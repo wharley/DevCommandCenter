@@ -11,6 +11,9 @@ import {
 	Info,
 	Loader2,
 	MessageSquare,
+	PanelRightClose,
+	Pin,
+	PinOff,
 	Rabbit,
 	Search,
 	TerminalSquare,
@@ -19,6 +22,7 @@ import {
 import {
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -234,6 +238,10 @@ type WorkspaceInspectorSidebarProps = {
 		specRelativePath: string;
 	}) => void;
 	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
+	isPinned: boolean;
+	onPinnedChange: (pinned: boolean) => void;
+	onRequestClose: () => void;
+	onContextualActionComplete?: () => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
 	mode: WorkspaceInspectorMode;
@@ -252,6 +260,22 @@ const INSPECTOR_MODES: WorkspaceInspectorMode[] = ["git", "code"];
 const EMPTY_CODE_FILE_PATHS: string[] = [];
 const WORKSPACE_CONFLICT_STATE_QUERY_KEY = "workspaceGitConflictState";
 type PendingGitConfirmation = "merge" | "complete-merge" | "sync-base" | null;
+
+type InspectorViewCache = {
+	dockHeight: number;
+	sessionDockOpen: boolean;
+	scrollPositions: Record<string, number>;
+};
+
+const inspectorViewCache = new Map<string, InspectorViewCache>();
+const codeTreeExpansionCache = new Map<string, Set<string>>();
+
+function inspectorScrollableElement(marker: HTMLElement): HTMLElement {
+	return (
+		marker.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]") ??
+		marker
+	);
+}
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
 	return (
@@ -1102,9 +1126,15 @@ function countReviewCommentsForNode(
 function InspectorModeDock({
 	mode,
 	onModeChange,
+	isPinned,
+	onPinnedChange,
+	onRequestClose,
 }: {
 	mode: WorkspaceInspectorMode;
 	onModeChange: (mode: WorkspaceInspectorMode) => void;
+	isPinned: boolean;
+	onPinnedChange: (pinned: boolean) => void;
+	onRequestClose: () => void;
 }) {
 	const { t } = useTranslation("common");
 	return (
@@ -1113,6 +1143,7 @@ function InspectorModeDock({
 			className="shrink-0 border-b border-border/60 bg-sidebar"
 		>
 			<div className="flex h-10 items-center gap-1 px-2">
+				<div className="flex min-w-0 flex-1 items-center gap-1">
 				{INSPECTOR_MODES.map((item) => {
 					const active = item === mode;
 					const Icon = item === "git" ? GitBranch : Code2;
@@ -1154,6 +1185,60 @@ function InspectorModeDock({
 						</Tooltip>
 					);
 				})}
+				</div>
+				<div className="ml-1 flex shrink-0 items-center gap-0.5 border-l border-border/60 pl-1.5">
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className={cn(
+									"size-7 cursor-pointer",
+									isPinned
+										? "text-foreground"
+										: "text-muted-foreground hover:text-foreground",
+								)}
+								aria-label={t(
+									isPinned
+										? "inspector.presentation.unpin"
+										: "inspector.presentation.pin",
+								)}
+								onClick={() => onPinnedChange(!isPinned)}
+							>
+								{isPinned ? (
+									<PinOff className="size-3.5" strokeWidth={1.8} />
+								) : (
+									<Pin className="size-3.5" strokeWidth={1.8} />
+								)}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">
+							{t(
+								isPinned
+									? "inspector.presentation.unpinHint"
+									: "inspector.presentation.pinHint",
+							)}
+						</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className="size-7 cursor-pointer text-muted-foreground hover:text-foreground"
+								aria-label={t("inspector.presentation.close")}
+								onClick={onRequestClose}
+							>
+								<PanelRightClose className="size-3.5" strokeWidth={1.8} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">
+							{t("inspector.presentation.close")}
+						</TooltipContent>
+					</Tooltip>
+				</div>
 			</div>
 		</nav>
 	);
@@ -1187,12 +1272,18 @@ function CodeProjectSection({
 	});
 	const paths = filesQuery.data ?? EMPTY_CODE_FILE_PATHS;
 	const tree = useMemo(() => buildCodeTree(paths), [paths]);
-	const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+	const [expanded, setExpanded] = useState<Set<string>>(
+		() => new Set(codeTreeExpansionCache.get(root) ?? []),
+	);
 
 	useEffect(() => {
-		const next = new Set(collectInitialCodeFolderPaths(tree));
+		const cached = codeTreeExpansionCache.get(root);
+		const next = cached
+			? new Set(cached)
+			: new Set(collectInitialCodeFolderPaths(tree));
+		codeTreeExpansionCache.set(root, next);
 		setExpanded((current) => (sameStringSet(current, next) ? current : next));
-	}, [tree]);
+	}, [root, tree]);
 
 	const toggle = useCallback((path: string) => {
 		setExpanded((previous) => {
@@ -1202,9 +1293,10 @@ function CodeProjectSection({
 			} else {
 				next.add(path);
 			}
+			codeTreeExpansionCache.set(root, next);
 			return next;
 		});
-	}, []);
+	}, [root]);
 
 	return (
 		<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
@@ -1242,7 +1334,10 @@ function CodeProjectSection({
 					</Tooltip>
 				</div>
 			</div>
-			<div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
+			<div
+				data-inspector-scroll-key="code-files"
+				className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2"
+			>
 				{!root ? (
 					<p className="px-2 py-3 text-[12px] text-muted-foreground">
 						{t("inspector.codeSection.unavailable")}
@@ -1488,6 +1583,10 @@ export function WorkspaceInspectorSidebar({
 	missionSpecAutoCompileFailures,
 	onClearMissionSpecAutoCompileFailure,
 	onCompleteWorkspace,
+	isPinned,
+	onPinnedChange,
+	onRequestClose,
+	onContextualActionComplete,
 	activeTab,
 	onTabChange,
 	mode: inspectorMode,
@@ -1568,11 +1667,12 @@ export function WorkspaceInspectorSidebar({
 					queryKey: ["delegations", workspaceId],
 				});
 				toast.success(t("inspector.delegations.reviewed"));
+				onContextualActionComplete?.();
 			} catch (error) {
 				toast.error(error instanceof Error ? error.message : String(error));
 			}
 		},
-		[queryClient, t, workspaceId],
+		[onContextualActionComplete, queryClient, t, workspaceId],
 	);
 
 	const resolveDelegationWorktreePath = useCallback(
@@ -1649,11 +1749,19 @@ export function WorkspaceInspectorSidebar({
 						count: result.changedFiles.length,
 					}),
 				);
+				onContextualActionComplete?.();
 			} catch (error) {
 				toast.error(error instanceof Error ? error.message : String(error));
 			}
 		},
-		[queryClient, resolveDelegationWorktreePath, t, workspaceId, workspacePath],
+		[
+			onContextualActionComplete,
+			queryClient,
+			resolveDelegationWorktreePath,
+			t,
+			workspaceId,
+			workspacePath,
+		],
 	);
 
 	const handleDiscardDelegation = useCallback(
@@ -1694,11 +1802,19 @@ export function WorkspaceInspectorSidebar({
 					queryKey: ["delegations", workspaceId],
 				});
 				toast.success(t("inspector.delegations.discarded"));
+				onContextualActionComplete?.();
 			} catch (error) {
 				toast.error(error instanceof Error ? error.message : String(error));
 			}
 		},
-		[queryClient, resolveDelegationWorktreePath, t, workspaceId, workspacePath],
+		[
+			onContextualActionComplete,
+			queryClient,
+			resolveDelegationWorktreePath,
+			t,
+			workspaceId,
+			workspacePath,
+		],
 	);
 
 	const handledReviewDelegationNonceRef = useRef<number | null>(null);
@@ -1988,17 +2104,20 @@ export function WorkspaceInspectorSidebar({
 		) {
 			return;
 		}
-		void completeMergedWorkspace().catch((error) => {
-			toast.error(
-				t("sidebar.completeWorkspaceError", {
-					message: getInspectorActionErrorMessage(error, t),
-				}),
-			);
-		});
+		void completeMergedWorkspace()
+			.then(() => onContextualActionComplete?.())
+			.catch((error) => {
+				toast.error(
+					t("sidebar.completeWorkspaceError", {
+						message: getInspectorActionErrorMessage(error, t),
+					}),
+				);
+			});
 	}, [
 		commitMode,
 		completeMergedWorkspace,
 		onCompleteWorkspace,
+		onContextualActionComplete,
 		prStatusQuery.dataUpdatedAt,
 		t,
 		workspaceStatus,
@@ -2293,6 +2412,7 @@ export function WorkspaceInspectorSidebar({
 			t("inspector.gitConfirmation.completeMergeLoading"),
 		);
 		setIsGitActionInProgress(true);
+		let completed = false;
 		try {
 			const conflictState = await workspaceGitConflictState({
 				workspaceRoot: root,
@@ -2333,6 +2453,7 @@ export function WorkspaceInspectorSidebar({
 			toast.success(t("inspector.gitConfirmation.completeMergeSuccess"), {
 				id: loadingToast,
 			});
+			completed = true;
 		} catch (error) {
 			const message = getInspectorActionErrorMessage(error, t);
 			toast.error(
@@ -2365,7 +2486,10 @@ export function WorkspaceInspectorSidebar({
 				}),
 			]);
 		}
-	}, [queryClient, selectedForgeLogin, t, workspacePath]);
+		if (completed) {
+			onContextualActionComplete?.();
+		}
+	}, [onContextualActionComplete, queryClient, selectedForgeLogin, t, workspacePath]);
 
 	const executeConfirmedMerge = useCallback(async () => {
 		const root = workspacePath?.trim();
@@ -2380,6 +2504,7 @@ export function WorkspaceInspectorSidebar({
 			}),
 		);
 		setIsGitActionInProgress(true);
+		let completed = false;
 		try {
 			await workspaceChangeRequestMerge({
 				workspaceRoot: root,
@@ -2421,6 +2546,7 @@ export function WorkspaceInspectorSidebar({
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
 			});
+			completed = true;
 		} catch (error) {
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_DELIVERY_FAILURE_QUERY_KEY, root],
@@ -2436,9 +2562,13 @@ export function WorkspaceInspectorSidebar({
 		} finally {
 			setIsGitActionInProgress(false);
 		}
+		if (completed) {
+			onContextualActionComplete?.();
+		}
 	}, [
 		completeMergedWorkspace,
 		forgeContext.requestLabel,
+		onContextualActionComplete,
 		queryClient,
 		selectedForgeLogin,
 		t,
@@ -2596,8 +2726,66 @@ export function WorkspaceInspectorSidebar({
 		[queryClient, workspaceForgeContext, workspacePath],
 	);
 
-	const [dockHeight, setDockHeight] = useState(DEFAULT_DOCK_HEIGHT);
-	const [sessionDockOpen, setSessionDockOpen] = useState(false);
+	const inspectorViewCacheKey = `${workspaceId ?? "none"}:${sessionId ?? "none"}`;
+	const cachedInspectorView = inspectorViewCache.get(inspectorViewCacheKey);
+	const [dockHeight, setDockHeight] = useState(
+		() => cachedInspectorView?.dockHeight ?? DEFAULT_DOCK_HEIGHT,
+	);
+	const [sessionDockOpen, setSessionDockOpen] = useState(
+		() => cachedInspectorView?.sessionDockOpen ?? false,
+	);
+	const dockHeightRef = useRef(dockHeight);
+	const sessionDockOpenRef = useRef(sessionDockOpen);
+	const shouldRestoreInspectorViewRef = useRef(Boolean(cachedInspectorView));
+	dockHeightRef.current = dockHeight;
+	sessionDockOpenRef.current = sessionDockOpen;
+
+	useLayoutEffect(() => {
+		const cacheKey = inspectorViewCacheKey;
+		const cached = inspectorViewCache.get(cacheKey);
+		shouldRestoreInspectorViewRef.current = Boolean(cached);
+		if (cached) {
+			setDockHeight(cached.dockHeight);
+			setSessionDockOpen(cached.sessionDockOpen);
+		}
+
+		let secondFrame = 0;
+		const firstFrame = window.requestAnimationFrame(() => {
+			secondFrame = window.requestAnimationFrame(() => {
+				const root = rootRef.current;
+				if (!root || !cached) return;
+				for (const marker of root.querySelectorAll<HTMLElement>(
+					"[data-inspector-scroll-key]",
+				)) {
+					const key = marker.dataset.inspectorScrollKey;
+					if (!key || cached.scrollPositions[key] === undefined) continue;
+					inspectorScrollableElement(marker).scrollTop = cached.scrollPositions[key];
+				}
+			});
+		});
+
+		return () => {
+			window.cancelAnimationFrame(firstFrame);
+			if (secondFrame) window.cancelAnimationFrame(secondFrame);
+			const scrollPositions: Record<string, number> = {};
+			for (const marker of rootRef.current?.querySelectorAll<HTMLElement>(
+				"[data-inspector-scroll-key]",
+			) ?? []) {
+				const key = marker.dataset.inspectorScrollKey;
+				if (!key) continue;
+				scrollPositions[key] = inspectorScrollableElement(marker).scrollTop;
+			}
+			if (!inspectorViewCache.has(cacheKey) && inspectorViewCache.size >= 50) {
+				const oldestKey = inspectorViewCache.keys().next().value;
+				if (oldestKey) inspectorViewCache.delete(oldestKey);
+			}
+			inspectorViewCache.set(cacheKey, {
+				dockHeight: dockHeightRef.current,
+				sessionDockOpen: sessionDockOpenRef.current,
+				scrollPositions,
+			});
+		};
+	}, [inspectorViewCacheKey]);
 	// Whether the user deliberately collapsed the dock in this session.
 	const dockUserClosedRef = useRef(false);
 	const selectInspectorMode = useCallback(
@@ -3070,6 +3258,10 @@ export function WorkspaceInspectorSidebar({
 	]);
 
 	useEffect(() => {
+		if (shouldRestoreInspectorViewRef.current) {
+			shouldRestoreInspectorViewRef.current = false;
+			return;
+		}
 		onTabChange("activity");
 		// New session: rest collapsed. Calm mode keeps the dock closed until the
 		// user opens it (or a fresh plan surfaces) — streaming chat activity no
@@ -3130,7 +3322,13 @@ export function WorkspaceInspectorSidebar({
 				className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
 				data-dcc-inspector-root
 			>
-				<InspectorModeDock mode={inspectorMode} onModeChange={selectInspectorMode} />
+				<InspectorModeDock
+					mode={inspectorMode}
+					onModeChange={selectInspectorMode}
+					isPinned={isPinned}
+					onPinnedChange={onPinnedChange}
+					onRequestClose={onRequestClose}
+				/>
 				{workspacePath && gitStatusQuery.data ? (
 					<WorkspaceRecapStrip
 						recap={workspaceRecap}
@@ -3457,6 +3655,7 @@ export function WorkspaceInspectorSidebar({
 
 						<TabsContent
 							value="context"
+							data-inspector-scroll-key="session-context"
 							className="mt-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
 						>
 							<div className="space-y-4">
@@ -3766,6 +3965,7 @@ export function WorkspaceInspectorSidebar({
 
 						<TabsContent
 							value="spec"
+							data-inspector-scroll-key="mission-spec"
 							className="mt-0 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 pb-3 pt-2 data-[state=inactive]:hidden"
 						>
 							{activeMissionSpec ? (

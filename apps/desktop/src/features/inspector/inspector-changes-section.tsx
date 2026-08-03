@@ -908,6 +908,7 @@ export function InspectorChangesSection({
 	return (
 		<div className="relative flex min-h-0 flex-1 flex-col">
 			<ScrollArea
+				viewportProps={{ "data-inspector-scroll-key": "git-changes" }}
 				className="min-h-0 flex-1 bg-muted/15 font-mono text-[11.5px]"
 				aria-label="Git changes"
 			>

@@ -487,6 +487,13 @@
       "git": "Mudanças",
       "code": "Arquivos"
     },
+    "presentation": {
+      "pin": "Fixar Inspector",
+      "unpin": "Desafixar Inspector",
+      "pinHint": "Manter aberto até você fechar",
+      "unpinHint": "Permitir recolher ao concluir este fluxo",
+      "close": "Fechar Inspector"
+    },
     "gitConfirmation": {
       "mergeTitle": "Mesclar {{requestLabel}}?",
       "mergeDescription": "Esta ação vai mesclar o {{requestLabel}} atual. Use somente quando você tiver certeza de que a task está pronta.",

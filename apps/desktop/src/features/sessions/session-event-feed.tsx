@@ -483,13 +483,14 @@ export function SessionEventFeed({
 				<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
 					<div
 						ref={scrollRef}
+						data-inspector-scroll-key="activity-feed"
 						className="dcc-conversation-scroll-viewport h-full w-full overflow-x-hidden overflow-y-auto overscroll-none"
 					>
-					<div className="flex min-h-full min-w-0 flex-col">
-						<div className="h-6 shrink-0" aria-hidden />
-						{timelineRows}
+						<div className="flex min-h-full min-w-0 flex-col">
+							<div className="h-6 shrink-0" aria-hidden />
+							{timelineRows}
+						</div>
 					</div>
-				</div>
 				{showScrollToLatest ? (
 					<div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
 						<button

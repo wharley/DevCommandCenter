@@ -57,6 +57,10 @@ import {
 	WorkspaceInspectorSidebar,
 	type WorkspaceInspectorMode,
 } from "./features/inspector";
+import {
+	shouldCollapseContextualInspector,
+	type InspectorPresentation,
+} from "./features/inspector/inspector-presentation";
 import { SettingsDialog } from "./features/settings";
 import { SkillsDialog, getTotalSkillContextCount } from "./features/skills";
 import { compileSkills, detectSkillContext } from "./lib/skills-api";
@@ -642,6 +646,7 @@ function ResizeSeparator({
 	isActive,
 	onMouseDown,
 	onKeyDown,
+	hideOnCompact = false,
 }: {
 	side: "left" | "right";
 	widthAt: number;
@@ -652,6 +657,7 @@ function ResizeSeparator({
 	isActive: boolean;
 	onMouseDown: MouseEventHandler<HTMLDivElement>;
 	onKeyDown: KeyboardEventHandler<HTMLDivElement>;
+	hideOnCompact?: boolean;
 }) {
 	return (
 		<div
@@ -664,7 +670,10 @@ function ResizeSeparator({
 			aria-valuenow={ariaNow}
 			onMouseDown={onMouseDown}
 			onKeyDown={onKeyDown}
-			className="group absolute inset-y-0 z-30 cursor-ew-resize touch-none outline-none transition-[width,background-color,box-shadow]"
+			className={cn(
+				"group absolute inset-y-0 z-30 cursor-ew-resize touch-none outline-none transition-[width,background-color,box-shadow]",
+				hideOnCompact && "max-[1180px]:hidden",
+			)}
 			style={{
 				[side === "left" ? "left" : "right"]:
 					side === "left"
@@ -1071,6 +1080,27 @@ export default function App() {
 	>("activity");
 	const [inspectorMode, setInspectorMode] =
 		useState<WorkspaceInspectorMode>("git");
+	const [inspectorPresentation, setInspectorPresentation] =
+		useState<InspectorPresentation>(() =>
+			inspectorCollapsed ? "contextual" : "pinned",
+		);
+	const inspectorWorkspaceIdRef = useRef(selectedWorkspaceId);
+	useEffect(() => {
+		const previousWorkspaceId = inspectorWorkspaceIdRef.current;
+		inspectorWorkspaceIdRef.current = selectedWorkspaceId;
+		if (
+			previousWorkspaceId &&
+			selectedWorkspaceId &&
+			previousWorkspaceId !== selectedWorkspaceId &&
+			inspectorPresentation === "contextual"
+		) {
+			setInspectorCollapsed(true);
+		}
+	}, [
+		inspectorPresentation,
+		selectedWorkspaceId,
+		setInspectorCollapsed,
+	]);
 	const [sessionSnapshotsById, setSessionSnapshotsById] = useState<
 		Record<string, RuntimeSessionSnapshot>
 	>({});
@@ -1721,32 +1751,55 @@ export default function App() {
 		selectedLocalWorkspacePath,
 		selectedSessionSummary,
 	]);
+	const openContextualInspector = useCallback(() => {
+		setInspectorPresentation((current) =>
+			!inspectorCollapsed && current === "pinned" ? current : "contextual",
+		);
+		setInspectorCollapsed(false);
+	}, [inspectorCollapsed, setInspectorCollapsed]);
+	const openPinnedInspector = useCallback(() => {
+		setInspectorPresentation("pinned");
+		setInspectorCollapsed(false);
+	}, [setInspectorCollapsed]);
+	const closeInspector = useCallback(() => {
+		setInspectorCollapsed(true);
+	}, [setInspectorCollapsed]);
+	const handleInspectorContextualActionComplete = useCallback(() => {
+		if (
+			shouldCollapseContextualInspector(
+				inspectorPresentation,
+				inspectorCollapsed,
+			)
+		) {
+			setInspectorCollapsed(true);
+		}
+	}, [inspectorCollapsed, inspectorPresentation, setInspectorCollapsed]);
 	const openGitInspector = useCallback(() => {
 		recordUxMetric("diff_discovered");
 		setInspectorMode("git");
-		setInspectorCollapsed(false);
-	}, [setInspectorCollapsed]);
+		openContextualInspector();
+	}, [openContextualInspector]);
 	const handleReviewDelegation = useCallback(
 		(delegationId: string) => {
 			setInspectorMode("git");
-			setInspectorCollapsed(false);
+			openContextualInspector();
 			setSurfaceSelection(null);
 			setReviewDelegationRequest((current) => ({
 				delegationId,
 				nonce: (current?.nonce ?? 0) + 1,
 			}));
 		},
-		[setInspectorCollapsed],
+		[openContextualInspector],
 	);
 	const toggleGitInspector = useCallback(() => {
 		if (inspectorCollapsed) {
 			recordUxMetric("diff_discovered");
 			setInspectorMode("git");
-			setInspectorCollapsed(false);
+			openPinnedInspector();
 			return;
 		}
-		setInspectorCollapsed(true);
-	}, [inspectorCollapsed, setInspectorCollapsed]);
+		closeInspector();
+	}, [closeInspector, inspectorCollapsed, openPinnedInspector]);
 	const openPlanSurface = useCallback(() => {
 		setSurfaceSelection({ kind: "plan" });
 		setInspectorCollapsed(true);
@@ -1758,27 +1811,27 @@ export default function App() {
 				case "inspector.changes":
 					recordUxMetric("diff_discovered");
 					setInspectorMode("git");
-					setInspectorCollapsed(false);
+					openPinnedInspector();
 					return;
 				case "inspector.files":
 					setInspectorMode("code");
-					setInspectorCollapsed(false);
+					openPinnedInspector();
 					return;
 				case "inspector.activity":
 					setInspectorMode("git");
 					setInspectorTab("activity");
-					setInspectorCollapsed(false);
+					openPinnedInspector();
 					return;
 				case "inspector.details":
 					setInspectorMode("git");
 					setInspectorTab("context");
-					setInspectorCollapsed(false);
+					openPinnedInspector();
 					return;
 				default:
 					dispatchWorkbenchCommand(command);
 			}
 		},
-		[setInspectorCollapsed],
+		[openPinnedInspector],
 	);
 
 	useEffect(() => {
@@ -3268,7 +3321,7 @@ export default function App() {
 		}) => {
 			const prompt = buildMissionValidationPrompt(input);
 			setInspectorMode("git");
-			setInspectorCollapsed(false);
+			openContextualInspector();
 			setInspectorTab("activity");
 			void handleSubmitPrompt({
 				rawPrompt: prompt,
@@ -3279,7 +3332,7 @@ export default function App() {
 				},
 			});
 		},
-		[handleSubmitPrompt, setInspectorCollapsed],
+		[handleSubmitPrompt, openContextualInspector],
 	);
 
 	const handleReanchorMissionSpec = useCallback(
@@ -3302,7 +3355,7 @@ export default function App() {
 
 			const prompt = buildMissionReanchorPrompt(input);
 			setInspectorMode("git");
-			setInspectorCollapsed(false);
+			openContextualInspector();
 			setInspectorTab("activity");
 			void handleSubmitPrompt({
 				rawPrompt: prompt,
@@ -3315,10 +3368,10 @@ export default function App() {
 		},
 		[
 			handleSubmitPrompt,
+			openContextualInspector,
 			queryClient,
 			registerMissionSpecAutoCompileAttempt,
 			selectedLocalWorkspacePath,
-			setInspectorCollapsed,
 		],
 	);
 
@@ -3343,7 +3396,7 @@ export default function App() {
 
 			const prompt = buildMissionContinueCriterionPrompt(input);
 			setInspectorMode("git");
-			setInspectorCollapsed(false);
+			openContextualInspector();
 			setInspectorTab("activity");
 			void handleSubmitPrompt({
 				rawPrompt: prompt,
@@ -3356,10 +3409,10 @@ export default function App() {
 		},
 		[
 			handleSubmitPrompt,
+			openContextualInspector,
 			queryClient,
 			registerMissionSpecAutoCompileAttempt,
 			selectedLocalWorkspacePath,
-			setInspectorCollapsed,
 		],
 	);
 
@@ -4552,6 +4605,14 @@ export default function App() {
 
 					{globalSurface !== "pullRequests" && !inspectorCollapsed && (
 						<>
+							{inspectorPresentation === "contextual" ? (
+								<button
+									type="button"
+									aria-label={t("inspector.presentation.close")}
+									className="absolute inset-0 z-40 hidden cursor-default bg-black/20 backdrop-blur-[1px] max-[1180px]:block"
+									onClick={closeInspector}
+								/>
+							) : null}
 							<ResizeSeparator
 								side="right"
 								widthAt={inspectorWidth}
@@ -4562,12 +4623,15 @@ export default function App() {
 								isActive={isInspectorResizing}
 								onMouseDown={handleResizeStart("inspector")}
 								onKeyDown={handleResizeKeyDown("inspector")}
+								hideOnCompact
 							/>
 
 							<aside
 								aria-label={t("app.inspectorSidebarAria")}
-								className="inspector-enter relative h-full shrink-0 overflow-hidden bg-sidebar"
-								style={{ width: `${inspectorWidth}px` }}
+								className="inspector-enter relative z-40 h-full shrink-0 overflow-hidden border-l border-border/60 bg-sidebar max-[1180px]:absolute max-[1180px]:inset-y-0 max-[1180px]:right-0 max-[1180px]:z-50 max-[1180px]:shadow-2xl"
+								style={{
+									width: `min(${inspectorWidth}px, calc(100vw - 32px))`,
+								}}
 							>
 								<WorkspaceInspectorSidebar
 									providerCatalog={providerCatalog}
@@ -4621,6 +4685,14 @@ export default function App() {
 									}
 									onCompleteWorkspace={
 										isRemoteBackend ? undefined : handleCompleteWorkspace
+									}
+									isPinned={inspectorPresentation === "pinned"}
+									onPinnedChange={(pinned) =>
+										setInspectorPresentation(pinned ? "pinned" : "contextual")
+									}
+									onRequestClose={closeInspector}
+									onContextualActionComplete={
+										handleInspectorContextualActionComplete
 									}
 									reviewDelegationRequest={reviewDelegationRequest}
 									activeTab={inspectorTab}

@@ -487,6 +487,13 @@
       "git": "Changes",
       "code": "Files"
     },
+    "presentation": {
+      "pin": "Pin Inspector",
+      "unpin": "Unpin Inspector",
+      "pinHint": "Keep it open until you close it",
+      "unpinHint": "Allow it to collapse when this workflow finishes",
+      "close": "Close Inspector"
+    },
     "gitConfirmation": {
       "mergeTitle": "Merge {{requestLabel}}?",
       "mergeDescription": "This will merge the current {{requestLabel}}. Use it only when you are sure the task is ready.",
