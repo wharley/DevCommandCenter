@@ -15,6 +15,7 @@ function delegation(overrides: Partial<Delegation> = {}): Delegation {
 		childSessionId: "session-2",
 		workspaceId: "workspace-1",
 		targetProviderId: "codex",
+		targetModelId: "gpt-5.6-terra",
 		mode: "review",
 		status: "completed",
 		prompt: "Delegated review task from Dev Command Center.",
@@ -40,6 +41,8 @@ describe("describeDelegation", () => {
 			mode: "review",
 			providerId: "codex",
 			providerLabel: "Codex",
+			modelId: "gpt-5.6-terra",
+			modelLabel: "gpt-5.6-terra",
 			contextPolicy: "review_current_diff",
 			allowFileEdits: false,
 		});

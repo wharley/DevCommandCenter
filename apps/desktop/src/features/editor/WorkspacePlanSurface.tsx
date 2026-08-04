@@ -8,6 +8,17 @@ import { PlanReviewCard } from "@/features/panel/message-components";
 import type { ParsedPlanContent } from "@/features/panel/plan-content";
 import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
 import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
+import type { ProviderCatalog } from "@dcc/contracts";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuLabel,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+	DelegationTargetItems,
+	type DelegationTargetSelection,
+} from "@/features/sessions/DelegationTargetItems";
 
 type WorkspacePlanSurfaceProps = {
 	plan: ParsedPlanContent;
@@ -20,7 +31,8 @@ type WorkspacePlanSurfaceProps = {
 	onApprove: () => void;
 	onClose: () => void;
 	onRequestRevision: (prompt: string) => void;
-	onDelegate: () => void;
+	delegationTargets: ProviderCatalog["providers"];
+	onDelegate: (selection: DelegationTargetSelection) => void;
 	onImplementInNewThread: () => void;
 };
 
@@ -35,6 +47,7 @@ export function WorkspacePlanSurface({
 	onApprove,
 	onClose,
 	onRequestRevision,
+	delegationTargets,
 	onDelegate,
 	onImplementInNewThread,
 }: WorkspacePlanSurfaceProps) {
@@ -151,10 +164,26 @@ export function WorkspacePlanSurface({
 									<Play className="size-3.5" aria-hidden />
 									{t("planSurface.implementInNewThread")}
 								</Button>
-								<Button type="button" size="sm" className="gap-1.5" onClick={onDelegate}>
-									<GitFork className="size-3.5" aria-hidden />
-									{t("planSurface.delegate")}
-								</Button>
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											type="button"
+											size="sm"
+											className="gap-1.5"
+											disabled={delegationTargets.length === 0}
+										>
+											<GitFork className="size-3.5" aria-hidden />
+											{t("planSurface.delegate")}
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent side="bottom" align="end" className="w-72">
+										<DropdownMenuLabel>{t("composer.delegate.title")}</DropdownMenuLabel>
+										<DelegationTargetItems
+											targets={delegationTargets}
+											onSelect={onDelegate}
+										/>
+									</DropdownMenuContent>
+								</DropdownMenu>
 							</>
 						) : needsInput ? (
 							<Button

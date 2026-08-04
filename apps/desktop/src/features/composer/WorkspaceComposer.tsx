@@ -94,6 +94,7 @@ import type {
 	ComposerSubmittedTurn,
 } from "./composer-turn";
 import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
+import { DelegationTargetItems } from "@/features/sessions/DelegationTargetItems";
 import {
 	clearDraft,
 	loadApprovalPolicy,
@@ -548,7 +549,7 @@ export function WorkspaceComposer({
 	}, [delegateTargets, fanOutSelection]);
 
 	const submitDelegation = useCallback(
-		async (targetProviderIds: string[]) => {
+		async (targetProviderIds: string[], targetModelId: string | null = null) => {
 			if (!onDelegatePrompt || isSubmitting || targetProviderIds.length === 0) {
 				return;
 			}
@@ -566,6 +567,7 @@ export function WorkspaceComposer({
 				await onDelegatePrompt({
 					rawPrompt,
 					targetProviderIds,
+					targetModelId: targetProviderIds.length === 1 ? targetModelId : null,
 					// Edit delegations stay single-target, matching the backend guard.
 					allowFileEdits: delegateAllowFileEdits && targetProviderIds.length === 1,
 					effort: resolveEffectiveEffort({
@@ -1160,7 +1162,18 @@ export function WorkspaceComposer({
 													{t("composer.delegate.noEditTargets")}
 												</p>
 											) : null}
-											{delegateTargets.map((target) => {
+											{fanOutTargetIds === null ? (
+												<DelegationTargetItems
+													targets={delegateTargets}
+													disabled={isSubmitting}
+													onSelect={(selection) => {
+														void submitDelegation(
+															[selection.providerId],
+															selection.modelId,
+														);
+													}}
+												/>
+											) : delegateTargets.map((target) => {
 												const isPicked =
 													fanOutTargetIds?.includes(target.id) ?? false;
 												return (
@@ -1175,7 +1188,6 @@ export function WorkspaceComposer({
 																toggleFanOutTarget(target.id);
 																return;
 															}
-															void submitDelegation([target.id]);
 														}}
 													>
 														<span className="min-w-0 truncate">{target.label}</span>

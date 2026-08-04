@@ -2491,6 +2491,7 @@ export default function App() {
 						childSessionId,
 						workspaceId: selectedWorkspace.id,
 						targetProviderId: targetProvider.id,
+						targetModelId,
 						mode: request.mode,
 						prompt,
 						contextPolicy: request.contextPolicy,
@@ -2631,8 +2632,7 @@ export default function App() {
 			await handleDelegate({
 				targetProviderId: request.targetProviderIds[0],
 				targetProviderIds: request.targetProviderIds,
-				// Null lets handleDelegate resolve each target's recommended model.
-				targetModelId: null,
+				targetModelId: request.targetModelId,
 				mode: defaults.mode,
 				contextPolicy: defaults.contextPolicy,
 				instruction: request.rawPrompt,

@@ -75,6 +75,8 @@ pub struct Delegation {
     pub child_session_id: Option<SessionId>,
     pub workspace_id: WorkspaceId,
     pub target_provider_id: ProviderId,
+    #[serde(default)]
+    pub target_model_id: Option<String>,
     pub mode: DelegationMode,
     pub status: DelegationStatus,
     pub prompt: String,

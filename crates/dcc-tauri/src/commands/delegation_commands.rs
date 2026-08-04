@@ -27,6 +27,8 @@ pub struct CreateDelegationInput {
     pub child_session_id: Option<SessionId>,
     pub workspace_id: WorkspaceId,
     pub target_provider_id: ProviderId,
+    #[serde(default)]
+    pub target_model_id: Option<String>,
     pub mode: DelegationMode,
     pub prompt: String,
     #[serde(default)]
@@ -222,6 +224,7 @@ pub async fn create_delegation(
         child_session_id: input.child_session_id,
         workspace_id: input.workspace_id,
         target_provider_id: input.target_provider_id,
+        target_model_id: input.target_model_id,
         mode: input.mode,
         status: DelegationStatus::Draft,
         prompt: input.prompt,

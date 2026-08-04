@@ -30,6 +30,8 @@ export type ComposerSubmittedTurn = {
 export type ComposerDelegationRequest = {
 	rawPrompt: string;
 	targetProviderIds: string[];
+	/** Explicit model for a single-target delegation; fan-out resolves per-provider recommendations. */
+	targetModelId: string | null;
 	allowFileEdits: boolean;
 	effort: ComposerEffortLevel;
 	fastMode: boolean;

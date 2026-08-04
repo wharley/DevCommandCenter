@@ -1190,7 +1190,10 @@
       "submitFanOut": "Delegate to {{count}} agents",
       "allowEdits": "Can edit files",
       "allowEditsHint": "Runs in an isolated worktree; nothing lands without your review.",
-      "noEditTargets": "No available agent can edit files."
+      "noEditTargets": "No available agent can edit files.",
+      "chooseModel": "Choose {{provider}} model",
+      "recommended": "Recommended",
+      "noModels": "No models available"
     },
     "accountUsage": {
       "title": "Account usage",

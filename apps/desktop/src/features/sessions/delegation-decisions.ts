@@ -11,6 +11,8 @@ export type DelegationDecisions = {
 	mode: Delegation["mode"];
 	providerId: string;
 	providerLabel: string;
+	modelId: string | null;
+	modelLabel: string | null;
 	contextPolicy: Delegation["contextPolicy"]["type"];
 	allowFileEdits: boolean;
 };
@@ -22,10 +24,15 @@ export function describeDelegation(
 	const provider = providers.find(
 		(candidate) => candidate.id === record.targetProviderId,
 	);
+	const model = provider?.models?.find(
+		(candidate) => candidate.id === record.targetModelId,
+	);
 	return {
 		mode: record.mode,
 		providerId: record.targetProviderId,
 		providerLabel: provider?.label ?? record.targetProviderId,
+		modelId: record.targetModelId ?? null,
+		modelLabel: model?.label ?? record.targetModelId ?? null,
 		contextPolicy: record.contextPolicy.type,
 		allowFileEdits: record.budget.allowFileEdits,
 	};

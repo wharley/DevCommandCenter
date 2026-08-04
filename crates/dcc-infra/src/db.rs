@@ -189,6 +189,7 @@ CREATE TABLE IF NOT EXISTS dcc_delegations (
 	child_session_id TEXT NULL,
 	workspace_id TEXT NOT NULL,
 	target_provider_id TEXT NOT NULL,
+	target_model_id TEXT NULL,
 	mode TEXT NOT NULL,
 	status TEXT NOT NULL,
 	prompt TEXT NOT NULL,
@@ -680,6 +681,12 @@ impl SqliteSessionRepo {
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_delegations",
+            "target_model_id",
+            "TEXT NULL",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_delegations",
             "result_summary",
             "TEXT NULL",
         )?;
@@ -818,27 +825,27 @@ impl SqliteSessionRepo {
     }
 
     fn delegation_from_row(row: &Row<'_>) -> rusqlite::Result<Delegation> {
-        let context_policy_json = row.get::<_, String>(9)?;
+        let context_policy_json = row.get::<_, String>(10)?;
         let context_policy =
             from_str::<DelegationContextPolicy>(&context_policy_json).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
-                    9,
+                    10,
                     rusqlite::types::Type::Text,
                     Box::new(error),
                 )
             })?;
-        let budget_json = row.get::<_, String>(10)?;
+        let budget_json = row.get::<_, String>(11)?;
         let budget = from_str::<DelegationBudget>(&budget_json).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                10,
+                11,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
         })?;
-        let touched_files_json = row.get::<_, String>(12)?;
+        let touched_files_json = row.get::<_, String>(13)?;
         let touched_files = from_str::<Vec<String>>(&touched_files_json).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                12,
+                13,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
@@ -851,17 +858,18 @@ impl SqliteSessionRepo {
             child_session_id: row.get::<_, Option<String>>(3)?.map(SessionId),
             workspace_id: WorkspaceId(row.get::<_, String>(4)?),
             target_provider_id: dcc_core::domain::provider::ProviderId(row.get::<_, String>(5)?),
-            mode: Self::delegation_mode_from_str(&row.get::<_, String>(6)?, 6)?,
-            status: Self::delegation_status_from_str(&row.get::<_, String>(7)?, 7)?,
-            prompt: row.get::<_, String>(8)?,
+            target_model_id: row.get::<_, Option<String>>(6)?,
+            mode: Self::delegation_mode_from_str(&row.get::<_, String>(7)?, 7)?,
+            status: Self::delegation_status_from_str(&row.get::<_, String>(8)?, 8)?,
+            prompt: row.get::<_, String>(9)?,
             context_policy,
             budget,
-            result_summary: row.get::<_, Option<String>>(11)?,
+            result_summary: row.get::<_, Option<String>>(12)?,
             touched_files,
-            diff_summary: row.get::<_, Option<String>>(13)?,
-            validation_summary: row.get::<_, Option<String>>(14)?,
-            created_at: row.get::<_, String>(15)?,
-            updated_at: row.get::<_, String>(16)?,
+            diff_summary: row.get::<_, Option<String>>(14)?,
+            validation_summary: row.get::<_, Option<String>>(15)?,
+            created_at: row.get::<_, String>(16)?,
+            updated_at: row.get::<_, String>(17)?,
         })
     }
 
@@ -2389,15 +2397,16 @@ impl DelegationRepo for SqliteSessionRepo {
             r#"
 			INSERT INTO dcc_delegations (
 				id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
-				target_provider_id, mode, status, prompt, context_policy_json, budget_json,
+				target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
 				result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
 			ON CONFLICT(id) DO UPDATE SET
 				parent_session_id = excluded.parent_session_id,
 				parent_turn_id = excluded.parent_turn_id,
 				child_session_id = excluded.child_session_id,
 				workspace_id = excluded.workspace_id,
 				target_provider_id = excluded.target_provider_id,
+				target_model_id = excluded.target_model_id,
 				mode = excluded.mode,
 				status = excluded.status,
 				prompt = excluded.prompt,
@@ -2423,6 +2432,7 @@ impl DelegationRepo for SqliteSessionRepo {
                     .map(|session_id| session_id.0.clone()),
                 delegation.workspace_id.0.clone(),
                 delegation.target_provider_id.0.clone(),
+                delegation.target_model_id.clone(),
                 Self::delegation_mode_as_str(&delegation.mode),
                 Self::delegation_status_as_str(&delegation.status),
                 delegation.prompt.clone(),
@@ -2448,7 +2458,7 @@ impl DelegationRepo for SqliteSessionRepo {
         conn.query_row(
             r#"
 			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
-			       target_provider_id, mode, status, prompt, context_policy_json, budget_json,
+			       target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
 			       result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at
 			  FROM dcc_delegations
 			 WHERE id = ?1
@@ -2471,7 +2481,7 @@ impl DelegationRepo for SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let base_sql = r#"
 			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
-			       target_provider_id, mode, status, prompt, context_policy_json, budget_json,
+			       target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
 			       result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at
 			  FROM dcc_delegations
 		"#;
@@ -2912,6 +2922,7 @@ mod tests {
             child_session_id: Some(child_session.id.clone()),
             workspace_id: workspace.id.clone(),
             target_provider_id: ProviderId("gemini".to_string()),
+            target_model_id: Some("gemini-2.5-pro".to_string()),
             mode: DelegationMode::Review,
             status: DelegationStatus::Draft,
             prompt: "Review the current diff".to_string(),
@@ -2934,6 +2945,7 @@ mod tests {
             .expect("get delegation")
             .expect("delegation exists");
         assert_eq!(fetched.parent_session_id.0, "parent-session");
+        assert_eq!(fetched.target_model_id.as_deref(), Some("gemini-2.5-pro"));
         assert_eq!(
             fetched.child_session_id.as_ref().map(|id| id.0.as_str()),
             Some("child-session")

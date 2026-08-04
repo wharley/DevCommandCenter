@@ -1190,7 +1190,10 @@
       "submitFanOut": "Delegar para {{count}} agentes",
       "allowEdits": "Pode editar arquivos",
       "allowEditsHint": "Roda em worktree isolado; nada é aplicado sem sua revisão.",
-      "noEditTargets": "Nenhum agente disponível edita arquivos."
+      "noEditTargets": "Nenhum agente disponível edita arquivos.",
+      "chooseModel": "Escolher modelo do {{provider}}",
+      "recommended": "Recomendado",
+      "noModels": "Nenhum modelo disponível"
     },
     "accountUsage": {
       "title": "Uso da conta",

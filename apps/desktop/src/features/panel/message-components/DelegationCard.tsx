@@ -93,6 +93,7 @@ export function DelegationCard({
 					defaultValue: decisions.mode,
 				}),
 				decisions.providerLabel,
+				...(decisions.modelLabel ? [decisions.modelLabel] : []),
 				t(`delegation.contextOptions.${decisions.contextPolicy}`, {
 					defaultValue: decisions.contextPolicy,
 				}),

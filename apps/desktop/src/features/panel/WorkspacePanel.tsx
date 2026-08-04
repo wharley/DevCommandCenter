@@ -670,16 +670,24 @@ export function WorkspacePanel({
 	);
 	// An approved plan already carries every answer a delegation needs, and plan
 	// approval is itself the human checkpoint — so the handoff runs directly.
-	const planImplementationTarget = useMemo(() => {
-		const targets = delegationTargetsFor(providerChoices, {
+	const planImplementationTargets = useMemo(() => {
+		return delegationTargetsFor(providerChoices, {
 			allowFileEdits: true,
 		});
-		return targets.find((target) => target.id === "codex") ?? targets[0] ?? null;
 	}, [providerChoices]);
-	const handleDelegatePlan = useCallback(async () => {
+	const handleDelegatePlan = useCallback(async ({
+		providerId,
+		modelId,
+	}: {
+		providerId: string;
+		modelId: string | null;
+	}) => {
 		if (!latestPlanMarkdown || !canExecuteLatestPlan) {
 			return;
 		}
+		const planImplementationTarget = planImplementationTargets.find(
+			(target) => target.id === providerId,
+		);
 		if (!planImplementationTarget) {
 			toast.error(t("planSurface.delegateNoTarget"));
 			return;
@@ -687,12 +695,13 @@ export function WorkspacePanel({
 		if (planHandoffInFlightRef.current) {
 			return;
 		}
-		const models = planImplementationTarget.models;
-		const targetModelId =
-			models.find((model) => model.id === "gpt-5.5")?.id ??
-			models.find((model) => model.recommended)?.id ??
-			models[0]?.id ??
-			null;
+		const targetModelId = planImplementationTarget.models.some(
+			(model) => model.id === modelId,
+		)
+			? modelId
+			: (planImplementationTarget.models.find((model) => model.recommended)?.id ??
+				planImplementationTarget.models[0]?.id ??
+				null);
 		planHandoffInFlightRef.current = true;
 		try {
 			await onDelegate({
@@ -713,7 +722,7 @@ export function WorkspacePanel({
 		latestPlanMarkdown,
 		onCloseSurface,
 		onDelegate,
-		planImplementationTarget,
+		planImplementationTargets,
 		recordCurrentPlanHandoff,
 		t,
 	]);
@@ -813,6 +822,7 @@ export function WorkspacePanel({
 					onApprove={handleApprovePlan}
 					onClose={onCloseSurface}
 					onRequestRevision={handleRequestPlanRevision}
+					delegationTargets={planImplementationTargets}
 					onDelegate={handleDelegatePlan}
 					onImplementInNewThread={handleImplementPlanInNewThread}
 				/>
