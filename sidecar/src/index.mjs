@@ -25,7 +25,7 @@ import { resolveClaudeApprovalOptions } from "./approval-policy.mjs";
 import { createDccMcpPermissionHooks } from "./mcp-permission-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 
-const SIDECAR_VERSION = "0.1.40";
+const SIDECAR_VERSION = "0.1.41";
 
 function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);
