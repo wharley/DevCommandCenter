@@ -1061,6 +1061,10 @@
     "controls": {
       "plan": "Plan",
       "planMode": "Plan mode",
+      "planModeEnable": "Enable Plan mode",
+      "planModeDisable": "Disable Plan mode",
+      "planModeHint": "Analyze the task and propose a plan before making changes.",
+      "planModeActiveHint": "Active: analyze and propose a plan without making changes.",
       "send": "Send",
       "steer": "Send guidance",
       "stop": "Stop"

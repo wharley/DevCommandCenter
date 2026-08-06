@@ -996,23 +996,39 @@ export function WorkspaceComposer({
 						planMode={isPlanMode}
 						onSelect={selectApprovalPolicy}
 					/>
-					<ComposerButton
-						type="button"
-						aria-label={t("composer.controls.planMode")}
-						disabled={turnSettingsDisabled}
-						className={cn(
-							"h-7 gap-1 px-1.5 text-[var(--dcc-daily-meta-size)]",
-							isPlanMode
-								? "text-[color:var(--plan)] hover:text-[color:var(--plan)]"
-								: "text-muted-foreground/70 hover:text-muted-foreground/70",
-						)}
-						onClick={togglePlanMode}
-					>
-						<ClipboardList className="size-[13px]" strokeWidth={1.8} />
-						<span className="dcc-composer-plan-label text-[12px] font-medium leading-4">
-							{t("composer.controls.plan")}
-						</span>
-					</ComposerButton>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<ComposerButton
+								type="button"
+								aria-label={t(
+									isPlanMode
+										? "composer.controls.planModeDisable"
+										: "composer.controls.planModeEnable",
+								)}
+								aria-pressed={isPlanMode}
+								disabled={turnSettingsDisabled}
+								className={cn(
+									"h-7 gap-1 px-1.5 text-[var(--dcc-daily-meta-size)]",
+									isPlanMode
+										? "text-[color:var(--plan)] hover:text-[color:var(--plan)]"
+										: "text-muted-foreground/70 hover:text-muted-foreground/70",
+								)}
+								onClick={togglePlanMode}
+							>
+								<ClipboardList className="size-[13px]" strokeWidth={1.8} />
+								<span className="dcc-composer-plan-label text-[12px] font-medium leading-4">
+									{t("composer.controls.plan")}
+								</span>
+							</ComposerButton>
+						</TooltipTrigger>
+						<TooltipContent side="top">
+							{t(
+								isPlanMode
+									? "composer.controls.planModeActiveHint"
+									: "composer.controls.planModeHint",
+							)}
+						</TooltipContent>
+					</Tooltip>
 				</div>
 
 				<div className="flex shrink-0 items-center gap-1.5">

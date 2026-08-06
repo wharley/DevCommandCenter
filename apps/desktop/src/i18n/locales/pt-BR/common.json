@@ -1061,6 +1061,10 @@
     "controls": {
       "plan": "Planejar",
       "planMode": "Modo de planejamento",
+      "planModeEnable": "Ativar modo de planejamento",
+      "planModeDisable": "Desativar modo de planejamento",
+      "planModeHint": "Analisa a tarefa e propõe um plano antes de executar alterações.",
+      "planModeActiveHint": "Ativo: analisa e propõe um plano sem executar alterações.",
       "send": "Enviar",
       "steer": "Enviar orientação",
       "stop": "Interromper"
