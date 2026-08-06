@@ -424,7 +424,10 @@ async fn acp_notification_events(
     let at = now_iso();
     match kind {
         "agent_message_chunk" => update_text(update)
-            .map(|content| ProviderEvent::TextDelta { content })
+            .map(|content| match update_message_id(update) {
+                Some(id) => ProviderEvent::AssistantMessageDelta { id, content },
+                None => ProviderEvent::TextDelta { content },
+            })
             .into_iter()
             .collect(),
         "agent_thought_chunk" | "agent_reasoning_chunk" => {
@@ -494,6 +497,19 @@ fn update_id(update: &Value, fallback: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or(fallback)
         .to_string()
+}
+
+fn update_message_id(update: &Value) -> Option<String> {
+    update
+        .get("messageId")
+        .or_else(|| update.get("message_id"))
+        .or_else(|| update.pointer("/_meta/messageId"))
+        .or_else(|| update.pointer("/_meta/message_id"))
+        .and_then(Value::as_str)
+        .filter(|value| {
+            !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
+        })
+        .map(str::to_string)
 }
 
 fn update_text(update: &Value) -> Option<String> {
@@ -699,6 +715,18 @@ mod tests {
         assert!(
             matches!(text.as_slice(), [ProviderEvent::TextDelta { content }] if content == "Hello")
         );
+
+        let identified_text = acp_notification_events(
+            "session/update",
+            &json!({ "update": { "sessionUpdate": "agent_message_chunk", "messageId": "550e8400-e29b-41d4-a716-446655440000", "content": { "text": "World" } } }),
+            &reasoning_active,
+        )
+        .await;
+        assert!(matches!(
+            identified_text.as_slice(),
+            [ProviderEvent::AssistantMessageDelta { id, content }]
+                if id == "550e8400-e29b-41d4-a716-446655440000" && content == "World"
+        ));
 
         let tool = acp_notification_events(
             "session/update",

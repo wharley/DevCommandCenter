@@ -29,8 +29,8 @@ use dcc_core::{
         provider::{McpOauthSupport, ProviderEvent, ProviderId, SessionHandle},
         repository::{Repository, RepositoryId},
         session::{
-            Session, SessionEventKind, SessionEventRecord, SessionId, SessionSearchResult, TurnId,
-            WorkspaceSessionSummary,
+            AssistantMessagePhase, Session, SessionEventKind, SessionEventRecord, SessionId,
+            SessionSearchResult, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
         workspace::{Workspace, WorkspaceId},
@@ -198,7 +198,38 @@ struct ProviderSessionBinding {
     provider_id: String,
     handle: SessionHandle,
     current_turn_id: Arc<AsyncMutex<Option<String>>>,
+    assistant_messages: Arc<AsyncMutex<AssistantMessageTracker>>,
     projected_mcp_definition_ids: Arc<HashSet<McpDefinitionId>>,
+}
+
+#[derive(Default, Debug)]
+struct AssistantMessageTracker {
+    active: HashMap<String, AssistantMessagePhase>,
+    synthetic_current: Option<String>,
+    synthetic_index: u32,
+}
+
+impl AssistantMessageTracker {
+    fn synthetic_append_target(&mut self, turn_id: &str) -> (String, bool) {
+        if let Some(message_id) = self.synthetic_current.clone() {
+            return (message_id, false);
+        }
+        let message_id = format!("assistant:{turn_id}:synthetic-{}", self.synthetic_index);
+        self.synthetic_index += 1;
+        self.synthetic_current = Some(message_id.clone());
+        self.active
+            .insert(message_id.clone(), AssistantMessagePhase::Unknown);
+        (message_id, true)
+    }
+
+    fn take_synthetic_completion(&mut self) -> Option<(String, AssistantMessagePhase)> {
+        let message_id = self.synthetic_current.take()?;
+        let phase = self
+            .active
+            .remove(&message_id)
+            .unwrap_or(AssistantMessagePhase::Unknown);
+        Some((message_id, phase))
+    }
 }
 
 #[derive(Default, Debug)]
@@ -328,6 +359,14 @@ impl SessionCommandState {
             while let Some(event) = events.next().await {
                 match event? {
                     ProviderEvent::TextDelta { content } => response.push_str(&content),
+                    ProviderEvent::AssistantMessageDelta { content, .. } => {
+                        response.push_str(&content)
+                    }
+                    ProviderEvent::AssistantMessageCompleted {
+                        phase: AssistantMessagePhase::FinalAnswer,
+                        content: Some(content),
+                        ..
+                    } => response = content,
                     ProviderEvent::Completed { .. } => return Ok(response),
                     ProviderEvent::Failed { message, .. } => {
                         return Err(dcc_core::CoreError::Provider(message));
@@ -532,6 +571,7 @@ impl SessionCommandState {
             provider_id: session.provider_id.clone(),
             handle: handle.clone(),
             current_turn_id: Arc::new(AsyncMutex::new(None)),
+            assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(
                 projected_definition_ids.iter().cloned().collect(),
             ),
@@ -1056,16 +1096,150 @@ impl SessionCommandState {
                     Ok(ProviderEvent::TextDelta { content }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
+                            // Simple providers expose text without item
+                            // lifecycle. Keep a stable synthetic item until a
+                            // semantic boundary (tool/reasoning/input), then
+                            // start a new segment for subsequent text.
+                            let (message_id, should_start) = {
+                                let mut tracker = binding.assistant_messages.lock().await;
+                                tracker.synthetic_append_target(&turn_id)
+                            };
+                            if should_start {
+                                let _ = state
+                                    .append_and_publish_session_event(
+                                        &session_id,
+                                        SessionEventKind::TurnAssistantMessageStarted {
+                                            turn_id: TurnId(turn_id.clone()),
+                                            message_id: message_id.clone(),
+                                            phase: AssistantMessagePhase::Unknown,
+                                        },
+                                        dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageStarted {
+                                            session_id: session_id.0.clone(),
+                                            turn_id: turn_id.clone(),
+                                            message_id: message_id.clone(),
+                                            phase: AssistantMessagePhase::Unknown,
+                                        },
+                                    )
+                                    .await;
+                            }
                             let _ = state
                                 .append_and_publish_session_event(
                                     &session_id,
-                                    SessionEventKind::TurnDelta {
+                                    SessionEventKind::TurnAssistantMessageDelta {
                                         turn_id: TurnId(turn_id.clone()),
+                                        message_id: message_id.clone(),
                                         content: content.clone(),
                                     },
-                                    dcc_core::ports::events::CoreEvent::SessionTurnDelta {
+                                    dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageDelta {
                                         session_id: session_id.0.clone(),
                                         turn_id,
+                                        message_id,
+                                        content,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
+                    Ok(ProviderEvent::AssistantMessageStarted { id, phase, .. }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            binding
+                                .assistant_messages
+                                .lock()
+                                .await
+                                .active
+                                .insert(id.clone(), phase.clone());
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnAssistantMessageStarted {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        message_id: id.clone(),
+                                        phase: phase.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageStarted {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        message_id: id,
+                                        phase,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
+                    Ok(ProviderEvent::AssistantMessageDelta { id, content }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            // Be defensive when providers omit or reorder the
+                            // start notification: synthesize only that missing
+                            // lifecycle edge while preserving the native ID.
+                            let should_start = {
+                                let mut tracker = binding.assistant_messages.lock().await;
+                                if tracker.active.contains_key(&id) {
+                                    false
+                                } else {
+                                    tracker
+                                        .active
+                                        .insert(id.clone(), AssistantMessagePhase::Unknown);
+                                    true
+                                }
+                            };
+                            if should_start {
+                                let _ = state
+                                    .append_and_publish_session_event(
+                                        &session_id,
+                                        SessionEventKind::TurnAssistantMessageStarted {
+                                            turn_id: TurnId(turn_id.clone()),
+                                            message_id: id.clone(),
+                                            phase: AssistantMessagePhase::Unknown,
+                                        },
+                                        dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageStarted {
+                                            session_id: session_id.0.clone(),
+                                            turn_id: turn_id.clone(),
+                                            message_id: id.clone(),
+                                            phase: AssistantMessagePhase::Unknown,
+                                        },
+                                    )
+                                    .await;
+                            }
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnAssistantMessageDelta {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        message_id: id.clone(),
+                                        content: content.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageDelta {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        message_id: id,
+                                        content,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
+                    Ok(ProviderEvent::AssistantMessageCompleted {
+                        id, phase, content, ..
+                    }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            binding.assistant_messages.lock().await.active.remove(&id);
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnAssistantMessageCompleted {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        message_id: id.clone(),
+                                        phase: phase.clone(),
+                                        content: content.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageCompleted {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        message_id: id,
+                                        phase,
                                         content,
                                     },
                                 )
@@ -1075,6 +1249,13 @@ impl SessionCommandState {
                     Ok(ProviderEvent::ReasoningStarted { id, label, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
+                            state
+                                .complete_synthetic_assistant_message(
+                                    &session_id,
+                                    &binding,
+                                    &turn_id,
+                                )
+                                .await;
                             let _ = state
 								.append_and_publish_session_event(
 									&session_id,
@@ -1142,6 +1323,13 @@ impl SessionCommandState {
                     }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
+                            state
+                                .complete_synthetic_assistant_message(
+                                    &session_id,
+                                    &binding,
+                                    &turn_id,
+                                )
+                                .await;
                             let _ = state
 								.append_and_publish_session_event(
 									&session_id,
@@ -1228,6 +1416,13 @@ impl SessionCommandState {
                     Ok(ProviderEvent::UserInputRequested { id, questions, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
+                            state
+                                .complete_synthetic_assistant_message(
+                                    &session_id,
+                                    &binding,
+                                    &turn_id,
+                                )
+                                .await;
                             let _ = state
                                 .append_and_publish_session_event(
                                     &session_id,
@@ -1270,6 +1465,13 @@ impl SessionCommandState {
                     Ok(ProviderEvent::PermissionRequested { request, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
+                            state
+                                .complete_synthetic_assistant_message(
+                                    &session_id,
+                                    &binding,
+                                    &turn_id,
+                                )
+                                .await;
                             let _ = state
                                 .append_and_publish_session_event(
                                     &session_id,
@@ -1320,6 +1522,31 @@ impl SessionCommandState {
                     Ok(ProviderEvent::Completed { .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.take();
                         if let Some(turn_id) = turn_id {
+                            let mut remaining = {
+                                let mut tracker = binding.assistant_messages.lock().await;
+                                tracker.active.drain().collect::<Vec<_>>()
+                            };
+                            remaining.sort_by(|left, right| left.0.cmp(&right.0));
+                            for (message_id, phase) in remaining {
+                                let _ = state
+                                    .append_and_publish_session_event(
+                                        &session_id,
+                                        SessionEventKind::TurnAssistantMessageCompleted {
+                                            turn_id: TurnId(turn_id.clone()),
+                                            message_id: message_id.clone(),
+                                            phase: phase.clone(),
+                                            content: None,
+                                        },
+                                        dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageCompleted {
+                                            session_id: session_id.0.clone(),
+                                            turn_id: turn_id.clone(),
+                                            message_id,
+                                            phase,
+                                            content: None,
+                                        },
+                                    )
+                                    .await;
+                            }
                             let _ = state
                                 .append_and_publish_session_event(
                                     &session_id,
@@ -1340,6 +1567,7 @@ impl SessionCommandState {
                     Ok(ProviderEvent::Failed { message, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.take();
                         if let Some(turn_id) = turn_id {
+                            binding.assistant_messages.lock().await.active.clear();
                             let _ = state
                                 .append_and_publish_session_event(
                                     &session_id,
@@ -1359,6 +1587,7 @@ impl SessionCommandState {
                     Err(error) => {
                         let turn_id = binding.current_turn_id.lock().await.take();
                         if let Some(turn_id) = turn_id {
+                            binding.assistant_messages.lock().await.active.clear();
                             let reason = error.to_string();
                             let _ = state
                                 .append_and_publish_session_event(
@@ -1386,6 +1615,40 @@ impl SessionCommandState {
         });
     }
 
+    async fn complete_synthetic_assistant_message(
+        &self,
+        session_id: &SessionId,
+        binding: &ProviderSessionBinding,
+        turn_id: &str,
+    ) {
+        let completion = {
+            let mut tracker = binding.assistant_messages.lock().await;
+            let Some(completion) = tracker.take_synthetic_completion() else {
+                return;
+            };
+            completion
+        };
+        let (message_id, phase) = completion;
+        let _ = self
+            .append_and_publish_session_event(
+                session_id,
+                SessionEventKind::TurnAssistantMessageCompleted {
+                    turn_id: TurnId(turn_id.to_string()),
+                    message_id: message_id.clone(),
+                    phase: phase.clone(),
+                    content: None,
+                },
+                dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageCompleted {
+                    session_id: session_id.0.clone(),
+                    turn_id: turn_id.to_string(),
+                    message_id,
+                    phase,
+                    content: None,
+                },
+            )
+            .await;
+    }
+
     pub async fn set_active_turn(
         &self,
         session_id: &SessionId,
@@ -1397,6 +1660,7 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
+        *binding.assistant_messages.lock().await = AssistantMessageTracker::default();
         *binding.current_turn_id.lock().await = turn_id;
         Ok(())
     }
@@ -1779,6 +2043,28 @@ mod tests {
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
         },
     };
+
+    #[test]
+    fn synthetic_assistant_items_are_stable_until_a_semantic_boundary() {
+        let mut tracker = AssistantMessageTracker::default();
+
+        let (first_id, first_started) = tracker.synthetic_append_target("turn-1");
+        let (same_id, same_started) = tracker.synthetic_append_target("turn-1");
+        assert!(first_started);
+        assert!(!same_started);
+        assert_eq!(same_id, first_id);
+
+        let completed = tracker
+            .take_synthetic_completion()
+            .expect("active synthetic item");
+        assert_eq!(completed.0, first_id);
+        assert_eq!(completed.1, AssistantMessagePhase::Unknown);
+
+        let (second_id, second_started) = tracker.synthetic_append_target("turn-1");
+        assert!(second_started);
+        assert_ne!(second_id, first_id);
+        assert!(second_id.ends_with("synthetic-1"));
+    }
 
     fn sample_workspace(id: &str, root: &str) -> Workspace {
         Workspace {

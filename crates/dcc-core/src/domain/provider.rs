@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::session::SessionId;
+use super::session::{AssistantMessagePhase, SessionId};
 use super::{
     mcp::McpRuntimeStatus,
     mcp_conformance::{McpConformanceEvidence, McpConformanceEvidenceError},
@@ -246,6 +246,25 @@ pub enum ProviderEvent {
     },
     TextDelta {
         content: String,
+    },
+    /// Starts a semantically distinct assistant message within the current
+    /// turn. Rich providers should use their native item identifier.
+    AssistantMessageStarted {
+        id: String,
+        phase: AssistantMessagePhase,
+        at: String,
+    },
+    AssistantMessageDelta {
+        id: String,
+        content: String,
+    },
+    /// Completes an assistant message. `content`, when present, is the
+    /// provider's authoritative final snapshot and replaces streamed deltas.
+    AssistantMessageCompleted {
+        id: String,
+        phase: AssistantMessagePhase,
+        content: Option<String>,
+        at: String,
     },
     ReasoningStarted {
         id: String,

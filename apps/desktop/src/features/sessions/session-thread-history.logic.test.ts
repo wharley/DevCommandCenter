@@ -44,15 +44,81 @@ function sessionTurnCompleted(
 	sessionId: string,
 	turnId: string,
 	occurredAt = "2026-05-01T12:00:05Z",
+	sequence = 2,
 ): SessionEventRecord {
 	return {
 		eventId: `evt-${sessionId}-${turnId}-completed`,
 		sessionId,
-		sequence: 2,
+		sequence,
 		occurredAt,
 		kind: {
 			type: "turn_completed",
 			turnId,
+		},
+	};
+}
+
+function assistantMessageStarted(
+	sessionId: string,
+	turnId: string,
+	messageId: string,
+	phase: "commentary" | "final_answer" | "unknown",
+	sequence: number,
+): SessionEventRecord {
+	return {
+		eventId: `evt-${sessionId}-${turnId}-${messageId}-started`,
+		sessionId,
+		sequence,
+		occurredAt: `2026-05-01T12:00:0${sequence}Z`,
+		kind: {
+			type: "turn_assistant_message_started",
+			turnId,
+			messageId,
+			phase,
+		},
+	};
+}
+
+function assistantMessageDelta(
+	sessionId: string,
+	turnId: string,
+	messageId: string,
+	content: string,
+	sequence: number,
+): SessionEventRecord {
+	return {
+		eventId: `evt-${sessionId}-${turnId}-${messageId}-delta-${sequence}`,
+		sessionId,
+		sequence,
+		occurredAt: `2026-05-01T12:00:0${sequence}Z`,
+		kind: {
+			type: "turn_assistant_message_delta",
+			turnId,
+			messageId,
+			content,
+		},
+	};
+}
+
+function assistantMessageCompleted(
+	sessionId: string,
+	turnId: string,
+	messageId: string,
+	phase: "commentary" | "final_answer" | "unknown",
+	content: string | null,
+	sequence: number,
+): SessionEventRecord {
+	return {
+		eventId: `evt-${sessionId}-${turnId}-${messageId}-completed`,
+		sessionId,
+		sequence,
+		occurredAt: `2026-05-01T12:00:0${sequence}Z`,
+		kind: {
+			type: "turn_assistant_message_completed",
+			turnId,
+			messageId,
+			phase,
+			content,
 		},
 	};
 }
@@ -380,6 +446,116 @@ describe("projectWorkspaceMessages", () => {
 			role: "assistant",
 			content: "Vou rastrear onde o",
 		});
+	});
+
+	it("keeps native assistant items distinct while a turn is streaming", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "comment-1", "commentary", 2),
+				assistantMessageDelta("session-a", "turn-1", "comment-1", "Vou investigar.", 3),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"comment-1",
+					"commentary",
+					"Vou investigar.",
+					4,
+				),
+				assistantMessageStarted("session-a", "turn-1", "final-1", "final_answer", 5),
+				assistantMessageDelta("session-a", "turn-1", "final-1", "Resolvido.", 6),
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages.filter((message) => message.role === "assistant")).toMatchObject([
+			{
+				content: "Vou investigar.",
+				assistantPhase: "commentary",
+				streaming: false,
+			},
+			{
+				content: "Resolvido.",
+				assistantPhase: "final_answer",
+				streaming: true,
+			},
+		]);
+	});
+
+	it("folds settled commentary and keeps the authoritative final answer visible", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "comment-1", "commentary", 2),
+				assistantMessageDelta("session-a", "turn-1", "comment-1", "Vou investigar.", 3),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"comment-1",
+					"commentary",
+					"Vou investigar com cuidado.",
+					4,
+				),
+				assistantMessageStarted("session-a", "turn-1", "final-1", "final_answer", 5),
+				assistantMessageDelta("session-a", "turn-1", "final-1", "Parcial", 6),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"final-1",
+					"final_answer",
+					"Resposta final autoritativa.",
+					7,
+				),
+				sessionTurnCompleted("session-a", "turn-1", "2026-05-01T12:00:08Z", 8),
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				content: "Resposta final autoritativa.",
+				assistantPhase: "final_answer",
+				streaming: false,
+				annotations: [
+					expect.objectContaining({
+						type: "commentary",
+						content: "Vou investigar com cuidado.",
+					}),
+				],
+			}),
+		]);
+	});
+
+	it("uses the last completed assistant item when a provider has no native phase", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "segment-0", "unknown", 2),
+				assistantMessageDelta("session-a", "turn-1", "segment-0", "Vou ler os arquivos.", 3),
+				assistantMessageCompleted("session-a", "turn-1", "segment-0", "unknown", null, 4),
+				assistantMessageStarted("session-a", "turn-1", "segment-1", "unknown", 5),
+				assistantMessageDelta("session-a", "turn-1", "segment-1", "Encontrei a causa.", 6),
+				assistantMessageCompleted("session-a", "turn-1", "segment-1", "unknown", null, 7),
+				sessionTurnCompleted("session-a", "turn-1", "2026-05-01T12:00:08Z", 8),
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				content: "Encontrei a causa.",
+				assistantPhase: "unknown",
+				annotations: [
+					expect.objectContaining({
+						type: "commentary",
+						content: "Vou ler os arquivos.",
+					}),
+				],
+			}),
+		]);
 	});
 
 	it("deduplicates live deltas already present in history by occurrence", () => {

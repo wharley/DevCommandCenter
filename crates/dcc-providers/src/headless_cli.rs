@@ -463,6 +463,7 @@ fn parse_gemini_stream_value(
     match kind {
         "init" => {
             state.gemini_streamed_text_emitted = false;
+            state.gemini_active_message_id = Some("gemini:assistant:0".to_string());
             None
         }
         "message" => {
@@ -475,7 +476,11 @@ fn parse_gemini_stream_value(
                 None
             } else {
                 state.gemini_streamed_text_emitted = true;
-                Some(ProviderEvent::TextDelta {
+                Some(ProviderEvent::AssistantMessageDelta {
+                    id: state
+                        .gemini_active_message_id
+                        .get_or_insert_with(|| "gemini:assistant:0".to_string())
+                        .clone(),
                     content: content.to_string(),
                 })
             }
@@ -554,11 +559,18 @@ fn parse_gemini_stream_value(
                 .and_then(Value::as_str)
                 .unwrap_or("success");
             if status == "success" {
-                if !state.gemini_streamed_text_emitted {
-                    if let Some(text) = gemini_result_text(value) {
-                        state.gemini_streamed_text_emitted = true;
-                        return Some(ProviderEvent::TextDelta { content: text });
-                    }
+                let content = gemini_result_text(value);
+                if state.gemini_streamed_text_emitted || content.is_some() {
+                    state.gemini_streamed_text_emitted = false;
+                    return Some(ProviderEvent::AssistantMessageCompleted {
+                        id: state
+                            .gemini_active_message_id
+                            .take()
+                            .unwrap_or_else(|| "gemini:assistant:0".to_string()),
+                        phase: dcc_core::domain::session::AssistantMessagePhase::Unknown,
+                        content,
+                        at,
+                    });
                 }
                 Some(ProviderEvent::Completed { at })
             } else {
@@ -580,6 +592,7 @@ fn parse_gemini_stream_value(
 fn gemini_result_text(value: &Value) -> Option<String> {
     let direct = value
         .get("result")
+        .or_else(|| value.get("response"))
         .or_else(|| value.get("output"))
         .or_else(|| value.get("content"))
         .and_then(Value::as_str)
@@ -592,6 +605,7 @@ fn gemini_result_text(value: &Value) -> Option<String> {
 
     let nested = value
         .get("result")
+        .or_else(|| value.get("response"))
         .or_else(|| value.get("output"))
         .and_then(Value::as_object)?;
 
@@ -851,7 +865,42 @@ mod tests {
         );
         assert!(matches!(
             parsed,
-            ParsedProviderLine::Text(text) if text == "# Ship\n\n- inspect\n- patch"
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageCompleted {
+                id,
+                content: Some(text),
+                ..
+            }) if id == "gemini:assistant:0" && text == "# Ship\n\n- inspect\n- patch"
+        ));
+    }
+
+    #[test]
+    fn reconciles_gemini_deltas_with_the_terminal_result() {
+        let mut state = ProviderStreamState::default();
+        let _ = parse_gemini_stream_line(
+            r#"{"type":"init","session_id":"gemini-session-1"}"#,
+            &mut state,
+        );
+        let delta = parse_gemini_stream_line(
+            r#"{"type":"message","role":"assistant","content":"Hello"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            delta,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageDelta { id, content })
+                if id == "gemini:assistant:0" && content == "Hello"
+        ));
+
+        let result = parse_gemini_stream_line(
+            r#"{"type":"result","status":"success","response":"Hello world"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            result,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageCompleted {
+                id,
+                content: Some(content),
+                ..
+            }) if id == "gemini:assistant:0" && content == "Hello world"
         ));
     }
 

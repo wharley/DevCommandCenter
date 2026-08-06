@@ -1999,6 +1999,9 @@
       "label": "Pensando",
       "empty": "Nenhum raciocínio capturado."
     },
+    "commentary": {
+      "label": "Atualização do progresso"
+    },
     "toolCall": {
       "running": "Executando",
       "failed": "Falhou",

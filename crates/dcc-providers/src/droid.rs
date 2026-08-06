@@ -18,7 +18,7 @@ use dcc_core::{
             Capabilities, HealthStatus, ProviderDescriptor, ProviderEvent, ProviderId,
             SessionHandle,
         },
-        session::SessionId,
+        session::{AssistantMessagePhase, SessionId},
     },
     ports::{Input, Provider, SessionConfig},
     CoreError, Result,
@@ -63,7 +63,9 @@ struct ActiveTurn {
 
 #[derive(Default)]
 struct DroidStreamState {
-    assistant_text_emitted: bool,
+    active_assistant_message_id: Option<String>,
+    active_assistant_text: String,
+    legacy_assistant_text: String,
     reasoning_started: HashMap<String, bool>,
 }
 
@@ -370,26 +372,22 @@ fn parse_droid_stream_value(value: &Value, state: &mut DroidStreamState) -> Vec<
     match kind {
         "system" => Vec::new(),
         "message" => parse_droid_message(value, state),
-        "reasoning" => parse_droid_reasoning(value, state, at),
-        "tool_call" => parse_droid_tool_call(value, at).into_iter().collect(),
+        "reasoning" => {
+            let mut events = complete_droid_active_message(state, None, at.clone());
+            state.legacy_assistant_text.clear();
+            events.extend(parse_droid_reasoning(value, state, at));
+            events
+        }
+        "tool_call" => {
+            let mut events = complete_droid_active_message(state, None, at.clone());
+            state.legacy_assistant_text.clear();
+            events.extend(parse_droid_tool_call(value, at));
+            events
+        }
         "tool_result" => parse_droid_tool_result(value, at),
         "completion" => {
-            let mut events = Vec::new();
-            if !state.assistant_text_emitted {
-                if let Some(final_text) = value
-                    .get("finalText")
-                    .or_else(|| value.get("final_text"))
-                    .or_else(|| value.get("result"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|text| !text.is_empty())
-                {
-                    state.assistant_text_emitted = true;
-                    events.push(ProviderEvent::TextDelta {
-                        content: final_text.to_string(),
-                    });
-                }
-            }
+            let final_text = droid_final_text(value);
+            let mut events = complete_droid_turn_text(value, state, final_text, at.clone());
             events.push(ProviderEvent::Completed { at });
             events
         }
@@ -404,20 +402,8 @@ fn parse_droid_stream_value(value: &Value, state: &mut DroidStreamState) -> Vec<
                 .and_then(Value::as_bool)
                 != Some(true);
             if success {
-                let mut events = Vec::new();
-                if !state.assistant_text_emitted {
-                    if let Some(result_text) = value
-                        .get("result")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|text| !text.is_empty())
-                    {
-                        state.assistant_text_emitted = true;
-                        events.push(ProviderEvent::TextDelta {
-                            content: result_text.to_string(),
-                        });
-                    }
-                }
+                let final_text = droid_final_text(value);
+                let mut events = complete_droid_turn_text(value, state, final_text, at.clone());
                 events.push(ProviderEvent::Completed { at });
                 events
             } else {
@@ -439,7 +425,11 @@ fn parse_droid_message(value: &Value, state: &mut DroidStreamState) -> Vec<Provi
 
     if let Some(subtype) = value.get("subtype").and_then(Value::as_str) {
         if subtype.eq_ignore_ascii_case("reasoning") || subtype.eq_ignore_ascii_case("thinking") {
-            return parse_droid_reasoning(value, state, now_iso());
+            let at = now_iso();
+            let mut events = complete_droid_active_message(state, None, at.clone());
+            state.legacy_assistant_text.clear();
+            events.extend(parse_droid_reasoning(value, state, at));
+            return events;
         }
     }
 
@@ -449,14 +439,104 @@ fn parse_droid_message(value: &Value, state: &mut DroidStreamState) -> Vec<Provi
         .and_then(Value::as_bool)
         == Some(true)
     {
-        return parse_droid_reasoning(value, state, now_iso());
+        let at = now_iso();
+        let mut events = complete_droid_active_message(state, None, at.clone());
+        state.legacy_assistant_text.clear();
+        events.extend(parse_droid_reasoning(value, state, at));
+        return events;
     }
 
     let Some(text) = droid_text_field(value) else {
         return Vec::new();
     };
-    state.assistant_text_emitted = true;
-    vec![ProviderEvent::TextDelta { content: text }]
+    let Some(id) = droid_message_id(value) else {
+        state.legacy_assistant_text.push_str(&text);
+        return vec![ProviderEvent::TextDelta { content: text }];
+    };
+
+    let mut events = Vec::new();
+    if state.active_assistant_message_id.as_deref() != Some(id.as_str()) {
+        events.extend(complete_droid_active_message(state, None, now_iso()));
+        state.active_assistant_message_id = Some(id.clone());
+        state.active_assistant_text.clear();
+        events.push(ProviderEvent::AssistantMessageStarted {
+            id: id.clone(),
+            phase: AssistantMessagePhase::Unknown,
+            at: now_iso(),
+        });
+    }
+    state.active_assistant_text.push_str(&text);
+    events.push(ProviderEvent::AssistantMessageDelta { id, content: text });
+    events
+}
+
+fn droid_message_id(value: &Value) -> Option<String> {
+    value
+        .get("id")
+        .or_else(|| value.get("messageId"))
+        .or_else(|| value.get("message_id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
+        .map(str::to_string)
+}
+
+fn droid_final_text(value: &Value) -> Option<String> {
+    value
+        .get("finalText")
+        .or_else(|| value.get("final_text"))
+        .or_else(|| value.get("result"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+fn complete_droid_active_message(
+    state: &mut DroidStreamState,
+    authoritative: Option<String>,
+    at: String,
+) -> Vec<ProviderEvent> {
+    let Some(id) = state.active_assistant_message_id.take() else {
+        return Vec::new();
+    };
+    let content = authoritative.or_else(|| {
+        (!state.active_assistant_text.is_empty()).then(|| state.active_assistant_text.clone())
+    });
+    state.active_assistant_text.clear();
+    vec![ProviderEvent::AssistantMessageCompleted {
+        id,
+        phase: AssistantMessagePhase::Unknown,
+        content,
+        at,
+    }]
+}
+
+fn complete_droid_turn_text(
+    value: &Value,
+    state: &mut DroidStreamState,
+    final_text: Option<String>,
+    at: String,
+) -> Vec<ProviderEvent> {
+    if state.active_assistant_message_id.is_some() {
+        state.legacy_assistant_text.clear();
+        return complete_droid_active_message(state, final_text, at);
+    }
+
+    let Some(final_text) = final_text else {
+        state.legacy_assistant_text.clear();
+        return Vec::new();
+    };
+    if final_text == state.legacy_assistant_text {
+        state.legacy_assistant_text.clear();
+        return Vec::new();
+    }
+    state.legacy_assistant_text.clear();
+    vec![ProviderEvent::AssistantMessageCompleted {
+        id: droid_message_id(value).unwrap_or_else(|| "droid:final".to_string()),
+        phase: AssistantMessagePhase::Unknown,
+        content: Some(final_text),
+        at,
+    }]
 }
 
 fn parse_droid_reasoning(
@@ -832,7 +912,10 @@ mod tests {
         );
         assert!(matches!(
             assistant.as_slice(),
-            [ProviderEvent::TextDelta { content }] if content == "I'll inspect the repo."
+            [
+                ProviderEvent::AssistantMessageStarted { id: first_id, .. },
+                ProviderEvent::AssistantMessageDelta { id: second_id, content }
+            ] if first_id == "msg-2" && second_id == "msg-2" && content == "I'll inspect the repo."
         ));
 
         let tool_call = parse_droid_stream_line(
@@ -841,13 +924,22 @@ mod tests {
         );
         assert!(matches!(
             tool_call.as_slice(),
-            [ProviderEvent::ToolCallStarted {
-                id,
-                action,
-                command,
-                file,
-                ..
-            }] if id == "call-1" && action == "Execute" && command.as_deref() == Some("ls -la") && file.is_none()
+            [
+                ProviderEvent::AssistantMessageCompleted {
+                    id: message_id,
+                    content: Some(message),
+                    ..
+                },
+                ProviderEvent::ToolCallStarted {
+                    id,
+                    action,
+                    command,
+                    file,
+                    ..
+                }
+            ] if message_id == "msg-2" && message == "I'll inspect the repo."
+                && id == "call-1" && action == "Execute"
+                && command.as_deref() == Some("ls -la") && file.is_none()
         ));
 
         let tool_result = parse_droid_stream_line(
@@ -868,7 +960,14 @@ mod tests {
         );
         assert!(matches!(
             completion.as_slice(),
-            [ProviderEvent::Completed { .. }]
+            [
+                ProviderEvent::AssistantMessageCompleted {
+                    id,
+                    content: Some(content),
+                    ..
+                },
+                ProviderEvent::Completed { .. }
+            ] if id == "droid:final" && content == "Done."
         ));
     }
 
@@ -895,9 +994,13 @@ mod tests {
         assert!(matches!(
             completion.as_slice(),
             [
-                ProviderEvent::TextDelta { content },
+                ProviderEvent::AssistantMessageCompleted {
+                    id,
+                    content: Some(content),
+                    ..
+                },
                 ProviderEvent::Completed { .. }
-            ] if content == "Final answer"
+            ] if id == "droid:final" && content == "Final answer"
         ));
     }
 }

@@ -735,6 +735,24 @@ function getCoreEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
 		return event.sessionTurnDelta.session_id;
 	}
+	if (
+		"sessionTurnAssistantMessageStarted" in event &&
+		event.sessionTurnAssistantMessageStarted
+	) {
+		return event.sessionTurnAssistantMessageStarted.session_id;
+	}
+	if (
+		"sessionTurnAssistantMessageDelta" in event &&
+		event.sessionTurnAssistantMessageDelta
+	) {
+		return event.sessionTurnAssistantMessageDelta.session_id;
+	}
+	if (
+		"sessionTurnAssistantMessageCompleted" in event &&
+		event.sessionTurnAssistantMessageCompleted
+	) {
+		return event.sessionTurnAssistantMessageCompleted.session_id;
+	}
 	if ("sessionTurnReasoningStarted" in event && event.sessionTurnReasoningStarted) {
 		return event.sessionTurnReasoningStarted.session_id;
 	}

@@ -735,7 +735,10 @@ async fn cursor_acp_notification_events(
     let at = now_iso();
     match kind {
         "agent_message_chunk" => update_text(update)
-            .map(|content| ProviderEvent::TextDelta { content })
+            .map(|content| match update_message_id(update) {
+                Some(id) => ProviderEvent::AssistantMessageDelta { id, content },
+                None => ProviderEvent::TextDelta { content },
+            })
             .into_iter()
             .collect(),
         "agent_thought_chunk" | "agent_reasoning_chunk" => {
@@ -1089,6 +1092,19 @@ fn update_id(update: &Value, fallback: &str) -> String {
         .filter(|value| !value.is_empty() && value.len() <= 256)
         .unwrap_or(fallback)
         .to_string()
+}
+
+fn update_message_id(update: &Value) -> Option<String> {
+    update
+        .get("messageId")
+        .or_else(|| update.get("message_id"))
+        .or_else(|| update.pointer("/_meta/messageId"))
+        .or_else(|| update.pointer("/_meta/message_id"))
+        .and_then(Value::as_str)
+        .filter(|value| {
+            !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
+        })
+        .map(str::to_string)
 }
 
 fn update_text(update: &Value) -> Option<String> {
@@ -1499,6 +1515,20 @@ mod tests {
             tool_name: "fixture.mutate".to_string(),
             decision: McpToolPolicyDecision::Deny,
         };
+    }
+
+    #[test]
+    fn preserves_standard_and_metadata_acp_message_ids() {
+        assert_eq!(
+            update_message_id(&json!({ "messageId": "550e8400-e29b-41d4-a716-446655440000" }))
+                .as_deref(),
+            Some("550e8400-e29b-41d4-a716-446655440000")
+        );
+        assert_eq!(
+            update_message_id(&json!({ "_meta": { "message_id": "provider-message" } })).as_deref(),
+            Some("provider-message")
+        );
+        assert!(update_message_id(&json!({ "messageId": "bad\nmessage" })).is_none());
     }
 
     #[test]

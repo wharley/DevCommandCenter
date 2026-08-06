@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
-use crate::domain::mcp::McpRuntimeStatus;
+use crate::domain::{mcp::McpRuntimeStatus, session::AssistantMessagePhase};
 use crate::Result;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -74,6 +74,25 @@ pub enum CoreEvent {
         session_id: String,
         turn_id: String,
         content: String,
+    },
+    SessionTurnAssistantMessageStarted {
+        session_id: String,
+        turn_id: String,
+        message_id: String,
+        phase: AssistantMessagePhase,
+    },
+    SessionTurnAssistantMessageDelta {
+        session_id: String,
+        turn_id: String,
+        message_id: String,
+        content: String,
+    },
+    SessionTurnAssistantMessageCompleted {
+        session_id: String,
+        turn_id: String,
+        message_id: String,
+        phase: AssistantMessagePhase,
+        content: Option<String>,
     },
     SessionTurnReasoningStarted {
         session_id: String,

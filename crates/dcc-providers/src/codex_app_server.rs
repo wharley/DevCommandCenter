@@ -37,7 +37,7 @@ use dcc_core::{
             Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
             ProviderApprovalPolicy, ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
         },
-        session::SessionId,
+        session::{AssistantMessagePhase, SessionId},
     },
     ports::{
         provider::{ProviderPermissionRequest, ProviderPermissionResponse},
@@ -396,41 +396,31 @@ async fn fetch_codex_account_usage(
 
 // ── Notification → ProviderEvent ────────────────────────────────────────────
 
-fn codex_agent_message_delta_content(
-    params: &Value,
-    last_agent_message_id: &mut Option<String>,
-) -> String {
-    let item_id = params.get("itemId").and_then(Value::as_str);
-    let delta = params.get("delta").and_then(Value::as_str).unwrap_or("");
-    let should_prefix_separator = item_id.is_some_and(|current_id| {
-        last_agent_message_id
-            .as_deref()
-            .is_some_and(|previous_id| previous_id != current_id)
-    }) && !delta.is_empty();
-
-    if let Some(current_id) = item_id.filter(|value| !value.is_empty()) {
-        *last_agent_message_id = Some(current_id.to_string());
-    }
-
-    if should_prefix_separator {
-        format!("\n\n{delta}")
-    } else {
-        delta.to_string()
+fn codex_agent_message_phase(item: &Value) -> AssistantMessagePhase {
+    match item.get("phase").and_then(Value::as_str) {
+        Some("commentary") => AssistantMessagePhase::Commentary,
+        Some("final_answer") | Some("finalAnswer") => AssistantMessagePhase::FinalAnswer,
+        _ => AssistantMessagePhase::Unknown,
     }
 }
 
-fn notification_to_event(
-    method: &str,
-    params: &Value,
-    last_agent_message_id: &mut Option<String>,
-) -> Option<ProviderEvent> {
+fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> {
     let at = Utc::now().to_rfc3339();
     match method {
-        "item/agentMessage/delta" => Some(ProviderEvent::TextDelta {
-            content: codex_agent_message_delta_content(params, last_agent_message_id),
+        "item/agentMessage/delta" => Some(ProviderEvent::AssistantMessageDelta {
+            id: params
+                .get("itemId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .unwrap_or("codex-agent-message")
+                .to_string(),
+            content: params
+                .get("delta")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         }),
         "turn/completed" => {
-            *last_agent_message_id = None;
             let status = params
                 .get("turn")
                 .and_then(|t| t.get("status"))
@@ -451,13 +441,10 @@ fn notification_to_event(
                 Some(ProviderEvent::Completed { at })
             }
         }
-        "error" => {
-            *last_agent_message_id = None;
-            Some(ProviderEvent::Failed {
-                message: codex_error_message(params),
-                at,
-            })
-        }
+        "error" => Some(ProviderEvent::Failed {
+            message: codex_error_message(params),
+            at,
+        }),
         "item/started" => {
             let item = params.get("item")?;
             let kind = item.get("type").and_then(Value::as_str)?;
@@ -467,6 +454,11 @@ fn notification_to_event(
                 .unwrap_or("item")
                 .to_string();
             match kind {
+                "agentMessage" => Some(ProviderEvent::AssistantMessageStarted {
+                    id,
+                    phase: codex_agent_message_phase(item),
+                    at,
+                }),
                 "commandExecution" => Some(ProviderEvent::ToolCallStarted {
                     id,
                     action: "Bash".to_string(),
@@ -519,6 +511,12 @@ fn notification_to_event(
                 .unwrap_or("item")
                 .to_string();
             match kind {
+                "agentMessage" => Some(ProviderEvent::AssistantMessageCompleted {
+                    id,
+                    phase: codex_agent_message_phase(item),
+                    content: item.get("text").and_then(Value::as_str).map(str::to_string),
+                    at,
+                }),
                 "mcpToolCall" => {
                     let failed = item
                         .get("status")
@@ -1670,7 +1668,6 @@ impl CodexAppServerAdapter {
             });
 
             let mut reader = BufReader::new(stdout).lines();
-            let mut last_agent_message_id = None;
             let mut active_mcp_tool_calls = HashMap::new();
             while let Ok(Some(line)) = reader.next_line().await {
                 let trimmed = line.trim().to_string();
@@ -1814,9 +1811,7 @@ impl CodexAppServerAdapter {
                     if method == "error" && should_suppress_codex_error(params, &runtime).await {
                         continue;
                     }
-                    if let Some(event) =
-                        notification_to_event(method, params, &mut last_agent_message_id)
-                    {
+                    if let Some(event) = notification_to_event(method, params) {
                         let _ = runtime.events_tx.send(event);
                     }
                 }
@@ -2438,22 +2433,20 @@ mod tests {
     }
 
     #[test]
-    fn separates_codex_agent_message_items() {
-        let mut last_agent_message_id = None;
-
+    fn preserves_codex_agent_message_item_identity() {
         let first = notification_to_event(
             "item/agentMessage/delta",
             &json!({
                 "itemId": "msg_1",
                 "delta": "Primeira mensagem.",
             }),
-            &mut last_agent_message_id,
         );
         match first {
-            Some(ProviderEvent::TextDelta { content }) => {
+            Some(ProviderEvent::AssistantMessageDelta { id, content }) => {
+                assert_eq!(id, "msg_1");
                 assert_eq!(content, "Primeira mensagem.");
             }
-            other => panic!("expected first text delta, got {other:?}"),
+            other => panic!("expected first assistant delta, got {other:?}"),
         }
 
         let second = notification_to_event(
@@ -2462,19 +2455,62 @@ mod tests {
                 "itemId": "msg_2",
                 "delta": "Segunda mensagem.",
             }),
-            &mut last_agent_message_id,
         );
         match second {
-            Some(ProviderEvent::TextDelta { content }) => {
-                assert_eq!(content, "\n\nSegunda mensagem.");
+            Some(ProviderEvent::AssistantMessageDelta { id, content }) => {
+                assert_eq!(id, "msg_2");
+                assert_eq!(content, "Segunda mensagem.");
             }
-            other => panic!("expected separated text delta, got {other:?}"),
+            other => panic!("expected second assistant delta, got {other:?}"),
         }
     }
 
     #[test]
+    fn preserves_codex_agent_message_phase_and_authoritative_completion() {
+        let started = notification_to_event(
+            "item/started",
+            &json!({
+                "item": {
+                    "id": "msg-final",
+                    "type": "agentMessage",
+                    "text": "",
+                    "phase": "final_answer"
+                }
+            }),
+        );
+        assert!(matches!(
+            started,
+            Some(ProviderEvent::AssistantMessageStarted {
+                id,
+                phase: AssistantMessagePhase::FinalAnswer,
+                ..
+            }) if id == "msg-final"
+        ));
+
+        let completed = notification_to_event(
+            "item/completed",
+            &json!({
+                "item": {
+                    "id": "msg-final",
+                    "type": "agentMessage",
+                    "text": "Resposta final autoritativa.",
+                    "phase": "final_answer"
+                }
+            }),
+        );
+        assert!(matches!(
+            completed,
+            Some(ProviderEvent::AssistantMessageCompleted {
+                id,
+                phase: AssistantMessagePhase::FinalAnswer,
+                content: Some(content),
+                ..
+            }) if id == "msg-final" && content == "Resposta final autoritativa."
+        ));
+    }
+
+    #[test]
     fn normalizes_schema_backed_mcp_tool_lifecycle_without_payloads() {
-        let mut last_agent_message_id = None;
         let started = notification_to_event(
             "item/started",
             &json!({
@@ -2487,7 +2523,6 @@ mod tests {
                     "status": "inProgress"
                 }
             }),
-            &mut last_agent_message_id,
         );
         match started {
             Some(ProviderEvent::ToolCallStarted {
@@ -2518,7 +2553,6 @@ mod tests {
                     "error": { "message": "secret-bearing provider error" }
                 }
             }),
-            &mut last_agent_message_id,
         );
         match failed {
             Some(ProviderEvent::ToolCallFailed { id, reason, .. }) => {

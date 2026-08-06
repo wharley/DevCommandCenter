@@ -1,4 +1,5 @@
 import type {
+	AssistantMessagePhase,
 	CoreEvent,
 	ProviderUserInputAnswer,
 	ProviderUserInputQuestion,
@@ -14,6 +15,13 @@ export type SessionMessageStatus = {
 export type WorkspaceMessageRole = "user" | "assistant" | "system";
 
 export type WorkspaceMessageAnnotation =
+	| {
+			type: "commentary";
+			id: string;
+			content: string;
+			streaming?: boolean;
+			createdAt?: string;
+	  }
 	| {
 			type: "reasoning";
 			id: string;
@@ -68,6 +76,8 @@ export type WorkspaceMessageDelegation = {
 export type WorkspaceMessage = {
 	id: string;
 	role: WorkspaceMessageRole;
+	turnId?: string;
+	assistantPhase?: AssistantMessagePhase;
 	content: string;
 	label: string;
 	streaming?: boolean;
@@ -124,6 +134,34 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 				sessionTurnDelta: {
 					session_id: record.sessionId,
 					turn_id: record.kind.turnId,
+					content: record.kind.content,
+				},
+			};
+		case "turn_assistant_message_started":
+			return {
+				sessionTurnAssistantMessageStarted: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					message_id: record.kind.messageId,
+					phase: record.kind.phase,
+				},
+			};
+		case "turn_assistant_message_delta":
+			return {
+				sessionTurnAssistantMessageDelta: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					message_id: record.kind.messageId,
+					content: record.kind.content,
+				},
+			};
+		case "turn_assistant_message_completed":
+			return {
+				sessionTurnAssistantMessageCompleted: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					message_id: record.kind.messageId,
+					phase: record.kind.phase,
 					content: record.kind.content,
 				},
 			};
@@ -372,6 +410,24 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
 		return event.sessionTurnDelta.session_id;
 	}
+	if (
+		"sessionTurnAssistantMessageStarted" in event &&
+		event.sessionTurnAssistantMessageStarted
+	) {
+		return event.sessionTurnAssistantMessageStarted.session_id;
+	}
+	if (
+		"sessionTurnAssistantMessageDelta" in event &&
+		event.sessionTurnAssistantMessageDelta
+	) {
+		return event.sessionTurnAssistantMessageDelta.session_id;
+	}
+	if (
+		"sessionTurnAssistantMessageCompleted" in event &&
+		event.sessionTurnAssistantMessageCompleted
+	) {
+		return event.sessionTurnAssistantMessageCompleted.session_id;
+	}
 	if ("sessionTurnReasoningStarted" in event && event.sessionTurnReasoningStarted) {
 		return event.sessionTurnReasoningStarted.session_id;
 	}
@@ -450,6 +506,12 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnSteered" in event) return "session.turn.steered";
 	if ("sessionTurnDelta" in event) return "session.turn.delta";
+	if ("sessionTurnAssistantMessageStarted" in event)
+		return "session.turn.assistant-message.started";
+	if ("sessionTurnAssistantMessageDelta" in event)
+		return "session.turn.assistant-message.delta";
+	if ("sessionTurnAssistantMessageCompleted" in event)
+		return "session.turn.assistant-message.completed";
 	if ("sessionTurnReasoningStarted" in event) return "session.turn.reasoning.started";
 	if ("sessionTurnReasoningDelta" in event) return "session.turn.reasoning.delta";
 	if ("sessionTurnReasoningCompleted" in event) return "session.turn.reasoning.completed";
@@ -489,6 +551,27 @@ function eventSummary(event: CoreEvent): string {
 	}
 	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
 		return event.sessionTurnDelta.content;
+	}
+	if (
+		"sessionTurnAssistantMessageStarted" in event &&
+		event.sessionTurnAssistantMessageStarted
+	) {
+		return event.sessionTurnAssistantMessageStarted.phase;
+	}
+	if (
+		"sessionTurnAssistantMessageDelta" in event &&
+		event.sessionTurnAssistantMessageDelta
+	) {
+		return event.sessionTurnAssistantMessageDelta.content;
+	}
+	if (
+		"sessionTurnAssistantMessageCompleted" in event &&
+		event.sessionTurnAssistantMessageCompleted
+	) {
+		return (
+			event.sessionTurnAssistantMessageCompleted.content ??
+			event.sessionTurnAssistantMessageCompleted.phase
+		);
 	}
 	if ("sessionTurnReasoningStarted" in event && event.sessionTurnReasoningStarted) {
 		return event.sessionTurnReasoningStarted.label ?? event.sessionTurnReasoningStarted.reasoning_id;
@@ -697,6 +780,103 @@ function ensureAssistantMessage(
 	return message;
 }
 
+function ensureAssistantItemMessage(
+	messages: WorkspaceMessage[],
+	assistantItems: Map<string, WorkspaceMessage>,
+	assistantBuckets: Map<string, WorkspaceMessage>,
+	assistantMessagesByTurn: Map<string, WorkspaceMessage[]>,
+	sessionId: string,
+	turnId: string,
+	messageId: string,
+	phase: AssistantMessagePhase,
+	makeCurrent: boolean,
+	createdAt?: string,
+) {
+	const itemKey = `${turnId}\u0000${messageId}`;
+	let message = assistantItems.get(itemKey);
+	if (message) {
+		if (phase !== "unknown") {
+			message.assistantPhase = phase;
+		}
+		if (makeCurrent) {
+			assistantBuckets.set(turnId, message);
+		}
+		return message;
+	}
+
+	message = {
+		id: `assistant-${sessionId}-${turnId}-${messageId}`,
+		role: "assistant",
+		turnId,
+		assistantPhase: phase,
+		label: "Assistant",
+		content: "",
+		streaming: true,
+		createdAt,
+	};
+	assistantItems.set(itemKey, message);
+	const turnMessages = assistantMessagesByTurn.get(turnId) ?? [];
+	const previousBucket = assistantBuckets.get(turnId);
+	if (previousBucket && !turnMessages.includes(previousBucket)) {
+		turnMessages.push(previousBucket);
+	}
+	turnMessages.push(message);
+	assistantMessagesByTurn.set(turnId, turnMessages);
+	if (makeCurrent) {
+		assistantBuckets.set(turnId, message);
+	}
+	messages.push(message);
+	return message;
+}
+
+function foldSettledAssistantMessages(
+	messages: WorkspaceMessage[],
+	assistantMessagesByTurn: Map<string, WorkspaceMessage[]>,
+	settledTurns: ReadonlySet<string>,
+) {
+	const hidden = new Set<WorkspaceMessage>();
+	for (const [turnId, turnMessages] of assistantMessagesByTurn) {
+		if (!settledTurns.has(turnId) || turnMessages.length < 2) {
+			continue;
+		}
+		const terminal =
+			[...turnMessages]
+				.reverse()
+				.find((message) => message.assistantPhase === "final_answer") ??
+			[...turnMessages]
+				.reverse()
+				.find((message) => message.content.trim().length > 0) ??
+			turnMessages.at(-1);
+		if (!terminal) {
+			continue;
+		}
+
+		const foldedAnnotations: WorkspaceMessageAnnotation[] = [];
+		for (const message of turnMessages) {
+			if (message === terminal) {
+				continue;
+			}
+			if (message.content.trim().length > 0) {
+				foldedAnnotations.push({
+					type: "commentary",
+					id: `commentary-${message.id}`,
+					content: message.content,
+					createdAt: message.createdAt,
+				});
+			}
+			foldedAnnotations.push(...(message.annotations ?? []));
+			hidden.add(message);
+		}
+		if (foldedAnnotations.length > 0) {
+			terminal.annotations = [
+				...foldedAnnotations,
+				...(terminal.annotations ?? []),
+			];
+		}
+	}
+	return hidden.size > 0 ? messages.filter((message) => !hidden.has(message)) : messages;
+}
+
 function getOrCreateAnnotation(
 	message: WorkspaceMessage,
 	annotation: WorkspaceMessageAnnotation,
@@ -724,6 +904,8 @@ export function projectWorkspaceMessages(
 ): WorkspaceMessage[] {
 	const messages: WorkspaceMessage[] = [];
 	const assistantBuckets = new Map<string, WorkspaceMessage>();
+	const assistantItems = new Map<string, WorkspaceMessage>();
+	const assistantMessagesByTurn = new Map<string, WorkspaceMessage[]>();
 	const delegationBuckets = new Map<string, WorkspaceMessage>();
 	const completedTurns = new Set<string>();
 	const abortedTurns = new Map<string, string>();
@@ -780,6 +962,73 @@ export function projectWorkspaceMessages(
 					reason: abortedReason,
 				};
 			}
+			continue;
+		}
+
+		if (
+			"sessionTurnAssistantMessageStarted" in event &&
+			event.sessionTurnAssistantMessageStarted
+		) {
+			const item = event.sessionTurnAssistantMessageStarted;
+			ensureAssistantItemMessage(
+				messages,
+				assistantItems,
+				assistantBuckets,
+				assistantMessagesByTurn,
+				item.session_id,
+				item.turn_id,
+				item.message_id,
+				item.phase,
+				true,
+				turnStartedAtByTurnId.get(item.turn_id) ?? occurredAt,
+			);
+			continue;
+		}
+
+		if (
+			"sessionTurnAssistantMessageDelta" in event &&
+			event.sessionTurnAssistantMessageDelta
+		) {
+			const item = event.sessionTurnAssistantMessageDelta;
+			const message = ensureAssistantItemMessage(
+				messages,
+				assistantItems,
+				assistantBuckets,
+				assistantMessagesByTurn,
+				item.session_id,
+				item.turn_id,
+				item.message_id,
+				"unknown",
+				true,
+				turnStartedAtByTurnId.get(item.turn_id) ?? occurredAt,
+			);
+			message.content = `${message.content}${item.content}`;
+			message.streaming = !completedTurns.has(item.turn_id) && !abortedTurns.has(item.turn_id);
+			continue;
+		}
+
+		if (
+			"sessionTurnAssistantMessageCompleted" in event &&
+			event.sessionTurnAssistantMessageCompleted
+		) {
+			const item = event.sessionTurnAssistantMessageCompleted;
+			const message = ensureAssistantItemMessage(
+				messages,
+				assistantItems,
+				assistantBuckets,
+				assistantMessagesByTurn,
+				item.session_id,
+				item.turn_id,
+				item.message_id,
+				item.phase,
+				false,
+				turnStartedAtByTurnId.get(item.turn_id) ?? occurredAt,
+			);
+			message.assistantPhase = item.phase;
+			if (item.content !== null) {
+				message.content = item.content;
+			}
+			message.streaming = false;
 			continue;
 		}
 
@@ -999,8 +1248,10 @@ export function projectWorkspaceMessages(
 		if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 			const key = event.sessionTurnCompleted.turn_id;
 			completedTurns.add(key);
-			const existing = assistantBuckets.get(key);
-			if (existing) {
+			const turnMessages = assistantMessagesByTurn.get(key) ?? [assistantBuckets.get(key)].filter(
+				(message): message is WorkspaceMessage => Boolean(message),
+			);
+			for (const existing of turnMessages) {
 				existing.streaming = false;
 				for (const annotation of existing.annotations ?? []) {
 					annotation.streaming = false;
@@ -1012,8 +1263,10 @@ export function projectWorkspaceMessages(
 		if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
 			const key = event.sessionTurnAborted.turn_id;
 			abortedTurns.set(key, event.sessionTurnAborted.reason ?? "Turn aborted");
-			const existing = assistantBuckets.get(key);
-			if (existing) {
+			const turnMessages = assistantMessagesByTurn.get(key) ?? [assistantBuckets.get(key)].filter(
+				(message): message is WorkspaceMessage => Boolean(message),
+			);
+			for (const existing of turnMessages) {
 				existing.streaming = false;
 				existing.status = {
 					type: "incomplete",
@@ -1161,5 +1414,9 @@ export function projectWorkspaceMessages(
 		}
 	}
 
-	return messages;
+	return foldSettledAssistantMessages(
+		messages,
+		assistantMessagesByTurn,
+		new Set([...completedTurns, ...abortedTurns.keys()]),
+	);
 }

@@ -35,6 +35,18 @@ pub enum TurnState {
     Aborted,
 }
 
+/// Provider-neutral semantic role of an assistant message inside a turn.
+/// Providers with a native distinction preserve it; adapters without one use
+/// `Unknown` and let the timeline select the last completed message.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantMessagePhase {
+    Commentary,
+    FinalAnswer,
+    #[default]
+    Unknown,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Turn {
@@ -142,6 +154,30 @@ pub enum SessionEventKind {
         #[serde(rename = "turnId")]
         turn_id: TurnId,
         content: String,
+    },
+    TurnAssistantMessageStarted {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        phase: AssistantMessagePhase,
+    },
+    TurnAssistantMessageDelta {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        content: String,
+    },
+    TurnAssistantMessageCompleted {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        phase: AssistantMessagePhase,
+        /// Final provider snapshot. When present this replaces accumulated
+        /// deltas and is authoritative for replay.
+        content: Option<String>,
     },
     TurnReasoningStarted {
         #[serde(rename = "turnId")]
@@ -371,6 +407,9 @@ impl SessionProjection {
             | SessionEventKind::TurnQueueReordered { .. }
             | SessionEventKind::QueuedTurnDispatched { .. }
             | SessionEventKind::TurnDelta { .. }
+            | SessionEventKind::TurnAssistantMessageStarted { .. }
+            | SessionEventKind::TurnAssistantMessageDelta { .. }
+            | SessionEventKind::TurnAssistantMessageCompleted { .. }
             | SessionEventKind::TurnReasoningStarted { .. }
             | SessionEventKind::TurnReasoningDelta { .. }
             | SessionEventKind::TurnReasoningCompleted { .. }

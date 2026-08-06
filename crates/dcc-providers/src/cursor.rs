@@ -17,7 +17,7 @@ use dcc_core::{
             Capabilities, HealthStatus, McpSupportLevel, ProviderDescriptor, ProviderEvent,
             ProviderId, ProviderModelDescriptor, SessionHandle,
         },
-        session::SessionId,
+        session::{AssistantMessagePhase, SessionId},
     },
     ports::{Input, Provider, SessionConfig},
     CoreError, Result,
@@ -64,6 +64,12 @@ struct CursorCommandResult {
     stdout: String,
     stderr: String,
     code: i32,
+}
+
+#[derive(Debug, Default)]
+struct CursorStreamState {
+    assistant_message_id: Option<String>,
+    assistant_message_started: bool,
 }
 
 pub fn adapter() -> CursorBridgeProvider {
@@ -293,6 +299,7 @@ impl CursorProvider {
 
             let stderr_task = tokio::spawn(async move { collect_stream_to_string(stderr).await });
             let mut reader = BufReader::new(stdout).lines();
+            let mut stream_state = CursorStreamState::default();
 
             loop {
                 let next_line = reader.next_line();
@@ -301,7 +308,7 @@ impl CursorProvider {
                     line_result = &mut next_line => {
                         match line_result {
                             Ok(Some(line)) => {
-                                if let Some(event) = parse_cursor_stream_line(&line) {
+                                for event in parse_cursor_stream_line(&line, &mut stream_state) {
                                     if matches!(
                                         event,
                                         ProviderEvent::Completed { .. } | ProviderEvent::Failed { .. }
@@ -430,31 +437,43 @@ fn join_cursor_messages(first: Option<String>, second: Option<String>) -> Option
     }
 }
 
-fn parse_cursor_stream_line(line: &str) -> Option<ProviderEvent> {
+fn parse_cursor_stream_line(line: &str, state: &mut CursorStreamState) -> Vec<ProviderEvent> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
-        return None;
+        return Vec::new();
     }
-    let value = serde_json::from_str::<Value>(trimmed).ok()?;
-    parse_cursor_stream_value(&value)
+    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+        return Vec::new();
+    };
+    parse_cursor_stream_value(&value, state)
 }
 
-fn parse_cursor_stream_value(value: &Value) -> Option<ProviderEvent> {
-    let kind = value.get("type").and_then(Value::as_str)?;
+fn parse_cursor_stream_value(value: &Value, state: &mut CursorStreamState) -> Vec<ProviderEvent> {
+    let Some(kind) = value.get("type").and_then(Value::as_str) else {
+        return Vec::new();
+    };
     let at = now_iso();
 
     match kind {
-        "assistant" => parse_cursor_assistant_message(value),
-        "tool_call" => parse_cursor_tool_call(value, at),
-        "result" => Some(parse_cursor_result(value, at)),
-        "system" | "user" => None,
-        _ => None,
+        "assistant" => parse_cursor_assistant_message(value, state, at),
+        "tool_call" => parse_cursor_tool_call(value, at).into_iter().collect(),
+        "result" => parse_cursor_result(value, state, at),
+        "system" | "user" => Vec::new(),
+        _ => Vec::new(),
     }
 }
 
-fn parse_cursor_assistant_message(value: &Value) -> Option<ProviderEvent> {
-    let message = value.get("message")?.as_object()?;
-    let content = message.get("content")?.as_array()?;
+fn parse_cursor_assistant_message(
+    value: &Value,
+    state: &mut CursorStreamState,
+    at: String,
+) -> Vec<ProviderEvent> {
+    let Some(message) = value.get("message").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let Some(content) = message.get("content").and_then(Value::as_array) else {
+        return Vec::new();
+    };
     let mut delta = String::new();
     for item in content {
         let Some(content_type) = item.get("type").and_then(Value::as_str) else {
@@ -467,9 +486,26 @@ fn parse_cursor_assistant_message(value: &Value) -> Option<ProviderEvent> {
         }
     }
     if delta.is_empty() {
-        return None;
+        return Vec::new();
     }
-    Some(ProviderEvent::TextDelta { content: delta })
+    let id = state
+        .assistant_message_id
+        .get_or_insert_with(|| "cursor:assistant:0".to_string())
+        .clone();
+    let mut events = Vec::new();
+    if !state.assistant_message_started {
+        // `assistant_message_id` is created on the first delta and retained for
+        // the whole Cursor result. Cursor documents the terminal `result` as
+        // the concatenation of these deltas, even when tools interleave.
+        state.assistant_message_started = true;
+        events.push(ProviderEvent::AssistantMessageStarted {
+            id: id.clone(),
+            phase: AssistantMessagePhase::Unknown,
+            at,
+        });
+    }
+    events.push(ProviderEvent::AssistantMessageDelta { id, content: delta });
+    events
 }
 
 fn parse_cursor_tool_call(value: &Value, at: String) -> Option<ProviderEvent> {
@@ -593,7 +629,11 @@ fn to_title_case_words(value: &str) -> String {
         .join(" ")
 }
 
-fn parse_cursor_result(value: &Value, at: String) -> ProviderEvent {
+fn parse_cursor_result(
+    value: &Value,
+    state: &mut CursorStreamState,
+    at: String,
+) -> Vec<ProviderEvent> {
     let is_error = value
         .get("is_error")
         .and_then(Value::as_bool)
@@ -605,9 +645,28 @@ fn parse_cursor_result(value: &Value, at: String) -> ProviderEvent {
             .or_else(|| value.get("result").and_then(Value::as_str))
             .map(str::to_string)
             .unwrap_or_else(|| "Cursor reported an error".to_string());
-        return ProviderEvent::Failed { message, at };
+        return vec![ProviderEvent::Failed { message, at }];
     }
-    ProviderEvent::Completed { at }
+    let mut events = Vec::new();
+    if let Some(content) = value
+        .get("result")
+        .and_then(Value::as_str)
+        .filter(|content| !content.is_empty())
+        .map(str::to_string)
+    {
+        events.push(ProviderEvent::AssistantMessageCompleted {
+            id: state
+                .assistant_message_id
+                .take()
+                .unwrap_or_else(|| "cursor:assistant:0".to_string()),
+            phase: AssistantMessagePhase::Unknown,
+            content: Some(content),
+            at: at.clone(),
+        });
+        state.assistant_message_started = false;
+    }
+    events.push(ProviderEvent::Completed { at });
+    events
 }
 
 async fn collect_stream_to_string<R>(reader: R) -> String
@@ -1107,27 +1166,32 @@ mod tests {
 
     #[test]
     fn parses_cursor_stream_assistant_and_tool_events() {
+        let mut state = CursorStreamState::default();
         let assistant = parse_cursor_stream_line(
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello"},{"type":"text","text":" world"}]},"session_id":"sess"}"#,
+            &mut state,
         );
-        match assistant {
-            Some(ProviderEvent::TextDelta { content }) => {
-                assert_eq!(content, "Hello world");
-            }
-            other => panic!("expected text delta, got {other:?}"),
-        }
+        assert!(matches!(
+            assistant.as_slice(),
+            [
+                ProviderEvent::AssistantMessageStarted { id: first_id, .. },
+                ProviderEvent::AssistantMessageDelta { id: second_id, content }
+            ] if first_id == "cursor:assistant:0" && second_id == "cursor:assistant:0"
+                && content == "Hello world"
+        ));
 
         let tool_started = parse_cursor_stream_line(
             r#"{"type":"tool_call","subtype":"started","call_id":"call_1","tool_call":{"readToolCall":{"args":{"path":"README.md"}}},"session_id":"sess"}"#,
+            &mut state,
         );
-        match tool_started {
-            Some(ProviderEvent::ToolCallStarted {
+        match tool_started.as_slice() {
+            [ProviderEvent::ToolCallStarted {
                 id,
                 action,
                 command,
                 file,
                 ..
-            }) => {
+            }] => {
                 assert_eq!(id, "call_1");
                 assert_eq!(action, "Read");
                 assert_eq!(file.as_deref(), Some("README.md"));
@@ -1138,9 +1202,10 @@ mod tests {
 
         let tool_completed = parse_cursor_stream_line(
             r#"{"type":"tool_call","subtype":"completed","call_id":"call_1","tool_call":{"readToolCall":{"args":{"path":"README.md"},"result":{"success":{"content":"hello"}}}},"session_id":"sess"}"#,
+            &mut state,
         );
-        match tool_completed {
-            Some(ProviderEvent::ToolCallCompleted { id, .. }) => {
+        match tool_completed.as_slice() {
+            [ProviderEvent::ToolCallCompleted { id, .. }] => {
                 assert_eq!(id, "call_1");
             }
             other => panic!("expected tool call completed, got {other:?}"),
@@ -1148,11 +1213,19 @@ mod tests {
 
         let result = parse_cursor_stream_line(
             r#"{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"sess"}"#,
+            &mut state,
         );
-        match result {
-            Some(ProviderEvent::Completed { .. }) => {}
-            other => panic!("expected result completion, got {other:?}"),
-        }
+        assert!(matches!(
+            result.as_slice(),
+            [
+                ProviderEvent::AssistantMessageCompleted {
+                    id,
+                    content: Some(content),
+                    ..
+                },
+                ProviderEvent::Completed { .. }
+            ] if id == "cursor:assistant:0" && content == "done"
+        ));
     }
 
     #[test]

@@ -24,6 +24,8 @@ export type SessionEventKind = {
 	turnId?: string;
 	prompt?: string;
 	content?: string;
+	messageId?: string;
+	phase?: "commentary" | "final_answer" | "unknown";
 	label?: string;
 	reasoningId?: string;
 	toolCallId?: string;
@@ -242,6 +244,37 @@ function coreEventToRawSessionEvent(
 					content: stringField(body, "content") ?? "",
 				},
 			};
+		case "sessionTurnAssistantMessageStarted":
+			return {
+				...base,
+				kind: {
+					type: "turn_assistant_message_started",
+					turnId: stringField(body, "turn_id"),
+					messageId: stringField(body, "message_id"),
+					phase: assistantPhaseField(body, "phase"),
+				},
+			};
+		case "sessionTurnAssistantMessageDelta":
+			return {
+				...base,
+				kind: {
+					type: "turn_assistant_message_delta",
+					turnId: stringField(body, "turn_id"),
+					messageId: stringField(body, "message_id"),
+					content: stringField(body, "content") ?? "",
+				},
+			};
+		case "sessionTurnAssistantMessageCompleted":
+			return {
+				...base,
+				kind: {
+					type: "turn_assistant_message_completed",
+					turnId: stringField(body, "turn_id"),
+					messageId: stringField(body, "message_id"),
+					phase: assistantPhaseField(body, "phase"),
+					content: stringField(body, "content"),
+				},
+			};
 		case "sessionTurnReasoningStarted":
 			return {
 				...base,
@@ -342,6 +375,14 @@ function stringField(source: CorePayload, key: string): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
+function assistantPhaseField(
+	source: CorePayload,
+	key: string,
+): "commentary" | "final_answer" | "unknown" {
+	const phase = stringField(source, key);
+	return phase === "commentary" || phase === "final_answer" ? phase : "unknown";
+}
+
 function booleanField(source: CorePayload, key: string): boolean | undefined {
 	const value = source[key];
 	return typeof value === "boolean" ? value : undefined;
@@ -394,7 +435,8 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 			break;
 		}
 
-		case "turn_delta": {
+		case "turn_delta":
+		case "turn_assistant_message_delta": {
 			const refs = state.byTurn.get(turnId) ?? {};
 			if (refs.assistant === undefined) {
 				state.messages.push({
@@ -413,6 +455,22 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 				{ kind: "assistant" }
 			>;
 			msg.text += typeof kind.content === "string" ? kind.content : "";
+			break;
+		}
+
+		case "turn_assistant_message_completed": {
+			const refs = state.byTurn.get(turnId);
+			if (
+				refs?.assistant !== undefined &&
+				kind.phase === "final_answer" &&
+				typeof kind.content === "string"
+			) {
+				const msg = state.messages[refs.assistant] as Extract<
+					ChatMessage,
+					{ kind: "assistant" }
+				>;
+				msg.text = kind.content;
+			}
 			break;
 		}
 

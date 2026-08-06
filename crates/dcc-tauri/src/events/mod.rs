@@ -31,6 +31,15 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
             format!("{SESSION_EVENT_PREFIX}/turn/queue/dispatched")
         }
         CoreEvent::SessionTurnDelta { .. } => format!("{SESSION_EVENT_PREFIX}/turn/delta"),
+        CoreEvent::SessionTurnAssistantMessageStarted { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/assistant-message/started")
+        }
+        CoreEvent::SessionTurnAssistantMessageDelta { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/assistant-message/delta")
+        }
+        CoreEvent::SessionTurnAssistantMessageCompleted { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/assistant-message/completed")
+        }
         CoreEvent::SessionTurnReasoningStarted { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/reasoning/started")
         }

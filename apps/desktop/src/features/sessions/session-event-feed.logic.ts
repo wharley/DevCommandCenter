@@ -8,6 +8,9 @@ import type { CoreEvent } from "@dcc/contracts";
 export function isSemanticSessionEvent(event: CoreEvent): boolean {
 	return !(
 		"sessionTurnDelta" in event ||
+		"sessionTurnAssistantMessageStarted" in event ||
+		"sessionTurnAssistantMessageDelta" in event ||
+		"sessionTurnAssistantMessageCompleted" in event ||
 		"sessionTurnReasoningStarted" in event ||
 		"sessionTurnReasoningDelta" in event ||
 		"sessionTurnReasoningCompleted" in event ||

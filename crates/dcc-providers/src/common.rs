@@ -24,7 +24,7 @@ use dcc_core::{
         provider::{
             Capabilities, HealthStatus, McpSupportLevel, ProviderEvent, ProviderId, SessionHandle,
         },
-        session::SessionId,
+        session::{AssistantMessagePhase, SessionId},
         workspace::WorkspaceId,
     },
     ports::{Input, Provider, ProviderRuntimeConfig, SessionConfig},
@@ -68,9 +68,10 @@ enum ProviderEnvelope {
 pub(crate) struct ProviderStreamState {
     claude_blocks: HashMap<u64, ClaudeBlockState>,
     claude_pending_tool_calls: HashSet<String>,
-    claude_streamed_text_emitted: bool,
+    claude_active_message_id: Option<String>,
+    claude_text_message_started: bool,
     pub(crate) gemini_streamed_text_emitted: bool,
-    codex_last_agent_message_id: Option<String>,
+    pub(crate) gemini_active_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -385,6 +386,12 @@ fn parse_claude_stream_value(
     if kind != "stream_event" {
         return parse_claude_terminal_value(value, state);
     }
+    if value
+        .get("parent_tool_use_id")
+        .is_some_and(|parent| !parent.is_null())
+    {
+        return None;
+    }
 
     let event = value.get("event")?.as_object()?;
     let event_type = event.get("type").and_then(Value::as_str)?;
@@ -393,7 +400,15 @@ fn parse_claude_stream_value(
     match event_type {
         "message_start" => {
             state.claude_blocks.clear();
-            state.claude_streamed_text_emitted = false;
+            state.claude_active_message_id = event
+                .get("message")
+                .and_then(Value::as_object)
+                .and_then(|message| message.get("id"))
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .or_else(|| claude_envelope_uuid(value));
+            state.claude_text_message_started = false;
             None
         }
         "content_block_start" => {
@@ -401,7 +416,7 @@ fn parse_claude_stream_value(
             let block = event.get("content_block")?.as_object()?;
             match block.get("type").and_then(Value::as_str)? {
                 "thinking" | "redacted_thinking" => {
-                    let id = claude_reasoning_id(index);
+                    let id = claude_reasoning_id(state, index);
                     state
                         .claude_blocks
                         .insert(index, ClaudeBlockState::Reasoning { id: id.clone() });
@@ -416,7 +431,7 @@ fn parse_claude_stream_value(
                         .get("id")
                         .and_then(Value::as_str)
                         .map(str::to_string)
-                        .unwrap_or_else(|| claude_tool_call_id(index));
+                        .unwrap_or_else(|| claude_tool_call_id(state, index));
                     state.claude_pending_tool_calls.insert(id.clone());
                     state
                         .claude_blocks
@@ -432,6 +447,18 @@ fn parse_claude_stream_value(
                             .to_string(),
                         command,
                         file,
+                        at,
+                    })
+                }
+                "text" => {
+                    if state.claude_text_message_started {
+                        return None;
+                    }
+                    let id = claude_active_message_id(state, value);
+                    state.claude_text_message_started = true;
+                    Some(ProviderEvent::AssistantMessageStarted {
+                        id,
+                        phase: AssistantMessagePhase::Unknown,
                         at,
                     })
                 }
@@ -452,8 +479,9 @@ fn parse_claude_stream_value(
                 }
                 "text_delta" => {
                     let content = delta.get("text").and_then(Value::as_str).unwrap_or("");
-                    state.claude_streamed_text_emitted = true;
-                    Some(ProviderEvent::TextDelta {
+                    let id = claude_active_message_id(state, value);
+                    Some(ProviderEvent::AssistantMessageDelta {
+                        id,
                         content: content.to_string(),
                     })
                 }
@@ -495,7 +523,10 @@ fn parse_claude_terminal_value(
     let at = now_iso();
     match kind {
         "assistant" => {
-            if state.claude_streamed_text_emitted {
+            if value
+                .get("parent_tool_use_id")
+                .is_some_and(|parent| !parent.is_null())
+            {
                 return None;
             }
 
@@ -509,10 +540,26 @@ fn parse_claude_terminal_value(
                 .collect::<Vec<_>>()
                 .join("");
 
+            let id = message
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .or_else(|| state.claude_active_message_id.clone())
+                .or_else(|| claude_envelope_uuid(value))
+                .unwrap_or_else(|| format!("claude:assistant:{}", Uuid::new_v4()));
+            state.claude_active_message_id = None;
+            state.claude_text_message_started = false;
+
             if text.is_empty() {
                 None
             } else {
-                Some(ProviderEvent::TextDelta { content: text })
+                Some(ProviderEvent::AssistantMessageCompleted {
+                    id,
+                    phase: AssistantMessagePhase::Unknown,
+                    content: Some(text),
+                    at,
+                })
             }
         }
         "user" => {
@@ -645,31 +692,17 @@ fn parse_claude_terminal_value(
     }
 }
 
-fn codex_agent_message_delta_content(
-    item_id: Option<&str>,
-    delta: &str,
-    last_agent_message_id: &mut Option<String>,
-) -> String {
-    let should_prefix_separator = item_id.is_some_and(|current_id| {
-        last_agent_message_id
-            .as_deref()
-            .is_some_and(|previous_id| previous_id != current_id)
-    }) && !delta.is_empty();
-
-    if let Some(current_id) = item_id.filter(|value| !value.is_empty()) {
-        *last_agent_message_id = Some(current_id.to_string());
-    }
-
-    if should_prefix_separator {
-        format!("\n\n{delta}")
-    } else {
-        delta.to_string()
+fn codex_agent_message_phase(item: &serde_json::Map<String, Value>) -> AssistantMessagePhase {
+    match item.get("phase").and_then(Value::as_str) {
+        Some("commentary") => AssistantMessagePhase::Commentary,
+        Some("final_answer") | Some("finalAnswer") => AssistantMessagePhase::FinalAnswer,
+        _ => AssistantMessagePhase::Unknown,
     }
 }
 
 fn parse_codex_stream_value(
     value: &Value,
-    state: &mut ProviderStreamState,
+    _state: &mut ProviderStreamState,
 ) -> Option<ProviderEvent> {
     let kind = value.get("type").and_then(Value::as_str)?;
     let at = now_iso();
@@ -678,6 +711,15 @@ fn parse_codex_stream_value(
         "item/started" => {
             let item = value.get("item")?.as_object()?;
             match item.get("type").and_then(Value::as_str)? {
+                "agentMessage" | "agent_message" => Some(ProviderEvent::AssistantMessageStarted {
+                    id: item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("codex-agent-message")
+                        .to_string(),
+                    phase: codex_agent_message_phase(item),
+                    at,
+                }),
                 "reasoning" => Some(ProviderEvent::ReasoningStarted {
                     id: item
                         .get("id")
@@ -755,16 +797,34 @@ fn parse_codex_stream_value(
                 _ => None,
             }
         }
-        "item/agentMessage/delta" => Some(ProviderEvent::TextDelta {
-            content: codex_agent_message_delta_content(
-                value.get("itemId").and_then(Value::as_str),
-                value.get("delta").and_then(Value::as_str).unwrap_or(""),
-                &mut state.codex_last_agent_message_id,
-            ),
+        "item/agentMessage/delta" => Some(ProviderEvent::AssistantMessageDelta {
+            id: value
+                .get("itemId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .unwrap_or("codex-agent-message")
+                .to_string(),
+            content: value
+                .get("delta")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         }),
         "item/completed" => {
             let item = value.get("item")?.as_object()?;
             match item.get("type").and_then(Value::as_str)? {
+                "agentMessage" | "agent_message" => {
+                    Some(ProviderEvent::AssistantMessageCompleted {
+                        id: item
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or("codex-agent-message")
+                            .to_string(),
+                        phase: codex_agent_message_phase(item),
+                        content: item.get("text").and_then(Value::as_str).map(str::to_string),
+                        at,
+                    })
+                }
                 "reasoning" => Some(ProviderEvent::ReasoningCompleted {
                     id: item
                         .get("id")
@@ -810,31 +870,49 @@ fn parse_codex_stream_value(
                 _ => None,
             }
         }
-        "turn/completed" | "result" => {
-            state.codex_last_agent_message_id = None;
-            Some(ProviderEvent::Completed { at })
-        }
-        "turn/aborted" => {
-            state.codex_last_agent_message_id = None;
-            Some(ProviderEvent::Failed {
-                message: value
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("turn aborted")
-                    .to_string(),
-                at,
-            })
-        }
+        "turn/completed" | "result" => Some(ProviderEvent::Completed { at }),
+        "turn/aborted" => Some(ProviderEvent::Failed {
+            message: value
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("turn aborted")
+                .to_string(),
+            at,
+        }),
         _ => None,
     }
 }
 
-fn claude_reasoning_id(index: u64) -> String {
-    format!("claude:reasoning:{index}")
+fn claude_envelope_uuid(value: &Value) -> Option<String> {
+    value
+        .get("uuid")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
 }
 
-fn claude_tool_call_id(index: u64) -> String {
-    format!("claude:tool-call:{index}")
+fn claude_active_message_id(state: &mut ProviderStreamState, value: &Value) -> String {
+    if let Some(id) = state.claude_active_message_id.clone() {
+        return id;
+    }
+    let id = claude_envelope_uuid(value)
+        .unwrap_or_else(|| format!("claude:assistant:{}", Uuid::new_v4()));
+    state.claude_active_message_id = Some(id.clone());
+    id
+}
+
+fn claude_reasoning_id(state: &ProviderStreamState, index: u64) -> String {
+    match state.claude_active_message_id.as_deref() {
+        Some(message_id) => format!("{message_id}:reasoning:{index}"),
+        None => format!("claude:reasoning:{index}"),
+    }
+}
+
+fn claude_tool_call_id(state: &ProviderStreamState, index: u64) -> String {
+    match state.claude_active_message_id.as_deref() {
+        Some(message_id) => format!("{message_id}:tool-call:{index}"),
+        None => format!("claude:tool-call:{index}"),
+    }
 }
 
 fn claude_block_id_for_reasoning(state: &ProviderStreamState, index: u64) -> String {
@@ -845,7 +923,7 @@ fn claude_block_id_for_reasoning(state: &ProviderStreamState, index: u64) -> Str
             ClaudeBlockState::Reasoning { id } => Some(id.clone()),
             _ => None,
         })
-        .unwrap_or_else(|| claude_reasoning_id(index))
+        .unwrap_or_else(|| claude_reasoning_id(state, index))
 }
 
 fn claude_block_id_for_tool_call(state: &ProviderStreamState, index: u64) -> String {
@@ -856,7 +934,7 @@ fn claude_block_id_for_tool_call(state: &ProviderStreamState, index: u64) -> Str
             ClaudeBlockState::ToolCall { id } => Some(id.clone()),
             _ => None,
         })
-        .unwrap_or_else(|| claude_tool_call_id(index))
+        .unwrap_or_else(|| claude_tool_call_id(state, index))
 }
 
 fn claude_tool_input_metadata(input: Option<&Value>) -> (Option<String>, Option<String>) {
@@ -1655,37 +1733,91 @@ mod tests {
         let mut state = ProviderStreamState::default();
 
         let assistant = parse_provider_stream_line(
-            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Not logged in \u00b7 Please run /login"}]}}"#,
+            r#"{"type":"assistant","uuid":"sdk-message-1","parent_tool_use_id":null,"message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Not logged in \u00b7 Please run /login"}]}}"#,
             &mut state,
         );
         match assistant {
-            ParsedProviderLine::Event(ProviderEvent::TextDelta { content }) => {
-                assert_eq!(content, "Not logged in · Please run /login");
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageCompleted {
+                id,
+                phase,
+                content,
+                ..
+            }) => {
+                assert_eq!(id, "msg_1");
+                assert_eq!(phase, AssistantMessagePhase::Unknown);
+                assert_eq!(
+                    content.as_deref(),
+                    Some("Not logged in · Please run /login")
+                );
             }
-            other => panic!("expected assistant fallback text, got {other:?}"),
+            other => panic!("expected authoritative assistant message, got {other:?}"),
         }
     }
 
     #[test]
-    fn ignores_claude_terminal_assistant_text_after_streamed_text() {
+    fn reconciles_claude_stream_with_authoritative_terminal_assistant_text() {
         let mut state = ProviderStreamState::default();
 
-        let _ = parse_provider_stream_line(
-            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[]}}}"#,
+        let message_start = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-1","parent_tool_use_id":null,"event":{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[]}}}"#,
             &mut state,
         );
-        let _ = parse_provider_stream_line(
-            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}"#,
+        assert!(matches!(message_start, ParsedProviderLine::Ignored));
+
+        let content_start = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-2","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
             &mut state,
         );
+        assert!(matches!(
+            content_start,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageStarted {
+                ref id,
+                phase: AssistantMessagePhase::Unknown,
+                ..
+            }) if id == "msg_1"
+        ));
+
+        let delta = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-3","parent_tool_use_id":null,"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            delta,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageDelta {
+                ref id,
+                ref content,
+            }) if id == "msg_1" && content == "Hello"
+        ));
+
         let assistant = parse_provider_stream_line(
-            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}]}}"#,
+            r#"{"type":"assistant","uuid":"sdk-message-1","parent_tool_use_id":null,"message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Hello world"}]}}"#,
             &mut state,
         );
-        match assistant {
-            ParsedProviderLine::Ignored => {}
-            other => panic!("expected assistant fallback to stay ignored, got {other:?}"),
-        }
+        assert!(matches!(
+            assistant,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageCompleted {
+                ref id,
+                phase: AssistantMessagePhase::Unknown,
+                content: Some(ref content),
+                ..
+            }) if id == "msg_1" && content == "Hello world"
+        ));
+    }
+
+    #[test]
+    fn does_not_flatten_claude_subagent_text_into_the_root_timeline() {
+        let mut state = ProviderStreamState::default();
+        let partial = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"sdk-subagent-stream","parent_tool_use_id":"toolu_parent","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"private subagent delta"}}}"#,
+            &mut state,
+        );
+        assert!(matches!(partial, ParsedProviderLine::Ignored));
+
+        let assistant = parse_provider_stream_line(
+            r#"{"type":"assistant","uuid":"sdk-subagent-message","parent_tool_use_id":"toolu_parent","message":{"id":"msg_subagent","role":"assistant","content":[{"type":"text","text":"private subagent progress"}]}}"#,
+            &mut state,
+        );
+        assert!(matches!(assistant, ParsedProviderLine::Ignored));
     }
 
     #[test]
@@ -1771,10 +1903,11 @@ mod tests {
             &mut state,
         );
         match delta {
-            ParsedProviderLine::Event(ProviderEvent::TextDelta { content }) => {
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageDelta { id, content }) => {
+                assert_eq!(id, "msg_1");
                 assert_eq!(content, "Listing");
             }
-            other => panic!("expected text delta, got {other:?}"),
+            other => panic!("expected assistant delta, got {other:?}"),
         }
 
         let separated_delta = parse_provider_stream_line(
@@ -1782,10 +1915,11 @@ mod tests {
             &mut state,
         );
         match separated_delta {
-            ParsedProviderLine::Event(ProviderEvent::TextDelta { content }) => {
-                assert_eq!(content, "\n\nFinished listing.");
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageDelta { id, content }) => {
+                assert_eq!(id, "msg_2");
+                assert_eq!(content, "Finished listing.");
             }
-            other => panic!("expected separated text delta, got {other:?}"),
+            other => panic!("expected second assistant delta, got {other:?}"),
         }
 
         let completed = parse_provider_stream_line(

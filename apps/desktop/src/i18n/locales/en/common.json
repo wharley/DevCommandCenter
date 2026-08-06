@@ -1999,6 +1999,9 @@
       "label": "Thinking",
       "empty": "No reasoning captured."
     },
+    "commentary": {
+      "label": "Progress update"
+    },
     "toolCall": {
       "running": "Running",
       "failed": "Failed",

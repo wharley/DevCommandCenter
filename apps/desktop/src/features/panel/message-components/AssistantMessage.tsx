@@ -36,7 +36,11 @@ function AssistantTextFallback({ text }: { text: string }) {
 }
 
 function isActivityAnnotation(annotation: WorkspaceMessageAnnotation) {
-	return annotation.type === "reasoning" || annotation.type === "tool-call";
+	return (
+		annotation.type === "commentary" ||
+		annotation.type === "reasoning" ||
+		annotation.type === "tool-call"
+	);
 }
 
 function AssistantActivityGroup({
@@ -49,7 +53,9 @@ function AssistantActivityGroup({
 	const { t } = useTranslation("common");
 	const isLive = annotations.some((annotation) => Boolean(annotation.streaming));
 	const toolCount = annotations.filter((annotation) => annotation.type === "tool-call").length;
-	const reasoningCount = annotations.filter((annotation) => annotation.type === "reasoning").length;
+	const reasoningCount = annotations.filter(
+		(annotation) => annotation.type === "reasoning" || annotation.type === "commentary",
+	).length;
 	const failedCount = annotations.filter(
 		(annotation) => annotation.type === "tool-call" && annotation.status?.type === "failed",
 	).length;
@@ -201,6 +207,21 @@ export function AssistantMessage({
 				{activityAnnotations.length ? (
 					<AssistantActivityGroup annotations={activityAnnotations}>
 						{activityAnnotations.map((annotation) => {
+							if (annotation.type === "commentary") {
+								return (
+									<div
+										key={`commentary-${annotation.id}`}
+										className="rounded-md px-2 py-1.5 text-[12px] leading-5 text-muted-foreground"
+									>
+										<div className="mb-0.5 font-medium text-foreground/75">
+											{t("conversation.commentary.label")}
+										</div>
+										<div className="whitespace-pre-wrap break-words">
+											{annotation.content}
+										</div>
+									</div>
+								);
+							}
 							if (annotation.type === "reasoning") {
 								return (
 									<Reasoning

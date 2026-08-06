@@ -19,6 +19,12 @@ function eventSessionId(event: CoreEvent): string | null {
 			event.sessionMcpRuntimeStatusChanged) ||
 		("sessionTurnStarted" in event && event.sessionTurnStarted) ||
 		("sessionTurnDelta" in event && event.sessionTurnDelta) ||
+		("sessionTurnAssistantMessageStarted" in event &&
+			event.sessionTurnAssistantMessageStarted) ||
+		("sessionTurnAssistantMessageDelta" in event &&
+			event.sessionTurnAssistantMessageDelta) ||
+		("sessionTurnAssistantMessageCompleted" in event &&
+			event.sessionTurnAssistantMessageCompleted) ||
 		("sessionTurnReasoningStarted" in event && event.sessionTurnReasoningStarted) ||
 		("sessionTurnReasoningDelta" in event && event.sessionTurnReasoningDelta) ||
 		("sessionTurnReasoningCompleted" in event &&
@@ -45,6 +51,12 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnDelta" in event) return "session.turn.delta";
+	if ("sessionTurnAssistantMessageStarted" in event)
+		return "session.turn.assistant-message.started";
+	if ("sessionTurnAssistantMessageDelta" in event)
+		return "session.turn.assistant-message.delta";
+	if ("sessionTurnAssistantMessageCompleted" in event)
+		return "session.turn.assistant-message.completed";
 	if ("sessionTurnReasoningStarted" in event) return "session.turn.reasoning.started";
 	if ("sessionTurnReasoningDelta" in event) return "session.turn.reasoning.delta";
 	if ("sessionTurnReasoningCompleted" in event) return "session.turn.reasoning.completed";

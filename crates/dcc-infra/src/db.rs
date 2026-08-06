@@ -15,8 +15,8 @@ use dcc_core::{
         project::ProjectId,
         repository::{Repository, RepositoryId},
         session::{
-            Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
-            SessionSearchResult, SessionState, TurnId, WorkspaceSessionSummary,
+            AssistantMessagePhase, Session, SessionEventKind, SessionEventRecord, SessionId,
+            SessionProjection, SessionSearchResult, SessionState, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
         workspace::{Workspace, WorkspaceId, WorkspaceSource, WorkspaceState},
@@ -951,8 +951,14 @@ impl SqliteSessionRepo {
             failure_reason: Option<String>,
         }
 
+        struct AssistantMessageBuffer {
+            id: String,
+            phase: AssistantMessagePhase,
+            content: String,
+        }
+
         let mut fragments = Vec::new();
-        let mut assistant_by_turn = HashMap::<String, String>::new();
+        let mut assistant_by_turn = HashMap::<String, Vec<AssistantMessageBuffer>>::new();
         let mut reasoning_by_turn = HashMap::<String, BTreeMap<String, String>>::new();
         let mut tool_calls_by_turn = HashMap::<String, BTreeMap<String, ToolCallBuffer>>::new();
 
@@ -966,12 +972,27 @@ impl SqliteSessionRepo {
         fn flush_turn(
             fragments: &mut Vec<String>,
             turn_id: &str,
-            assistant_by_turn: &mut HashMap<String, String>,
+            assistant_by_turn: &mut HashMap<String, Vec<AssistantMessageBuffer>>,
             reasoning_by_turn: &mut HashMap<String, BTreeMap<String, String>>,
             tool_calls_by_turn: &mut HashMap<String, BTreeMap<String, ToolCallBuffer>>,
         ) {
-            if let Some(content) = assistant_by_turn.remove(turn_id) {
-                push_fragment(fragments, format!("Assistant: {content}"));
+            if let Some(messages) = assistant_by_turn.remove(turn_id) {
+                let terminal_index = messages
+                    .iter()
+                    .rposition(|message| message.phase == AssistantMessagePhase::FinalAnswer)
+                    .or_else(|| {
+                        messages
+                            .iter()
+                            .rposition(|message| !message.content.trim().is_empty())
+                    });
+                for (index, message) in messages.into_iter().enumerate() {
+                    let label = if Some(index) == terminal_index {
+                        "Assistant"
+                    } else {
+                        "Assistant commentary"
+                    };
+                    push_fragment(fragments, format!("{label}: {}", message.content));
+                }
             }
 
             if let Some(reasoning) = reasoning_by_turn.remove(turn_id) {
@@ -1013,10 +1034,80 @@ impl SqliteSessionRepo {
                     );
                 }
                 SessionEventKind::TurnDelta { turn_id, content } => {
-                    assistant_by_turn
-                        .entry(turn_id.0.clone())
-                        .or_default()
-                        .push_str(content);
+                    let messages = assistant_by_turn.entry(turn_id.0.clone()).or_default();
+                    let index = messages
+                        .iter()
+                        .position(|message| message.id == "legacy")
+                        .unwrap_or_else(|| {
+                            messages.push(AssistantMessageBuffer {
+                                id: "legacy".to_string(),
+                                phase: AssistantMessagePhase::Unknown,
+                                content: String::new(),
+                            });
+                            messages.len() - 1
+                        });
+                    messages[index].content.push_str(content);
+                }
+                SessionEventKind::TurnAssistantMessageStarted {
+                    turn_id,
+                    message_id,
+                    phase,
+                } => {
+                    let messages = assistant_by_turn.entry(turn_id.0.clone()).or_default();
+                    if let Some(message) = messages
+                        .iter_mut()
+                        .find(|message| message.id == *message_id)
+                    {
+                        message.phase = phase.clone();
+                    } else {
+                        messages.push(AssistantMessageBuffer {
+                            id: message_id.clone(),
+                            phase: phase.clone(),
+                            content: String::new(),
+                        });
+                    }
+                }
+                SessionEventKind::TurnAssistantMessageDelta {
+                    turn_id,
+                    message_id,
+                    content,
+                } => {
+                    let messages = assistant_by_turn.entry(turn_id.0.clone()).or_default();
+                    let index = messages
+                        .iter()
+                        .position(|message| message.id == *message_id)
+                        .unwrap_or_else(|| {
+                            messages.push(AssistantMessageBuffer {
+                                id: message_id.clone(),
+                                phase: AssistantMessagePhase::Unknown,
+                                content: String::new(),
+                            });
+                            messages.len() - 1
+                        });
+                    messages[index].content.push_str(content);
+                }
+                SessionEventKind::TurnAssistantMessageCompleted {
+                    turn_id,
+                    message_id,
+                    phase,
+                    content,
+                } => {
+                    let messages = assistant_by_turn.entry(turn_id.0.clone()).or_default();
+                    let index = messages
+                        .iter()
+                        .position(|message| message.id == *message_id)
+                        .unwrap_or_else(|| {
+                            messages.push(AssistantMessageBuffer {
+                                id: message_id.clone(),
+                                phase: AssistantMessagePhase::Unknown,
+                                content: String::new(),
+                            });
+                            messages.len() - 1
+                        });
+                    messages[index].phase = phase.clone();
+                    if let Some(content) = content {
+                        messages[index].content = content.clone();
+                    }
                 }
                 SessionEventKind::TurnReasoningDelta {
                     turn_id,
@@ -2817,15 +2908,41 @@ mod tests {
                 session_id: session.id.clone(),
                 sequence: 3,
                 occurred_at: "2026-01-01T00:00:10Z".to_string(),
-                kind: SessionEventKind::TurnDelta {
+                kind: SessionEventKind::TurnAssistantMessageStarted {
                     turn_id: TurnId("turn-1".to_string()),
-                    content: "The login handler drops the session token during retry.".to_string(),
+                    message_id: "final-1".to_string(),
+                    phase: AssistantMessagePhase::FinalAnswer,
                 },
             },
             SessionEventRecord {
                 event_id: "event-4".to_string(),
                 session_id: session.id.clone(),
                 sequence: 4,
+                occurred_at: "2026-01-01T00:00:11Z".to_string(),
+                kind: SessionEventKind::TurnAssistantMessageDelta {
+                    turn_id: TurnId("turn-1".to_string()),
+                    message_id: "final-1".to_string(),
+                    content: "The login handler drops the session token during retry.".to_string(),
+                },
+            },
+            SessionEventRecord {
+                event_id: "event-5".to_string(),
+                session_id: session.id.clone(),
+                sequence: 5,
+                occurred_at: "2026-01-01T00:00:14Z".to_string(),
+                kind: SessionEventKind::TurnAssistantMessageCompleted {
+                    turn_id: TurnId("turn-1".to_string()),
+                    message_id: "final-1".to_string(),
+                    phase: AssistantMessagePhase::FinalAnswer,
+                    content: Some(
+                        "The login handler drops the session token during retry.".to_string(),
+                    ),
+                },
+            },
+            SessionEventRecord {
+                event_id: "event-6".to_string(),
+                session_id: session.id.clone(),
+                sequence: 6,
                 occurred_at: "2026-01-01T00:00:15Z".to_string(),
                 kind: SessionEventKind::TurnCompleted {
                     turn_id: TurnId("turn-1".to_string()),
