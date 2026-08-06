@@ -5,6 +5,7 @@ import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import { monacoFileContentCache as fileContentCache } from "./file-content-lru";
 
 type MonacoModule = typeof Monaco;
 type StandaloneEditor = Monaco.editor.IStandaloneCodeEditor;
@@ -77,7 +78,6 @@ export type DiffMachineAnnotation = {
 };
 
 let runtimePromise: Promise<MonacoRuntime> | null = null;
-const fileContentCache = new Map<string, string>();
 let editorModelId = 0;
 
 type EditorTheme = "light" | "dark";
@@ -1074,6 +1074,7 @@ export function preWarmFileContents(
 export function syncVirtualFile(path: string, content: string) {
 	fileContentCache.set(path, content);
 }
+
 
 async function ensureRuntime(): Promise<MonacoRuntime> {
 	if (!runtimePromise) {

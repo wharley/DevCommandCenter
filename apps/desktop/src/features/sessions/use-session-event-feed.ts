@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CoreEvent } from "@dcc/contracts";
 import { listenSessionEvents } from "@/lib/session-api";
 
-const MAX_PROJECTION_EVENTS = 5000;
+import { SessionLiveEventBuffer } from "./session-live-event-buffer";
+
 const MAX_ACTIVITY_EVENTS = 12;
 
 /**
@@ -16,7 +17,8 @@ const MAX_ACTIVITY_EVENTS = 12;
  * catches up. `activityEvents` is the small UI-only feed.
  */
 export function useSessionEventFeed(onEvent?: (event: CoreEvent) => void) {
-	const [events, setEvents] = useState<CoreEvent[]>([]);
+	const bufferRef = useRef(new SessionLiveEventBuffer());
+	const [bufferVersion, setBufferVersion] = useState(0);
 	const [activityEvents, setActivityEvents] = useState<CoreEvent[]>([]);
 	const onEventRef = useRef(onEvent);
 
@@ -28,7 +30,8 @@ export function useSessionEventFeed(onEvent?: (event: CoreEvent) => void) {
 		let disposed = false;
 		let cleanup: (() => void) | null = null;
 
-		setEvents([]);
+		bufferRef.current = new SessionLiveEventBuffer();
+		setBufferVersion((version) => version + 1);
 		setActivityEvents([]);
 
 		void listenSessionEvents((event) => {
@@ -36,7 +39,8 @@ export function useSessionEventFeed(onEvent?: (event: CoreEvent) => void) {
 				return;
 			}
 			onEventRef.current?.(event);
-			setEvents((current) => [...current, event].slice(-MAX_PROJECTION_EVENTS));
+			bufferRef.current.append(event);
+			setBufferVersion((version) => version + 1);
 			setActivityEvents((current) => [...current, event].slice(-MAX_ACTIVITY_EVENTS));
 		})
 			.then((unlisten) => {
@@ -58,5 +62,32 @@ export function useSessionEventFeed(onEvent?: (event: CoreEvent) => void) {
 		};
 	}, []);
 
-	return { activityEvents, events };
+	const events = useMemo(() => bufferRef.current.events(), [bufferVersion]);
+	const purgeSessionEvents = useCallback((sessionId: string) => {
+		bufferRef.current.purgeSession(sessionId);
+		setBufferVersion((version) => version + 1);
+	}, []);
+	const purgeSessionsEvents = useCallback((sessionIds: Iterable<string>) => {
+		bufferRef.current.purgeSessions(sessionIds);
+		setBufferVersion((version) => version + 1);
+	}, []);
+	const purgeThroughTurnEvents = useCallback((sessionId: string, turnId: string) => {
+		bufferRef.current.purgeThroughTurn(sessionId, turnId);
+		setBufferVersion((version) => version + 1);
+	}, []);
+	const purgeThroughSessionTerminalEvents = useCallback((sessionId: string) => {
+		bufferRef.current.purgeThroughSessionTerminal(sessionId);
+		setBufferVersion((version) => version + 1);
+	}, []);
+	const getBufferStats = useCallback(() => bufferRef.current.stats(), []);
+
+	return {
+		activityEvents,
+		events,
+		purgeSessionEvents,
+		purgeSessionsEvents,
+		purgeThroughTurnEvents,
+		purgeThroughSessionTerminalEvents,
+		getBufferStats,
+	};
 }

@@ -91,6 +91,11 @@ import { SessionSearchDialog } from "./features/sessions/session-search-dialog";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
+import { sessionThreadHistoryQueryOptions } from "./features/sessions/session-thread-history";
+import {
+	isTerminalEventDurable,
+	terminalDurabilityTarget,
+} from "./features/sessions/session-event-durability";
 import {
 	workspaceSessionSnapshotFromSummary,
 	workspaceSessionsQueryOptions,
@@ -141,6 +146,13 @@ import {
 	type WorkbenchCommand,
 } from "./features/workspaces/workbench-command";
 import { recordUxMetric } from "./lib/ux-metrics";
+import {
+	cleanupCompletedWorkspaceFrontendState,
+	cleanupDeletedWorkspaceFrontendState,
+	removeSessionFrontendQueries,
+} from "./lib/frontend-state-cleanup";
+import { purgeMonacoFileContentsForRoot } from "./lib/file-content-lru";
+import { frontendMemorySnapshot } from "./lib/frontend-memory-observability";
 import {
 	SELECTED_PROVIDER_STORAGE_KEY,
 	SELECTED_MODEL_STORAGE_KEY,
@@ -1177,6 +1189,13 @@ export default function App() {
 		[queryClient],
 	);
 
+	const purgeThroughTurnEventsRef = useRef<
+		(sessionId: string, turnId: string) => void
+	>(() => undefined);
+	const purgeThroughSessionTerminalEventsRef = useRef<(sessionId: string) => void>(
+		() => undefined,
+	);
+
 	/**
 	 * Apply each live event to the snapshot of the session that owns it — not
 	 * just the selected one — so background sessions (e.g. a plan implementation
@@ -1199,6 +1218,37 @@ export default function App() {
 				}
 				return { ...current, [eventSessionId]: next };
 			});
+			const durabilityTarget = terminalDurabilityTarget(event);
+			if (durabilityTarget) {
+				void queryClient
+					.fetchQuery(
+						sessionThreadHistoryQueryOptions(durabilityTarget.sessionId, {
+							scope: backendCacheKey,
+						}),
+					)
+					.then((history) => {
+						if (!isTerminalEventDurable(durabilityTarget, history)) return;
+						if (
+							durabilityTarget.type === "session_aborted" ||
+							durabilityTarget.type === "session_completed"
+						) {
+							purgeThroughSessionTerminalEventsRef.current(
+								durabilityTarget.sessionId,
+							);
+						} else if ("turnId" in durabilityTarget) {
+							purgeThroughTurnEventsRef.current(
+								durabilityTarget.sessionId,
+								durabilityTarget.turnId,
+							);
+						}
+					})
+					.catch((error) => {
+						console.warn(
+							"[dcc] live-event durability barrier retained buffer:",
+							error,
+						);
+					});
+			}
 
 			if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 				void finalizeDelegationFromChild(
@@ -1214,10 +1264,29 @@ export default function App() {
 				);
 			}
 		},
-		[finalizeDelegationFromChild],
+		[backendCacheKey, finalizeDelegationFromChild, queryClient],
 	);
-	const { activityEvents: sessionActivityEvents, events: sessionEvents } =
-		useSessionEventFeed(handleSessionEvent);
+	const {
+		activityEvents: sessionActivityEvents,
+		events: sessionEvents,
+		purgeSessionEvents,
+		purgeSessionsEvents,
+		purgeThroughTurnEvents,
+		purgeThroughSessionTerminalEvents,
+		getBufferStats: getSessionEventBufferStats,
+	} = useSessionEventFeed(handleSessionEvent);
+	purgeThroughTurnEventsRef.current = purgeThroughTurnEvents;
+	purgeThroughSessionTerminalEventsRef.current = purgeThroughSessionTerminalEvents;
+	useEffect(() => {
+		const debugWindow = window as Window & {
+			__dccMemorySnapshot?: () => ReturnType<typeof frontendMemorySnapshot>;
+		};
+		debugWindow.__dccMemorySnapshot = () =>
+			frontendMemorySnapshot(queryClient, getSessionEventBufferStats());
+		return () => {
+			delete debugWindow.__dccMemorySnapshot;
+		};
+	}, [getSessionEventBufferStats, queryClient]);
 
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
@@ -1662,6 +1731,14 @@ export default function App() {
 		)
 			? selectedSessionId
 			: (visibleWorkspaceSessions[0]?.session.id ?? null);
+	const previousSelectedSessionForCleanupRef = useRef<string | null>(null);
+	useEffect(() => {
+		const previous = previousSelectedSessionForCleanupRef.current;
+		previousSelectedSessionForCleanupRef.current = effectiveSelectedSessionId;
+		if (previous && previous !== effectiveSelectedSessionId) {
+			removeSessionFrontendQueries(queryClient, [previous]);
+		}
+	}, [effectiveSelectedSessionId, queryClient]);
 	const selectedSessionSummary = useMemo(
 		() =>
 			workspaceSessions.find(
@@ -2913,7 +2990,6 @@ export default function App() {
 			(selectedWorkspace.isAutoNamed || isAutomaticTaskTitle(selectedWorkspace.name))
 			? deriveTaskTitle(trimmedPrompt, selectedWorkspace.name)
 			: null;
-
 		const targetSessionId = options?.targetSessionId ?? null;
 		const targetSessionSummary =
 			targetSessionId && !options?.forceNewSession
@@ -3845,6 +3921,10 @@ export default function App() {
 					delete next[request.sessionId];
 					return next;
 				});
+				if (result.deletedHistory) {
+					removeSessionFrontendQueries(queryClient, [request.sessionId]);
+					purgeSessionEvents(request.sessionId);
+				}
 				setPendingPrompt((current) =>
 					pendingPromptSessionId === request.sessionId ? null : current,
 				);
@@ -3883,6 +3963,7 @@ export default function App() {
 			pendingPrompt,
 			pendingPromptSessionId,
 			queryClient,
+			purgeSessionEvents,
 			selectedWorkspace,
 			sessionSnapshotsById,
 			workspaceSessions,
@@ -4146,14 +4227,21 @@ export default function App() {
 			const workspaceIds = workspace?.memberWorkspaceIds?.length
 				? workspace.memberWorkspaceIds
 				: [workspaceId];
+			const roots = allWorkspaces
+				.filter((candidate) => workspaceIds.includes(candidate.id))
+				.flatMap((candidate) => [candidate.worktreePath, candidate.rootPath])
+				.filter((root): root is string => Boolean(root));
 			await requestWorkspaceTerminalLifecycle("complete", workspaceIds, async () => {
 				await completeWorkspace(workspaceId);
+				cleanupCompletedWorkspaceFrontendState(queryClient, { workspaceIds, roots });
+				for (const root of roots) purgeMonacoFileContentsForRoot(root);
 				await refreshWorkspaceCollections();
 			});
 		},
 		[
 			allWorkspaces,
 			completeWorkspace,
+			queryClient,
 			refreshWorkspaceCollections,
 			requestWorkspaceTerminalLifecycle,
 		],
@@ -4172,27 +4260,45 @@ export default function App() {
 				workspace?.bundleId && workspace.memberWorkspaceIds?.length
 					? workspace.memberWorkspaceIds
 					: [workspaceId];
+			const affectedSessionIds = queryClient
+				.getQueryCache()
+				.findAll({ queryKey: ["workspaceSessions"] })
+				.filter((query) => affectedWorkspaceIds.includes(String(query.queryKey[2])))
+				.flatMap((query) =>
+					((query.state.data as WorkspaceSessionSummary[] | undefined) ?? []).map(
+						(summary) => summary.session.id,
+					),
+				);
+			const roots = allWorkspaces
+				.filter((candidate) => affectedWorkspaceIds.includes(candidate.id))
+				.flatMap((candidate) => [candidate.worktreePath, candidate.rootPath])
+				.filter((root): root is string => Boolean(root));
 			await terminateWorkspaceTerminals(affectedWorkspaceIds);
 			await deleteWorkspace(workspaceId, options);
-			for (const affectedWorkspaceId of affectedWorkspaceIds) {
-				queryClient.removeQueries({
-					queryKey: getWorkspaceSessionsCacheKey(
-						backendCacheKey,
-						affectedWorkspaceId,
-					),
-				});
-				queryClient.removeQueries({
-					queryKey: ["multiWorkspaceChanges", affectedWorkspaceId],
-				});
+			cleanupDeletedWorkspaceFrontendState(queryClient, {
+				workspaceIds: affectedWorkspaceIds,
+				sessionIds: affectedSessionIds,
+				roots,
+			});
+			purgeSessionsEvents(affectedSessionIds);
+			for (const root of roots) purgeMonacoFileContentsForRoot(root);
+			setSessionSnapshotsById((current) => {
+				const next = { ...current };
+				for (const sessionId of affectedSessionIds) delete next[sessionId];
+				return next;
+			});
+			if (selectedWorkspace && affectedWorkspaceIds.includes(selectedWorkspace.id)) {
+				setSurfaceSelection(null);
 			}
 			await refreshWorkspaceCollections();
 		},
 		[
 			allWorkspaces,
-			backendCacheKey,
 			deleteWorkspace,
+			purgeSessionsEvents,
 			queryClient,
 			refreshWorkspaceCollections,
+			selectedWorkspace,
 		],
 	);
 

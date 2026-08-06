@@ -19,6 +19,7 @@ import {
 } from "@/features/panel/plan-content";
 import { parseMissionValidationReport } from "@/features/spec/mission-spec-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
+import { shouldAutoOpenAssistantActivity } from "./assistant-activity-disclosure";
 
 type AssistantStatus = {
 	type: "incomplete";
@@ -59,7 +60,7 @@ function AssistantActivityGroup({
 	const failedCount = annotations.filter(
 		(annotation) => annotation.type === "tool-call" && annotation.status?.type === "failed",
 	).length;
-	const shouldStayOpen = isLive || failedCount > 0;
+	const shouldStayOpen = shouldAutoOpenAssistantActivity(annotations);
 	const [isOpen, setIsOpen] = useState(shouldStayOpen);
 	// Once the user toggles by hand, auto open/close stops driving this disclosure.
 	const userToggledRef = useRef(false);
@@ -68,7 +69,6 @@ function AssistantActivityGroup({
 		if (userToggledRef.current) {
 			return;
 		}
-
 		setIsOpen(shouldStayOpen);
 	}, [shouldStayOpen]);
 
@@ -111,9 +111,11 @@ function AssistantActivityGroup({
 					</span>
 				) : null}
 			</summary>
-			<div className="mt-2 flex min-w-0 flex-col gap-1.5 pl-1">
-				{children}
-			</div>
+			{isOpen ? (
+				<div className="mt-2 flex min-w-0 flex-col gap-1.5 pl-1">
+					{children}
+				</div>
+			) : null}
 		</details>
 	);
 }

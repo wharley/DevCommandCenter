@@ -61,7 +61,7 @@ import { GitSectionHeader } from "./git-section-header";
 import { GitlabPipelineSection } from "./gitlab-pipeline-section";
 import { WorkspaceDeliveryFailureSection } from "./workspace-delivery-failure-section";
 import { WorkspaceReviewStateSection } from "./workspace-review-state-section";
-import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
+import { projectWorkspacePlanMessages } from "@/features/panel/thread-projection";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
@@ -2814,7 +2814,7 @@ export function WorkspaceInspectorSidebar({
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [selectInspectorMode]);
 	const planMessages = useMemo(
-		() => projectWorkspaceMessages([], sessionEvents, sessionId, null),
+		() => projectWorkspacePlanMessages([], sessionEvents, sessionId),
 		[sessionEvents, sessionId],
 	);
 	const planFollowUpState = useMemo(

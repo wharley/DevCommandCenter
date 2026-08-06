@@ -9,6 +9,8 @@ import {
 	removeOldestQuery,
 	type PersistedClient,
 } from "@tanstack/react-query-persist-client";
+import type { CoreEvent, WorkspaceSessionSummary } from "@dcc/contracts";
+import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { REMOTE_CORE_EVENT_NAME } from "./session-api";
 
 export const DCC_QUERY_CACHE_STORAGE_KEY = "dcc-query-cache";
@@ -213,21 +215,183 @@ export const dccQueryKeys = {
 		["workspaceSessions", scope, workspaceId] as const,
 } as const;
 
-function shouldRefreshInspectorGitQueries(payload: unknown) {
-	if (!payload || typeof payload !== "object") {
-		return false;
+type DccCoreEventRefreshPlan = {
+	workspaceId: string | null;
+	sessionId: string | null;
+	refreshCollections: boolean;
+	refreshSessionMetadata: boolean;
+	refreshThreadHistory: boolean;
+	refreshInspectorGit: boolean;
+};
+
+const EMPTY_CORE_EVENT_REFRESH_PLAN: DccCoreEventRefreshPlan = {
+	workspaceId: null,
+	sessionId: null,
+	refreshCollections: false,
+	refreshSessionMetadata: false,
+	refreshThreadHistory: false,
+	refreshInspectorGit: false,
+};
+
+/**
+ * Streaming deltas are already delivered to the live event feed. Invalidating
+ * SQLite-backed queries for every token/tool chunk causes an avoidable refetch
+ * storm and repeatedly materializes an ever-growing event history.
+ */
+export function coreEventRefreshPlan(event: CoreEvent): DccCoreEventRefreshPlan {
+	if ("workspacePrepared" in event && event.workspacePrepared) {
+		return {
+			...EMPTY_CORE_EVENT_REFRESH_PLAN,
+			workspaceId: event.workspacePrepared.workspace_id,
+			refreshCollections: true,
+			refreshInspectorGit: true,
+		};
+	}
+	if ("workspaceReady" in event && event.workspaceReady) {
+		return {
+			...EMPTY_CORE_EVENT_REFRESH_PLAN,
+			workspaceId: event.workspaceReady.workspace_id,
+			refreshCollections: true,
+			refreshInspectorGit: true,
+		};
+	}
+	if ("sessionStarted" in event && event.sessionStarted) {
+		return {
+			...EMPTY_CORE_EVENT_REFRESH_PLAN,
+			workspaceId: event.sessionStarted.workspace_id,
+			sessionId: event.sessionStarted.session_id,
+			refreshSessionMetadata: true,
+			refreshThreadHistory: true,
+		};
 	}
 
-	const event = payload as Record<string, unknown>;
-	return Boolean(
-		event.workspacePrepared ||
-			event.workspaceReady ||
-			event.sessionCompleted ||
-			event.sessionTurnCompleted ||
-			event.sessionTurnAborted ||
-			event.sessionTurnToolCallCompleted ||
-			event.sessionTurnToolCallFailed,
-	);
+	const lifecycle =
+		("sessionCompleted" in event && event.sessionCompleted) ||
+		("sessionAborted" in event && event.sessionAborted) ||
+		("sessionResumed" in event && event.sessionResumed) ||
+		("sessionTurnStarted" in event && event.sessionTurnStarted) ||
+		("sessionTurnCompleted" in event && event.sessionTurnCompleted) ||
+		("sessionTurnAborted" in event && event.sessionTurnAborted) ||
+		null;
+	if (lifecycle) {
+		return {
+			...EMPTY_CORE_EVENT_REFRESH_PLAN,
+			sessionId: lifecycle.session_id,
+			refreshSessionMetadata: true,
+			refreshThreadHistory: true,
+			refreshInspectorGit: Boolean(
+				("sessionCompleted" in event && event.sessionCompleted) ||
+					("sessionTurnCompleted" in event && event.sessionTurnCompleted) ||
+					("sessionTurnAborted" in event && event.sessionTurnAborted),
+			),
+		};
+	}
+
+	const toolSettled =
+		("sessionTurnToolCallCompleted" in event && event.sessionTurnToolCallCompleted) ||
+		("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) ||
+		null;
+	if (toolSettled) {
+		return {
+			...EMPTY_CORE_EVENT_REFRESH_PLAN,
+			sessionId: toolSettled.session_id,
+			refreshInspectorGit: true,
+		};
+	}
+
+	return EMPTY_CORE_EVENT_REFRESH_PLAN;
+}
+
+function workspaceIdForSession(queryClient: QueryClient, sessionId: string): string | null {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["workspaceSessions"] })) {
+		const summaries = query.state.data as WorkspaceSessionSummary[] | undefined;
+		const match = summaries?.find((summary) => summary.session.id === sessionId);
+		if (match) return match.session.workspaceId;
+	}
+	return null;
+}
+
+function workspaceRoots(queryClient: QueryClient, workspaceId: string | null): Set<string> {
+	const roots = new Set<string>();
+	if (!workspaceId) return roots;
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["workspaces"] })) {
+		const workspaces = query.state.data as WorkspaceSummary[] | undefined;
+		const workspace = workspaces?.find((candidate) => candidate.id === workspaceId);
+		for (const root of [workspace?.worktreePath, workspace?.rootPath]) {
+			if (root?.trim()) roots.add(root.trim());
+		}
+	}
+	return roots;
+}
+
+const gitRefreshTimers = new WeakMap<
+	QueryClient,
+	Map<string, ReturnType<typeof setTimeout>>
+>();
+
+export function applyCoreEventQueryRefresh(
+	queryClient: QueryClient,
+	event: CoreEvent,
+	input: { gitDebounceMs?: number } = {},
+) {
+	const plan = coreEventRefreshPlan(event);
+	if (plan === EMPTY_CORE_EVENT_REFRESH_PLAN) return plan;
+	const workspaceId =
+		plan.workspaceId ??
+		(plan.sessionId ? workspaceIdForSession(queryClient, plan.sessionId) : null);
+
+	if (plan.refreshCollections) {
+		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.repositories });
+		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
+	}
+	if (plan.refreshSessionMetadata) {
+		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.sessions });
+		if (workspaceId) {
+			void queryClient.invalidateQueries({
+				queryKey: ["workspaceSessions"],
+				predicate: (query) => query.queryKey[2] === workspaceId,
+			});
+		} else {
+			// Cache may be cold or already compacted. Lifecycle events are infrequent,
+			// so a family fallback is safer than leaving shell metadata stale.
+			void queryClient.invalidateQueries({ queryKey: ["workspaceSessions"] });
+		}
+	}
+	if (plan.refreshThreadHistory && plan.sessionId) {
+		void queryClient.invalidateQueries({
+			queryKey: ["sessionThreads"],
+			predicate: (query) => query.queryKey[2] === plan.sessionId,
+		});
+	}
+	if (plan.refreshInspectorGit) {
+		const timers = gitRefreshTimers.get(queryClient) ?? new Map();
+		gitRefreshTimers.set(queryClient, timers);
+		const timerKey = workspaceId ?? plan.sessionId ?? "__global__";
+		const existing = timers.get(timerKey);
+		if (existing) clearTimeout(existing);
+		const roots = workspaceRoots(queryClient, workspaceId);
+		const timer = setTimeout(() => {
+			timers.delete(timerKey);
+			void queryClient.invalidateQueries({
+				predicate: (query) => {
+					const root = query.queryKey[0];
+					const queryRoot = query.queryKey[1];
+					return (
+						(root === "workspaceGitStatus" ||
+							root === "workspacePrStatus" ||
+							root === "workspacePipeline" ||
+							root === "workspaceDeliveryFailureSnapshot" ||
+							root === "workspaceReviewState" ||
+							root === "workspaceGitBranchDiff") &&
+						(roots.size === 0 ||
+							(typeof queryRoot === "string" && roots.has(queryRoot)))
+					);
+				},
+			});
+		}, input.gitDebounceMs ?? 200);
+		timers.set(timerKey, timer);
+	}
+	return { ...plan, workspaceId };
 }
 
 export function configureDccQueryGcDefaults(queryClient: QueryClient) {
@@ -276,30 +440,6 @@ export function createDccQueryClient() {
 		}),
 	);
 
-	const invalidateCoreEventQueries = (payload: unknown) => {
-		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.repositories });
-		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
-		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.sessions });
-		void queryClient.invalidateQueries({ queryKey: ["sessionThreads"] });
-		void queryClient.invalidateQueries({ queryKey: ["sessionSearch"] });
-		void queryClient.invalidateQueries({ queryKey: ["workspaceSessions"] });
-		if (shouldRefreshInspectorGitQueries(payload)) {
-			void queryClient.invalidateQueries({
-				predicate: (query) => {
-					const queryKey = query.queryKey[0];
-					return (
-						queryKey === "workspaceGitStatus" ||
-						queryKey === "workspacePrStatus" ||
-						queryKey === "workspacePipeline" ||
-						queryKey === "workspaceDeliveryFailureSnapshot" ||
-						queryKey === "workspaceReviewState" ||
-						queryKey === "workspaceGitBranchDiff"
-					);
-				},
-			});
-		}
-	};
-
 	focusManager.setEventListener((handleFocus) => {
 		let unlistenFocus: (() => void) | undefined;
 		let unlistenBlur: (() => void) | undefined;
@@ -321,12 +461,15 @@ export function createDccQueryClient() {
 
 	void import("@tauri-apps/api/event").then(({ listen }) => {
 		void listen("dcc:core-event", (event) => {
-			invalidateCoreEventQueries(event.payload);
+			applyCoreEventQueryRefresh(queryClient, event.payload as CoreEvent);
 		});
 	});
 	if (typeof window !== "undefined") {
 		window.addEventListener(REMOTE_CORE_EVENT_NAME, (event) => {
-			invalidateCoreEventQueries((event as CustomEvent).detail);
+			applyCoreEventQueryRefresh(
+				queryClient,
+				(event as CustomEvent<CoreEvent>).detail,
+			);
 		});
 	}
 

@@ -1,8 +1,10 @@
 import { dehydrate, QueryClient } from "@tanstack/react-query";
 import type { PersistedClient } from "@tanstack/react-query-persist-client";
+import type { CoreEvent, WorkspaceSessionSummary } from "@dcc/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
 	compactDccPersistedClient,
+	applyCoreEventQueryRefresh,
 	configureDccQueryGcDefaults,
 	createDccQueryCacheStorage,
 	DCC_QUERY_CACHE_BUSTER,
@@ -13,6 +15,10 @@ import {
 	serializeDccQueryCache,
 	shouldPersistDccQuery,
 } from "./query-client";
+
+function coreEvent(value: object): CoreEvent {
+	return value as CoreEvent;
+}
 
 class MemoryStorage implements Storage {
 	readonly values = new Map<string, string>();
@@ -51,6 +57,113 @@ function persistedClient(queryClient: QueryClient): PersistedClient {
 }
 
 describe("DCC query cache persistence", () => {
+	it("does not invalidate any query for 1000 streaming deltas", () => {
+		const queryClient = new QueryClient();
+		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+		for (let index = 0; index < 1000; index += 1) {
+			applyCoreEventQueryRefresh(
+				queryClient,
+				coreEvent({
+					sessionTurnAssistantMessageDelta: {
+						session_id: "session-a",
+						turn_id: "turn-a",
+						message_id: "message-a",
+						content: "x",
+					},
+				}),
+			);
+		}
+
+		expect(invalidate).not.toHaveBeenCalled();
+	});
+
+	it("targets completion refreshes and debounces Git queries", async () => {
+		vi.useFakeTimers();
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(
+			["workspaceSessions", "local", "workspace-a"],
+			[{ session: { id: "session-a", workspaceId: "workspace-a" } }] as WorkspaceSessionSummary[],
+		);
+		queryClient.setQueryData(
+			["workspaceSessions", "local", "workspace-b"],
+			[{ session: { id: "session-b", workspaceId: "workspace-b" } }] as WorkspaceSessionSummary[],
+		);
+		queryClient.setQueryData(["workspaces", "local"], [
+			{ id: "workspace-a", worktreePath: "/repo/a" },
+			{ id: "workspace-b", worktreePath: "/repo/b" },
+		]);
+		queryClient.setQueryData(["sessionThreads", "local", "session-a"], []);
+		queryClient.setQueryData(["sessionThreads", "local", "session-b"], []);
+		queryClient.setQueryData(["workspaceGitStatus", "/repo/a"], {});
+		queryClient.setQueryData(["workspaceGitStatus", "/repo/b"], {});
+
+		applyCoreEventQueryRefresh(
+			queryClient,
+			coreEvent({ sessionTurnCompleted: { session_id: "session-a", turn_id: "turn-a" } }),
+			{ gitDebounceMs: 200 },
+		);
+		await Promise.resolve();
+
+		expect(
+			queryClient.getQueryState(["sessionThreads", "local", "session-a"])
+				?.isInvalidated,
+		).toBe(true);
+		expect(
+			queryClient.getQueryState(["sessionThreads", "local", "session-b"])
+				?.isInvalidated,
+		).toBe(false);
+		expect(
+			queryClient.getQueryState(["workspaceSessions", "local", "workspace-a"])
+				?.isInvalidated,
+		).toBe(true);
+		expect(
+			queryClient.getQueryState(["workspaceSessions", "local", "workspace-b"])
+				?.isInvalidated,
+		).toBe(false);
+		expect(queryClient.getQueryState(["workspaceGitStatus", "/repo/a"])?.isInvalidated).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(200);
+		expect(queryClient.getQueryState(["workspaceGitStatus", "/repo/a"])?.isInvalidated).toBe(true);
+		expect(queryClient.getQueryState(["workspaceGitStatus", "/repo/b"])?.isInvalidated).toBe(false);
+		vi.useRealTimers();
+	});
+
+	it("falls back to query families when lifecycle ownership is not cached", async () => {
+		vi.useFakeTimers();
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(["workspaceSessions", "local", "workspace-a"], []);
+		queryClient.setQueryData(["workspaceSessions", "local", "workspace-b"], []);
+		queryClient.setQueryData(["workspaceGitStatus", "/repo/a"], {});
+		queryClient.setQueryData(["workspaceGitStatus", "/repo/b"], {});
+
+		applyCoreEventQueryRefresh(
+			queryClient,
+			coreEvent({
+				sessionTurnCompleted: { session_id: "unknown", turn_id: "turn-a" },
+			}),
+			{ gitDebounceMs: 200 },
+		);
+		await Promise.resolve();
+		expect(
+			queryClient.getQueryState(["workspaceSessions", "local", "workspace-a"])
+				?.isInvalidated,
+		).toBe(true);
+		expect(
+			queryClient.getQueryState(["workspaceSessions", "local", "workspace-b"])
+				?.isInvalidated,
+		).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(200);
+		expect(
+			queryClient.getQueryState(["workspaceGitStatus", "/repo/a"])?.isInvalidated,
+		).toBe(true);
+		expect(
+			queryClient.getQueryState(["workspaceGitStatus", "/repo/b"])?.isInvalidated,
+		).toBe(true);
+		vi.useRealTimers();
+	});
+
 	it("keeps metadata warm but quickly collects reloadable heavy payloads", () => {
 		const queryClient = configureDccQueryGcDefaults(
 			new QueryClient({
