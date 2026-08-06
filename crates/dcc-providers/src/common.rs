@@ -540,11 +540,23 @@ fn parse_claude_terminal_value(
                 .collect::<Vec<_>>()
                 .join("");
 
-            let id = message
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-                .map(str::to_string)
+            // The Agent SDK can expose the stream envelope UUID for partial
+            // text while the authoritative `assistant` snapshot carries the
+            // underlying Anthropic message ID. Once text streaming started,
+            // the active stream ID is the lifecycle identity already exposed
+            // to consumers and must also close that item.
+            let streamed_text_id = state
+                .claude_text_message_started
+                .then(|| state.claude_active_message_id.clone())
+                .flatten();
+            let id = streamed_text_id
+                .or_else(|| {
+                    message
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string)
+                })
                 .or_else(|| state.claude_active_message_id.clone())
                 .or_else(|| claude_envelope_uuid(value))
                 .unwrap_or_else(|| format!("claude:assistant:{}", Uuid::new_v4()));
@@ -1801,6 +1813,56 @@ mod tests {
                 content: Some(ref content),
                 ..
             }) if id == "msg_1" && content == "Hello world"
+        ));
+    }
+
+    #[test]
+    fn keeps_claude_stream_identity_when_terminal_snapshot_uses_another_id() {
+        let mut state = ProviderStreamState::default();
+
+        let message_start = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-envelope-id","parent_tool_use_id":null,"event":{"type":"message_start","message":{"type":"message","role":"assistant","content":[]}}}"#,
+            &mut state,
+        );
+        assert!(matches!(message_start, ParsedProviderLine::Ignored));
+
+        let content_start = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"content-envelope-id","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            content_start,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageStarted {
+                ref id,
+                phase: AssistantMessagePhase::Unknown,
+                ..
+            }) if id == "stream-envelope-id"
+        ));
+
+        let delta = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"delta-envelope-id","parent_tool_use_id":null,"event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Toda a mensagem"}}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            delta,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageDelta {
+                ref id,
+                ref content,
+            }) if id == "stream-envelope-id" && content == "Toda a mensagem"
+        ));
+
+        let assistant = parse_provider_stream_line(
+            r#"{"type":"assistant","uuid":"sdk-message-id","parent_tool_use_id":null,"message":{"id":"msg_authoritative","role":"assistant","content":[{"type":"text","text":"Toda a mensagem, sem perder o final."}]}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            assistant,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageCompleted {
+                ref id,
+                phase: AssistantMessagePhase::Unknown,
+                content: Some(ref content),
+                ..
+            }) if id == "stream-envelope-id" && content == "Toda a mensagem, sem perder o final."
         ));
     }
 

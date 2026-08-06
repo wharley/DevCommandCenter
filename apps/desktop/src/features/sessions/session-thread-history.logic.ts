@@ -829,6 +829,18 @@ function ensureAssistantItemMessage(
 	return message;
 }
 
+function assistantPhasesAreCompatible(
+	activePhase: AssistantMessagePhase | undefined,
+	completedPhase: AssistantMessagePhase,
+) {
+	return (
+		!activePhase ||
+		activePhase === "unknown" ||
+		completedPhase === "unknown" ||
+		activePhase === completedPhase
+	);
+}
+
 function foldSettledAssistantMessages(
 	messages: WorkspaceMessage[],
 	assistantMessagesByTurn: Map<string, WorkspaceMessage[]>,
@@ -906,6 +918,7 @@ export function projectWorkspaceMessages(
 	const assistantBuckets = new Map<string, WorkspaceMessage>();
 	const assistantItems = new Map<string, WorkspaceMessage>();
 	const assistantMessagesByTurn = new Map<string, WorkspaceMessage[]>();
+	const activeAssistantItemsByTurn = new Map<string, Set<WorkspaceMessage>>();
 	const delegationBuckets = new Map<string, WorkspaceMessage>();
 	const completedTurns = new Set<string>();
 	const abortedTurns = new Map<string, string>();
@@ -970,7 +983,7 @@ export function projectWorkspaceMessages(
 			event.sessionTurnAssistantMessageStarted
 		) {
 			const item = event.sessionTurnAssistantMessageStarted;
-			ensureAssistantItemMessage(
+			const message = ensureAssistantItemMessage(
 				messages,
 				assistantItems,
 				assistantBuckets,
@@ -982,6 +995,9 @@ export function projectWorkspaceMessages(
 				true,
 				turnStartedAtByTurnId.get(item.turn_id) ?? occurredAt,
 			);
+			const activeItems = activeAssistantItemsByTurn.get(item.turn_id) ?? new Set();
+			activeItems.add(message);
+			activeAssistantItemsByTurn.set(item.turn_id, activeItems);
 			continue;
 		}
 
@@ -1004,6 +1020,9 @@ export function projectWorkspaceMessages(
 			);
 			message.content = `${message.content}${item.content}`;
 			message.streaming = !completedTurns.has(item.turn_id) && !abortedTurns.has(item.turn_id);
+			const activeItems = activeAssistantItemsByTurn.get(item.turn_id) ?? new Set();
+			activeItems.add(message);
+			activeAssistantItemsByTurn.set(item.turn_id, activeItems);
 			continue;
 		}
 
@@ -1012,23 +1031,44 @@ export function projectWorkspaceMessages(
 			event.sessionTurnAssistantMessageCompleted
 		) {
 			const item = event.sessionTurnAssistantMessageCompleted;
-			const message = ensureAssistantItemMessage(
-				messages,
-				assistantItems,
-				assistantBuckets,
-				assistantMessagesByTurn,
-				item.session_id,
-				item.turn_id,
-				item.message_id,
-				item.phase,
-				false,
-				turnStartedAtByTurnId.get(item.turn_id) ?? occurredAt,
-			);
+			const itemKey = `${item.turn_id}\u0000${item.message_id}`;
+			const exactMessage = assistantItems.get(itemKey);
+			const activeItems = activeAssistantItemsByTurn.get(item.turn_id);
+			const soleActiveMessage =
+				!exactMessage && activeItems?.size === 1 ? [...activeItems][0] : undefined;
+			const lifecycleMessage =
+				soleActiveMessage &&
+				assistantPhasesAreCompatible(soleActiveMessage.assistantPhase, item.phase)
+					? soleActiveMessage
+					: undefined;
+			const message =
+				exactMessage ??
+				lifecycleMessage ??
+				ensureAssistantItemMessage(
+					messages,
+					assistantItems,
+					assistantBuckets,
+					assistantMessagesByTurn,
+					item.session_id,
+					item.turn_id,
+					item.message_id,
+					item.phase,
+					false,
+					turnStartedAtByTurnId.get(item.turn_id) ?? occurredAt,
+				);
+			if (lifecycleMessage) {
+				// Persisted histories from older provider adapters may finish a
+				// streamed root message under the authoritative snapshot ID. Alias
+				// that terminal ID only when one compatible item is active, so real
+				// native items and concurrent lifecycles remain distinct.
+				assistantItems.set(itemKey, lifecycleMessage);
+			}
 			message.assistantPhase = item.phase;
 			if (item.content !== null) {
 				message.content = item.content;
 			}
 			message.streaming = false;
+			activeItems?.delete(message);
 			continue;
 		}
 

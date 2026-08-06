@@ -483,6 +483,136 @@ describe("projectWorkspaceMessages", () => {
 		]);
 	});
 
+	it("reconciles a terminal snapshot with the sole active item when provider IDs diverge", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "stream-envelope", "unknown", 2),
+				assistantMessageDelta("session-a", "turn-1", "stream-envelope", "Toda a ", 3),
+				assistantMessageDelta("session-a", "turn-1", "stream-envelope", "mensagem", 4),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"msg-authoritative",
+					"unknown",
+					"Toda a mensagem, incluindo o final sem perder palavras.",
+					5,
+				),
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				id: "assistant-session-a-turn-1-stream-envelope",
+				content: "Toda a mensagem, incluindo o final sem perder palavras.",
+				assistantPhase: "unknown",
+				streaming: false,
+			}),
+		]);
+	});
+
+	it("lets an authoritative snapshot replace incomplete streamed text under a divergent ID", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "stream-envelope", "unknown", 2),
+				assistantMessageDelta(
+					"session-a",
+					"turn-1",
+					"stream-envelope",
+					"Typecheck falh",
+					3,
+				),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"msg-authoritative",
+					"unknown",
+					"Typecheck passou sem erros.",
+					4,
+				),
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				content: "Typecheck passou sem erros.",
+				streaming: false,
+			}),
+		]);
+	});
+
+	it("does not merge a terminal item that has its own native start", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "comment-1", "commentary", 2),
+				assistantMessageDelta("session-a", "turn-1", "comment-1", "Ainda trabalhando.", 3),
+				assistantMessageStarted("session-a", "turn-1", "final-1", "final_answer", 4),
+				assistantMessageDelta("session-a", "turn-1", "final-1", "Resolvido.", 5),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"final-1",
+					"final_answer",
+					"Resolvido.",
+					6,
+				),
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages.filter((message) => message.role === "assistant")).toMatchObject([
+			{
+				content: "Ainda trabalhando.",
+				assistantPhase: "commentary",
+				streaming: true,
+			},
+			{
+				content: "Resolvido.",
+				assistantPhase: "final_answer",
+				streaming: false,
+			},
+		]);
+	});
+
+	it("keeps a terminal-only item distinct when multiple active items make correlation ambiguous", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "stream-1", "unknown", 2),
+				assistantMessageDelta("session-a", "turn-1", "stream-1", "Primeiro", 3),
+				assistantMessageStarted("session-a", "turn-1", "stream-2", "unknown", 4),
+				assistantMessageDelta("session-a", "turn-1", "stream-2", "Segundo", 5),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"terminal-3",
+					"unknown",
+					"Terceiro",
+					6,
+				),
+			],
+			[],
+			"session-a",
+		);
+
+		expect(
+			messages
+				.filter((message) => message.role === "assistant")
+				.map(({ content, streaming }) => ({ content, streaming })),
+		).toEqual([
+			{ content: "Primeiro", streaming: true },
+			{ content: "Segundo", streaming: true },
+			{ content: "Terceiro", streaming: false },
+		]);
+	});
+
 	it("folds settled commentary and keeps the authoritative final answer visible", () => {
 		const messages = projectWorkspaceMessages(
 			[
