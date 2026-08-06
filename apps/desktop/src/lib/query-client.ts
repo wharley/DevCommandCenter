@@ -14,6 +14,19 @@ import { REMOTE_CORE_EVENT_NAME } from "./session-api";
 export const DCC_QUERY_CACHE_STORAGE_KEY = "dcc-query-cache";
 export const DCC_QUERY_CACHE_BUSTER = "dcc-query-cache-v3";
 
+export const DCC_QUERY_GC_TIME_MS = {
+	/** Small shell metadata that makes remounts/navigation instant. */
+	metadata: 24 * 60 * 60_000,
+	/** Normal inactive data should not occupy the WebView for an entire day. */
+	default: 15 * 60_000,
+	/** Session event histories are reloadable from SQLite, but useful when revisiting. */
+	history: 5 * 60_000,
+	/** File bodies, diffs and logs can be very large and are cheap to read again. */
+	heavyPayload: 2 * 60_000,
+	/** Search results are ephemeral and should disappear soon after closing the dialog. */
+	search: 60_000,
+} as const;
+
 /**
  * WebKit gives localStorage a small, shared per-origin quota. Keep the query
  * snapshot well below it so drafts and preferences always retain headroom.
@@ -217,17 +230,51 @@ function shouldRefreshInspectorGitQueries(payload: unknown) {
 	);
 }
 
-export function createDccQueryClient() {
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: {
-				gcTime: 24 * 60 * 60_000,
-				retry: 1,
-				refetchOnWindowFocus: true,
-				refetchOnReconnect: false,
-			},
-		},
+export function configureDccQueryGcDefaults(queryClient: QueryClient) {
+	// Query defaults merge from generic to specific prefixes. Keep compact shell
+	// metadata warm, while allowing reloadable payloads to leave the JS heap soon
+	// after their final observer unmounts. Persistence remains governed separately
+	// by shouldPersistDccQuery and the 1 MB serialized snapshot budget above.
+	for (const root of ["shell", "repositories", "workspaces", "providers"]) {
+		queryClient.setQueryDefaults([root], {
+			gcTime: DCC_QUERY_GC_TIME_MS.metadata,
+		});
+	}
+	queryClient.setQueryDefaults(["sessionThreads"], {
+		gcTime: DCC_QUERY_GC_TIME_MS.history,
 	});
+	for (const queryKey of [
+		["workspaceFileContent"],
+		["workspaceGitFilePreviewContent"],
+		["workspaceGitBranchDiff"],
+		["workspacePipelineJobLog"],
+		["pullRequestHub", "detailCode"],
+	] as const) {
+		queryClient.setQueryDefaults(queryKey, {
+			gcTime: DCC_QUERY_GC_TIME_MS.heavyPayload,
+		});
+	}
+	for (const root of ["sessionSearch", "workspaceSearch"]) {
+		queryClient.setQueryDefaults([root], {
+			gcTime: DCC_QUERY_GC_TIME_MS.search,
+		});
+	}
+	return queryClient;
+}
+
+export function createDccQueryClient() {
+	const queryClient = configureDccQueryGcDefaults(
+		new QueryClient({
+			defaultOptions: {
+				queries: {
+					gcTime: DCC_QUERY_GC_TIME_MS.default,
+					retry: 1,
+					refetchOnWindowFocus: true,
+					refetchOnReconnect: false,
+				},
+			},
+		}),
+	);
 
 	const invalidateCoreEventQueries = (payload: unknown) => {
 		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.repositories });

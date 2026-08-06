@@ -50,6 +50,7 @@ export const TERMINAL_OUTPUT_TRUNCATION =
 type TerminalEntry = TerminalSnapshot & {
 	listeners: Set<TerminalListener>;
 	spawnPromise: Promise<TerminalSnapshot> | null;
+	disposed: boolean;
 	lastResizeCols: number | null;
 	lastResizeRows: number | null;
 };
@@ -89,6 +90,7 @@ function getOrCreateEntry(terminalId: string): TerminalEntry {
 		truncated: false,
 		listeners: new Set(),
 		spawnPromise: null,
+		disposed: false,
 		lastResizeCols: null,
 		lastResizeRows: null,
 	};
@@ -147,14 +149,18 @@ function appendChunk(entry: TerminalEntry, data: string) {
 	}
 }
 
+function notifyStoreListeners() {
+	for (const listener of storeListeners) {
+		listener();
+	}
+}
+
 function notifyStatus(entry: TerminalEntry) {
 	for (const listener of entry.listeners) {
 		listener.onStatusChange(entry.status, entry.exitCode);
 		listener.onPtyIdChange?.(entry.ptyId);
 	}
-	for (const listener of storeListeners) {
-		listener();
-	}
+	notifyStoreListeners();
 }
 
 async function refreshTerminalActivity() {
@@ -311,6 +317,9 @@ export async function ensureTerminal(
 	entry.spawnPromise = (async () => {
 		try {
 			const { shell } = await getDefaultShell();
+			if (entry.disposed) {
+				return snapshot(entry);
+			}
 			const shouldUseLoginArgs = /[\\/](zsh|bash|sh)$/i.test(shell);
 			const ownerKey = `terminal:${terminalId}`;
 			const result = await getOrCreateTerminalByOwner(ownerKey, {
@@ -321,6 +330,13 @@ export async function ensureTerminal(
 				rows: 32,
 				ptyOwnerKey: ownerKey,
 			});
+			if (entry.disposed) {
+				await killTerminalApi(result.ptyId).catch(() => ({ ok: false }));
+				entry.status = "exited";
+				entry.activityStatus = "exited";
+				entry.ptyId = null;
+				return snapshot(entry);
+			}
 
 			entry.ptyId = result.ptyId;
 			entry.shell = shell;
@@ -356,6 +372,9 @@ export async function ensureTerminal(
 			notifyStatus(entry);
 			return snapshot(entry);
 		} catch (error) {
+			if (entry.disposed) {
+				return snapshot(entry);
+			}
 			entry.status = "error";
 			entry.activityStatus = "error";
 			entry.exitCode = 1;
@@ -387,10 +406,10 @@ export async function terminateWorkspaceTerminals(workspaceIds: readonly string[
 	const terminations: Array<Promise<boolean>> = [];
 	for (const entry of entries.values()) {
 		if (
-			entry.ptyId &&
+			(entry.ptyId || entry.spawnPromise) &&
 			prefixes.some((prefix) => entry.terminalId.startsWith(prefix))
 		) {
-			terminations.push(killTerminal(entry.terminalId));
+			terminations.push(disposeTerminal(entry.terminalId));
 		}
 	}
 	const results = await Promise.all(terminations);
@@ -478,6 +497,45 @@ export function killTerminal(terminalId: string): Promise<boolean> {
 	entry.exitCode = entry.exitCode ?? -1;
 	ptyToTerminal.delete(ptyId);
 	notifyStatus(entry);
+	return killTerminalApi(ptyId)
+		.then((result) => result.ok)
+		.catch(() => false);
+}
+
+/**
+ * Permanently forgets a terminal after its owning tab/workspace is removed.
+ *
+ * `killTerminal` intentionally retains the entry so an exited tab can display
+ * its final output or be restarted. Closing the tab is different: keeping that
+ * entry would retain up to MAX_CHUNK_BYTES indefinitely in this module-level
+ * store. Remove the routing first so late PTY events cannot recreate output in
+ * a terminal the user has already closed.
+ */
+export function disposeTerminal(terminalId: string): Promise<boolean> {
+	const entryKey = terminalEntryKey(terminalId);
+	const entry = entries.get(entryKey);
+	if (!entry) {
+		return Promise.resolve(false);
+	}
+
+	const ptyId = entry.ptyId;
+	const spawnPromise = entry.spawnPromise;
+	entry.disposed = true;
+	if (ptyId) {
+		ptyToTerminal.delete(ptyId);
+	}
+	entry.listeners.clear();
+	entry.chunks = [];
+	entry.bufferedBytes = 0;
+	entries.delete(entryKey);
+	notifyStoreListeners();
+
+	if (!ptyId) {
+		return spawnPromise
+			? spawnPromise.then(() => true).catch(() => false)
+			: Promise.resolve(true);
+	}
+
 	return killTerminalApi(ptyId)
 		.then((result) => result.ok)
 		.catch(() => false);

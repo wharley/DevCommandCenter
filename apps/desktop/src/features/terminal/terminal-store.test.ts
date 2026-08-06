@@ -27,17 +27,17 @@ vi.mock("@/lib/terminal-api", () => ({
 describe("terminal sizing during PTY startup", () => {
 	beforeEach(() => {
 		vi.resetModules();
-		terminalApi.getDefaultShell.mockResolvedValue({ shell: "/bin/zsh" });
-		terminalApi.getOrCreateTerminalByOwner.mockResolvedValue({
+		terminalApi.getDefaultShell.mockReset().mockResolvedValue({ shell: "/bin/zsh" });
+		terminalApi.getOrCreateTerminalByOwner.mockReset().mockResolvedValue({
 			ptyId: "pty-1",
 			existing: false,
 			session: { status: "running", lastExitCode: null },
 			chunks: [],
 			truncated: false,
 		});
-		terminalApi.listenTerminalExit.mockResolvedValue(() => {});
-		terminalApi.listenTerminalOutput.mockResolvedValue(() => {});
-		terminalApi.listTerminalRuntimeActivity.mockResolvedValue([]);
+		terminalApi.listenTerminalExit.mockReset().mockResolvedValue(() => {});
+		terminalApi.listenTerminalOutput.mockReset().mockResolvedValue(() => {});
+		terminalApi.listTerminalRuntimeActivity.mockReset().mockResolvedValue([]);
 		terminalApi.resizeTerminal.mockReset();
 		terminalApi.killTerminal.mockResolvedValue({ ok: true });
 		terminalApi.writeTerminalStdin.mockResolvedValue({ ok: true });
@@ -100,7 +100,7 @@ describe("terminal sizing during PTY startup", () => {
 				truncated: false,
 			}),
 		);
-		const { ensureTerminal, terminateWorkspaceTerminals } = await import(
+		const { ensureTerminal, getTerminalSnapshot, terminateWorkspaceTerminals } = await import(
 			"./terminal-store"
 		);
 		const context = {
@@ -120,5 +120,69 @@ describe("terminal sizing during PTY startup", () => {
 		expect(terminalApi.killTerminal).toHaveBeenCalledWith(
 			"pty-terminal:worktree:workspace-a:tab-1",
 		);
+		expect(getTerminalSnapshot("worktree:workspace-a:tab-1")).toBeNull();
+		expect(getTerminalSnapshot("worktree:workspace-b:tab-1")).not.toBeNull();
+	});
+
+	it("drops buffered output when a terminal tab is disposed", async () => {
+		const { disposeTerminal, ensureTerminal, getTerminalSnapshot } = await import(
+			"./terminal-store"
+		);
+		await ensureTerminal("terminal-disposed", "/workspace", {
+			title: "Terminal",
+			workspaceName: "Workspace",
+			workspaceBranch: "main",
+			providerLabel: null,
+			sessionState: "idle",
+			sessionId: null,
+		});
+
+		expect(getTerminalSnapshot("terminal-disposed")).not.toBeNull();
+		expect(await disposeTerminal("terminal-disposed")).toBe(true);
+		expect(getTerminalSnapshot("terminal-disposed")).toBeNull();
+		expect(terminalApi.killTerminal).toHaveBeenCalledWith("pty-1");
+	});
+
+	it("kills a PTY that finishes spawning after its tab was disposed", async () => {
+		let resolveSpawn!: (value: {
+			ptyId: string;
+			existing: boolean;
+			session: { status: string; lastExitCode: null };
+			chunks: string[];
+			truncated: boolean;
+		}) => void;
+		terminalApi.getOrCreateTerminalByOwner.mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveSpawn = resolve;
+			}),
+		);
+		const { disposeTerminal, ensureTerminal, getTerminalSnapshot } = await import(
+			"./terminal-store"
+		);
+		const starting = ensureTerminal("terminal-starting", "/workspace", {
+			title: "Terminal",
+			workspaceName: "Workspace",
+			workspaceBranch: "main",
+			providerLabel: null,
+			sessionState: "idle",
+			sessionId: null,
+		});
+		await vi.waitFor(() => {
+			expect(terminalApi.getOrCreateTerminalByOwner).toHaveBeenCalled();
+		});
+
+		const disposing = disposeTerminal("terminal-starting");
+		resolveSpawn({
+			ptyId: "pty-late",
+			existing: false,
+			session: { status: "running", lastExitCode: null },
+			chunks: [],
+			truncated: false,
+		});
+
+		await starting;
+		expect(await disposing).toBe(true);
+		expect(getTerminalSnapshot("terminal-starting")).toBeNull();
+		expect(terminalApi.killTerminal).toHaveBeenCalledWith("pty-late");
 	});
 });

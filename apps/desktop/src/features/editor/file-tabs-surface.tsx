@@ -13,7 +13,10 @@ import {
 	DiffAnnotationPopover,
 	type PendingAnnotation,
 } from "./diff-annotation";
-import { hasDirtyFileSurfaceState } from "./file-surface.logic";
+import {
+	hasDirtyFileSurfaceState,
+	shouldKeepFileSurfaceMounted,
+} from "./file-surface.logic";
 import {
 	WorkspaceFileEditor,
 	WorkspaceFileSurface,
@@ -145,6 +148,30 @@ export function FileTabsSurface({
 		});
 		activateTab(path);
 	}, [path, name, openRequestId, focusLine, activateTab]);
+
+	// Preview replacement can remove a tab without going through closeTab. Prune
+	// its externalized editor state as soon as it is no longer represented in the
+	// strip, otherwise file bodies and buffers would stay reachable indefinitely.
+	useEffect(() => {
+		const openPaths = new Set(openFiles.map((file) => file.path));
+		for (const filePath of buffersRef.current.keys()) {
+			if (!openPaths.has(filePath)) buffersRef.current.delete(filePath);
+		}
+		for (const filePath of contentByPathRef.current.keys()) {
+			if (!openPaths.has(filePath)) contentByPathRef.current.delete(filePath);
+		}
+		for (const filePath of cursorByPathRef.current.keys()) {
+			if (!openPaths.has(filePath)) cursorByPathRef.current.delete(filePath);
+		}
+		setStateByPath((prev) => {
+			const retained = Object.fromEntries(
+				Object.entries(prev).filter(([filePath]) => openPaths.has(filePath)),
+			);
+			return Object.keys(retained).length === Object.keys(prev).length
+				? prev
+				: retained;
+		});
+	}, [openFiles]);
 
 	const handleBufferSnapshot = useCallback((filePath: string, content: string) => {
 		buffersRef.current.set(filePath, content);
@@ -353,8 +380,7 @@ export function FileTabsSurface({
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [pending, requestCloseAll]);
 
-	// On tab switch, re-measure + focus the now-visible editor (kept-alive surfaces
-	// can render at zero size while hidden under display:none).
+	// On tab switch, re-measure + focus the shared editor after its model swap.
 	useEffect(() => {
 		const revealActive = () => {
 			surfaceRefs.current.get(activePath)?.reveal();
@@ -372,6 +398,32 @@ export function FileTabsSurface({
 	}, [activePath, openRequestId]);
 
 	const activeState = stateByPath[activePath];
+	// Clean inactive surfaces are fully unmounted so their React Query observers
+	// release file payloads for the short heavy-payload GC window. Dirty/saving
+	// surfaces remain alive to preserve reconciliation and in-flight save behavior.
+	const mountedFiles = openFiles.filter((file) => {
+		return shouldKeepFileSurfaceMounted(
+			file.path,
+			activePath,
+			stateByPath[file.path],
+		);
+	});
+	useEffect(() => {
+		for (const file of openFiles) {
+			if (
+				!shouldKeepFileSurfaceMounted(
+					file.path,
+					activePath,
+					stateByPath[file.path],
+				)
+			) {
+				// Clean content is reproducible from disk. Keep only the cursor so a
+				// revisit feels continuous without pinning duplicate file strings.
+				buffersRef.current.delete(file.path);
+				contentByPathRef.current.delete(file.path);
+			}
+		}
+	}, [activePath, openFiles, stateByPath]);
 
 	return (
 		<section
@@ -424,7 +476,7 @@ export function FileTabsSurface({
 				</div>
 			</div>
 			<div className="relative min-h-0 flex-1 bg-background">
-				{openFiles.map((file) => (
+				{mountedFiles.map((file) => (
 					<div
 						key={file.path}
 						aria-hidden={file.path !== activePath}

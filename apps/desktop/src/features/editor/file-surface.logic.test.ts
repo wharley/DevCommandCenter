@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	hasDirtyFileSurfaceState,
 	resolveFileSurfaceContentState,
+	shouldKeepFileSurfaceMounted,
 } from "./file-surface.logic";
 
 describe("file surface logic", () => {
@@ -39,6 +40,33 @@ describe("file surface logic", () => {
 		expect(
 			hasDirtyFileSurfaceState({
 				"a.ts": { dirty: false, saving: false },
+			}),
+		).toBe(false);
+	});
+
+	it("unmounts only clean inactive file surfaces", () => {
+		expect(
+			shouldKeepFileSurfaceMounted("active.ts", "active.ts", {
+				dirty: false,
+				saving: false,
+			}),
+		).toBe(true);
+		expect(
+			shouldKeepFileSurfaceMounted("dirty.ts", "active.ts", {
+				dirty: true,
+				saving: false,
+			}),
+		).toBe(true);
+		expect(
+			shouldKeepFileSurfaceMounted("saving.ts", "active.ts", {
+				dirty: false,
+				saving: true,
+			}),
+		).toBe(true);
+		expect(
+			shouldKeepFileSurfaceMounted("clean.ts", "active.ts", {
+				dirty: false,
+				saving: false,
 			}),
 		).toBe(false);
 	});

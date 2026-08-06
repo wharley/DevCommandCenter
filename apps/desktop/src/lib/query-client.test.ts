@@ -3,10 +3,12 @@ import type { PersistedClient } from "@tanstack/react-query-persist-client";
 import { describe, expect, it, vi } from "vitest";
 import {
 	compactDccPersistedClient,
+	configureDccQueryGcDefaults,
 	createDccQueryCacheStorage,
 	DCC_QUERY_CACHE_BUSTER,
 	DCC_QUERY_CACHE_MAX_CHARS,
 	DCC_QUERY_CACHE_STORAGE_KEY,
+	DCC_QUERY_GC_TIME_MS,
 	prepareDccQueryCacheStorage,
 	serializeDccQueryCache,
 	shouldPersistDccQuery,
@@ -49,6 +51,38 @@ function persistedClient(queryClient: QueryClient): PersistedClient {
 }
 
 describe("DCC query cache persistence", () => {
+	it("keeps metadata warm but quickly collects reloadable heavy payloads", () => {
+		const queryClient = configureDccQueryGcDefaults(
+			new QueryClient({
+				defaultOptions: {
+					queries: { gcTime: DCC_QUERY_GC_TIME_MS.default },
+				},
+			}),
+		);
+
+		expect(queryClient.getDefaultOptions().queries?.gcTime).toBe(
+			DCC_QUERY_GC_TIME_MS.default,
+		);
+		expect(queryClient.getQueryDefaults(["workspaces", "local"]).gcTime).toBe(
+			DCC_QUERY_GC_TIME_MS.metadata,
+		);
+		expect(
+			queryClient.getQueryDefaults(["sessionThreads", "local", "session-1"])
+				.gcTime,
+		).toBe(DCC_QUERY_GC_TIME_MS.history);
+		expect(
+			queryClient.getQueryDefaults(["workspaceFileContent", "/repo", "large.ts"])
+				.gcTime,
+		).toBe(DCC_QUERY_GC_TIME_MS.heavyPayload);
+		expect(
+			queryClient.getQueryDefaults(["pullRequestHub", "detailCode", "pr-1"])
+				.gcTime,
+		).toBe(DCC_QUERY_GC_TIME_MS.heavyPayload);
+		expect(queryClient.getQueryDefaults(["sessionSearch", "term"]).gcTime).toBe(
+			DCC_QUERY_GC_TIME_MS.search,
+		);
+	});
+
 	it("persists shell metadata and thread histories but excludes file payloads", () => {
 		const queryClient = new QueryClient();
 		queryClient.setQueryData(["workspaces", "local"], [{ id: "workspace-1" }]);

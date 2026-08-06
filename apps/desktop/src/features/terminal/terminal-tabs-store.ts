@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { killTerminal } from "./terminal-store";
+import { disposeTerminal } from "./terminal-store";
 
 export type TerminalTab = {
 	id: string;
@@ -159,7 +159,7 @@ export function removeTerminal(scopeKey: string, terminalId: string) {
 		return;
 	}
 
-	void killTerminal(getTerminalRuntimeId(scopeKey, terminalId));
+	void disposeTerminal(getTerminalRuntimeId(scopeKey, terminalId));
 	const tabs = current.tabs.filter((tab) => tab.id !== terminalId);
 
 	let activeId = current.activeId;

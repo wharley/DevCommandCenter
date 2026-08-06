@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const terminalStore = vi.hoisted(() => ({
+	disposeTerminal: vi.fn(),
+}));
+
 vi.mock("./terminal-store", () => ({
-	killTerminal: vi.fn(),
+	disposeTerminal: terminalStore.disposeTerminal,
 }));
 
 describe("terminal tab names", () => {
@@ -9,11 +13,25 @@ describe("terminal tab names", () => {
 
 	beforeEach(() => {
 		vi.resetModules();
+		terminalStore.disposeTerminal.mockReset();
 		values.clear();
 		vi.stubGlobal("localStorage", {
 			getItem: (key: string) => values.get(key) ?? null,
 			setItem: (key: string, value: string) => values.set(key, value),
 		});
+	});
+
+	it("disposes the runtime when a tab is permanently closed", async () => {
+		const { addTerminal, getTerminalRuntimeId, removeTerminal } = await import(
+			"./terminal-tabs-store"
+		);
+		const tabId = addTerminal("project-1");
+
+		removeTerminal("project-1", tabId!);
+
+		expect(terminalStore.disposeTerminal).toHaveBeenCalledWith(
+			getTerminalRuntimeId("project-1", tabId!),
+		);
 	});
 
 	it("persists a renamed tab without changing its identity", async () => {

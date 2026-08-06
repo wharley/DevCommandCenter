@@ -28,3 +28,16 @@ export function hasDirtyFileSurfaceState(
 ) {
 	return Object.values(stateByPath).some((state) => state.dirty);
 }
+
+/**
+ * Clean inactive file surfaces are reproducible from their externalized buffer
+ * and query data, so keeping their observers mounted only retains large payloads.
+ * Dirty and saving tabs stay alive to preserve conflict reconciliation and writes.
+ */
+export function shouldKeepFileSurfaceMounted(
+	filePath: string,
+	activePath: string,
+	state?: FileSurfaceTabState,
+) {
+	return filePath === activePath || Boolean(state?.dirty || state?.saving);
+}
