@@ -1,9 +1,13 @@
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
 
 export function shouldAutoOpenAssistantActivity(
-	_annotations: WorkspaceMessageAnnotation[],
+	annotations: WorkspaceMessageAnnotation[],
 ) {
-	// Live state, counters and failures remain visible in the summary. Details
-	// only open when the user explicitly asks to inspect the activity timeline.
-	return false;
+	return annotations.some(
+		(annotation) =>
+			Boolean(annotation.streaming) ||
+			(annotation.type === "tool-call" && annotation.status?.type === "failed") ||
+			(annotation.type === "native-subagent" &&
+				(annotation.status === "running" || annotation.status === "failed")),
+	);
 }

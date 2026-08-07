@@ -1,4 +1,5 @@
 import ReactDOM from "react-dom/client";
+import type { ErrorInfo, RootOptions } from "react-dom/client";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import App from "./App";
 import { SplashScreen } from "./components/SplashScreen";
@@ -13,7 +14,21 @@ import "./styles/app.css";
 
 const queryClient = createDccQueryClient();
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+function reportReactRootError(kind: "uncaught" | "recoverable", error: unknown, info: ErrorInfo) {
+	console.error(`[dcc][react] ${kind} root error`, error, {
+		componentStack: info.componentStack,
+	});
+}
+
+const reactRootOptions: RootOptions | undefined = import.meta.env.DEV
+	? {
+			onUncaughtError: (error, info) => reportReactRootError("uncaught", error, info),
+			onRecoverableError: (error, info) =>
+				reportReactRootError("recoverable", error, info),
+		}
+	: undefined;
+
+ReactDOM.createRoot(document.getElementById("root")!, reactRootOptions).render(
 	<ThemeProvider>
 		<TooltipProvider delayDuration={0}>
 			<PersistQueryClientProvider

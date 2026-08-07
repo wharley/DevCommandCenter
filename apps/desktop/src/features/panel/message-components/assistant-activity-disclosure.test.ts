@@ -5,21 +5,34 @@ import { shouldAutoOpenAssistantActivity } from "./assistant-activity-disclosure
 const annotation = (value: object) => value as WorkspaceMessageAnnotation;
 
 describe("assistant activity disclosure", () => {
-	it("stays collapsed by default for live, failed and settled activity", () => {
+	it("opens for live and failed activity but not settled activity", () => {
 		expect(
 			shouldAutoOpenAssistantActivity([
 				annotation({ type: "reasoning", streaming: true }),
 			]),
-		).toBe(false);
+		).toBe(true);
 		expect(
 			shouldAutoOpenAssistantActivity([
 				annotation({ type: "tool-call", status: { type: "failed" } }),
 			]),
-		).toBe(false);
+		).toBe(true);
 		expect(
 			shouldAutoOpenAssistantActivity([
 				annotation({ type: "tool-call", status: { type: "completed" } }),
 			]),
 		).toBe(false);
+	});
+
+	it("opens while a native subagent is running or failed", () => {
+		expect(
+			shouldAutoOpenAssistantActivity([
+				annotation({ type: "native-subagent", status: "running" }),
+			]),
+		).toBe(true);
+		expect(
+			shouldAutoOpenAssistantActivity([
+				annotation({ type: "native-subagent", status: "failed" }),
+			]),
+		).toBe(true);
 	});
 });

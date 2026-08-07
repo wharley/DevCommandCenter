@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertCircle, ChevronRight, Copy, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
@@ -20,6 +20,10 @@ import {
 import { parseMissionValidationReport } from "@/features/spec/mission-spec-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
 import { shouldAutoOpenAssistantActivity } from "./assistant-activity-disclosure";
+import {
+	ASSISTANT_STREAMDOWN_SHIKI_THEME,
+	assistantStreamingAnimation,
+} from "./assistant-streaming-rendering";
 
 type AssistantStatus = {
 	type: "incomplete";
@@ -87,7 +91,13 @@ function AssistantActivityGroup({
 				.filter((value, index, all) => all.indexOf(value) === index)
 				.join(" · ")
 		: null;
-	const [isOpen, setIsOpen] = useState(shouldStayOpen);
+	const initialOpenRef = useRef(shouldStayOpen);
+	const [isOpen, setIsOpen] = useState(initialOpenRef.current);
+	const detailsRef = useRef<HTMLDetailsElement | null>(null);
+	const handleDetailsRef = useCallback((details: HTMLDetailsElement | null) => {
+		detailsRef.current = details;
+		if (details) details.open = initialOpenRef.current;
+	}, []);
 	// Once the user toggles by hand, auto open/close stops driving this disclosure.
 	const userToggledRef = useRef(false);
 
@@ -95,19 +105,22 @@ function AssistantActivityGroup({
 		if (userToggledRef.current) {
 			return;
 		}
-		setIsOpen(shouldStayOpen);
+		const details = detailsRef.current;
+		if (details && details.open !== shouldStayOpen) {
+			details.open = shouldStayOpen;
+		}
+		setIsOpen((current) => (current === shouldStayOpen ? current : shouldStayOpen));
 	}, [shouldStayOpen]);
 
 	return (
 		<details
+			ref={handleDetailsRef}
 			className="mb-2 flex min-w-0 flex-col rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2"
-			open={isOpen}
+			onToggle={(event) => setIsOpen(event.currentTarget.open)}
 		>
 			<summary
-				onClick={(event) => {
-					event.preventDefault();
+				onClick={() => {
 					userToggledRef.current = true;
-					setIsOpen((open) => !open);
 				}}
 				className="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground [&::-webkit-details-marker]:hidden"
 			>
@@ -403,15 +416,11 @@ export function AssistantMessage({
 						<Suspense fallback={<AssistantTextFallback text={content} />}>
 							<LazyStreamdown
 								mode={streaming ? "streaming" : "static"}
-								animated={
-									streaming
-										? { animation: "blurIn", duration: 150, stagger: 30, sep: "word" }
-										: false
-								}
+								animated={assistantStreamingAnimation(streaming, content.length)}
 								caret={streaming ? "block" : undefined}
 								className="conversation-streamdown"
 								isAnimating={Boolean(streaming)}
-								shikiTheme={["github-light", "github-dark"]}
+								shikiTheme={ASSISTANT_STREAMDOWN_SHIKI_THEME}
 							>
 								{content}
 							</LazyStreamdown>

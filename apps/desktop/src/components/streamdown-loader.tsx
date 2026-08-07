@@ -1,4 +1,4 @@
-import { lazy } from "react";
+import { lazy, useMemo } from "react";
 import type { StreamdownProps } from "streamdown";
 import "streamdown/styles.css";
 
@@ -8,13 +8,26 @@ export const LazyStreamdown = lazy(async () => {
 		import("@/components/streamdown-components"),
 	]);
 
-	const LazyRenderer = (props: StreamdownProps) => (
-		<Streamdown
-			{...props}
-			components={{ ...streamdownComponents, ...props.components }}
-			shikiTheme={props.shikiTheme ?? ["github-light", "github-dark"]}
-		/>
-	);
+	const defaultShikiTheme: NonNullable<StreamdownProps["shikiTheme"]> = [
+		"github-light",
+		"github-dark",
+	];
+	const LazyRenderer = (props: StreamdownProps) => {
+		const components = useMemo(
+			() =>
+				props.components
+					? { ...streamdownComponents, ...props.components }
+					: streamdownComponents,
+			[props.components],
+		);
+		return (
+			<Streamdown
+				{...props}
+				components={components}
+				shikiTheme={props.shikiTheme ?? defaultShikiTheme}
+			/>
+		);
+	};
 
 	return {
 		default: LazyRenderer,

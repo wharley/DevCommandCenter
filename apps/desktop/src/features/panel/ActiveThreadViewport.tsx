@@ -81,9 +81,14 @@ export function ActiveThreadViewport({
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
 	const [hasNewActivity, setHasNewActivity] = useState(false);
+	const hasStreamingMessage = messages.some(
+		(message) => message.role === "assistant" && Boolean(message.streaming),
+	);
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
 		initial: "instant",
-		resize: "smooth",
+		// Token-by-token height changes should not start overlapping smooth-scroll
+		// animations. Explicit user navigation remains smooth below.
+		resize: hasStreamingMessage ? "instant" : "smooth",
 	});
 
 	const activitySignature = latestConversationActivitySignature(messages);

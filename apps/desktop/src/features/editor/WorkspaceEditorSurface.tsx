@@ -1,5 +1,5 @@
 import { ExternalLink, MessageSquare, Send, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TrafficLightSpacer } from "@/components/chrome/traffic-light-spacer";
 import { Button } from "@/components/ui/button";
@@ -84,6 +84,20 @@ function WorkspaceEditorDiff({
 	annotateLabelRef.current = annotateLabel;
 	const onMachineAnnotationClickRef = useRef(onMachineAnnotationClick);
 	onMachineAnnotationClickRef.current = onMachineAnnotationClick;
+	const editorStateRef = useRef({
+		originalText,
+		modifiedText,
+		inline,
+		focusLine,
+		machineAnnotations,
+	});
+	editorStateRef.current = {
+		originalText,
+		modifiedText,
+		inline,
+		focusLine,
+		machineAnnotations,
+	};
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
@@ -95,7 +109,7 @@ function WorkspaceEditorDiff({
 		[],
 	);
 
-	useLayoutEffect(() => {
+	useEffect(() => {
 		const host = hostRef.current;
 		if (!host) return;
 
@@ -112,14 +126,15 @@ function WorkspaceEditorDiff({
 		void (async () => {
 			try {
 				const { createDiffEditor } = await import("@/lib/monaco-runtime");
+				const current = editorStateRef.current;
 				const controller = await createDiffEditor({
 					container: host,
 					path,
-					originalText,
-					modifiedText,
-					inline,
-					focusLine,
-					machineAnnotations,
+					originalText: current.originalText,
+					modifiedText: current.modifiedText,
+					inline: current.inline,
+					focusLine: current.focusLine,
+					machineAnnotations: current.machineAnnotations,
 					onAnnotate: (payload) => onAnnotateRef.current?.(payload),
 					annotateLabel: annotateLabelRef.current,
 					onMachineAnnotationClick: (payload) =>
@@ -133,6 +148,14 @@ function WorkspaceEditorDiff({
 				}
 
 				controllerRef.current = controller;
+				const latest = editorStateRef.current;
+				controller.setTexts({
+					originalText: latest.originalText,
+					modifiedText: latest.modifiedText,
+					inline: latest.inline,
+				});
+				controller.setMachineAnnotations(latest.machineAnnotations ?? []);
+				if (latest.focusLine) controller.revealLine(latest.focusLine);
 				setLoading(false);
 				requestAnimationFrame(() => {
 					if (disposed || requestId !== requestIdRef.current) {
@@ -152,7 +175,7 @@ function WorkspaceEditorDiff({
 		return () => {
 			disposed = true;
 		};
-	}, [focusLine, inline, machineAnnotations, modifiedText, originalText, path, reviewCommentLabel]);
+	}, [path, reviewCommentLabel]);
 
 	useEffect(() => {
 		controllerRef.current?.setTexts({
