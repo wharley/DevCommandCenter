@@ -199,7 +199,7 @@ export default function WorkspaceChangesDiff({
 		>
 			<CodeView<AnnotationMetadata>
 				ref={viewRef}
-				className="h-full min-h-0 min-w-0"
+				className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto"
 				items={items}
 				selectedLines={selectedLines}
 				onSelectedLinesChange={setSelectedLines}
