@@ -8,6 +8,7 @@ use crate::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion}
 use crate::ports::ProviderRuntimeConfig;
 
 use super::delegation::DelegationId;
+use super::provider::NativeSubagentStatus;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct SessionId(pub String);
@@ -261,6 +262,19 @@ pub enum SessionEventKind {
         request_id: String,
         behavior: String,
     },
+    TurnNativeSubagentActivity {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        id: String,
+        #[serde(rename = "agentId")]
+        agent_id: Option<String>,
+        #[serde(rename = "agentThreadId")]
+        agent_thread_id: Option<String>,
+        name: Option<String>,
+        role: Option<String>,
+        model: Option<String>,
+        status: NativeSubagentStatus,
+    },
     TurnCompleted {
         #[serde(rename = "turnId")]
         turn_id: TurnId,
@@ -421,6 +435,7 @@ impl SessionProjection {
             | SessionEventKind::TurnUserInputResolved { .. }
             | SessionEventKind::TurnPermissionRequested { .. }
             | SessionEventKind::TurnPermissionResolved { .. }
+            | SessionEventKind::TurnNativeSubagentActivity { .. }
             | SessionEventKind::PlanApproved { .. }
             | SessionEventKind::PlanHandedOff { .. }
             | SessionEventKind::DelegationRequested { .. }

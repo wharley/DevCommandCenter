@@ -23,6 +23,7 @@ import {
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 import { resolveClaudeApprovalOptions } from "./approval-policy.mjs";
 import { createDccMcpPermissionHooks } from "./mcp-permission-hook.mjs";
+import { createNativeSubagentHooks } from "./native-subagent-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 
 const SIDECAR_VERSION = "0.1.42";
@@ -290,9 +291,12 @@ async function runTurn(payload, state) {
 			includePartialMessages: true,
 			settingSources: ["user", "project", "local"],
 			...mcpOptions,
-			...(hasDccMcpServers
-				? { hooks: createDccMcpPermissionHooks(state, emit) }
-				: {}),
+			hooks: {
+				...createNativeSubagentHooks(emit),
+				...(hasDccMcpServers
+					? createDccMcpPermissionHooks(state, emit)
+					: {}),
+			},
 			effort: normalizeEffort(payload?.effort),
 			systemPrompt: buildSystemPrompt(payload?.fastMode, payload?.toolInstructions),
 			canUseTool: async (toolName, input, options) => {

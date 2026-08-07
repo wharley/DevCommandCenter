@@ -40,7 +40,8 @@ function isActivityAnnotation(annotation: WorkspaceMessageAnnotation) {
 	return (
 		annotation.type === "commentary" ||
 		annotation.type === "reasoning" ||
-		annotation.type === "tool-call"
+		annotation.type === "tool-call" ||
+		annotation.type === "native-subagent"
 	);
 }
 
@@ -52,15 +53,40 @@ function AssistantActivityGroup({
 	children: React.ReactNode;
 }) {
 	const { t } = useTranslation("common");
-	const isLive = annotations.some((annotation) => Boolean(annotation.streaming));
-	const toolCount = annotations.filter((annotation) => annotation.type === "tool-call").length;
+	const isLive = annotations.some(
+		(annotation) =>
+			Boolean(annotation.streaming) ||
+			(annotation.type === "native-subagent" && annotation.status === "running"),
+	);
+	const nativeSubagents = annotations.filter(
+		(annotation) => annotation.type === "native-subagent",
+	);
+	const toolCount = annotations.filter(
+		(annotation) => annotation.type === "tool-call" || annotation.type === "native-subagent",
+	).length;
 	const reasoningCount = annotations.filter(
 		(annotation) => annotation.type === "reasoning" || annotation.type === "commentary",
 	).length;
 	const failedCount = annotations.filter(
-		(annotation) => annotation.type === "tool-call" && annotation.status?.type === "failed",
+		(annotation) =>
+			(annotation.type === "tool-call" && annotation.status?.type === "failed") ||
+			(annotation.type === "native-subagent" && annotation.status === "failed"),
 	).length;
 	const shouldStayOpen = shouldAutoOpenAssistantActivity(annotations);
+	const visibleNativeSubagent =
+		nativeSubagents.find((annotation) => annotation.status === "running") ??
+		nativeSubagents.at(-1);
+	const nativeSubagentSummary = visibleNativeSubagent
+		? [
+				visibleNativeSubagent.name ??
+					visibleNativeSubagent.role ??
+					visibleNativeSubagent.model ??
+					t("conversation.nativeSubagent.fallbackName"),
+				visibleNativeSubagent.model ?? t("conversation.nativeSubagent.modelNotReported"),
+			]
+				.filter((value, index, all) => all.indexOf(value) === index)
+				.join(" · ")
+		: null;
 	const [isOpen, setIsOpen] = useState(shouldStayOpen);
 	// Once the user toggles by hand, auto open/close stops driving this disclosure.
 	const userToggledRef = useRef(false);
@@ -100,10 +126,11 @@ function AssistantActivityGroup({
 						: t("conversation.activity.completed")}
 				</span>
 				<span className="truncate text-muted-foreground/70">
-					{t("conversation.activity.summary", {
-						actions: toolCount,
-						thoughts: reasoningCount,
-					})}
+					{nativeSubagentSummary ??
+						t("conversation.activity.summary", {
+							actions: toolCount,
+							thoughts: reasoningCount,
+						})}
 				</span>
 				{failedCount > 0 ? (
 					<span className="ml-auto shrink-0 rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] text-destructive">
@@ -209,6 +236,41 @@ export function AssistantMessage({
 				{activityAnnotations.length ? (
 					<AssistantActivityGroup annotations={activityAnnotations}>
 						{activityAnnotations.map((annotation) => {
+							if (annotation.type === "native-subagent") {
+								const identity =
+									annotation.name ??
+									annotation.role ??
+									annotation.model ??
+									t("conversation.nativeSubagent.fallbackName");
+								const details = [
+									annotation.role,
+									annotation.model ?? t("conversation.nativeSubagent.modelNotReported"),
+								]
+									.filter((value, index, all) => Boolean(value) && all.indexOf(value) === index)
+									.join(" · ");
+								const status = t(
+									`conversation.nativeSubagent.status.${annotation.status}`,
+								);
+								return (
+									<div
+										key={`native-subagent-${annotation.id}`}
+										className="flex min-w-0 items-center gap-2 rounded-md border border-border/50 bg-background/40 px-2.5 py-2 text-[12px]"
+									>
+										{annotation.status === "running" ? (
+											<DccThinkingIndicator size={12} />
+										) : (
+											<Activity className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+										)}
+										<div className="min-w-0">
+											<div className="truncate font-medium text-foreground/85">{identity}</div>
+											<div className="truncate text-muted-foreground">{details}</div>
+										</div>
+										<span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+											{status}
+										</span>
+									</div>
+								);
+							}
 							if (annotation.type === "commentary") {
 								return (
 									<div

@@ -10,6 +10,17 @@ use crate::ports::provider::{
     ProviderPermissionRequest, ProviderUserInputAnswer, ProviderUserInputQuestion,
 };
 
+/// Lifecycle reported by a provider for one of its own native subagents.  This
+/// is deliberately separate from a DCC delegation: it has no DCC child
+/// session and is emitted only when the provider supplies structured data.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeSubagentStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(transparent)]
 pub struct ProviderId(pub String);
@@ -243,6 +254,19 @@ pub enum ProviderEvent {
     /// credential bytes remain in the provider's private drain channel.
     McpOauthStateChanged {
         definition_id: crate::domain::mcp::McpDefinitionId,
+    },
+    NativeSubagentActivity {
+        id: String,
+        agent_id: Option<String>,
+        agent_thread_id: Option<String>,
+        name: Option<String>,
+        role: Option<String>,
+        /// Requested model only. Adapters must leave this `None` when the
+        /// provider does not explicitly report it; it is never inferred from
+        /// the parent session model.
+        model: Option<String>,
+        status: NativeSubagentStatus,
+        at: String,
     },
     TextDelta {
         content: String,

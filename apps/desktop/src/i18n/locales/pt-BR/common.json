@@ -2006,6 +2006,15 @@
     "commentary": {
       "label": "Atualização do progresso"
     },
+    "nativeSubagent": {
+      "fallbackName": "Subagente",
+      "modelNotReported": "modelo não informado",
+      "status": {
+        "running": "Trabalhando",
+        "completed": "Concluído",
+        "failed": "Falhou"
+      }
+    },
     "toolCall": {
       "running": "Executando",
       "failed": "Falhou",

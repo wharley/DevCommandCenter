@@ -34,6 +34,8 @@ function eventSessionId(event: CoreEvent): string | null {
 		("sessionTurnToolCallCompleted" in event &&
 			event.sessionTurnToolCallCompleted) ||
 		("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) ||
+		("sessionTurnNativeSubagentActivity" in event &&
+			event.sessionTurnNativeSubagentActivity) ||
 		("sessionTurnCompleted" in event && event.sessionTurnCompleted) ||
 		("sessionTurnAborted" in event && event.sessionTurnAborted) ||
 		("sessionCheckpointCreated" in event && event.sessionCheckpointCreated) ||
@@ -64,6 +66,8 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnToolCallDelta" in event) return "session.turn.tool-call.delta";
 	if ("sessionTurnToolCallCompleted" in event) return "session.turn.tool-call.completed";
 	if ("sessionTurnToolCallFailed" in event) return "session.turn.tool-call.failed";
+	if ("sessionTurnNativeSubagentActivity" in event)
+		return "session.turn.native-subagent.activity";
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";

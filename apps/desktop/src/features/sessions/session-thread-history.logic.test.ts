@@ -978,4 +978,102 @@ describe("projectWorkspaceMessages", () => {
 			}),
 		]);
 	});
+
+	it("projects structured native subagent activity without creating a DCC delegation", () => {
+		const activity: SessionEventRecord = {
+			eventId: "event-native-subagent",
+			sessionId: "session-a",
+			sequence: 2,
+			occurredAt: "2026-05-01T12:00:01Z",
+			kind: {
+				type: "turn_native_subagent_activity",
+				turnId: "turn-1",
+				id: "agent-call-1",
+				agentId: "agent-1",
+				agentThreadId: "thread-child-1",
+				name: "Terra",
+				role: "explorer",
+				model: null,
+				status: "running",
+			},
+		};
+
+		const messages = projectWorkspaceMessages(
+			[sessionTurnStarted("session-a", "turn-1", "Investigate") as SessionEventRecord, activity],
+			[],
+			"session-a",
+		);
+		expect(messages).toHaveLength(2);
+		expect(messages[1]).toMatchObject({
+			role: "assistant",
+			annotations: [
+				{
+					type: "native-subagent",
+					id: "agent-call-1",
+					name: "Terra",
+					role: "explorer",
+					model: undefined,
+					status: "running",
+				},
+			],
+		});
+	});
+
+	it("keeps confirmed native subagent metadata when a later status event is sparse", () => {
+		const started: SessionEventRecord = {
+			eventId: "event-native-subagent-started",
+			sessionId: "session-a",
+			sequence: 2,
+			occurredAt: "2026-05-01T12:00:01Z",
+			kind: {
+				type: "turn_native_subagent_activity",
+				turnId: "turn-1",
+				id: "agent-1",
+				agentId: "agent-1",
+				agentThreadId: "thread-child-1",
+				name: "Terra",
+				role: "worker",
+				model: "gpt-5.6-terra",
+				status: "running",
+			},
+		};
+		const completed: SessionEventRecord = {
+			eventId: "event-native-subagent-completed",
+			sessionId: "session-a",
+			sequence: 3,
+			occurredAt: "2026-05-01T12:00:02Z",
+			kind: {
+				type: "turn_native_subagent_activity",
+				turnId: "turn-1",
+				id: "agent-1",
+				agentId: null,
+				agentThreadId: null,
+				name: null,
+				role: null,
+				model: null,
+				status: "completed",
+			},
+		};
+
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Investigate") as SessionEventRecord,
+				started,
+				completed,
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages[1]?.annotations).toContainEqual(
+			expect.objectContaining({
+				type: "native-subagent",
+				id: "agent-1",
+				name: "Terra",
+				role: "worker",
+				model: "gpt-5.6-terra",
+				status: "completed",
+			}),
+		);
+	});
 });

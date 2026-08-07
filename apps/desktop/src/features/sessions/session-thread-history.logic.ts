@@ -63,6 +63,18 @@ export type WorkspaceMessageAnnotation =
 			behavior?: string;
 			streaming?: boolean;
 			createdAt?: string;
+	  }
+	| {
+			type: "native-subagent";
+			id: string;
+			agentId?: string;
+			agentThreadId?: string;
+			name?: string;
+			role?: string;
+			model?: string;
+			status: "running" | "completed" | "failed";
+			streaming?: boolean;
+			createdAt?: string;
 	  };
 
 export type WorkspaceMessageDelegation = {
@@ -268,6 +280,20 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					behavior: record.kind.behavior,
 				},
 			};
+		case "turn_native_subagent_activity":
+			return {
+				sessionTurnNativeSubagentActivity: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					id: record.kind.id,
+					agent_id: record.kind.agentId,
+					agent_thread_id: record.kind.agentThreadId,
+					name: record.kind.name,
+					role: record.kind.role,
+					model: record.kind.model,
+					status: record.kind.status,
+				},
+			};
 		case "turn_completed":
 			return {
 				sessionTurnCompleted: {
@@ -461,6 +487,12 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnPermissionResolved" in event && event.sessionTurnPermissionResolved) {
 		return event.sessionTurnPermissionResolved.session_id;
 	}
+	if (
+		"sessionTurnNativeSubagentActivity" in event &&
+		event.sessionTurnNativeSubagentActivity
+	) {
+		return event.sessionTurnNativeSubagentActivity.session_id;
+	}
 	if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 		return event.sessionTurnCompleted.session_id;
 	}
@@ -523,6 +555,8 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnUserInputResolved" in event) return "session.turn.user-input.resolved";
 	if ("sessionTurnPermissionRequested" in event) return "session.turn.permission.requested";
 	if ("sessionTurnPermissionResolved" in event) return "session.turn.permission.resolved";
+	if ("sessionTurnNativeSubagentActivity" in event)
+		return "session.turn.native-subagent.activity";
 	if ("sessionTurnCompleted" in event) return "session.turn.completed";
 	if ("sessionTurnAborted" in event) return "session.turn.aborted";
 	if ("sessionCheckpointCreated" in event) return "session.checkpoint.created";
@@ -614,6 +648,15 @@ function eventSummary(event: CoreEvent): string {
 	}
 	if ("sessionTurnPermissionResolved" in event && event.sessionTurnPermissionResolved) {
 		return event.sessionTurnPermissionResolved.behavior;
+	}
+	if (
+		"sessionTurnNativeSubagentActivity" in event &&
+		event.sessionTurnNativeSubagentActivity
+	) {
+		const item = event.sessionTurnNativeSubagentActivity;
+		return [item.name ?? item.role ?? item.agent_id ?? item.agent_thread_id, item.model]
+			.filter(Boolean)
+			.join(" · ");
 	}
 	if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
 		return event.sessionTurnAborted.reason ?? "Turn aborted";
@@ -1280,6 +1323,42 @@ export function projectWorkspaceMessages(
 			if (annotation && annotation.type === "approval") {
 				annotation.behavior = event.sessionTurnPermissionResolved.behavior;
 				annotation.streaming = false;
+				annotation.createdAt ??= occurredAt;
+			}
+			continue;
+		}
+
+		if (
+			"sessionTurnNativeSubagentActivity" in event &&
+			event.sessionTurnNativeSubagentActivity
+		) {
+			const item = event.sessionTurnNativeSubagentActivity;
+			const key = item.turn_id;
+			const message = ensureAssistantMessage(
+				messages,
+				assistantBuckets,
+				item.session_id,
+				key,
+				turnStartedAtByTurnId.get(key) ?? occurredAt,
+			);
+			const annotation = getOrCreateAnnotation(message, {
+				type: "native-subagent",
+				id: item.id,
+				agentId: item.agent_id ?? undefined,
+				agentThreadId: item.agent_thread_id ?? undefined,
+				name: item.name ?? undefined,
+				role: item.role ?? undefined,
+				model: item.model ?? undefined,
+				status: item.status,
+				createdAt: occurredAt,
+			});
+			if (annotation.type === "native-subagent") {
+				annotation.agentId = item.agent_id ?? annotation.agentId;
+				annotation.agentThreadId = item.agent_thread_id ?? annotation.agentThreadId;
+				annotation.name = item.name ?? annotation.name;
+				annotation.role = item.role ?? annotation.role;
+				annotation.model = item.model ?? annotation.model;
+				annotation.status = item.status;
 				annotation.createdAt ??= occurredAt;
 			}
 			continue;

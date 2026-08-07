@@ -227,6 +227,7 @@ const SESSION_EVENT_NAMES = [
 	"dcc/session/turn/user-input/resolved",
 	"dcc/session/turn/permission/requested",
 	"dcc/session/turn/permission/resolved",
+	"dcc/session/turn/native-subagent/activity",
 	"dcc/session/turn/completed",
 	"dcc/session/turn/aborted",
 	"dcc/session/checkpoint/created",

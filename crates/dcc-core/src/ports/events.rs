@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
-use crate::domain::{mcp::McpRuntimeStatus, session::AssistantMessagePhase};
+use crate::domain::{
+    mcp::McpRuntimeStatus, provider::NativeSubagentStatus, session::AssistantMessagePhase,
+};
 use crate::Result;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -163,6 +165,17 @@ pub enum CoreEvent {
         turn_id: String,
         request_id: String,
         behavior: String,
+    },
+    SessionTurnNativeSubagentActivity {
+        session_id: String,
+        turn_id: String,
+        id: String,
+        agent_id: Option<String>,
+        agent_thread_id: Option<String>,
+        name: Option<String>,
+        role: Option<String>,
+        model: Option<String>,
+        status: NativeSubagentStatus,
     },
     SessionTurnCompleted {
         session_id: String,

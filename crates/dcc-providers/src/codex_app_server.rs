@@ -34,8 +34,9 @@ use dcc_core::{
             McpToolPolicyDecision,
         },
         provider::{
-            Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
-            ProviderApprovalPolicy, ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
+            Capabilities, HealthStatus, NativeSubagentStatus, ProviderAccountUsage,
+            ProviderAccountUsageState, ProviderApprovalPolicy, ProviderEvent, ProviderId,
+            ProviderUsageWindow, SessionHandle,
         },
         session::{AssistantMessagePhase, SessionId},
     },
@@ -401,6 +402,154 @@ fn codex_agent_message_phase(item: &Value) -> AssistantMessagePhase {
         Some("commentary") => AssistantMessagePhase::Commentary,
         Some("final_answer") | Some("finalAnswer") => AssistantMessagePhase::FinalAnswer,
         _ => AssistantMessagePhase::Unknown,
+    }
+}
+
+fn codex_native_subagent_status(value: Option<&Value>) -> Option<NativeSubagentStatus> {
+    match value.and_then(Value::as_str) {
+        Some("pending" | "pendingInit" | "queued" | "inProgress" | "running" | "working") => {
+            Some(NativeSubagentStatus::Running)
+        }
+        Some("completed" | "succeeded" | "success" | "done" | "shutdown") => {
+            Some(NativeSubagentStatus::Completed)
+        }
+        Some(
+            "failed" | "error" | "errored" | "interrupted" | "notFound" | "cancelled" | "canceled",
+        ) => Some(NativeSubagentStatus::Failed),
+        _ => None,
+    }
+}
+
+/// Converts only schema-backed Codex collaboration items into native
+/// subagent activity. This intentionally does not inspect agent messages or
+/// tool text: without one of these structured items, DCC shows nothing.
+fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
+    let Some(item) = params.get("item") else {
+        return Vec::new();
+    };
+    let Some(kind) = item.get("type").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let at = Utc::now().to_rfc3339();
+    match kind {
+        "collabAgentToolCall" => {
+            let Some(_call_id) = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+            else {
+                return Vec::new();
+            };
+            let model = item
+                .get("model")
+                .and_then(Value::as_str)
+                .filter(|model| !model.is_empty())
+                .map(str::to_string);
+            let receivers = item
+                .get("receiverThreadIds")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let states = item.get("agentsStates").and_then(Value::as_object);
+            let mut events = Vec::new();
+            if let Some(states) = states {
+                for (index, (state_key, state)) in states.iter().enumerate() {
+                    let status = codex_native_subagent_status(state.get("status"));
+                    let Some(status) = status else { continue };
+                    let thread_id = state
+                        .get("agentThreadId")
+                        .or_else(|| state.get("threadId"))
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string)
+                        .or_else(|| {
+                            receivers
+                                .iter()
+                                .any(|receiver| *receiver == state_key)
+                                .then(|| state_key.to_string())
+                        })
+                        .or_else(|| receivers.get(index).map(|id| (*id).to_string()));
+                    let agent_id = state
+                        .get("agentId")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string);
+                    let identity = thread_id
+                        .clone()
+                        .or_else(|| agent_id.clone())
+                        .unwrap_or_else(|| state_key.to_string());
+                    events.push(ProviderEvent::NativeSubagentActivity {
+                        id: format!("codex-native:{identity}"),
+                        agent_id,
+                        agent_thread_id: thread_id,
+                        name: state
+                            .get("agentNickname")
+                            .or_else(|| state.get("name"))
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string),
+                        role: state
+                            .get("agentRole")
+                            .or_else(|| state.get("role"))
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string),
+                        model: model.clone(),
+                        status: status.clone(),
+                        at: at.clone(),
+                    });
+                }
+            }
+            events
+        }
+        "subAgentActivity" => {
+            let Some(_activity_id) = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+            else {
+                return Vec::new();
+            };
+            let status = match item.get("kind").and_then(Value::as_str) {
+                Some("started" | "interacted") => NativeSubagentStatus::Running,
+                Some("interrupted") => NativeSubagentStatus::Failed,
+                _ => return Vec::new(),
+            };
+            let thread_id = item
+                .get("agentThreadId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string);
+            if thread_id.is_none() {
+                return Vec::new();
+            }
+            let agent_path = item
+                .get("agentPath")
+                .and_then(Value::as_str)
+                .filter(|path| !path.is_empty())
+                .map(str::to_string);
+            vec![ProviderEvent::NativeSubagentActivity {
+                id: format!(
+                    "codex-native:{}",
+                    thread_id.as_deref().expect("checked above")
+                ),
+                agent_id: None,
+                agent_thread_id: thread_id,
+                // Keep the provider's structured path verbatim. It identifies
+                // the executing subagent without guessing a nickname or role.
+                name: agent_path,
+                role: None,
+                model: None,
+                status,
+                at,
+            }]
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -1811,7 +1960,12 @@ impl CodexAppServerAdapter {
                     if method == "error" && should_suppress_codex_error(params, &runtime).await {
                         continue;
                     }
-                    if let Some(event) = notification_to_event(method, params) {
+                    let native_subagent_events = codex_native_subagent_events(params);
+                    if !native_subagent_events.is_empty() {
+                        for event in native_subagent_events {
+                            let _ = runtime.events_tx.send(event);
+                        }
+                    } else if let Some(event) = notification_to_event(method, params) {
                         let _ = runtime.events_tx.send(event);
                     }
                 }
@@ -2463,6 +2617,81 @@ mod tests {
             }
             other => panic!("expected second assistant delta, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn projects_only_schema_backed_codex_native_subagent_activity() {
+        let events = codex_native_subagent_events(&json!({
+            "item": {
+                "id": "collab-1",
+                "type": "collabAgentToolCall",
+                "status": "inProgress",
+                "model": "gpt-5.6-terra",
+                "receiverThreadIds": ["thread-child-1"],
+                "agentsStates": { "thread-child-1": { "status": "running" } }
+            }
+        }));
+        assert!(matches!(
+            events.as_slice(),
+            [ProviderEvent::NativeSubagentActivity {
+                id,
+                agent_id: None,
+                agent_thread_id: Some(thread_id),
+                name: None,
+                role: None,
+                model: Some(model),
+                status: NativeSubagentStatus::Running,
+                ..
+            }] if id == "codex-native:thread-child-1" && thread_id == "thread-child-1" && model == "gpt-5.6-terra"
+        ));
+
+        // Assistant text that merely claims delegation is not telemetry.
+        assert!(codex_native_subagent_events(&json!({
+            "item": { "id": "msg-1", "type": "agentMessage", "text": "deleguei para Terra" }
+        }))
+        .is_empty());
+    }
+
+    #[test]
+    fn projects_codex_subagent_activity_kind_without_inventing_a_model() {
+        let events = codex_native_subagent_events(&json!({
+            "item": {
+                "id": "activity-1",
+                "type": "subAgentActivity",
+                "agentPath": "root/terra",
+                "agentThreadId": "thread-child-1",
+                "kind": "started"
+            }
+        }));
+        assert!(matches!(
+            events.as_slice(),
+            [ProviderEvent::NativeSubagentActivity {
+                id,
+                agent_thread_id: Some(thread_id),
+                name: Some(agent_path),
+                model: None,
+                status: NativeSubagentStatus::Running,
+                ..
+            }] if id == "codex-native:thread-child-1"
+                && thread_id == "thread-child-1"
+                && agent_path == "root/terra"
+        ));
+    }
+
+    #[test]
+    fn maps_codex_native_subagent_terminal_statuses_from_the_schema() {
+        assert_eq!(
+            codex_native_subagent_status(Some(&json!("completed"))),
+            Some(NativeSubagentStatus::Completed)
+        );
+        assert_eq!(
+            codex_native_subagent_status(Some(&json!("errored"))),
+            Some(NativeSubagentStatus::Failed)
+        );
+        assert_eq!(
+            codex_native_subagent_status(Some(&json!("interrupted"))),
+            Some(NativeSubagentStatus::Failed)
+        );
     }
 
     #[test]

@@ -23,7 +23,10 @@ use dcc_core::{
             McpTrustDecision, McpTrustFingerprint,
         },
         project::ProjectId,
-        provider::{McpOauthSupport, McpSupportLevel, ProviderCatalog, ProviderDescriptor},
+        provider::{
+            McpOauthSupport, McpSupportLevel, NativeSubagentStatus, ProviderCatalog,
+            ProviderDescriptor,
+        },
         repository::{Repository, RepositoryId},
         session::{
             Checkpoint, CheckpointId, QueuedTurn, Session, SessionEventKind, SessionEventRecord,
@@ -344,6 +347,7 @@ fn main() {
         .typ::<ProviderDescriptor>()
         .typ::<McpSupportLevel>()
         .typ::<McpOauthSupport>()
+        .typ::<NativeSubagentStatus>()
         .typ::<dcc_core::domain::provider::ProviderAccountUsage>()
         .typ::<dcc_core::domain::provider::ProviderAccountUsageState>()
         .typ::<dcc_core::domain::provider::ProviderUsageWindow>()

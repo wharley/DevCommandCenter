@@ -1093,6 +1093,46 @@ impl SessionCommandState {
                             }
                         }
                     }
+                    Ok(ProviderEvent::NativeSubagentActivity {
+                        id,
+                        agent_id,
+                        agent_thread_id,
+                        name,
+                        role,
+                        model,
+                        status,
+                        ..
+                    }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnNativeSubagentActivity {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        id: id.clone(),
+                                        agent_id: agent_id.clone(),
+                                        agent_thread_id: agent_thread_id.clone(),
+                                        name: name.clone(),
+                                        role: role.clone(),
+                                        model: model.clone(),
+                                        status: status.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnNativeSubagentActivity {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        id,
+                                        agent_id,
+                                        agent_thread_id,
+                                        name,
+                                        role,
+                                        model,
+                                        status,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
                     Ok(ProviderEvent::TextDelta { content }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {

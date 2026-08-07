@@ -1221,6 +1221,23 @@ impl SqliteSessionRepo {
                 SessionEventKind::TurnPermissionResolved { behavior, .. } => {
                     push_fragment(&mut fragments, format!("Permission resolved: {behavior}"));
                 }
+                SessionEventKind::TurnNativeSubagentActivity {
+                    name,
+                    role,
+                    model,
+                    status,
+                    ..
+                } => {
+                    let identity = name
+                        .as_deref()
+                        .or(role.as_deref())
+                        .unwrap_or("Native subagent");
+                    let model = model.as_deref().unwrap_or("model not reported");
+                    push_fragment(
+                        &mut fragments,
+                        format!("Native subagent: {identity} · {model} · {status:?}"),
+                    );
+                }
                 SessionEventKind::TurnCompleted { turn_id }
                 | SessionEventKind::TurnAborted { turn_id, .. } => {
                     flush_turn(

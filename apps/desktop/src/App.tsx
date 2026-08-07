@@ -786,6 +786,12 @@ function getCoreEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) {
 		return event.sessionTurnToolCallFailed.session_id;
 	}
+	if (
+		"sessionTurnNativeSubagentActivity" in event &&
+		event.sessionTurnNativeSubagentActivity
+	) {
+		return event.sessionTurnNativeSubagentActivity.session_id;
+	}
 	if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 		return event.sessionTurnCompleted.session_id;
 	}

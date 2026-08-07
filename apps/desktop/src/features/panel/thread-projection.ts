@@ -12,7 +12,8 @@ function isHeavyActivityEvent(event: CoreEvent) {
 		"sessionTurnToolCallStarted" in event ||
 		"sessionTurnToolCallDelta" in event ||
 		"sessionTurnToolCallCompleted" in event ||
-		"sessionTurnToolCallFailed" in event
+		"sessionTurnToolCallFailed" in event ||
+		"sessionTurnNativeSubagentActivity" in event
 	);
 }
 
@@ -25,7 +26,8 @@ export function projectWorkspacePlanMessages(
 	return projectWorkspaceMessages(
 		history.filter((record) =>
 			!record.kind.type.startsWith("turn_reasoning_") &&
-			!record.kind.type.startsWith("turn_tool_call_"),
+			!record.kind.type.startsWith("turn_tool_call_") &&
+			record.kind.type !== "turn_native_subagent_activity",
 		),
 		liveEvents.filter((event) => !isHeavyActivityEvent(event)),
 		sessionId,

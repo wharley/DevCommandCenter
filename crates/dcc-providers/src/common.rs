@@ -22,7 +22,8 @@ use dcc_core::{
     application::compose_wire_prompt_for_provider,
     domain::{
         provider::{
-            Capabilities, HealthStatus, McpSupportLevel, ProviderEvent, ProviderId, SessionHandle,
+            Capabilities, HealthStatus, McpSupportLevel, NativeSubagentStatus, ProviderEvent,
+            ProviderId, SessionHandle,
         },
         session::{AssistantMessagePhase, SessionId},
         workspace::WorkspaceId,
@@ -68,6 +69,10 @@ enum ProviderEnvelope {
 pub(crate) struct ProviderStreamState {
     claude_blocks: HashMap<u64, ClaudeBlockState>,
     claude_pending_tool_calls: HashSet<String>,
+    claude_native_subagents: HashMap<String, ClaudeNativeSubagent>,
+    claude_native_subagent_inputs: HashMap<String, String>,
+    claude_native_subagent_event_ids: HashMap<String, String>,
+    claude_native_subagent_terminal_statuses: HashMap<String, NativeSubagentStatus>,
     claude_active_message_id: Option<String>,
     claude_text_message_started: bool,
     pub(crate) gemini_streamed_text_emitted: bool,
@@ -78,6 +83,115 @@ pub(crate) struct ProviderStreamState {
 enum ClaudeBlockState {
     Reasoning { id: String },
     ToolCall { id: String },
+}
+
+#[derive(Debug, Clone)]
+struct ClaudeNativeSubagent {
+    agent_id: Option<String>,
+    hook_agent_id: Option<String>,
+    name: Option<String>,
+    role: Option<String>,
+    model: Option<String>,
+}
+
+fn claude_native_subagent_metadata(input: Option<&Value>) -> ClaudeNativeSubagent {
+    let input = input.and_then(Value::as_object);
+    let read = |key: &str| {
+        input
+            .and_then(|input| input.get(key))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+
+    ClaudeNativeSubagent {
+        // Claude's structured Agent tool reports the tool-use identity here,
+        // not the runtime agent ID. Keep that distinction explicit.
+        agent_id: None,
+        hook_agent_id: None,
+        name: read("name"),
+        role: read("subagent_type"),
+        model: read("model"),
+    }
+}
+
+fn nonempty_json_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn parse_claude_native_subagent_hook(
+    value: &Value,
+    state: &mut ProviderStreamState,
+    at: String,
+) -> Option<ProviderEvent> {
+    if value.get("type").and_then(Value::as_str) != Some("dcc_native_subagent_activity") {
+        return None;
+    }
+    let agent_id = nonempty_json_string(value.get("agent_id"))?;
+    let role = nonempty_json_string(value.get("agent_type"))?;
+    let mut status = match value.get("status").and_then(Value::as_str) {
+        Some("running") => NativeSubagentStatus::Running,
+        Some("completed") => NativeSubagentStatus::Completed,
+        Some("failed") => NativeSubagentStatus::Failed,
+        _ => return None,
+    };
+    let correlation_id = nonempty_json_string(value.get("correlation_id"));
+
+    // A hook may link to an Agent invocation only through the SDK-provided
+    // toolUseID. Without it, reuse an identity solely after the same hook
+    // agent_id has already been observed; roles and timing are not evidence.
+    let matched_id = correlation_id.or_else(|| {
+        state
+            .claude_native_subagent_event_ids
+            .get(&agent_id)
+            .cloned()
+    });
+    let id = matched_id.unwrap_or_else(|| format!("claude:subagent:{agent_id}"));
+    if status == NativeSubagentStatus::Completed
+        && state.claude_native_subagent_terminal_statuses.get(&id)
+            == Some(&NativeSubagentStatus::Failed)
+    {
+        // If the Agent tool result was observed before SubagentStop, keep the
+        // provider's explicit failure instead of downgrading it to completed.
+        status = NativeSubagentStatus::Failed;
+    }
+    let metadata = state
+        .claude_native_subagents
+        .entry(id.clone())
+        .or_insert_with(|| ClaudeNativeSubagent {
+            agent_id: None,
+            hook_agent_id: None,
+            name: None,
+            role: None,
+            model: None,
+        });
+    metadata.agent_id = Some(agent_id.clone());
+    metadata.hook_agent_id = Some(agent_id.clone());
+    metadata.role = Some(role.clone());
+
+    if status == NativeSubagentStatus::Running {
+        state
+            .claude_native_subagent_event_ids
+            .insert(agent_id.clone(), id.clone());
+    } else {
+        state.claude_native_subagent_event_ids.remove(&agent_id);
+        state.claude_native_subagent_terminal_statuses.remove(&id);
+    }
+
+    Some(ProviderEvent::NativeSubagentActivity {
+        id,
+        agent_id: Some(agent_id),
+        agent_thread_id: None,
+        name: None,
+        role: Some(role),
+        model: None,
+        status,
+        at,
+    })
 }
 
 #[derive(Debug)]
@@ -432,6 +546,50 @@ fn parse_claude_stream_value(
                         .and_then(Value::as_str)
                         .map(str::to_string)
                         .unwrap_or_else(|| claude_tool_call_id(state, index));
+                    let action = block
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Tool call");
+                    // The Claude Agent tool is an explicit, structured signal
+                    // that a native subagent was invoked.  Do not use message
+                    // text or a parent model as a proxy. `model` is only kept
+                    // when the tool input itself reports it.
+                    if action == "Agent" {
+                        let mut metadata = claude_native_subagent_metadata(block.get("input"));
+                        if let Some(hook_metadata) = state.claude_native_subagents.remove(&id) {
+                            metadata.agent_id = hook_metadata.agent_id;
+                            metadata.hook_agent_id = hook_metadata.hook_agent_id;
+                            metadata.name = metadata.name.or(hook_metadata.name);
+                            metadata.role = metadata.role.or(hook_metadata.role);
+                            metadata.model = metadata.model.or(hook_metadata.model);
+                        }
+                        state.claude_pending_tool_calls.insert(id.clone());
+                        state
+                            .claude_native_subagents
+                            .insert(id.clone(), metadata.clone());
+                        if block
+                            .get("input")
+                            .and_then(Value::as_object)
+                            .is_none_or(|input| input.is_empty())
+                        {
+                            state
+                                .claude_native_subagent_inputs
+                                .insert(id.clone(), String::new());
+                        }
+                        state
+                            .claude_blocks
+                            .insert(index, ClaudeBlockState::ToolCall { id: id.clone() });
+                        return Some(ProviderEvent::NativeSubagentActivity {
+                            id,
+                            agent_id: metadata.agent_id,
+                            agent_thread_id: None,
+                            name: metadata.name,
+                            role: metadata.role,
+                            model: metadata.model,
+                            status: NativeSubagentStatus::Running,
+                            at,
+                        });
+                    }
                     state.claude_pending_tool_calls.insert(id.clone());
                     state
                         .claude_blocks
@@ -440,11 +598,7 @@ fn parse_claude_stream_value(
                     let (command, file) = claude_tool_input_metadata(input);
                     Some(ProviderEvent::ToolCallStarted {
                         id,
-                        action: block
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .unwrap_or("Tool call")
-                            .to_string(),
+                        action: action.to_string(),
                         command,
                         file,
                         at,
@@ -491,6 +645,11 @@ fn parse_claude_stream_value(
                         .get("partial_json")
                         .and_then(Value::as_str)
                         .unwrap_or("");
+                    if state.claude_native_subagents.contains_key(&id) {
+                        let input = state.claude_native_subagent_inputs.entry(id).or_default();
+                        input.push_str(content);
+                        return None;
+                    }
                     Some(ProviderEvent::ToolCallDelta {
                         id,
                         content: content.to_string(),
@@ -506,7 +665,29 @@ fn parse_claude_stream_value(
                 Some(ClaudeBlockState::Reasoning { id }) => {
                     Some(ProviderEvent::ReasoningCompleted { id, at })
                 }
-                Some(ClaudeBlockState::ToolCall { .. }) => None,
+                Some(ClaudeBlockState::ToolCall { id }) => {
+                    let input = state.claude_native_subagent_inputs.remove(&id)?;
+                    if input.is_empty() {
+                        return None;
+                    }
+                    let input = serde_json::from_str::<Value>(&input).ok()?;
+                    let reported = claude_native_subagent_metadata(Some(&input));
+                    let metadata = state.claude_native_subagents.get_mut(&id)?;
+                    metadata.name = reported.name.or_else(|| metadata.name.clone());
+                    metadata.role = reported.role.or_else(|| metadata.role.clone());
+                    metadata.model = reported.model.or_else(|| metadata.model.clone());
+                    let metadata = metadata.clone();
+                    Some(ProviderEvent::NativeSubagentActivity {
+                        id,
+                        agent_id: metadata.agent_id,
+                        agent_thread_id: None,
+                        name: metadata.name,
+                        role: metadata.role,
+                        model: metadata.model,
+                        status: NativeSubagentStatus::Running,
+                        at,
+                    })
+                }
                 None => None,
             }
         }
@@ -521,6 +702,9 @@ fn parse_claude_terminal_value(
 ) -> Option<ProviderEvent> {
     let kind = value.get("type").and_then(Value::as_str)?;
     let at = now_iso();
+    if let Some(event) = parse_claude_native_subagent_hook(value, state, at.clone()) {
+        return Some(event);
+    }
     match kind {
         "assistant" => {
             if value
@@ -585,6 +769,37 @@ fn parse_claude_terminal_value(
                 };
                 if !state.claude_pending_tool_calls.remove(id) {
                     continue;
+                }
+                if let Some(metadata) = state.claude_native_subagents.remove(id) {
+                    state.claude_native_subagent_inputs.remove(id);
+                    let status = if block
+                        .get("is_error")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        NativeSubagentStatus::Failed
+                    } else {
+                        NativeSubagentStatus::Completed
+                    };
+                    if state
+                        .claude_native_subagent_event_ids
+                        .values()
+                        .any(|event_id| event_id == id)
+                    {
+                        state
+                            .claude_native_subagent_terminal_statuses
+                            .insert(id.to_string(), status.clone());
+                    }
+                    return Some(ProviderEvent::NativeSubagentActivity {
+                        id: id.to_string(),
+                        agent_id: metadata.agent_id,
+                        agent_thread_id: None,
+                        name: metadata.name,
+                        role: metadata.role,
+                        model: metadata.model,
+                        status,
+                        at,
+                    });
                 }
                 return if block
                     .get("is_error")
@@ -1813,6 +2028,235 @@ mod tests {
                 content: Some(ref content),
                 ..
             }) if id == "msg_1" && content == "Hello world"
+        ));
+    }
+
+    #[test]
+    fn projects_claude_agent_tool_lifecycle_without_inferring_model() {
+        let mut state = ProviderStreamState::default();
+        let started = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_agent","name":"Agent","input":{"subagent_type":"Explore"}}}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            started,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: None,
+                role: Some(ref role),
+                model: None,
+                status: NativeSubagentStatus::Running,
+                ..
+            }) if id == "toolu_agent" && role == "Explore"
+        ));
+
+        let completed = parse_provider_stream_line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_agent","is_error":false,"content":"done"}]}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            completed,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                model: None,
+                status: NativeSubagentStatus::Completed,
+                ..
+            }) if id == "toolu_agent"
+        ));
+    }
+
+    #[test]
+    fn enriches_claude_agent_activity_only_with_a_hook_tool_use_id() {
+        let mut state = ProviderStreamState::default();
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_agent","name":"Agent","input":{"subagent_type":"Explore"}}}}"#,
+            &mut state,
+        );
+
+        let started = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-1","agent_type":"Explore","status":"running","correlation_id":"toolu_agent"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            started,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: Some(ref agent_id),
+                role: Some(ref role),
+                model: None,
+                status: NativeSubagentStatus::Running,
+                ..
+            }) if id == "toolu_agent" && agent_id == "native-agent-1" && role == "Explore"
+        ));
+
+        let stopped = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-1","agent_type":"Explore","status":"completed","correlation_id":null}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            stopped,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: Some(ref agent_id),
+                status: NativeSubagentStatus::Completed,
+                ..
+            }) if id == "toolu_agent" && agent_id == "native-agent-1"
+        ));
+    }
+
+    #[test]
+    fn preserves_hook_identity_when_claude_reports_start_before_the_agent_block() {
+        let mut state = ProviderStreamState::default();
+        let hook = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-early","agent_type":"reviewer","status":"running","correlation_id":"toolu_agent_early"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            hook,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: Some(ref agent_id),
+                ..
+            }) if id == "toolu_agent_early" && agent_id == "native-agent-early"
+        ));
+
+        let tool = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_agent_early","name":"Agent","input":{"subagent_type":"reviewer","model":"opus"}}}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            tool,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: Some(ref agent_id),
+                role: Some(ref role),
+                model: Some(ref model),
+                ..
+            }) if id == "toolu_agent_early"
+                && agent_id == "native-agent-early"
+                && role == "reviewer"
+                && model == "opus"
+        ));
+    }
+
+    #[test]
+    fn keeps_a_failed_agent_result_when_subagent_stop_arrives_later() {
+        let mut state = ProviderStreamState::default();
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_agent_failed","name":"Agent","input":{"subagent_type":"Explore"}}}}"#,
+            &mut state,
+        );
+        let _ = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-failed","agent_type":"Explore","status":"running","correlation_id":"toolu_agent_failed"}"#,
+            &mut state,
+        );
+        let failed = parse_provider_stream_line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_agent_failed","is_error":true,"content":"failed"}]}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            failed,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                status: NativeSubagentStatus::Failed,
+                ..
+            })
+        ));
+
+        let stopped = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-failed","agent_type":"Explore","status":"completed","correlation_id":null}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            stopped,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: Some(ref agent_id),
+                status: NativeSubagentStatus::Failed,
+                ..
+            }) if id == "toolu_agent_failed" && agent_id == "native-agent-failed"
+        ));
+    }
+
+    #[test]
+    fn keeps_an_uncorrelated_claude_hook_separate_from_agent_tool_calls() {
+        let mut state = ProviderStreamState::default();
+        let event = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-2","agent_type":"Explore","status":"running","correlation_id":null}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            event,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: Some(ref agent_id),
+                ..
+            }) if id == "claude:subagent:native-agent-2" && agent_id == "native-agent-2"
+        ));
+    }
+
+    #[test]
+    fn collects_streamed_claude_agent_metadata_without_emitting_a_generic_tool_call() {
+        let mut state = ProviderStreamState::default();
+        let started = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_agent_streamed","name":"Agent","input":{}}}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            started,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                agent_id: None,
+                name: None,
+                role: None,
+                model: None,
+                status: NativeSubagentStatus::Running,
+                ..
+            })
+        ));
+
+        let input_delta = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"subagent_type\":\"reviewer\",\"model\":\"opus\",\"name\":\"Opus reviewer\"}"}}}"#,
+            &mut state,
+        );
+        assert!(matches!(input_delta, ParsedProviderLine::Ignored));
+
+        let input_completed = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_stop","index":0}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            input_completed,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: None,
+                name: Some(ref name),
+                role: Some(ref role),
+                model: Some(ref model),
+                status: NativeSubagentStatus::Running,
+                ..
+            }) if id == "toolu_agent_streamed"
+                && name == "Opus reviewer"
+                && role == "reviewer"
+                && model == "opus"
+        ));
+
+        let completed = parse_provider_stream_line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_agent_streamed","is_error":false,"content":"done"}]}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            completed,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: None,
+                name: Some(ref name),
+                role: Some(ref role),
+                model: Some(ref model),
+                status: NativeSubagentStatus::Completed,
+                ..
+            }) if id == "toolu_agent_streamed"
+                && name == "Opus reviewer"
+                && role == "reviewer"
+                && model == "opus"
         ));
     }
 

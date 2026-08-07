@@ -73,6 +73,9 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionTurnPermissionResolved { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/permission/resolved")
         }
+        CoreEvent::SessionTurnNativeSubagentActivity { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/native-subagent/activity")
+        }
         CoreEvent::SessionTurnCompleted { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/completed")
         }
