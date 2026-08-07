@@ -947,6 +947,28 @@ function getOrCreateAnnotation(
 	return annotation;
 }
 
+function getOrCreateNativeSubagentAnnotation(
+	message: WorkspaceMessage,
+	annotation: Extract<WorkspaceMessageAnnotation, { type: "native-subagent" }>,
+) {
+	const annotations = message.annotations ?? (message.annotations = []);
+	const existingIndex = annotations.findIndex((item) => {
+		if (item.type !== "native-subagent") {
+			return false;
+		}
+		return (
+			item.id === annotation.id ||
+			(Boolean(annotation.agentThreadId) && item.agentThreadId === annotation.agentThreadId) ||
+			(Boolean(annotation.agentId) && item.agentId === annotation.agentId)
+		);
+	});
+	if (existingIndex >= 0) {
+		return annotations[existingIndex];
+	}
+	annotations.push(annotation);
+	return annotation;
+}
+
 function isHiddenToolAction(action: string | undefined) {
 	return action === "AskUserQuestion" || action === "ExitPlanMode";
 }
@@ -1341,7 +1363,7 @@ export function projectWorkspaceMessages(
 				key,
 				turnStartedAtByTurnId.get(key) ?? occurredAt,
 			);
-			const annotation = getOrCreateAnnotation(message, {
+			const annotation = getOrCreateNativeSubagentAnnotation(message, {
 				type: "native-subagent",
 				id: item.id,
 				agentId: item.agent_id ?? undefined,

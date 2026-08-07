@@ -2007,6 +2007,7 @@
       "label": "Atualização do progresso"
     },
     "nativeSubagent": {
+      "label": "Subagente",
       "fallbackName": "Subagente",
       "modelNotReported": "modelo não informado",
       "status": {

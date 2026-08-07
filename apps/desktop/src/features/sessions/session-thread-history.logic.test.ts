@@ -1076,4 +1076,61 @@ describe("projectWorkspaceMessages", () => {
 			}),
 		);
 	});
+
+	it("reconciles native subagent status events with different ids by thread", () => {
+		const started: SessionEventRecord = {
+			eventId: "event-native-subagent-started-by-thread",
+			sessionId: "session-a",
+			sequence: 2,
+			occurredAt: "2026-05-01T12:00:01Z",
+			kind: {
+				type: "turn_native_subagent_activity",
+				turnId: "turn-1",
+				id: "codex-native:state-key",
+				agentId: null,
+				agentThreadId: "thread-child-1",
+				name: "Luna",
+				role: "worker",
+				model: "gpt-5.5",
+				status: "running",
+			},
+		};
+		const completed: SessionEventRecord = {
+			eventId: "event-native-subagent-completed-by-thread",
+			sessionId: "session-a",
+			sequence: 3,
+			occurredAt: "2026-05-01T12:00:02Z",
+			kind: {
+				type: "turn_native_subagent_activity",
+				turnId: "turn-1",
+				id: "codex-native:thread-child-1",
+				agentId: null,
+				agentThreadId: "thread-child-1",
+				name: null,
+				role: null,
+				model: null,
+				status: "completed",
+			},
+		};
+
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Investigate") as SessionEventRecord,
+				started,
+				completed,
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages[1]?.annotations).toEqual([
+			expect.objectContaining({
+				type: "native-subagent",
+				id: "codex-native:state-key",
+				name: "Luna",
+				model: "gpt-5.5",
+				status: "completed",
+			}),
+		]);
+	});
 });

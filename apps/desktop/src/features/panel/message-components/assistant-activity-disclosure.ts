@@ -6,8 +6,6 @@ export function shouldAutoOpenAssistantActivity(
 	return annotations.some(
 		(annotation) =>
 			Boolean(annotation.streaming) ||
-			(annotation.type === "tool-call" && annotation.status?.type === "failed") ||
-			(annotation.type === "native-subagent" &&
-				(annotation.status === "running" || annotation.status === "failed")),
+			(annotation.type === "tool-call" && annotation.status?.type === "failed"),
 	);
 }

@@ -23,16 +23,16 @@ describe("assistant activity disclosure", () => {
 		).toBe(false);
 	});
 
-	it("opens while a native subagent is running or failed", () => {
+	it("does not treat a native subagent as parent activity", () => {
 		expect(
 			shouldAutoOpenAssistantActivity([
 				annotation({ type: "native-subagent", status: "running" }),
 			]),
-		).toBe(true);
+		).toBe(false);
 		expect(
 			shouldAutoOpenAssistantActivity([
 				annotation({ type: "native-subagent", status: "failed" }),
 			]),
-		).toBe(true);
+		).toBe(false);
 	});
 });

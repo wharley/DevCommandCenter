@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, ChevronRight, Copy, RotateCcw } from "lucide-react";
+import { Activity, AlertCircle, Bot, ChevronRight, Copy, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { Button } from "@/components/ui/button";
@@ -44,8 +44,49 @@ function isActivityAnnotation(annotation: WorkspaceMessageAnnotation) {
 	return (
 		annotation.type === "commentary" ||
 		annotation.type === "reasoning" ||
-		annotation.type === "tool-call" ||
-		annotation.type === "native-subagent"
+		annotation.type === "tool-call"
+	);
+}
+
+type NativeSubagentAnnotation = Extract<
+	WorkspaceMessageAnnotation,
+	{ type: "native-subagent" }
+>;
+
+function NativeSubagentCard({ annotation }: { annotation: NativeSubagentAnnotation }) {
+	const { t } = useTranslation("common");
+	const identity =
+		annotation.name ??
+		annotation.role ??
+		annotation.model ??
+		t("conversation.nativeSubagent.fallbackName");
+	const details = [
+		annotation.role,
+		annotation.model ?? t("conversation.nativeSubagent.modelNotReported"),
+	]
+		.filter((value, index, all) => Boolean(value) && all.indexOf(value) === index)
+		.join(" · ");
+	const status = t(`conversation.nativeSubagent.status.${annotation.status}`);
+
+	return (
+		<div
+			className="mb-2 flex min-w-0 items-center gap-2 rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2 text-[12px]"
+			title={annotation.agentThreadId ?? undefined}
+		>
+			<Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+			<div className="min-w-0">
+				<div className="flex min-w-0 items-center gap-1.5">
+					<span className="shrink-0 font-medium text-foreground/85">
+						{t("conversation.nativeSubagent.label")}
+					</span>
+					<span className="truncate text-foreground/85">{identity}</span>
+				</div>
+				<div className="truncate text-muted-foreground">{details}</div>
+			</div>
+			<span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+				{status}
+			</span>
+		</div>
 	);
 }
 
@@ -58,39 +99,16 @@ function AssistantActivityGroup({
 }) {
 	const { t } = useTranslation("common");
 	const isLive = annotations.some(
-		(annotation) =>
-			Boolean(annotation.streaming) ||
-			(annotation.type === "native-subagent" && annotation.status === "running"),
+		(annotation) => Boolean(annotation.streaming),
 	);
-	const nativeSubagents = annotations.filter(
-		(annotation) => annotation.type === "native-subagent",
-	);
-	const toolCount = annotations.filter(
-		(annotation) => annotation.type === "tool-call" || annotation.type === "native-subagent",
-	).length;
+	const toolCount = annotations.filter((annotation) => annotation.type === "tool-call").length;
 	const reasoningCount = annotations.filter(
-		(annotation) => annotation.type === "reasoning" || annotation.type === "commentary",
+		(annotation) => annotation.type === "reasoning",
 	).length;
 	const failedCount = annotations.filter(
-		(annotation) =>
-			(annotation.type === "tool-call" && annotation.status?.type === "failed") ||
-			(annotation.type === "native-subagent" && annotation.status === "failed"),
+		(annotation) => annotation.type === "tool-call" && annotation.status?.type === "failed",
 	).length;
 	const shouldStayOpen = shouldAutoOpenAssistantActivity(annotations);
-	const visibleNativeSubagent =
-		nativeSubagents.find((annotation) => annotation.status === "running") ??
-		nativeSubagents.at(-1);
-	const nativeSubagentSummary = visibleNativeSubagent
-		? [
-				visibleNativeSubagent.name ??
-					visibleNativeSubagent.role ??
-					visibleNativeSubagent.model ??
-					t("conversation.nativeSubagent.fallbackName"),
-				visibleNativeSubagent.model ?? t("conversation.nativeSubagent.modelNotReported"),
-			]
-				.filter((value, index, all) => all.indexOf(value) === index)
-				.join(" · ")
-		: null;
 	const initialOpenRef = useRef(shouldStayOpen);
 	const [isOpen, setIsOpen] = useState(initialOpenRef.current);
 	const detailsRef = useRef<HTMLDetailsElement | null>(null);
@@ -139,11 +157,10 @@ function AssistantActivityGroup({
 						: t("conversation.activity.completed")}
 				</span>
 				<span className="truncate text-muted-foreground/70">
-					{nativeSubagentSummary ??
-						t("conversation.activity.summary", {
-							actions: toolCount,
-							thoughts: reasoningCount,
-						})}
+					{t("conversation.activity.summary", {
+						actions: toolCount,
+						thoughts: reasoningCount,
+					})}
 				</span>
 				{failedCount > 0 ? (
 					<span className="ml-auto shrink-0 rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] text-destructive">
@@ -216,6 +233,14 @@ export function AssistantMessage({
 		() => (annotations ?? []).filter(isActivityAnnotation),
 		[annotations],
 	);
+	const nativeSubagentAnnotations = useMemo(
+		() =>
+			(annotations ?? []).filter(
+				(annotation): annotation is NativeSubagentAnnotation =>
+					annotation.type === "native-subagent",
+			),
+		[annotations],
+	);
 	const requestAnnotations = useMemo(
 		() =>
 			(annotations ?? []).filter(
@@ -249,41 +274,6 @@ export function AssistantMessage({
 				{activityAnnotations.length ? (
 					<AssistantActivityGroup annotations={activityAnnotations}>
 						{activityAnnotations.map((annotation) => {
-							if (annotation.type === "native-subagent") {
-								const identity =
-									annotation.name ??
-									annotation.role ??
-									annotation.model ??
-									t("conversation.nativeSubagent.fallbackName");
-								const details = [
-									annotation.role,
-									annotation.model ?? t("conversation.nativeSubagent.modelNotReported"),
-								]
-									.filter((value, index, all) => Boolean(value) && all.indexOf(value) === index)
-									.join(" · ");
-								const status = t(
-									`conversation.nativeSubagent.status.${annotation.status}`,
-								);
-								return (
-									<div
-										key={`native-subagent-${annotation.id}`}
-										className="flex min-w-0 items-center gap-2 rounded-md border border-border/50 bg-background/40 px-2.5 py-2 text-[12px]"
-									>
-										{annotation.status === "running" ? (
-											<DccThinkingIndicator size={12} />
-										) : (
-											<Activity className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-										)}
-										<div className="min-w-0">
-											<div className="truncate font-medium text-foreground/85">{identity}</div>
-											<div className="truncate text-muted-foreground">{details}</div>
-										</div>
-										<span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
-											{status}
-										</span>
-									</div>
-								);
-							}
 							if (annotation.type === "commentary") {
 								return (
 									<div
@@ -356,6 +346,9 @@ export function AssistantMessage({
 						})}
 					</AssistantActivityGroup>
 				) : null}
+				{nativeSubagentAnnotations.map((annotation) => (
+					<NativeSubagentCard key={`native-subagent-${annotation.id}`} annotation={annotation} />
+				))}
 				{requestAnnotations.length ? (
 					<div className="mb-2 flex flex-col gap-2">
 						{requestAnnotations.map((annotation) => {
