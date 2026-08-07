@@ -45,6 +45,8 @@ import type {
 import { derivePlanFollowUpState } from "./plan-follow-up";
 import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
 import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
+import { useWorkspaceGitBranchDiff } from "@/features/inspector/use-workspace-git-branch-diff";
+import { useWorkspacePrStatus } from "@/features/inspector/use-workspace-pr-status";
 import { workspaceRailDisplayTitle } from "@/features/workspaces/workspace-rail-shared";
 import {
 	buildMissionSpecFilename,
@@ -422,25 +424,40 @@ export function WorkspacePanel({
 	const sessionState = sessionSnapshot?.state ?? null;
 	const lastTurnState = sessionSnapshot?.lastTurnState ?? null;
 	// Hoisted here (always mounted) so the execution dock stays accurate even while
-	// the inspector is collapsed. Shares React Query's cache with the inspector's own
-	// useWorkspaceGitStatus call — one network request, not two.
+	// the inspector is collapsed. These queries share React Query's cache with the
+	// Inspector, so opening the panel does not create duplicate requests.
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+	const branchDiffQuery = useWorkspaceGitBranchDiff(workspacePath);
+	const currentBranch = gitStatusQuery.data?.currentBranch ?? null;
+	const pullRequestQuery = useWorkspacePrStatus(workspacePath, currentBranch);
 	const gitChangeSummary = useMemo(() => {
-		const data = gitStatusQuery.data;
-		if (!data) {
+		const status = gitStatusQuery.data;
+		const branchDiff = branchDiffQuery.data;
+		if (!status && !branchDiff && !pullRequestQuery.data) {
 			return null;
 		}
-		const entries = [...data.staged, ...data.unstaged];
-		const files = new Set(entries.map((entry) => entry.path)).size;
-		if (files === 0) {
-			return null;
-		}
+		const localEntries = status ? [...status.staged, ...status.unstaged] : [];
+		const branchEntries = branchDiff?.changes ?? [];
+		const files = new Set(localEntries.map((entry) => entry.path)).size;
+		const branchFiles = new Set(branchEntries.map((entry) => entry.path)).size;
 		return {
 			files,
-			additions: entries.reduce((sum, entry) => sum + entry.insertions, 0),
-			deletions: entries.reduce((sum, entry) => sum + entry.deletions, 0),
+			additions: localEntries.reduce((sum, entry) => sum + entry.insertions, 0),
+			deletions: localEntries.reduce((sum, entry) => sum + entry.deletions, 0),
+			branchFiles,
+			branchAdditions: branchEntries.reduce((sum, entry) => sum + entry.insertions, 0),
+			branchDeletions: branchEntries.reduce((sum, entry) => sum + entry.deletions, 0),
+			aheadOfRemoteCount: status?.aheadOfRemoteCount ?? 0,
+			pullRequestState: pullRequestQuery.data?.state ?? null,
+			pullRequestNumber: pullRequestQuery.data?.number ?? null,
 		};
-	}, [gitStatusQuery.data]);
+	}, [branchDiffQuery.data, gitStatusQuery.data, pullRequestQuery.data]);
+	const gitStatusState =
+		gitStatusQuery.isLoading || branchDiffQuery.isLoading
+			? "loading"
+			: gitStatusQuery.isError || branchDiffQuery.isError
+				? "error"
+				: "ready";
 	const messages = useMemo(
 		() =>
 			projectWorkspaceMessages(
@@ -923,16 +940,10 @@ export function WorkspacePanel({
 						projectLabel={projectLabel}
 						projectIcon={projectIcon}
 						projectColor={projectColor}
-						currentBranch={gitStatusQuery.data?.currentBranch ?? null}
+						currentBranch={currentBranch}
 						isIsolatedWorkspace={isIsolatedWorkspace}
 						gitChangeSummary={gitChangeSummary}
-						gitStatusState={
-							gitStatusQuery.isLoading
-								? "loading"
-								: gitStatusQuery.isError
-									? "error"
-									: "ready"
-						}
+						gitStatusState={gitStatusState}
 						contextProjects={workspaceContextProjects}
 						showPlanFollowUpPrompt={showPlanFollowUpPrompt}
 						planTitle={activePlanTitle}

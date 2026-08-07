@@ -21,12 +21,13 @@ import { cn } from "@/lib/utils";
 import { setupDisplayCommand } from "@/features/workspaces/workspace-setup-report";
 import { ProjectIdentityGlyph } from "@/features/workspaces/project-identity";
 import { ExecutionOriginPicker } from "./ExecutionOriginPicker";
+import {
+	resolveExecutionDockStatus,
+	type ExecutionDockChangeSummary,
+	type ExecutionDockGitState,
+} from "./ExecutionDock.logic";
 
-export type ExecutionDockChangeSummary = {
-	files: number;
-	additions: number;
-	deletions: number;
-};
+export type { ExecutionDockChangeSummary } from "./ExecutionDock.logic";
 
 type ExecutionDockProps = {
 	projectLabel: string | null;
@@ -38,7 +39,7 @@ type ExecutionDockProps = {
 	currentBranch: string | null;
 	isIsolatedWorkspace: boolean;
 	changeSummary: ExecutionDockChangeSummary | null;
-	gitStatusState?: "loading" | "ready" | "error";
+	gitStatusState?: ExecutionDockGitState;
 	contextProjects?: Array<{
 		id: string;
 		name: string;
@@ -116,6 +117,7 @@ export const ExecutionDock = memo(function ExecutionDock({
 	const setupSummary = setupCommands
 		.map((command) => setupDisplayCommand(command))
 		.join(" · ");
+	const gitStatus = resolveExecutionDockStatus(changeSummary, gitStatusState);
 	useEffect(() => {
 		setSetupError(null);
 	}, [projectRootPath, setupReport?.status]);
@@ -356,30 +358,70 @@ export const ExecutionDock = memo(function ExecutionDock({
 				aria-label={t("composer.executionDock.reviewChanges")}
 			>
 				<FileDiff className="size-3.5 shrink-0" strokeWidth={1.8} />
-				{gitStatusState === "loading" ? (
+				{gitStatus.kind === "loading" ? (
 					<span className="whitespace-nowrap max-[440px]:hidden">
 						{t("composer.executionDock.readingChanges")}
 					</span>
-				) : gitStatusState === "error" ? (
+				) : gitStatus.kind === "error" ? (
 					<span className="whitespace-nowrap max-[440px]:hidden">
 						{t("composer.executionDock.changesUnavailable")}
 					</span>
-				) : changeSummary ? (
+				) : gitStatus.kind === "local" ? (
 					<span className="flex items-center gap-1 whitespace-nowrap tabular-nums">
-						<strong className="font-medium text-foreground">{changeSummary.files}</strong>
+						<strong className="font-medium text-foreground">{gitStatus.files}</strong>
 						<span className="max-[440px]:hidden">
 							{t("composer.executionDock.changes", {
-								count: changeSummary.files,
+								count: gitStatus.files,
 							})}
 						</span>
-						{changeSummary.additions > 0 ? (
+						{gitStatus.additions > 0 ? (
 							<span className="text-emerald-600 dark:text-emerald-400">
-								+{changeSummary.additions}
+								+{gitStatus.additions}
 							</span>
 						) : null}
-						{changeSummary.deletions > 0 ? (
-							<span className="text-destructive">−{changeSummary.deletions}</span>
+						{gitStatus.deletions > 0 ? (
+							<span className="text-destructive">−{gitStatus.deletions}</span>
 						) : null}
+					</span>
+				) : gitStatus.kind === "branch" ? (
+					<span className="flex items-center gap-1 whitespace-nowrap tabular-nums">
+						<span className="font-medium text-foreground">
+							{t("composer.executionDock.viewDiff")}
+						</span>
+						<span className="text-muted-foreground/80">·</span>
+						<strong className="font-medium text-foreground">{gitStatus.files}</strong>
+						<span className="max-[440px]:hidden">
+							{t("composer.executionDock.branchFiles", { count: gitStatus.files })}
+						</span>
+						{gitStatus.additions > 0 ? (
+							<span className="text-emerald-600 dark:text-emerald-400">+{gitStatus.additions}</span>
+						) : null}
+						{gitStatus.deletions > 0 ? (
+							<span className="text-destructive">−{gitStatus.deletions}</span>
+						) : null}
+					</span>
+				) : gitStatus.kind === "local-and-branch" ? (
+					<span className="whitespace-nowrap tabular-nums">
+						<strong className="font-medium text-foreground">{gitStatus.localFiles}</strong>
+						<span className="max-[440px]:hidden">
+							{t("composer.executionDock.localChanges", { count: gitStatus.localFiles })}
+						</span>
+						<span className="mx-1 text-muted-foreground/70">·</span>
+						<span className="font-medium text-foreground">
+							{t("composer.executionDock.branchDiffShort", { count: gitStatus.branchFiles })}
+						</span>
+					</span>
+				) : gitStatus.kind === "merged" ? (
+					<span className="whitespace-nowrap text-emerald-700 dark:text-emerald-400">
+						{gitStatus.pullRequestNumber
+							? t("composer.executionDock.mergedWithNumber", {
+									pr: gitStatus.pullRequestNumber,
+								})
+							: t("composer.executionDock.merged")}
+					</span>
+				) : gitStatus.kind === "ahead" ? (
+					<span className="whitespace-nowrap text-foreground/80">
+						{t("composer.executionDock.ahead", { count: gitStatus.commits })}
 					</span>
 				) : (
 					<span className="whitespace-nowrap text-foreground/65 max-[440px]:hidden">
