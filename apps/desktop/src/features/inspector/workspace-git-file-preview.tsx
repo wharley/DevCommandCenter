@@ -1,7 +1,7 @@
 import type { CodeRabbitFindingSeverity, WorkspacePrReviewComment } from "@dcc/contracts";
 import { AlertCircle, FileCode2, LoaderCircle } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { WorkspaceChangesDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
 import { useWorkspaceGitFilePreviewContent } from "./use-workspace-git-file-preview-content";
 
 export type WorkspaceGitPreviewMachineAnnotation = {
@@ -30,127 +30,6 @@ type WorkspaceGitFilePreviewProps = {
 	workspaceRoot: string | null;
 	selection: WorkspaceGitPreviewSelection | null;
 };
-
-type MonacoRuntimeModule = typeof import("@/lib/monaco-runtime");
-type MonacoDiffController = Awaited<
-	ReturnType<MonacoRuntimeModule["createDiffEditor"]>
->;
-
-function WorkspaceGitMonacoDiff({
-	path,
-	originalText,
-	modifiedText,
-	inline,
-}: {
-	path: string;
-	originalText: string;
-	modifiedText: string;
-	inline: boolean;
-}) {
-	const hostRef = useRef<HTMLDivElement | null>(null);
-	const controllerRef = useRef<MonacoDiffController | null>(null);
-	const requestIdRef = useRef(0);
-	const [surfaceStatus, setSurfaceStatus] = useState<
-		| { kind: "loading" }
-		| { kind: "ready" }
-		| { kind: "error"; message: string }
-	>({ kind: "loading" });
-
-	useEffect(() => {
-		return () => {
-			controllerRef.current?.dispose();
-			controllerRef.current = null;
-		};
-	}, []);
-
-	useLayoutEffect(() => {
-		const host = hostRef.current;
-		if (!host) {
-			return;
-		}
-
-		const requestId = requestIdRef.current + 1;
-		requestIdRef.current = requestId;
-		let disposed = false;
-
-		controllerRef.current?.dispose();
-		controllerRef.current = null;
-		host.replaceChildren();
-		setSurfaceStatus({ kind: "loading" });
-
-		void (async () => {
-			try {
-				const { createDiffEditor } = await import("@/lib/monaco-runtime");
-				const controller = await createDiffEditor({
-					container: host,
-					path,
-					originalText,
-					modifiedText,
-					inline,
-				});
-
-				if (disposed || requestId !== requestIdRef.current) {
-					controller.dispose();
-					return;
-				}
-
-				controllerRef.current = controller;
-				setSurfaceStatus({ kind: "ready" });
-			} catch (error) {
-				if (disposed) {
-					return;
-				}
-
-				setSurfaceStatus({
-					kind: "error",
-					message:
-						error instanceof Error ? error.message : "Failed to load file preview",
-				});
-			}
-		})();
-
-		return () => {
-			disposed = true;
-		};
-	}, [path]);
-
-	useEffect(() => {
-		if (!controllerRef.current) {
-			return;
-		}
-
-		controllerRef.current.setTexts({
-			originalText,
-			modifiedText,
-			inline,
-		});
-	}, [inline, modifiedText, originalText]);
-
-	if (surfaceStatus.kind === "error") {
-		return (
-			<div className="flex min-h-[280px] flex-1 items-center justify-center rounded-md border border-destructive/30 bg-background/60 px-4 py-6 text-center text-[11px] text-destructive">
-				<span className="inline-flex items-center gap-2">
-					<AlertCircle className="size-3.5" />
-					{surfaceStatus.message}
-				</span>
-			</div>
-		);
-	}
-
-	return (
-		<div className="relative flex min-h-[280px] min-w-0 flex-1 overflow-hidden rounded-md border border-border/50 bg-background/60">
-			<div ref={hostRef} className="h-full min-h-0 min-w-0 flex-1" />
-			{surfaceStatus.kind === "loading" ? (
-				<div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
-					<span className="inline-flex items-center gap-2 text-[11px] text-muted-foreground">
-						<LoaderCircle className="size-3.5 animate-spin" />
-						Loading file preview...
-					</span>
-				</div>
-			) : null}
-		</div>
-	);
-}
 
 export function WorkspaceGitFilePreview({
 	workspaceRoot,
@@ -237,12 +116,13 @@ export function WorkspaceGitFilePreview({
 				Showing read-only code diff for the selected file.
 			</div>
 			{snapshot ? (
-				<WorkspaceGitMonacoDiff
+				<WorkspaceChangesDiffLoader
 					key={`${selection.group}:${selection.path}:${selection.baseBranch ?? ""}`}
 					path={selection.path}
 					originalText={snapshot.originalText}
 					modifiedText={snapshot.modifiedText}
 					inline={snapshot.inline}
+					className="min-h-[280px] rounded-b-md"
 				/>
 			) : (
 				<div className="flex min-h-[180px] flex-1 items-center justify-center px-4 py-6 text-center text-[11px] text-muted-foreground">

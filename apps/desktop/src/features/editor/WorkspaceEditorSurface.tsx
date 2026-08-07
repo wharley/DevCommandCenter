@@ -1,5 +1,5 @@
 import { ExternalLink, MessageSquare, Send, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TrafficLightSpacer } from "@/components/chrome/traffic-light-spacer";
 import { Button } from "@/components/ui/button";
@@ -14,13 +14,14 @@ import type { WorkspacePrReviewComment } from "@dcc/contracts";
 import type {
 	DiffAnnotationPayload,
 	DiffMachineAnnotation,
-} from "@/lib/monaco-runtime";
+} from "./diff-types";
 import {
 	DiffAnnotationPopover,
 	type DiffAnnotationRequest,
 	type DiffAnnotationSubmit,
 	type PendingAnnotation,
 } from "./diff-annotation";
+import { WorkspaceChangesDiffLoader } from "./WorkspaceChangesDiffLoader";
 
 // Re-exported for backward compatibility with existing importers.
 export type { DiffAnnotationRequest, DiffAnnotationSubmit };
@@ -42,175 +43,6 @@ type WorkspaceEditorSurfaceProps = {
 		note: string;
 	}) => void;
 };
-
-type MonacoRuntimeModule = typeof import("@/lib/monaco-runtime");
-type MonacoDiffController = Awaited<
-	ReturnType<MonacoRuntimeModule["createDiffEditor"]>
->;
-
-function WorkspaceEditorDiff({
-	path,
-	originalText,
-	modifiedText,
-	inline,
-	focusLine,
-	machineAnnotations,
-	onAnnotate,
-	annotateLabel,
-	onMachineAnnotationClick,
-	reviewCommentLabel,
-}: {
-	path: string;
-	originalText: string;
-	modifiedText: string;
-	inline: boolean;
-	focusLine?: number | null;
-	machineAnnotations?: DiffMachineAnnotation[];
-	onAnnotate?: (payload: DiffAnnotationPayload) => void;
-	annotateLabel: string;
-	onMachineAnnotationClick?: (input: {
-		annotation: DiffMachineAnnotation;
-		anchor: { top: number; left: number };
-	}) => void;
-	reviewCommentLabel: string;
-}) {
-	const hostRef = useRef<HTMLDivElement | null>(null);
-	const controllerRef = useRef<MonacoDiffController | null>(null);
-	const requestIdRef = useRef(0);
-	// Keep the latest callback/label in refs so they never recreate the editor.
-	const onAnnotateRef = useRef(onAnnotate);
-	onAnnotateRef.current = onAnnotate;
-	const annotateLabelRef = useRef(annotateLabel);
-	annotateLabelRef.current = annotateLabel;
-	const onMachineAnnotationClickRef = useRef(onMachineAnnotationClick);
-	onMachineAnnotationClickRef.current = onMachineAnnotationClick;
-	const editorStateRef = useRef({
-		originalText,
-		modifiedText,
-		inline,
-		focusLine,
-		machineAnnotations,
-	});
-	editorStateRef.current = {
-		originalText,
-		modifiedText,
-		inline,
-		focusLine,
-		machineAnnotations,
-	};
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-
-	useEffect(
-		() => () => {
-			controllerRef.current?.dispose();
-			controllerRef.current = null;
-		},
-		[],
-	);
-
-	useEffect(() => {
-		const host = hostRef.current;
-		if (!host) return;
-
-		const requestId = requestIdRef.current + 1;
-		requestIdRef.current = requestId;
-		let disposed = false;
-
-		controllerRef.current?.dispose();
-		controllerRef.current = null;
-		host.replaceChildren();
-		setLoading(true);
-		setError(null);
-
-		void (async () => {
-			try {
-				const { createDiffEditor } = await import("@/lib/monaco-runtime");
-				const current = editorStateRef.current;
-				const controller = await createDiffEditor({
-					container: host,
-					path,
-					originalText: current.originalText,
-					modifiedText: current.modifiedText,
-					inline: current.inline,
-					focusLine: current.focusLine,
-					machineAnnotations: current.machineAnnotations,
-					onAnnotate: (payload) => onAnnotateRef.current?.(payload),
-					annotateLabel: annotateLabelRef.current,
-					onMachineAnnotationClick: (payload) =>
-						onMachineAnnotationClickRef.current?.(payload),
-					reviewCommentLabel,
-				});
-
-				if (disposed || requestId !== requestIdRef.current) {
-					controller.dispose();
-					return;
-				}
-
-				controllerRef.current = controller;
-				const latest = editorStateRef.current;
-				controller.setTexts({
-					originalText: latest.originalText,
-					modifiedText: latest.modifiedText,
-					inline: latest.inline,
-				});
-				controller.setMachineAnnotations(latest.machineAnnotations ?? []);
-				if (latest.focusLine) controller.revealLine(latest.focusLine);
-				setLoading(false);
-				requestAnimationFrame(() => {
-					if (disposed || requestId !== requestIdRef.current) {
-						return;
-					}
-					const modified = controller.editor.getModifiedEditor();
-					modified.layout();
-					modified.focus();
-				});
-			} catch (cause) {
-				if (disposed) return;
-				setError(cause instanceof Error ? cause.message : "Failed to load editor");
-				setLoading(false);
-			}
-		})();
-
-		return () => {
-			disposed = true;
-		};
-	}, [path, reviewCommentLabel]);
-
-	useEffect(() => {
-		controllerRef.current?.setTexts({
-			originalText,
-			modifiedText,
-			inline,
-		});
-	}, [inline, modifiedText, originalText]);
-
-	useEffect(() => {
-		controllerRef.current?.setMachineAnnotations(machineAnnotations ?? []);
-	}, [machineAnnotations]);
-
-	useEffect(() => {
-		if (focusLine) {
-			controllerRef.current?.revealLine(focusLine);
-		}
-	}, [focusLine]);
-
-	return (
-		<div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-			<div ref={hostRef} className="h-full min-h-0 min-w-0 flex-1" />
-			{loading ? (
-				<div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
-					<span className="text-[11px] text-muted-foreground">Loading editor...</span>
-				</div>
-			) : null}
-			{error ? (
-				<div className="absolute inset-0 flex items-center justify-center bg-background">
-					<p className="text-[11px] text-destructive">{error}</p>
-				</div>
-			) : null}
-		</div>
-	);
-}
 
 type ReviewThread = {
 	id: string;
@@ -764,14 +596,6 @@ export function WorkspaceEditorSurface({
 		selection,
 	]);
 
-	if (query.isPending) {
-		return null;
-	}
-
-	if (query.isError) {
-		return null;
-	}
-
 	return (
 		<section
 			aria-label="Workspace editor surface"
@@ -813,7 +637,7 @@ export function WorkspaceEditorSurface({
 						<p className="text-[11px] text-muted-foreground">Loading file...</p>
 					</div>
 				) : (
-					<WorkspaceEditorDiff
+					<WorkspaceChangesDiffLoader
 						path={selection.path}
 						originalText={snapshot.originalText}
 						modifiedText={snapshot.modifiedText}

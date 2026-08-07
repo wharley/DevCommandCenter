@@ -151,7 +151,6 @@ import {
 	cleanupDeletedWorkspaceFrontendState,
 	removeSessionFrontendQueries,
 } from "./lib/frontend-state-cleanup";
-import { purgeMonacoFileContentsForRoot } from "./lib/file-content-lru";
 import { frontendMemorySnapshot } from "./lib/frontend-memory-observability";
 import {
 	SELECTED_PROVIDER_STORAGE_KEY,
@@ -4240,7 +4239,6 @@ export default function App() {
 			await requestWorkspaceTerminalLifecycle("complete", workspaceIds, async () => {
 				await completeWorkspace(workspaceId);
 				cleanupCompletedWorkspaceFrontendState(queryClient, { workspaceIds, roots });
-				for (const root of roots) purgeMonacoFileContentsForRoot(root);
 				await refreshWorkspaceCollections();
 			});
 		},
@@ -4287,7 +4285,6 @@ export default function App() {
 				roots,
 			});
 			purgeSessionsEvents(affectedSessionIds);
-			for (const root of roots) purgeMonacoFileContentsForRoot(root);
 			setSessionSnapshotsById((current) => {
 				const next = { ...current };
 				for (const sessionId of affectedSessionIds) delete next[sessionId];

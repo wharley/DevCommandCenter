@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
 import { cn } from "@/lib/utils";
-import type { DiffAnnotationPayload } from "@/lib/monaco-runtime";
+import type { DiffAnnotationPayload } from "./diff-types";
 import type {
 	DiffAnnotationRequest,
 	DiffAnnotationSubmit,

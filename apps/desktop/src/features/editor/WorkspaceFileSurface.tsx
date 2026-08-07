@@ -1,18 +1,25 @@
-import { Loader2, Save, X } from "lucide-react";
+import type { SelectedLineRange } from "@pierre/diffs";
+import { Editor, type EditorOptions } from "@pierre/diffs/edit";
+import { EditProvider, File, Virtualizer, useVirtualizer } from "@pierre/diffs/react";
+import { Loader2, MessageSquare, Save, X } from "lucide-react";
 import {
 	forwardRef,
 	useCallback,
 	useEffect,
 	useImperativeHandle,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 	type RefObject,
+	type ComponentProps,
+	type MutableRefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { TrafficLightSpacer } from "@/components/chrome/traffic-light-spacer";
 import { Button } from "@/components/ui/button";
+import { useAppearance } from "@/components/theme-provider";
 import {
 	Dialog,
 	DialogContent,
@@ -26,7 +33,7 @@ import { useWorkspaceGitFilePreviewContent } from "@/features/inspector/use-work
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
 import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
 import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
-import type { DiffAnnotationPayload } from "@/lib/monaco-runtime";
+import type { DiffAnnotationPayload } from "./diff-types";
 import {
 	DiffAnnotationPopover,
 	type DiffAnnotationRequest,
@@ -35,6 +42,13 @@ import {
 } from "./diff-annotation";
 import { resolveFileSurfaceContentState } from "./file-surface.logic";
 import { useWorkspaceFileContent } from "./use-workspace-file-content";
+import { WorkspaceChangesDiffLoader } from "./WorkspaceChangesDiffLoader";
+import {
+	collapsedEditorState,
+	fullDocumentReplacement,
+	primaryHandlePosition,
+	snippetForOneBasedLines,
+} from "./workspace-file-editor.logic";
 
 /**
  * Where the file body comes from. `git` loads working-tree content from the
@@ -54,7 +68,7 @@ export type WorkspaceFileSurfaceHandle = {
 	save: () => void;
 	/** Re-measure + focus the editor when this surface's tab becomes active. */
 	reveal: () => void;
-	/** Notify dirty state after the shared Monaco buffer changes. */
+	/** Notify dirty state after the shared editor buffer changes. */
 	syncEditorChange: () => void;
 };
 
@@ -74,9 +88,9 @@ type WorkspaceFileSurfaceProps = {
 	initialBuffer?: string | null;
 	/** Persist in-flight edits when the tab surface unmounts. */
 	onBufferSnapshot?: (content: string) => void;
-	/** Tab strip renders one shared Monaco; this surface only loads content. */
+	/** Tab strip renders one shared editor; this surface only loads content. */
 	useSharedEditor?: boolean;
-	/** Live editor handle for the active tab (shared Monaco). */
+	/** Live editor handle for the active tab (shared editor). */
 	editorBridge?: RefObject<FileEditorHandle | null>;
 	/** Fired when disk content is ready for the shared editor. */
 	onContentReady?: (content: string) => void;
@@ -91,11 +105,6 @@ type WorkspaceFileSurfaceProps = {
 		note: string;
 	}) => void;
 };
-
-type MonacoRuntimeModule = typeof import("@/lib/monaco-runtime");
-type MonacoFileController = Awaited<
-	ReturnType<MonacoRuntimeModule["createFileEditor"]>
->;
 
 export type FileEditorHandle = {
 	getValue: () => string;
@@ -113,6 +122,55 @@ export type FileEditorHandle = {
 	focus: () => void;
 };
 
+type PierreVirtualizer = ReturnType<typeof useVirtualizer>;
+type SelectionActionContext = Parameters<
+	NonNullable<EditorOptions<undefined>["renderSelectionAction"]>
+>[0];
+
+function triggerAnchor(target: HTMLElement | null): { top: number; left: number } {
+	const rect = target?.getBoundingClientRect();
+	return {
+		top: rect?.bottom ?? Math.round(window.innerHeight / 2),
+		left: rect?.left ?? Math.round(window.innerWidth / 2),
+	};
+}
+
+function WorkspaceFileRenderer({
+	file,
+	readOnly,
+	options,
+	virtualizerRef,
+	renderGutterUtility,
+	selectedLines,
+}: {
+	file: { name: string; contents: string; cacheKey: string };
+	readOnly: boolean;
+	options: ComponentProps<typeof File>["options"];
+	virtualizerRef: MutableRefObject<PierreVirtualizer>;
+	renderGutterUtility?: ComponentProps<typeof File>["renderGutterUtility"];
+	selectedLines?: SelectedLineRange | null;
+}) {
+	const virtualizer = useVirtualizer();
+	useLayoutEffect(() => {
+		virtualizerRef.current = virtualizer;
+		return () => {
+			if (virtualizerRef.current === virtualizer) virtualizerRef.current = undefined;
+		};
+	}, [virtualizer, virtualizerRef]);
+
+	return (
+		<File
+			file={file}
+			edit={!readOnly}
+			disableWorkerPool
+			options={options}
+			selectedLines={selectedLines}
+			renderGutterUtility={renderGutterUtility}
+			className="block min-h-full min-w-full"
+		/>
+	);
+}
+
 export const WorkspaceFileEditor = forwardRef<
 	FileEditorHandle,
 	{
@@ -122,7 +180,7 @@ export const WorkspaceFileEditor = forwardRef<
 		cursorLine?: number | null;
 		cursorColumn?: number | null;
 		readOnly: boolean;
-		/** Swap models on tab change instead of tearing down Monaco (tab strip). */
+		/** Swap files on tab change instead of tearing down the editor (tab strip). */
 		reuseInstance?: boolean;
 		onAnnotate?: (payload: DiffAnnotationPayload) => void;
 		annotateLabel: string;
@@ -143,176 +201,272 @@ export const WorkspaceFileEditor = forwardRef<
 	},
 	ref,
 ) {
+	const { theme } = useAppearance();
 	const hostRef = useRef<HTMLDivElement | null>(null);
-	const controllerRef = useRef<MonacoFileController | null>(null);
-	const changeSubRef = useRef<{ dispose(): void } | null>(null);
-	const requestIdRef = useRef(0);
-	// Keep the latest callbacks/label in refs so they never recreate the editor.
+	const gutterButtonRef = useRef<HTMLButtonElement | null>(null);
+	const virtualizerRef = useRef<PierreVirtualizer>(undefined);
+	const editorRef = useRef<Editor<undefined> | null>(null);
+	const [activeFile, setActiveFile] = useState(() => ({ path, content }));
+	const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null>(null);
+	const valueRef = useRef(content);
+	const pathRef = useRef(path);
+	const positionRef = useRef<{ lineNumber: number; column: number } | null>(
+		cursorLine != null
+			? { lineNumber: cursorLine, column: cursorColumn ?? 1 }
+			: focusLine != null
+				? { lineNumber: focusLine, column: 1 }
+				: null,
+	);
+	const pendingPositionRef = useRef(positionRef.current);
 	const onAnnotateRef = useRef(onAnnotate);
 	onAnnotateRef.current = onAnnotate;
 	const onChangeRef = useRef(onChange);
 	onChangeRef.current = onChange;
 	const annotateLabelRef = useRef(annotateLabel);
 	annotateLabelRef.current = annotateLabel;
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+
+	const emitAnnotation = useCallback(
+		(startLine: number, endLine: number, snippet: string, target: HTMLElement | null) => {
+			onAnnotateRef.current?.({
+				side: "modified",
+				startLine,
+				endLine,
+				snippet,
+				anchor: triggerAnchor(target ?? hostRef.current),
+			});
+		},
+		[],
+	);
+	const annotateSelectedLines = useCallback(
+		(range: SelectedLineRange, target: HTMLElement | null) => {
+			const startLine = Math.max(1, Math.min(range.start, range.end));
+			const endLine = Math.max(startLine, Math.max(range.start, range.end));
+			emitAnnotation(
+				startLine,
+				endLine,
+				snippetForOneBasedLines(valueRef.current, startLine, endLine),
+				target,
+			);
+			setSelectedLines(null);
+		},
+		[emitAnnotation],
+	);
+
+	const renderSelectionAction = useCallback(
+		(context: SelectionActionContext) => {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.textContent = annotateLabelRef.current;
+			button.className =
+				"rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground shadow-sm";
+			button.addEventListener("click", () => {
+				const startLine = Math.min(
+					context.selection.start.line,
+					context.selection.end.line,
+				) + 1;
+				const endLine = Math.max(
+					context.selection.start.line,
+					context.selection.end.line,
+				) + 1;
+				emitAnnotation(startLine, endLine, context.getSelectionText(), button);
+				context.close();
+			});
+			return button;
+		},
+		[emitAnnotation],
+	);
+
+	if (!editorRef.current) {
+		editorRef.current = new Editor<undefined>({
+			historyMaxEntries: 32,
+			persistState: false,
+			roundedSelection: true,
+			matchBrackets: true,
+			enabledSelectionAction: Boolean(onAnnotate),
+			renderSelectionAction,
+			onAttach: (editor) => {
+				const target = pendingPositionRef.current;
+				if (target) editor.setState(collapsedEditorState(target.lineNumber, target.column));
+			},
+			onChange: (_file, _annotations, _event) => {
+				const editor = editorRef.current;
+				if (!editor) return;
+				valueRef.current = editor.getText();
+				positionRef.current = primaryHandlePosition(editor.getState());
+				onChangeRef.current?.();
+			},
+		});
+	}
+
+	const createEditor = useCallback((options: EditorOptions<undefined>) => {
+		const editor = editorRef.current;
+		if (!editor) throw new Error("Workspace file editor was disposed");
+		editor.setOptions({ ...options, persistState: false, historyMaxEntries: 32 });
+		return editor;
+	}, []);
 
 	useImperativeHandle(
 		ref,
 		() => ({
-			getValue: () => controllerRef.current?.getValue() ?? "",
-			setValue: (value: string) => controllerRef.current?.setValue(value),
-			getPath: () => controllerRef.current?.getPath() ?? path,
-			getPosition: () => controllerRef.current?.editor.getPosition() ?? null,
-			switchFile: (nextPath, nextContent, nextFocusLine, nextFocusColumn) =>
-				controllerRef.current?.switchFile(
-					nextPath,
-					nextContent,
-					nextFocusLine ?? undefined,
-					nextFocusColumn ?? undefined,
-				) ?? false,
-			layout: () => controllerRef.current?.editor.layout(),
-			focus: () => controllerRef.current?.editor.focus(),
+			getValue: () => valueRef.current,
+			setValue: (value: string) => {
+				const editor = editorRef.current;
+				const attachedFile = editor?.getFile();
+				const replacement = editor && attachedFile?.name === pathRef.current
+					? fullDocumentReplacement(editor.getText(), value)
+					: null;
+				valueRef.current = value;
+				setActiveFile((current) => ({ ...current, content: value }));
+				if (!readOnly && editor && replacement) editor.applyEdits([replacement]);
+			},
+			getPath: () => pathRef.current,
+			getPosition: () => {
+				if (!readOnly && editorRef.current) {
+					positionRef.current = primaryHandlePosition(editorRef.current.getState());
+				}
+				return positionRef.current;
+			},
+			switchFile: (nextPath, nextContent, nextFocusLine, nextFocusColumn) => {
+				setSelectedLines(null);
+				pathRef.current = nextPath;
+				valueRef.current = nextContent;
+				positionRef.current =
+					nextFocusLine != null
+						? { lineNumber: nextFocusLine, column: nextFocusColumn ?? 1 }
+						: null;
+				pendingPositionRef.current = positionRef.current;
+				setActiveFile({ path: nextPath, content: nextContent });
+				return true;
+			},
+			layout: () => {
+				virtualizerRef.current?.markDOMDirty();
+				window.dispatchEvent(new Event("resize"));
+			},
+			focus: () => {
+				const target = positionRef.current;
+				editorRef.current?.focus(
+					target
+						? { lineNumber: target.lineNumber, character: target.column - 1 }
+						: { lineNumber: "first-visible" },
+				);
+			},
 		}),
-		[],
+		[readOnly],
 	);
+
+	useLayoutEffect(() => {
+		if (pathRef.current === path && (reuseInstance || !readOnly)) return;
+		pathRef.current = path;
+		valueRef.current = content;
+		setSelectedLines(null);
+		const targetLine = cursorLine ?? focusLine;
+		positionRef.current =
+			targetLine != null
+				? { lineNumber: targetLine, column: cursorColumn ?? 1 }
+				: null;
+		pendingPositionRef.current = positionRef.current;
+		setActiveFile({ path, content });
+	}, [content, cursorColumn, cursorLine, focusLine, path, readOnly, reuseInstance]);
+
+	useLayoutEffect(() => {
+		if (readOnly) return;
+		const target = pendingPositionRef.current;
+		if (!target) return;
+		const frame = requestAnimationFrame(() => {
+			const editor = editorRef.current;
+			if (!editor || editor.getFile()?.name !== activeFile.path) return;
+			editor.setState(collapsedEditorState(target.lineNumber, target.column));
+			editor.focus({
+				lineNumber: target.lineNumber,
+				character: target.column - 1,
+			});
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [activeFile.path, readOnly]);
+
+	useEffect(() => {
+		editorRef.current?.setOptions({
+			enabledSelectionAction: Boolean(onAnnotate),
+			renderSelectionAction,
+		});
+	}, [onAnnotate, renderSelectionAction]);
 
 	useEffect(
 		() => () => {
-			changeSubRef.current?.dispose();
-			changeSubRef.current = null;
-			controllerRef.current?.dispose();
-			controllerRef.current = null;
+			editorRef.current?.cleanUp();
+			editorRef.current = null;
+			virtualizerRef.current = undefined;
 		},
 		[],
 	);
 
-	// Recreate the editor when the file identity changes, unless the tab strip reuses
-	// one Monaco instance and swaps models via switchFile().
-	useLayoutEffect(() => {
-		const host = hostRef.current;
-		if (!host) return;
-
-		const requestId = requestIdRef.current + 1;
-		requestIdRef.current = requestId;
-		let disposed = false;
-		let focusFrame: number | null = null;
-
-		const scheduleFocus = (controller: MonacoFileController) => {
-			focusFrame = requestAnimationFrame(() => {
-				if (disposed || requestId !== requestIdRef.current) {
-					return;
-				}
-				controller.editor.layout();
-				const textarea = host.querySelector("textarea.inputarea");
-				if (textarea instanceof HTMLTextAreaElement) {
-					textarea.focus({ preventScroll: true });
-				}
-				controller.editor.focus();
-				controller.editor.layout();
-			});
-		};
-
-		const existing = controllerRef.current;
-		const restoreLine = cursorLine ?? focusLine ?? undefined;
-		const restoreColumn = cursorColumn ?? (focusLine ? 1 : undefined);
-		if (reuseInstance && existing) {
-			existing.switchFile(path, content, restoreLine, restoreColumn);
-			setLoading(false);
-			setError(null);
-			scheduleFocus(existing);
-			return () => {
-				disposed = true;
-				if (focusFrame !== null) {
-					cancelAnimationFrame(focusFrame);
-				}
-			};
-		}
-
-		existing?.dispose();
-		controllerRef.current = null;
-		host.replaceChildren();
-		setLoading(true);
-		setError(null);
-
-		void (async () => {
-			try {
-				const { createFileEditor } = await import("@/lib/monaco-runtime");
-				const annotateHandler = onAnnotateRef.current;
-				const controller = await createFileEditor({
-					container: host,
-					path,
-					content,
-					readOnly,
-					line: focusLine ?? undefined,
-					...(annotateHandler
-						? {
-								onAnnotate: (payload) => annotateHandler(payload),
-								annotateLabel: annotateLabelRef.current,
-							}
-						: {}),
-				});
-
-				if (disposed || requestId !== requestIdRef.current) {
-					controller.dispose();
-					return;
-				}
-
-				controllerRef.current = controller;
-				changeSubRef.current?.dispose();
-				changeSubRef.current = controller.onDidChangeModelContent(() =>
-					onChangeRef.current?.(),
-				);
-				setLoading(false);
-				scheduleFocus(controller);
-			} catch (cause) {
-				if (disposed) return;
-				setError(cause instanceof Error ? cause.message : "Failed to load editor");
-				setLoading(false);
-			}
-		})();
-
-		return () => {
-			disposed = true;
-			if (focusFrame !== null) {
-				cancelAnimationFrame(focusFrame);
-			}
-		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [path, reuseInstance]);
-
-	// Only the read-only surface mirrors later content into the editor. In edit
-	// mode the buffer is user-owned (synced via the imperative handle), so we never
-	// push query updates back in — that would clobber unsaved edits.
-	useEffect(() => {
-		if (readOnly) {
-			controllerRef.current?.setValue(content);
-		}
-	}, [content, readOnly]);
-
-	useEffect(() => {
-		controllerRef.current?.editor.updateOptions({ readOnly });
-	}, [readOnly]);
-
-	useEffect(() => {
-		if (!focusLine || cursorLine != null) {
-			return;
-		}
-		controllerRef.current?.revealPosition(focusLine);
-	}, [cursorLine, focusLine]);
+	const file = useMemo(
+		() => ({
+			name: activeFile.path,
+			contents: pathRef.current === activeFile.path ? valueRef.current : activeFile.content,
+			cacheKey: activeFile.path,
+		}),
+		[activeFile, readOnly],
+	);
+	const fileOptions = useMemo<ComponentProps<typeof File>["options"]>(
+		() => ({
+			disableFileHeader: true,
+			overflow: "scroll",
+			theme: theme === "dark" ? "pierre-dark" : "pierre-light",
+			themeType: theme,
+			tokenizeMaxLineLength: 2_000,
+			tokenizeMaxLength: 250_000,
+			lineHoverHighlight: onAnnotate ? "both" : "line",
+			enableGutterUtility: Boolean(onAnnotate),
+			enableLineSelection: Boolean(onAnnotate && readOnly),
+			onLineSelected: onAnnotate && readOnly ? setSelectedLines : undefined,
+			onGutterUtilityClick: onAnnotate
+				? (range) => annotateSelectedLines(range, gutterButtonRef.current)
+				: undefined,
+		}),
+		[annotateSelectedLines, onAnnotate, readOnly, theme],
+	);
+	const renderGutterUtility = onAnnotate
+		? () => (
+				<button
+					ref={gutterButtonRef}
+					type="button"
+					aria-label={annotateLabel}
+					title={annotateLabel}
+					className="flex size-5 items-center justify-center rounded bg-primary text-primary-foreground shadow-sm"
+				>
+					<MessageSquare className="size-3" aria-hidden />
+				</button>
+			)
+		: undefined;
 
 	return (
-		<div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
-			<div ref={hostRef} className="h-full min-h-0 flex-1" />
-			{loading ? (
-				<div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70">
-					<span className="text-[11px] text-muted-foreground">Loading editor...</span>
-				</div>
-			) : null}
-			{error ? (
-				<div className="absolute inset-0 flex items-center justify-center bg-background">
-					<p className="text-[11px] text-destructive">{error}</p>
-				</div>
+		<div ref={hostRef} className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
+			<EditProvider createEditor={createEditor}>
+				<Virtualizer
+					className="h-full min-h-0 min-w-0 flex-1 overflow-auto"
+					contentClassName="min-h-full min-w-full"
+					config={{ overscrollSize: 600 }}
+				>
+					<WorkspaceFileRenderer
+						file={file}
+						readOnly={readOnly}
+						options={fileOptions}
+						virtualizerRef={virtualizerRef}
+						renderGutterUtility={renderGutterUtility}
+						selectedLines={readOnly ? selectedLines : null}
+					/>
+				</Virtualizer>
+			</EditProvider>
+			{readOnly && selectedLines && onAnnotate ? (
+				<button
+					type="button"
+					className="absolute bottom-3 right-3 z-20 inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-[11px] text-primary-foreground shadow-md"
+					onClick={(event) => annotateSelectedLines(selectedLines, event.currentTarget)}
+				>
+					<MessageSquare className="size-3" aria-hidden />
+					{annotateLabel}
+				</button>
 			) : null}
 		</div>
 	);
@@ -595,7 +749,7 @@ export const WorkspaceFileSurface = forwardRef<
 	}, [filePath]);
 
 	// Notify the shared editor once when disk content is first available. Do not
-	// re-fire on buffer edits — that would push content back into Monaco and reset
+	// re-fire on buffer edits — that would push content back into the editor and reset
 	// the cursor while the user is typing.
 	useEffect(() => {
 		if (contentState !== "editor" || !onContentReady || body.length === 0) {
@@ -730,55 +884,6 @@ export const WorkspaceFileSurface = forwardRef<
 	);
 });
 
-type MonacoDiffController = Awaited<
-	ReturnType<MonacoRuntimeModule["createDiffEditor"]>
->;
-
-/** Read-only diff of the on-disk version (left) against the user's edit (right). */
-function ReconcileDiffHost({
-	path,
-	disk,
-	mine,
-}: {
-	path: string;
-	disk: string;
-	mine: string;
-}) {
-	const hostRef = useRef<HTMLDivElement | null>(null);
-	const controllerRef = useRef<MonacoDiffController | null>(null);
-
-	useLayoutEffect(() => {
-		const host = hostRef.current;
-		if (!host) return;
-		let disposed = false;
-
-		host.replaceChildren();
-		void (async () => {
-			const { createDiffEditor } = await import("@/lib/monaco-runtime");
-			const controller = await createDiffEditor({
-				container: host,
-				path,
-				originalText: disk,
-				modifiedText: mine,
-				inline: false,
-			});
-			if (disposed) {
-				controller.dispose();
-				return;
-			}
-			controllerRef.current = controller;
-		})();
-
-		return () => {
-			disposed = true;
-			controllerRef.current?.dispose();
-			controllerRef.current = null;
-		};
-	}, [path, disk, mine]);
-
-	return <div ref={hostRef} className="h-full min-h-0 w-full" />;
-}
-
 function ReconcileDialog({
 	open,
 	fileName,
@@ -821,7 +926,14 @@ function ReconcileDialog({
 					<span className="flex-1">{t("fileSurface.reconcile.mineLabel")}</span>
 				</div>
 				<div className="min-h-0 flex-1 border-y border-border/60">
-					{open ? <ReconcileDiffHost path={path} disk={disk} mine={mine} /> : null}
+					{open ? (
+						<WorkspaceChangesDiffLoader
+							path={path}
+							originalText={disk}
+							modifiedText={mine}
+							inline={false}
+						/>
+					) : null}
 				</div>
 				<DialogFooter className="gap-1.5 px-4 py-3">
 					<Button

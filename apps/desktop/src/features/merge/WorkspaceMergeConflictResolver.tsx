@@ -28,7 +28,6 @@ import {
 import {
 	useCallback,
 	useEffect,
-	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -52,6 +51,7 @@ import {
 	type FileEditorHandle,
 	WorkspaceFileEditor,
 } from "@/features/editor/WorkspaceFileSurface";
+import { WorkspaceChangesDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
 import {
 	applyMergeConflictResolution,
 	hasMergeConflictMarkerFragments,
@@ -90,11 +90,6 @@ type AppliedAgentSuggestion = {
 };
 
 type ResultView = "edit" | "compare-current" | "compare-incoming";
-
-type MonacoRuntimeModule = typeof import("@/lib/monaco-runtime");
-type MonacoDiffController = Awaited<
-	ReturnType<MonacoRuntimeModule["createDiffEditor"]>
->;
 
 const MERGE_DIFF_SIDE_BY_SIDE_MIN_WIDTH = 1_000;
 
@@ -223,60 +218,7 @@ function ConflictResultDiff({
 	resultLabel: string;
 }) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
-	const hostRef = useRef<HTMLDivElement | null>(null);
-	const controllerRef = useRef<MonacoDiffController | null>(null);
-	const requestIdRef = useRef(0);
-	const [error, setError] = useState<string | null>(null);
 	const [inline, setInline] = useState(false);
-
-	useEffect(
-		() => () => {
-			controllerRef.current?.dispose();
-			controllerRef.current = null;
-		},
-		[],
-	);
-
-	useLayoutEffect(() => {
-		const host = hostRef.current;
-		if (!host) return;
-		const shouldRenderInline =
-			(containerRef.current?.getBoundingClientRect().width ?? 0) <
-			MERGE_DIFF_SIDE_BY_SIDE_MIN_WIDTH;
-
-		const requestId = requestIdRef.current + 1;
-		requestIdRef.current = requestId;
-		let disposed = false;
-
-		controllerRef.current?.dispose();
-		controllerRef.current = null;
-		host.replaceChildren();
-		setError(null);
-
-		void (async () => {
-			try {
-				const { createDiffEditor } = await import("@/lib/monaco-runtime");
-				const controller = await createDiffEditor({
-					container: host,
-					path,
-					originalText,
-					modifiedText: resultText,
-					inline: shouldRenderInline,
-				});
-				if (disposed || requestId !== requestIdRef.current) {
-					controller.dispose();
-					return;
-				}
-				controllerRef.current = controller;
-			} catch (cause) {
-				if (!disposed) setError(errorMessage(cause));
-			}
-		})();
-
-		return () => {
-			disposed = true;
-		};
-	}, [path]);
 
 	useEffect(() => {
 		const container = containerRef.current;
@@ -292,14 +234,6 @@ function ConflictResultDiff({
 		return () => observer.disconnect();
 	}, []);
 
-	useEffect(() => {
-		controllerRef.current?.setTexts({
-			originalText,
-			modifiedText: resultText,
-			inline,
-		});
-	}, [inline, originalText, resultText]);
-
 	return (
 		<div ref={containerRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 			<div className={cn("shrink-0 border-b border-border/50 bg-muted/[0.08] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground", inline ? "flex items-center gap-2" : "grid grid-cols-2 px-4")}>
@@ -307,13 +241,13 @@ function ConflictResultDiff({
 				{inline ? <span aria-hidden className="text-muted-foreground/50">→</span> : null}
 				<span className={cn("truncate", inline ? "text-foreground/80" : "pl-3")} title={resultLabel}>{resultLabel}</span>
 			</div>
-			{error ? (
-				<div className="flex flex-1 items-center justify-center p-6 text-sm text-destructive">
-					{error}
-				</div>
-			) : (
-				<div ref={hostRef} className="min-h-0 min-w-0 w-full flex-1 overflow-hidden" />
-			)}
+			<WorkspaceChangesDiffLoader
+				path={path}
+				originalText={originalText}
+				modifiedText={resultText}
+				inline={inline}
+				className="w-full"
+			/>
 		</div>
 	);
 }

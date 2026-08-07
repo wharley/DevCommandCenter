@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { InlineShortcutDisplay } from "@/features/shortcuts/InlineShortcutDisplay";
-import type { DiffAnnotationPayload } from "@/lib/monaco-runtime";
+import type { DiffAnnotationPayload } from "./diff-types";
 
 /** A diff/file annotation bound to the file it was selected in (anchor stripped). */
 export type DiffAnnotationRequest = Omit<DiffAnnotationPayload, "anchor"> & {
@@ -93,7 +93,7 @@ export function DiffAnnotationPopover({
 	// The card is hidden until its viewport-safe position has been measured. Trying
 	// to focus the textarea during the first mount is therefore ignored by some
 	// browsers/webviews. Focus it only after the card is visible and keep this modal
-	// focus scope from being immediately stolen back by Monaco.
+	// focus scope from being immediately stolen back by the underlying editor.
 	useLayoutEffect(() => {
 		if (!isPositioned) {
 			return;
