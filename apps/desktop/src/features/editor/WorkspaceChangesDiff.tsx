@@ -117,7 +117,6 @@ export default function WorkspaceChangesDiff({
 	const { theme } = useAppearance();
 	const viewRef = useRef<CodeViewHandle<AnnotationMetadata> | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
-	const annotateButtonRef = useRef<HTMLButtonElement | null>(null);
 	const selectionButtonRef = useRef<HTMLButtonElement | null>(null);
 	const [selectedLines, setSelectedLines] =
 		useState<CodeViewLineSelection | null>(null);
@@ -185,9 +184,7 @@ export default function WorkspaceChangesDiff({
 					range,
 					originalText,
 					modifiedText,
-					anchor: triggerAnchor(
-						trigger ?? annotateButtonRef.current ?? containerRef.current,
-					),
+					anchor: triggerAnchor(trigger ?? containerRef.current),
 				}),
 			);
 			setSelectedLines(null);
@@ -230,21 +227,6 @@ export default function WorkspaceChangesDiff({
 					stickyHeaders: false,
 					onGutterUtilityClick: (range) => handleAnnotate(range),
 				}}
-				renderGutterUtility={
-					onAnnotate
-						? () => (
-							<button
-								ref={annotateButtonRef}
-								type="button"
-								aria-label={annotateLabel}
-								title={annotateLabel}
-								className="flex size-5 items-center justify-center rounded bg-primary text-primary-foreground shadow-sm"
-							>
-								<MessageSquare className="size-3" aria-hidden />
-							</button>
-						)
-						: undefined
-				}
 				renderAnnotation={(annotation) => (
 					<div className="flex min-w-0 flex-col px-2 py-0.5">
 						{annotation.metadata?.annotations.map((entry, index) => (

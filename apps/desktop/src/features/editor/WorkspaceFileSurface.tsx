@@ -140,14 +140,12 @@ function WorkspaceFileRenderer({
 	readOnly,
 	options,
 	virtualizerRef,
-	renderGutterUtility,
 	selectedLines,
 }: {
 	file: { name: string; contents: string; cacheKey: string };
 	readOnly: boolean;
 	options: ComponentProps<typeof File>["options"];
 	virtualizerRef: MutableRefObject<PierreVirtualizer>;
-	renderGutterUtility?: ComponentProps<typeof File>["renderGutterUtility"];
 	selectedLines?: SelectedLineRange | null;
 }) {
 	const virtualizer = useVirtualizer();
@@ -165,7 +163,6 @@ function WorkspaceFileRenderer({
 			disableWorkerPool
 			options={options}
 			selectedLines={selectedLines}
-			renderGutterUtility={renderGutterUtility}
 			className="block min-h-full min-w-full"
 		/>
 	);
@@ -203,7 +200,6 @@ export const WorkspaceFileEditor = forwardRef<
 ) {
 	const { theme } = useAppearance();
 	const hostRef = useRef<HTMLDivElement | null>(null);
-	const gutterButtonRef = useRef<HTMLButtonElement | null>(null);
 	const virtualizerRef = useRef<PierreVirtualizer>(undefined);
 	const editorRef = useRef<Editor<undefined> | null>(null);
 	const [activeFile, setActiveFile] = useState(() => ({ path, content }));
@@ -421,25 +417,11 @@ export const WorkspaceFileEditor = forwardRef<
 			enableLineSelection: Boolean(onAnnotate && readOnly),
 			onLineSelected: onAnnotate && readOnly ? setSelectedLines : undefined,
 			onGutterUtilityClick: onAnnotate
-				? (range) => annotateSelectedLines(range, gutterButtonRef.current)
+				? (range) => annotateSelectedLines(range, null)
 				: undefined,
 		}),
 		[annotateSelectedLines, onAnnotate, readOnly, theme],
 	);
-	const renderGutterUtility = onAnnotate
-		? () => (
-				<button
-					ref={gutterButtonRef}
-					type="button"
-					aria-label={annotateLabel}
-					title={annotateLabel}
-					className="flex size-5 items-center justify-center rounded bg-primary text-primary-foreground shadow-sm"
-				>
-					<MessageSquare className="size-3" aria-hidden />
-				</button>
-			)
-		: undefined;
-
 	return (
 		<div ref={hostRef} className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
 			<EditProvider createEditor={createEditor}>
@@ -453,7 +435,6 @@ export const WorkspaceFileEditor = forwardRef<
 						readOnly={readOnly}
 						options={fileOptions}
 						virtualizerRef={virtualizerRef}
-						renderGutterUtility={renderGutterUtility}
 						selectedLines={readOnly ? selectedLines : null}
 					/>
 				</Virtualizer>
