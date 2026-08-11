@@ -13,7 +13,10 @@ use dcc_tauri::{
         WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
         WorkspaceReviewStateInput, WorkspaceReviewStateOutput,
     },
-    commands::workspace_commands::{RepositoryIdInput, WorkspaceGitPushInput},
+    commands::workspace_commands::{
+        RepositoryIdInput, WorkspaceChangeRequestContextInput, WorkspaceChangeRequestContextOutput,
+        WorkspaceChangeRequestCreateInput, WorkspaceGitPushInput,
+    },
     state::WorkspaceCommandState,
 };
 
@@ -140,9 +143,17 @@ pub async fn workspace_change_request_view_web(
 #[tauri::command]
 pub async fn workspace_change_request_create(
     state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
+    input: WorkspaceChangeRequestCreateInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::forge_commands::workspace_change_request_create(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_context(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceChangeRequestContextInput,
+) -> Result<WorkspaceChangeRequestContextOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_change_request_context(state, input).await
 }
 
 #[tauri::command]

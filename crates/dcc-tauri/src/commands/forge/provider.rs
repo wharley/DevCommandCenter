@@ -25,6 +25,7 @@ pub(crate) struct ResolvedChangeRequestStatus {
     pub(crate) head_branch: Option<String>,
     pub(crate) base_branch: Option<String>,
     pub(crate) state: Option<String>,
+    pub(crate) is_draft: bool,
     pub(crate) mergeable: Option<String>,
     pub(crate) merge_state_status: Option<String>,
 }
@@ -160,6 +161,10 @@ pub(crate) fn resolve_workspace_change_request_status(
                     .and_then(|value| value.as_str())
                     .map(ToString::to_string),
                 state: gitlab::map_state(raw_mr.get("state").and_then(|value| value.as_str())),
+                is_draft: raw_mr
+                    .get("draft")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
                 mergeable: gitlab::map_mergeable(&raw_mr),
                 merge_state_status: raw_mr
                     .get("detailed_merge_status")
@@ -218,6 +223,10 @@ pub(crate) fn resolve_workspace_change_request_status(
                     .and_then(|value| value.as_str())
                     .map(ToString::to_string),
                 state,
+                is_draft: raw_pr
+                    .get("isDraft")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
                 mergeable: raw_pr
                     .get("mergeable")
                     .and_then(|value| value.as_str())
@@ -292,6 +301,8 @@ pub(crate) fn create_workspace_change_request(
     base_branch: &str,
     head_branch: &str,
     title: Option<&str>,
+    body: Option<&str>,
+    draft: bool,
     login: Option<&str>,
 ) -> Result<(), String> {
     match resolve_workspace_forge_target(root)? {
@@ -301,6 +312,8 @@ pub(crate) fn create_workspace_change_request(
                 base_branch,
                 head_branch,
                 title,
+                body,
+                draft,
                 &target.remote.host,
                 login,
             )
@@ -310,6 +323,8 @@ pub(crate) fn create_workspace_change_request(
             base_branch,
             head_branch,
             title,
+            body,
+            draft,
             &target.remote.host,
             login,
         ),
@@ -318,6 +333,8 @@ pub(crate) fn create_workspace_change_request(
             base_branch,
             head_branch,
             title,
+            body,
+            draft,
             "github.com",
             login,
         ),

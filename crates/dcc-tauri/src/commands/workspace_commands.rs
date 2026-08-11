@@ -562,9 +562,43 @@ pub struct WorkspaceGitCommitPushInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitCommitInput {
+    pub workspace_root: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitPushInput {
     pub workspace_root: String,
     pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeRequestCreateInput {
+    pub workspace_root: String,
+    pub forge_login: Option<String>,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub draft: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeRequestContextInput {
+    pub workspace_root: String,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeRequestContextOutput {
+    pub head_branch: String,
+    pub base_branch: String,
+    pub title: Option<String>,
+    pub provider: Option<String>,
+    pub request_label: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -2621,6 +2655,36 @@ fn git_has_staged_changes(root: &str) -> Result<bool, String> {
     ))
 }
 
+fn commit_staged_workspace_changes(root: &str, message: &str) -> Result<(), String> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("commit message is empty".to_string());
+    }
+    if !git_has_staged_changes(root)? {
+        return Err("nothing to commit — stage changes first".to_string());
+    }
+    let commit = run_git_output(root, &["commit", "-m", message])?;
+    if commit.status.success() {
+        return Ok(());
+    }
+    Err(git_output_err("git commit", &commit.stderr))
+}
+
+/// Commit staged changes without pushing. This is deliberately separate from
+/// the commit-and-push action exposed by the Inspector.
+#[tauri::command]
+pub async fn workspace_git_commit(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitCommitInput,
+) -> Result<(), String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    commit_staged_workspace_changes(root, &input.message)
+}
+
 /// Commit staged changes and push (requires at least one staged path).
 #[tauri::command]
 pub async fn workspace_git_commit_push(
@@ -2632,18 +2696,7 @@ pub async fn workspace_git_commit_push(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    let message = input.message.trim();
-    if message.is_empty() {
-        return Err("commit message is empty".to_string());
-    }
-
-    if !git_has_staged_changes(root)? {
-        return Err("nothing to commit — stage changes first".to_string());
-    }
-
-    let commit = run_git_output(root, &["commit", "-m", message])?;
-    if !commit.status.success() {
-        let error = git_output_err("git commit", &commit.stderr);
+    if let Err(error) = commit_staged_workspace_changes(root, &input.message) {
         capture_workspace_delivery_failure(
             &state,
             root,
@@ -5092,11 +5145,13 @@ fn normalize_repository_display_name(
         .map(ToString::to_string)
 }
 
-const PROJECT_ICONS: [&str; 8] = [
-    "folder", "terminal", "code", "layers", "package", "database", "globe", "rocket",
+const PROJECT_ICONS: [&str; 12] = [
+    "folder", "terminal", "code", "layers", "package", "database", "globe", "rocket", "branch",
+    "cpu", "shield", "wrench",
 ];
-const PROJECT_COLORS: [&str; 8] = [
-    "slate", "sky", "cyan", "emerald", "amber", "orange", "rose", "violet",
+const PROJECT_COLORS: [&str; 12] = [
+    "slate", "sky", "cyan", "emerald", "amber", "orange", "rose", "violet", "indigo", "fuchsia",
+    "lime", "pink",
 ];
 
 fn normalize_repository_visual(
@@ -5544,6 +5599,14 @@ mod editor_workspace_file_tests {
             Ok(Some("rocket".to_string()))
         );
         assert_eq!(
+            normalize_repository_visual(Some("cpu"), "folder", &PROJECT_ICONS, "icon"),
+            Ok(Some("cpu".to_string()))
+        );
+        assert_eq!(
+            normalize_repository_visual(Some("shield"), "folder", &PROJECT_ICONS, "icon"),
+            Ok(Some("shield".to_string()))
+        );
+        assert_eq!(
             normalize_repository_visual(Some("folder"), "folder", &PROJECT_ICONS, "icon"),
             Ok(None)
         );
@@ -5554,6 +5617,14 @@ mod editor_workspace_file_tests {
         assert_eq!(
             normalize_repository_visual(Some("violet"), "slate", &PROJECT_COLORS, "color"),
             Ok(Some("violet".to_string()))
+        );
+        assert_eq!(
+            normalize_repository_visual(Some("fuchsia"), "slate", &PROJECT_COLORS, "color"),
+            Ok(Some("fuchsia".to_string()))
+        );
+        assert_eq!(
+            normalize_repository_visual(Some("pink"), "slate", &PROJECT_COLORS, "color"),
+            Ok(Some("pink".to_string()))
         );
     }
 

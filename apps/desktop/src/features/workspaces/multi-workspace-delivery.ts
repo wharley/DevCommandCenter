@@ -101,7 +101,13 @@ const defaultDependencies: MultiWorkspaceDeliveryDependencies = {
 	requestStatus: (workspaceRoot, branch) =>
 		workspacePrStatus({ workspaceRoot, branch, forgeLogin: null }),
 	createRequest: (workspaceRoot) =>
-		workspaceChangeRequestCreate({ workspaceRoot, forgeLogin: null }),
+		workspaceChangeRequestCreate({
+			workspaceRoot,
+			forgeLogin: null,
+			title: null,
+			body: null,
+			draft: false,
+		}),
 };
 
 function errorMessage(error: unknown) {

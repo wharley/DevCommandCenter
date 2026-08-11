@@ -54,6 +54,8 @@ import {
 	ExecutionDock,
 	type ExecutionDockChangeSummary,
 } from "./ExecutionDock";
+import type { ExecutionDockRunMode } from "./ExecutionDock.actions";
+import type { CommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ComposerApprovalPolicyMenu } from "./ComposerApprovalPolicyMenu";
 import { ComposerExecutionMenu } from "./ComposerExecutionMenu";
@@ -173,6 +175,12 @@ type WorkspaceComposerProps = {
 	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
+	commitMode?: CommitMode | null;
+	forgeRequestLabel?: "PR" | "MR";
+	deliveryBusy?: boolean;
+	onRunDeliveryAction?: (mode: ExecutionDockRunMode) => Promise<void> | void;
+	onCreateChangeRequest?: (draft: boolean) => void;
+	onOpenMultiProjectDelivery?: () => void;
 };
 
 export function WorkspaceComposer({
@@ -215,6 +223,12 @@ export function WorkspaceComposer({
 	onCreateTaskFromBranch,
 	onRunRecommendedSetup,
 	onSkipRecommendedSetup,
+	commitMode,
+	forgeRequestLabel,
+	deliveryBusy,
+	onRunDeliveryAction,
+	onCreateChangeRequest,
+	onOpenMultiProjectDelivery,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
@@ -812,6 +826,12 @@ export function WorkspaceComposer({
 			onCreateTaskFromBranch={onCreateTaskFromBranch}
 			onRunRecommendedSetup={onRunRecommendedSetup}
 			onSkipRecommendedSetup={onSkipRecommendedSetup}
+			commitMode={commitMode}
+			forgeRequestLabel={forgeRequestLabel}
+			deliveryBusy={deliveryBusy}
+			onRunDeliveryAction={onRunDeliveryAction}
+			onCreateChangeRequest={onCreateChangeRequest}
+			onOpenMultiProjectDelivery={onOpenMultiProjectDelivery}
 		/>,
 		<div
 			key="composer-surface"

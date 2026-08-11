@@ -1,13 +1,17 @@
 import type { LucideIcon } from "lucide-react";
 import {
 	Code2,
+	Cpu,
 	Database,
 	Folder,
+	GitBranch,
 	Globe2,
 	Layers3,
 	Package,
 	Rocket,
+	ShieldCheck,
 	SquareTerminal,
+	Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +24,10 @@ export const PROJECT_ICON_OPTIONS = [
 	{ id: "database", Icon: Database },
 	{ id: "globe", Icon: Globe2 },
 	{ id: "rocket", Icon: Rocket },
+	{ id: "branch", Icon: GitBranch },
+	{ id: "cpu", Icon: Cpu },
+	{ id: "shield", Icon: ShieldCheck },
+	{ id: "wrench", Icon: Wrench },
 ] as const satisfies ReadonlyArray<{ id: string; Icon: LucideIcon }>;
 
 export const PROJECT_COLOR_OPTIONS = [
@@ -31,6 +39,10 @@ export const PROJECT_COLOR_OPTIONS = [
 	"orange",
 	"rose",
 	"violet",
+	"indigo",
+	"fuchsia",
+	"lime",
+	"pink",
 ] as const;
 
 export type ProjectIconId = (typeof PROJECT_ICON_OPTIONS)[number]["id"];
@@ -47,6 +59,12 @@ const PROJECT_COLOR_CLASSES: Record<ProjectColorId, string> = {
 	rose: "border-rose-500/25 bg-rose-500/12 text-rose-600 dark:text-rose-300",
 	violet:
 		"border-violet-500/25 bg-violet-500/12 text-violet-600 dark:text-violet-300",
+	indigo:
+		"border-indigo-500/25 bg-indigo-500/12 text-indigo-600 dark:text-indigo-300",
+	fuchsia:
+		"border-fuchsia-500/25 bg-fuchsia-500/12 text-fuchsia-600 dark:text-fuchsia-300",
+	lime: "border-lime-500/25 bg-lime-500/12 text-lime-600 dark:text-lime-300",
+	pink: "border-pink-500/25 bg-pink-500/12 text-pink-600 dark:text-pink-300",
 };
 
 export function projectIconId(value: string | null | undefined): ProjectIconId {

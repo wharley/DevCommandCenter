@@ -80,6 +80,10 @@ import type {
 	WorkspaceGitFilePreviewInput,
 	WorkspaceGitFilePreviewContentOutput,
 	WorkspaceGitCommitPushInput,
+	WorkspaceGitCommitInput,
+	WorkspaceChangeRequestCreateInput,
+	WorkspaceChangeRequestContextInput,
+	WorkspaceChangeRequestContextOutput,
 	WorkspaceGitCompleteMergeInput,
 	WorkspaceGitCompleteMergeOutput,
 	WorkspaceGitAcceptConflictInput,
@@ -574,6 +578,10 @@ export function workspaceGitCommitPush(input: WorkspaceGitCommitPushInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGitCommitPush, { input });
 }
 
+export function workspaceGitCommit(input: WorkspaceGitCommitInput) {
+	return invoke<void>(WORKSPACE_METHODS.workspaceGitCommit, { input });
+}
+
 export function workspaceGitPush(input: WorkspaceGitPushInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceGitPush, { input });
 }
@@ -607,8 +615,12 @@ export function workspaceChangeRequestViewWeb(input: WorkspaceGitPushInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceChangeRequestViewWeb, { input });
 }
 
-export function workspaceChangeRequestCreate(input: WorkspaceGitPushInput) {
+export function workspaceChangeRequestCreate(input: WorkspaceChangeRequestCreateInput) {
 	return invoke<void>(WORKSPACE_METHODS.workspaceChangeRequestCreate, { input });
+}
+
+export function workspaceChangeRequestContext(input: WorkspaceChangeRequestContextInput) {
+	return invoke<WorkspaceChangeRequestContextOutput>(WORKSPACE_METHODS.workspaceChangeRequestContext, { input });
 }
 
 export function workspaceChangeRequestMerge(input: WorkspaceGitPushInput) {
@@ -620,7 +632,13 @@ export function workspaceGhPrViewWeb(input: WorkspaceGitPushInput) {
 }
 
 export function workspaceGhPrCreateFill(input: WorkspaceGitPushInput) {
-	return workspaceChangeRequestCreate(input);
+	return workspaceChangeRequestCreate({
+		workspaceRoot: input.workspaceRoot,
+		forgeLogin: input.forgeLogin,
+		title: null,
+		body: null,
+		draft: false,
+	});
 }
 
 export function workspaceGhPrMerge(input: WorkspaceGitPushInput) {

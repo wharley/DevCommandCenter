@@ -1369,6 +1369,8 @@ pub(crate) fn create_change_request(
     base_branch: &str,
     head_branch: &str,
     title: Option<&str>,
+    body: Option<&str>,
+    draft: bool,
     host: &str,
     login: Option<&str>,
 ) -> Result<(), String> {
@@ -1378,14 +1380,51 @@ pub(crate) fn create_change_request(
         Some(title) => title.to_string(),
         None => last_commit_title(root)?,
     };
-    let mut output = Command::new(glab);
+    let mut output = Command::new(&glab);
     output.current_dir(root);
     output.stdin(Stdio::null());
     if let Some(auth) = auth.as_ref() {
         output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
-    let output = output
-        .args([
+    let output = output.args([
+        "mr",
+        "create",
+        "--fill",
+        "--source-branch",
+        head_branch,
+        "--target-branch",
+        base_branch,
+        "--title",
+        &title,
+        "--yes",
+    ]);
+    if let Some(body) = body.map(str::trim).filter(|body| !body.is_empty()) {
+        output.args(["--description", body]);
+    }
+    if draft {
+        output.arg("--draft");
+    }
+    let output = output.output().map_err(|e| e.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let draft_flag_unsupported = draft
+        && [
+            "unknown flag",
+            "unknown option",
+            "flag provided but not defined",
+        ]
+        .iter()
+        .any(|marker| stderr.to_lowercase().contains(marker));
+    if draft_flag_unsupported {
+        let fallback_title = if title.to_lowercase().starts_with("draft:") {
+            title.clone()
+        } else {
+            format!("Draft: {title}")
+        };
+        let mut fallback = Command::new(&glab);
+        fallback.current_dir(root).stdin(Stdio::null()).args([
             "mr",
             "create",
             "--fill",
@@ -1394,18 +1433,25 @@ pub(crate) fn create_change_request(
             "--target-branch",
             base_branch,
             "--title",
-            &title,
+            &fallback_title,
             "--yes",
-        ])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if output.status.success() {
-        return Ok(());
+        ]);
+        if let Some(auth) = auth.as_ref() {
+            fallback.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+        }
+        if let Some(body) = body.map(str::trim).filter(|body| !body.is_empty()) {
+            fallback.args(["--description", body]);
+        }
+        let fallback_output = fallback.output().map_err(|e| e.to_string())?;
+        if fallback_output.status.success() {
+            return Ok(());
+        }
+        return Err(format!(
+            "glab mr create failed: {}",
+            String::from_utf8_lossy(&fallback_output.stderr).trim()
+        ));
     }
-    Err(format!(
-        "glab mr create failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    ))
+    Err(format!("glab mr create failed: {stderr}"))
 }
 
 fn run_hub_glab_json(

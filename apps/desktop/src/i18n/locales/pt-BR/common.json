@@ -159,7 +159,11 @@
       "package": "Pacote",
       "database": "Banco de dados",
       "globe": "Web",
-      "rocket": "Foguete"
+      "rocket": "Foguete",
+      "branch": "Branch",
+      "cpu": "Processador",
+      "shield": "Proteção",
+      "wrench": "Ferramenta"
     },
     "colors": {
       "slate": "Ardósia",
@@ -169,7 +173,11 @@
       "amber": "Âmbar",
       "orange": "Laranja",
       "rose": "Rosa",
-      "violet": "Violeta"
+      "violet": "Violeta",
+      "indigo": "Índigo",
+      "fuchsia": "Fúcsia",
+      "lime": "Lima",
+      "pink": "Rosa forte"
     },
     "useRepositoryName": "Usar nome original",
     "technicalIdentity": "Identidade técnica",
@@ -1164,6 +1172,38 @@
       "readingChanges": "Lendo mudanças…",
       "changesUnavailable": "Git indisponível",
       "reviewChanges": "Revisar mudanças da tarefa",
+      "draftBadge": "Draft",
+      "actions": {
+        "title": "Ações git",
+        "primary": "próximo passo",
+        "git": "Ação git",
+        "openMenu": "Abrir ações git",
+        "syncBase": "Atualizar branch",
+        "commit": "Commitar",
+        "createDraft": "Criar draft {{requestLabel}}",
+        "unavailable": "O Git está indisponível para este workspace.",
+        "noLocalChanges": "Não há mudanças locais para commitar.",
+        "beforePushBlocked": "Uma verificação configurada bloqueou a entrega.",
+        "committed": "Commit criado",
+        "pushed": "Enviado",
+        "committedAndPushed": "Commit criado e enviado",
+        "opened": "Aberto no forge",
+        "failed": "A ação git falhou"
+      },
+      "createRequest": {
+        "title": "Criar {{requestLabel}}",
+        "route": "{{head}} → {{base}}",
+        "titleLabel": "Título",
+        "descriptionLabel": "Descrição (opcional)",
+        "descriptionPlaceholder": "Adicione contexto para quem vai revisar…",
+        "includeLocalChanges": "Incluir mudanças locais (commitar e enviar)",
+        "localSummary": "{{files}} arquivos · +{{additions}} −{{deletions}}",
+        "draft": "Criar como draft",
+        "cancel": "Cancelar",
+        "creating": "Criando…",
+        "submit": "Criar {{requestLabel}}",
+        "created": "{{requestLabel}} criado"
+      },
       "setup": {
         "recommended": "Setup recomendado — nada foi executado",
         "failed": "Setup falhou — revise no terminal e tente novamente",

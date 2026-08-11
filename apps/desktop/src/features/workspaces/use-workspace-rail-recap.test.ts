@@ -24,6 +24,7 @@ const noPr: WorkspacePrStatusOutput = {
 	headBranch: null,
 	baseBranch: null,
 	state: null,
+	isDraft: false,
 	mergeable: null,
 	mergeStateStatus: null,
 };

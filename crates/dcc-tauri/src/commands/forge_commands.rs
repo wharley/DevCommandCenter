@@ -10,7 +10,11 @@ use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use crate::{
     commands::forge::context as forge_context,
     commands::forge::provider as forge_provider,
-    commands::workspace_commands::{push_current_branch, RepositoryIdInput, WorkspaceGitPushInput},
+    commands::workspace_commands::{
+        push_current_branch, RepositoryIdInput, WorkspaceChangeRequestContextInput,
+        WorkspaceChangeRequestContextOutput, WorkspaceChangeRequestCreateInput,
+        WorkspaceGitPushInput,
+    },
     commands::workspace_support::{
         ensure_pushable_branch, find_workspace_by_root, preflight_workspace_root,
         resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
@@ -451,6 +455,7 @@ pub struct WorkspacePrStatusOutput {
     pub head_branch: Option<String>,
     pub base_branch: Option<String>,
     pub state: Option<String>,
+    pub is_draft: bool,
     pub mergeable: Option<String>,
     pub merge_state_status: Option<String>,
 }
@@ -934,7 +939,7 @@ pub async fn workspace_change_request_merge(
 #[tauri::command]
 pub async fn workspace_change_request_create(
     state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
+    input: WorkspaceChangeRequestCreateInput,
 ) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
@@ -970,7 +975,13 @@ pub async fn workspace_change_request_create(
         input.forge_login.as_deref(),
     )?
     .and_then(|context| context.effective_login);
-    let title = workspace_change_request_title(&state, root).await?;
+    let title = input
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or(workspace_change_request_title(&state, root).await?);
 
     push_current_branch(&state, root, protected_branch.as_deref(), login.as_deref())
         .await
@@ -981,8 +992,68 @@ pub async fn workspace_change_request_create(
         &base_branch,
         &head_branch,
         title.as_deref(),
+        input.body.as_deref(),
+        input.draft,
         login.as_deref(),
     )
+}
+
+#[tauri::command]
+pub async fn workspace_change_request_context(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceChangeRequestContextInput,
+) -> Result<WorkspaceChangeRequestContextOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+
+    let source = imported_workspace_source(&state, root).await?;
+    let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    let head_branch = if let Some(source) = source.as_ref() {
+        source.head_branch.clone()
+    } else {
+        ensure_pushable_branch(root, protected_branch.as_deref())?
+    };
+    let base_branch = if let Some(source) = source.as_ref() {
+        source.base_branch.clone()
+    } else {
+        let base_ref = resolve_branch_diff_base(root, protected_branch.as_deref())
+            .unwrap_or_else(|| "main".to_string());
+        let base_stripped = base_ref
+            .split_once('/')
+            .map(|(_, branch)| branch)
+            .unwrap_or(&base_ref);
+        if base_stripped == "HEAD" {
+            "main".to_string()
+        } else {
+            base_stripped.to_string()
+        }
+    };
+    let title = workspace_change_request_title(&state, root).await?;
+    let forge = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?;
+    let provider = forge.as_ref().map(|context| match context.provider {
+        ForgeCliProvider::Github => "github".to_string(),
+        ForgeCliProvider::Gitlab => "gitlab".to_string(),
+    });
+    let request_label = if provider.as_deref() == Some("gitlab") {
+        "MR"
+    } else {
+        "PR"
+    };
+
+    Ok(WorkspaceChangeRequestContextOutput {
+        head_branch,
+        base_branch,
+        title,
+        provider,
+        request_label: request_label.to_string(),
+    })
 }
 
 #[tauri::command]
@@ -1006,7 +1077,17 @@ pub async fn workspace_gh_pr_create_fill(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
-    workspace_change_request_create(state, input).await
+    workspace_change_request_create(
+        state,
+        WorkspaceChangeRequestCreateInput {
+            workspace_root: input.workspace_root,
+            forge_login: input.forge_login,
+            title: None,
+            body: None,
+            draft: false,
+        },
+    )
+    .await
 }
 
 fn hub_actor(value: &Value, provider: ForgeCliProvider) -> Option<PullRequestHubActor> {
@@ -2352,6 +2433,7 @@ pub async fn workspace_pr_status(
             head_branch: None,
             base_branch: None,
             state: None,
+            is_draft: false,
             mergeable: None,
             merge_state_status: None,
         });
@@ -2389,6 +2471,7 @@ pub async fn workspace_pr_status(
                     head_branch: None,
                     base_branch: None,
                     state: None,
+                    is_draft: false,
                     mergeable: None,
                     merge_state_status: None,
                 });
@@ -2419,6 +2502,7 @@ pub async fn workspace_pr_status(
             head_branch: Some(branch),
             base_branch: None,
             state: None,
+            is_draft: false,
             mergeable: None,
             merge_state_status: None,
         });
@@ -2433,6 +2517,7 @@ pub async fn workspace_pr_status(
         head_branch: resolved.head_branch,
         base_branch: resolved.base_branch,
         state: resolved.state,
+        is_draft: resolved.is_draft,
         mergeable: resolved.mergeable,
         merge_state_status: resolved.merge_state_status,
     })

@@ -34,6 +34,7 @@ export type WorkspacePrStatusSummary = {
 	state?: string | null;
 	mergeable?: string | null;
 	mergeStateStatus?: string | null;
+	isDraft?: boolean;
 };
 
 export type CommitModeContext = {

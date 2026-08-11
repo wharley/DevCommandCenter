@@ -159,7 +159,11 @@
       "package": "Package",
       "database": "Database",
       "globe": "Web",
-      "rocket": "Rocket"
+      "rocket": "Rocket",
+      "branch": "Branch",
+      "cpu": "Processor",
+      "shield": "Protection",
+      "wrench": "Tool"
     },
     "colors": {
       "slate": "Slate",
@@ -169,7 +173,11 @@
       "amber": "Amber",
       "orange": "Orange",
       "rose": "Rose",
-      "violet": "Violet"
+      "violet": "Violet",
+      "indigo": "Indigo",
+      "fuchsia": "Fuchsia",
+      "lime": "Lime",
+      "pink": "Pink"
     },
     "useRepositoryName": "Use original name",
     "technicalIdentity": "Technical identity",
@@ -1164,6 +1172,38 @@
       "readingChanges": "Reading changes…",
       "changesUnavailable": "Git unavailable",
       "reviewChanges": "Review task changes",
+      "draftBadge": "Draft",
+      "actions": {
+        "title": "Git actions",
+        "primary": "next",
+        "git": "Git action",
+        "openMenu": "Open Git actions",
+        "syncBase": "Update branch",
+        "commit": "Commit",
+        "createDraft": "Create draft {{requestLabel}}",
+        "unavailable": "Git is unavailable for this workspace.",
+        "noLocalChanges": "There are no local changes to commit.",
+        "beforePushBlocked": "A configured check blocked delivery.",
+        "committed": "Committed",
+        "pushed": "Pushed",
+        "committedAndPushed": "Committed and pushed",
+        "opened": "Opened in the forge",
+        "failed": "Git action failed"
+      },
+      "createRequest": {
+        "title": "Create {{requestLabel}}",
+        "route": "{{head}} → {{base}}",
+        "titleLabel": "Title",
+        "descriptionLabel": "Description (optional)",
+        "descriptionPlaceholder": "Add context for reviewers…",
+        "includeLocalChanges": "Include local changes (commit and push)",
+        "localSummary": "{{files}} files · +{{additions}} −{{deletions}}",
+        "draft": "Create as draft",
+        "cancel": "Cancel",
+        "creating": "Creating…",
+        "submit": "Create {{requestLabel}}",
+        "created": "{{requestLabel}} created"
+      },
       "setup": {
         "recommended": "Recommended setup — nothing was executed",
         "failed": "Setup failed — review the terminal and try again",

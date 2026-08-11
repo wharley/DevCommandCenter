@@ -75,6 +75,7 @@ import {
 	type MissionResumeCriterion,
 } from "@/features/spec/mission-spec-content";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
+import { setWorkspaceDeliveryBusy } from "@/features/commit/workspace-delivery-busy";
 import { MissionValidationCard } from "@/features/panel/message-components/MissionValidationCard";
 import {
 	compileMissionSpecContext,
@@ -2254,6 +2255,7 @@ export function WorkspaceInspectorSidebar({
 		}
 
 		setIsGitActionInProgress(true);
+		setWorkspaceDeliveryBusy(root, true);
 		try {
 			switch (commitMode) {
 				case "merged":
@@ -2315,6 +2317,9 @@ export function WorkspaceInspectorSidebar({
 					await workspaceChangeRequestCreate({
 						workspaceRoot: root,
 						forgeLogin: selectedForgeLogin,
+						title: null,
+						body: null,
+						draft: false,
 					});
 					toast.success(`${forgeContext.requestLabel} criado`, { id: loadingToast });
 					break;
@@ -2383,6 +2388,7 @@ export function WorkspaceInspectorSidebar({
 			throw error;
 		} finally {
 			setIsGitActionInProgress(false);
+			setWorkspaceDeliveryBusy(root, false);
 		}
 	}, [
 		commitMode,
@@ -2412,6 +2418,7 @@ export function WorkspaceInspectorSidebar({
 			t("inspector.gitConfirmation.completeMergeLoading"),
 		);
 		setIsGitActionInProgress(true);
+		setWorkspaceDeliveryBusy(root, true);
 		let completed = false;
 		try {
 			const conflictState = await workspaceGitConflictState({
@@ -2462,6 +2469,7 @@ export function WorkspaceInspectorSidebar({
 			);
 		} finally {
 			setIsGitActionInProgress(false);
+			setWorkspaceDeliveryBusy(root, false);
 			await Promise.allSettled([
 				queryClient.invalidateQueries({
 					queryKey: [WORKSPACE_CONFLICT_STATE_QUERY_KEY, root],
@@ -2504,6 +2512,7 @@ export function WorkspaceInspectorSidebar({
 			}),
 		);
 		setIsGitActionInProgress(true);
+		setWorkspaceDeliveryBusy(root, true);
 		let completed = false;
 		try {
 			await workspaceChangeRequestMerge({
@@ -2561,6 +2570,7 @@ export function WorkspaceInspectorSidebar({
 			);
 		} finally {
 			setIsGitActionInProgress(false);
+			setWorkspaceDeliveryBusy(root, false);
 		}
 		if (completed) {
 			onContextualActionComplete?.();
@@ -2583,6 +2593,7 @@ export function WorkspaceInspectorSidebar({
 		}
 
 		setIsSyncingBase(true);
+		setWorkspaceDeliveryBusy(root, true);
 		const loadingToast = toast.loading(t("inspector.gitConfirmation.syncLoading"));
 		try {
 			const result = await workspaceGitSyncBase({
@@ -2607,6 +2618,7 @@ export function WorkspaceInspectorSidebar({
 			});
 		} finally {
 			setIsSyncingBase(false);
+			setWorkspaceDeliveryBusy(root, false);
 			await queryClient.invalidateQueries({
 				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
 			});
@@ -3361,7 +3373,8 @@ export function WorkspaceInspectorSidebar({
 							retrySetupLabel={t("inspector.setupRetry.button")}
 							prUrl={prStatus?.url ?? null}
 							prNumber={prStatus?.number ?? null}
-							prProvider={prStatus?.provider ?? null}
+									prProvider={prStatus?.provider ?? null}
+									prIsDraft={prStatus?.isDraft ?? false}
 							hideCommitAction={Boolean(activeDelegationReview) || isSessionWorktreeView}
 							suppressCommitButton={suppressEmptyCreatePr}
 							identitySlot={

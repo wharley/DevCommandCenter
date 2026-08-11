@@ -996,6 +996,8 @@ pub(crate) fn create_change_request(
     base_branch: &str,
     head_branch: &str,
     title: Option<&str>,
+    body: Option<&str>,
+    draft: bool,
     host: &str,
     login: Option<&str>,
 ) -> Result<(), String> {
@@ -1019,6 +1021,12 @@ pub(crate) fn create_change_request(
     ]);
     if let Some(title) = title.map(str::trim).filter(|title| !title.is_empty()) {
         output.args(["--title", title]);
+    }
+    if let Some(body) = body.map(str::trim).filter(|body| !body.is_empty()) {
+        output.args(["--body", body]);
+    }
+    if draft {
+        output.arg("--draft");
     }
     let output = output.output().map_err(|e| e.to_string())?;
     if output.status.success() {

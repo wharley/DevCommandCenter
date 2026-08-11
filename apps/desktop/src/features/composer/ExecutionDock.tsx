@@ -1,5 +1,6 @@
 import {
 	Check,
+	ChevronDown,
 	ChevronUp,
 	FileDiff,
 	FolderGit2,
@@ -9,7 +10,7 @@ import {
 	Terminal,
 	X,
 } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSetupReport } from "@dcc/contracts";
 import {
@@ -26,6 +27,12 @@ import {
 	type ExecutionDockChangeSummary,
 	type ExecutionDockGitState,
 } from "./ExecutionDock.logic";
+import {
+	resolveExecutionDockActions,
+	type ExecutionDockAction,
+	type ExecutionDockRunMode,
+} from "./ExecutionDock.actions";
+import { commitTranslationKey, type CommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 
 export type { ExecutionDockChangeSummary } from "./ExecutionDock.logic";
 
@@ -52,6 +59,12 @@ type ExecutionDockProps = {
 	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
+	commitMode?: CommitMode | null;
+	forgeRequestLabel?: "PR" | "MR";
+	deliveryBusy?: boolean;
+	onRunDeliveryAction?: (mode: ExecutionDockRunMode) => Promise<void> | void;
+	onCreateChangeRequest?: (draft: boolean) => void;
+	onOpenMultiProjectDelivery?: () => void;
 };
 
 /**
@@ -76,10 +89,17 @@ export const ExecutionDock = memo(function ExecutionDock({
 	onCreateTaskFromBranch,
 	onRunRecommendedSetup,
 	onSkipRecommendedSetup,
+	commitMode = null,
+	forgeRequestLabel = "PR",
+	deliveryBusy = false,
+	onRunDeliveryAction,
+	onCreateChangeRequest,
+	onOpenMultiProjectDelivery,
 }: ExecutionDockProps) {
 	const { t } = useTranslation("common");
 	const [isRunningSetup, setIsRunningSetup] = useState(false);
 	const [setupError, setSetupError] = useState<string | null>(null);
+	const [deliveryMenuOpen, setDeliveryMenuOpen] = useState(false);
 	const workingBranch =
 		currentBranch && currentBranch !== "HEAD" ? currentBranch : null;
 	const displayedProject = projectLabel || t("composer.executionDock.projectFallback");
@@ -118,6 +138,59 @@ export const ExecutionDock = memo(function ExecutionDock({
 		.map((command) => setupDisplayCommand(command))
 		.join(" · ");
 	const gitStatus = resolveExecutionDockStatus(changeSummary, gitStatusState);
+	const actionLoading = deliveryBusy || gitStatusState !== "ready";
+	const deliveryActions = useMemo(
+		() =>
+			resolveExecutionDockActions({
+				mode: commitMode,
+				loading: actionLoading,
+				multiProject,
+					hasLocalChanges: (changeSummary?.files ?? 0) > 0,
+					hasBranchChanges: (changeSummary?.branchFiles ?? 0) > 0,
+					hasAheadCommits: (changeSummary?.aheadOfRemoteCount ?? 0) > 0,
+					hasChangeRequest: Boolean(changeSummary?.pullRequestState?.trim()),
+					hasOpenRequest: Boolean(
+					changeSummary?.pullRequestState?.trim().toLowerCase() === "open",
+				),
+			}),
+		[actionLoading, changeSummary, commitMode, multiProject],
+	);
+	const primaryAction = deliveryActions[0];
+	const actionLabel = (action: ExecutionDockAction) => {
+		if (multiProject) {
+			return t("workspaceScope.delivery.action", { count: contextProjects.length });
+		}
+		if (action.id === "sync-base") {
+			return t("composer.executionDock.actions.syncBase");
+		}
+		if (action.id === "create-draft-pr") {
+			return t("composer.executionDock.actions.createDraft", { requestLabel: forgeRequestLabel });
+		}
+		if (action.mode === "commit") {
+			return t("composer.executionDock.actions.commit");
+		}
+		if (action.mode === "sync-base") {
+			return t("composer.executionDock.actions.syncBase");
+		}
+		if (action.mode) {
+			return t(commitTranslationKey(action.mode, "idle"), { requestLabel: forgeRequestLabel });
+		}
+		return t("composer.executionDock.actions.git");
+	};
+	const runDockAction = (action: ExecutionDockAction) => {
+		if (action.disabled) return;
+		if (action.kind === "create-request") {
+			onCreateChangeRequest?.(action.id === "create-draft-pr");
+			return;
+		}
+		if (action.mode) {
+			void onRunDeliveryAction?.(action.mode);
+			return;
+		}
+		if (action.id === "primary" && multiProject) {
+			onOpenMultiProjectDelivery?.();
+		}
+	};
 	useEffect(() => {
 		setSetupError(null);
 	}, [projectRootPath, setupReport?.status]);
@@ -350,13 +423,14 @@ export const ExecutionDock = memo(function ExecutionDock({
 				)}
 			</div>
 
-			<button
-				type="button"
-				onClick={onReviewChanges}
-				disabled={!onReviewChanges}
-				className="flex items-center gap-1.5 rounded-tr-xl px-3 py-2 text-[11px] text-muted-foreground/90 transition-colors hover:bg-muted/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-70"
-				aria-label={t("composer.executionDock.reviewChanges")}
-			>
+			<div className="flex min-w-0 rounded-tr-xl">
+				<button
+					type="button"
+					onClick={onReviewChanges}
+					disabled={!onReviewChanges}
+					className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-r border-border/45 px-3 py-2 text-[11px] text-muted-foreground/90 transition-colors hover:bg-muted/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-70"
+					aria-label={t("composer.executionDock.reviewChanges")}
+				>
 				<FileDiff className="size-3.5 shrink-0" strokeWidth={1.8} />
 				{gitStatus.kind === "loading" ? (
 					<span className="whitespace-nowrap max-[440px]:hidden">
@@ -428,7 +502,62 @@ export const ExecutionDock = memo(function ExecutionDock({
 						{t("composer.executionDock.noChanges")}
 					</span>
 				)}
-			</button>
+				</button>
+				<div className="flex min-w-24 max-[440px]:min-w-10">
+					<button
+						type="button"
+						disabled={primaryAction.disabled}
+						onClick={() => {
+							if (primaryAction.kind === "review") {
+								setDeliveryMenuOpen(true);
+								return;
+							}
+							runDockAction(primaryAction);
+						}}
+						className="flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 px-2.5 py-2 text-[11px] font-medium text-foreground transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-70"
+						aria-label={actionLabel(primaryAction)}
+					>
+						{deliveryBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+						<span className="truncate max-[440px]:hidden">{actionLabel(primaryAction)}</span>
+					</button>
+					<Popover open={deliveryMenuOpen} onOpenChange={setDeliveryMenuOpen}>
+						<PopoverTrigger asChild>
+							<button
+								type="button"
+								disabled={actionLoading}
+								className="flex cursor-pointer items-center justify-center border-l border-border/45 px-2 text-foreground transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-70"
+								aria-label={t("composer.executionDock.actions.openMenu")}
+							>
+								<ChevronDown className="size-3.5 shrink-0" strokeWidth={2} />
+							</button>
+						</PopoverTrigger>
+						<PopoverContent side="top" align="end" sideOffset={8} className="w-64 p-1.5">
+							<p className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+								{t("composer.executionDock.actions.title")}
+							</p>
+							{deliveryActions.map((action, index) => (
+								<button
+									key={`${action.id}-${index}`}
+									type="button"
+									disabled={action.disabled}
+									onClick={() => runDockAction(action)}
+									className={cn(
+										"flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-2 text-left text-[11px] transition-colors hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-40",
+										action.primary && "bg-muted/55 font-medium",
+									)}
+								>
+									<span>{actionLabel(action)}</span>
+									{action.primary ? (
+										<span className="text-[10px] text-muted-foreground">
+											{t("composer.executionDock.actions.primary")}
+										</span>
+									) : null}
+								</button>
+							))}
+						</PopoverContent>
+					</Popover>
+				</div>
+			</div>
 
 			{showSetupRecommendation ? (
 				<div className="col-span-3 flex min-w-0 items-center gap-2 border-t border-amber-500/20 bg-amber-500/[0.065] px-3 py-2 max-sm:col-span-2 max-sm:flex-wrap">

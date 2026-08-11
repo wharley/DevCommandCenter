@@ -32,6 +32,7 @@ export function useWorkspacePrStatus(
 					headBranch: null,
 					baseBranch: null,
 					state: null,
+					isDraft: false,
 					mergeable: null,
 					mergeStateStatus: null,
 				};

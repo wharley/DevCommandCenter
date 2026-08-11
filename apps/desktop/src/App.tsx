@@ -1862,6 +1862,9 @@ export default function App() {
 		setInspectorCollapsed(false);
 	}, [setInspectorCollapsed]);
 	const closeInspector = useCallback(() => {
+		// A manual close is an explicit override of the pin. The next opening
+		// should be contextual again unless the user pins it again.
+		setInspectorPresentation("contextual");
 		setInspectorCollapsed(true);
 	}, [setInspectorCollapsed]);
 	const handleInspectorContextualActionComplete = useCallback(() => {
@@ -1895,11 +1898,11 @@ export default function App() {
 		if (inspectorCollapsed) {
 			recordUxMetric("diff_discovered");
 			setInspectorMode("git");
-			openPinnedInspector();
+			openContextualInspector();
 			return;
 		}
 		closeInspector();
-	}, [closeInspector, inspectorCollapsed, openPinnedInspector]);
+	}, [closeInspector, inspectorCollapsed, openContextualInspector]);
 	const openPlanSurface = useCallback(() => {
 		setSurfaceSelection({ kind: "plan" });
 		setInspectorCollapsed(true);
@@ -4708,6 +4711,9 @@ export default function App() {
 									onInspectorCollapsedChange={setInspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
+									onCompleteWorkspace={
+									isRemoteBackend ? undefined : handleCompleteWorkspace
+								}
 									onCreateTaskFromBranch={
 										canCreateTaskFromDock
 											? handleCreateTaskFromDockBranch

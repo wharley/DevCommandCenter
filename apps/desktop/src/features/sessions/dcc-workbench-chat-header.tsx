@@ -2,7 +2,6 @@ import {
 	AlertCircle,
 	Clock3,
 	History,
-	PanelRightClose,
 	PanelRightOpen,
 	Plus,
 	RefreshCw,
@@ -58,9 +57,9 @@ export type DccWorkbenchChatHeaderProps = {
 	sessionActionSessionId: string | null;
 	onOpenTerminal?: () => void;
 	terminalScopes?: TerminalScopeTarget[];
-	/** Current inspector visibility — picks the open vs. close affordance. */
+	/** Current inspector visibility — the header action is shown only when closed. */
 	inspectorCollapsed?: boolean;
-	/** Toggles the inspector open/closed. */
+	/** Opens the inspector from the closed state. */
 	onToggleInspector?: () => void;
 };
 
@@ -87,9 +86,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onToggleInspector,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
-	const handleInspectorToggle = () => {
-		onToggleInspector?.();
-	};
+	const inspectorIsClosed = inspectorCollapsed ?? true;
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const visibleSessionList = visibleSessions(sessions);
 	const archivedSessionList = sessions.filter(isSessionArchived);
@@ -185,32 +182,22 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 							</TooltipContent>
 						</Tooltip>
 					) : null}
-					{onToggleInspector ? (
+					{onToggleInspector && inspectorIsClosed ? (
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button
 									type="button"
 									variant="ghost"
 									size="icon-sm"
-									onClick={handleInspectorToggle}
-									aria-label={
-										inspectorCollapsed
-											? t("workbench.inspectorToggle.open")
-											: t("workbench.inspectorToggle.close")
-									}
+									onClick={onToggleInspector}
+									aria-label={t("workbench.inspectorToggle.open")}
 									className="shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
 								>
-									{inspectorCollapsed ? (
-										<PanelRightOpen className="size-3.5" strokeWidth={1.8} />
-									) : (
-										<PanelRightClose className="size-3.5" strokeWidth={1.8} />
-									)}
+									<PanelRightOpen className="size-3.5" strokeWidth={1.8} />
 								</Button>
 							</TooltipTrigger>
 							<TooltipContent side="bottom">
-								{inspectorCollapsed
-									? t("workbench.inspectorToggle.open")
-									: t("workbench.inspectorToggle.close")}
+								{t("workbench.inspectorToggle.open")}
 							</TooltipContent>
 						</Tooltip>
 					) : null}

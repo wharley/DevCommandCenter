@@ -194,6 +194,7 @@ struct WorkspaceMethods {
     list_repositories: String,
     list_workspace_bundles: String,
     workspace_continue_from_base_branch: String,
+    workspace_change_request_context: String,
     workspace_change_request_create: String,
     workspace_change_request_merge: String,
     workspace_change_request_view_web: String,
@@ -217,6 +218,7 @@ struct WorkspaceMethods {
     workspace_git_branch_diff: String,
     workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
+    workspace_git_commit: String,
     workspace_git_accept_conflict: String,
     workspace_git_mark_conflict_resolved: String,
     workspace_git_abort_merge: String,
@@ -528,6 +530,10 @@ fn main() {
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitFilePreviewContentOutput>()
         .typ::<WorkspaceGitPathInput>()
         .typ::<WorkspaceGitCommitPushInput>()
+        .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitCommitInput>()
+        .typ::<dcc_tauri::commands::workspace_commands::WorkspaceChangeRequestCreateInput>()
+        .typ::<dcc_tauri::commands::workspace_commands::WorkspaceChangeRequestContextInput>()
+        .typ::<dcc_tauri::commands::workspace_commands::WorkspaceChangeRequestContextOutput>()
         .typ::<WorkspaceGitPushInput>()
         .typ::<WorkspaceGitCompleteMergeInput>()
         .typ::<WorkspaceGitCompleteMergeOutput>()
@@ -697,6 +703,7 @@ fn main() {
                 list_workspace_bundles: "list_workspace_bundles".to_string(),
                 workspace_continue_from_base_branch: "workspace_continue_from_base_branch"
                     .to_string(),
+                workspace_change_request_context: "workspace_change_request_context".to_string(),
                 workspace_change_request_create: "workspace_change_request_create".to_string(),
                 workspace_change_request_merge: "workspace_change_request_merge".to_string(),
                 workspace_change_request_view_web: "workspace_change_request_view_web".to_string(),
@@ -726,6 +733,7 @@ fn main() {
                 workspace_git_file_preview_content: "workspace_git_file_preview_content"
                     .to_string(),
                 workspace_git_commit_push: "workspace_git_commit_push".to_string(),
+                workspace_git_commit: "workspace_git_commit".to_string(),
                 workspace_git_accept_conflict: "workspace_git_accept_conflict".to_string(),
                 workspace_git_mark_conflict_resolved: "workspace_git_mark_conflict_resolved"
                     .to_string(),

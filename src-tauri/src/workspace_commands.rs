@@ -414,6 +414,14 @@ pub async fn workspace_git_commit_push(
 }
 
 #[tauri::command]
+pub async fn workspace_git_commit(
+    state: State<'_, WorkspaceCommandState>,
+    input: dcc_tauri::commands::workspace_commands::WorkspaceGitCommitInput,
+) -> Result<(), String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_commit(state, input).await
+}
+
+#[tauri::command]
 pub async fn workspace_git_push(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPushInput,

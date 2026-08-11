@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { WorkspaceSessionSummary, WorkspaceSetupReport } from "@dcc/contracts";
@@ -47,6 +47,17 @@ import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mis
 import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
 import { useWorkspaceGitBranchDiff } from "@/features/inspector/use-workspace-git-branch-diff";
 import { useWorkspacePrStatus } from "@/features/inspector/use-workspace-pr-status";
+import { useWorkspaceForgeContext } from "@/features/inspector/use-workspace-forge-context";
+import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
+import {
+	useWorkspaceDelivery,
+	type WorkspaceDeliveryCreateRequestInput,
+} from "@/features/commit/use-workspace-delivery";
+import { CreateChangeRequestDialog } from "@/features/commit/CreateChangeRequestDialog";
+import { SyncBaseDialog } from "@/features/commit/SyncBaseDialog";
+import { MergeConfirmDialog } from "@/features/commit/MergeConfirmDialog";
+import type { ExecutionDockRunMode } from "@/features/composer/ExecutionDock.actions";
+import { workspaceChangeRequestContext } from "@/lib/workspace-api";
 import { workspaceRailDisplayTitle } from "@/features/workspaces/workspace-rail-shared";
 import {
 	buildMissionSpecFilename,
@@ -200,6 +211,8 @@ type WorkspacePanelProps = {
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
+	onOpenMultiProjectDelivery?: () => void;
+	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
 	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
@@ -268,6 +281,8 @@ export function WorkspacePanel({
 	inspectorCollapsed,
 	onToggleInspector,
 	onReviewChanges,
+	onOpenMultiProjectDelivery,
+	onCompleteWorkspace,
 	onCreateTaskFromBranch,
 	onRunRecommendedSetup,
 	onSkipRecommendedSetup,
@@ -279,6 +294,7 @@ export function WorkspacePanel({
 	delegateSignal,
 }: WorkspacePanelProps) {
 	const { t } = useTranslation("common");
+	const queryClient = useQueryClient();
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
 	);
@@ -429,7 +445,30 @@ export function WorkspacePanel({
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
 	const branchDiffQuery = useWorkspaceGitBranchDiff(workspacePath);
 	const currentBranch = gitStatusQuery.data?.currentBranch ?? null;
-	const pullRequestQuery = useWorkspacePrStatus(workspacePath, currentBranch);
+	const forgeContextQuery = useWorkspaceForgeContext(workspacePath);
+	const forgeContext = forgeContextQuery.data ?? null;
+	const forgeLogin = forgeContext?.effectiveLogin ?? null;
+	const forgeRequestLabel: "PR" | "MR" = forgeContext?.provider === "gitlab" ? "MR" : "PR";
+	const pullRequestQuery = useWorkspacePrStatus(workspacePath, currentBranch, forgeLogin);
+	const [syncBaseConfirmationOpen, setSyncBaseConfirmationOpen] = useState(false);
+	const [mergeConfirmationOpen, setMergeConfirmationOpen] = useState(false);
+	const commitMode = resolveCommitMode({
+		branch: currentBranch || workspaceBranch,
+		prStatus: pullRequestQuery.data,
+		gitStatus: gitStatusQuery.data,
+	});
+	const [createRequestDraft, setCreateRequestDraft] = useState<boolean | null>(null);
+	const changeRequestContextQuery = useQuery({
+		queryKey: ["workspaceChangeRequestContext", workspacePath?.trim() ?? "", forgeLogin ?? ""],
+		queryFn: () => workspaceChangeRequestContext({
+			workspaceRoot: workspacePath?.trim() ?? "",
+			forgeLogin,
+		}),
+		enabled: Boolean(workspacePath?.trim() && createRequestDraft !== null),
+		staleTime: 15_000,
+	});
+	const dialogRequestLabel: "PR" | "MR" =
+		changeRequestContextQuery.data?.requestLabel === "MR" ? "MR" : forgeRequestLabel;
 	const gitChangeSummary = useMemo(() => {
 		const status = gitStatusQuery.data;
 		const branchDiff = branchDiffQuery.data;
@@ -458,6 +497,25 @@ export function WorkspacePanel({
 			: gitStatusQuery.isError || branchDiffQuery.isError
 				? "error"
 				: "ready";
+	const hasLocalChanges = (gitChangeSummary?.files ?? 0) > 0;
+	const delivery = useWorkspaceDelivery({
+		workspaceRoot: workspacePath,
+		workspaceName,
+		forgeLogin,
+		baseBranch: pullRequestQuery.data?.baseBranch ?? branchDiffQuery.data?.baseBranch ?? workspaceBranch,
+		requestLabel: forgeRequestLabel,
+		stagedCount: gitStatusQuery.data?.staged.length ?? 0,
+		hasLocalChanges,
+		multiProject: workspaceContextProjects.length > 1,
+		onReview: onReviewChanges ?? onToggleInspector ?? (() => undefined),
+		onRequestSyncBase: () => setSyncBaseConfirmationOpen(true),
+		onRequestMerge: () => setMergeConfirmationOpen(true),
+		onCompleteWorkspace: () => onCompleteWorkspace?.(workspaceId),
+		onOpenMultiProject: onOpenMultiProjectDelivery,
+		onCreateRequest: (draft) => setCreateRequestDraft(draft),
+		queryClient,
+		t,
+	});
 	const messages = useMemo(
 		() =>
 			projectWorkspaceMessages(
@@ -959,6 +1017,12 @@ export function WorkspacePanel({
 						onAbortSession={onAbortSession}
 						onReviewPlan={onOpenPlanSurface}
 						onReviewChanges={onReviewChanges ?? onToggleInspector}
+						commitMode={commitMode}
+						forgeRequestLabel={forgeRequestLabel}
+						deliveryBusy={delivery.busy}
+						onRunDeliveryAction={(mode: ExecutionDockRunMode) => delivery.run(mode)}
+						onCreateChangeRequest={(draft) => setCreateRequestDraft(draft)}
+						onOpenMultiProjectDelivery={onOpenMultiProjectDelivery}
 						onCreateTaskFromBranch={onCreateTaskFromBranch}
 						onRunRecommendedSetup={onRunRecommendedSetup}
 						onSkipRecommendedSetup={onSkipRecommendedSetup}
@@ -971,6 +1035,53 @@ export function WorkspacePanel({
 	return (
 		<>
 			{surfaceContent}
+			<CreateChangeRequestDialog
+				open={createRequestDraft !== null}
+				onOpenChange={(open) => {
+					if (!open && !delivery.busy) setCreateRequestDraft(null);
+				}}
+				requestLabel={dialogRequestLabel}
+				headBranch={changeRequestContextQuery.data?.headBranch ?? currentBranch}
+				baseBranch={changeRequestContextQuery.data?.baseBranch ?? branchDiffQuery.data?.baseBranch ?? workspaceBranch}
+				defaultTitle={changeRequestContextQuery.data?.title ?? workspaceName}
+				localFiles={gitChangeSummary?.files ?? 0}
+				localAdditions={gitChangeSummary?.additions ?? 0}
+				localDeletions={gitChangeSummary?.deletions ?? 0}
+				loading={delivery.busy}
+				initialDraft={createRequestDraft === true}
+				onSubmit={async (input) => {
+					const request: WorkspaceDeliveryCreateRequestInput = {
+						workspaceRoot: workspacePath?.trim() ?? "",
+						forgeLogin,
+						title: input.title,
+						body: input.body || null,
+						draft: input.draft,
+						includeLocalChanges: input.includeLocalChanges,
+					};
+					await delivery.createRequest(request);
+					setCreateRequestDraft(null);
+				}}
+			/>
+			<SyncBaseDialog
+				open={syncBaseConfirmationOpen}
+				onOpenChange={setSyncBaseConfirmationOpen}
+				baseBranch={pullRequestQuery.data?.baseBranch ?? branchDiffQuery.data?.baseBranch ?? workspaceBranch}
+				loading={delivery.busy}
+				onConfirm={() => {
+					setSyncBaseConfirmationOpen(false);
+					void delivery.syncBase();
+				}}
+			/>
+			<MergeConfirmDialog
+				open={mergeConfirmationOpen}
+				onOpenChange={setMergeConfirmationOpen}
+				requestLabel={forgeRequestLabel}
+				loading={delivery.busy}
+				onConfirm={() => {
+					setMergeConfirmationOpen(false);
+					void delivery.merge();
+				}}
+			/>
 			<DiffReviewTray
 				annotations={reviewAnnotations}
 				onRemove={handleRemoveReviewAnnotation}

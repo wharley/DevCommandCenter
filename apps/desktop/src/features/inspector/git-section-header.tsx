@@ -40,6 +40,7 @@ export type GitSectionHeaderProps = {
   prUrl?: string | null;
   prNumber?: number | null;
   prProvider?: string | null;
+  prIsDraft?: boolean;
   identitySlot?: ReactNode;
   hideCommitAction?: boolean;
   suppressCommitButton?: boolean;
@@ -58,6 +59,7 @@ export function GitSectionHeader({
   prUrl = null,
   prNumber = null,
   prProvider = null,
+  prIsDraft = false,
   identitySlot = null,
   hideCommitAction = false,
   suppressCommitButton = false,
@@ -107,6 +109,7 @@ export function GitSectionHeader({
             <ExternalLink className="size-3.5" />
             {prLabel}
             {prNumber ? ` #${prNumber}` : ""}
+            {prIsDraft ? <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] uppercase tracking-wide">{t("composer.executionDock.draftBadge")}</span> : null}
           </Button>
         ) : null}
         {identitySlot}
