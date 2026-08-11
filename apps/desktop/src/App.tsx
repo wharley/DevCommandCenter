@@ -1444,22 +1444,27 @@ export default function App() {
 				forgeLogin: pullRequest.forgeLogin,
 			});
 			notifyWorkspaceCreationResult(t, "open", result);
-			await Promise.all([
-				queryClient.invalidateQueries({
-					queryKey: ["workspaces", backendCacheKey],
-				}),
-				queryClient.invalidateQueries({
-					queryKey: ["pullRequestHub", "list"],
-				}),
-			]);
+			// The creation hook already adds the workspace optimistically and selects it.
+			// Keep this explicit here because this flow also switches away from the PR
+			// surface immediately after the workspace is ready.
+			setSelectedWorkspaceId(result.workspace.id);
 			setGlobalSurface(null);
 			requestNewTaskComposerFocus(result.workspace.id);
+			// Refresh in the background. Waiting for the PR list refetch here keeps the
+			// PR button in its loading state even though workspace creation completed.
+			void queryClient.invalidateQueries({
+				queryKey: ["workspaces", backendCacheKey],
+			});
+			void queryClient.invalidateQueries({
+				queryKey: ["pullRequestHub", "list"],
+			});
 		},
 		[
 			backendCacheKey,
 			createWorkspaceFromSourceUrl,
 			queryClient,
 			requestNewTaskComposerFocus,
+			setSelectedWorkspaceId,
 			t,
 		],
 	);
