@@ -160,6 +160,7 @@ type SessionWorkbenchProps = {
 		nonce: number;
 		mode?: "append" | "replace";
 	} | null;
+	onComposerPrefillConsumed?: (prefill: { text: string; nonce: number }) => void;
 	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
@@ -239,6 +240,7 @@ export function SessionWorkbench({
 	onOpenPlanSurface,
 	onImplementPlanInNewThread,
 	composerPrefill,
+	onComposerPrefillConsumed,
 	composerFocusRequestKey = null,
 	inspectorCollapsed,
 	onInspectorCollapsedChange,
@@ -258,11 +260,30 @@ export function SessionWorkbench({
 	const [terminalUiStates, setTerminalUiStates] =
 		useState<WorkspaceTerminalUiStates>({});
 	const [terminalComposerPrefill, setTerminalComposerPrefill] = useState<{
+		workspaceId: string;
 		text: string;
 		nonce: number;
 		mode: "append";
 	} | null>(null);
 	const terminalPrefillNonceRef = useRef(0);
+	const handleComposerPrefillConsumed = useCallback(
+		(prefill: { text: string; nonce: number }) => {
+			if (
+				terminalComposerPrefill?.nonce === prefill.nonce &&
+				terminalComposerPrefill.text === prefill.text
+			) {
+				setTerminalComposerPrefill(null);
+				return;
+			}
+			onComposerPrefillConsumed?.(prefill);
+		},
+		[onComposerPrefillConsumed, terminalComposerPrefill],
+	);
+	useEffect(() => {
+		// Terminal context belongs to the workspace where it was collected and
+		// must not leak into the next workspace's composer.
+		setTerminalComposerPrefill(null);
+	}, [workspaceId]);
 	const inspectorBeforeTerminalExpandRef = useRef<boolean | null>(null);
 	const [deliveryOpen, setDeliveryOpen] = useState(false);
 	const [deliveryRunning, setDeliveryRunning] = useState(false);
@@ -528,6 +549,7 @@ export function SessionWorkbench({
 				? t("terminalDock.agentContext.selection")
 				: t("terminalDock.agentContext.recentOutput");
 			setTerminalComposerPrefill({
+				workspaceId,
 				nonce: terminalPrefillNonceRef.current,
 				mode: "append",
 				text: [
@@ -720,7 +742,12 @@ export function SessionWorkbench({
 						onImplementPlanInNewThread={onImplementPlanInNewThread}
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}
-						externalComposerPrefill={terminalComposerPrefill ?? composerPrefill}
+						externalComposerPrefill={
+							terminalComposerPrefill?.workspaceId === workspaceId
+								? terminalComposerPrefill
+								: composerPrefill
+						}
+						onExternalComposerPrefillConsumed={handleComposerPrefillConsumed}
 						composerFocusRequestKey={composerFocusRequestKey}
 						inspectorCollapsed={inspectorCollapsed}
 						onToggleInspector={onToggleInspector}

@@ -3748,6 +3748,17 @@ export default function App() {
 		[selectedWorkspace],
 	);
 
+	const handleComposerPrefillConsumed = useCallback(
+		(prefill: { text: string; nonce: number }) => {
+			setWorkspaceComposerPrefill((current) =>
+				current?.nonce === prefill.nonce && current.text === prefill.text
+					? null
+					: current,
+			);
+		},
+		[],
+	);
+
 	const handleOpenMissionSpec = useCallback((spec: MissionSpecEntry | null) => {
 		setSurfaceSelection(
 			spec
@@ -4738,7 +4749,8 @@ export default function App() {
 													mode: workspaceComposerPrefill.mode,
 												}
 											: null
-									}
+										}
+									onComposerPrefillConsumed={handleComposerPrefillConsumed}
 								/>
 							) : (
 								<WorkspaceBootstrapState

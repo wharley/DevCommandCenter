@@ -97,6 +97,8 @@ type ComposerPrefill = {
 	mode?: "append" | "replace";
 };
 
+type ComposerPrefillConsumption = Pick<ComposerPrefill, "text" | "nonce">;
+
 /** Formats a diff selection as a markdown context block for the agent prompt. */
 function buildAnnotationContextBlock(request: DiffAnnotationRequest): string {
 	const lineLabel =
@@ -204,6 +206,9 @@ type WorkspacePanelProps = {
 	terminalScopes?: TerminalScopeTarget[];
 	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 	externalComposerPrefill?: ComposerPrefill | null;
+	onExternalComposerPrefillConsumed?: (
+		prefill: ComposerPrefillConsumption,
+	) => void;
 	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
@@ -277,6 +282,7 @@ export function WorkspacePanel({
 	terminalScopes,
 	onOpenTerminal,
 	externalComposerPrefill,
+	onExternalComposerPrefillConsumed,
 	composerFocusRequestKey = null,
 	inspectorCollapsed,
 	onToggleInspector,
@@ -327,8 +333,9 @@ export function WorkspacePanel({
 	useEffect(() => {
 		if (externalComposerPrefill) {
 			setComposerPrefill(externalComposerPrefill);
+			onExternalComposerPrefillConsumed?.(externalComposerPrefill);
 		}
-	}, [externalComposerPrefill]);
+	}, [externalComposerPrefill, onExternalComposerPrefillConsumed]);
 
 	// Build a turn that honors the workspace's persisted effort/ultrathink so a
 	// direct send matches what the user would get from the composer.
