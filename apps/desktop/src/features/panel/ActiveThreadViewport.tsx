@@ -212,6 +212,8 @@ export function ActiveThreadViewport({
 													message.id === planMessageId && planReadOnly
 												}
 												sessionId={sessionId}
+												providers={providers}
+												modelId={message.model}
 												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 												activeMissionSpecHash={activeMissionSpecHash}
 												autoSaveMissionValidation={autoSaveMissionValidation}

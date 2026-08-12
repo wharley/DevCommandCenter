@@ -2012,6 +2012,8 @@
   },
   "conversation": {
     "scrollToBottom": "Rolar para o fim",
+    "modelLabel": "Modelo",
+    "requestedModelLabel": "Modelo solicitado",
     "newActivity": "Nova atividade",
     "starting": "Preparando o agente…",
     "loading": {

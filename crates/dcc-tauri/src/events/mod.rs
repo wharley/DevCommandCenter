@@ -76,6 +76,15 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionTurnNativeSubagentActivity { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/native-subagent/activity")
         }
+        CoreEvent::SessionTurnNativeSubagentModelConfirmed { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/native-subagent/model-confirmed")
+        }
+        CoreEvent::SessionTurnNativeSubagentModelRequested { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/native-subagent/model-requested")
+        }
+        CoreEvent::SessionTurnModelEffective { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/model-effective")
+        }
         CoreEvent::SessionTurnCompleted { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/completed")
         }

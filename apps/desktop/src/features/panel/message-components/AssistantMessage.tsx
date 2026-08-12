@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertCircle, Bot, ChevronRight, Copy, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { ProviderCatalog } from "@dcc/contracts";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { Button } from "@/components/ui/button";
 import { LazyStreamdown } from "@/components/streamdown-loader";
@@ -53,18 +54,45 @@ type NativeSubagentAnnotation = Extract<
 	{ type: "native-subagent" }
 >;
 
-function NativeSubagentCard({ annotation }: { annotation: NativeSubagentAnnotation }) {
+function resolveModelLabel(
+	model: string | null | undefined,
+	providers: ProviderCatalog["providers"] = [],
+) {
+	const normalized = model?.trim();
+	if (!normalized) return null;
+	return (
+		providers
+			.flatMap((provider) => provider.models)
+			.find((candidate) => candidate.id === normalized)?.label ?? normalized
+	);
+}
+
+function NativeSubagentCard({
+	annotation,
+	providers,
+}: {
+	annotation: NativeSubagentAnnotation;
+	providers?: ProviderCatalog["providers"];
+}) {
 	const { t } = useTranslation("common");
+	const modelLabel = resolveModelLabel(annotation.model, providers);
+	const requestedModelLabel = resolveModelLabel(annotation.requestedModel, providers);
 	const identity =
+		modelLabel ??
 		annotation.name ??
 		annotation.role ??
-		annotation.model ??
 		t("conversation.nativeSubagent.fallbackName");
 	const details = [
+		annotation.name,
 		annotation.role,
-		annotation.model ?? t("conversation.nativeSubagent.modelNotReported"),
+		requestedModelLabel && !modelLabel
+			? `${t("conversation.requestedModelLabel")}: ${requestedModelLabel}`
+			: null,
 	]
-		.filter((value, index, all) => Boolean(value) && all.indexOf(value) === index)
+		.filter(
+			(value, index, all) =>
+				Boolean(value) && value !== identity && all.indexOf(value) === index,
+		)
 		.join(" · ");
 	const status = t(`conversation.nativeSubagent.status.${annotation.status}`);
 
@@ -81,7 +109,7 @@ function NativeSubagentCard({ annotation }: { annotation: NativeSubagentAnnotati
 					</span>
 					<span className="truncate text-foreground/85">{identity}</span>
 				</div>
-				<div className="truncate text-muted-foreground">{details}</div>
+				{details ? <div className="truncate text-muted-foreground">{details}</div> : null}
 			</div>
 			<span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
 				{status}
@@ -189,6 +217,8 @@ export function AssistantMessage({
 	isPlanApproved,
 	isPlanReadOnly,
 	sessionId,
+	providers,
+	modelId,
 	activeMissionSpecRelativePath,
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
@@ -208,6 +238,8 @@ export function AssistantMessage({
 	isPlanApproved?: boolean;
 	isPlanReadOnly?: boolean;
 	sessionId?: string | null;
+	providers?: ProviderCatalog["providers"];
+	modelId?: string | null;
 	activeMissionSpecRelativePath?: string | null;
 	activeMissionSpecHash?: string | null;
 	autoSaveMissionValidation?: boolean;
@@ -217,6 +249,7 @@ export function AssistantMessage({
 	hidePendingApprovals?: boolean;
 }) {
 	const { t } = useTranslation("common");
+	const modelLabel = resolveModelLabel(modelId, providers);
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
 	const displayedPlan = plan ?? {
 		title: "Plan",
@@ -271,6 +304,13 @@ export function AssistantMessage({
 					showPlanCard ? "w-full max-w-3xl" : "w-full max-w-[52rem]",
 				)}
 			>
+				{modelLabel ? (
+					<div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+						<Bot className="size-3.5 shrink-0" aria-hidden />
+						<span>{t("conversation.modelLabel")}:</span>
+						<span className="font-medium text-foreground/80">{modelLabel}</span>
+					</div>
+				) : null}
 				{activityAnnotations.length ? (
 					<AssistantActivityGroup annotations={activityAnnotations}>
 						{activityAnnotations.map((annotation) => {
@@ -347,7 +387,11 @@ export function AssistantMessage({
 					</AssistantActivityGroup>
 				) : null}
 				{nativeSubagentAnnotations.map((annotation) => (
-					<NativeSubagentCard key={`native-subagent-${annotation.id}`} annotation={annotation} />
+					<NativeSubagentCard
+						key={`native-subagent-${annotation.id}`}
+						annotation={annotation}
+						providers={providers}
+					/>
 				))}
 				{requestAnnotations.length ? (
 					<div className="mb-2 flex flex-col gap-2">

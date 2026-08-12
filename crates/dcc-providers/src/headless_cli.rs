@@ -340,6 +340,24 @@ impl HeadlessCliProviderAdapter {
                             break;
                         }
                     }
+                    ParsedProviderLine::Events(events) => {
+                        for event in events {
+                            if matches!(
+                                event,
+                                ProviderEvent::Completed { .. } | ProviderEvent::Failed { .. }
+                            ) {
+                                saw_terminal_event = true;
+                                should_force_kill = true;
+                            }
+                            let _ = runtime_for_task.events_tx.send(event);
+                            if should_force_kill {
+                                break;
+                            }
+                        }
+                        if should_force_kill {
+                            break;
+                        }
+                    }
                     ParsedProviderLine::Text(text) => {
                         let _ = runtime_for_task
                             .events_tx
@@ -569,6 +587,7 @@ fn parse_gemini_stream_value(
                             .unwrap_or_else(|| "gemini:assistant:0".to_string()),
                         phase: dcc_core::domain::session::AssistantMessagePhase::Unknown,
                         content,
+                        model: None,
                         at,
                     });
                 }

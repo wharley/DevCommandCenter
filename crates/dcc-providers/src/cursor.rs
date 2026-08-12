@@ -661,6 +661,7 @@ fn parse_cursor_result(
                 .unwrap_or_else(|| "cursor:assistant:0".to_string()),
             phase: AssistantMessagePhase::Unknown,
             content: Some(content),
+            model: None,
             at: at.clone(),
         });
         state.assistant_message_started = false;

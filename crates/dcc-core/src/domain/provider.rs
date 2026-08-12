@@ -261,11 +261,25 @@ pub enum ProviderEvent {
         agent_thread_id: Option<String>,
         name: Option<String>,
         role: Option<String>,
-        /// Requested model only. Adapters must leave this `None` when the
-        /// provider does not explicitly report it; it is never inferred from
-        /// the parent session model.
+        /// Confirmed/effective model reported by the provider. Requested
+        /// models are emitted through NativeSubagentModelRequested instead;
+        /// this field is never inferred from the parent session model.
         model: Option<String>,
         status: NativeSubagentStatus,
+        at: String,
+    },
+    NativeSubagentModelConfirmed {
+        correlation_id: String,
+        model: String,
+        at: String,
+    },
+    NativeSubagentModelRequested {
+        correlation_id: String,
+        model: String,
+        at: String,
+    },
+    ModelEffective {
+        model: String,
         at: String,
     },
     TextDelta {
@@ -288,6 +302,7 @@ pub enum ProviderEvent {
         id: String,
         phase: AssistantMessagePhase,
         content: Option<String>,
+        model: Option<String>,
         at: String,
     },
     ReasoningStarted {

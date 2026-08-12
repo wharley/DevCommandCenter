@@ -645,6 +645,11 @@ impl ClaudeSdkSidecarAdapter {
                     ParsedProviderLine::Event(event) => {
                         let _ = runtime_for_task.events_tx.send(event);
                     }
+                    ParsedProviderLine::Events(events) => {
+                        for event in events {
+                            let _ = runtime_for_task.events_tx.send(event);
+                        }
+                    }
                     ParsedProviderLine::Text(text) => {
                         let _ = runtime_for_task
                             .events_tx

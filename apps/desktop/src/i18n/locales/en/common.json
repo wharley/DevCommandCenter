@@ -2012,6 +2012,8 @@
   },
   "conversation": {
     "scrollToBottom": "Scroll to bottom",
+    "modelLabel": "Model",
+    "requestedModelLabel": "Requested model",
     "newActivity": "New activity",
     "starting": "Preparing the agent…",
     "loading": {

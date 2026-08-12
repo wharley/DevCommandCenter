@@ -72,6 +72,7 @@ export type WorkspaceMessageAnnotation =
 			name?: string;
 			role?: string;
 			model?: string;
+			requestedModel?: string;
 			status: "running" | "completed" | "failed";
 			streaming?: boolean;
 			createdAt?: string;
@@ -92,6 +93,7 @@ export type WorkspaceMessage = {
 	assistantPhase?: AssistantMessagePhase;
 	content: string;
 	label: string;
+	model?: string | null;
 	streaming?: boolean;
 	createdAt?: string;
 	status?: SessionMessageStatus;
@@ -131,6 +133,7 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					turn_id: record.kind.turnId,
 					prompt: record.kind.prompt,
 					plan_mode: record.kind.planMode ?? null,
+					model: record.kind.model ?? null,
 				},
 			};
 		case "turn_steered":
@@ -294,6 +297,12 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					status: record.kind.status,
 				},
 			};
+		case "turn_native_subagent_model_requested":
+			return { sessionTurnNativeSubagentModelRequested: { session_id: record.sessionId, turn_id: record.kind.turnId, correlation_id: record.kind.correlationId, model: record.kind.model } };
+		case "turn_native_subagent_model_confirmed":
+			return { sessionTurnNativeSubagentModelConfirmed: { session_id: record.sessionId, turn_id: record.kind.turnId, correlation_id: record.kind.correlationId, model: record.kind.model } };
+		case "turn_model_effective":
+			return { sessionTurnModelEffective: { session_id: record.sessionId, turn_id: record.kind.turnId, model: record.kind.model } };
 		case "turn_completed":
 			return {
 				sessionTurnCompleted: {
@@ -988,6 +997,9 @@ export function projectWorkspaceMessages(
 	const completedTurns = new Set<string>();
 	const abortedTurns = new Map<string, string>();
 	const turnStartedAtByTurnId = new Map<string, string>();
+	const turnModelByTurnId = new Map<string, string | null>();
+	const requestedSubagentModels = new Map<string, string>();
+	const confirmedSubagentModels = new Map<string, string>();
 	const filteredEvents = mergeSessionThreadEvents(historyEvents, liveEvents, sessionId);
 
 	for (const timelineEvent of filteredEvents) {
@@ -995,6 +1007,10 @@ export function projectWorkspaceMessages(
 		const occurredAt = timelineEvent.occurredAt;
 
 		if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
+			turnModelByTurnId.set(
+				event.sessionTurnStarted.turn_id,
+				event.sessionTurnStarted.model ?? null,
+			);
 			turnStartedAtByTurnId.set(
 				event.sessionTurnStarted.turn_id,
 				occurredAt ?? "",
@@ -1370,7 +1386,8 @@ export function projectWorkspaceMessages(
 				agentThreadId: item.agent_thread_id ?? undefined,
 				name: item.name ?? undefined,
 				role: item.role ?? undefined,
-				model: item.model ?? undefined,
+				requestedModel: requestedSubagentModels.get(item.agent_thread_id ?? item.id),
+				model: confirmedSubagentModels.get(item.agent_thread_id ?? item.id) ?? item.model ?? undefined,
 				status: item.status,
 				createdAt: occurredAt,
 			});
@@ -1380,9 +1397,36 @@ export function projectWorkspaceMessages(
 				annotation.name = item.name ?? annotation.name;
 				annotation.role = item.role ?? annotation.role;
 				annotation.model = item.model ?? annotation.model;
+				annotation.model = confirmedSubagentModels.get(item.agent_thread_id ?? item.id) ?? annotation.model;
+				annotation.requestedModel = requestedSubagentModels.get(item.agent_thread_id ?? item.id) ?? annotation.requestedModel;
 				annotation.status = item.status;
 				annotation.createdAt ??= occurredAt;
 			}
+			continue;
+		}
+
+		if ("sessionTurnNativeSubagentModelRequested" in event && event.sessionTurnNativeSubagentModelRequested) {
+			const item = event.sessionTurnNativeSubagentModelRequested;
+			requestedSubagentModels.set(item.correlation_id, item.model);
+			const annotation = assistantBuckets.get(item.turn_id)?.annotations?.find(
+				(candidate) => candidate.type === "native-subagent" && (candidate.agentThreadId === item.correlation_id || candidate.id === item.correlation_id),
+			);
+			if (annotation?.type === "native-subagent") annotation.requestedModel = item.model;
+			continue;
+		}
+
+		if ("sessionTurnNativeSubagentModelConfirmed" in event && event.sessionTurnNativeSubagentModelConfirmed) {
+			const item = event.sessionTurnNativeSubagentModelConfirmed;
+			confirmedSubagentModels.set(item.correlation_id, item.model);
+			const annotation = assistantBuckets.get(item.turn_id)?.annotations?.find(
+				(candidate) => candidate.type === "native-subagent" && (candidate.agentThreadId === item.correlation_id || candidate.id === item.correlation_id),
+			);
+			if (annotation?.type === "native-subagent") annotation.model = item.model;
+			continue;
+		}
+
+		if ("sessionTurnModelEffective" in event && event.sessionTurnModelEffective) {
+			turnModelByTurnId.set(event.sessionTurnModelEffective.turn_id, event.sessionTurnModelEffective.model);
 			continue;
 		}
 
@@ -1535,6 +1579,14 @@ export function projectWorkspaceMessages(
 				content: trimmedPendingPrompt,
 			});
 		}
+	}
+	for (const [turnId, model] of turnModelByTurnId) {
+		if (!model) continue;
+		for (const message of assistantMessagesByTurn.get(turnId) ?? []) {
+			message.model = model;
+		}
+		const message = assistantBuckets.get(turnId);
+		if (message) message.model = model;
 	}
 
 	let lastUserPlanMode = false;

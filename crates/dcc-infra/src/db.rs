@@ -1238,6 +1238,9 @@ impl SqliteSessionRepo {
                         format!("Native subagent: {identity} · {model} · {status:?}"),
                     );
                 }
+                SessionEventKind::TurnNativeSubagentModelConfirmed { .. }
+                | SessionEventKind::TurnNativeSubagentModelRequested { .. } => {}
+                SessionEventKind::TurnModelEffective { .. } => {}
                 SessionEventKind::TurnCompleted { turn_id }
                 | SessionEventKind::TurnAborted { turn_id, .. } => {
                     flush_turn(
@@ -2754,6 +2757,7 @@ mod tests {
                     turn_id: TurnId("turn-1".to_string()),
                     prompt: "Implement the workspace recap".to_string(),
                     plan_mode: Some(false),
+                    model: None,
                 },
             },
             SessionEventRecord {
@@ -2918,6 +2922,7 @@ mod tests {
                     turn_id: TurnId("turn-1".to_string()),
                     prompt: "Find the authentication race condition in login".to_string(),
                     plan_mode: Some(false),
+                    model: None,
                 },
             },
             SessionEventRecord {
