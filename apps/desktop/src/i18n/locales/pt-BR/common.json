@@ -2016,6 +2016,10 @@
     "requestedModelLabel": "Modelo solicitado",
     "newActivity": "Nova atividade",
     "starting": "Preparando o agente…",
+    "trail": {
+      "label": "Navegação da conversa",
+      "itemLabel": "Turno {{position}}: {{preview}}"
+    },
     "loading": {
       "title": "Carregando conversa",
       "description": "Preparando o histórico desta tarefa."

@@ -2016,6 +2016,10 @@
     "requestedModelLabel": "Requested model",
     "newActivity": "New activity",
     "starting": "Preparing the agent…",
+    "trail": {
+      "label": "Conversation navigation",
+      "itemLabel": "Turn {{position}}: {{preview}}"
+    },
     "loading": {
       "title": "Loading conversation",
       "description": "Preparing the thread history for this workspace."

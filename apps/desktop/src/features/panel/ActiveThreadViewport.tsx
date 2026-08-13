@@ -19,6 +19,7 @@ import {
 	latestConversationActivitySignature,
 	precedingUserPrompt,
 } from "./conversation-recovery";
+import { ConversationTrail } from "./ConversationTrail";
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -175,11 +176,15 @@ export function ActiveThreadViewport({
 							/>
 						</div>
 					) : (
-						<div className="flex flex-col gap-0 px-5">
+						<div className="dcc-conversation-thread-list flex flex-col gap-0 px-5">
 							{messages.map((message, messageIndex) => {
 								if (message.role === "user") {
 									return (
-										<div key={message.id} className="pb-4">
+										<div
+											key={message.id}
+											data-conversation-trail-id={message.id}
+											className="scroll-mt-6 pb-4"
+										>
 											<UserMessage
 												label={message.label}
 												content={message.content}
@@ -276,6 +281,7 @@ export function ActiveThreadViewport({
 					<div className="h-10 shrink-0" aria-hidden />
 				</div>
 			</div>
+			<ConversationTrail messages={messages} scrollRef={scrollRef} />
 			{!isAtBottom ? (
 				<div className="pointer-events-none absolute inset-x-0 bottom-1 z-30 flex justify-center py-1.5">
 					<Button
