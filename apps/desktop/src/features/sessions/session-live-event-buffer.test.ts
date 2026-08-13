@@ -40,6 +40,23 @@ describe("SessionLiveEventBuffer", () => {
 		expect(buffer.stats().map((entry) => entry.sessionId)).toEqual(["b"]);
 	});
 
+	it("selects only one session while retaining unscoped events", () => {
+		const buffer = new SessionLiveEventBuffer();
+		buffer.append(event({ providerCatalogUpdated: { provider_id: "codex" } }));
+		buffer.append(event({ sessionCompleted: { session_id: "a" } }));
+		buffer.append(event({ sessionCompleted: { session_id: "b" } }));
+
+		expect(buffer.eventsForSession("a")).toHaveLength(2);
+		expect(buffer.eventsForSession("a")[1]).toHaveProperty(
+			"sessionCompleted.session_id",
+			"a",
+		);
+		expect(buffer.eventsForSession("b")[1]).toHaveProperty(
+			"sessionCompleted.session_id",
+			"b",
+		);
+	});
+
 	it("purges only through the confirmed turn and preserves the next turn", () => {
 		const buffer = new SessionLiveEventBuffer();
 		buffer.append(event({ sessionTurnStarted: { session_id: "a", turn_id: "turn-a" } }));

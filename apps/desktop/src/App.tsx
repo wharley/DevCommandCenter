@@ -1271,28 +1271,6 @@ export default function App() {
 		},
 		[backendCacheKey, finalizeDelegationFromChild, queryClient],
 	);
-	const {
-		activityEvents: sessionActivityEvents,
-		events: sessionEvents,
-		purgeSessionEvents,
-		purgeSessionsEvents,
-		purgeThroughTurnEvents,
-		purgeThroughSessionTerminalEvents,
-		getBufferStats: getSessionEventBufferStats,
-	} = useSessionEventFeed(handleSessionEvent);
-	purgeThroughTurnEventsRef.current = purgeThroughTurnEvents;
-	purgeThroughSessionTerminalEventsRef.current = purgeThroughSessionTerminalEvents;
-	useEffect(() => {
-		const debugWindow = window as Window & {
-			__dccMemorySnapshot?: () => ReturnType<typeof frontendMemorySnapshot>;
-		};
-		debugWindow.__dccMemorySnapshot = () =>
-			frontendMemorySnapshot(queryClient, getSessionEventBufferStats());
-		return () => {
-			delete debugWindow.__dccMemorySnapshot;
-		};
-	}, [getSessionEventBufferStats, queryClient]);
-
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
 	const inspectorBeforeMergeRef = useRef<boolean | null>(null);
@@ -1741,6 +1719,27 @@ export default function App() {
 		)
 			? selectedSessionId
 			: (visibleWorkspaceSessions[0]?.session.id ?? null);
+	const {
+		activityEvents: sessionActivityEvents,
+		events: sessionEvents,
+		purgeSessionEvents,
+		purgeSessionsEvents,
+		purgeThroughTurnEvents,
+		purgeThroughSessionTerminalEvents,
+		getBufferStats: getSessionEventBufferStats,
+	} = useSessionEventFeed(handleSessionEvent, effectiveSelectedSessionId);
+	purgeThroughTurnEventsRef.current = purgeThroughTurnEvents;
+	purgeThroughSessionTerminalEventsRef.current = purgeThroughSessionTerminalEvents;
+	useEffect(() => {
+		const debugWindow = window as Window & {
+			__dccMemorySnapshot?: () => ReturnType<typeof frontendMemorySnapshot>;
+		};
+		debugWindow.__dccMemorySnapshot = () =>
+			frontendMemorySnapshot(queryClient, getSessionEventBufferStats());
+		return () => {
+			delete debugWindow.__dccMemorySnapshot;
+		};
+	}, [getSessionEventBufferStats, queryClient]);
 	const previousSelectedSessionForCleanupRef = useRef<string | null>(null);
 	useEffect(() => {
 		const previous = previousSelectedSessionForCleanupRef.current;

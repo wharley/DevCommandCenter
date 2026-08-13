@@ -2012,6 +2012,7 @@
   },
   "conversation": {
     "scrollToBottom": "Rolar para o fim",
+    "loadEarlier": "Carregar {{count}} mensagens anteriores",
     "modelLabel": "Modelo",
     "requestedModelLabel": "Modelo solicitado",
     "newActivity": "Nova atividade",

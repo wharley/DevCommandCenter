@@ -26,6 +26,7 @@ const TICK_SIGMA_PX = 14;
 type ConversationTrailProps = {
 	messages: readonly WorkspaceMessage[];
 	scrollRef: RefObject<HTMLElement | null>;
+	ordinalOffset?: number;
 };
 
 function findMessageElement(
@@ -39,12 +40,20 @@ function findMessageElement(
 	);
 }
 
-export function ConversationTrail({ messages, scrollRef }: ConversationTrailProps) {
+export function ConversationTrail({
+	messages,
+	scrollRef,
+	ordinalOffset = 0,
+}: ConversationTrailProps) {
 	const { t } = useTranslation("common");
 	const tooltipId = useId();
 	const trailItems = useMemo(
-		() => deriveConversationTrailItems(messages),
-		[messages],
+		() =>
+			deriveConversationTrailItems(messages).map((item) => ({
+				...item,
+				ordinal: item.ordinal + ordinalOffset,
+			})),
+		[messages, ordinalOffset],
 	);
 	const rootRef = useRef<HTMLElement | null>(null);
 	const viewportRef = useRef<HTMLDivElement | null>(null);

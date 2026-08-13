@@ -2012,6 +2012,7 @@
   },
   "conversation": {
     "scrollToBottom": "Scroll to bottom",
+    "loadEarlier": "Load {{count}} earlier messages",
     "modelLabel": "Model",
     "requestedModelLabel": "Requested model",
     "newActivity": "New activity",
