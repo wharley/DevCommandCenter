@@ -502,6 +502,21 @@ function getEventSessionId(event: CoreEvent): string | null {
 	) {
 		return event.sessionTurnNativeSubagentActivity.session_id;
 	}
+	if (
+		"sessionTurnNativeSubagentModelRequested" in event &&
+		event.sessionTurnNativeSubagentModelRequested
+	) {
+		return event.sessionTurnNativeSubagentModelRequested.session_id;
+	}
+	if (
+		"sessionTurnNativeSubagentModelConfirmed" in event &&
+		event.sessionTurnNativeSubagentModelConfirmed
+	) {
+		return event.sessionTurnNativeSubagentModelConfirmed.session_id;
+	}
+	if ("sessionTurnModelEffective" in event && event.sessionTurnModelEffective) {
+		return event.sessionTurnModelEffective.session_id;
+	}
 	if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 		return event.sessionTurnCompleted.session_id;
 	}

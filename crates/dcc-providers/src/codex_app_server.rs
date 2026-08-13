@@ -633,11 +633,16 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
 fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> {
     let at = Utc::now().to_rfc3339();
     match method {
-        "model/rerouted" => Some(ProviderEvent::NativeSubagentModelConfirmed {
-            correlation_id: params.get("threadId").and_then(Value::as_str)?.to_string(),
-            model: params.get("toModel").and_then(Value::as_str)?.to_string(),
-            at,
-        }),
+        "model/rerouted" => {
+            // Root-thread reroutes must remain attributable to their native
+            // turn before the Tauri bridge maps them to a DCC turn.
+            params.get("turnId").and_then(Value::as_str)?;
+            Some(ProviderEvent::NativeSubagentModelConfirmed {
+                correlation_id: params.get("threadId").and_then(Value::as_str)?.to_string(),
+                model: params.get("toModel").and_then(Value::as_str)?.to_string(),
+                at,
+            })
+        }
         "thread/settings/updated" => Some(ProviderEvent::NativeSubagentModelConfirmed {
             correlation_id: params.get("threadId").and_then(Value::as_str)?.to_string(),
             model: params
@@ -817,16 +822,18 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
 fn classify_codex_model_event(
     event: ProviderEvent,
     current_thread_id: Option<&str>,
-) -> ProviderEvent {
+    current_turn_id: Option<&str>,
+    source_turn_id: Option<&str>,
+) -> Option<ProviderEvent> {
     match event {
         ProviderEvent::NativeSubagentModelConfirmed {
             correlation_id,
             model,
             at,
-        } if current_thread_id == Some(correlation_id.as_str()) => {
-            ProviderEvent::ModelEffective { model, at }
-        }
-        other => other,
+        } if current_thread_id == Some(correlation_id.as_str()) => source_turn_id
+            .map_or(true, |turn_id| current_turn_id == Some(turn_id))
+            .then_some(ProviderEvent::ModelEffective { model, at }),
+        other => Some(other),
     }
 }
 
@@ -1161,8 +1168,12 @@ fn codex_native_approval_result(kind: CodexNativeApprovalKind, behavior: &str) -
     }
 }
 
-type PendingResponse = oneshot::Sender<std::result::Result<Value, String>>;
-type PendingMap = Arc<Mutex<HashMap<u64, PendingResponse>>>;
+struct PendingRequest {
+    method: String,
+    response: oneshot::Sender<std::result::Result<Value, String>>,
+}
+
+type PendingMap = Arc<Mutex<HashMap<u64, PendingRequest>>>;
 
 struct SessionRuntime {
     handle: SessionHandle,
@@ -1192,7 +1203,13 @@ impl SessionRuntime {
     async fn send_request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
+        self.pending.lock().await.insert(
+            id,
+            PendingRequest {
+                method: method.to_string(),
+                response: tx,
+            },
+        );
         {
             let mut stdin = self.stdin.lock().await;
             write_line(&mut stdin, &rpc_request(id, method, params)).await?;
@@ -1226,7 +1243,13 @@ impl SessionRuntime {
             &self.handle.session_id,
         ));
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
+        self.pending.lock().await.insert(
+            id,
+            PendingRequest {
+                method: method.to_string(),
+                response: tx,
+            },
+        );
         let write_result = {
             let mut stdin = self.stdin.lock().await;
             prepared.write_to(&mut *stdin).await
@@ -1940,17 +1963,29 @@ impl CodexAppServerAdapter {
                 if let Some(id_val) = &msg.id {
                     if let Some(id) = id_val.as_u64() {
                         if msg.result.is_some() || msg.error.is_some() {
-                            let mut pending = runtime.pending.lock().await;
-                            if let Some(tx) = pending.remove(&id) {
+                            let pending = runtime.pending.lock().await.remove(&id);
+                            if let Some(pending) = pending {
                                 if let Some(r) = msg.result {
-                                    let _ = tx.send(Ok(r));
+                                    if pending.method == "turn/start" {
+                                        if let Some(turn_id) = r
+                                            .get("turn")
+                                            .and_then(|turn| turn.get("id"))
+                                            .and_then(Value::as_str)
+                                        {
+                                            // Publish the native turn before waking the caller so
+                                            // an immediately following notification cannot overtake it.
+                                            *runtime.active_turn_id.lock().await =
+                                                Some(turn_id.to_string());
+                                        }
+                                    }
+                                    let _ = pending.response.send(Ok(r));
                                 } else if let Some(e) = msg.error {
                                     let msg = e
                                         .get("message")
                                         .and_then(Value::as_str)
                                         .unwrap_or("rpc error")
                                         .to_string();
-                                    let _ = tx.send(Err(msg));
+                                    let _ = pending.response.send(Err(msg));
                                 }
                             }
                             continue;
@@ -2075,8 +2110,16 @@ impl CodexAppServerAdapter {
                         }
                     } else if let Some(event) = notification_to_event(method, params) {
                         let current_thread_id = runtime.thread_id.lock().await.clone();
-                        let event = classify_codex_model_event(event, current_thread_id.as_deref());
-                        let _ = runtime.events_tx.send(event);
+                        let current_turn_id = runtime.active_turn_id.lock().await.clone();
+                        let source_turn_id = params.get("turnId").and_then(Value::as_str);
+                        if let Some(event) = classify_codex_model_event(
+                            event,
+                            current_thread_id.as_deref(),
+                            current_turn_id.as_deref(),
+                            source_turn_id,
+                        ) {
+                            let _ = runtime.events_tx.send(event);
+                        }
                     }
                 }
             }
@@ -2089,8 +2132,10 @@ impl CodexAppServerAdapter {
             };
 
             // Drain pending requests
-            for (_, tx) in runtime.pending.lock().await.drain() {
-                let _ = tx.send(Err("codex process exited".to_string()));
+            for (_, pending) in runtime.pending.lock().await.drain() {
+                let _ = pending
+                    .response
+                    .send(Err("codex process exited".to_string()));
             }
             for (request_id, _) in runtime.pending_mcp_approvals.lock().await.drain() {
                 let _ = runtime.events_tx.send(ProviderEvent::PermissionResolved {
@@ -2296,13 +2341,11 @@ impl Provider for CodexAppServerAdapter {
             )
             .await?;
 
-        let turn_id = result
+        result
             .get("turn")
             .and_then(|turn| turn.get("id"))
             .and_then(Value::as_str)
-            .ok_or_else(|| CoreError::Provider("codex turn/start missing turn.id".to_string()))?
-            .to_string();
-        *runtime.active_turn_id.lock().await = Some(turn_id);
+            .ok_or_else(|| CoreError::Provider("codex turn/start missing turn.id".to_string()))?;
 
         Ok(())
     }
@@ -2863,9 +2906,33 @@ mod tests {
         )
         .expect("reroute must produce a model event");
         assert!(matches!(
-            classify_codex_model_event(root_reroute, Some("thread-root")),
-            ProviderEvent::ModelEffective { model, .. } if model == "gpt-5.6-terra"
+            classify_codex_model_event(
+                root_reroute,
+                Some("thread-root"),
+                Some("turn-1"),
+                Some("turn-1"),
+            ),
+            Some(ProviderEvent::ModelEffective { model, .. }) if model == "gpt-5.6-terra"
         ));
+
+        let stale_root_reroute = notification_to_event(
+            "model/rerouted",
+            &json!({
+                "threadId": "thread-root",
+                "turnId": "turn-1",
+                "fromModel": "gpt-5.6-sol",
+                "toModel": "gpt-5.6-terra",
+                "reason": "fallback"
+            }),
+        )
+        .expect("reroute must produce a model event");
+        assert!(classify_codex_model_event(
+            stale_root_reroute,
+            Some("thread-root"),
+            Some("turn-2"),
+            Some("turn-1"),
+        )
+        .is_none());
 
         let child_settings = notification_to_event(
             "thread/settings/updated",
@@ -2876,12 +2943,17 @@ mod tests {
         )
         .expect("settings update must produce a model event");
         assert!(matches!(
-            classify_codex_model_event(child_settings, Some("thread-root")),
-            ProviderEvent::NativeSubagentModelConfirmed {
+            classify_codex_model_event(
+                child_settings,
+                Some("thread-root"),
+                Some("turn-1"),
+                None,
+            ),
+            Some(ProviderEvent::NativeSubagentModelConfirmed {
                 correlation_id,
                 model,
                 ..
-            } if correlation_id == "thread-child" && model == "gpt-5.6-luna"
+            }) if correlation_id == "thread-child" && model == "gpt-5.6-luna"
         ));
     }
 

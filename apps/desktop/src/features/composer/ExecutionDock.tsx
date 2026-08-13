@@ -433,11 +433,11 @@ export const ExecutionDock = memo(function ExecutionDock({
 				>
 				<FileDiff className="size-3.5 shrink-0" strokeWidth={1.8} />
 				{gitStatus.kind === "loading" ? (
-					<span className="min-w-0 flex-1 truncate max-[440px]:hidden">
+					<span className="min-w-0 flex-1 truncate">
 						{t("composer.executionDock.readingChanges")}
 					</span>
 				) : gitStatus.kind === "error" ? (
-					<span className="min-w-0 flex-1 truncate max-[440px]:hidden">
+					<span className="min-w-0 flex-1 truncate">
 						{t("composer.executionDock.changesUnavailable")}
 					</span>
 				) : gitStatus.kind === "local" ? (
@@ -498,7 +498,7 @@ export const ExecutionDock = memo(function ExecutionDock({
 						{t("composer.executionDock.ahead", { count: gitStatus.commits })}
 					</span>
 				) : (
-					<span className="min-w-0 flex-1 truncate text-foreground/65 max-[440px]:hidden">
+					<span className="min-w-0 flex-1 truncate text-foreground/65">
 						{t("composer.executionDock.noChanges")}
 					</span>
 				)}

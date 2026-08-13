@@ -981,6 +981,39 @@ describe("projectWorkspaceMessages", () => {
 		]);
 	});
 
+	it("keeps live model events for the selected session", () => {
+		const liveEvents: CoreEvent[] = [
+			{
+				sessionTurnNativeSubagentModelRequested: {
+					session_id: "session-a",
+					turn_id: "turn-1",
+					correlation_id: "thread-child-1",
+					model: "gpt-5.6-luna",
+				},
+			},
+			{
+				sessionTurnNativeSubagentModelConfirmed: {
+					session_id: "session-a",
+					turn_id: "turn-1",
+					correlation_id: "thread-child-1",
+					model: "gpt-5.6-luna",
+				},
+			},
+			{
+				sessionTurnModelEffective: {
+					session_id: "session-a",
+					turn_id: "turn-1",
+					model: "gpt-5.6-terra",
+				},
+			},
+		];
+
+		expect(
+			mergeSessionThreadEvents([], liveEvents, "session-a").map(({ event }) => event),
+		).toEqual(liveEvents);
+		expect(mergeSessionThreadEvents([], liveEvents, "session-b")).toEqual([]);
+	});
+
 	it("projects structured native subagent activity without creating a DCC delegation", () => {
 		const activity: SessionEventRecord = {
 			eventId: "event-native-subagent",
