@@ -37,7 +37,7 @@ use dcc_tauri::{
         WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput,
         WorkspaceDeliveryRecoveryInput, WorkspaceDeliveryRecoveryOutput,
     },
-    state::WorkspaceCommandState,
+    state::{SessionCommandState, WorkspaceCommandState},
 };
 
 #[tauri::command]
@@ -419,6 +419,20 @@ pub async fn workspace_git_commit(
     input: dcc_tauri::commands::workspace_commands::WorkspaceGitCommitInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::workspace_git_commit(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_git_commit_suggestion(
+    state: State<'_, WorkspaceCommandState>,
+    session_state: State<'_, SessionCommandState>,
+    input: dcc_tauri::commands::workspace_commands::WorkspaceGitCommitSuggestionInput,
+) -> Result<dcc_tauri::commands::workspace_commands::WorkspaceGitCommitSuggestionOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_git_commit_suggestion(
+        state,
+        session_state,
+        input,
+    )
+    .await
 }
 
 #[tauri::command]

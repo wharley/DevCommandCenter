@@ -1901,6 +1901,15 @@
     "merged": "Merged",
     "closed": "Closed",
     "default": "Commit",
+    "preview": {
+      "title": "Review commit message",
+      "description": "This suggestion was derived only from the staged Git changes. Edit it before committing.",
+      "label": "Commit message",
+      "bodyLabel": "Commit body (optional)",
+      "source": "Based on {{count}} staged file(s)",
+      "cancel": "Cancel",
+      "confirm": "Commit and push"
+    },
     "modes": {
       "create-pr": {
         "idle": "Create {{requestLabel}}",

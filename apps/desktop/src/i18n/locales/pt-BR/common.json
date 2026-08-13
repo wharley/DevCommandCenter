@@ -1901,6 +1901,15 @@
     "merged": "Merged",
     "closed": "Closed",
     "default": "Commit",
+    "preview": {
+      "title": "Revisar mensagem do commit",
+      "description": "Esta sugestão foi derivada apenas das alterações staged do Git. Edite antes de commitar.",
+      "label": "Mensagem do commit",
+      "bodyLabel": "Corpo do commit (opcional)",
+      "source": "Baseada em {{count}} arquivo(s) staged",
+      "cancel": "Cancelar",
+      "confirm": "Commitar e enviar"
+    },
     "modes": {
       "create-pr": {
         "idle": "Criar {{requestLabel}}",

@@ -12,10 +12,15 @@ import {
 	workspaceGitPush,
 	workspaceGitStageAll,
 	workspaceGitStatus,
+	workspaceGitCommitSuggestion,
 	workspacePrStatus,
 	workspaceProjectAutomationConfig,
 	workspaceRunProjectTasks,
 } from "@/lib/workspace-api";
+import {
+	deriveWorkspaceCommitMessage,
+	sanitizeWorkspaceCommitMessage,
+} from "@/features/commit/commit-message";
 
 export type MultiWorkspaceDeliveryMember = {
 	workspaceId: string;
@@ -39,6 +44,11 @@ export type MultiWorkspaceDeliveryResult = {
 
 export type MultiWorkspaceDeliveryDependencies = {
 	gitStatus: (workspaceRoot: string) => Promise<WorkspaceGitStatusOutput>;
+	commitSuggestion?: (workspaceRoot: string) => Promise<{
+		subject: string;
+		body?: string | null;
+		stagedFingerprint?: string;
+	}>;
 	branchDiff: (workspaceRoot: string) => Promise<WorkspaceGitBranchDiffOutput>;
 	projectAutomation: (
 		workspaceRoot: string,
@@ -49,7 +59,12 @@ export type MultiWorkspaceDeliveryDependencies = {
 		expectedConfigHash: string | null,
 	) => Promise<WorkspaceRunProjectTasksOutput>;
 	stageAll: (workspaceRoot: string) => Promise<void>;
-	commitPush: (workspaceRoot: string, message: string) => Promise<void>;
+	commitPush: (
+		workspaceRoot: string,
+		message: string,
+		body: string | null,
+		stagedFingerprint: string,
+	) => Promise<void>;
 	push: (workspaceRoot: string) => Promise<void>;
 	requestStatus: (
 		workspaceRoot: string,
@@ -88,6 +103,19 @@ export function resolveMultiWorkspaceDeliveryState({
 
 const defaultDependencies: MultiWorkspaceDeliveryDependencies = {
 	gitStatus: (workspaceRoot) => workspaceGitStatus({ workspaceRoot }),
+	commitSuggestion: async (workspaceRoot) => {
+		try {
+			return await workspaceGitCommitSuggestion({ workspaceRoot });
+		} catch {
+			const status = await workspaceGitStatus({ workspaceRoot });
+			return {
+				subject: deriveWorkspaceCommitMessage(status.staged),
+				body: null,
+				stagedFingerprint: status.stagedFingerprint,
+				source: "heuristic-git-staged-fallback",
+			};
+		}
+	},
 	branchDiff: (workspaceRoot) => workspaceGitBranchDiff({ workspaceRoot }),
 	projectAutomation: (workspaceRoot) =>
 		workspaceProjectAutomationConfig({ workspaceRoot }),
@@ -95,8 +123,14 @@ const defaultDependencies: MultiWorkspaceDeliveryDependencies = {
 		workspaceRunProjectTasks({ workspaceRoot, taskIds, expectedConfigHash }),
 	stageAll: (workspaceRoot) =>
 		workspaceGitStageAll({ workspaceRoot, relativePath: "." }),
-	commitPush: (workspaceRoot, message) =>
-		workspaceGitCommitPush({ workspaceRoot, message, forgeLogin: null }),
+	commitPush: (workspaceRoot, message, body, stagedFingerprint) =>
+		workspaceGitCommitPush({
+			workspaceRoot,
+			message,
+			body,
+			stagedFingerprint,
+			forgeLogin: null,
+		}),
 	push: (workspaceRoot) => workspaceGitPush({ workspaceRoot, forgeLogin: null }),
 	requestStatus: (workspaceRoot, branch) =>
 		workspacePrStatus({ workspaceRoot, branch, forgeLogin: null }),
@@ -204,9 +238,19 @@ async function deliverMember(
 				// The coordinated action is explicitly an "all changed projects" delivery.
 				// Stage the complete worktree so no local file is silently left outside its PR.
 				await dependencies.stageAll(member.workspaceRoot);
+				const stagedStatus = await dependencies.gitStatus(member.workspaceRoot);
+				const suggestion = dependencies.commitSuggestion
+					? await dependencies.commitSuggestion(member.workspaceRoot)
+					: {
+						subject: deriveWorkspaceCommitMessage(stagedStatus.staged),
+						body: null,
+						stagedFingerprint: stagedStatus.stagedFingerprint,
+					};
 				await dependencies.commitPush(
 					member.workspaceRoot,
-					`chore: checkpoint for ${member.name}`,
+					sanitizeWorkspaceCommitMessage(suggestion.subject),
+					suggestion.body ?? null,
+					suggestion.stagedFingerprint ?? "",
 				);
 				published = true;
 			} else if (status.aheadOfRemoteCount > 0) {
