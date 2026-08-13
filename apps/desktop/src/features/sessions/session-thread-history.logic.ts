@@ -1233,7 +1233,12 @@ export function projectWorkspaceMessages(
 				message.content = item.content;
 			}
 			message.streaming = false;
-			completedAssistantItems.add(itemKey);
+			// Completion can alias an authoritative provider ID to the original
+			// streaming envelope. Mark every key for that lifecycle as terminal so
+			// delayed deltas under either ID cannot reopen or duplicate the message.
+			for (const [candidateKey, candidate] of assistantItems) {
+				if (candidate === message) completedAssistantItems.add(candidateKey);
+			}
 			activeItems?.delete(message);
 			continue;
 		}

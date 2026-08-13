@@ -552,6 +552,15 @@ describe("projectWorkspaceMessages", () => {
 					"Toda a mensagem, incluindo o final sem perder palavras.",
 					5,
 				),
+				// A buffered delta can arrive under the original stream envelope
+				// after the authoritative snapshot closed that same lifecycle.
+				assistantMessageDelta(
+					"session-a",
+					"turn-1",
+					"stream-envelope",
+					" mensagem atrasada que não deve aparecer",
+					6,
+				),
 			],
 			[],
 			"session-a",
