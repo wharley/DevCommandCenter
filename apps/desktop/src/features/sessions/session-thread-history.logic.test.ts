@@ -450,10 +450,17 @@ describe("projectWorkspaceMessages", () => {
 		});
 	});
 
-	it("keeps native assistant items distinct while a turn is streaming", () => {
+	it("folds live commentary into activity while streaming one final answer row", () => {
 		const messages = projectWorkspaceMessages(
 			[
-				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				sessionTurnStarted(
+					"session-a",
+					"turn-1",
+					"Alpha",
+					"2026-05-01T12:00:00Z",
+					false,
+					"claude-fable-5",
+				),
 				assistantMessageStarted("session-a", "turn-1", "comment-1", "commentary", 2),
 				assistantMessageDelta("session-a", "turn-1", "comment-1", "Vou investigar.", 3),
 				assistantMessageCompleted(
@@ -471,17 +478,62 @@ describe("projectWorkspaceMessages", () => {
 			"session-a",
 		);
 
-		expect(messages.filter((message) => message.role === "assistant")).toMatchObject([
-			{
-				content: "Vou investigar.",
-				assistantPhase: "commentary",
-				streaming: false,
-			},
-			{
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				id: "assistant-session-a-turn-1",
+				model: "claude-fable-5",
 				content: "Resolvido.",
 				assistantPhase: "final_answer",
 				streaming: true,
-			},
+				annotations: [
+					expect.objectContaining({
+						type: "commentary",
+						content: "Vou investigar.",
+						streaming: false,
+					}),
+				],
+			}),
+		]);
+	});
+
+	it("keeps phase-less live provider text inside one activity row until settle", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "segment-0", "unknown", 2),
+				assistantMessageDelta("session-a", "turn-1", "segment-0", "Vou investigar.", 3),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"segment-0",
+					"unknown",
+					"Vou investigar.",
+					4,
+				),
+				assistantMessageStarted("session-a", "turn-1", "segment-1", "unknown", 5),
+				assistantMessageDelta("session-a", "turn-1", "segment-1", "Executando os testes.", 6),
+			],
+			[],
+			"session-a",
+		);
+
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				id: "assistant-session-a-turn-1",
+				content: "",
+				streaming: true,
+				annotations: [
+					expect.objectContaining({
+						type: "commentary",
+						content: "Vou investigar.",
+					}),
+					expect.objectContaining({
+						type: "commentary",
+						content: "Executando os testes.",
+						streaming: true,
+					}),
+				],
+			}),
 		]);
 	});
 
@@ -507,10 +559,16 @@ describe("projectWorkspaceMessages", () => {
 
 		expect(messages.filter((message) => message.role === "assistant")).toEqual([
 			expect.objectContaining({
-				id: "assistant-session-a-turn-1-stream-envelope",
-				content: "Toda a mensagem, incluindo o final sem perder palavras.",
+				id: "assistant-session-a-turn-1",
+				content: "",
 				assistantPhase: "unknown",
-				streaming: false,
+				streaming: true,
+				annotations: [
+					expect.objectContaining({
+						type: "commentary",
+						content: "Toda a mensagem, incluindo o final sem perder palavras.",
+					}),
+				],
 			}),
 		]);
 	});
@@ -542,13 +600,19 @@ describe("projectWorkspaceMessages", () => {
 
 		expect(messages.filter((message) => message.role === "assistant")).toEqual([
 			expect.objectContaining({
-				content: "Typecheck passou sem erros.",
-				streaming: false,
+				content: "",
+				streaming: true,
+				annotations: [
+					expect.objectContaining({
+						type: "commentary",
+						content: "Typecheck passou sem erros.",
+					}),
+				],
 			}),
 		]);
 	});
 
-	it("does not merge a terminal item that has its own native start", () => {
+	it("folds live commentary when a terminal item has its own native start", () => {
 		const messages = projectWorkspaceMessages(
 			[
 				sessionTurnStarted("session-a", "turn-1", "Alpha"),
@@ -569,21 +633,23 @@ describe("projectWorkspaceMessages", () => {
 			"session-a",
 		);
 
-		expect(messages.filter((message) => message.role === "assistant")).toMatchObject([
-			{
-				content: "Ainda trabalhando.",
-				assistantPhase: "commentary",
-				streaming: true,
-			},
-			{
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				id: "assistant-session-a-turn-1",
 				content: "Resolvido.",
 				assistantPhase: "final_answer",
-				streaming: false,
-			},
+				streaming: true,
+				annotations: [
+					expect.objectContaining({
+						type: "commentary",
+						content: "Ainda trabalhando.",
+					}),
+				],
+			}),
 		]);
 	});
 
-	it("keeps a terminal-only item distinct when multiple active items make correlation ambiguous", () => {
+	it("folds ambiguous phase-less items into one live activity row", () => {
 		const messages = projectWorkspaceMessages(
 			[
 				sessionTurnStarted("session-a", "turn-1", "Alpha"),
@@ -604,14 +670,17 @@ describe("projectWorkspaceMessages", () => {
 			"session-a",
 		);
 
-		expect(
-			messages
-				.filter((message) => message.role === "assistant")
-				.map(({ content, streaming }) => ({ content, streaming })),
-		).toEqual([
-			{ content: "Primeiro", streaming: true },
-			{ content: "Segundo", streaming: true },
-			{ content: "Terceiro", streaming: false },
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				id: "assistant-session-a-turn-1",
+				content: "",
+				streaming: true,
+				annotations: [
+					expect.objectContaining({ type: "commentary", content: "Primeiro" }),
+					expect.objectContaining({ type: "commentary", content: "Segundo" }),
+					expect.objectContaining({ type: "commentary", content: "Terceiro" }),
+				],
+			}),
 		]);
 	});
 
@@ -714,6 +783,63 @@ describe("projectWorkspaceMessages", () => {
 			role: "assistant",
 			content: "Vou rastrear onde",
 		});
+	});
+
+	it("ignores buffered assistant deltas after an authoritative item snapshot", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				assistantMessageStarted("session-a", "turn-1", "message-1", "unknown", 2),
+				assistantMessageCompleted(
+					"session-a",
+					"turn-1",
+					"message-1",
+					"unknown",
+					"Texto autoritativo sem duplicação.",
+					3,
+				),
+			],
+			[
+				{
+					sessionTurnAssistantMessageStarted: {
+						session_id: "session-a",
+						turn_id: "turn-1",
+						message_id: "message-1",
+						phase: "unknown",
+					},
+				},
+				{
+					sessionTurnAssistantMessageDelta: {
+						session_id: "session-a",
+						turn_id: "turn-1",
+						message_id: "message-1",
+						content: "Texto autoritativo ",
+					},
+				},
+				{
+					sessionTurnAssistantMessageDelta: {
+						session_id: "session-a",
+						turn_id: "turn-1",
+						message_id: "message-1",
+						content: "sem duplicação.",
+					},
+				},
+			],
+			"session-a",
+		);
+
+		expect(messages.filter((message) => message.role === "assistant")).toEqual([
+			expect.objectContaining({
+				id: "assistant-session-a-turn-1",
+				content: "",
+				annotations: [
+					expect.objectContaining({
+						type: "commentary",
+						content: "Texto autoritativo sem duplicação.",
+					}),
+				],
+			}),
+		]);
 	});
 
 	it("projects reasoning and tool call annotations into the assistant message", () => {
@@ -1052,6 +1178,60 @@ describe("projectWorkspaceMessages", () => {
 				},
 			],
 		});
+	});
+
+	it("keeps one structured subagent card when the assistant bucket changes", () => {
+		const subagent = (
+			sequence: number,
+			status: "running" | "completed",
+		): SessionEventRecord => ({
+			eventId: `event-native-subagent-${status}`,
+			sessionId: "session-a",
+			sequence,
+			occurredAt: `2026-05-01T12:00:0${sequence}Z`,
+			kind: {
+				type: "turn_native_subagent_activity",
+				turnId: "turn-1",
+				id: status === "running" ? "spawn-call" : "child-status",
+				agentId: "agent-1",
+				agentThreadId: "thread-child-1",
+				name: status === "running" ? "Reviewer" : null,
+				role: status === "running" ? "reviewer" : null,
+				model: status === "running" ? "gpt-5.6-terra" : null,
+				status,
+			},
+		});
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Investigate"),
+				assistantMessageStarted("session-a", "turn-1", "comment-1", "commentary", 2),
+				assistantMessageDelta("session-a", "turn-1", "comment-1", "Delegando review.", 3),
+				subagent(4, "running"),
+				assistantMessageStarted("session-a", "turn-1", "final-1", "final_answer", 5),
+				assistantMessageDelta("session-a", "turn-1", "final-1", "Review concluído.", 6),
+				subagent(7, "completed"),
+			],
+			[],
+			"session-a",
+		);
+
+		const assistant = messages.find((message) => message.role === "assistant");
+		expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+		expect(assistant).toMatchObject({
+			id: "assistant-session-a-turn-1",
+			content: "Review concluído.",
+		});
+		expect(assistant?.annotations?.filter((item) => item.type === "native-subagent")).toEqual([
+			expect.objectContaining({
+				id: "spawn-call",
+				agentId: "agent-1",
+				agentThreadId: "thread-child-1",
+				name: "Reviewer",
+				role: "reviewer",
+				model: "gpt-5.6-terra",
+				status: "completed",
+			}),
+		]);
 	});
 
 	it("keeps the confirmed parent model on the assistant messages for that turn", () => {

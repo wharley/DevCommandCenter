@@ -292,6 +292,7 @@ export function AssistantMessage({
 		[annotations, hidePendingApprovals],
 	);
 	const validationReport = showPlanCard ? null : parseMissionValidationReport(content);
+	const hasAssistantText = content.trim().length > 0;
 	const isValidationStale = Boolean(
 		validationReport?.specHash &&
 			activeMissionSpecHash &&
@@ -452,7 +453,7 @@ export function AssistantMessage({
 						activeSpecRelativePath={activeMissionSpecRelativePath}
 						activeSpecHash={activeMissionSpecHash}
 					/>
-				) : (
+				) : hasAssistantText ? (
 					<div className={cn("assistant-markdown-scale max-w-none break-words text-foreground")}>
 						<Suspense fallback={<AssistantTextFallback text={content} />}>
 							<LazyStreamdown
@@ -467,7 +468,7 @@ export function AssistantMessage({
 							</LazyStreamdown>
 						</Suspense>
 					</div>
-				)}
+				) : null}
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
 					<MessageTimestamp createdAt={createdAt} />
 				</div>

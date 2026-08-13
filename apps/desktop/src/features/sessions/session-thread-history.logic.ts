@@ -908,49 +908,111 @@ function assistantPhasesAreCompatible(
 	);
 }
 
-function foldSettledAssistantMessages(
+function sameNativeSubagent(
+	left: Extract<WorkspaceMessageAnnotation, { type: "native-subagent" }>,
+	right: Extract<WorkspaceMessageAnnotation, { type: "native-subagent" }>,
+) {
+	return (
+		left.id === right.id ||
+		(Boolean(right.agentThreadId) && left.agentThreadId === right.agentThreadId) ||
+		(Boolean(right.agentId) && left.agentId === right.agentId)
+	);
+}
+
+function mergeTurnAnnotation(
+	annotations: WorkspaceMessageAnnotation[],
+	incoming: WorkspaceMessageAnnotation,
+) {
+	const existingIndex = annotations.findIndex((existing) => {
+		if (existing.type !== incoming.type) return false;
+		if (existing.type === "native-subagent" && incoming.type === "native-subagent") {
+			return sameNativeSubagent(existing, incoming);
+		}
+		return existing.id === incoming.id;
+	});
+	if (existingIndex < 0) {
+		annotations.push({ ...incoming });
+		return;
+	}
+	const existing = annotations[existingIndex];
+	if (existing?.type === "native-subagent" && incoming.type === "native-subagent") {
+		const definedIncoming = Object.fromEntries(
+			Object.entries(incoming).filter(([, value]) => value !== undefined),
+		) as Partial<typeof incoming>;
+		annotations[existingIndex] = {
+			...existing,
+			...definedIncoming,
+			// The first identity is the React key already visible to the user.
+			id: existing.id,
+		};
+		return;
+	}
+	annotations[existingIndex] = {
+		...existing,
+		...incoming,
+	} as WorkspaceMessageAnnotation;
+}
+
+/**
+ * Projects every structured provider turn as one stable assistant row.
+ * Commentary stays in the activity disclosure while the final answer, when
+ * the provider identifies one, streams below it. Providers without native
+ * phases keep all live text in activity and reveal the last item on settle.
+ */
+function foldAssistantTurnMessages(
 	messages: WorkspaceMessage[],
 	assistantMessagesByTurn: Map<string, WorkspaceMessage[]>,
 	settledTurns: ReadonlySet<string>,
+	sessionId: string,
 ) {
 	const hidden = new Set<WorkspaceMessage>();
 	for (const [turnId, turnMessages] of assistantMessagesByTurn) {
-		if (!settledTurns.has(turnId) || turnMessages.length < 2) {
+		if (turnMessages.length === 0) {
 			continue;
 		}
-		const terminal =
-			[...turnMessages]
-				.reverse()
-				.find((message) => message.assistantPhase === "final_answer") ??
-			[...turnMessages]
-				.reverse()
-				.find((message) => message.content.trim().length > 0) ??
-			turnMessages.at(-1);
+		const settled = settledTurns.has(turnId);
+		const finalAnswer = [...turnMessages]
+			.reverse()
+			.find((message) => message.assistantPhase === "final_answer");
+		const terminal = settled
+			? finalAnswer ??
+				[...turnMessages]
+					.reverse()
+					.find((message) => message.content.trim().length > 0) ??
+				turnMessages.at(-1)
+			: finalAnswer ?? turnMessages.at(-1);
 		if (!terminal) {
 			continue;
 		}
 
 		const foldedAnnotations: WorkspaceMessageAnnotation[] = [];
 		for (const message of turnMessages) {
-			if (message === terminal) {
-				continue;
-			}
-			if (message.content.trim().length > 0) {
-				foldedAnnotations.push({
+			const isVisibleAnswer =
+				message === terminal &&
+				(settled || message.assistantPhase === "final_answer");
+			if (!isVisibleAnswer && message.content.trim().length > 0) {
+				mergeTurnAnnotation(foldedAnnotations, {
 					type: "commentary",
 					id: `commentary-${message.id}`,
 					content: message.content,
+					streaming:
+						!settled && message === terminal
+							? true
+							: message.streaming,
 					createdAt: message.createdAt,
 				});
 			}
-			foldedAnnotations.push(...(message.annotations ?? []));
-			hidden.add(message);
+			for (const annotation of message.annotations ?? []) {
+				mergeTurnAnnotation(foldedAnnotations, annotation);
+			}
+			if (message !== terminal) hidden.add(message);
 		}
-		if (foldedAnnotations.length > 0) {
-			terminal.annotations = [
-				...foldedAnnotations,
-				...(terminal.annotations ?? []),
-			];
+		terminal.id = `assistant-${sessionId}-${turnId}`;
+		terminal.turnId = turnId;
+		terminal.streaming = !settled;
+		terminal.annotations = foldedAnnotations.length > 0 ? foldedAnnotations : undefined;
+		if (!settled && terminal.assistantPhase !== "final_answer") {
+			terminal.content = "";
 		}
 	}
 	return hidden.size > 0 ? messages.filter((message) => !hidden.has(message)) : messages;
@@ -1008,6 +1070,9 @@ export function projectWorkspaceMessages(
 	const assistantItems = new Map<string, WorkspaceMessage>();
 	const assistantMessagesByTurn = new Map<string, WorkspaceMessage[]>();
 	const activeAssistantItemsByTurn = new Map<string, Set<WorkspaceMessage>>();
+	const completedAssistantItems = new Set<string>();
+	const completedReasoningItems = new Set<string>();
+	const completedToolCallItems = new Set<string>();
 	const delegationBuckets = new Map<string, WorkspaceMessage>();
 	const completedTurns = new Set<string>();
 	const abortedTurns = new Map<string, string>();
@@ -1079,6 +1144,8 @@ export function projectWorkspaceMessages(
 			event.sessionTurnAssistantMessageStarted
 		) {
 			const item = event.sessionTurnAssistantMessageStarted;
+			const itemKey = `${item.turn_id}\u0000${item.message_id}`;
+			if (completedAssistantItems.has(itemKey)) continue;
 			const message = ensureAssistantItemMessage(
 				messages,
 				assistantItems,
@@ -1102,6 +1169,8 @@ export function projectWorkspaceMessages(
 			event.sessionTurnAssistantMessageDelta
 		) {
 			const item = event.sessionTurnAssistantMessageDelta;
+			const itemKey = `${item.turn_id}\u0000${item.message_id}`;
+			if (completedAssistantItems.has(itemKey)) continue;
 			const message = ensureAssistantItemMessage(
 				messages,
 				assistantItems,
@@ -1164,12 +1233,15 @@ export function projectWorkspaceMessages(
 				message.content = item.content;
 			}
 			message.streaming = false;
+			completedAssistantItems.add(itemKey);
 			activeItems?.delete(message);
 			continue;
 		}
 
 		if ("sessionTurnReasoningStarted" in event && event.sessionTurnReasoningStarted) {
 			const key = event.sessionTurnReasoningStarted.turn_id;
+			const itemKey = `${key}\u0000${event.sessionTurnReasoningStarted.reasoning_id}`;
+			if (completedReasoningItems.has(itemKey)) continue;
 			const message = ensureAssistantMessage(
 				messages,
 				assistantBuckets,
@@ -1190,6 +1262,8 @@ export function projectWorkspaceMessages(
 
 		if ("sessionTurnReasoningDelta" in event && event.sessionTurnReasoningDelta) {
 			const key = event.sessionTurnReasoningDelta.turn_id;
+			const itemKey = `${key}\u0000${event.sessionTurnReasoningDelta.reasoning_id}`;
+			if (completedReasoningItems.has(itemKey)) continue;
 			const message = ensureAssistantMessage(
 				messages,
 				assistantBuckets,
@@ -1215,6 +1289,9 @@ export function projectWorkspaceMessages(
 
 		if ("sessionTurnReasoningCompleted" in event && event.sessionTurnReasoningCompleted) {
 			const key = event.sessionTurnReasoningCompleted.turn_id;
+			completedReasoningItems.add(
+				`${key}\u0000${event.sessionTurnReasoningCompleted.reasoning_id}`,
+			);
 			const message = assistantBuckets.get(key);
 			const annotation = message?.annotations?.find(
 				(item) =>
@@ -1232,6 +1309,8 @@ export function projectWorkspaceMessages(
 				continue;
 			}
 			const key = event.sessionTurnToolCallStarted.turn_id;
+			const itemKey = `${key}\u0000${event.sessionTurnToolCallStarted.tool_call_id}`;
+			if (completedToolCallItems.has(itemKey)) continue;
 			const message = ensureAssistantMessage(
 				messages,
 				assistantBuckets,
@@ -1254,6 +1333,8 @@ export function projectWorkspaceMessages(
 
 		if ("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) {
 			const key = event.sessionTurnToolCallDelta.turn_id;
+			const itemKey = `${key}\u0000${event.sessionTurnToolCallDelta.tool_call_id}`;
+			if (completedToolCallItems.has(itemKey)) continue;
 			const message = ensureAssistantMessage(
 				messages,
 				assistantBuckets,
@@ -1276,6 +1357,9 @@ export function projectWorkspaceMessages(
 
 		if ("sessionTurnToolCallCompleted" in event && event.sessionTurnToolCallCompleted) {
 			const key = event.sessionTurnToolCallCompleted.turn_id;
+			completedToolCallItems.add(
+				`${key}\u0000${event.sessionTurnToolCallCompleted.tool_call_id}`,
+			);
 			const message = assistantBuckets.get(key);
 			const annotation = message?.annotations?.find(
 				(item) =>
@@ -1290,6 +1374,9 @@ export function projectWorkspaceMessages(
 
 		if ("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) {
 			const key = event.sessionTurnToolCallFailed.turn_id;
+			completedToolCallItems.add(
+				`${key}\u0000${event.sessionTurnToolCallFailed.tool_call_id}`,
+			);
 			const message = assistantBuckets.get(key);
 			const annotation = message?.annotations?.find(
 				(item) =>
@@ -1622,9 +1709,10 @@ export function projectWorkspaceMessages(
 		}
 	}
 
-	return foldSettledAssistantMessages(
+	return foldAssistantTurnMessages(
 		messages,
 		assistantMessagesByTurn,
 		new Set([...completedTurns, ...abortedTurns.keys()]),
+		sessionId ?? "unknown-session",
 	);
 }
