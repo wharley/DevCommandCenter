@@ -127,6 +127,18 @@ fn nonempty_json_string(value: Option<&Value>) -> Option<String> {
         .map(str::to_string)
 }
 
+fn single_unbound_claude_agent_tool(state: &ProviderStreamState) -> Option<String> {
+    let mut candidates = state
+        .claude_native_subagents
+        .iter()
+        .filter(|(id, metadata)| {
+            state.claude_pending_tool_calls.contains(*id) && metadata.hook_agent_id.is_none()
+        })
+        .map(|(id, _)| id.clone());
+    let candidate = candidates.next()?;
+    candidates.next().is_none().then_some(candidate)
+}
+
 fn parse_claude_native_subagent_hook(
     value: &Value,
     state: &mut ProviderStreamState,
@@ -143,17 +155,26 @@ fn parse_claude_native_subagent_hook(
         Some("failed") => NativeSubagentStatus::Failed,
         _ => return None,
     };
-    let correlation_id = nonempty_json_string(value.get("correlation_id"));
+    let sdk_correlation_id = nonempty_json_string(value.get("correlation_id"));
 
-    // A hook may link to an Agent invocation only through the SDK-provided
-    // toolUseID. Without it, reuse an identity solely after the same hook
-    // agent_id has already been observed; roles and timing are not evidence.
-    let matched_id = correlation_id.or_else(|| {
-        state
-            .claude_native_subagent_event_ids
-            .get(&agent_id)
-            .cloned()
-    });
+    // Claude's hook callback can report an internal UUID in `toolUseID`
+    // instead of the `toolu_...` identity from the structured Agent block.
+    // Trust it only when it is an Anthropic tool-use ID or already names an
+    // observed Agent invocation. Otherwise, a start hook can be linked safely
+    // when exactly one unbound Agent invocation is pending. Multiple pending
+    // invocations remain separate instead of being guessed by role or timing.
+    let direct_correlation_id = sdk_correlation_id
+        .filter(|id| id.starts_with("toolu_") || state.claude_native_subagents.contains_key(id));
+    let matched_id = state
+        .claude_native_subagent_event_ids
+        .get(&agent_id)
+        .cloned()
+        .or(direct_correlation_id)
+        .or_else(|| {
+            (status == NativeSubagentStatus::Running)
+                .then(|| single_unbound_claude_agent_tool(state))
+                .flatten()
+        });
     let id = matched_id.unwrap_or_else(|| format!("claude:subagent:{agent_id}"));
     if status == NativeSubagentStatus::Completed
         && state.claude_native_subagent_terminal_statuses.get(&id)
@@ -2124,7 +2145,7 @@ mod tests {
     }
 
     #[test]
-    fn enriches_claude_agent_activity_only_with_a_hook_tool_use_id() {
+    fn enriches_claude_agent_activity_with_a_hook_tool_use_id() {
         let mut state = ProviderStreamState::default();
         let _ = parse_provider_stream_line(
             r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_agent","name":"Agent","input":{"subagent_type":"Explore"}}}}"#,
@@ -2159,6 +2180,67 @@ mod tests {
                 status: NativeSubagentStatus::Completed,
                 ..
             }) if id == "toolu_agent" && agent_id == "native-agent-1"
+        ));
+    }
+
+    #[test]
+    fn correlates_claude_hook_callback_uuid_with_the_only_pending_agent() {
+        let mut state = ProviderStreamState::default();
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","uuid":"stream-agent","parent_tool_use_id":null,"event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_agent","name":"Agent","input":{"subagent_type":"general-purpose","model":"sonnet"}}}}"#,
+            &mut state,
+        );
+
+        let started = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-uuid","agent_type":"general-purpose","status":"running","correlation_id":"2736fc94-19c4-4678-9abf-c6c012fdd851"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            started,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                agent_id: Some(ref agent_id),
+                role: Some(ref role),
+                status: NativeSubagentStatus::Running,
+                ..
+            }) if id == "toolu_agent" && agent_id == "native-agent-uuid"
+                && role == "general-purpose"
+        ));
+
+        let stopped = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-uuid","agent_type":"general-purpose","status":"completed","correlation_id":"be9bc4eb-1243-4493-9573-5b5ee39c252c"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            stopped,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                status: NativeSubagentStatus::Completed,
+                ..
+            }) if id == "toolu_agent"
+        ));
+    }
+
+    #[test]
+    fn does_not_guess_a_claude_hook_identity_with_multiple_pending_agents() {
+        let mut state = ProviderStreamState::default();
+        for (index, id) in [(0, "toolu_agent_one"), (1, "toolu_agent_two")] {
+            let line = format!(
+                r#"{{"type":"stream_event","uuid":"stream-agent-{index}","parent_tool_use_id":null,"event":{{"type":"content_block_start","index":{index},"content_block":{{"type":"tool_use","id":"{id}","name":"Agent","input":{{"subagent_type":"general-purpose"}}}}}}}}"#
+            );
+            let _ = parse_provider_stream_line(&line, &mut state);
+        }
+
+        let event = parse_provider_stream_line(
+            r#"{"type":"dcc_native_subagent_activity","agent_id":"native-agent-ambiguous","agent_type":"general-purpose","status":"running","correlation_id":"2736fc94-19c4-4678-9abf-c6c012fdd851"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            event,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
+                ref id,
+                ..
+            }) if id == "claude:subagent:native-agent-ambiguous"
         ));
     }
 

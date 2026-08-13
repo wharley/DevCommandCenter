@@ -88,6 +88,7 @@ import {
 	type RuntimeSessionSnapshot,
 } from "./features/sessions/session-workbench";
 import { SessionSearchDialog } from "./features/sessions/session-search-dialog";
+import { resolveDelegateTaskToolInstructions } from "./features/sessions/delegate-task-tool-instructions";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
@@ -591,60 +592,6 @@ async function assertImplementationDelegationWorkspaceReady(workspacePath: strin
 	throw new Error(
 		`Commit, stash, or discard existing worktree changes before starting an implementation delegation (${changedFiles.length} changed: ${preview}${suffix}).`,
 	);
-}
-
-function buildDelegateTaskToolInstructions(
-	providers: ProviderCatalog["providers"],
-	currentProviderId: string | null,
-) {
-	const targets = providers.filter(
-		(provider) =>
-			provider.id !== currentProviderId &&
-			provider.capabilities.canBeDelegationTarget &&
-			provider.capabilities.supportsReadOnlyDelegation,
-	);
-	if (targets.length === 0) {
-		return "";
-	}
-
-	return [
-		"",
-		"Dev Command Center tool: delegate_task",
-		"You may ask the human to delegate a bounded subtask to another provider by emitting a DCC permission request.",
-		"Use it only when another provider can provide materially useful review, explanation, or implementation help.",
-		"Emit exactly this JSON event through the provider permission channel:",
-		JSON.stringify({
-			type: "dcc_permission_request",
-			request_id: "delegate-task-short-id",
-			tool_name: "delegate_task",
-			title: "Delegate task",
-			description: "One sentence explaining why delegation is useful.",
-			command: JSON.stringify({
-				instruction: "Specific task for the delegated provider.",
-				mode: "review",
-				contextPolicy: "review_current_diff",
-				targetProviderId: targets[0]?.id ?? null,
-			}),
-		}),
-		"Allowed modes: review, explain, implement. Use implement only when file edits are necessary; DCC will require human review before completion.",
-		`Available delegation targets: ${targets
-			.map((provider) => `${provider.id} (${provider.label})`)
-			.join(", ")}.`,
-	].join("\n");
-}
-
-function resolveDelegateTaskToolInstructions({
-	provider,
-	providers,
-}: {
-	provider: ProviderCatalog["providers"][number] | null | undefined;
-	providers: ProviderCatalog["providers"];
-}) {
-	if (!provider?.capabilities.canRequestDelegation) {
-		return null;
-	}
-	const instructions = buildDelegateTaskToolInstructions(providers, provider.id);
-	return instructions || null;
 }
 
 function ResizeSeparator({

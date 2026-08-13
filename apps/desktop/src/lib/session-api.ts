@@ -200,7 +200,7 @@ export function searchSessionHistory(query: string, limit = 40) {
 	});
 }
 
-const SESSION_EVENT_NAMES = [
+export const SESSION_EVENT_NAMES = [
 	"dcc/session/started",
 	"dcc/session/completed",
 	"dcc/session/aborted",
@@ -228,6 +228,9 @@ const SESSION_EVENT_NAMES = [
 	"dcc/session/turn/permission/requested",
 	"dcc/session/turn/permission/resolved",
 	"dcc/session/turn/native-subagent/activity",
+	"dcc/session/turn/native-subagent/model-requested",
+	"dcc/session/turn/native-subagent/model-confirmed",
+	"dcc/session/turn/model-effective",
 	"dcc/session/turn/completed",
 	"dcc/session/turn/aborted",
 	"dcc/session/checkpoint/created",

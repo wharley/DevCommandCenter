@@ -83,9 +83,9 @@ fn rpc_response(id: &Value, result: Value) -> String {
 fn initialize_params(experimental_api: bool) -> Value {
     json!({
         "clientInfo": { "name": "dcc", "version": env!("CARGO_PKG_VERSION") },
-        // runtimeWorkspaceRoots is currently part of the Codex app-server
-        // experimental API. Opt in only for multi-root sessions so the existing
-        // single-workspace and account-usage flows stay on the stable protocol.
+        // runtimeWorkspaceRoots and raw response items are currently part of
+        // the Codex app-server experimental API. Account-usage reads stay on
+        // the stable protocol, while interactive runtimes opt in explicitly.
         "capabilities": if experimental_api {
             json!({ "experimentalApi": true })
         } else {
@@ -94,11 +94,21 @@ fn initialize_params(experimental_api: bool) -> Value {
     })
 }
 
-fn thread_start_params(cwd: &str, additional_working_directories: &[String]) -> Value {
+fn thread_start_params(
+    cwd: &str,
+    additional_working_directories: &[String],
+    model: Option<&str>,
+) -> Value {
     let mut params = json!({
         "cwd": cwd,
+        "model": model,
         "approvalPolicy": "never",
         "sandbox": "workspace-write",
+        // MultiAgent V2's public `subAgentActivity` item deliberately exposes
+        // only the task path and child thread id. The raw function-call item
+        // is the structured source for the requested spawn model; DCC reads
+        // only that small piece of metadata and discards the raw item.
+        "experimentalRawEvents": true,
     });
     if !additional_working_directories.is_empty() {
         let mut runtime_workspace_roots = vec![cwd.to_string()];
@@ -106,6 +116,26 @@ fn thread_start_params(cwd: &str, additional_working_directories: &[String]) -> 
         params["runtimeWorkspaceRoots"] = json!(runtime_workspace_roots);
     }
     params
+}
+
+fn turn_start_params(
+    thread_id: &str,
+    prompt: String,
+    model: Option<&str>,
+    effort: Option<&str>,
+    approval_policy: Value,
+    sandbox_policy: Value,
+    summary: Option<&str>,
+) -> Value {
+    json!({
+        "threadId": thread_id,
+        "model": model,
+        "input": [{ "type": "text", "text": prompt }],
+        "effort": effort,
+        "approvalPolicy": approval_policy,
+        "sandboxPolicy": sandbox_policy,
+        "summary": summary,
+    })
 }
 
 fn parse_codex_cli_version_output(output: &str) -> Option<&str> {
@@ -628,6 +658,57 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
         }
         _ => Vec::new(),
     }
+}
+
+fn codex_raw_spawn_model(params: &Value) -> Option<(String, String)> {
+    let item = params.get("item")?;
+    if item.get("type").and_then(Value::as_str) != Some("function_call")
+        || item.get("name").and_then(Value::as_str) != Some("spawn_agent")
+        || item
+            .get("namespace")
+            .and_then(Value::as_str)
+            .is_some_and(|namespace| namespace != "collaboration")
+    {
+        return None;
+    }
+
+    let call_id = item
+        .get("call_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty() && value.chars().count() <= MAX_CODEX_RPC_STRING_ID_CHARS
+        })?;
+    let arguments = match item.get("arguments")? {
+        Value::String(arguments) => serde_json::from_str::<Value>(arguments).ok()?,
+        Value::Object(_) => item.get("arguments")?.clone(),
+        _ => return None,
+    };
+    let model = arguments
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.chars().count() <= 128)?;
+
+    Some((call_id.to_string(), model.to_string()))
+}
+
+fn codex_subagent_activity_correlation(params: &Value) -> Option<(String, String)> {
+    let item = params.get("item")?;
+    if item.get("type").and_then(Value::as_str) != Some("subAgentActivity") {
+        return None;
+    }
+    let call_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let thread_id = item
+        .get("agentThreadId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some((call_id.to_string(), thread_id.to_string()))
 }
 
 fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> {
@@ -1177,6 +1258,7 @@ type PendingMap = Arc<Mutex<HashMap<u64, PendingRequest>>>;
 
 struct SessionRuntime {
     handle: SessionHandle,
+    model: Option<String>,
     mcp_provider_version: Option<String>,
     stdin: Mutex<ChildStdin>,
     child: Mutex<Child>,
@@ -1188,6 +1270,7 @@ struct SessionRuntime {
     pending: PendingMap,
     pending_mcp_approvals: Mutex<HashMap<String, PendingCodexMcpApproval>>,
     pending_native_approvals: Mutex<HashMap<String, PendingCodexNativeApproval>>,
+    pending_subagent_models: Mutex<HashMap<String, String>>,
     next_id: AtomicU64,
     events_tx: broadcast::Sender<ProviderEvent>,
     last_retry_at: Mutex<Option<Instant>>,
@@ -1225,12 +1308,13 @@ impl SessionRuntime {
         &self,
         cwd: &str,
         additional_working_directories: &[String],
+        model: Option<&str>,
         servers: &[dcc_core::ports::ProviderMcpServerConfig],
     ) -> Result<Value> {
         let method = "thread/start";
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let prepared =
-            prepare_thread_start_request(id, cwd, additional_working_directories, servers)?;
+            prepare_thread_start_request(id, cwd, additional_working_directories, model, servers)?;
         let definitions = prepared.definitions_by_wire_name().clone();
         let tool_policies = prepared.tool_policies_by_definition().clone();
         *self.mcp_definitions_by_wire_name.lock().await = definitions.clone();
@@ -1824,6 +1908,7 @@ impl CodexAppServerAdapter {
         let (events_tx, _) = broadcast::channel(128);
         let runtime = Arc::new(SessionRuntime {
             handle: handle.clone(),
+            model: cfg.model.clone(),
             mcp_provider_version: self
                 .mcp_projection
                 .as_ref()
@@ -1838,6 +1923,7 @@ impl CodexAppServerAdapter {
             pending: Arc::new(Mutex::new(HashMap::new())),
             pending_mcp_approvals: Mutex::new(HashMap::new()),
             pending_native_approvals: Mutex::new(HashMap::new()),
+            pending_subagent_models: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             events_tx: events_tx.clone(),
             last_retry_at: Mutex::new(None),
@@ -1875,10 +1961,8 @@ impl CodexAppServerAdapter {
         mcp_projection: Option<&CodexMcpProjection>,
     ) -> Result<()> {
         // initialize
-        let uses_experimental_api =
-            !cfg.additional_working_directories.is_empty() || !cfg.mcp_servers.is_empty();
         let initialize_result = runtime
-            .send_request("initialize", initialize_params(uses_experimental_api))
+            .send_request("initialize", initialize_params(true))
             .await?;
         if !cfg.mcp_servers.is_empty() {
             validate_codex_mcp_projection(mcp_projection, &initialize_result)?;
@@ -1897,7 +1981,11 @@ impl CodexAppServerAdapter {
             runtime
                 .send_request(
                     "thread/start",
-                    thread_start_params(cwd, &cfg.additional_working_directories),
+                    thread_start_params(
+                        cwd,
+                        &cfg.additional_working_directories,
+                        cfg.model.as_deref(),
+                    ),
                 )
                 .await?
         } else {
@@ -1905,6 +1993,7 @@ impl CodexAppServerAdapter {
                 .send_mcp_thread_start_request(
                     cwd,
                     &cfg.additional_working_directories,
+                    cfg.model.as_deref(),
                     &cfg.mcp_servers,
                 )
                 .await?
@@ -2103,10 +2192,38 @@ impl CodexAppServerAdapter {
                     if method == "error" && should_suppress_codex_error(params, &runtime).await {
                         continue;
                     }
+                    if method == "rawResponseItem/completed" {
+                        if let Some((call_id, model)) = codex_raw_spawn_model(params) {
+                            let mut pending_models = runtime.pending_subagent_models.lock().await;
+                            if pending_models.len() >= MAX_ACTIVE_CODEX_MCP_TOOL_CALLS {
+                                pending_models.clear();
+                            }
+                            pending_models.insert(call_id, model);
+                        }
+                        continue;
+                    }
                     let native_subagent_events = codex_native_subagent_events(params);
                     if !native_subagent_events.is_empty() {
                         for event in native_subagent_events {
                             let _ = runtime.events_tx.send(event);
+                        }
+                        if let Some((call_id, thread_id)) =
+                            codex_subagent_activity_correlation(params)
+                        {
+                            if let Some(model) = runtime
+                                .pending_subagent_models
+                                .lock()
+                                .await
+                                .remove(&call_id)
+                            {
+                                let _ = runtime.events_tx.send(
+                                    ProviderEvent::NativeSubagentModelRequested {
+                                        correlation_id: thread_id,
+                                        model,
+                                        at: now_iso(),
+                                    },
+                                );
+                            }
                         }
                     } else if let Some(event) = notification_to_event(method, params) {
                         let current_thread_id = runtime.thread_id.lock().await.clone();
@@ -2330,14 +2447,15 @@ impl Provider for CodexAppServerAdapter {
         let result = runtime
             .send_request(
                 "turn/start",
-                json!({
-                    "threadId": thread_id,
-                    "input": [{ "type": "text", "text": prompt }],
-                    "effort": effort,
-                    "approvalPolicy": approval_policy,
-                    "sandboxPolicy": sandbox_policy,
-                    "summary": summary,
-                }),
+                turn_start_params(
+                    &thread_id,
+                    prompt,
+                    runtime.model.as_deref(),
+                    effort,
+                    approval_policy,
+                    sandbox_policy,
+                    summary,
+                ),
             )
             .await?;
 
@@ -2623,6 +2741,11 @@ mod tests {
         let thread = thread_start_params(
             "/tmp/app",
             &["/tmp/api".to_string(), "/tmp/shared".to_string()],
+            Some("gpt-5.6-terra"),
+        );
+        assert_eq!(
+            thread.get("model").and_then(Value::as_str),
+            Some("gpt-5.6-terra")
         );
         assert_eq!(
             thread
@@ -2636,8 +2759,22 @@ mod tests {
         assert!(stable_initialize
             .pointer("/capabilities/experimentalApi")
             .is_none());
-        let single_thread = thread_start_params("/tmp/app", &[]);
+        let single_thread = thread_start_params("/tmp/app", &[], None);
         assert!(single_thread.get("runtimeWorkspaceRoots").is_none());
+
+        let turn = turn_start_params(
+            "thread-root",
+            "delegate".to_string(),
+            Some("gpt-5.6-terra"),
+            Some("medium"),
+            json!("never"),
+            json!({ "type": "dangerFullAccess" }),
+            Some("auto"),
+        );
+        assert_eq!(
+            turn.get("model").and_then(Value::as_str),
+            Some("gpt-5.6-terra")
+        );
 
         assert_eq!(
             serde_json::to_value(codex_mcp_approval_policy()).expect("serialize policy"),
@@ -2839,6 +2976,56 @@ mod tests {
                 && thread_id == "thread-child-1"
                 && agent_path == "root/terra"
         ));
+    }
+
+    #[test]
+    fn correlates_the_structured_v2_spawn_model_without_reading_chat_text() {
+        let (call_id, model) = codex_raw_spawn_model(&json!({
+            "threadId": "thread-root",
+            "turnId": "turn-root",
+            "item": {
+                "type": "function_call",
+                "call_id": "call-spawn-terra",
+                "name": "spawn_agent",
+                "namespace": "collaboration",
+                "arguments": r#"{
+                    "task_name":"atualizar_hero",
+                    "message":"opaque",
+                    "model":"gpt-5.6-terra"
+                }"#
+            }
+        }))
+        .expect("spawn function call must expose its requested model");
+        assert_eq!(call_id, "call-spawn-terra");
+        assert_eq!(model, "gpt-5.6-terra");
+
+        let correlation = codex_subagent_activity_correlation(&json!({
+            "item": {
+                "id": "call-spawn-terra",
+                "type": "subAgentActivity",
+                "agentThreadId": "thread-child-terra",
+                "agentPath": "/root/atualizar_hero",
+                "kind": "started"
+            }
+        }));
+        assert_eq!(
+            correlation,
+            Some((
+                "call-spawn-terra".to_string(),
+                "thread-child-terra".to_string()
+            ))
+        );
+
+        assert!(codex_raw_spawn_model(&json!({
+            "item": {
+                "type": "function_call",
+                "call_id": "call-message",
+                "name": "send_message",
+                "namespace": "collaboration",
+                "arguments": r#"{"model":"gpt-5.6-terra"}"#
+            }
+        }))
+        .is_none());
     }
 
     #[test]

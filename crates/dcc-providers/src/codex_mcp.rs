@@ -52,6 +52,8 @@ struct RpcRequest<'a> {
 #[serde(rename_all = "camelCase")]
 struct CodexThreadStartParams<'a> {
     cwd: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<&'a str>,
     approval_policy: CodexMcpApprovalPolicy,
     sandbox: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,10 +187,12 @@ pub(crate) fn prepare_thread_start_request(
     request_id: u64,
     cwd: &str,
     additional_working_directories: &[String],
+    model: Option<&str>,
     servers: &[ProviderMcpServerConfig],
 ) -> Result<PreparedCodexMcpThreadStartRequest> {
     if cwd.trim().is_empty()
         || cwd.contains('\0')
+        || model.is_some_and(|model| model.trim().is_empty() || model.contains('\0'))
         || additional_working_directories
             .iter()
             .any(|path| path.trim().is_empty() || path.contains('\0'))
@@ -291,6 +295,7 @@ pub(crate) fn prepare_thread_start_request(
         method: "thread/start",
         params: CodexThreadStartParams {
             cwd,
+            model,
             approval_policy: codex_mcp_approval_policy(),
             sandbox: "workspace-write",
             runtime_workspace_roots,
@@ -768,9 +773,14 @@ mod tests {
 
     #[test]
     fn encodes_bounded_ephemeral_thread_configuration() {
-        let prepared =
-            prepare_thread_start_request(7, "/workspace", &["/shared".to_string()], &fixtures())
-                .expect("valid configuration");
+        let prepared = prepare_thread_start_request(
+            7,
+            "/workspace",
+            &["/shared".to_string()],
+            Some("gpt-5.6-terra"),
+            &fixtures(),
+        )
+        .expect("valid configuration");
         assert_eq!(
             format!("{prepared:?}"),
             "PreparedCodexMcpThreadStartRequest([REDACTED])"
@@ -797,6 +807,12 @@ mod tests {
         assert_eq!(
             value.pointer("/params/runtimeWorkspaceRoots"),
             Some(&serde_json::json!(["/workspace", "/shared"]))
+        );
+        assert_eq!(
+            value
+                .pointer("/params/model")
+                .and_then(serde_json::Value::as_str),
+            Some("gpt-5.6-terra")
         );
         assert_eq!(
             value.pointer("/params/approvalPolicy"),
@@ -849,38 +865,43 @@ mod tests {
     fn rejects_unsafe_or_ambiguous_configuration() {
         let mut duplicate = fixtures();
         duplicate[1].server_name = duplicate[0].server_name.clone();
-        assert!(prepare_thread_start_request(1, "/workspace", &[], &duplicate).is_err());
+        assert!(prepare_thread_start_request(1, "/workspace", &[], None, &duplicate).is_err());
 
         let mut duplicate_definition = fixtures();
         duplicate_definition[1].definition_id = duplicate_definition[0].definition_id.clone();
-        assert!(prepare_thread_start_request(1, "/workspace", &[], &duplicate_definition).is_err());
+        assert!(
+            prepare_thread_start_request(1, "/workspace", &[], None, &duplicate_definition)
+                .is_err()
+        );
 
         let mut bad_header = fixtures();
         let ProviderMcpTransport::Http { headers, .. } = &mut bad_header[1].transport else {
             panic!("HTTP fixture");
         };
         *headers = vec![secret("X-Test", "safe\r\nInjected: value")];
-        assert!(prepare_thread_start_request(1, "/workspace", &[], &bad_header).is_err());
+        assert!(prepare_thread_start_request(1, "/workspace", &[], None, &bad_header).is_err());
 
         let mut reserved_header = fixtures();
         let ProviderMcpTransport::Http { headers, .. } = &mut reserved_header[1].transport else {
             panic!("HTTP fixture");
         };
         *headers = vec![secret("Mcp-Session-Id", "user-controlled")];
-        assert!(prepare_thread_start_request(1, "/workspace", &[], &reserved_header).is_err());
+        assert!(
+            prepare_thread_start_request(1, "/workspace", &[], None, &reserved_header).is_err()
+        );
 
         let mut bad_cwd = fixtures();
         let ProviderMcpTransport::Stdio { cwd, .. } = &mut bad_cwd[0].transport else {
             panic!("stdio fixture");
         };
         *cwd = Some("bad\0path".to_string());
-        assert!(prepare_thread_start_request(1, "/workspace", &[], &bad_cwd).is_err());
+        assert!(prepare_thread_start_request(1, "/workspace", &[], None, &bad_cwd).is_err());
     }
 
     #[tokio::test]
     async fn writes_one_json_rpc_line() {
         let mut output = Vec::new();
-        let prepared = prepare_thread_start_request(9, "/workspace", &[], &fixtures())
+        let prepared = prepare_thread_start_request(9, "/workspace", &[], None, &fixtures())
             .expect("request should prepare");
         assert_eq!(prepared.definitions_by_wire_name().len(), 2);
         prepared

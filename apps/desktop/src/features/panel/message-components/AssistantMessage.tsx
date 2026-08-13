@@ -22,6 +22,9 @@ import { parseMissionValidationReport } from "@/features/spec/mission-spec-conte
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
 import { shouldAutoOpenAssistantActivity } from "./assistant-activity-disclosure";
 import {
+	resolveNativeSubagentPresentation,
+} from "../native-subagent-presentation";
+import {
 	ASSISTANT_STREAMDOWN_SHIKI_THEME,
 	assistantStreamingAnimation,
 } from "./assistant-streaming-rendering";
@@ -75,17 +78,16 @@ function NativeSubagentCard({
 	providers?: ProviderCatalog["providers"];
 }) {
 	const { t } = useTranslation("common");
-	const modelLabel = resolveModelLabel(annotation.model, providers);
-	const requestedModelLabel = resolveModelLabel(annotation.requestedModel, providers);
-	const identity =
-		modelLabel ??
-		annotation.name ??
-		annotation.role ??
-		t("conversation.nativeSubagent.fallbackName");
+	const {
+		modelName: modelLabel,
+		requestedModelName: requestedModelLabel,
+		agentName,
+		identity,
+	} = resolveNativeSubagentPresentation(annotation, providers);
 	const details = [
-		annotation.name,
+		agentName,
 		annotation.role,
-		requestedModelLabel && !modelLabel
+		requestedModelLabel && modelLabel && requestedModelLabel !== modelLabel
 			? `${t("conversation.requestedModelLabel")}: ${requestedModelLabel}`
 			: null,
 	]
@@ -107,7 +109,9 @@ function NativeSubagentCard({
 					<span className="shrink-0 font-medium text-foreground/85">
 						{t("conversation.nativeSubagent.label")}
 					</span>
-					<span className="truncate text-foreground/85">{identity}</span>
+					{identity ? (
+						<span className="truncate text-foreground/85">{identity}</span>
+					) : null}
 				</div>
 				{details ? <div className="truncate text-muted-foreground">{details}</div> : null}
 			</div>
