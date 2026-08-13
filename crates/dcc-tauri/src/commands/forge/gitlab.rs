@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::commands::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
 use crate::commands::forge::remote::WorkspaceForgeTarget;
-use crate::commands::forge::resolve_cli_binary;
+use crate::commands::forge::{resolve_cli_binary, run_forge_cli_command};
 use crate::git::{git_output_err, run_git_output};
 
 #[derive(Debug, Clone)]
@@ -331,10 +331,9 @@ pub(crate) fn check_auth(host: &str, login: &str) -> AuthCheck {
 
 pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
     let glab = resolve_cli_binary("glab")?;
-    let output = Command::new(glab)
-        .args(["auth", "status"])
-        .output()
-        .map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&glab, |command| {
+        command.args(["auth", "status"]);
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -376,10 +375,9 @@ pub(crate) fn auth_status_with_options(
     }
 
     let glab = resolve_cli_binary("glab")?;
-    let output = Command::new(glab)
-        .args(["auth", "status", "--hostname", host])
-        .output()
-        .map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&glab, |command| {
+        command.args(["auth", "status", "--hostname", host]);
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -469,11 +467,11 @@ pub(crate) fn repo_access(
 
     let path = format!("projects/{}", encode_percent(&format!("{owner}/{name}")));
     let glab = resolve_cli_binary("glab")?;
-    let mut command = Command::new(glab);
-    command
-        .args(["api", "--hostname", host, path.as_str()])
-        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&glab, |command| {
+        command
+            .args(["api", "--hostname", host, path.as_str()])
+            .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    })?;
     if !output.status.success() {
         let detail = format!(
             "{}\n{}",
@@ -497,10 +495,9 @@ fn fetch_gitlab_profile(host: &str) -> Result<GitlabUserProfile, String> {
     }
 
     let glab = resolve_cli_binary("glab")?;
-    let output = Command::new(glab)
-        .args(["api", "--hostname", host, "user"])
-        .output()
-        .map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&glab, |command| {
+        command.args(["api", "--hostname", host, "user"]);
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
@@ -654,10 +651,9 @@ pub(crate) fn resolve_auth_context(
     }
 
     let glab = resolve_cli_binary("glab")?;
-    let output = Command::new(glab)
-        .args(["auth", "status", "--hostname", host, "--show-token"])
-        .output()
-        .map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&glab, |command| {
+        command.args(["auth", "status", "--hostname", host, "--show-token"]);
+    })?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let combined = format!("{stdout}\n{stderr}");

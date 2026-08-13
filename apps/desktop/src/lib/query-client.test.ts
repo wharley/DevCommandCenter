@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	compactDccPersistedClient,
 	applyCoreEventQueryRefresh,
+	applyWorkspaceForgeMetadataUpdated,
 	configureDccQueryGcDefaults,
 	createDccQueryCacheStorage,
 	DCC_QUERY_CACHE_BUSTER,
@@ -57,6 +58,31 @@ function persistedClient(queryClient: QueryClient): PersistedClient {
 }
 
 describe("DCC query cache persistence", () => {
+	it("refreshes only the forge context for the workspace whose binding settled", async () => {
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(["repositories", "local"], []);
+		queryClient.setQueryData(["workspaces", "local"], []);
+		queryClient.setQueryData(["workspaceForgeContext", "/repo/a", ""], {});
+		queryClient.setQueryData(["workspaceForgeContext", "/repo/b", ""], {});
+
+		applyWorkspaceForgeMetadataUpdated(queryClient, {
+			workspaceId: "workspace-a",
+			workspaceRoot: "/repo/a",
+		});
+		await Promise.resolve();
+
+		expect(queryClient.getQueryState(["repositories", "local"])?.isInvalidated).toBe(true);
+		expect(queryClient.getQueryState(["workspaces", "local"])?.isInvalidated).toBe(true);
+		expect(
+			queryClient.getQueryState(["workspaceForgeContext", "/repo/a", ""])
+				?.isInvalidated,
+		).toBe(true);
+		expect(
+			queryClient.getQueryState(["workspaceForgeContext", "/repo/b", ""])
+				?.isInvalidated,
+		).toBe(false);
+	});
+
 	it("does not invalidate any query for 1000 streaming deltas", () => {
 		const queryClient = new QueryClient();
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries");

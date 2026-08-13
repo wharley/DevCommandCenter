@@ -90,7 +90,7 @@
     "removeProjectTitle": "Remove project {{label}}?",
     "removeProjectDescription": "This will permanently remove all workspaces in this project from DCC ({{count}}) and delete their local worktrees from disk.",
     "removeProjectPathLabel": "Path",
-    "removeProjectWarning": "In DCC's current model, conversations and sessions tied to those workspaces also become inaccessible from the interface. The root repository stays preserved.",
+    "removeProjectWarning": "Conversations, sessions, search history, and other DCC data tied to these workspaces will also be permanently removed. The root repository and global forge accounts stay preserved, so reopening this path starts with a clean DCC project.",
     "removeProjectConfirm": "Remove project",
     "removeProjectConfirming": "Removing…",
     "removeProjectError": "Failed to remove project",

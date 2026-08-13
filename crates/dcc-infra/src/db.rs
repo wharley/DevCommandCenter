@@ -354,6 +354,65 @@ impl SqliteWorkspaceRepo {
         Ok(())
     }
 
+    pub fn update_repository_forge_login_if_current(
+        &self,
+        repository_id: &RepositoryId,
+        expected_created_at: &str,
+        expected_updated_at: &str,
+        login: Option<&str>,
+    ) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "UPDATE dcc_repositories
+                    SET forge_login = ?1, updated_at = datetime('now')
+                  WHERE id = ?2 AND created_at = ?3 AND updated_at = ?4",
+                params![
+                    login.map(str::trim).filter(|value| !value.is_empty()),
+                    repository_id.0.clone(),
+                    expected_created_at,
+                    expected_updated_at,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
+    }
+
+    /// Updates Forge metadata without re-inserting a repository that may have
+    /// been removed while an optional background refresh was running.
+    pub fn update_repository_forge_metadata_if_exists(
+        &self,
+        repository: &Repository,
+    ) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "UPDATE dcc_repositories
+                    SET remote = ?1,
+                        remote_url = ?2,
+                        forge_provider = ?3,
+                        updated_at = ?4
+                  WHERE id = ?5 AND created_at = ?6 AND updated_at = ?7",
+                params![
+                    repository.remote.clone(),
+                    repository.remote_url.clone(),
+                    repository.forge_provider.clone(),
+                    repository.updated_at.clone(),
+                    repository.id.0.clone(),
+                    repository.created_at.clone(),
+                    repository.updated_at.clone(),
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
+    }
+
     pub fn update_repository_identity(
         &self,
         repository_id: &RepositoryId,
@@ -732,6 +791,79 @@ impl SqliteSessionRepo {
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::rebuild_search_index_sync(&conn)?;
+        Ok(())
+    }
+
+    pub fn list_session_ids_for_workspace_scope(
+        &self,
+        workspace_ids: &[WorkspaceId],
+    ) -> Result<Vec<SessionId>> {
+        if workspace_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let workspace_ids = workspace_ids
+            .iter()
+            .map(|workspace_id| workspace_id.0.as_str())
+            .collect::<BTreeSet<_>>();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare("SELECT id, workspace_id, additional_workspace_ids_json FROM dcc_sessions")
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut session_ids = Vec::new();
+        for row in rows {
+            let (session_id, workspace_id, additional_json) =
+                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let additional =
+                serde_json::from_str::<Vec<String>>(&additional_json).unwrap_or_default();
+            if workspace_ids.contains(workspace_id.as_str())
+                || additional
+                    .iter()
+                    .any(|workspace_id| workspace_ids.contains(workspace_id.as_str()))
+            {
+                session_ids.push(SessionId(session_id));
+            }
+        }
+        Ok(session_ids)
+    }
+
+    pub fn delete_delegation_record(&self, id: &DelegationId) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "DELETE FROM dcc_delegations WHERE id = ?1",
+                params![id.0.clone()],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
+    }
+
+    pub fn delete_search_rows_for_workspaces(&self, workspace_ids: &[WorkspaceId]) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        for workspace_id in workspace_ids {
+            conn.execute(
+                "DELETE FROM dcc_session_search WHERE workspace_id = ?1",
+                params![workspace_id.0.clone()],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
         Ok(())
     }
 
@@ -1441,7 +1573,7 @@ impl SqliteSessionRepo {
         })
     }
 
-    fn list_events_by_session_sync(
+    pub fn list_events_by_session_sync(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<SessionEventRecord>> {
@@ -2157,7 +2289,10 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
 				remote = excluded.remote,
 				remote_url = excluded.remote_url,
 				forge_provider = excluded.forge_provider,
-				forge_login = excluded.forge_login,
+				-- A missing login in a repository snapshot means "not provided".
+				-- Explicit logout uses update_repository_forge_login and can still
+				-- clear this value intentionally.
+				forge_login = COALESCE(excluded.forge_login, dcc_repositories.forge_login),
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
 			"#,
@@ -2233,20 +2368,25 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
     }
 
     async fn delete_repository(&self, id: &RepositoryId) -> Result<()> {
-        let conn = self
+        let mut conn = self
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        conn.execute(
+        let tx = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
             "DELETE FROM dcc_workspaces WHERE root_path = ?1",
             params![id.0.clone()],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        conn.execute(
+        tx.execute(
             "DELETE FROM dcc_repositories WHERE id = ?1",
             params![id.0.clone()],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
     }
 }
@@ -3225,6 +3365,34 @@ mod tests {
         let workspaces =
             futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
         assert!(workspaces.is_empty());
+        let mut stale_refresh = repository.clone();
+        stale_refresh.remote = Some("origin".to_string());
+        stale_refresh.remote_url = Some("git@gitlab.example.com:acme/repo.git".to_string());
+        stale_refresh.forge_provider = Some("gitlab".to_string());
+        assert!(!repo
+            .update_repository_forge_metadata_if_exists(&stale_refresh)
+            .expect("ignore refresh for deleted repository"));
+        assert!(
+            futures::executor::block_on(repo.get_repository(&repository.id))
+                .expect("read repository after stale refresh")
+                .is_none()
+        );
+
+        let mut replacement = repository.clone();
+        replacement.remote = Some("replacement".to_string());
+        replacement.remote_url = Some("git@github.com:acme/replacement.git".to_string());
+        replacement.forge_provider = Some("github".to_string());
+        replacement.created_at = "2026-01-01T00:01:00Z".to_string();
+        replacement.updated_at = "2026-01-01T00:01:00Z".to_string();
+        futures::executor::block_on(repo.save_repository(&replacement))
+            .expect("re-register replacement repository");
+        assert!(!repo
+            .update_repository_forge_metadata_if_exists(&stale_refresh)
+            .expect("ignore refresh for recreated repository"));
+        let current = futures::executor::block_on(repo.get_repository(&replacement.id))
+            .expect("read recreated repository")
+            .expect("recreated repository exists");
+        assert_eq!(current.remote.as_deref(), Some("replacement"));
     }
 
     #[test]
@@ -3357,6 +3525,26 @@ mod tests {
         assert_eq!(bound.len(), 1);
         assert_eq!(bound[0].id.0, "/tmp/repo");
         assert_eq!(bound[0].login, "octocat");
+
+        let mut repository_without_login = repository.clone();
+        repository_without_login.forge_login = None;
+        futures::executor::block_on(repo.save_repository(&repository_without_login))
+            .expect("save repository snapshot without login");
+        let preserved = futures::executor::block_on(
+            repo.get_repository(&RepositoryId("/tmp/repo".to_string())),
+        )
+        .expect("read preserved forge login")
+        .expect("repository exists after snapshot update");
+        assert_eq!(preserved.forge_login.as_deref(), Some("octocat"));
+
+        repo.update_repository_forge_login(&RepositoryId("/tmp/repo".to_string()), None)
+            .expect("clear forge login explicitly");
+        let cleared = futures::executor::block_on(
+            repo.get_repository(&RepositoryId("/tmp/repo".to_string())),
+        )
+        .expect("read cleared forge login")
+        .expect("repository exists after explicit logout");
+        assert_eq!(cleared.forge_login, None);
     }
 
     #[test]

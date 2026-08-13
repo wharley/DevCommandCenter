@@ -8,6 +8,21 @@ pub(crate) mod remote;
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
+
+use dcc_infra::process::run_command_with_timeout;
+
+pub(crate) const FORGE_CLI_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub(crate) fn run_forge_cli_command<F>(
+    program: &std::path::Path,
+    configure: F,
+) -> Result<std::process::Output, String>
+where
+    F: FnOnce(&mut Command),
+{
+    run_command_with_timeout(program, configure, FORGE_CLI_COMMAND_TIMEOUT)
+}
 
 pub(crate) fn resolve_cli_binary(program: &str) -> Result<PathBuf, String> {
     let candidates = [
@@ -18,7 +33,11 @@ pub(crate) fn resolve_cli_binary(program: &str) -> Result<PathBuf, String> {
 
     for candidate in candidates {
         if candidate.as_os_str() == program {
-            if Command::new(&candidate).arg("--version").output().is_ok() {
+            if run_forge_cli_command(&candidate, |command| {
+                command.arg("--version");
+            })
+            .is_ok()
+            {
                 return Ok(candidate);
             }
             continue;

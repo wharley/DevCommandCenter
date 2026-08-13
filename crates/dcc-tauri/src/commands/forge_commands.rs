@@ -11,9 +11,9 @@ use crate::{
     commands::forge::context as forge_context,
     commands::forge::provider as forge_provider,
     commands::workspace_commands::{
-        push_current_branch, RepositoryIdInput, WorkspaceChangeRequestContextInput,
-        WorkspaceChangeRequestContextOutput, WorkspaceChangeRequestCreateInput,
-        WorkspaceGitPushInput,
+        complete_repository_forge_binding_retry, push_current_branch, RepositoryIdInput,
+        WorkspaceChangeRequestContextInput, WorkspaceChangeRequestContextOutput,
+        WorkspaceChangeRequestCreateInput, WorkspaceGitPushInput,
     },
     commands::workspace_support::{
         ensure_pushable_branch, find_workspace_by_root, preflight_workspace_root,
@@ -798,10 +798,12 @@ pub async fn workspace_retry_repository_forge_binding(
     input: RepositoryIdInput,
 ) -> Result<Option<String>, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    crate::commands::forge::accounts::auto_bind_repository(
-        &repo,
-        &dcc_core::domain::repository::RepositoryId(input.repository_id),
-    )
+    let repository_id = dcc_core::domain::repository::RepositoryId(input.repository_id);
+    let login = crate::commands::forge::accounts::auto_bind_repository(&repo, &repository_id)?;
+    if login.is_some() {
+        complete_repository_forge_binding_retry(&repo, &repository_id).await?;
+    }
+    Ok(login)
 }
 
 #[tauri::command]

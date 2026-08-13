@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::commands::forge::detect::detect_provider_for_repo;
 use crate::commands::forge_commands::ForgeCliProvider;
-use crate::git::run_git_output;
+use crate::git::{run_git_output_with_timeout, GIT_LOCAL_TIMEOUT};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedRemote {
@@ -69,7 +69,7 @@ fn parsed_remote_from_host_path(host: &str, path: &str) -> Option<ParsedRemote> 
 }
 
 fn list_remote_names(root: &str) -> Result<Vec<String>, String> {
-    let output = run_git_output(root, &["remote"])?;
+    let output = run_git_output_with_timeout(root, &["remote"], GIT_LOCAL_TIMEOUT)?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -101,12 +101,16 @@ fn resolve_default_remote_name(root: &str) -> Result<String, String> {
         return Ok("origin".to_string());
     }
 
-    let upstream = run_git_output(root, &["rev-parse", "--abbrev-ref", "@{upstream}"])
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .and_then(|stdout| parse_upstream_remote_name(&stdout))
-        .filter(|remote| remotes.iter().any(|candidate| candidate == remote));
+    let upstream = run_git_output_with_timeout(
+        root,
+        &["rev-parse", "--abbrev-ref", "@{upstream}"],
+        GIT_LOCAL_TIMEOUT,
+    )
+    .ok()
+    .filter(|output| output.status.success())
+    .and_then(|output| String::from_utf8(output.stdout).ok())
+    .and_then(|stdout| parse_upstream_remote_name(&stdout))
+    .filter(|remote| remotes.iter().any(|candidate| candidate == remote));
     if let Some(remote) = upstream {
         return Ok(remote);
     }
@@ -120,7 +124,8 @@ fn resolve_default_remote_name(root: &str) -> Result<String, String> {
 
 fn resolve_workspace_remote(root: &str) -> Result<Option<(String, String)>, String> {
     let remote = resolve_default_remote_name(root)?;
-    let output = run_git_output(root, &["remote", "get-url", &remote])?;
+    let output =
+        run_git_output_with_timeout(root, &["remote", "get-url", &remote], GIT_LOCAL_TIMEOUT)?;
     if !output.status.success() {
         return Ok(None);
     }

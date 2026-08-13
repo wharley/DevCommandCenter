@@ -15,6 +15,13 @@ import { REMOTE_CORE_EVENT_NAME } from "./session-api";
 
 export const DCC_QUERY_CACHE_STORAGE_KEY = "dcc-query-cache";
 export const DCC_QUERY_CACHE_BUSTER = "dcc-query-cache-v3";
+export const WORKSPACE_FORGE_METADATA_UPDATED_EVENT =
+	"dcc/workspace/forge-metadata-updated";
+
+export type WorkspaceForgeMetadataUpdatedPayload = {
+	workspaceId: string;
+	workspaceRoot: string;
+};
 
 export const DCC_QUERY_GC_TIME_MS = {
 	/** Small shell metadata that makes remounts/navigation instant. */
@@ -394,6 +401,20 @@ export function applyCoreEventQueryRefresh(
 	return { ...plan, workspaceId };
 }
 
+export function applyWorkspaceForgeMetadataUpdated(
+	queryClient: QueryClient,
+	payload: WorkspaceForgeMetadataUpdatedPayload,
+) {
+	const root = payload.workspaceRoot?.trim();
+	void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+	void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+	if (root) {
+		void queryClient.invalidateQueries({
+			queryKey: ["workspaceForgeContext", root],
+		});
+	}
+}
+
 export function configureDccQueryGcDefaults(queryClient: QueryClient) {
 	// Query defaults merge from generic to specific prefixes. Keep compact shell
 	// metadata warm, while allowing reloadable payloads to leave the JS heap soon
@@ -463,6 +484,10 @@ export function createDccQueryClient() {
 		void listen("dcc:core-event", (event) => {
 			applyCoreEventQueryRefresh(queryClient, event.payload as CoreEvent);
 		});
+		void listen<WorkspaceForgeMetadataUpdatedPayload>(
+			WORKSPACE_FORGE_METADATA_UPDATED_EVENT,
+			(event) => applyWorkspaceForgeMetadataUpdated(queryClient, event.payload),
+		);
 	});
 	if (typeof window !== "undefined") {
 		window.addEventListener(REMOTE_CORE_EVENT_NAME, (event) => {

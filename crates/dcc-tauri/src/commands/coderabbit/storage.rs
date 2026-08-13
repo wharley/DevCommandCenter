@@ -152,6 +152,24 @@ pub(crate) fn clear_review(db_path: &Path, workspace_root: String) -> Result<(),
     Ok(())
 }
 
+pub(crate) fn clear_workspace_artifacts(
+    db_path: &Path,
+    workspace_root: String,
+) -> Result<(), String> {
+    let conn = open_coderabbit_reviews_db(db_path)?;
+    conn.execute(
+        "DELETE FROM workspace_coderabbit_reviews WHERE workspace_root = ?1",
+        params![&workspace_root],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM workspace_coderabbit_review_history WHERE workspace_root = ?1",
+        params![&workspace_root],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn open_coderabbit_reviews_db(db_path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(db_path).map_err(|error| error.to_string())?;
     conn.execute_batch(

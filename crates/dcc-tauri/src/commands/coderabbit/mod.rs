@@ -26,6 +26,13 @@ use crate::{commands::workspace_support::preflight_workspace_root, state::Worksp
 
 pub use self::jobs::CodeRabbitReviewJobsState;
 
+pub(crate) fn clear_workspace_coderabbit_artifacts(
+    db_path: &std::path::Path,
+    workspace_root: &str,
+) -> Result<(), String> {
+    storage::clear_workspace_artifacts(db_path, workspace_root.to_string())
+}
+
 use self::{
     errors::classify_review_error,
     fingerprint::build_diff_fingerprint,

@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::commands::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
-use crate::commands::forge::resolve_cli_binary;
+use crate::commands::forge::{resolve_cli_binary, run_forge_cli_command};
 use dcc_infra::git::git_output_err;
 
 #[derive(Debug, Clone)]
@@ -212,12 +212,12 @@ pub(crate) fn resolve_auth_context(
     }
 
     let gh = resolve_cli_binary("gh")?;
-    let mut command = Command::new(gh);
-    command.args(["auth", "token", "--hostname", host]);
-    if let Some(login) = requested_login {
-        command.args(["--user", login]);
-    }
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&gh, |command| {
+        command.args(["auth", "token", "--hostname", host]);
+        if let Some(login) = requested_login {
+            command.args(["--user", login]);
+        }
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
@@ -263,10 +263,9 @@ pub(crate) fn check_auth(host: &str, login: &str) -> AuthCheck {
 
 pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
     let gh = resolve_cli_binary("gh")?;
-    let output = Command::new(gh)
-        .args(["auth", "status", "--json", "hosts"])
-        .output()
-        .map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&gh, |command| {
+        command.args(["auth", "status", "--json", "hosts"]);
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -308,10 +307,9 @@ pub(crate) fn auth_status_with_options(
     }
 
     let gh = resolve_cli_binary("gh")?;
-    let output = Command::new(gh)
-        .args(["auth", "status", "--hostname", host, "--json", "hosts"])
-        .output()
-        .map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&gh, |command| {
+        command.args(["auth", "status", "--hostname", host, "--json", "hosts"]);
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -408,18 +406,18 @@ pub(crate) fn repo_access(
 
     let path = format!("/repos/{owner}/{name}");
     let gh = resolve_cli_binary("gh")?;
-    let mut command = Command::new(gh);
-    command
-        .args([
-            "api",
-            "--hostname",
-            host,
-            "-H",
-            "Accept: application/vnd.github+json",
-            path.as_str(),
-        ])
-        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&gh, |command| {
+        command
+            .args([
+                "api",
+                "--hostname",
+                host,
+                "-H",
+                "Accept: application/vnd.github+json",
+                path.as_str(),
+            ])
+            .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    })?;
     if !output.status.success() {
         let detail = format!(
             "{}\n{}",
@@ -661,11 +659,11 @@ fn fetch_github_profile(host: &str, login: &str) -> Result<GithubUserProfile, St
     };
 
     let gh = resolve_cli_binary("gh")?;
-    let mut command = Command::new(gh);
-    command
-        .args(["api", "--hostname", host, "/user"])
-        .envs(auth.envs.iter().map(|(key, value)| (key, value)));
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = run_forge_cli_command(&gh, |command| {
+        command
+            .args(["api", "--hostname", host, "/user"])
+            .envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {

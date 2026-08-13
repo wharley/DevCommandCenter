@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use reqwest::blocking::Client;
@@ -11,6 +9,7 @@ use reqwest::header::SERVER;
 use crate::commands::forge::remote::{parse_remote, ParsedRemote};
 use crate::commands::forge::resolve_cli_binary;
 use crate::commands::forge_commands::ForgeCliProvider;
+use dcc_infra::process::run_command_with_timeout;
 
 const HTTP_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLI_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -317,30 +316,15 @@ fn cli_recognizes_remote(program: &str, args: &[&str], timeout: Duration) -> boo
         Ok(path) => path,
         Err(_) => return false,
     };
-    let mut child = match Command::new(cli)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return false,
-    };
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return status.success(),
-            Ok(None) if started.elapsed() < timeout => {
-                thread::sleep(Duration::from_millis(50));
-            }
-            Ok(None) | Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
-        }
-    }
+    run_command_with_timeout(
+        &cli,
+        |command| {
+            command.args(args);
+        },
+        timeout,
+    )
+    .map(|output| output.status.success())
+    .unwrap_or(false)
 }
 
 #[cfg(test)]

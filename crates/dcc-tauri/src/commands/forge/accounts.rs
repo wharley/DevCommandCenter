@@ -254,11 +254,26 @@ pub(crate) fn auto_bind_repository(
     repo: &SqliteWorkspaceRepo,
     repository_id: &RepositoryId,
 ) -> Result<Option<String>, String> {
+    auto_bind_repository_if_current(repo, repository_id, None)
+}
+
+pub(crate) fn auto_bind_repository_if_current(
+    repo: &SqliteWorkspaceRepo,
+    repository_id: &RepositoryId,
+    expected_snapshot: Option<(&str, &str)>,
+) -> Result<Option<String>, String> {
     let Some(repository) = futures::executor::block_on(repo.get_repository(repository_id))
         .map_err(|error| error.to_string())?
     else {
         return Ok(None);
     };
+    if let Some((expected_created_at, expected_updated_at)) = expected_snapshot {
+        if repository.created_at != expected_created_at
+            || repository.updated_at != expected_updated_at
+        {
+            return Ok(None);
+        }
+    }
     let Some(target) = repo_forge_target(&repository) else {
         return Ok(None);
     };
@@ -287,8 +302,22 @@ pub(crate) fn auto_bind_repository(
         return Ok(None);
     };
 
-    repo.update_repository_forge_login(repository_id, Some(chosen.as_str()))
-        .map_err(|error| error.to_string())?;
+    if let Some((expected_created_at, expected_updated_at)) = expected_snapshot {
+        if !repo
+            .update_repository_forge_login_if_current(
+                repository_id,
+                expected_created_at,
+                expected_updated_at,
+                Some(chosen.as_str()),
+            )
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(None);
+        }
+    } else {
+        repo.update_repository_forge_login(repository_id, Some(chosen.as_str()))
+            .map_err(|error| error.to_string())?;
+    }
     Ok(Some(chosen))
 }
 

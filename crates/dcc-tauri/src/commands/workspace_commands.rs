@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use specta::Type;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use dcc_core::{
@@ -942,17 +942,29 @@ async fn persist_workspace_setup_outcome(
     workspace: &mut Workspace,
     setup_report: &WorkspaceSetupReport,
 ) -> Result<(), String> {
-    workspace.state = match setup_report.status {
-        WorkspaceSetupStatus::Completed | WorkspaceSetupStatus::Skipped => WorkspaceState::Ready,
-        WorkspaceSetupStatus::Pending
-        | WorkspaceSetupStatus::Warning
-        | WorkspaceSetupStatus::Failed => WorkspaceState::SetupPending,
-    };
+    workspace.state = workspace_state_for_setup_report(setup_report);
     workspace.setup_report = Some(setup_report.clone());
     workspace.updated_at = Utc::now().to_rfc3339();
     repo.save_workspace(workspace)
         .await
         .map_err(|error| error.to_string())
+}
+
+fn workspace_state_for_setup_report(report: &WorkspaceSetupReport) -> WorkspaceState {
+    let has_required_setup_action = report.steps.iter().any(|step| {
+        step.command != FORGE_METADATA_STEP_COMMAND
+            && matches!(
+                step.status,
+                WorkspaceSetupStatus::Pending
+                    | WorkspaceSetupStatus::Warning
+                    | WorkspaceSetupStatus::Failed
+            )
+    });
+    if has_required_setup_action {
+        WorkspaceState::SetupPending
+    } else {
+        WorkspaceState::Ready
+    }
 }
 
 fn compile_active_mission_spec_context_for_workspace(
@@ -1008,6 +1020,74 @@ fn append_mission_spec_compile_warning(
         next.message = Some(detail);
     }
     next
+}
+
+const FORGE_METADATA_STEP_COMMAND: &str = "refresh_repository_forge_metadata";
+const WORKSPACE_FORGE_METADATA_UPDATED_EVENT: &str = "dcc/workspace/forge-metadata-updated";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceForgeMetadataUpdatedPayload {
+    workspace_id: String,
+    workspace_root: String,
+}
+
+fn append_forge_binding_pending(
+    setup_report: &WorkspaceSetupReport,
+    workspace_root: &str,
+) -> WorkspaceSetupReport {
+    let mut next = setup_report.clone();
+    next.steps.retain(|step| {
+        step.command != FORGE_METADATA_STEP_COMMAND && step.command != "auto_bind_repository"
+    });
+    next.steps.push(WorkspaceSetupStepReport {
+        label: "Detect and bind forge account".to_string(),
+        command: FORGE_METADATA_STEP_COMMAND.to_string(),
+        source_path: workspace_root.to_string(),
+        status: WorkspaceSetupStatus::Pending,
+        detail: Some(
+            "Optional forge metadata discovery is running in the background and will not block workspace creation.".to_string(),
+        ),
+    });
+    if matches!(
+        next.status,
+        WorkspaceSetupStatus::Completed | WorkspaceSetupStatus::Skipped
+    ) {
+        next.status = WorkspaceSetupStatus::Pending;
+    }
+    if next.message.is_none() {
+        next.message = Some(
+            "Workspace is ready. Optional forge account discovery is running in the background."
+                .to_string(),
+        );
+    }
+    next
+}
+
+fn recompute_workspace_setup_status(report: &mut WorkspaceSetupReport) {
+    report.status = if report
+        .steps
+        .iter()
+        .any(|step| step.status == WorkspaceSetupStatus::Failed)
+    {
+        WorkspaceSetupStatus::Failed
+    } else if report
+        .steps
+        .iter()
+        .any(|step| step.status == WorkspaceSetupStatus::Warning)
+    {
+        WorkspaceSetupStatus::Warning
+    } else if report
+        .steps
+        .iter()
+        .any(|step| step.status == WorkspaceSetupStatus::Pending)
+    {
+        WorkspaceSetupStatus::Pending
+    } else if report.steps.is_empty() {
+        WorkspaceSetupStatus::Skipped
+    } else {
+        WorkspaceSetupStatus::Completed
+    };
 }
 
 fn validate_git_relative_path(path: &str) -> Result<String, String> {
@@ -2301,40 +2381,183 @@ fn workspace_validation_config_hash(root: &str) -> Result<Option<String>, String
     }
 }
 
-async fn refresh_repository_forge_metadata(
+fn refresh_repository_forge_metadata_blocking(
     repo: &SqliteWorkspaceRepo,
     workspace: &Workspace,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let repository_id = RepositoryId(workspace.root_path.clone());
-    let Some(mut repository) = repo
-        .get_repository(&repository_id)
-        .await
+    let Some(mut repository) = futures::executor::block_on(repo.get_repository(&repository_id))
         .map_err(|error| error.to_string())?
     else {
-        return Ok(());
+        return Ok(None);
     };
+    let expected_created_at = repository.created_at.clone();
+    let expected_updated_at = repository.updated_at.clone();
 
-    let remote_info = resolve_workspace_remote_info(&workspace.root_path)?;
-    repository.remote = remote_info.as_ref().map(|info| info.remote_name.clone());
-    repository.remote_url = remote_info.as_ref().map(|info| info.remote_url.clone());
-    repository.forge_provider = remote_info.as_ref().map(|info| match info.provider {
+    let Some(remote_info) = resolve_workspace_remote_info(&workspace.root_path)? else {
+        repository.remote = None;
+        repository.remote_url = None;
+        repository.forge_provider = None;
+        if !repo
+            .update_repository_forge_metadata_if_exists(&repository)
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(None);
+        }
+        return Ok(None);
+    };
+    let provider_label = match remote_info.provider {
+        crate::commands::forge_commands::ForgeCliProvider::Github => "GitHub",
+        crate::commands::forge_commands::ForgeCliProvider::Gitlab => "GitLab",
+    };
+    repository.remote = Some(remote_info.remote_name.clone());
+    repository.remote_url = Some(remote_info.remote_url.clone());
+    repository.forge_provider = Some(match remote_info.provider {
         crate::commands::forge_commands::ForgeCliProvider::Github => "github".to_string(),
         crate::commands::forge_commands::ForgeCliProvider::Gitlab => "gitlab".to_string(),
     });
-    repo.save_repository(&repository)
-        .await
-        .map_err(|error| error.to_string())?;
+    if !repo
+        .update_repository_forge_metadata_if_exists(&repository)
+        .map_err(|error| error.to_string())?
+    {
+        return Ok(None);
+    }
 
     if repository
         .forge_login
         .as_deref()
         .is_some_and(|login| !login.trim().is_empty())
     {
-        return Ok(());
+        return Ok(None);
     }
 
-    let _ = crate::commands::forge::accounts::auto_bind_repository(repo, &repository_id);
+    match crate::commands::forge::accounts::auto_bind_repository_if_current(
+        repo,
+        &repository_id,
+        Some((&expected_created_at, &expected_updated_at)),
+    ) {
+        Ok(Some(_)) => Ok(None),
+        Ok(None) => Ok(Some(format!(
+            "No authenticated {provider_label} account with access to this repository was found."
+        ))),
+        Err(error) => Ok(Some(format!(
+            "{provider_label} account binding was skipped: {error}"
+        ))),
+    }
+}
 
+fn schedule_repository_forge_metadata_refresh(
+    repo: &SqliteWorkspaceRepo,
+    workspace: &Workspace,
+    app: AppHandle,
+) {
+    let repo = repo.clone();
+    let workspace = workspace.clone();
+    tauri::async_runtime::spawn(async move {
+        let refresh_repo = repo.clone();
+        let refresh_workspace = workspace.clone();
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            refresh_repository_forge_metadata_blocking(&refresh_repo, &refresh_workspace)
+        })
+        .await;
+
+        let warning = match outcome {
+            Ok(Ok(warning)) => warning,
+            Ok(Err(error)) => Some(format!("Forge metadata refresh was skipped: {error}")),
+            Err(error) => Some(format!(
+                "Forge metadata refresh could not complete: {error}"
+            )),
+        };
+
+        match persist_forge_metadata_refresh_result(&repo, &workspace, warning).await {
+            Ok(()) => {
+                if let Err(error) = app.emit(
+                    WORKSPACE_FORGE_METADATA_UPDATED_EVENT,
+                    WorkspaceForgeMetadataUpdatedPayload {
+                        workspace_id: workspace.id.0.clone(),
+                        workspace_root: workspace.root_path.clone(),
+                    },
+                ) {
+                    eprintln!(
+                        "[dcc] failed to publish forge metadata refresh for {}: {error}",
+                        workspace.root_path
+                    );
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "[dcc] failed to persist forge metadata refresh result for {}: {error}",
+                    workspace.root_path
+                );
+            }
+        }
+    });
+}
+
+async fn persist_forge_metadata_refresh_result(
+    repo: &SqliteWorkspaceRepo,
+    workspace: &Workspace,
+    warning: Option<String>,
+) -> Result<(), String> {
+    let Some(mut current) = repo
+        .get_workspace(&workspace.id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(());
+    };
+    let Some(mut report) = current.setup_report.clone() else {
+        return Ok(());
+    };
+    let Some(step_index) = report
+        .steps
+        .iter()
+        .position(|step| step.command == FORGE_METADATA_STEP_COMMAND)
+    else {
+        return Ok(());
+    };
+
+    if let Some(warning) = warning.filter(|value| !value.trim().is_empty()) {
+        let detail = format!(
+            "Workspace created, but forge account auto-binding was not completed: {warning}"
+        );
+        report.steps[step_index].status = WorkspaceSetupStatus::Warning;
+        report.steps[step_index].detail = Some(detail.clone());
+        report.message = Some(detail);
+    } else {
+        report.steps.remove(step_index);
+        if report
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("forge account discovery"))
+        {
+            report.message = None;
+        }
+    }
+    recompute_workspace_setup_status(&mut report);
+    persist_workspace_setup_outcome(repo, &mut current, &report).await
+}
+
+pub(crate) async fn complete_repository_forge_binding_retry(
+    repo: &SqliteWorkspaceRepo,
+    repository_id: &RepositoryId,
+) -> Result<(), String> {
+    let repository_root = repo
+        .get_repository(repository_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .map(|repository| repository.root_path)
+        .unwrap_or_else(|| repository_id.0.clone());
+    let workspaces = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?;
+    for workspace in workspaces
+        .into_iter()
+        .filter(|workspace| workspace.root_path.trim() == repository_root.trim())
+    {
+        persist_forge_metadata_refresh_result(repo, &workspace, None).await?;
+    }
     Ok(())
 }
 
@@ -4770,13 +4993,13 @@ pub async fn create_workspace_from_source_url(
     repo.save_repository(&repository)
         .await
         .map_err(|error| error.to_string())?;
-    refresh_repository_forge_metadata(&repo, &workspace).await?;
-
     let setup_hints = collect_workspace_setup_hints(&workspace);
     let setup_report = recommended_workspace_setup_report(&workspace);
     let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
+    let setup_report = append_forge_binding_pending(&setup_report, &workspace.root_path);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
+    schedule_repository_forge_metadata_refresh(&repo, &workspace, app.clone());
 
     Ok(CreateWorkspaceForRepoOutput {
         workspace,
@@ -4790,25 +5013,130 @@ async fn create_workspace_for_repo_with_repo(
     app: &AppHandle,
     input: CreateWorkspaceForRepoInput,
 ) -> Result<CreateWorkspaceForRepoOutput, String> {
+    if let Some(existing) = recover_existing_workspace_for_create(repo, Some(app), &input).await? {
+        return Ok(existing);
+    }
+
     let git = CommandGitOps::new();
     let events = TauriEventBus::new(app.clone());
 
     let finalized = run_create_workspace_for_repo(repo, &git, &events, input)
         .await
         .map_err(|error| error.to_string())?;
-    refresh_repository_forge_metadata(repo, &finalized.workspace).await?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = recommended_workspace_setup_report(&finalized.workspace);
     let mut workspace = finalized.workspace;
     let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
+    let setup_report = append_forge_binding_pending(&setup_report, &workspace.root_path);
     persist_workspace_setup_outcome(repo, &mut workspace, &setup_report).await?;
+    schedule_repository_forge_metadata_refresh(repo, &workspace, app.clone());
 
     Ok(CreateWorkspaceForRepoOutput {
         workspace,
         setup_hints,
         setup_report,
     })
+}
+
+async fn recover_existing_workspace_for_create(
+    repo: &SqliteWorkspaceRepo,
+    app: Option<&AppHandle>,
+    input: &CreateWorkspaceForRepoInput,
+) -> Result<Option<CreateWorkspaceForRepoOutput>, String> {
+    let existing = repo
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|workspace| {
+            workspace.project_id == input.project_id
+                && workspace.root_path.trim() == input.workspace_root.trim()
+                && workspace.base_branch.trim() == input.base_branch.trim()
+                // A repository can legitimately have several completed tasks
+                // created from the same base branch. Only reuse a durable row
+                // that still represents an interrupted creation.
+                && (workspace.setup_report.is_none()
+                    || workspace.state == WorkspaceState::Initializing)
+        })
+        .max_by(|left, right| left.updated_at.cmp(&right.updated_at));
+    let Some(mut workspace) = existing else {
+        return Ok(None);
+    };
+
+    // A response can be lost between the workspace and repository writes. Repair
+    // that durable gap before returning the recovered workspace so the caller
+    // never observes a silently incomplete creation.
+    let repository_id = RepositoryId(workspace.root_path.clone());
+    if repo
+        .get_repository(&repository_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        let repository_name = Path::new(&workspace.root_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or("Repository")
+            .to_string();
+        repo.save_repository(&Repository {
+            id: repository_id,
+            project_id: workspace.project_id.clone(),
+            name: repository_name,
+            display_name: None,
+            icon: None,
+            color: None,
+            pinned_at: workspace.pinned_at.clone(),
+            root_path: workspace.root_path.clone(),
+            base_branch: workspace.base_branch.clone(),
+            remote: None,
+            remote_url: None,
+            forge_provider: None,
+            forge_login: None,
+            created_at: workspace.created_at.clone(),
+            updated_at: workspace.updated_at.clone(),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
+    let setup_hints = collect_workspace_setup_hints(&workspace);
+    let setup_report = workspace
+        .setup_report
+        .clone()
+        .unwrap_or_else(|| recommended_workspace_setup_report(&workspace));
+    let has_forge_refresh = setup_report
+        .steps
+        .iter()
+        .any(|step| step.command == FORGE_METADATA_STEP_COMMAND);
+    let setup_report = if has_forge_refresh {
+        setup_report
+    } else if workspace.setup_report.is_none() {
+        append_forge_binding_pending(&setup_report, &workspace.root_path)
+    } else {
+        setup_report
+    };
+
+    if workspace.setup_report.is_none() {
+        persist_workspace_setup_outcome(repo, &mut workspace, &setup_report).await?;
+    }
+    if has_forge_refresh
+        || setup_report
+            .steps
+            .iter()
+            .any(|step| step.command == FORGE_METADATA_STEP_COMMAND)
+    {
+        if let Some(app) = app {
+            schedule_repository_forge_metadata_refresh(repo, &workspace, app.clone());
+        }
+    }
+
+    Ok(Some(CreateWorkspaceForRepoOutput {
+        workspace,
+        setup_hints,
+        setup_report,
+    }))
 }
 
 fn validate_bundle_projects(
@@ -4979,18 +5307,19 @@ pub async fn create_workspace_from_url(
 ) -> Result<CreateWorkspaceFromUrlOutput, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let git = CommandGitOps::new();
-    let events = TauriEventBus::new(app);
+    let events = TauriEventBus::new(app.clone());
 
     let finalized = run_create_workspace_from_url(&repo, &git, &events, input)
         .await
         .map_err(|error| error.to_string())?;
-    refresh_repository_forge_metadata(&repo, &finalized.workspace).await?;
     let setup_hints = collect_workspace_setup_hints(&finalized.workspace);
     let setup_report = recommended_workspace_setup_report(&finalized.workspace);
     let mut workspace = finalized.workspace;
     let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
+    let setup_report = append_forge_binding_pending(&setup_report, &workspace.root_path);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
+    schedule_repository_forge_metadata_refresh(&repo, &workspace, app);
 
     Ok(CreateWorkspaceFromUrlOutput {
         workspace,
@@ -5533,6 +5862,16 @@ fn parse_git_grep_z_output(stdout: &[u8], max_results: usize) -> SearchWorkspace
 #[cfg(test)]
 mod editor_workspace_file_tests {
     use super::*;
+    use dcc_core::domain::{
+        delegation::{
+            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
+            DelegationStatus,
+        },
+        provider::ProviderId,
+        session::{Session, SessionEventRecord, SessionId, SessionState},
+        thread::{Thread, ThreadId},
+    };
+    use dcc_core::ports::{DelegationRepo, SessionEventRepo, SessionRepo, ThreadRepo};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestDir {
@@ -5746,11 +6085,133 @@ mod editor_workspace_file_tests {
 
         futures::executor::block_on(repo.save_repository(&repository)).expect("save repository");
         futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+        repo.set_forge_login_preference("gitlab", "gitlab.lithealth.com.br", Some("company-user"))
+            .expect("save global forge preference");
+        let coderabbit_db_path = dir.path.join("dcc.sqlite");
+        let coderabbit_conn =
+            rusqlite::Connection::open(&coderabbit_db_path).expect("open CodeRabbit database");
+        coderabbit_conn
+            .execute_batch(
+                "CREATE TABLE workspace_coderabbit_reviews (workspace_root TEXT PRIMARY KEY, review_json TEXT NOT NULL, fingerprint_hash TEXT, completed_at TEXT, created_at TEXT, updated_at TEXT);
+                 CREATE TABLE workspace_coderabbit_review_history (review_id TEXT PRIMARY KEY, workspace_root TEXT NOT NULL, review_json TEXT NOT NULL, review_type TEXT, success INTEGER, findings_count INTEGER, fingerprint_hash TEXT, completed_at TEXT, saved_at TEXT);",
+            )
+            .expect("create CodeRabbit tables");
+        coderabbit_conn
+            .execute(
+                "INSERT INTO workspace_coderabbit_reviews (workspace_root, review_json) VALUES (?1, ?2)",
+                rusqlite::params![&worktree_root, "{}"],
+            )
+            .expect("save CodeRabbit review");
+        coderabbit_conn
+            .execute(
+                "INSERT INTO workspace_coderabbit_review_history (review_id, workspace_root, review_json) VALUES (?1, ?2, ?3)",
+                rusqlite::params!["review-1", &worktree_root, "{}"],
+            )
+            .expect("save CodeRabbit history");
+
+        let child_workspace = Workspace {
+            id: WorkspaceId("workspace-child".to_string()),
+            project_id: dcc_core::domain::project::ProjectId("project-child".to_string()),
+            name: Some("Child workspace".to_string()),
+            root_path: dir
+                .path
+                .join("other-repository")
+                .to_string_lossy()
+                .into_owned(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_workspace(&child_workspace))
+            .expect("save child workspace");
+
+        let parent_session = Session {
+            id: SessionId("project-session".to_string()),
+            project_id: repository.project_id.clone(),
+            workspace_id: workspace.id.clone(),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: Some("gpt-5".to_string()),
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Completed,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let child_session = Session {
+            id: SessionId("delegated-child-session".to_string()),
+            project_id: child_workspace.project_id.clone(),
+            workspace_id: child_workspace.id.clone(),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "gemini".to_string(),
+            model: Some("gemini-2.5-pro".to_string()),
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Completed,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(session_repo.save_session(&parent_session))
+            .expect("save parent session");
+        futures::executor::block_on(session_repo.save_session(&child_session))
+            .expect("save delegated child session");
+        futures::executor::block_on(session_repo.save_thread(&Thread {
+            id: ThreadId("project-thread".to_string()),
+            project_id: repository.project_id.clone(),
+            session_id: Some(parent_session.id.clone()),
+            title: "Project thread".to_string(),
+            archived_at: None,
+        }))
+        .expect("save project thread");
+        futures::executor::block_on(session_repo.append_event(&SessionEventRecord {
+            event_id: "project-event".to_string(),
+            session_id: parent_session.id.clone(),
+            sequence: 1,
+            occurred_at: "2026-01-01T00:00:01Z".to_string(),
+            kind: dcc_core::domain::session::SessionEventKind::SessionStarted {
+                workspace_id: workspace.id.clone(),
+                project_id: repository.project_id.clone(),
+                provider_id: "codex".to_string(),
+                model: Some("gpt-5".to_string()),
+            },
+        }))
+        .expect("save session event");
+        futures::executor::block_on(session_repo.save_delegation(&Delegation {
+            id: DelegationId("project-delegation".to_string()),
+            parent_session_id: parent_session.id.clone(),
+            parent_turn_id: None,
+            child_session_id: Some(child_session.id.clone()),
+            workspace_id: workspace.id.clone(),
+            target_provider_id: ProviderId("gemini".to_string()),
+            target_model_id: Some("gemini-2.5-pro".to_string()),
+            mode: DelegationMode::Review,
+            status: DelegationStatus::Completed,
+            prompt: "Review the project".to_string(),
+            context_policy: DelegationContextPolicy::ReviewCurrentDiff,
+            budget: DelegationBudget {
+                turn_limit: Some(1),
+                timeout_seconds: Some(30),
+                allow_file_edits: false,
+            },
+            result_summary: Some("done".to_string()),
+            touched_files: Vec::new(),
+            diff_summary: None,
+            validation_summary: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }))
+        .expect("save delegation");
 
         let removed = futures::executor::block_on(delete_repository_with_workspaces(
             &repo,
             &session_repo,
             &repository.id,
+            &coderabbit_db_path,
         ))
         .expect("remove project");
 
@@ -5762,9 +6223,221 @@ mod editor_workspace_file_tests {
                 .expect("read repository")
                 .is_none()
         );
-        assert!(futures::executor::block_on(repo.list_workspaces())
-            .expect("list workspaces")
+        let remaining_workspaces =
+            futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
+        assert_eq!(remaining_workspaces.len(), 1);
+        assert_eq!(remaining_workspaces[0].id, child_workspace.id);
+        assert!(
+            futures::executor::block_on(repo.get_workspace(&child_workspace.id))
+                .expect("read unrelated workspace")
+                .is_some()
+        );
+        assert!(
+            futures::executor::block_on(session_repo.get_session(&parent_session.id))
+                .expect("read removed parent session")
+                .is_none()
+        );
+        assert!(
+            futures::executor::block_on(session_repo.get_session(&child_session.id))
+                .expect("read removed delegated child session")
+                .is_none()
+        );
+        assert!(futures::executor::block_on(
+            session_repo.get_thread(&ThreadId("project-thread".to_string(),))
+        )
+        .expect("read removed thread")
+        .is_none());
+        assert!(futures::executor::block_on(
+            session_repo.get_delegation(&DelegationId("project-delegation".to_string(),))
+        )
+        .expect("read removed delegation")
+        .is_none());
+        assert!(session_repo
+            .search_sessions("project", 20)
+            .expect("search after removal")
             .is_empty());
+        assert_eq!(
+            repo.get_forge_login_preference("gitlab", "gitlab.lithealth.com.br")
+                .expect("read global forge preference")
+                .as_deref(),
+            Some("company-user")
+        );
+        let remaining_coderabbit =
+            rusqlite::Connection::open(&coderabbit_db_path).expect("reopen CodeRabbit database");
+        assert_eq!(
+            remaining_coderabbit
+                .query_row(
+                    "SELECT COUNT(*) FROM workspace_coderabbit_reviews WHERE workspace_root = ?1",
+                    rusqlite::params![&worktree_root],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count CodeRabbit review"),
+            0
+        );
+        assert_eq!(
+            remaining_coderabbit
+                .query_row(
+                    "SELECT COUNT(*) FROM workspace_coderabbit_review_history WHERE workspace_root = ?1",
+                    rusqlite::params![&worktree_root],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count CodeRabbit history"),
+            0
+        );
+
+        futures::executor::block_on(repo.save_repository(&repository))
+            .expect("re-register repository after cleanup");
+        assert!(
+            futures::executor::block_on(repo.get_repository(&repository.id))
+                .expect("read re-registered repository")
+                .is_some()
+        );
+        assert!(futures::executor::block_on(repo.list_workspaces())
+            .expect("read clean workspace records")
+            .iter()
+            .all(|candidate| candidate.id == child_workspace.id));
+
+        // The checkout itself is intentionally retained so the same path can
+        // be registered again without losing user files or global credentials.
+        assert!(Path::new(&repository_root).exists());
+    }
+
+    #[tokio::test]
+    async fn forge_binding_is_observable_and_retryable_without_blocking_creation() {
+        use std::sync::{Arc, Mutex};
+
+        let connection = Arc::new(Mutex::new(
+            rusqlite::Connection::open_in_memory().expect("in-memory database"),
+        ));
+        let repo = SqliteWorkspaceRepo::from_connection(connection).expect("workspace repository");
+        let workspace = workspace_for_rename("forge-pending", "/tmp/forge-pending");
+        let repository =
+            registered_repository(&workspace.project_id.0, workspace.root_path.as_str());
+        repo.save_repository(&repository)
+            .await
+            .expect("save repository");
+        repo.save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+
+        let base_report = recommended_workspace_setup_report(&workspace);
+        let pending_report = append_forge_binding_pending(&base_report, &workspace.root_path);
+        assert_eq!(pending_report.status, WorkspaceSetupStatus::Pending);
+        assert!(pending_report
+            .steps
+            .iter()
+            .any(|step| step.command == FORGE_METADATA_STEP_COMMAND));
+
+        let mut persisted_workspace = workspace.clone();
+        persist_workspace_setup_outcome(&repo, &mut persisted_workspace, &pending_report)
+            .await
+            .expect("persist pending setup report");
+        assert_eq!(persisted_workspace.state, WorkspaceState::Ready);
+        persist_forge_metadata_refresh_result(
+            &repo,
+            &workspace,
+            Some("glab timed out after 10 seconds".to_string()),
+        )
+        .await
+        .expect("persist forge warning");
+        let warning_report = repo
+            .get_workspace(&workspace.id)
+            .await
+            .expect("read warning report")
+            .expect("workspace with warning")
+            .setup_report
+            .expect("warning setup report");
+        assert_eq!(warning_report.status, WorkspaceSetupStatus::Warning);
+        assert!(warning_report.steps.iter().any(|step| {
+            step.command == FORGE_METADATA_STEP_COMMAND
+                && step.status == WorkspaceSetupStatus::Warning
+        }));
+
+        complete_repository_forge_binding_retry(&repo, &repository.id)
+            .await
+            .expect("complete forge retry");
+        let completed = repo
+            .get_workspace(&workspace.id)
+            .await
+            .expect("read completed report")
+            .expect("workspace after retry");
+        assert!(completed
+            .setup_report
+            .as_ref()
+            .expect("completed setup report")
+            .steps
+            .iter()
+            .all(|step| step.command != FORGE_METADATA_STEP_COMMAND));
+        assert_eq!(completed.state, WorkspaceState::Ready);
+    }
+
+    #[tokio::test]
+    async fn reopening_after_a_lost_create_response_reuses_the_existing_workspace() {
+        use std::sync::{Arc, Mutex};
+
+        let connection = Arc::new(Mutex::new(
+            rusqlite::Connection::open_in_memory().expect("in-memory database"),
+        ));
+        let repo = SqliteWorkspaceRepo::from_connection(connection).expect("workspace repository");
+        let existing = workspace_for_rename("idempotent", "/tmp/idempotent");
+        repo.save_workspace(&existing)
+            .await
+            .expect("save existing workspace");
+
+        let recovered = recover_existing_workspace_for_create(
+            &repo,
+            None,
+            &CreateWorkspaceForRepoInput {
+                project_id: existing.project_id.clone(),
+                workspace_root: existing.root_path.clone(),
+                base_branch: existing.base_branch.clone(),
+                name: None,
+            },
+        )
+        .await
+        .expect("recover workspace")
+        .expect("existing workspace should be reused");
+
+        assert_eq!(recovered.workspace.id, existing.id);
+        assert_eq!(
+            repo.list_workspaces().await.expect("list workspaces").len(),
+            1
+        );
+        assert!(repo
+            .get_repository(&RepositoryId(existing.root_path.clone()))
+            .await
+            .expect("read repaired repository")
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn creating_another_task_does_not_reuse_a_completed_workspace() {
+        use std::sync::{Arc, Mutex};
+
+        let connection = Arc::new(Mutex::new(
+            rusqlite::Connection::open_in_memory().expect("in-memory database"),
+        ));
+        let repo = SqliteWorkspaceRepo::from_connection(connection).expect("workspace repository");
+        let mut existing = workspace_for_rename("completed", "/tmp/completed");
+        existing.setup_report = Some(recommended_workspace_setup_report(&existing));
+        repo.save_workspace(&existing)
+            .await
+            .expect("save completed workspace");
+
+        let recovered = recover_existing_workspace_for_create(
+            &repo,
+            None,
+            &CreateWorkspaceForRepoInput {
+                project_id: existing.project_id.clone(),
+                workspace_root: existing.root_path.clone(),
+                base_branch: existing.base_branch.clone(),
+                name: None,
+            },
+        )
+        .await
+        .expect("check for interrupted creation");
+
+        assert!(recovered.is_none());
     }
 
     #[test]
@@ -7855,6 +8528,12 @@ pub async fn delete_workspace(
     cleanup_delegation_worktrees(&session_repo, &workspace).await?;
     cleanup_workspace_files(&workspace)?;
     cleanup_unused_workspace_push_target(&repo, &workspace).await?;
+    cleanup_workspace_session_records(
+        &session_repo,
+        std::slice::from_ref(&workspace),
+        &state.db_path,
+    )
+    .await?;
     repo.delete_workspace(&id)
         .await
         .map_err(|e| e.to_string())?;
@@ -7941,7 +8620,8 @@ pub async fn delete_repository(
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = RepositoryId(input.repository_id);
-    let removed_workspaces = delete_repository_with_workspaces(&repo, &session_repo, &id).await?;
+    let removed_workspaces =
+        delete_repository_with_workspaces(&repo, &session_repo, &id, &state.db_path).await?;
     for workspace in removed_workspaces {
         state.clear_delivery_failures(&workspace.root_path);
         if let Some(worktree_path) = workspace.worktree_path.as_deref() {
@@ -7955,6 +8635,7 @@ async fn delete_repository_with_workspaces(
     repo: &SqliteWorkspaceRepo,
     session_repo: &SqliteSessionRepo,
     id: &RepositoryId,
+    coderabbit_db_path: &Path,
 ) -> Result<Vec<Workspace>, String> {
     let repository = repo
         .get_repository(id)
@@ -7991,8 +8672,96 @@ async fn delete_repository_with_workspaces(
         cleanup_workspace_files(workspace)?;
     }
 
+    cleanup_workspace_session_records(session_repo, &workspaces, coderabbit_db_path).await?;
+
     repo.delete_repository(id)
         .await
         .map_err(|error| error.to_string())?;
     Ok(workspaces)
+}
+
+async fn cleanup_workspace_session_records(
+    session_repo: &SqliteSessionRepo,
+    workspaces: &[Workspace],
+    coderabbit_db_path: &Path,
+) -> Result<(), String> {
+    if workspaces.is_empty() {
+        return Ok(());
+    }
+
+    let workspace_ids = workspaces
+        .iter()
+        .map(|workspace| workspace.id.clone())
+        .collect::<Vec<_>>();
+    let mut session_ids = session_repo
+        .list_session_ids_for_workspace_scope(&workspace_ids)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|session_id| session_id.0)
+        .collect::<BTreeSet<_>>();
+    let delegations = DelegationRepo::list_delegations(session_repo, None, None)
+        .await
+        .map_err(|error| error.to_string())?;
+    let removed_workspace_ids = workspace_ids
+        .iter()
+        .map(|workspace_id| workspace_id.0.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut delegation_ids = BTreeSet::new();
+
+    loop {
+        let mut changed = false;
+        for delegation in &delegations {
+            let parent_removed = session_ids.contains(&delegation.parent_session_id.0);
+            let workspace_removed =
+                removed_workspace_ids.contains(&delegation.workspace_id.0.as_str());
+            let child_removed = delegation
+                .child_session_id
+                .as_ref()
+                .is_some_and(|session_id| session_ids.contains(&session_id.0));
+            if workspace_removed || parent_removed || child_removed {
+                delegation_ids.insert(delegation.id.0.clone());
+                if let Some(child_session_id) = delegation.child_session_id.as_ref() {
+                    changed |= session_ids.insert(child_session_id.0.clone());
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    for delegation_id in delegation_ids {
+        session_repo
+            .delete_delegation_record(&dcc_core::domain::delegation::DelegationId(delegation_id))
+            .map_err(|error| error.to_string())?;
+    }
+    for session_id in session_ids {
+        SessionRepo::delete_session(
+            session_repo,
+            &dcc_core::domain::session::SessionId(session_id),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    session_repo
+        .delete_search_rows_for_workspaces(&workspace_ids)
+        .map_err(|error| error.to_string())?;
+
+    let mut coderabbit_roots = BTreeSet::new();
+    for workspace in workspaces {
+        coderabbit_roots.insert(workspace.root_path.trim().to_string());
+        if let Some(worktree_path) = workspace.worktree_path.as_deref() {
+            coderabbit_roots.insert(worktree_path.trim().to_string());
+        }
+    }
+    for root in coderabbit_roots {
+        if root.is_empty() {
+            continue;
+        }
+        crate::commands::coderabbit::clear_workspace_coderabbit_artifacts(
+            coderabbit_db_path,
+            &root,
+        )?;
+    }
+    Ok(())
 }
