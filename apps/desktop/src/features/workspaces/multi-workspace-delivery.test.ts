@@ -28,6 +28,7 @@ function change(path: string) {
 function status(overrides: Record<string, unknown> = {}) {
 	return {
 		staged: [],
+		stagedFingerprint: "",
 		unstaged: [],
 		currentBranch: "dcc/task-api",
 		aheadOfRemoteCount: 0,
@@ -43,6 +44,7 @@ function dependencies(
 ): MultiWorkspaceDeliveryDependencies {
 	return {
 		gitStatus: vi.fn().mockResolvedValue(status()),
+		commitSuggestion: vi.fn().mockResolvedValue({ subject: "chore: update staged files" }),
 		branchDiff: vi.fn().mockResolvedValue({ changes: [], baseBranch: "main" }),
 		projectAutomation: vi.fn().mockResolvedValue({
 			setupCommand: null,
@@ -125,7 +127,9 @@ describe("deliverMultiWorkspace", () => {
 		expect(deps.stageAll).toHaveBeenCalledWith(member.workspaceRoot);
 		expect(deps.commitPush).toHaveBeenCalledWith(
 			member.workspaceRoot,
-			"chore: checkpoint for service-api",
+			"chore: update staged files",
+			null,
+			"",
 		);
 		expect(deps.createRequest).toHaveBeenCalledWith(member.workspaceRoot);
 		expect(result.status).toBe("delivered");

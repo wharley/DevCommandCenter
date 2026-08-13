@@ -22,6 +22,7 @@ export function useWorkspaceGitStatus(
 				return {
 					staged: [],
 					unstaged: [],
+					stagedFingerprint: "",
 					currentBranch: null,
 					aheadOfRemoteCount: 0,
 					behindOfRemoteCount: 0,

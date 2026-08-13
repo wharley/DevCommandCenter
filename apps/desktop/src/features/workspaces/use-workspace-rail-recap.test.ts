@@ -7,6 +7,7 @@ import { buildWorkspaceRailRecap } from "./use-workspace-rail-recap";
 
 const cleanGitStatus: WorkspaceGitStatusOutput = {
 	staged: [],
+	stagedFingerprint: "",
 	unstaged: [],
 	currentBranch: "feature/sidebar-recap",
 	aheadOfRemoteCount: 0,

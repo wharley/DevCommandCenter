@@ -4,9 +4,17 @@ import { toast } from "sonner";
 import type { TFunction } from "i18next";
 import type { CommitMode } from "./WorkspaceCommitButton.logic";
 import {
+	deriveWorkspaceCommitMessage,
+	sanitizeWorkspaceCommitBody,
+	sanitizeWorkspaceCommitSubject,
+	type WorkspaceCommitMessageSuggestion,
+} from "./commit-message";
+import {
 	workspaceGitCommit,
+	workspaceGitCommitSuggestion,
 	workspaceGitCommitPush,
 	workspaceGitPush,
+	workspaceGitStatus,
 	workspaceGitSyncBase,
 	workspaceChangeRequestMerge,
 	workspaceGitStageAll,
@@ -15,7 +23,7 @@ import {
 	workspaceRunProjectTasks,
 	workspaceChangeRequestCreate,
 } from "@/lib/workspace-api";
-import type { WorkspaceChangeRequestCreateInput } from "@dcc/contracts";
+import type { ProviderRuntimeConfig, WorkspaceChangeRequestCreateInput } from "@dcc/contracts";
 import {
 	WORKSPACE_GIT_STATUS_QUERY_KEY,
 } from "@/features/inspector/use-workspace-git-status";
@@ -32,7 +40,6 @@ import {
 
 type WorkspaceDeliveryControllerOptions = {
 	workspaceRoot: string | null;
-	workspaceName: string;
 	forgeLogin: string | null;
 	baseBranch: string | null;
 	requestLabel?: "PR" | "MR";
@@ -49,6 +56,12 @@ type WorkspaceDeliveryControllerOptions = {
 	t: TFunction<"common">;
 };
 
+export type WorkspaceCommitSuggestionOptions = {
+	providerId?: string | null;
+	model?: string | null;
+	providerRuntime?: ProviderRuntimeConfig | null;
+};
+
 export type WorkspaceDeliveryCreateRequestInput = WorkspaceChangeRequestCreateInput & {
 	includeLocalChanges: boolean;
 };
@@ -57,9 +70,67 @@ function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
 
+async function commitMessageForStagedChanges(
+	workspaceRoot: string,
+) {
+	try {
+		// Automatic delivery never invokes a provider. Provider output is allowed
+		// only through prepareWorkspaceCommitMessage, which opens a human preview.
+		const suggestion = await workspaceGitCommitSuggestion({ workspaceRoot });
+		return {
+			...suggestion,
+			subject: sanitizeWorkspaceCommitSubject(suggestion.subject),
+			body: sanitizeWorkspaceCommitBody(suggestion.body),
+		};
+	} catch {
+		// Keep an offline/older-runtime fallback. It is still derived only from
+		// the freshly-read staged Git status and never from task/chat context.
+		const status = await workspaceGitStatus({ workspaceRoot });
+		if (!status.stagedFingerprint) {
+			throw new Error("Unable to capture the staged Git snapshot; refresh and try again");
+		}
+		return {
+			subject: deriveWorkspaceCommitMessage(status.staged),
+			body: null,
+			stagedFingerprint: status.stagedFingerprint,
+			source: "heuristic-git-staged-fallback",
+		};
+	}
+}
+
+export async function prepareWorkspaceCommitMessage(
+	workspaceRoot: string,
+	options?: WorkspaceCommitSuggestionOptions,
+): Promise<WorkspaceCommitMessageSuggestion> {
+	try {
+		const suggestion = await workspaceGitCommitSuggestion({
+			workspaceRoot,
+			providerId: options?.providerId ?? null,
+			model: options?.model ?? null,
+			providerRuntime: options?.providerRuntime ?? null,
+		});
+		return {
+			...suggestion,
+			subject: sanitizeWorkspaceCommitSubject(suggestion.subject),
+			body: sanitizeWorkspaceCommitBody(suggestion.body),
+		};
+	} catch {
+		const status = await workspaceGitStatus({ workspaceRoot });
+		if (!status.stagedFingerprint) {
+			throw new Error("Unable to capture the staged Git snapshot; refresh and try again");
+		}
+		return {
+			subject: deriveWorkspaceCommitMessage(status.staged),
+			body: null,
+			stagedFileCount: status.staged.length,
+			stagedFingerprint: status.stagedFingerprint,
+			source: "git-staged-fallback",
+		};
+	}
+}
+
 export function useWorkspaceDelivery({
 	workspaceRoot,
-	workspaceName,
 	forgeLogin,
 	baseBranch,
 	requestLabel = "PR",
@@ -106,7 +177,12 @@ export function useWorkspaceDelivery({
 		return output.report.status === "passed";
 	}, [invalidateGitState, queryClient]);
 
-	const run = useCallback(async (mode: CommitMode | "commit" | "sync-base") => {
+	const run = useCallback(async (
+		mode: CommitMode | "commit" | "sync-base",
+		commitMessage?: string,
+		commitBody?: string | null,
+		stagedFingerprint?: string,
+	) => {
 		if (multiProject) {
 			onOpenMultiProject?.();
 			return;
@@ -144,9 +220,19 @@ export function useWorkspaceDelivery({
 					if (stagedCount === 0) {
 						await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
 					}
+					const commitSuggestion = commitMessage
+						? {
+							subject: sanitizeWorkspaceCommitSubject(commitMessage),
+							body: sanitizeWorkspaceCommitBody(commitBody),
+							stagedFingerprint,
+						}
+						: await commitMessageForStagedChanges(root);
+					if (!commitSuggestion.stagedFingerprint) throw new Error("Staged preview expired; refresh and try again");
 					await workspaceGitCommit({
 						workspaceRoot: root,
-						message: `chore: checkpoint for ${workspaceName}`,
+						message: commitSuggestion.subject,
+						body: commitSuggestion.body,
+						stagedFingerprint: commitSuggestion.stagedFingerprint,
 					});
 					toast.success(t("composer.executionDock.actions.committed"));
 					break;
@@ -165,9 +251,19 @@ export function useWorkspaceDelivery({
 					if (stagedCount === 0) {
 						await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
 					}
+					const pushSuggestion = commitMessage
+						? {
+							subject: sanitizeWorkspaceCommitSubject(commitMessage),
+							body: sanitizeWorkspaceCommitBody(commitBody),
+							stagedFingerprint,
+						}
+						: await commitMessageForStagedChanges(root);
+					if (!pushSuggestion.stagedFingerprint) throw new Error("Staged preview expired; refresh and try again");
 					await workspaceGitCommitPush({
 						workspaceRoot: root,
-						message: `chore: checkpoint for ${workspaceName}`,
+						message: pushSuggestion.subject,
+						body: pushSuggestion.body,
+						stagedFingerprint: pushSuggestion.stagedFingerprint,
 						forgeLogin,
 					});
 					toast.success(t("composer.executionDock.actions.committedAndPushed"));
@@ -201,7 +297,8 @@ export function useWorkspaceDelivery({
 		runBeforePushChecks,
 		stagedCount,
 		t,
-		workspaceName,
+		// The optional preview text is user-editable; sanitize again at the
+		// boundary before it reaches the Git command.
 		workspaceRoot,
 	]);
 
@@ -277,9 +374,12 @@ export function useWorkspaceDelivery({
 				if (stagedCount === 0) {
 					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
 				}
+				const suggestion = await commitMessageForStagedChanges(root);
 				await workspaceGitCommitPush({
 					workspaceRoot: root,
-					message: `chore: checkpoint for ${workspaceName}`,
+					message: suggestion.subject,
+					body: suggestion.body,
+					stagedFingerprint: suggestion.stagedFingerprint,
 					forgeLogin,
 				});
 			}
@@ -307,7 +407,6 @@ export function useWorkspaceDelivery({
 		requestLabel,
 		stagedCount,
 		t,
-		workspaceName,
 		workspaceRoot,
 	]);
 

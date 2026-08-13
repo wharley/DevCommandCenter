@@ -81,6 +81,8 @@ import type {
 	WorkspaceGitFilePreviewContentOutput,
 	WorkspaceGitCommitPushInput,
 	WorkspaceGitCommitInput,
+	WorkspaceGitCommitSuggestionInput,
+	WorkspaceGitCommitSuggestionOutput,
 	WorkspaceChangeRequestCreateInput,
 	WorkspaceChangeRequestContextInput,
 	WorkspaceChangeRequestContextOutput,
@@ -472,6 +474,14 @@ export function workspaceGitStatus(input: WorkspaceGitStatusInput) {
 	return invoke<WorkspaceGitStatusOutput>(WORKSPACE_METHODS.workspaceGitStatus, {
 		input,
 	});
+}
+
+/** Suggestion provenance is limited to the staged Git snapshot in the backend. */
+export function workspaceGitCommitSuggestion(input: WorkspaceGitCommitSuggestionInput) {
+	return invoke<WorkspaceGitCommitSuggestionOutput>(
+		WORKSPACE_METHODS.workspaceGitCommitSuggestion,
+		{ input },
+	);
 }
 
 export function workspaceGitConflictState(input: WorkspaceGitConflictStateInput) {

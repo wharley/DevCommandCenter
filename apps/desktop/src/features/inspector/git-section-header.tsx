@@ -3,6 +3,7 @@ import { ExternalLink, FileDiff, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceCommitButton } from "@/features/commit";
+import type { WorkspaceCommitMessageSuggestion } from "@/features/commit/commit-message";
 import type { CommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import { INSPECTOR_SECTION_HEADER_CLASS, INSPECTOR_SECTION_TITLE_CLASS } from "@/shell/layout";
 import { cn } from "@/lib/utils";
@@ -31,7 +32,8 @@ function gitSectionHeaderHighlightClass(mode: CommitMode): string {
 export type GitSectionHeaderProps = {
   commitMode: CommitMode;
   isRefreshing?: boolean;
-  onCommit?: () => Promise<void> | void;
+  onCommit?: (message?: string, body?: string | null, stagedFingerprint?: string) => Promise<void> | void;
+  onPrepareCommitMessage?: () => Promise<WorkspaceCommitMessageSuggestion>;
   onReviewConflictResolution?: () => void;
   onRetrySetup?: () => Promise<void> | void;
   isRetryingSetup?: boolean;
@@ -51,6 +53,7 @@ export function GitSectionHeader({
   commitMode,
   isRefreshing = false,
   onCommit,
+  onPrepareCommitMessage,
   onReviewConflictResolution,
   onRetrySetup,
   isRetryingSetup = false,
@@ -161,6 +164,7 @@ export function GitSectionHeader({
             mode={commitMode}
             prProvider={prProvider}
             onCommit={onCommit}
+            onPrepareCommitMessage={onPrepareCommitMessage}
           />
         ) : null}
       </div>

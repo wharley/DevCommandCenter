@@ -124,7 +124,8 @@ use dcc_tauri::commands::{
         WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceDeliveryPolicy,
         WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
-        WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
+        WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput, WorkspaceGitCommitSuggestionInput,
+        WorkspaceGitCommitSuggestionOutput, WorkspaceGitCompleteMergeInput,
         WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
         WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
         WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
@@ -219,6 +220,7 @@ struct WorkspaceMethods {
     workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
     workspace_git_commit: String,
+    workspace_git_commit_suggestion: String,
     workspace_git_accept_conflict: String,
     workspace_git_mark_conflict_resolved: String,
     workspace_git_abort_merge: String,
@@ -531,6 +533,8 @@ fn main() {
         .typ::<WorkspaceGitPathInput>()
         .typ::<WorkspaceGitCommitPushInput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitCommitInput>()
+        .typ::<WorkspaceGitCommitSuggestionInput>()
+        .typ::<WorkspaceGitCommitSuggestionOutput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceChangeRequestCreateInput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceChangeRequestContextInput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceChangeRequestContextOutput>()
@@ -734,6 +738,7 @@ fn main() {
                     .to_string(),
                 workspace_git_commit_push: "workspace_git_commit_push".to_string(),
                 workspace_git_commit: "workspace_git_commit".to_string(),
+                workspace_git_commit_suggestion: "workspace_git_commit_suggestion".to_string(),
                 workspace_git_accept_conflict: "workspace_git_accept_conflict".to_string(),
                 workspace_git_mark_conflict_resolved: "workspace_git_mark_conflict_resolved"
                     .to_string(),

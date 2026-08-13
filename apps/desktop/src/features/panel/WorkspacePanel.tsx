@@ -3,6 +3,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { WorkspaceSessionSummary, WorkspaceSetupReport } from "@dcc/contracts";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import {
 	WorkspaceEditorSurface,
 	type DiffAnnotationRequest,
@@ -51,13 +61,18 @@ import { useWorkspaceForgeContext } from "@/features/inspector/use-workspace-for
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
 import {
 	useWorkspaceDelivery,
+	prepareWorkspaceCommitMessage,
 	type WorkspaceDeliveryCreateRequestInput,
 } from "@/features/commit/use-workspace-delivery";
+import {
+	sanitizeWorkspaceCommitBody,
+	sanitizeWorkspaceCommitSubject,
+} from "@/features/commit/commit-message";
 import { CreateChangeRequestDialog } from "@/features/commit/CreateChangeRequestDialog";
 import { SyncBaseDialog } from "@/features/commit/SyncBaseDialog";
 import { MergeConfirmDialog } from "@/features/commit/MergeConfirmDialog";
 import type { ExecutionDockRunMode } from "@/features/composer/ExecutionDock.actions";
-import { workspaceChangeRequestContext } from "@/lib/workspace-api";
+import { workspaceChangeRequestContext, workspaceGitStageAll } from "@/lib/workspace-api";
 import { workspaceRailDisplayTitle } from "@/features/workspaces/workspace-rail-shared";
 import {
 	buildMissionSpecFilename,
@@ -459,6 +474,13 @@ export function WorkspacePanel({
 	const pullRequestQuery = useWorkspacePrStatus(workspacePath, currentBranch, forgeLogin);
 	const [syncBaseConfirmationOpen, setSyncBaseConfirmationOpen] = useState(false);
 	const [mergeConfirmationOpen, setMergeConfirmationOpen] = useState(false);
+	const [commitPreview, setCommitPreview] = useState<{
+		mode: "commit" | "commit-and-push";
+		stagedFileCount: number;
+		stagedFingerprint: string;
+		body: string | null;
+	} | null>(null);
+	const [commitPreviewMessage, setCommitPreviewMessage] = useState("");
 	const commitMode = resolveCommitMode({
 		branch: currentBranch || workspaceBranch,
 		prStatus: pullRequestQuery.data,
@@ -507,7 +529,6 @@ export function WorkspacePanel({
 	const hasLocalChanges = (gitChangeSummary?.files ?? 0) > 0;
 	const delivery = useWorkspaceDelivery({
 		workspaceRoot: workspacePath,
-		workspaceName,
 		forgeLogin,
 		baseBranch: pullRequestQuery.data?.baseBranch ?? branchDiffQuery.data?.baseBranch ?? workspaceBranch,
 		requestLabel: forgeRequestLabel,
@@ -523,6 +544,40 @@ export function WorkspacePanel({
 		queryClient,
 		t,
 	});
+	const runDeliveryAction = useCallback(
+		async (mode: ExecutionDockRunMode) => {
+			if ((mode === "commit" || mode === "commit-and-push") && workspacePath?.trim()) {
+				if ((gitStatusQuery.data?.staged.length ?? 0) === 0) {
+					await workspaceGitStageAll({
+						workspaceRoot: workspacePath.trim(),
+						relativePath: ".",
+					});
+				}
+				const suggestion = await prepareWorkspaceCommitMessage(workspacePath.trim(), {
+					providerId: selectedProviderId,
+					model: selectedModelId,
+					providerRuntime: selectedProviderRuntime,
+				});
+				setCommitPreview({
+					mode,
+					stagedFileCount: suggestion.stagedFileCount ?? 0,
+					stagedFingerprint: suggestion.stagedFingerprint ?? "",
+					body: suggestion.body ?? null,
+				});
+				setCommitPreviewMessage(suggestion.subject);
+				return;
+			}
+			await delivery.run(mode);
+		},
+		[
+			delivery,
+			gitStatusQuery.data?.staged.length,
+			selectedModelId,
+			selectedProviderId,
+			selectedProviderRuntime,
+			workspacePath,
+		],
+	);
 	const messages = useMemo(
 		() =>
 			projectWorkspaceMessages(
@@ -1027,7 +1082,7 @@ export function WorkspacePanel({
 						commitMode={commitMode}
 						forgeRequestLabel={forgeRequestLabel}
 						deliveryBusy={delivery.busy}
-						onRunDeliveryAction={(mode: ExecutionDockRunMode) => delivery.run(mode)}
+						onRunDeliveryAction={runDeliveryAction}
 						onCreateChangeRequest={(draft) => setCreateRequestDraft(draft)}
 						onOpenMultiProjectDelivery={onOpenMultiProjectDelivery}
 						onCreateTaskFromBranch={onCreateTaskFromBranch}
@@ -1042,6 +1097,81 @@ export function WorkspacePanel({
 	return (
 		<>
 			{surfaceContent}
+			<Dialog
+				open={commitPreview !== null}
+				onOpenChange={(open) => {
+					if (!open && !delivery.busy) setCommitPreview(null);
+				}}
+			>
+				<DialogContent className="sm:max-w-lg">
+					<DialogHeader>
+						<DialogTitle>{t("commit.preview.title")}</DialogTitle>
+						<DialogDescription>{t("commit.preview.description")}</DialogDescription>
+					</DialogHeader>
+					<div className="grid gap-2 py-3">
+						<label
+							className="text-[12px] font-medium"
+							htmlFor="workspace-commit-message-preview"
+						>
+							{t("commit.preview.label")}
+						</label>
+						<Textarea
+							id="workspace-commit-message-preview"
+							value={commitPreviewMessage}
+							onChange={(event) => setCommitPreviewMessage(event.target.value)}
+							className="min-h-24 resize-y font-mono text-[12px]"
+							autoFocus
+						/>
+						<label className="text-[12px] font-medium" htmlFor="workspace-commit-body-preview">
+							{t("commit.preview.bodyLabel")}
+						</label>
+						<Textarea
+							id="workspace-commit-body-preview"
+							value={commitPreview?.body ?? ""}
+							onChange={(event) =>
+								setCommitPreview((previous) =>
+									previous ? { ...previous, body: event.target.value } : previous,
+								)
+							}
+							className="min-h-20 resize-y font-mono text-[12px]"
+						/>
+						{commitPreview ? (
+							<p className="text-[11px] text-muted-foreground">
+								{t("commit.preview.source", { count: commitPreview.stagedFileCount })}
+							</p>
+						) : null}
+					</div>
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							disabled={delivery.busy}
+							onClick={() => setCommitPreview(null)}
+						>
+							{t("commit.preview.cancel")}
+						</Button>
+						<Button
+							type="button"
+							disabled={delivery.busy || !commitPreviewMessage.trim() || !commitPreview}
+							onClick={async () => {
+								if (!commitPreview) return;
+								const pending = commitPreview;
+								setCommitPreview(null);
+								await delivery.run(
+									pending.mode,
+									sanitizeWorkspaceCommitSubject(commitPreviewMessage),
+									sanitizeWorkspaceCommitBody(pending.body),
+									pending.stagedFingerprint,
+								);
+							}}
+						>
+							{commitPreview?.mode === "commit"
+								? t("composer.executionDock.actions.commit")
+								: t("commit.preview.confirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			<CreateChangeRequestDialog
 				open={createRequestDraft !== null}
 				onOpenChange={(open) => {

@@ -75,6 +75,11 @@ import {
 	type MissionResumeCriterion,
 } from "@/features/spec/mission-spec-content";
 import { resolveCommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
+import { prepareWorkspaceCommitMessage } from "@/features/commit/use-workspace-delivery";
+import {
+	sanitizeWorkspaceCommitBody,
+	sanitizeWorkspaceCommitSubject,
+} from "@/features/commit/commit-message";
 import { setWorkspaceDeliveryBusy } from "@/features/commit/workspace-delivery-busy";
 import { MissionValidationCard } from "@/features/panel/message-components/MissionValidationCard";
 import {
@@ -2218,7 +2223,20 @@ export function WorkspaceInspectorSidebar({
 		[queryClient],
 	);
 
-	const handleInspectorCommit = useCallback(async () => {
+	const prepareInspectorCommitMessage = useCallback(async () => {
+		const root = workspacePath?.trim();
+		if (!root) throw new Error("No workspace path");
+		if ((gitStatusQuery.data?.staged.length ?? 0) === 0) {
+			await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
+		}
+		return prepareWorkspaceCommitMessage(root);
+	}, [gitStatusQuery.data?.staged.length, workspacePath]);
+
+	const handleInspectorCommit = useCallback(async (
+		commitMessage?: string,
+		commitBody?: string | null,
+		stagedFingerprint?: string,
+	) => {
 		const root = workspacePath?.trim();
 		if (!root) {
 			toast.error("No workspace path");
@@ -2333,15 +2351,23 @@ export function WorkspaceInspectorSidebar({
 					}
 					// Respect the user's selection: if they already staged specific
 					// files, commit only those. Stage everything only when nothing is
-					// staged yet, so the checkpoint commit isn't empty.
+					// staged yet, so the delivery commit isn't empty.
 					const stagedCount = gitStatusQuery.data?.staged.length ?? 0;
 					if (stagedCount === 0) {
 						await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
 					}
-					const message = `chore: checkpoint for ${workspaceName ?? "workspace"}`;
+					const suggestion = commitMessage
+						? null
+						: await prepareWorkspaceCommitMessage(root);
 					await workspaceGitCommitPush({
 						workspaceRoot: root,
-						message,
+						message: commitMessage
+							? sanitizeWorkspaceCommitSubject(commitMessage)
+							: suggestion?.subject ?? "",
+						body: commitMessage
+							? sanitizeWorkspaceCommitBody(commitBody)
+							: (suggestion?.body ?? null),
+						stagedFingerprint: stagedFingerprint ?? suggestion?.stagedFingerprint ?? "",
 						forgeLogin: selectedForgeLogin,
 					});
 					toast.success("Committed and pushed", { id: loadingToast });
@@ -3358,6 +3384,11 @@ export function WorkspaceInspectorSidebar({
 								(gitStatusQuery.isFetching && !gitStatusQuery.isPending)
 							}
 							onCommit={handleInspectorCommit}
+				onPrepareCommitMessage={
+					commitMode === "commit" || commitMode === "commit-and-push"
+						? prepareInspectorCommitMessage
+						: undefined
+				}
 							onReviewConflictResolution={() => {
 								const root = workspacePath?.trim();
 								if (!root) return;
