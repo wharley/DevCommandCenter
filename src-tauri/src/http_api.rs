@@ -20,7 +20,7 @@ use dcc_core::{
     domain::workspace::WorkspaceId,
     ports::{
         provider::ProviderPermissionResponse, provider::ProviderUserInputResponse, CoreEvent,
-        EventBus, Input, ProviderTurnInput, SessionEventRepo,
+        EventBus, Input, ProviderTurnInput,
     },
 };
 use dcc_infra::db::SqliteSessionRepo;
@@ -2130,15 +2130,8 @@ async fn list_session_events_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, HttpApiError> {
     let payload = session_repo_operation(config, move |repo| {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| error.to_string())?;
-        let items = runtime
-            .block_on(SessionEventRepo::list_events_by_session(
-                &repo,
-                &SessionId(session_id),
-            ))
+        let items = repo
+            .list_events_by_session_sync(&SessionId(session_id))
             .map_err(|error| error.to_string())?;
         serde_json::to_value(items).map_err(|error| error.to_string())
     })
