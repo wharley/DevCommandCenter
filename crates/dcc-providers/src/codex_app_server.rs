@@ -84,7 +84,7 @@ fn initialize_params(experimental_api: bool) -> Value {
     json!({
         "clientInfo": { "name": "dcc", "version": env!("CARGO_PKG_VERSION") },
         // runtimeWorkspaceRoots and raw response items are currently part of
-        // the Codex app-server experimental API. Account-usage reads stay on
+        // the provider's experimental server API. Account-usage reads stay on
         // the stable protocol, while interactive runtimes opt in explicitly.
         "capabilities": if experimental_api {
             json!({ "experimentalApi": true })
