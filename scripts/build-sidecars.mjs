@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -81,6 +81,17 @@ function ensurePlaceholder(dir, baseName, hostTriple) {
   }
 }
 
+function copyExecutable(source, target) {
+  // Release binaries may be emitted as read-only executables (0555). Make an
+  // existing target replaceable so repeated dev/release builds are idempotent,
+  // then keep the staged sidecar executable and writable by its owner.
+  if (existsSync(target)) {
+    chmodSync(target, 0o755);
+  }
+  copyFileSync(source, target);
+  chmodSync(target, 0o755);
+}
+
 function copySidecar(baseName, hostTriple) {
   const source = join(releaseDir, binaryName(baseName));
   const target = join(releaseDir, targetBinaryName(baseName, hostTriple));
@@ -90,7 +101,7 @@ function copySidecar(baseName, hostTriple) {
   }
 
   mkdirSync(releaseDir, { recursive: true });
-  copyFileSync(source, target);
+  copyExecutable(source, target);
 }
 
 function copyCompiledClaudeSidecar(hostTriple) {
@@ -103,7 +114,7 @@ function copyCompiledClaudeSidecar(hostTriple) {
   }
 
   mkdirSync(sidecarDistDir, { recursive: true });
-  copyFileSync(source, target);
+  copyExecutable(source, target);
 }
 
 const hostTriple = detectHostTriple();
