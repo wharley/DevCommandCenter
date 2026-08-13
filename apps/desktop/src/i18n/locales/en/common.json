@@ -2012,8 +2012,15 @@
   },
   "conversation": {
     "scrollToBottom": "Scroll to bottom",
+    "loadEarlier": "Load {{count}} earlier messages",
+    "modelLabel": "Model",
+    "requestedModelLabel": "Requested model",
     "newActivity": "New activity",
     "starting": "Preparing the agent…",
+    "trail": {
+      "label": "Conversation navigation",
+      "itemLabel": "Turn {{position}}: {{preview}}"
+    },
     "loading": {
       "title": "Loading conversation",
       "description": "Preparing the thread history for this workspace."

@@ -11,6 +11,7 @@ function sessionTurnStarted(
 	prompt: string,
 	occurredAt = "2026-05-01T12:00:00Z",
 	planMode?: boolean,
+	model?: string,
 ): SessionEventRecord {
 	return {
 		eventId: `evt-${sessionId}-${turnId}-started`,
@@ -22,6 +23,7 @@ function sessionTurnStarted(
 			turnId,
 			prompt,
 			planMode: planMode ?? null,
+			model: model ?? null,
 		},
 	};
 }
@@ -979,6 +981,39 @@ describe("projectWorkspaceMessages", () => {
 		]);
 	});
 
+	it("keeps live model events for the selected session", () => {
+		const liveEvents: CoreEvent[] = [
+			{
+				sessionTurnNativeSubagentModelRequested: {
+					session_id: "session-a",
+					turn_id: "turn-1",
+					correlation_id: "thread-child-1",
+					model: "gpt-5.6-luna",
+				},
+			},
+			{
+				sessionTurnNativeSubagentModelConfirmed: {
+					session_id: "session-a",
+					turn_id: "turn-1",
+					correlation_id: "thread-child-1",
+					model: "gpt-5.6-luna",
+				},
+			},
+			{
+				sessionTurnModelEffective: {
+					session_id: "session-a",
+					turn_id: "turn-1",
+					model: "gpt-5.6-terra",
+				},
+			},
+		];
+
+		expect(
+			mergeSessionThreadEvents([], liveEvents, "session-a").map(({ event }) => event),
+		).toEqual(liveEvents);
+		expect(mergeSessionThreadEvents([], liveEvents, "session-b")).toEqual([]);
+	});
+
 	it("projects structured native subagent activity without creating a DCC delegation", () => {
 		const activity: SessionEventRecord = {
 			eventId: "event-native-subagent",
@@ -1016,6 +1051,28 @@ describe("projectWorkspaceMessages", () => {
 					status: "running",
 				},
 			],
+		});
+	});
+
+	it("keeps the confirmed parent model on the assistant messages for that turn", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted(
+					"session-a",
+					"turn-1",
+					"Investigate",
+					"2026-05-01T12:00:00Z",
+					false,
+					"gpt-5.6-sol",
+				),
+			],
+			[sessionTurnDelta("session-a", "turn-1", "Working")],
+			"session-a",
+		);
+
+		expect(messages[1]).toMatchObject({
+			role: "assistant",
+			model: "gpt-5.6-sol",
 		});
 	});
 
@@ -1132,5 +1189,60 @@ describe("projectWorkspaceMessages", () => {
 				status: "completed",
 			}),
 		]);
+	});
+
+	it("keeps a requested child model separate until it is confirmed", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Investigate"),
+				{
+					eventId: "activity",
+					sessionId: "session-a",
+					sequence: 2,
+					occurredAt: "2026-05-01T12:00:01Z",
+					kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "child", agentId: null, agentThreadId: "thread-luna", name: "/root/luna", role: null, model: null, status: "running" },
+				},
+				{
+					eventId: "requested",
+					sessionId: "session-a",
+					sequence: 3,
+					occurredAt: "2026-05-01T12:00:02Z",
+					kind: { type: "turn_native_subagent_model_requested", turnId: "turn-1", correlationId: "thread-luna", model: "gpt-5.6-luna" },
+				},
+			], [], "session-a",
+		);
+		expect(messages[1]?.annotations?.[0]).toMatchObject({ requestedModel: "gpt-5.6-luna", model: undefined });
+	});
+
+	it("applies a child confirmation that arrives before its activity", () => {
+		const messages = projectWorkspaceMessages([
+			sessionTurnStarted("session-a", "turn-1", "Investigate"),
+			{ eventId: "confirmed", sessionId: "session-a", sequence: 2, occurredAt: "2026-05-01T12:00:01Z", kind: { type: "turn_native_subagent_model_confirmed", turnId: "turn-1", correlationId: "thread-luna", model: "gpt-5.6-luna" } },
+			{ eventId: "activity", sessionId: "session-a", sequence: 3, occurredAt: "2026-05-01T12:00:02Z", kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "child", agentId: null, agentThreadId: "thread-luna", name: "/root/luna", role: null, model: null, status: "running" } },
+		], [], "session-a");
+		expect(messages[1]?.annotations?.[0]).toMatchObject({ model: "gpt-5.6-luna" });
+	});
+
+	it("correlates Claude requested and confirmed models by Agent tool id", () => {
+		const messages = projectWorkspaceMessages([
+			sessionTurnStarted("session-a", "turn-1", "Review"),
+			{ eventId: "requested", sessionId: "session-a", sequence: 2, occurredAt: "2026-05-01T12:00:01Z", kind: { type: "turn_native_subagent_model_requested", turnId: "turn-1", correlationId: "toolu_agent", model: "opus" } },
+			{ eventId: "confirmed", sessionId: "session-a", sequence: 3, occurredAt: "2026-05-01T12:00:02Z", kind: { type: "turn_native_subagent_model_confirmed", turnId: "turn-1", correlationId: "toolu_agent", model: "claude-opus-4-1" } },
+			{ eventId: "activity", sessionId: "session-a", sequence: 4, occurredAt: "2026-05-01T12:00:03Z", kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "toolu_agent", agentId: "agent-1", agentThreadId: null, name: "Reviewer", role: "reviewer", model: null, status: "running" } },
+		], [], "session-a");
+		expect(messages[1]?.annotations?.[0]).toMatchObject({
+			id: "toolu_agent",
+			requestedModel: "opus",
+			model: "claude-opus-4-1",
+		});
+	});
+
+	it("uses the effective parent model after a reroute", () => {
+		const messages = projectWorkspaceMessages([
+			sessionTurnStarted("session-a", "turn-1", "Analyze", "2026-05-01T12:00:00Z", false, "gpt-5.6-sol"),
+			sessionTurnDeltaRecord("session-a", "turn-1", "answer"),
+			{ eventId: "effective", sessionId: "session-a", sequence: 2, occurredAt: "2026-05-01T12:00:01Z", kind: { type: "turn_model_effective", turnId: "turn-1", model: "gpt-5.6-luna" } },
+		], [], "session-a");
+		expect(messages.find((message) => message.role === "assistant")?.model).toBe("gpt-5.6-luna");
 	});
 });

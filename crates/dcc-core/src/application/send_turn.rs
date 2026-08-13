@@ -175,6 +175,7 @@ where
             turn_id: turn_id.clone(),
             prompt: input.prompt.clone(),
             plan_mode: input.plan_mode,
+            model: session.model.clone(),
         },
     };
 
@@ -187,6 +188,7 @@ where
             turn_id: turn_id.0.clone(),
             prompt: input.prompt,
             plan_mode: input.plan_mode,
+            model: session.model.clone(),
         })
         .await?;
 
@@ -367,8 +369,9 @@ mod tests {
             .expect("session events lock poisoned");
         assert_eq!(session_events.len(), 2);
         assert!(matches!(
-            session_events[1].kind,
-            SessionEventKind::TurnStarted { .. }
+            &session_events[1].kind,
+            SessionEventKind::TurnStarted { model: Some(model), .. }
+                if model == "gpt-5.4"
         ));
     }
 

@@ -119,6 +119,11 @@ export class SessionLiveEventBuffer {
 		return [...this.unscoped, ...[...this.buckets.values()].flatMap((bucket) => bucket.events)];
 	}
 
+	eventsForSession(sessionId: string | null) {
+		if (!sessionId) return [...this.unscoped];
+		return [...this.unscoped, ...(this.buckets.get(sessionId)?.events ?? [])];
+	}
+
 	stats() {
 		return [...this.buckets.entries()].map(([sessionId, bucket]) => ({
 			sessionId,

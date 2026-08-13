@@ -1120,7 +1120,7 @@ impl SessionCommandState {
                                     },
                                     dcc_core::ports::events::CoreEvent::SessionTurnNativeSubagentActivity {
                                         session_id: session_id.0.clone(),
-                                        turn_id,
+                                        turn_id: turn_id.clone(),
                                         id,
                                         agent_id,
                                         agent_thread_id,
@@ -1128,6 +1128,71 @@ impl SessionCommandState {
                                         role,
                                         model,
                                         status,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
+                    Ok(ProviderEvent::NativeSubagentModelRequested {
+                        correlation_id,
+                        model,
+                        ..
+                    }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let _ = state.append_and_publish_session_event(
+                                &session_id,
+                                SessionEventKind::TurnNativeSubagentModelRequested {
+                                    turn_id: TurnId(turn_id.clone()),
+                                    correlation_id: correlation_id.clone(),
+                                    model: model.clone(),
+                                },
+                                dcc_core::ports::events::CoreEvent::SessionTurnNativeSubagentModelRequested {
+                                    session_id: session_id.0.clone(),
+                                    turn_id,
+                                    correlation_id,
+                                    model,
+                                },
+                            ).await;
+                        }
+                    }
+                    Ok(ProviderEvent::NativeSubagentModelConfirmed {
+                        correlation_id,
+                        model,
+                        ..
+                    }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let _ = state.append_and_publish_session_event(
+                                &session_id,
+                                SessionEventKind::TurnNativeSubagentModelConfirmed {
+                                    turn_id: TurnId(turn_id.clone()),
+                                    correlation_id: correlation_id.clone(),
+                                    model: model.clone(),
+                                },
+                                dcc_core::ports::events::CoreEvent::SessionTurnNativeSubagentModelConfirmed {
+                                    session_id: session_id.0.clone(),
+                                    turn_id,
+                                    correlation_id,
+                                    model,
+                                },
+                            ).await;
+                        }
+                    }
+                    Ok(ProviderEvent::ModelEffective { model, .. }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnModelEffective {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        model: model.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnModelEffective {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        model,
                                     },
                                 )
                                 .await;
@@ -1261,7 +1326,11 @@ impl SessionCommandState {
                         }
                     }
                     Ok(ProviderEvent::AssistantMessageCompleted {
-                        id, phase, content, ..
+                        id,
+                        phase,
+                        content,
+                        model,
+                        ..
                     }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
@@ -1277,13 +1346,29 @@ impl SessionCommandState {
                                     },
                                     dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageCompleted {
                                         session_id: session_id.0.clone(),
-                                        turn_id,
+                                        turn_id: turn_id.clone(),
                                         message_id: id,
                                         phase,
                                         content,
                                     },
                                 )
                                 .await;
+                            if let Some(model) = model {
+                                let _ = state
+                                    .append_and_publish_session_event(
+                                        &session_id,
+                                        SessionEventKind::TurnModelEffective {
+                                            turn_id: TurnId(turn_id.clone()),
+                                            model: model.clone(),
+                                        },
+                                        dcc_core::ports::events::CoreEvent::SessionTurnModelEffective {
+                                            session_id: session_id.0.clone(),
+                                            turn_id: turn_id.clone(),
+                                            model,
+                                        },
+                                    )
+                                    .await;
+                            }
                         }
                     }
                     Ok(ProviderEvent::ReasoningStarted { id, label, .. }) => {

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -19,6 +26,12 @@ import {
 	latestConversationActivitySignature,
 	precedingUserPrompt,
 } from "./conversation-recovery";
+import { ConversationTrail } from "./ConversationTrail";
+import {
+	CONVERSATION_MESSAGE_PAGE_SIZE,
+	conversationWindowStart,
+	INITIAL_CONVERSATION_MESSAGE_LIMIT,
+} from "./conversation-window";
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -81,6 +94,38 @@ export function ActiveThreadViewport({
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
 	const [hasNewActivity, setHasNewActivity] = useState(false);
+	const [conversationWindow, setConversationWindow] = useState({
+		sessionId,
+		messageLimit: INITIAL_CONVERSATION_MESSAGE_LIMIT,
+	});
+	const visibleMessageLimit =
+		conversationWindow.sessionId === sessionId
+			? conversationWindow.messageLimit
+			: INITIAL_CONVERSATION_MESSAGE_LIMIT;
+	const prependScrollAnchorRef = useRef<{
+		scrollHeight: number;
+		scrollTop: number;
+	} | null>(null);
+	const visibleStart = useMemo(
+		() => conversationWindowStart(messages, visibleMessageLimit),
+		[messages, visibleMessageLimit],
+	);
+	const visibleMessages = useMemo(
+		() => messages.slice(visibleStart),
+		[messages, visibleStart],
+	);
+	const earlierMessageCount = useMemo(() => {
+		if (visibleStart === 0) return 0;
+		const nextStart = conversationWindowStart(
+			messages,
+			visibleMessageLimit + CONVERSATION_MESSAGE_PAGE_SIZE,
+		);
+		return visibleStart - nextStart;
+	}, [messages, visibleMessageLimit, visibleStart]);
+	const hiddenUserMessageCount = useMemo(
+		() => messages.slice(0, visibleStart).filter((message) => message.role === "user").length,
+		[messages, visibleStart],
+	);
 	const hasStreamingMessage = messages.some(
 		(message) => message.role === "assistant" && Boolean(message.streaming),
 	);
@@ -99,6 +144,7 @@ export function ActiveThreadViewport({
 	const wasAtBottomRef = useRef(true);
 
 	useEffect(() => {
+		prependScrollAnchorRef.current = null;
 		previousActivityRef.current = activitySignature;
 		wasAtBottomRef.current = true;
 		setHasNewActivity(false);
@@ -106,6 +152,15 @@ export function ActiveThreadViewport({
 		// A session switch is the only time the viewport intentionally resets.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [sessionId]);
+
+	useLayoutEffect(() => {
+		const anchor = prependScrollAnchorRef.current;
+		const scrollElement = scrollRef.current;
+		if (!anchor || !scrollElement) return;
+		prependScrollAnchorRef.current = null;
+		scrollElement.scrollTop =
+			anchor.scrollTop + (scrollElement.scrollHeight - anchor.scrollHeight);
+	}, [scrollRef, visibleStart]);
 
 	useEffect(() => {
 		const previous = previousActivityRef.current;
@@ -126,6 +181,23 @@ export function ActiveThreadViewport({
 		setHasNewActivity(false);
 		void scrollToBottom("smooth");
 	}, [scrollToBottom]);
+
+	const handleLoadEarlier = useCallback(() => {
+		const scrollElement = scrollRef.current;
+		if (scrollElement) {
+			prependScrollAnchorRef.current = {
+				scrollHeight: scrollElement.scrollHeight,
+				scrollTop: scrollElement.scrollTop,
+			};
+		}
+		setConversationWindow((current) => ({
+			sessionId,
+			messageLimit:
+				(current.sessionId === sessionId
+					? current.messageLimit
+					: INITIAL_CONVERSATION_MESSAGE_LIMIT) + CONVERSATION_MESSAGE_PAGE_SIZE,
+		}));
+	}, [scrollRef, sessionId]);
 
 	if (!hasLoaded) {
 		return (
@@ -167,6 +239,20 @@ export function ActiveThreadViewport({
 			>
 				<div ref={contentRef} className="flex min-h-full min-w-0 flex-col">
 					<div className="h-6 shrink-0" aria-hidden />
+					{visibleStart > 0 ? (
+						<div className="flex justify-center px-5 pb-5">
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={handleLoadEarlier}
+							>
+								{t("conversation.loadEarlier", {
+									count: earlierMessageCount,
+								})}
+							</Button>
+						</div>
+					) : null}
 					{messages.length === 0 ? (
 						<div className="flex min-h-full flex-1 items-center justify-center px-8">
 							<EmptyState
@@ -175,11 +261,16 @@ export function ActiveThreadViewport({
 							/>
 						</div>
 					) : (
-						<div className="flex flex-col gap-0 px-5">
-							{messages.map((message, messageIndex) => {
+						<div className="dcc-conversation-thread-list flex flex-col gap-0 px-5">
+							{visibleMessages.map((message, visibleMessageIndex) => {
+								const messageIndex = visibleStart + visibleMessageIndex;
 								if (message.role === "user") {
 									return (
-										<div key={message.id} className="pb-4">
+										<div
+											key={message.id}
+											data-conversation-trail-id={message.id}
+											className="scroll-mt-6 pb-4"
+										>
 											<UserMessage
 												label={message.label}
 												content={message.content}
@@ -212,6 +303,8 @@ export function ActiveThreadViewport({
 													message.id === planMessageId && planReadOnly
 												}
 												sessionId={sessionId}
+												providers={providers}
+												modelId={message.model}
 												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 												activeMissionSpecHash={activeMissionSpecHash}
 												autoSaveMissionValidation={autoSaveMissionValidation}
@@ -274,6 +367,11 @@ export function ActiveThreadViewport({
 					<div className="h-10 shrink-0" aria-hidden />
 				</div>
 			</div>
+			<ConversationTrail
+				messages={visibleMessages}
+				scrollRef={scrollRef}
+				ordinalOffset={hiddenUserMessageCount}
+			/>
 			{!isAtBottom ? (
 				<div className="pointer-events-none absolute inset-x-0 bottom-1 z-30 flex justify-center py-1.5">
 					<Button

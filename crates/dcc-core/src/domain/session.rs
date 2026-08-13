@@ -127,6 +127,8 @@ pub enum SessionEventKind {
         prompt: String,
         #[serde(rename = "planMode", default)]
         plan_mode: Option<bool>,
+        #[serde(default)]
+        model: Option<String>,
     },
     TurnSteered {
         #[serde(rename = "turnId")]
@@ -274,6 +276,25 @@ pub enum SessionEventKind {
         role: Option<String>,
         model: Option<String>,
         status: NativeSubagentStatus,
+    },
+    TurnNativeSubagentModelConfirmed {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "correlationId")]
+        correlation_id: String,
+        model: String,
+    },
+    TurnNativeSubagentModelRequested {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "correlationId")]
+        correlation_id: String,
+        model: String,
+    },
+    TurnModelEffective {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        model: String,
     },
     TurnCompleted {
         #[serde(rename = "turnId")]
@@ -436,6 +457,9 @@ impl SessionProjection {
             | SessionEventKind::TurnPermissionRequested { .. }
             | SessionEventKind::TurnPermissionResolved { .. }
             | SessionEventKind::TurnNativeSubagentActivity { .. }
+            | SessionEventKind::TurnNativeSubagentModelConfirmed { .. }
+            | SessionEventKind::TurnNativeSubagentModelRequested { .. }
+            | SessionEventKind::TurnModelEffective { .. }
             | SessionEventKind::PlanApproved { .. }
             | SessionEventKind::PlanHandedOff { .. }
             | SessionEventKind::DelegationRequested { .. }
@@ -570,6 +594,7 @@ mod tests {
                     turn_id: TurnId("turn-1".to_string()),
                     prompt: "Create shell".to_string(),
                     plan_mode: None,
+                    model: None,
                 },
             ),
             event(

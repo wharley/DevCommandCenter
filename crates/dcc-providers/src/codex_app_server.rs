@@ -442,6 +442,7 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
             };
             let model = item
                 .get("model")
+                .or_else(|| item.get("agentModel"))
                 .and_then(Value::as_str)
                 .filter(|model| !model.is_empty())
                 .map(str::to_string);
@@ -452,11 +453,13 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                     ids.iter()
                         .filter_map(Value::as_str)
                         .filter(|id| !id.is_empty())
+                        .map(str::to_string)
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
             let states = item.get("agentsStates").and_then(Value::as_object);
             let mut events = Vec::new();
+            let mut emitted_threads = HashSet::new();
             if let Some(states) = states {
                 for (index, (state_key, state)) in states.iter().enumerate() {
                     let status = codex_native_subagent_status(state.get("status"));
@@ -470,7 +473,7 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                         .or_else(|| {
                             receivers
                                 .iter()
-                                .any(|receiver| *receiver == state_key)
+                                .any(|receiver| receiver == state_key)
                                 .then(|| state_key.to_string())
                         })
                         .or_else(|| receivers.get(index).map(|id| (*id).to_string()));
@@ -499,8 +502,63 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                             .and_then(Value::as_str)
                             .filter(|value| !value.is_empty())
                             .map(str::to_string),
-                        model: model.clone(),
+                        // `collabAgentToolCall.model` is the requested model,
+                        // not confirmation that the child actually ran it.
+                        model: None,
                         status: status.clone(),
+                        at: at.clone(),
+                    });
+                    if let Some(thread_id) = events.last().and_then(|event| match event {
+                        ProviderEvent::NativeSubagentActivity {
+                            agent_thread_id, ..
+                        } => agent_thread_id.clone(),
+                        _ => None,
+                    }) {
+                        emitted_threads.insert(thread_id);
+                    }
+                    if let (Some(thread_id), Some(model)) = (
+                        events.last().and_then(|event| match event {
+                            ProviderEvent::NativeSubagentActivity {
+                                agent_thread_id, ..
+                            } => agent_thread_id.clone(),
+                            _ => None,
+                        }),
+                        model.clone(),
+                    ) {
+                        events.push(ProviderEvent::NativeSubagentModelRequested {
+                            correlation_id: thread_id,
+                            model,
+                            at: at.clone(),
+                        });
+                    }
+                }
+            }
+            // The app-server can emit the spawn before `agentsStates` is
+            // populated. `receiverThreadIds` is the authoritative child
+            // identity in that case; preserve it so the later
+            // `subAgentActivity` event can enrich the same timeline item.
+            // The collaboration tool's status describes the spawn request,
+            // not the child. A child is running until its own activity event
+            // reports a terminal state.
+            let spawn_status = NativeSubagentStatus::Running;
+            for thread_id in receivers {
+                if emitted_threads.contains(&thread_id) {
+                    continue;
+                }
+                events.push(ProviderEvent::NativeSubagentActivity {
+                    id: format!("codex-native:{thread_id}"),
+                    agent_id: None,
+                    agent_thread_id: Some(thread_id.clone()),
+                    name: None,
+                    role: None,
+                    model: None,
+                    status: spawn_status.clone(),
+                    at: at.clone(),
+                });
+                if let Some(model) = model.clone() {
+                    events.push(ProviderEvent::NativeSubagentModelRequested {
+                        correlation_id: thread_id.clone(),
+                        model,
                         at: at.clone(),
                     });
                 }
@@ -533,6 +591,25 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                 .and_then(Value::as_str)
                 .filter(|path| !path.is_empty())
                 .map(str::to_string);
+            let model = item
+                .get("model")
+                .or_else(|| item.get("agentModel"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let name = item
+                .get("agentNickname")
+                .or_else(|| item.get("name"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or(agent_path);
+            let role = item
+                .get("agentRole")
+                .or_else(|| item.get("role"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
             vec![ProviderEvent::NativeSubagentActivity {
                 id: format!(
                     "codex-native:{}",
@@ -542,9 +619,9 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                 agent_thread_id: thread_id,
                 // Keep the provider's structured path verbatim. It identifies
                 // the executing subagent without guessing a nickname or role.
-                name: agent_path,
-                role: None,
-                model: None,
+                name,
+                role,
+                model,
                 status,
                 at,
             }]
@@ -556,6 +633,25 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
 fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> {
     let at = Utc::now().to_rfc3339();
     match method {
+        "model/rerouted" => {
+            // Root-thread reroutes must remain attributable to their native
+            // turn before the Tauri bridge maps them to a DCC turn.
+            params.get("turnId").and_then(Value::as_str)?;
+            Some(ProviderEvent::NativeSubagentModelConfirmed {
+                correlation_id: params.get("threadId").and_then(Value::as_str)?.to_string(),
+                model: params.get("toModel").and_then(Value::as_str)?.to_string(),
+                at,
+            })
+        }
+        "thread/settings/updated" => Some(ProviderEvent::NativeSubagentModelConfirmed {
+            correlation_id: params.get("threadId").and_then(Value::as_str)?.to_string(),
+            model: params
+                .get("threadSettings")
+                .and_then(|settings| settings.get("model"))
+                .and_then(Value::as_str)?
+                .to_string(),
+            at,
+        }),
         "item/agentMessage/delta" => Some(ProviderEvent::AssistantMessageDelta {
             id: params
                 .get("itemId")
@@ -664,6 +760,7 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
                     id,
                     phase: codex_agent_message_phase(item),
                     content: item.get("text").and_then(Value::as_str).map(str::to_string),
+                    model: None,
                     at,
                 }),
                 "mcpToolCall" => {
@@ -719,6 +816,24 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
             })
         }
         _ => None,
+    }
+}
+
+fn classify_codex_model_event(
+    event: ProviderEvent,
+    current_thread_id: Option<&str>,
+    current_turn_id: Option<&str>,
+    source_turn_id: Option<&str>,
+) -> Option<ProviderEvent> {
+    match event {
+        ProviderEvent::NativeSubagentModelConfirmed {
+            correlation_id,
+            model,
+            at,
+        } if current_thread_id == Some(correlation_id.as_str()) => source_turn_id
+            .map_or(true, |turn_id| current_turn_id == Some(turn_id))
+            .then_some(ProviderEvent::ModelEffective { model, at }),
+        other => Some(other),
     }
 }
 
@@ -1053,8 +1168,12 @@ fn codex_native_approval_result(kind: CodexNativeApprovalKind, behavior: &str) -
     }
 }
 
-type PendingResponse = oneshot::Sender<std::result::Result<Value, String>>;
-type PendingMap = Arc<Mutex<HashMap<u64, PendingResponse>>>;
+struct PendingRequest {
+    method: String,
+    response: oneshot::Sender<std::result::Result<Value, String>>,
+}
+
+type PendingMap = Arc<Mutex<HashMap<u64, PendingRequest>>>;
 
 struct SessionRuntime {
     handle: SessionHandle,
@@ -1084,7 +1203,13 @@ impl SessionRuntime {
     async fn send_request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
+        self.pending.lock().await.insert(
+            id,
+            PendingRequest {
+                method: method.to_string(),
+                response: tx,
+            },
+        );
         {
             let mut stdin = self.stdin.lock().await;
             write_line(&mut stdin, &rpc_request(id, method, params)).await?;
@@ -1118,7 +1243,13 @@ impl SessionRuntime {
             &self.handle.session_id,
         ));
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
+        self.pending.lock().await.insert(
+            id,
+            PendingRequest {
+                method: method.to_string(),
+                response: tx,
+            },
+        );
         let write_result = {
             let mut stdin = self.stdin.lock().await;
             prepared.write_to(&mut *stdin).await
@@ -1832,17 +1963,29 @@ impl CodexAppServerAdapter {
                 if let Some(id_val) = &msg.id {
                     if let Some(id) = id_val.as_u64() {
                         if msg.result.is_some() || msg.error.is_some() {
-                            let mut pending = runtime.pending.lock().await;
-                            if let Some(tx) = pending.remove(&id) {
+                            let pending = runtime.pending.lock().await.remove(&id);
+                            if let Some(pending) = pending {
                                 if let Some(r) = msg.result {
-                                    let _ = tx.send(Ok(r));
+                                    if pending.method == "turn/start" {
+                                        if let Some(turn_id) = r
+                                            .get("turn")
+                                            .and_then(|turn| turn.get("id"))
+                                            .and_then(Value::as_str)
+                                        {
+                                            // Publish the native turn before waking the caller so
+                                            // an immediately following notification cannot overtake it.
+                                            *runtime.active_turn_id.lock().await =
+                                                Some(turn_id.to_string());
+                                        }
+                                    }
+                                    let _ = pending.response.send(Ok(r));
                                 } else if let Some(e) = msg.error {
                                     let msg = e
                                         .get("message")
                                         .and_then(Value::as_str)
                                         .unwrap_or("rpc error")
                                         .to_string();
-                                    let _ = tx.send(Err(msg));
+                                    let _ = pending.response.send(Err(msg));
                                 }
                             }
                             continue;
@@ -1966,7 +2109,17 @@ impl CodexAppServerAdapter {
                             let _ = runtime.events_tx.send(event);
                         }
                     } else if let Some(event) = notification_to_event(method, params) {
-                        let _ = runtime.events_tx.send(event);
+                        let current_thread_id = runtime.thread_id.lock().await.clone();
+                        let current_turn_id = runtime.active_turn_id.lock().await.clone();
+                        let source_turn_id = params.get("turnId").and_then(Value::as_str);
+                        if let Some(event) = classify_codex_model_event(
+                            event,
+                            current_thread_id.as_deref(),
+                            current_turn_id.as_deref(),
+                            source_turn_id,
+                        ) {
+                            let _ = runtime.events_tx.send(event);
+                        }
                     }
                 }
             }
@@ -1979,8 +2132,10 @@ impl CodexAppServerAdapter {
             };
 
             // Drain pending requests
-            for (_, tx) in runtime.pending.lock().await.drain() {
-                let _ = tx.send(Err("codex process exited".to_string()));
+            for (_, pending) in runtime.pending.lock().await.drain() {
+                let _ = pending
+                    .response
+                    .send(Err("codex process exited".to_string()));
             }
             for (request_id, _) in runtime.pending_mcp_approvals.lock().await.drain() {
                 let _ = runtime.events_tx.send(ProviderEvent::PermissionResolved {
@@ -2186,13 +2341,11 @@ impl Provider for CodexAppServerAdapter {
             )
             .await?;
 
-        let turn_id = result
+        result
             .get("turn")
             .and_then(|turn| turn.get("id"))
             .and_then(Value::as_str)
-            .ok_or_else(|| CoreError::Provider("codex turn/start missing turn.id".to_string()))?
-            .to_string();
-        *runtime.active_turn_id.lock().await = Some(turn_id);
+            .ok_or_else(|| CoreError::Provider("codex turn/start missing turn.id".to_string()))?;
 
         Ok(())
     }
@@ -2633,16 +2786,26 @@ mod tests {
         }));
         assert!(matches!(
             events.as_slice(),
-            [ProviderEvent::NativeSubagentActivity {
-                id,
-                agent_id: None,
-                agent_thread_id: Some(thread_id),
-                name: None,
-                role: None,
-                model: Some(model),
-                status: NativeSubagentStatus::Running,
-                ..
-            }] if id == "codex-native:thread-child-1" && thread_id == "thread-child-1" && model == "gpt-5.6-terra"
+            [
+                ProviderEvent::NativeSubagentActivity {
+                    id,
+                    agent_id: None,
+                    agent_thread_id: Some(thread_id),
+                    name: None,
+                    role: None,
+                    model: None,
+                    status: NativeSubagentStatus::Running,
+                    ..
+                },
+                ProviderEvent::NativeSubagentModelRequested {
+                    correlation_id,
+                    model,
+                    ..
+                }
+            ] if id == "codex-native:thread-child-1"
+                && thread_id == "thread-child-1"
+                && correlation_id == "thread-child-1"
+                && model == "gpt-5.6-terra"
         ));
 
         // Assistant text that merely claims delegation is not telemetry.
@@ -2675,6 +2838,122 @@ mod tests {
             }] if id == "codex-native:thread-child-1"
                 && thread_id == "thread-child-1"
                 && agent_path == "root/terra"
+        ));
+    }
+
+    #[test]
+    fn preserves_explicit_codex_subagent_model_metadata() {
+        let events = codex_native_subagent_events(&json!({
+            "item": {
+                "id": "activity-2",
+                "type": "subAgentActivity",
+                "agentPath": "/root/luna",
+                "agentThreadId": "thread-child-2",
+                "model": "gpt-5.6-luna",
+                "kind": "started"
+            }
+        }));
+        assert!(matches!(
+            events.as_slice(),
+            [ProviderEvent::NativeSubagentActivity {
+                name: Some(name),
+                model: Some(model),
+                status: NativeSubagentStatus::Running,
+                ..
+            }] if name == "/root/luna" && model == "gpt-5.6-luna"
+        ));
+    }
+
+    #[test]
+    fn projects_receiver_thread_before_codex_agent_state_is_populated() {
+        let events = codex_native_subagent_events(&json!({
+            "item": {
+                "id": "collab-early",
+                "type": "collabAgentToolCall",
+                "status": "inProgress",
+                "model": "gpt-5.6-luna",
+                "receiverThreadIds": ["thread-luna"],
+                "agentsStates": {}
+            }
+        }));
+        assert!(matches!(
+            events.first(),
+            Some(ProviderEvent::NativeSubagentActivity {
+                agent_thread_id: Some(thread_id),
+                model: None,
+                status: NativeSubagentStatus::Running,
+                ..
+            }) if thread_id == "thread-luna"
+        ));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ProviderEvent::NativeSubagentModelRequested { correlation_id: agent_thread_id, model, .. }
+                if agent_thread_id == "thread-luna" && model == "gpt-5.6-luna"
+        )));
+    }
+
+    #[test]
+    fn classifies_root_and_child_model_notifications() {
+        let root_reroute = notification_to_event(
+            "model/rerouted",
+            &json!({
+                "threadId": "thread-root",
+                "turnId": "turn-1",
+                "fromModel": "gpt-5.6-sol",
+                "toModel": "gpt-5.6-terra",
+                "reason": "fallback"
+            }),
+        )
+        .expect("reroute must produce a model event");
+        assert!(matches!(
+            classify_codex_model_event(
+                root_reroute,
+                Some("thread-root"),
+                Some("turn-1"),
+                Some("turn-1"),
+            ),
+            Some(ProviderEvent::ModelEffective { model, .. }) if model == "gpt-5.6-terra"
+        ));
+
+        let stale_root_reroute = notification_to_event(
+            "model/rerouted",
+            &json!({
+                "threadId": "thread-root",
+                "turnId": "turn-1",
+                "fromModel": "gpt-5.6-sol",
+                "toModel": "gpt-5.6-terra",
+                "reason": "fallback"
+            }),
+        )
+        .expect("reroute must produce a model event");
+        assert!(classify_codex_model_event(
+            stale_root_reroute,
+            Some("thread-root"),
+            Some("turn-2"),
+            Some("turn-1"),
+        )
+        .is_none());
+
+        let child_settings = notification_to_event(
+            "thread/settings/updated",
+            &json!({
+                "threadId": "thread-child",
+                "threadSettings": { "model": "gpt-5.6-luna" }
+            }),
+        )
+        .expect("settings update must produce a model event");
+        assert!(matches!(
+            classify_codex_model_event(
+                child_settings,
+                Some("thread-root"),
+                Some("turn-1"),
+                None,
+            ),
+            Some(ProviderEvent::NativeSubagentModelConfirmed {
+                correlation_id,
+                model,
+                ..
+            }) if correlation_id == "thread-child" && model == "gpt-5.6-luna"
         ));
     }
 

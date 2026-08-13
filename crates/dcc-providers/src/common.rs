@@ -75,6 +75,10 @@ pub(crate) struct ProviderStreamState {
     claude_native_subagent_terminal_statuses: HashMap<String, NativeSubagentStatus>,
     claude_active_message_id: Option<String>,
     claude_text_message_started: bool,
+    /// Events discovered while parsing one envelope that must be emitted
+    /// alongside its primary event (for example Agent activity plus the
+    /// requested model from the same tool_use block).
+    claude_pending_events: Vec<ProviderEvent>,
     pub(crate) gemini_streamed_text_emitted: bool,
     pub(crate) gemini_active_message_id: Option<String>,
 }
@@ -197,6 +201,7 @@ fn parse_claude_native_subagent_hook(
 #[derive(Debug)]
 pub(crate) enum ParsedProviderLine {
     Event(ProviderEvent),
+    Events(Vec<ProviderEvent>),
     Text(String),
     Ignored,
 }
@@ -445,17 +450,18 @@ pub(crate) fn parse_provider_stream_line(
         Err(_) => return ParsedProviderLine::Text(trimmed.to_string()),
     };
 
-    if let Some(event) = parse_custom_envelope(&value) {
-        return ParsedProviderLine::Event(event);
+    let event = parse_custom_envelope(&value)
+        .or_else(|| parse_claude_stream_value(&value, state))
+        .or_else(|| parse_codex_stream_value(&value, state));
+    let mut events = state.claude_pending_events.drain(..).collect::<Vec<_>>();
+    if let Some(event) = event {
+        events.insert(0, event);
     }
-    if let Some(event) = parse_claude_stream_value(&value, state) {
-        return ParsedProviderLine::Event(event);
+    match events.len() {
+        0 => ParsedProviderLine::Ignored,
+        1 => ParsedProviderLine::Event(events.pop().expect("one event")),
+        _ => ParsedProviderLine::Events(events),
     }
-    if let Some(event) = parse_codex_stream_value(&value, state) {
-        return ParsedProviderLine::Event(event);
-    }
-
-    ParsedProviderLine::Ignored
 }
 
 fn parse_custom_envelope(value: &Value) -> Option<ProviderEvent> {
@@ -579,13 +585,22 @@ fn parse_claude_stream_value(
                         state
                             .claude_blocks
                             .insert(index, ClaudeBlockState::ToolCall { id: id.clone() });
+                        if let Some(model) = metadata.model.clone() {
+                            state.claude_pending_events.push(
+                                ProviderEvent::NativeSubagentModelRequested {
+                                    correlation_id: id.clone(),
+                                    model,
+                                    at: at.clone(),
+                                },
+                            );
+                        }
                         return Some(ProviderEvent::NativeSubagentActivity {
                             id,
                             agent_id: metadata.agent_id,
                             agent_thread_id: None,
                             name: metadata.name,
                             role: metadata.role,
-                            model: metadata.model,
+                            model: None,
                             status: NativeSubagentStatus::Running,
                             at,
                         });
@@ -677,13 +692,21 @@ fn parse_claude_stream_value(
                     metadata.role = reported.role.or_else(|| metadata.role.clone());
                     metadata.model = reported.model.or_else(|| metadata.model.clone());
                     let metadata = metadata.clone();
+                    let requested_model = metadata.model.clone();
+                    if let Some(model) = requested_model {
+                        return Some(ProviderEvent::NativeSubagentModelRequested {
+                            correlation_id: id,
+                            model,
+                            at,
+                        });
+                    }
                     Some(ProviderEvent::NativeSubagentActivity {
                         id,
                         agent_id: metadata.agent_id,
                         agent_thread_id: None,
                         name: metadata.name,
                         role: metadata.role,
-                        model: metadata.model,
+                        model: None,
                         status: NativeSubagentStatus::Running,
                         at,
                     })
@@ -707,14 +730,16 @@ fn parse_claude_terminal_value(
     }
     match kind {
         "assistant" => {
-            if value
-                .get("parent_tool_use_id")
-                .is_some_and(|parent| !parent.is_null())
-            {
-                return None;
-            }
-
             let message = value.get("message")?.as_object()?;
+            let message_model = nonempty_json_string(message.get("model"));
+            let parent_tool = nonempty_json_string(value.get("parent_tool_use_id"));
+            if let Some(parent_tool) = parent_tool {
+                return message_model.map(|model| ProviderEvent::NativeSubagentModelConfirmed {
+                    correlation_id: parent_tool,
+                    model,
+                    at,
+                });
+            }
             let content = message.get("content")?.as_array()?;
             let text = content
                 .iter()
@@ -747,13 +772,14 @@ fn parse_claude_terminal_value(
             state.claude_active_message_id = None;
             state.claude_text_message_started = false;
 
-            if text.is_empty() {
+            if text.is_empty() && message_model.is_none() {
                 None
             } else {
                 Some(ProviderEvent::AssistantMessageCompleted {
                     id,
                     phase: AssistantMessagePhase::Unknown,
-                    content: Some(text),
+                    content: (!text.is_empty()).then_some(text),
+                    model: message_model,
                     at,
                 })
             }
@@ -796,7 +822,7 @@ fn parse_claude_terminal_value(
                         agent_thread_id: None,
                         name: metadata.name,
                         role: metadata.role,
-                        model: metadata.model,
+                        model: None,
                         status,
                         at,
                     });
@@ -1049,6 +1075,7 @@ fn parse_codex_stream_value(
                             .to_string(),
                         phase: codex_agent_message_phase(item),
                         content: item.get("text").and_then(Value::as_str).map(str::to_string),
+                        model: None,
                         at,
                     })
                 }
@@ -1447,6 +1474,11 @@ impl CliProviderAdapter {
                 match parse_provider_stream_line(&content, &mut stream_state) {
                     ParsedProviderLine::Event(event) => {
                         let _ = runtime_for_task.events_tx.send(event);
+                    }
+                    ParsedProviderLine::Events(events) => {
+                        for event in events {
+                            let _ = runtime_for_task.events_tx.send(event);
+                        }
                     }
                     ParsedProviderLine::Text(text) => {
                         let _ = runtime_for_task
@@ -2066,6 +2098,32 @@ mod tests {
     }
 
     #[test]
+    fn captures_claude_effective_models_without_leaking_child_text() {
+        let mut state = ProviderStreamState::default();
+        let root = parse_provider_stream_line(
+            r#"{"type":"assistant","message":{"id":"msg_root","model":"claude-opus-effective","content":[{"type":"text","text":"root answer"}]}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            root,
+            ParsedProviderLine::Event(ProviderEvent::AssistantMessageCompleted {
+                content: Some(ref content), model: Some(ref model), ..
+            }) if content == "root answer" && model == "claude-opus-effective"
+        ));
+
+        let child = parse_provider_stream_line(
+            r#"{"type":"assistant","parent_tool_use_id":"toolu_agent","message":{"id":"msg_child","model":"claude-sonnet-effective","content":[{"type":"text","text":"private child text"}]}}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            child,
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentModelConfirmed {
+                ref correlation_id, ref model, ..
+            }) if correlation_id == "toolu_agent" && model == "claude-sonnet-effective"
+        ));
+    }
+
+    #[test]
     fn enriches_claude_agent_activity_only_with_a_hook_tool_use_id() {
         let mut state = ProviderStreamState::default();
         let _ = parse_provider_stream_line(
@@ -2126,16 +2184,17 @@ mod tests {
         );
         assert!(matches!(
             tool,
-            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
-                ref id,
-                agent_id: Some(ref agent_id),
-                role: Some(ref role),
-                model: Some(ref model),
-                ..
-            }) if id == "toolu_agent_early"
-                && agent_id == "native-agent-early"
-                && role == "reviewer"
-                && model == "opus"
+            ParsedProviderLine::Events(events) if matches!(events.as_slice(), [
+                ProviderEvent::NativeSubagentActivity {
+                    id,
+                    agent_id: Some(agent_id),
+                    role: Some(role),
+                    model: None,
+                    ..
+                },
+                ProviderEvent::NativeSubagentModelRequested { correlation_id, model, .. }
+            ] if id == "toolu_agent_early" && agent_id == "native-agent-early"
+                && role == "reviewer" && correlation_id == "toolu_agent_early" && model == "opus")
         ));
     }
 
@@ -2225,18 +2284,9 @@ mod tests {
         );
         assert!(matches!(
             input_completed,
-            ParsedProviderLine::Event(ProviderEvent::NativeSubagentActivity {
-                ref id,
-                agent_id: None,
-                name: Some(ref name),
-                role: Some(ref role),
-                model: Some(ref model),
-                status: NativeSubagentStatus::Running,
-                ..
-            }) if id == "toolu_agent_streamed"
-                && name == "Opus reviewer"
-                && role == "reviewer"
-                && model == "opus"
+            ParsedProviderLine::Event(ProviderEvent::NativeSubagentModelRequested {
+                ref correlation_id, ref model, ..
+            }) if correlation_id == "toolu_agent_streamed" && model == "opus"
         ));
 
         let completed = parse_provider_stream_line(
@@ -2250,13 +2300,12 @@ mod tests {
                 agent_id: None,
                 name: Some(ref name),
                 role: Some(ref role),
-                model: Some(ref model),
+                model: None,
                 status: NativeSubagentStatus::Completed,
                 ..
             }) if id == "toolu_agent_streamed"
                 && name == "Opus reviewer"
                 && role == "reviewer"
-                && model == "opus"
         ));
     }
 

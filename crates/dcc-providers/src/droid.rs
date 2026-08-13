@@ -507,6 +507,7 @@ fn complete_droid_active_message(
         id,
         phase: AssistantMessagePhase::Unknown,
         content,
+        model: None,
         at,
     }]
 }
@@ -535,6 +536,7 @@ fn complete_droid_turn_text(
         id: droid_message_id(value).unwrap_or_else(|| "droid:final".to_string()),
         phase: AssistantMessagePhase::Unknown,
         content: Some(final_text),
+        model: None,
         at,
     }]
 }

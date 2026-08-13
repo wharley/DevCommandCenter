@@ -346,8 +346,118 @@
 		flex-shrink: 0;
 	}
 
+	.dcc-conversation-scroll-area {
+		container-type: inline-size;
+	}
+
+	.dcc-conversation-trail {
+		pointer-events: none;
+		position: absolute;
+		inset-block: 0;
+		left: 0;
+		z-index: 20;
+		display: none;
+		width: 3.5rem;
+		flex-direction: column;
+		justify-content: center;
+	}
+
+	.dcc-conversation-trail__viewport {
+		pointer-events: auto;
+		position: relative;
+		width: 100%;
+		max-height: 80%;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		contain: layout;
+		scrollbar-width: none;
+	}
+
+	.dcc-conversation-trail__viewport::-webkit-scrollbar {
+		display: none;
+	}
+
+	.dcc-conversation-trail__track {
+		position: relative;
+		width: 100%;
+	}
+
+	.dcc-conversation-trail__tick {
+		position: absolute;
+		left: 0.875rem;
+		height: 2px;
+		min-width: 2px;
+		border: 0;
+		border-radius: 9999px;
+		background: var(--foreground);
+		padding: 0;
+		transform-origin: left center;
+		transition: width 90ms ease-out, opacity 90ms ease-out;
+		will-change: width, opacity;
+	}
+
+	.dcc-conversation-trail__tick:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 3px;
+	}
+
+	.dcc-conversation-trail__tooltip {
+		pointer-events: none;
+		position: absolute;
+		left: 4rem;
+		z-index: 30;
+		width: min(20rem, calc(100cqw - 5rem));
+		max-height: 8.5rem;
+		overflow: hidden;
+		transform: translateY(-50%);
+		border: 1px solid color-mix(in oklch, var(--border) 82%, transparent);
+		border-radius: 0.75rem;
+		background: color-mix(in oklch, var(--popover) 96%, transparent);
+		box-shadow: 0 14px 36px rgb(0 0 0 / 0.18);
+		padding: 0.65rem 0.75rem;
+		backdrop-filter: blur(14px);
+	}
+
+	.dcc-conversation-trail__prompt,
+	.dcc-conversation-trail__response {
+		display: -webkit-box;
+		overflow: hidden;
+		-webkit-box-orient: vertical;
+		margin: 0;
+		font-size: 0.75rem;
+		line-height: 1.35;
+	}
+
+	.dcc-conversation-trail__prompt {
+		-webkit-line-clamp: 2;
+		color: var(--foreground);
+		font-weight: 500;
+	}
+
+	.dcc-conversation-trail__response {
+		-webkit-line-clamp: 3;
+		margin-top: 0.3rem;
+		color: var(--muted-foreground);
+	}
+
+	@container (min-width: 54rem) {
+		.dcc-conversation-trail {
+			display: flex;
+		}
+
+		.dcc-conversation-thread-list {
+			padding-left: 4.5rem;
+		}
+	}
+
 	.row-content-fade {
 		-webkit-mask-image: linear-gradient(to left, transparent 1.2rem, black 2rem);
 		mask-image: linear-gradient(to left, transparent 1.2rem, black 2rem);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.dcc-conversation-trail__tick {
+		transition: none;
 	}
 }

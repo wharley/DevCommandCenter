@@ -49,6 +49,7 @@ pub enum CoreEvent {
         turn_id: String,
         prompt: String,
         plan_mode: Option<bool>,
+        model: Option<String>,
     },
     SessionTurnSteered {
         session_id: String,
@@ -176,6 +177,23 @@ pub enum CoreEvent {
         role: Option<String>,
         model: Option<String>,
         status: NativeSubagentStatus,
+    },
+    SessionTurnNativeSubagentModelConfirmed {
+        session_id: String,
+        turn_id: String,
+        correlation_id: String,
+        model: String,
+    },
+    SessionTurnNativeSubagentModelRequested {
+        session_id: String,
+        turn_id: String,
+        correlation_id: String,
+        model: String,
+    },
+    SessionTurnModelEffective {
+        session_id: String,
+        turn_id: String,
+        model: String,
     },
     SessionTurnCompleted {
         session_id: String,
