@@ -228,7 +228,6 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 									className="inline-flex min-w-full w-max justify-start self-start gap-0 rounded-none bg-transparent p-0"
 								>
 									{visibleSessionList.map((session) => {
-										const selected = session.session.id === activeSessionId;
 										const state = session.projection.state;
 										const stateDotClass =
 											state === "active"
@@ -245,15 +244,13 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 													<div className="group/tab relative min-w-[6.5rem] max-w-[14rem] shrink-0 flex-none">
 														<TabsTrigger
 															value={session.session.id}
-															className="h-[1.85rem] w-full justify-start gap-1.5 overflow-hidden pr-7 text-[13px] text-muted-foreground data-[state=active]:text-foreground"
+															className="h-[1.85rem] w-full justify-start gap-1.5 overflow-hidden rounded-md px-2 pr-7 text-[13px] text-muted-foreground transition-[color,background-color,border-color,box-shadow] after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-transparent hover:bg-accent/30 data-[state=active]:border-border/60 data-[state=active]:bg-accent/60 data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:after:bg-foreground"
 															title={session.thread.title}
 														>
 															<span className="flex min-w-0 flex-1 items-center gap-1.5">
 																<span
-																	className={cn(
-																		"size-1.5 shrink-0 rounded-full",
-																		selected ? "bg-foreground" : stateDotClass,
-																	)}
+																	aria-hidden
+																	className={cn("size-1.5 shrink-0 rounded-full", stateDotClass)}
 																/>
 																<span className="truncate font-medium">
 																	{session.thread.title}
