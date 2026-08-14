@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { LoaderCircle } from "lucide-react";
 import type { WorkspaceSessionSummary, WorkspaceSetupReport } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -479,8 +480,11 @@ export function WorkspacePanel({
 		stagedFileCount: number;
 		stagedFingerprint: string;
 		body: string | null;
+		preparing: boolean;
 	} | null>(null);
 	const [commitPreviewMessage, setCommitPreviewMessage] = useState("");
+	const [commitPreparationBusy, setCommitPreparationBusy] = useState(false);
+	const commitPreparationBusyRef = useRef(false);
 	const commitMode = resolveCommitMode({
 		branch: currentBranch || workspaceBranch,
 		prStatus: pullRequestQuery.data,
@@ -547,24 +551,49 @@ export function WorkspacePanel({
 	const runDeliveryAction = useCallback(
 		async (mode: ExecutionDockRunMode) => {
 			if ((mode === "commit" || mode === "commit-and-push") && workspacePath?.trim()) {
-				if ((gitStatusQuery.data?.staged.length ?? 0) === 0) {
-					await workspaceGitStageAll({
-						workspaceRoot: workspacePath.trim(),
-						relativePath: ".",
-					});
-				}
-				const suggestion = await prepareWorkspaceCommitMessage(workspacePath.trim(), {
-					providerId: selectedProviderId,
-					model: selectedModelId,
-					providerRuntime: selectedProviderRuntime,
-				});
+				// This preparation can involve staging and a provider request. Lock it
+				// synchronously so rapid clicks cannot enqueue duplicate previews before
+				// React has rendered the busy state.
+				if (commitPreparationBusyRef.current) return;
+				commitPreparationBusyRef.current = true;
+				setCommitPreparationBusy(true);
+				setCommitPreviewMessage("");
 				setCommitPreview({
 					mode,
-					stagedFileCount: suggestion.stagedFileCount ?? 0,
-					stagedFingerprint: suggestion.stagedFingerprint ?? "",
-					body: suggestion.body ?? null,
+					stagedFileCount: 0,
+					stagedFingerprint: "",
+					body: null,
+					preparing: true,
 				});
-				setCommitPreviewMessage(suggestion.subject);
+				try {
+					if ((gitStatusQuery.data?.staged.length ?? 0) === 0) {
+						await workspaceGitStageAll({
+							workspaceRoot: workspacePath.trim(),
+							relativePath: ".",
+						});
+					}
+					const suggestion = await prepareWorkspaceCommitMessage(workspacePath.trim(), {
+						providerId: selectedProviderId,
+						model: selectedModelId,
+						providerRuntime: selectedProviderRuntime,
+					});
+					setCommitPreview({
+						mode,
+						stagedFileCount: suggestion.stagedFileCount ?? 0,
+						stagedFingerprint: suggestion.stagedFingerprint ?? "",
+						body: suggestion.body ?? null,
+						preparing: false,
+					});
+					setCommitPreviewMessage(suggestion.subject);
+				} catch (error) {
+					setCommitPreview(null);
+					toast.error(t("commit.preview.preparationFailed"), {
+						description: error instanceof Error ? error.message : String(error),
+					});
+				} finally {
+					commitPreparationBusyRef.current = false;
+					setCommitPreparationBusy(false);
+				}
 				return;
 			}
 			await delivery.run(mode);
@@ -575,6 +604,7 @@ export function WorkspacePanel({
 			selectedModelId,
 			selectedProviderId,
 			selectedProviderRuntime,
+			t,
 			workspacePath,
 		],
 	);
@@ -1081,7 +1111,7 @@ export function WorkspacePanel({
 						onReviewChanges={onReviewChanges ?? onToggleInspector}
 						commitMode={commitMode}
 						forgeRequestLabel={forgeRequestLabel}
-						deliveryBusy={delivery.busy}
+						deliveryBusy={delivery.busy || commitPreparationBusy}
 						onRunDeliveryAction={runDeliveryAction}
 						onCreateChangeRequest={(draft) => setCreateRequestDraft(draft)}
 						onOpenMultiProjectDelivery={onOpenMultiProjectDelivery}
@@ -1100,7 +1130,7 @@ export function WorkspacePanel({
 			<Dialog
 				open={commitPreview !== null}
 				onOpenChange={(open) => {
-					if (!open && !delivery.busy) setCommitPreview(null);
+					if (!open && !delivery.busy && !commitPreparationBusy) setCommitPreview(null);
 				}}
 			>
 				<DialogContent className="sm:max-w-lg">
@@ -1108,51 +1138,75 @@ export function WorkspacePanel({
 						<DialogTitle>{t("commit.preview.title")}</DialogTitle>
 						<DialogDescription>{t("commit.preview.description")}</DialogDescription>
 					</DialogHeader>
-					<div className="grid gap-2 py-3">
-						<label
-							className="text-[12px] font-medium"
-							htmlFor="workspace-commit-message-preview"
+					{commitPreview?.preparing ? (
+						<div
+							className="flex min-h-52 items-center justify-center gap-3 rounded-lg border border-border/60 bg-muted/20 px-6 py-8 text-center"
+							role="status"
+							aria-live="polite"
 						>
-							{t("commit.preview.label")}
-						</label>
-						<Textarea
-							id="workspace-commit-message-preview"
-							value={commitPreviewMessage}
-							onChange={(event) => setCommitPreviewMessage(event.target.value)}
-							className="min-h-24 resize-y font-mono text-[12px]"
-							autoFocus
-						/>
-						<label className="text-[12px] font-medium" htmlFor="workspace-commit-body-preview">
-							{t("commit.preview.bodyLabel")}
-						</label>
-						<Textarea
-							id="workspace-commit-body-preview"
-							value={commitPreview?.body ?? ""}
-							onChange={(event) =>
-								setCommitPreview((previous) =>
-									previous ? { ...previous, body: event.target.value } : previous,
-								)
-							}
-							className="min-h-20 resize-y font-mono text-[12px]"
-						/>
-						{commitPreview ? (
-							<p className="text-[11px] text-muted-foreground">
-								{t("commit.preview.source", { count: commitPreview.stagedFileCount })}
-							</p>
-						) : null}
-					</div>
+							<LoaderCircle className="size-5 shrink-0 animate-spin text-muted-foreground" />
+							<div className="text-left">
+								<p className="text-[13px] font-medium text-foreground">
+									{t("commit.preview.preparing")}
+								</p>
+								<p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+									{t("commit.preview.preparingDescription")}
+								</p>
+							</div>
+						</div>
+					) : (
+						<div className="grid gap-2 py-3">
+							<label
+								className="text-[12px] font-medium"
+								htmlFor="workspace-commit-message-preview"
+							>
+								{t("commit.preview.label")}
+							</label>
+							<Textarea
+								id="workspace-commit-message-preview"
+								value={commitPreviewMessage}
+								onChange={(event) => setCommitPreviewMessage(event.target.value)}
+								className="min-h-24 resize-y font-mono text-[12px]"
+								autoFocus
+							/>
+							<label className="text-[12px] font-medium" htmlFor="workspace-commit-body-preview">
+								{t("commit.preview.bodyLabel")}
+							</label>
+							<Textarea
+								id="workspace-commit-body-preview"
+								value={commitPreview?.body ?? ""}
+								onChange={(event) =>
+									setCommitPreview((previous) =>
+										previous ? { ...previous, body: event.target.value } : previous,
+									)
+								}
+								className="min-h-20 resize-y font-mono text-[12px]"
+							/>
+							{commitPreview ? (
+								<p className="text-[11px] text-muted-foreground">
+									{t("commit.preview.source", { count: commitPreview.stagedFileCount })}
+								</p>
+							) : null}
+						</div>
+					)}
 					<DialogFooter>
 						<Button
 							type="button"
 							variant="outline"
-							disabled={delivery.busy}
+							disabled={delivery.busy || commitPreparationBusy}
 							onClick={() => setCommitPreview(null)}
 						>
 							{t("commit.preview.cancel")}
 						</Button>
 						<Button
 							type="button"
-							disabled={delivery.busy || !commitPreviewMessage.trim() || !commitPreview}
+							disabled={
+								delivery.busy ||
+								commitPreparationBusy ||
+								!commitPreviewMessage.trim() ||
+								!commitPreview ||
+								commitPreview.preparing
+							}
 							onClick={async () => {
 								if (!commitPreview) return;
 								const pending = commitPreview;

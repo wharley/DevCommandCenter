@@ -1907,6 +1907,9 @@
       "label": "Mensagem do commit",
       "bodyLabel": "Corpo do commit (opcional)",
       "source": "Baseada em {{count}} arquivo(s) staged",
+      "preparing": "Preparando a prévia do commit…",
+      "preparingDescription": "Organizando as mudanças e gerando uma sugestão segura. Você já pode aguardar aqui; não é necessário clicar novamente.",
+      "preparationFailed": "Não foi possível preparar a prévia do commit",
       "cancel": "Cancelar",
       "confirm": "Commitar e enviar"
     },

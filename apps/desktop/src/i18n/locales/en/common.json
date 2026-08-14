@@ -1907,6 +1907,9 @@
       "label": "Commit message",
       "bodyLabel": "Commit body (optional)",
       "source": "Based on {{count}} staged file(s)",
+      "preparing": "Preparing the commit preview…",
+      "preparingDescription": "Organizing the changes and generating a safe suggestion. You can wait here; there is no need to click again.",
+      "preparationFailed": "Could not prepare the commit preview",
       "cancel": "Cancel",
       "confirm": "Commit and push"
     },
