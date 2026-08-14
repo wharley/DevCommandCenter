@@ -105,10 +105,6 @@ function getGroupGapSize(previousHasRows: boolean, nextHasRows: boolean) {
 	return previousHasRows && nextHasRows ? GROUP_GAP : EMPTY_GROUP_GAP;
 }
 
-function TrafficLightSpacer({ width }: { width: number }) {
-	return <div aria-hidden className="shrink-0" style={{ width }} />;
-}
-
 function WorkspaceRepoPicker({
 	repositories,
 	isDisabled = false,
@@ -1114,9 +1110,21 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	return (
 		<>
 			<div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
-				<div data-slot="window-safe-top" className="flex h-9 shrink-0 items-center pr-3">
-					<TrafficLightSpacer width={94} />
-					<div data-tauri-drag-region className="h-full flex-1" />
+				<div data-slot="window-safe-top" className="flex h-9 shrink-0 items-center px-3">
+					<div
+						data-tauri-drag-region
+						className="flex h-full min-w-0 flex-1 items-center"
+					>
+						<div
+							aria-label="Dev Command Center"
+							className="pointer-events-none flex select-none items-center gap-1.5"
+						>
+							<img src="/dcc-glyph.svg" alt="" className="size-[18px] shrink-0" />
+							<span className="text-[11px] font-semibold tracking-[0.14em] text-foreground/80">
+								DCC
+							</span>
+						</div>
+					</div>
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button

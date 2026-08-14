@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="src-tauri/icons/128x128.png" alt="Dev Command Center icon" width="96" height="96" />
+  <a href="docs/BRAND.md">
+    <img src="public/dcc-mark.svg" alt="Dev Command Center mark" width="112" height="112" />
+  </a>
 </p>
 
 <h1 align="center">Dev Command Center</h1>
@@ -112,6 +114,7 @@ DCC was shaped by the broader ecosystem of AI coding tools, terminal-native deve
 
 ## Project docs
 
+- [Brand identity](docs/BRAND.md)
 - [Security policy](SECURITY.md)
 - [Contributing guide](CONTRIBUTING.md)
 - [Support](SUPPORT.md)

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="220 220 584 584" fill="none">
+  <defs>
+    <linearGradient id="dcc-glyph-a" x1="282" y1="294" x2="744" y2="738" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9B4DFF"/>
+      <stop offset="0.45" stop-color="#356EFF"/>
+      <stop offset="1" stop-color="#20BEFF"/>
+    </linearGradient>
+    <linearGradient id="dcc-glyph-b" x1="742" y1="294" x2="292" y2="742" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#35D6FF"/>
+      <stop offset="0.58" stop-color="#2278FF"/>
+      <stop offset="1" stop-color="#5B5BFF"/>
+    </linearGradient>
+    <linearGradient id="dcc-glyph-core" x1="468" y1="468" x2="556" y2="556" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#42D9FF"/>
+      <stop offset="0.55" stop-color="#2C72FF"/>
+      <stop offset="1" stop-color="#8050FF"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="68">
+    <path d="M300 326H352C416 326 430 384 430 432C430 480 461 505 500 542C538 578 552 618 586 659C614 693 654 710 716 710" stroke="url(#dcc-glyph-a)"/>
+    <path d="M724 326H672C608 326 594 384 594 432C594 480 563 505 524 542C486 578 472 618 438 659C410 693 370 710 308 710" stroke="url(#dcc-glyph-b)"/>
+    <path d="M512 270V405C512 456 548 477 548 520C548 563 512 584 512 635V754" stroke="url(#dcc-glyph-b)"/>
+    <path d="M270 512H405C456 512 477 476 520 476C563 476 584 512 635 512H754" stroke="url(#dcc-glyph-a)"/>
+  </g>
+  <path d="M512 457L567 512L512 567L457 512L512 457Z" fill="#08152E" stroke="url(#dcc-glyph-core)" stroke-width="12"/>
+  <path d="M491 486L518 512L491 538M518 538H541" stroke="url(#dcc-glyph-b)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
