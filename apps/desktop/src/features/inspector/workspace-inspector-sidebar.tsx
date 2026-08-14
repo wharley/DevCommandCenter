@@ -3384,11 +3384,11 @@ export function WorkspaceInspectorSidebar({
 								(gitStatusQuery.isFetching && !gitStatusQuery.isPending)
 							}
 							onCommit={handleInspectorCommit}
-				onPrepareCommitMessage={
-					commitMode === "commit" || commitMode === "commit-and-push"
-						? prepareInspectorCommitMessage
-						: undefined
-				}
+							onPrepareCommitMessage={
+								commitMode === "commit-and-push"
+									? prepareInspectorCommitMessage
+									: undefined
+							}
 							onReviewConflictResolution={() => {
 								const root = workspacePath?.trim();
 								if (!root) return;

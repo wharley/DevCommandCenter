@@ -2002,21 +2002,6 @@ export type WorkspaceGitChangeEntry = {
 	deletions: number,
 };
 
-export type WorkspaceGitCommitSuggestionInput = {
-	workspaceRoot: string,
-	providerId?: string | null,
-	model?: string | null,
-	providerRuntime?: ProviderRuntimeConfig | null,
-};
-
-export type WorkspaceGitCommitSuggestionOutput = {
-	subject: string,
-	body: string | null,
-	stagedFileCount: number,
-	stagedFingerprint: string,
-	source: string,
-};
-
 export type WorkspaceGitCommitInput = {
 	workspaceRoot: string,
 	message: string,
@@ -2030,6 +2015,31 @@ export type WorkspaceGitCommitPushInput = {
 	body: string | null,
 	stagedFingerprint: string,
 	forgeLogin: string | null,
+};
+
+/**
+ *  The only input accepted by the commit-message suggestion operation is the
+ *  repository's staged Git state. In particular, this contract intentionally
+ *  has no task, workspace name, branch, chat, or prompt fields.
+ */
+export type WorkspaceGitCommitSuggestionInput = {
+	workspaceRoot: string,
+	providerId: string | null,
+	model: string | null,
+	providerRuntime: ProviderRuntimeConfig | null,
+};
+
+export type WorkspaceGitCommitSuggestionOutput = {
+	subject: string,
+	body: string | null,
+	stagedFileCount: number,
+	// Stable hash of the exact staged name-status and patch snapshot.
+	stagedFingerprint: string,
+	/**
+	 *  `provider-git-staged` when an isolated read-only provider returns a
+	 *  valid structured response; otherwise `heuristic-git-staged`.
+	 */
+	source: string,
 };
 
 export type WorkspaceGitCompleteMergeInput = {

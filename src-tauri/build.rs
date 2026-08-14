@@ -859,6 +859,9 @@ fn main() {
         .map(str::trim_end)
         .collect::<Vec<_>>()
         .join("\n");
-    fs::write(&output_path, format!("{normalized}\n"))
-        .expect("failed to normalize generated DCC contracts");
+    fs::write(
+        &output_path,
+        format!("{}\n", normalized.trim_end_matches('\n')),
+    )
+    .expect("failed to normalize generated DCC contracts");
 }

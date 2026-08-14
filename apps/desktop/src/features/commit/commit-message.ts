@@ -102,7 +102,7 @@ function changeVerb(changes: readonly CommitMessageChange[]) {
 function singleChangeSubject(change: CommitMessageChange) {
 	const segments = change.path.split("/").filter(Boolean);
 	const rawFileName = withoutExtension(segments.at(-1) ?? "");
-	const fileName = humanize(rawFileName);
+	const fileName = /^[A-Z]+$/u.test(rawFileName) ? rawFileName : humanize(rawFileName);
 	if (fileName && !GENERIC_FILE_NAMES.has(fileName)) return fileName;
 	return humanize(meaningfulDirectory(change.path) ?? "project files");
 }
@@ -120,6 +120,7 @@ export function sanitizeWorkspaceCommitSubject(input: string) {
 		.trim()
 		.split(/\r?\n/u)[0]
 		.replace(/^\s*[{[]?\s*["']?(?:subject|message)["']?\s*:\s*/iu, "")
+		.replace(/^["']+/u, "")
 		.replace(/[}"'\],]+\s*$/u, "")
 		.trim();
 	return truncateSubject(firstLine) || "chore: update project files";

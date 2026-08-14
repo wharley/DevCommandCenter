@@ -105,7 +105,12 @@ const defaultDependencies: MultiWorkspaceDeliveryDependencies = {
 	gitStatus: (workspaceRoot) => workspaceGitStatus({ workspaceRoot }),
 	commitSuggestion: async (workspaceRoot) => {
 		try {
-			return await workspaceGitCommitSuggestion({ workspaceRoot });
+			return await workspaceGitCommitSuggestion({
+				workspaceRoot,
+				providerId: null,
+				model: null,
+				providerRuntime: null,
+			});
 		} catch {
 			const status = await workspaceGitStatus({ workspaceRoot });
 			return {

@@ -76,7 +76,12 @@ async function commitMessageForStagedChanges(
 	try {
 		// Automatic delivery never invokes a provider. Provider output is allowed
 		// only through prepareWorkspaceCommitMessage, which opens a human preview.
-		const suggestion = await workspaceGitCommitSuggestion({ workspaceRoot });
+		const suggestion = await workspaceGitCommitSuggestion({
+			workspaceRoot,
+			providerId: null,
+			model: null,
+			providerRuntime: null,
+		});
 		return {
 			...suggestion,
 			subject: sanitizeWorkspaceCommitSubject(suggestion.subject),

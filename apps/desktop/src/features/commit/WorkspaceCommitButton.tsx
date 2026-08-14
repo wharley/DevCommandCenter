@@ -75,7 +75,7 @@ export function WorkspaceCommitButton({
 
 					setStatus("busy");
 					try {
-						if ((mode === "commit" || mode === "commit-and-push") && onPrepareCommitMessage) {
+						if (mode === "commit-and-push" && onPrepareCommitMessage) {
 							const suggestion = await onPrepareCommitMessage();
 							setPreview(suggestion);
 							setMessage(suggestion.subject);
