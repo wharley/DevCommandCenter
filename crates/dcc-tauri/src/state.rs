@@ -976,9 +976,13 @@ impl SessionCommandState {
         }
 
         let resolve_managed_root = |workspace: &Workspace| -> Result<String> {
-            if workspace.state != dcc_core::domain::workspace::WorkspaceState::Ready {
+            if !matches!(
+                workspace.state,
+                dcc_core::domain::workspace::WorkspaceState::Ready
+                    | dcc_core::domain::workspace::WorkspaceState::SetupPending
+            ) {
                 return Err(dcc_core::CoreError::InvalidInput(format!(
-                    "workspace {} must be ready",
+                    "workspace {} must be ready or have setup pending",
                     workspace.id.0
                 )));
             }
@@ -2288,7 +2292,8 @@ mod tests {
         let db_path = std::env::temp_dir().join(format!("dcc-scope-{}.sqlite", Uuid::new_v4()));
         let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
         let primary = sample_workspace("primary", "/tmp/dcc-primary-worktree");
-        let secondary = sample_workspace("secondary", "/tmp/dcc-secondary-worktree");
+        let mut secondary = sample_workspace("secondary", "/tmp/dcc-secondary-worktree");
+        secondary.state = WorkspaceState::SetupPending;
         futures::executor::block_on(repo.save_workspace(&primary)).expect("save primary");
         futures::executor::block_on(repo.save_workspace(&secondary)).expect("save secondary");
         let bundle_id = WorkspaceBundleId("bundle-1".to_string());
@@ -2349,6 +2354,44 @@ mod tests {
         assert!(instructions.contains("/tmp/dcc-primary-worktree"));
         assert!(instructions.contains("/tmp/dcc-secondary-worktree"));
         assert!(!instructions.contains("/original/primary"));
+
+        secondary.worktree_path = Some("relative/dcc-secondary-worktree".to_string());
+        futures::executor::block_on(repo.save_workspace(&secondary))
+            .expect("save relative worktree path");
+        let relative_path =
+            futures::executor::block_on(state.resolve_session_working_directories(&session, true))
+                .expect_err("relative worktree path must be rejected");
+        assert!(
+            matches!(relative_path, dcc_core::CoreError::InvalidInput(message) if message.contains("worktree path must be absolute"))
+        );
+
+        secondary.worktree_path = Some("   ".to_string());
+        futures::executor::block_on(repo.save_workspace(&secondary))
+            .expect("save empty worktree path");
+        let empty_path =
+            futures::executor::block_on(state.resolve_session_working_directories(&session, true))
+                .expect_err("empty worktree path must be rejected");
+        assert!(
+            matches!(empty_path, dcc_core::CoreError::InvalidInput(message) if message.contains("has no DCC-managed worktree"))
+        );
+
+        secondary.worktree_path = Some("/tmp/dcc-secondary-worktree".to_string());
+        for unavailable_state in [
+            WorkspaceState::Initializing,
+            WorkspaceState::Archived,
+            WorkspaceState::Completed,
+        ] {
+            secondary.state = unavailable_state;
+            futures::executor::block_on(repo.save_workspace(&secondary))
+                .expect("save unavailable workspace state");
+            let result = futures::executor::block_on(
+                state.resolve_session_working_directories(&session, true),
+            );
+            let error = result.expect_err("unavailable workspace state must be rejected");
+            assert!(
+                matches!(error, dcc_core::CoreError::InvalidInput(message) if message.contains("must be ready or have setup pending"))
+            );
+        }
 
         drop(state);
         drop(repo);
