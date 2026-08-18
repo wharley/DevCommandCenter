@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+	MultiWorkspaceDeliveryCommitReview,
 	MultiWorkspaceDeliveryDependencies,
 	MultiWorkspaceDeliveryMember,
 } from "./multi-workspace-delivery";
 import {
 	deliverMultiWorkspace,
+	prepareMultiWorkspaceDelivery,
 	resolveMultiWorkspaceDeliveryState,
+	selectPreparedMultiWorkspaceMembers,
 } from "./multi-workspace-delivery";
 
 const member: MultiWorkspaceDeliveryMember = {
@@ -44,7 +47,12 @@ function dependencies(
 ): MultiWorkspaceDeliveryDependencies {
 	return {
 		gitStatus: vi.fn().mockResolvedValue(status()),
-		commitSuggestion: vi.fn().mockResolvedValue({ subject: "chore: update staged files" }),
+		commitSuggestion: vi.fn().mockResolvedValue({
+			subject: "chore: update staged files",
+			body: null,
+			stagedFileCount: 1,
+			stagedFingerprint: "staged-v1",
+		}),
 		branchDiff: vi.fn().mockResolvedValue({ changes: [], baseBranch: "main" }),
 		projectAutomation: vi.fn().mockResolvedValue({
 			setupCommand: null,
@@ -68,7 +76,42 @@ function dependencies(
 	};
 }
 
+function review(
+	overrides: Partial<MultiWorkspaceDeliveryCommitReview> = {},
+): MultiWorkspaceDeliveryCommitReview {
+	return {
+		workspaceId: member.workspaceId,
+		subject: "chore: update staged files",
+		body: null,
+		stagedFileCount: 1,
+		stagedFingerprint: "staged-v1",
+		expectedBranch: "dcc/task-api",
+		...overrides,
+	};
+}
+
 describe("deliverMultiWorkspace", () => {
+	it("binds confirmation to only the workspace identities that were reviewed", () => {
+		const laterMember = {
+			workspaceId: "workspace-web",
+			name: "web-app",
+			workspaceRoot: "/worktrees/web-app",
+		};
+
+		expect(
+			selectPreparedMultiWorkspaceMembers(
+				[member, laterMember],
+				[laterMember.workspaceId],
+			),
+		).toEqual([laterMember]);
+		expect(() =>
+			selectPreparedMultiWorkspaceMembers([member], [member.workspaceId, member.workspaceId]),
+		).toThrow(/duplicate workspace identities/u);
+		expect(() =>
+			selectPreparedMultiWorkspaceMembers([member], [laterMember.workspaceId]),
+		).toThrow(/changed after review/u);
+	});
+
 	it("does not offer delivery again for a clean branch with an open PR", () => {
 		expect(
 			resolveMultiWorkspaceDeliveryState({
@@ -101,7 +144,7 @@ describe("deliverMultiWorkspace", () => {
 
 	it("skips a project with no changes without publishing anything", async () => {
 		const deps = dependencies();
-		const [result] = await deliverMultiWorkspace([member], deps);
+		const [result] = await deliverMultiWorkspace([member], [], deps);
 
 		expect(result.status).toBe("skipped");
 		expect(result.action).toBe("no-changes");
@@ -115,6 +158,10 @@ describe("deliverMultiWorkspace", () => {
 				.fn()
 				.mockResolvedValueOnce(status({ unstaged: [change("route.ts")] }))
 				.mockResolvedValueOnce(status({ unstaged: [change("route.ts")] }))
+				.mockResolvedValueOnce(status({
+					staged: [change("route.ts")],
+					stagedFingerprint: "staged-v1",
+				}))
 				.mockResolvedValue(status()),
 			branchDiff: vi
 				.fn()
@@ -122,14 +169,18 @@ describe("deliverMultiWorkspace", () => {
 				.mockResolvedValue({ changes: [change("route.ts")], baseBranch: "main" }),
 		});
 
-		const [result] = await deliverMultiWorkspace([member], deps);
+		const [result] = await deliverMultiWorkspace(
+			[member],
+			[review({ subject: "feat(api): add reviewed route", body: "Reviewed body" })],
+			deps,
+		);
 
 		expect(deps.stageAll).toHaveBeenCalledWith(member.workspaceRoot);
 		expect(deps.commitPush).toHaveBeenCalledWith(
 			member.workspaceRoot,
-			"chore: update staged files",
-			null,
-			"",
+			"feat(api): add reviewed route",
+			"Reviewed body",
+			"staged-v1",
 		);
 		expect(deps.createRequest).toHaveBeenCalledWith(member.workspaceRoot);
 		expect(result.status).toBe("delivered");
@@ -153,7 +204,7 @@ describe("deliverMultiWorkspace", () => {
 			}),
 		});
 
-		const [result] = await deliverMultiWorkspace([member], deps);
+		const [result] = await deliverMultiWorkspace([member], [], deps);
 
 		expect(deps.push).toHaveBeenCalledWith(member.workspaceRoot);
 		expect(deps.createRequest).not.toHaveBeenCalled();
@@ -196,7 +247,7 @@ describe("deliverMultiWorkspace", () => {
 			workspaceRoot: "/worktrees/zedy-app",
 		};
 
-		const results = await deliverMultiWorkspace([member, cleanMember], combined);
+		const results = await deliverMultiWorkspace([member, cleanMember], [], combined);
 
 		expect(results.map((result) => result.status)).toEqual(["failed", "skipped"]);
 		expect(second.gitStatus).toHaveBeenCalled();
@@ -207,10 +258,127 @@ describe("deliverMultiWorkspace", () => {
 			gitStatus: vi.fn().mockResolvedValue(status({ conflictCount: 1 })),
 		});
 
-		const [result] = await deliverMultiWorkspace([member], deps);
+		const [result] = await deliverMultiWorkspace([member], [], deps);
 
 		expect(result.status).toBe("failed");
 		expect(result.message).toContain("conflitos");
 		expect(deps.stageAll).not.toHaveBeenCalled();
+	});
+
+	it("prepares a provider-backed editable review for the exact staged snapshot", async () => {
+		const staged = status({
+			staged: [change("route.ts")],
+			stagedFingerprint: "staged-v1",
+		});
+		const deps = dependencies({
+			gitStatus: vi
+				.fn()
+				.mockResolvedValueOnce(status({ unstaged: [change("route.ts")] }))
+				.mockResolvedValue(staged),
+			branchDiff: vi.fn().mockResolvedValue({ changes: [], baseBranch: "main" }),
+			commitSuggestion: vi.fn().mockResolvedValue({
+				subject: "feat(api): add route",
+				body: "Expose the coordinated endpoint.",
+				stagedFileCount: 1,
+				stagedFingerprint: "staged-v1",
+			}),
+		});
+
+		const [preview] = await prepareMultiWorkspaceDelivery(
+			[member],
+			{ providerId: "codex", model: "gpt-5.6-sol", providerRuntime: null },
+			deps,
+		);
+
+		expect(deps.stageAll).toHaveBeenCalledWith(member.workspaceRoot);
+		expect(deps.commitSuggestion).toHaveBeenCalledWith(member.workspaceRoot, {
+			providerId: "codex",
+			model: "gpt-5.6-sol",
+			providerRuntime: null,
+		});
+		expect(preview).toMatchObject({
+			action: "commit-and-push",
+			commit: {
+				subject: "feat(api): add route",
+				body: "Expose the coordinated endpoint.",
+				stagedFingerprint: "staged-v1",
+			},
+		});
+	});
+
+	it("does not invent a commit review for a project that only needs a push", async () => {
+		const deps = dependencies({
+			gitStatus: vi.fn().mockResolvedValue(status({ aheadOfRemoteCount: 1 })),
+			branchDiff: vi.fn().mockResolvedValue({
+				changes: [change("route.ts")],
+				baseBranch: "main",
+			}),
+		});
+
+		const [preview] = await prepareMultiWorkspaceDelivery([member], {}, deps);
+
+		expect(preview.action).toBe("push");
+		expect(preview.commit).toBeNull();
+		expect(deps.stageAll).not.toHaveBeenCalled();
+		expect(deps.commitSuggestion).not.toHaveBeenCalled();
+	});
+
+	it("blocks preparation when the staged snapshot changes while the suggestion is generated", async () => {
+		const deps = dependencies({
+			gitStatus: vi
+				.fn()
+				.mockResolvedValueOnce(status({ unstaged: [change("route.ts")] }))
+				.mockResolvedValueOnce(status({
+					staged: [change("route.ts")],
+					stagedFingerprint: "staged-v1",
+				}))
+				.mockResolvedValueOnce(status({
+					staged: [change("route.ts")],
+					stagedFingerprint: "staged-v2",
+				})),
+		});
+
+		const [preview] = await prepareMultiWorkspaceDelivery([member], {}, deps);
+
+		expect(preview.action).toBe("blocked");
+		expect(preview.commit).toBeNull();
+		expect(preview.message).toContain("mudaram durante a preparação");
+	});
+
+	it("blocks delivery when changes no longer match the reviewed fingerprint", async () => {
+		const deps = dependencies({
+			gitStatus: vi
+				.fn()
+				.mockResolvedValueOnce(status({ unstaged: [change("route.ts")] }))
+				.mockResolvedValueOnce(status({ unstaged: [change("route.ts")] }))
+				.mockResolvedValueOnce(status({
+					staged: [change("route.ts")],
+					stagedFingerprint: "staged-v2",
+				})),
+			branchDiff: vi.fn().mockResolvedValue({ changes: [], baseBranch: "main" }),
+		});
+
+		const [result] = await deliverMultiWorkspace([member], [review()], deps);
+
+		expect(result.status).toBe("failed");
+		expect(result.message).toContain("mudaram após a revisão");
+		expect(deps.commitPush).not.toHaveBeenCalled();
+		expect(deps.push).not.toHaveBeenCalled();
+	});
+
+	it("never commits local work without an explicit reviewed message", async () => {
+		const deps = dependencies({
+			gitStatus: vi.fn().mockResolvedValue(status({
+				staged: [change("route.ts")],
+				stagedFingerprint: "staged-v1",
+			})),
+			branchDiff: vi.fn().mockResolvedValue({ changes: [], baseBranch: "main" }),
+		});
+
+		const [result] = await deliverMultiWorkspace([member], [], deps);
+
+		expect(result.status).toBe("failed");
+		expect(result.message).toContain("sem uma mensagem revisada");
+		expect(deps.commitPush).not.toHaveBeenCalled();
 	});
 });

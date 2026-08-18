@@ -1,4 +1,5 @@
 import type {
+	ProviderRuntimeConfig,
 	WorkspaceGitBranchDiffOutput,
 	WorkspaceGitStatusOutput,
 	WorkspacePrStatusOutput,
@@ -19,7 +20,8 @@ import {
 } from "@/lib/workspace-api";
 import {
 	deriveWorkspaceCommitMessage,
-	sanitizeWorkspaceCommitMessage,
+	sanitizeWorkspaceCommitBody,
+	sanitizeWorkspaceCommitSubject,
 } from "@/features/commit/commit-message";
 
 export type MultiWorkspaceDeliveryMember = {
@@ -42,11 +44,64 @@ export type MultiWorkspaceDeliveryResult = {
 	requestUrl: string | null;
 };
 
+export type MultiWorkspaceDeliveryCommitReview = {
+	workspaceId: string;
+	subject: string;
+	body: string | null;
+	stagedFileCount: number;
+	stagedFingerprint: string;
+	expectedBranch: string | null;
+};
+
+export type MultiWorkspaceDeliveryPreview = {
+	workspaceId: string;
+	name: string;
+	action: "commit-and-push" | "push" | "request" | "no-changes" | "blocked";
+	commit: MultiWorkspaceDeliveryCommitReview | null;
+	message: string | null;
+};
+
+export type MultiWorkspaceDeliveryPreparationOptions = {
+	providerId?: string | null;
+	model?: string | null;
+	providerRuntime?: ProviderRuntimeConfig | null;
+};
+
+export function selectPreparedMultiWorkspaceMembers(
+	members: MultiWorkspaceDeliveryMember[],
+	workspaceIds: string[],
+) {
+	const membersById = new Map<string, MultiWorkspaceDeliveryMember>();
+	for (const member of members) {
+		if (membersById.has(member.workspaceId)) {
+			throw new Error("The multi-project task contains duplicate workspace identities.");
+		}
+		membersById.set(member.workspaceId, member);
+	}
+	const requestedIds = new Set(workspaceIds);
+	if (requestedIds.size !== workspaceIds.length) {
+		throw new Error("The delivery review contains duplicate workspace identities.");
+	}
+	return workspaceIds.map((workspaceId) => {
+		const member = membersById.get(workspaceId);
+		if (!member) {
+			throw new Error(
+				"The multi-project task changed after review. Prepare the delivery again.",
+			);
+		}
+		return member;
+	});
+}
+
 export type MultiWorkspaceDeliveryDependencies = {
 	gitStatus: (workspaceRoot: string) => Promise<WorkspaceGitStatusOutput>;
-	commitSuggestion?: (workspaceRoot: string) => Promise<{
+	commitSuggestion: (
+		workspaceRoot: string,
+		options?: MultiWorkspaceDeliveryPreparationOptions,
+	) => Promise<{
 		subject: string;
 		body?: string | null;
+		stagedFileCount?: number;
 		stagedFingerprint?: string;
 	}>;
 	branchDiff: (workspaceRoot: string) => Promise<WorkspaceGitBranchDiffOutput>;
@@ -103,13 +158,13 @@ export function resolveMultiWorkspaceDeliveryState({
 
 const defaultDependencies: MultiWorkspaceDeliveryDependencies = {
 	gitStatus: (workspaceRoot) => workspaceGitStatus({ workspaceRoot }),
-	commitSuggestion: async (workspaceRoot) => {
+	commitSuggestion: async (workspaceRoot, options) => {
 		try {
 			return await workspaceGitCommitSuggestion({
 				workspaceRoot,
-				providerId: null,
-				model: null,
-				providerRuntime: null,
+				providerId: options?.providerId ?? null,
+				model: options?.model ?? null,
+				providerRuntime: options?.providerRuntime ?? null,
 			});
 		} catch {
 			const status = await workspaceGitStatus({ workspaceRoot });
@@ -169,8 +224,114 @@ function blockedByLocalGit(status: WorkspaceGitStatusOutput) {
 	return null;
 }
 
+function blockedPreview(
+	member: MultiWorkspaceDeliveryMember,
+	message: string,
+): MultiWorkspaceDeliveryPreview {
+	return {
+		workspaceId: member.workspaceId,
+		name: member.name,
+		action: "blocked",
+		commit: null,
+		message,
+	};
+}
+
+async function prepareMember(
+	member: MultiWorkspaceDeliveryMember,
+	options: MultiWorkspaceDeliveryPreparationOptions,
+	dependencies: MultiWorkspaceDeliveryDependencies,
+): Promise<MultiWorkspaceDeliveryPreview> {
+	try {
+		let [status, branchDiff] = await Promise.all([
+			dependencies.gitStatus(member.workspaceRoot),
+			dependencies.branchDiff(member.workspaceRoot),
+		]);
+		const initialBlock = blockedByLocalGit(status);
+		if (initialBlock) return blockedPreview(member, initialBlock);
+
+		const hasLocalWork = hasWorkingChanges(status);
+		if (!hasLocalWork) {
+			const action = status.aheadOfRemoteCount > 0
+				? "push"
+				: branchDiff.changes.length > 0
+					? "request"
+					: "no-changes";
+			return {
+				workspaceId: member.workspaceId,
+				name: member.name,
+				action,
+				commit: null,
+				message: null,
+			};
+		}
+
+		// Multi-project delivery includes every local change. Staging during
+		// preparation mirrors the single-project review and gives the user a
+		// fingerprint-bound snapshot before any commit or push can happen.
+		await dependencies.stageAll(member.workspaceRoot);
+		status = await dependencies.gitStatus(member.workspaceRoot);
+		const stagedBlock = blockedByLocalGit(status);
+		if (stagedBlock) return blockedPreview(member, stagedBlock);
+		if (status.staged.length === 0 || !status.stagedFingerprint) {
+			return blockedPreview(
+				member,
+				"Não foi possível capturar o snapshot staged para revisar o commit.",
+			);
+		}
+		const preparedBranch = status.currentBranch;
+
+		const suggestion = await dependencies.commitSuggestion(member.workspaceRoot, options);
+		const verification = await dependencies.gitStatus(member.workspaceRoot);
+		const suggestionFingerprint = suggestion.stagedFingerprint?.trim() ?? "";
+		if (
+			!suggestionFingerprint ||
+			verification.currentBranch !== preparedBranch ||
+			verification.stagedFingerprint !== suggestionFingerprint ||
+			verification.unstaged.length > 0
+		) {
+			return blockedPreview(
+				member,
+				"As alterações mudaram durante a preparação. Atualize a revisão antes de entregar.",
+			);
+		}
+
+		return {
+			workspaceId: member.workspaceId,
+			name: member.name,
+			action: "commit-and-push",
+			commit: {
+				workspaceId: member.workspaceId,
+				subject: sanitizeWorkspaceCommitSubject(suggestion.subject),
+				body: sanitizeWorkspaceCommitBody(suggestion.body),
+				stagedFileCount: suggestion.stagedFileCount ?? verification.staged.length,
+				stagedFingerprint: suggestionFingerprint,
+				expectedBranch: preparedBranch,
+			},
+			message: null,
+		};
+	} catch (error) {
+		return blockedPreview(member, errorMessage(error));
+	}
+}
+
+export async function prepareMultiWorkspaceDelivery(
+	members: MultiWorkspaceDeliveryMember[],
+	options: MultiWorkspaceDeliveryPreparationOptions = {},
+	dependencies: MultiWorkspaceDeliveryDependencies = defaultDependencies,
+) {
+	const previews: MultiWorkspaceDeliveryPreview[] = [];
+	// Keep provider-backed preparation sequential. Some CLI runtimes own a
+	// single sidecar session and should not receive overlapping suggestion turns.
+	for (const member of members) {
+		previews.push(await prepareMember(member, options, dependencies));
+	}
+	return previews;
+}
+
 async function deliverMember(
 	member: MultiWorkspaceDeliveryMember,
+	commitReviews: ReadonlyMap<string, MultiWorkspaceDeliveryCommitReview>,
 	dependencies: MultiWorkspaceDeliveryDependencies,
 ): Promise<MultiWorkspaceDeliveryResult> {
 	let published = false;
@@ -240,22 +401,34 @@ async function deliverMember(
 			}
 
 			if (hasWorkingChanges(status)) {
-				// The coordinated action is explicitly an "all changed projects" delivery.
-				// Stage the complete worktree so no local file is silently left outside its PR.
+				// Re-stage after checks so fixes or edits cannot be silently omitted. The
+				// reviewed fingerprint must still match the exact snapshot Git will commit.
 				await dependencies.stageAll(member.workspaceRoot);
 				const stagedStatus = await dependencies.gitStatus(member.workspaceRoot);
-				const suggestion = dependencies.commitSuggestion
-					? await dependencies.commitSuggestion(member.workspaceRoot)
-					: {
-						subject: deriveWorkspaceCommitMessage(stagedStatus.staged),
-						body: null,
-						stagedFingerprint: stagedStatus.stagedFingerprint,
-					};
+				const review = commitReviews.get(member.workspaceId);
+				if (!review) {
+					throw new Error(
+						"Este projeto possui alterações sem uma mensagem revisada. Atualize a revisão antes de entregar.",
+					);
+				}
+				if (!review.subject.trim()) {
+					throw new Error("A mensagem revisada do commit está vazia.");
+				}
+				if (
+					stagedStatus.currentBranch !== review.expectedBranch ||
+					stagedStatus.unstaged.length > 0 ||
+					!stagedStatus.stagedFingerprint ||
+					stagedStatus.stagedFingerprint !== review.stagedFingerprint
+				) {
+					throw new Error(
+						"As alterações staged mudaram após a revisão. Atualize as mensagens antes de entregar.",
+					);
+				}
 				await dependencies.commitPush(
 					member.workspaceRoot,
-					sanitizeWorkspaceCommitMessage(suggestion.subject),
-					suggestion.body ?? null,
-					suggestion.stagedFingerprint ?? "",
+					sanitizeWorkspaceCommitSubject(review.subject),
+					sanitizeWorkspaceCommitBody(review.body),
+					review.stagedFingerprint,
 				);
 				published = true;
 			} else if (status.aheadOfRemoteCount > 0) {
@@ -342,13 +515,24 @@ async function deliverMember(
 
 export async function deliverMultiWorkspace(
 	members: MultiWorkspaceDeliveryMember[],
+	commitReviews: MultiWorkspaceDeliveryCommitReview[],
 	dependencies: MultiWorkspaceDeliveryDependencies = defaultDependencies,
 ) {
 	const results: MultiWorkspaceDeliveryResult[] = [];
+	const reviewsByWorkspace = new Map<string, MultiWorkspaceDeliveryCommitReview>();
+	const duplicateReviewIds = new Set<string>();
+	for (const review of commitReviews) {
+		if (reviewsByWorkspace.has(review.workspaceId)) {
+			duplicateReviewIds.add(review.workspaceId);
+			continue;
+		}
+		reviewsByWorkspace.set(review.workspaceId, review);
+	}
+	for (const workspaceId of duplicateReviewIds) reviewsByWorkspace.delete(workspaceId);
 	// Keep the bundle order and make partial progress explicit; Git has no transaction
 	// spanning repositories, so later failures must not pretend to roll back prior PRs.
 	for (const member of members) {
-		results.push(await deliverMember(member, dependencies));
+		results.push(await deliverMember(member, reviewsByWorkspace, dependencies));
 	}
 	return results;
 }

@@ -183,7 +183,12 @@ import { removeProjectFromDcc } from "./features/workspaces/project-removal";
 import type { WorkspaceSummary } from "./features/workspaces/types";
 import {
 	deliverMultiWorkspace,
+	prepareMultiWorkspaceDelivery,
 	resolveMultiWorkspaceDeliveryState,
+	selectPreparedMultiWorkspaceMembers,
+	type MultiWorkspaceDeliveryCommitReview,
+	type MultiWorkspaceDeliveryMember,
+	type MultiWorkspaceDeliveryPreview,
 	type MultiWorkspaceDeliveryResult,
 } from "./features/workspaces/multi-workspace-delivery";
 import {
@@ -1395,44 +1400,73 @@ export default function App() {
 			t,
 		],
 	);
-	const handleDeliverWorkspaceScope = useCallback(async (): Promise<
-		MultiWorkspaceDeliveryResult[]
-	> => {
-		const members = selectedBundleMembers.flatMap((workspace, index) =>
-			bundleMemberChangeQueries[index]?.data?.needsDelivery === true
-				? [
-						{
-							workspaceId: workspace.id,
-							name: workspace.name,
-							workspaceRoot: workspace.worktreePath ?? workspace.rootPath ?? "",
-						},
-					]
-				: [],
-		);
-		const invalidMember = members.find((member) => !member.workspaceRoot);
-		if (invalidMember) {
-			throw new Error(`Workspace sem caminho Git: ${invalidMember.name}`);
-		}
+	const multiWorkspaceScopeMembers = useMemo<MultiWorkspaceDeliveryMember[]>(
+		() =>
+			selectedBundleMembers.map((workspace) => ({
+				workspaceId: workspace.id,
+				name: workspace.name,
+				workspaceRoot: workspace.worktreePath ?? workspace.rootPath ?? "",
+			})),
+		[selectedBundleMembers],
+	);
+	const multiWorkspaceDeliveryMembers = useMemo(
+		() =>
+			multiWorkspaceScopeMembers.filter(
+				(_member, index) =>
+					bundleMemberChangeQueries[index]?.data?.needsDelivery === true,
+			),
+		[bundleMemberChangeQueries, multiWorkspaceScopeMembers],
+	);
+	const requireValidMultiWorkspaceMembers = useCallback(
+		(workspaceIds?: string[]) => {
+			const members = workspaceIds
+				? selectPreparedMultiWorkspaceMembers(
+						multiWorkspaceScopeMembers,
+						workspaceIds,
+					)
+				: multiWorkspaceDeliveryMembers;
+			const invalidMember = members.find((member) => !member.workspaceRoot);
+			if (invalidMember) {
+				throw new Error(`Workspace sem caminho Git: ${invalidMember.name}`);
+			}
+			return members;
+		},
+		[multiWorkspaceDeliveryMembers, multiWorkspaceScopeMembers],
+	);
+	const invalidateMultiWorkspaceDelivery = useCallback(
+		async (members: MultiWorkspaceDeliveryMember[]) => {
+			await Promise.all(
+				members.flatMap((member) => [
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, member.workspaceRoot],
+					}),
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, member.workspaceRoot],
+					}),
+					queryClient.invalidateQueries({
+						queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, member.workspaceRoot],
+					}),
+					queryClient.invalidateQueries({
+						queryKey: ["multiWorkspaceChanges", member.workspaceId, member.workspaceRoot],
+					}),
+				]),
+			);
+		},
+		[queryClient],
+	);
+	const handleDeliverWorkspaceScope = useCallback(
+		async (
+			workspaceIds: string[],
+			commitReviews: MultiWorkspaceDeliveryCommitReview[],
+		): Promise<MultiWorkspaceDeliveryResult[]> => {
+			const members = requireValidMultiWorkspaceMembers(workspaceIds);
 
-		const results = await deliverMultiWorkspace(members);
-		await Promise.all(
-			members.flatMap((member) => [
-				queryClient.invalidateQueries({
-					queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, member.workspaceRoot],
-				}),
-				queryClient.invalidateQueries({
-					queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, member.workspaceRoot],
-				}),
-				queryClient.invalidateQueries({
-					queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, member.workspaceRoot],
-				}),
-				queryClient.invalidateQueries({
-					queryKey: ["multiWorkspaceChanges", member.workspaceId, member.workspaceRoot],
-				}),
-			]),
-		);
-		return results;
-	}, [bundleMemberChangeQueries, queryClient, selectedBundleMembers]);
+			const results = await deliverMultiWorkspace(members, commitReviews);
+			await invalidateMultiWorkspaceDelivery(members);
+			return results;
+		},
+		[invalidateMultiWorkspaceDelivery, requireValidMultiWorkspaceMembers],
+	);
 	const selectedWorkspacePath =
 		activeWorkspace?.worktreePath ?? activeWorkspace?.rootPath ?? null;
 	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
@@ -1656,6 +1690,24 @@ export default function App() {
 			),
 		[providerRuntimeSettings, selectedProvider],
 	);
+	const handlePrepareWorkspaceScopeDelivery = useCallback(async (): Promise<
+		MultiWorkspaceDeliveryPreview[]
+	> => {
+		const members = requireValidMultiWorkspaceMembers();
+		const previews = await prepareMultiWorkspaceDelivery(members, {
+			providerId: selectedProviderId,
+			model: selectedModelId,
+			providerRuntime: selectedProviderRuntime,
+		});
+		await invalidateMultiWorkspaceDelivery(members);
+		return previews;
+	}, [
+		invalidateMultiWorkspaceDelivery,
+		requireValidMultiWorkspaceMembers,
+		selectedModelId,
+		selectedProviderId,
+		selectedProviderRuntime,
+	]);
 	useDockUnreadBadge(allWorkspaces);
 	const visibleWorkspaceSessions = useMemo(
 		() => visibleSessions(workspaceSessions),
@@ -4653,6 +4705,11 @@ export default function App() {
 									onSelectWorkspaceScope={setSelectedBundleMemberId}
 									onDeliverWorkspaceScope={
 										isRemoteBackend ? undefined : handleDeliverWorkspaceScope
+									}
+									onPrepareWorkspaceScopeDelivery={
+										isRemoteBackend
+											? undefined
+											: handlePrepareWorkspaceScopeDelivery
 									}
 									sessionQueryScope={backendCacheKey}
 									selectedProviderLabel={selectedProvider?.label ?? null}

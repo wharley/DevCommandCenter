@@ -69,6 +69,7 @@ import {
 } from "@/lib/workspace-api";
 import { pathBasename } from "@/lib/path-basename";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import {
 	Dialog,
@@ -79,7 +80,11 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import type { MultiWorkspaceDeliveryResult } from "@/features/workspaces/multi-workspace-delivery";
+import type {
+	MultiWorkspaceDeliveryCommitReview,
+	MultiWorkspaceDeliveryPreview,
+	MultiWorkspaceDeliveryResult,
+} from "@/features/workspaces/multi-workspace-delivery";
 
 export type { RuntimeSessionSnapshot } from "./workbench-types";
 
@@ -116,7 +121,11 @@ type SessionWorkbenchProps = {
 	}>;
 	selectedWorkspaceScopeId?: string | null;
 	onSelectWorkspaceScope?: (workspaceId: string) => void;
-	onDeliverWorkspaceScope?: () => Promise<MultiWorkspaceDeliveryResult[]>;
+	onPrepareWorkspaceScopeDelivery?: () => Promise<MultiWorkspaceDeliveryPreview[]>;
+	onDeliverWorkspaceScope?: (
+		workspaceIds: string[],
+		commitReviews: MultiWorkspaceDeliveryCommitReview[],
+	) => Promise<MultiWorkspaceDeliveryResult[]>;
 	sessionQueryScope?: string;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
@@ -207,6 +216,7 @@ export function SessionWorkbench({
 	workspaceScopeOptions = [],
 	selectedWorkspaceScopeId = null,
 	onSelectWorkspaceScope,
+	onPrepareWorkspaceScopeDelivery,
 	onDeliverWorkspaceScope,
 	sessionQueryScope = "local",
 	selectedProviderLabel,
@@ -289,11 +299,16 @@ export function SessionWorkbench({
 	}, [workspaceId]);
 	const inspectorBeforeTerminalExpandRef = useRef<boolean | null>(null);
 	const [deliveryOpen, setDeliveryOpen] = useState(false);
+	const [deliveryPreparing, setDeliveryPreparing] = useState(false);
 	const [deliveryRunning, setDeliveryRunning] = useState(false);
+	const [deliveryPreviews, setDeliveryPreviews] = useState<
+		MultiWorkspaceDeliveryPreview[] | null
+	>(null);
 	const [deliveryResults, setDeliveryResults] = useState<
 		MultiWorkspaceDeliveryResult[] | null
 	>(null);
 	const [deliveryError, setDeliveryError] = useState<string | null>(null);
+	const deliveryPreparationIdRef = useRef(0);
 	const sessionState = sessionSnapshot?.state ?? "idle";
 	const resolvedProjectLabel =
 		projectLabel?.trim() ||
@@ -608,16 +623,48 @@ export function SessionWorkbench({
 		(workspace) => workspace.needsDelivery === null,
 	);
 	const handleOpenDelivery = useCallback(() => {
+		const preparationId = deliveryPreparationIdRef.current + 1;
+		deliveryPreparationIdRef.current = preparationId;
+		setDeliveryPreviews(null);
 		setDeliveryResults(null);
 		setDeliveryError(null);
 		setDeliveryOpen(true);
-	}, []);
+		if (!onPrepareWorkspaceScopeDelivery) {
+			setDeliveryError(t("workspaceScope.delivery.preparationUnavailable"));
+			return;
+		}
+		setDeliveryPreparing(true);
+		void onPrepareWorkspaceScopeDelivery()
+			.then((previews) => {
+				if (deliveryPreparationIdRef.current !== preparationId) return;
+				setDeliveryPreviews(previews);
+			})
+			.catch((error) => {
+				if (deliveryPreparationIdRef.current !== preparationId) return;
+				setDeliveryError(
+					error instanceof Error
+						? error.message
+						: typeof error === "string"
+							? error
+							: String(error),
+				);
+			})
+			.finally(() => {
+				if (deliveryPreparationIdRef.current === preparationId) {
+					setDeliveryPreparing(false);
+				}
+			});
+	}, [onPrepareWorkspaceScopeDelivery, t]);
 	const handleDeliver = useCallback(async () => {
-		if (!onDeliverWorkspaceScope) return;
+		if (!onDeliverWorkspaceScope || !deliveryPreviews) return;
+		const commitReviews = deliveryPreviews.flatMap((preview) =>
+			preview.commit ? [preview.commit] : [],
+		);
+		const workspaceIds = deliveryPreviews.map((preview) => preview.workspaceId);
 		setDeliveryRunning(true);
 		setDeliveryError(null);
 		try {
-			setDeliveryResults(await onDeliverWorkspaceScope());
+			setDeliveryResults(await onDeliverWorkspaceScope(workspaceIds, commitReviews));
 		} catch (error) {
 			setDeliveryError(
 				error instanceof Error
@@ -629,7 +676,15 @@ export function SessionWorkbench({
 		} finally {
 			setDeliveryRunning(false);
 		}
-	}, [onDeliverWorkspaceScope]);
+	}, [deliveryPreviews, onDeliverWorkspaceScope]);
+	const deliveryReadyCount =
+		deliveryPreviews?.filter(
+			(preview) => preview.action !== "blocked" && preview.action !== "no-changes",
+		).length ?? 0;
+	const hasInvalidCommitReview =
+		deliveryPreviews?.some(
+			(preview) => preview.commit !== null && !preview.commit.subject.trim(),
+		) ?? false;
 
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -803,16 +858,21 @@ export function SessionWorkbench({
 			<Dialog
 				open={deliveryOpen}
 				onOpenChange={(open) => {
-					if (!deliveryRunning) setDeliveryOpen(open);
+					if (!deliveryRunning && !deliveryPreparing) setDeliveryOpen(open);
 				}}
 			>
-				<DialogContent className="sm:max-w-lg" showCloseButton={!deliveryRunning}>
+				<DialogContent
+					className="sm:max-w-2xl"
+					showCloseButton={!deliveryRunning && !deliveryPreparing}
+				>
 					<DialogHeader>
 						<DialogTitle>{t("workspaceScope.delivery.title")}</DialogTitle>
 						<DialogDescription>
 							{deliveryResults
 								? t("workspaceScope.delivery.resultDescription")
-								: t("workspaceScope.delivery.description")}
+								: deliveryPreparing
+									? t("workspaceScope.delivery.preparingDescription")
+									: t("workspaceScope.delivery.reviewDescription")}
 						</DialogDescription>
 					</DialogHeader>
 
@@ -861,24 +921,120 @@ export function SessionWorkbench({
 								);
 							})}
 						</div>
-					) : (
-						<div className="space-y-2">
-							{deliverableScopeOptions.map((workspace) => (
-								<div
-									key={workspace.id}
-									className="flex items-center gap-2 rounded-lg border border-border/70 px-3 py-2"
-								>
-									<span className="size-2 rounded-full bg-amber-400" />
-									<span className="min-w-0 flex-1 truncate text-sm font-medium">
-										{workspace.name}
-									</span>
-									<span className="truncate font-mono text-[11px] text-muted-foreground">
-										{workspace.branch}
-									</span>
-								</div>
-							))}
+					) : deliveryPreparing ? (
+						<div
+							className="flex min-h-52 items-center justify-center gap-3 rounded-lg border border-border/60 bg-muted/20 px-6 py-8"
+							role="status"
+							aria-live="polite"
+						>
+							<LoaderCircleIcon className="size-5 shrink-0 animate-spin text-muted-foreground" />
+							<div>
+								<p className="text-sm font-medium">
+									{t("workspaceScope.delivery.preparing")}
+								</p>
+								<p className="mt-1 text-xs text-muted-foreground">
+									{t("workspaceScope.delivery.preparingHint")}
+								</p>
+							</div>
 						</div>
-					)}
+					) : deliveryPreviews ? (
+						<div className="max-h-[min(62vh,560px)] space-y-3 overflow-y-auto pr-1">
+							{deliveryPreviews.map((preview, index) => {
+								const workspace = workspaceScopeOptions.find(
+									(option) => option.id === preview.workspaceId,
+								);
+								const blocked = preview.action === "blocked";
+								return (
+									<div
+										key={preview.workspaceId}
+										className={`rounded-lg border p-3 ${
+											blocked
+												? "border-destructive/40 bg-destructive/5"
+												: "border-border/70 bg-muted/20"
+										}`}
+									>
+										<div className="flex items-start gap-2">
+											{blocked ? (
+												<AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+											) : (
+												<span className="mt-1.5 size-2 shrink-0 rounded-full bg-amber-400" />
+											)}
+											<div className="min-w-0 flex-1">
+												<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+													<p className="truncate text-sm font-medium">{preview.name}</p>
+													{workspace?.branch ? (
+														<span className="truncate font-mono text-[11px] text-muted-foreground">
+															{workspace.branch}
+														</span>
+													) : null}
+													<span className="ml-auto rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+														{t(`workspaceScope.delivery.actions.${preview.action}`)}
+													</span>
+												</div>
+												{preview.message ? (
+													<p className="mt-1 text-xs leading-relaxed text-destructive">
+														{preview.message}
+													</p>
+												) : null}
+											</div>
+										</div>
+
+										{preview.commit ? (
+											<div className="mt-3 grid gap-2 border-t border-border/60 pt-3">
+												<label
+													className="text-[11px] font-medium"
+													htmlFor={`multi-workspace-commit-subject-${index}`}
+												>
+													{t("workspaceScope.delivery.commitSubject")}
+												</label>
+												<Textarea
+													id={`multi-workspace-commit-subject-${index}`}
+													value={preview.commit.subject}
+													onChange={(event) => {
+														const subject = event.target.value;
+														setDeliveryPreviews((current) =>
+															current?.map((item) =>
+																item.workspaceId === preview.workspaceId && item.commit
+																	? { ...item, commit: { ...item.commit, subject } }
+																	: item,
+															) ?? null,
+														);
+													}}
+													className="min-h-16 resize-y font-mono text-xs"
+												/>
+												<label
+													className="text-[11px] font-medium"
+													htmlFor={`multi-workspace-commit-body-${index}`}
+												>
+													{t("workspaceScope.delivery.commitBody")}
+												</label>
+												<Textarea
+													id={`multi-workspace-commit-body-${index}`}
+													value={preview.commit.body ?? ""}
+													onChange={(event) => {
+														const body = event.target.value;
+														setDeliveryPreviews((current) =>
+															current?.map((item) =>
+																item.workspaceId === preview.workspaceId && item.commit
+																	? { ...item, commit: { ...item.commit, body } }
+																	: item,
+															) ?? null,
+														);
+													}}
+													className="min-h-16 resize-y font-mono text-xs"
+												/>
+												<p className="text-[11px] text-muted-foreground">
+													{t("workspaceScope.delivery.stagedFiles", {
+														count: preview.commit.stagedFileCount,
+													})}
+												</p>
+											</div>
+										) : null}
+									</div>
+								);
+							})}
+						</div>
+					) : null}
 
 					{deliveryRunning ? (
 						<div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
@@ -895,25 +1051,43 @@ export function SessionWorkbench({
 					<DialogFooter>
 						{deliveryResults || deliveryError ? (
 							<DialogClose asChild>
-								<Button type="button" variant="outline">
+								<Button
+									type="button"
+									variant="outline"
+									disabled={deliveryPreparing || deliveryRunning}
+								>
 									{t("workspaceScope.delivery.close")}
 								</Button>
 							</DialogClose>
 						) : (
 							<>
 								<DialogClose asChild>
-									<Button type="button" variant="outline" disabled={deliveryRunning}>
+									<Button
+										type="button"
+										variant="outline"
+										disabled={deliveryPreparing || deliveryRunning}
+									>
 										{t("workspaceScope.delivery.cancel")}
 									</Button>
 								</DialogClose>
-								<Button type="button" onClick={handleDeliver} disabled={deliveryRunning}>
+								<Button
+									type="button"
+									onClick={handleDeliver}
+									disabled={
+										deliveryPreparing ||
+										deliveryRunning ||
+										!deliveryPreviews ||
+										deliveryReadyCount === 0 ||
+										hasInvalidCommitReview
+									}
+								>
 									{deliveryRunning ? (
 										<LoaderCircleIcon className="animate-spin" />
 									) : (
 										<GitPullRequestArrowIcon />
 									)}
-									{t("workspaceScope.delivery.confirm", {
-										count: deliverableScopeOptions.length,
+									{t("workspaceScope.delivery.confirmReviewed", {
+										count: deliveryReadyCount,
 									})}
 								</Button>
 							</>
