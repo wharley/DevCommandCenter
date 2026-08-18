@@ -10,6 +10,7 @@ use dcc_core::application::{
 use dcc_core::domain::session::{
     QueuedTurn, SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary,
 };
+use dcc_core::domain::usage::{UsageDashboard, UsageDashboardInput};
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, ApplyTaskTitleInput, ApplyTaskTitleOutput,
@@ -230,6 +231,14 @@ pub async fn search_sessions(
     input: SearchSessionsInput,
 ) -> Result<Vec<SessionSearchResult>, String> {
     session_command_impl::search_sessions(state, input).await
+}
+
+#[tauri::command]
+pub async fn usage_dashboard(
+    state: State<'_, SessionCommandState>,
+    input: UsageDashboardInput,
+) -> Result<UsageDashboard, String> {
+    session_command_impl::usage_dashboard(state, input).await
 }
 
 #[tauri::command]

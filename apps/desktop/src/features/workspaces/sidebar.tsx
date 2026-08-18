@@ -1,5 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+	BarChart3,
 	CircleCheckBig,
 	ChevronRight,
 	Clock3,
@@ -239,6 +240,7 @@ type WorkspacesSidebarProps = {
 	onInstallUpdate?: () => void;
 	onOpenSettings: () => void;
 	onOpenSkills: () => void;
+	onOpenUsage: () => void;
 	onOpenPullRequests: () => void;
 	pullRequestsActive?: boolean;
 	onToggleCollapsed: () => void;
@@ -294,6 +296,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onInstallUpdate,
 	onOpenSettings,
 	onOpenSkills,
+	onOpenUsage,
 	onOpenPullRequests,
 	pullRequestsActive = false,
 	onToggleCollapsed,
@@ -1065,6 +1068,21 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								type="button"
 								variant="ghost"
 								size="icon-xs"
+								className="text-muted-foreground hover:text-foreground"
+								aria-label={t("usage.title")}
+								onClick={onOpenUsage}
+							>
+								<BarChart3 className="size-4" strokeWidth={1.85} aria-hidden />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="right">{t("usage.title")}</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
 								className="relative text-muted-foreground hover:text-foreground"
 								aria-label="Skills"
 								onClick={onOpenSkills}
@@ -1285,6 +1303,22 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				</div>
 
 				<div className="flex shrink-0 items-center justify-start gap-1 px-3 pb-3 pt-1">
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="gap-1.5 text-muted-foreground hover:text-foreground"
+								aria-label={t("usage.title")}
+								onClick={onOpenUsage}
+							>
+								<BarChart3 className="size-4" strokeWidth={1.85} aria-hidden />
+								<span className="text-xs font-medium">Usage</span>
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="top">{t("usage.title")}</TooltipContent>
+					</Tooltip>
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button

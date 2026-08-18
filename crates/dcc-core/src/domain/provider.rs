@@ -6,6 +6,7 @@ use super::{
     mcp::McpRuntimeStatus,
     mcp_conformance::{McpConformanceEvidence, McpConformanceEvidenceError},
 };
+use crate::domain::usage::ModelTokenUsage;
 use crate::ports::provider::{
     ProviderPermissionRequest, ProviderUserInputAnswer, ProviderUserInputQuestion,
 };
@@ -367,6 +368,12 @@ pub enum ProviderEvent {
     PermissionResolved {
         id: String,
         behavior: String,
+        at: String,
+    },
+    /// Exact per-turn usage reported by the provider runtime. Missing categories
+    /// remain zero and cost stays absent instead of being estimated here.
+    TurnUsage {
+        models: Vec<ModelTokenUsage>,
         at: String,
     },
     Completed {

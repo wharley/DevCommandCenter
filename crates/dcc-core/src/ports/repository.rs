@@ -8,8 +8,9 @@ use crate::{
         },
         project::{Project, ProjectId},
         repository::{Repository, RepositoryId},
-        session::{Session, SessionEventRecord, SessionId},
+        session::{Session, SessionEventRecord, SessionId, TurnId},
         thread::{Thread, ThreadId},
+        usage::{ModelTokenUsage, UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
         workspace_bundle::{
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
@@ -141,6 +142,18 @@ pub trait SessionEventRepo: Send + Sync {
         session_id: &SessionId,
     ) -> Result<Vec<SessionEventRecord>>;
     async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()>;
+}
+
+#[async_trait]
+pub trait UsageRepo: Send + Sync {
+    async fn replace_turn_usage(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        recorded_at: &str,
+        models: &[ModelTokenUsage],
+    ) -> Result<()>;
+    async fn usage_dashboard(&self, input: &UsageDashboardInput) -> Result<UsageDashboard>;
 }
 
 #[async_trait]

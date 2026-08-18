@@ -24,5 +24,5 @@ pub use provider::{
 };
 pub use repository::{
     DelegationRepo, McpRepo, ProjectRepo, RepositoryRepo, SessionEventRepo, SessionRepo,
-    ThreadRepo, WorkspaceBundleRepo, WorkspaceRepo,
+    ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
 };

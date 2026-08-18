@@ -31,6 +31,7 @@ type WorkspaceCommandPaletteProps = {
 	onOpenOnboarding: () => void;
 	onOpenShortcuts: () => void;
 	onOpenSkills: () => void;
+	onOpenUsage: () => void;
 	/** Present only when the active workspace has a session to delegate from. */
 	onDelegate?: () => void;
 	onRunWorkbenchCommand?: (command: WorkbenchCommand) => void;
@@ -48,6 +49,7 @@ export function WorkspaceCommandPalette({
 	onOpenOnboarding,
 	onOpenShortcuts,
 	onOpenSkills,
+	onOpenUsage,
 	onDelegate,
 	onRunWorkbenchCommand,
 }: WorkspaceCommandPaletteProps) {
@@ -193,6 +195,15 @@ export function WorkspaceCommandPalette({
 						}}
 					>
 						{t("commandPalette.manageSkills")}
+					</CommandItem>
+					<CommandItem
+						value="usage analytics provider arena tokens models"
+						onSelect={() => {
+							onOpenChange(false);
+							onOpenUsage();
+						}}
+					>
+						{t("commandPalette.openUsage")}
 					</CommandItem>
 					<CommandItem
 						value="rebuild contracts"

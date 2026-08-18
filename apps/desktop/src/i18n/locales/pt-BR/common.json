@@ -72,6 +72,7 @@
     "openProject": "Abrir projeto",
     "openSettings": "Abrir configurações",
     "manageSkills": "Gerenciar skills",
+    "openUsage": "Abrir DCC Usage",
     "openProjectMenu": "Menu de abrir projeto",
     "projectActions": "Ações do projeto",
     "workspaceActions": "Ações da tarefa",
@@ -2224,6 +2225,61 @@
     "update": "Atualizar",
     "installing": "Atualizando…",
     "installFailed": "Não foi possível instalar a atualização: {{message}}"
+  },
+  "usage": {
+    "title": "DCC Usage",
+    "description": "Atividade real registrada pelo DCC, comparada entre providers e modelos.",
+    "refresh": "Atualizar uso",
+    "loading": "Carregando uso local…",
+    "error": "Não foi possível carregar os dados de uso.",
+    "tryAgain": "Tentar novamente",
+    "units": {
+      "tokens": "tokens",
+      "turns": "turns",
+      "sessions": "sessões"
+    },
+    "period": {
+      "days": "{{count}}d",
+      "all": "Tudo",
+      "project": "Projeto atual"
+    },
+    "metrics": {
+      "tokens": "Tokens medidos",
+      "tokenBreakdown": "{{input}} entrada · {{output}} saída",
+      "activity": "Turns concluídos",
+      "sessions": "{{count}} sessões",
+      "coverage": "Cobertura de tokens",
+      "measuredTurns": "{{count}} turns medidos",
+      "cost": "Custo informado",
+      "reportedCost": "Somente quando fornecido pelo provider"
+    },
+    "arena": {
+      "title": "Arena de providers",
+      "byTokens": "Participação nos tokens medidos",
+      "byTurns": "Participação nos turns concluídos",
+      "providerCount_one": "{{count}} provider",
+      "providerCount_other": "{{count}} providers"
+    },
+    "timeline": {
+      "title": "Atividade ao longo do tempo",
+      "tokens": "Tokens medidos por provider",
+      "turns": "Turns concluídos por provider",
+      "ariaLabel": "Linha do tempo de uso do DCC"
+    },
+    "providers": {
+      "title": "Placar dos providers",
+      "noTelemetry": "sem tokens"
+    },
+    "models": {
+      "title": "Ranking de modelos",
+      "awaiting": "A telemetria por modelo aparecerá após novos turns medidos.",
+      "turnCount_one": "{{count}} turn",
+      "turnCount_other": "{{count}} turns"
+    },
+    "empty": {
+      "title": "Nenhuma atividade do DCC neste período",
+      "body": "Execute uma sessão ou selecione um período maior para iniciar a comparação."
+    }
   },
   "skills": {
     "title": "Skills",

@@ -7,6 +7,7 @@ pub mod provider;
 pub mod repository;
 pub mod session;
 pub mod thread;
+pub mod usage;
 pub mod workspace;
 pub mod workspace_bundle;
 
@@ -40,6 +41,10 @@ pub use session::{
     WorkspaceSessionSummary,
 };
 pub use thread::{Thread, ThreadId};
+pub use usage::{
+    DailyUsageSummary, ModelTokenUsage, ModelUsageSummary, ProviderUsageSummary, UsageDashboard,
+    UsageDashboardInput, UsageTotals,
+};
 pub use workspace::{Workspace, WorkspaceId, WorkspaceState};
 pub use workspace_bundle::{
     WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,

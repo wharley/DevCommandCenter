@@ -7109,6 +7109,7 @@ pub fn run() {
             session_commands::record_plan_handoff,
             session_commands::list_workspace_sessions,
             session_commands::search_sessions,
+            session_commands::usage_dashboard,
             session_commands::respond_to_user_input,
             session_commands::respond_to_permission_request
         ])

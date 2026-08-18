@@ -1,10 +1,12 @@
 import {
 	useCallback,
 	useEffect,
+	lazy,
 	useMemo,
 	useRef,
 	useState,
 	useSyncExternalStore,
+	Suspense,
 	type KeyboardEventHandler,
 	type MouseEventHandler,
 } from "react";
@@ -239,6 +241,10 @@ import {
 	type ProviderRuntimeSettings,
 	writeProviderRuntimeSettings,
 } from "./features/providers/provider-runtime-settings";
+
+const LazyUsageDialog = lazy(() =>
+	import("./features/usage").then((module) => ({ default: module.UsageDialog })),
+);
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 const EMPTY_WORKSPACES: WorkspaceSummary[] = [];
 const LOCAL_BACKEND_CACHE_KEY = "local";
@@ -980,6 +986,7 @@ export default function App() {
 		useState<ExistingRepositoryContext | null>(null);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [isSkillsOpen, setIsSkillsOpen] = useState(false);
+	const [isUsageOpen, setIsUsageOpen] = useState(false);
 	const [globalSurface, setGlobalSurface] = useState<"pullRequests" | null>(null);
 	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
 	const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
@@ -4499,6 +4506,7 @@ export default function App() {
 							}
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onOpenSkills={() => setIsSkillsOpen(true)}
+							onOpenUsage={() => setIsUsageOpen(true)}
 							onOpenPullRequests={() => setGlobalSurface("pullRequests")}
 							pullRequestsActive={globalSurface === "pullRequests"}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
@@ -4585,6 +4593,7 @@ export default function App() {
 								onOpenOnboarding={() => setIsOnboardingOpen(true)}
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 								onOpenSkills={() => setIsSkillsOpen(true)}
+								onOpenUsage={() => setIsUsageOpen(true)}
 								onRunWorkbenchCommand={runWorkbenchCommand}
 								onDelegate={
 									selectedSessionSnapshot
@@ -5030,6 +5039,16 @@ export default function App() {
 				projectRoot={selectedWorkspace?.rootPath ?? null}
 				targetRoot={selectedWorkspacePath}
 			/>
+			{isUsageOpen ? (
+				<Suspense fallback={null}>
+					<LazyUsageDialog
+						open={isUsageOpen}
+						onOpenChange={setIsUsageOpen}
+						providerCatalog={providerCatalog}
+						projectId={selectedWorkspace?.projectId ?? null}
+					/>
+				</Suspense>
+			) : null}
 			<ShortcutCheatsheetDialog
 				open={isShortcutSheetOpen}
 				onOpenChange={setIsShortcutSheetOpen}

@@ -33,13 +33,14 @@ use dcc_core::{
             SessionSearchResult, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
+        usage::{ModelTokenUsage, UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
         workspace_bundle::WorkspaceBundleState,
     },
     ports::{
         CredentialStore, DelegationRepo, EventBus, Input, McpRepo, ProjectRepo, Provider,
         ProviderMcpOauthStart, ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo,
-        SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceBundleRepo,
+        SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo,
         WorkspaceRepo,
     },
     Result,
@@ -198,6 +199,7 @@ struct ProviderSessionBinding {
     provider_id: String,
     handle: SessionHandle,
     current_turn_id: Arc<AsyncMutex<Option<String>>>,
+    usage_turn_id: Arc<AsyncMutex<Option<String>>>,
     assistant_messages: Arc<AsyncMutex<AssistantMessageTracker>>,
     projected_mcp_definition_ids: Arc<HashSet<McpDefinitionId>>,
 }
@@ -438,6 +440,21 @@ impl SessionCommandState {
         self.session_repo.search_sessions(query, limit)
     }
 
+    pub async fn usage_dashboard(&self, input: &UsageDashboardInput) -> Result<UsageDashboard> {
+        UsageRepo::usage_dashboard(&self.session_repo, input).await
+    }
+
+    async fn record_turn_usage(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        recorded_at: &str,
+        models: &[ModelTokenUsage],
+    ) -> Result<()> {
+        UsageRepo::replace_turn_usage(&self.session_repo, session_id, turn_id, recorded_at, models)
+            .await
+    }
+
     async fn append_session_event(
         &self,
         session_id: &SessionId,
@@ -571,6 +588,7 @@ impl SessionCommandState {
             provider_id: session.provider_id.clone(),
             handle: handle.clone(),
             current_turn_id: Arc::new(AsyncMutex::new(None)),
+            usage_turn_id: Arc::new(AsyncMutex::new(None)),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(
                 projected_definition_ids.iter().cloned().collect(),
@@ -1651,6 +1669,21 @@ impl SessionCommandState {
                                 .await;
                         }
                     }
+                    Ok(ProviderEvent::TurnUsage { models, at }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone().or(binding
+                            .usage_turn_id
+                            .lock()
+                            .await
+                            .clone());
+                        if let Some(turn_id) = turn_id {
+                            if let Err(error) = state
+                                .record_turn_usage(&session_id, &TurnId(turn_id), &at, &models)
+                                .await
+                            {
+                                eprintln!("[DCC] turn usage persistence failed: {error}");
+                            }
+                        }
+                    }
                     Ok(ProviderEvent::Completed { .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.take();
                         if let Some(turn_id) = turn_id {
@@ -1793,7 +1826,8 @@ impl SessionCommandState {
             ))
         })?;
         *binding.assistant_messages.lock().await = AssistantMessageTracker::default();
-        *binding.current_turn_id.lock().await = turn_id;
+        *binding.current_turn_id.lock().await = turn_id.clone();
+        *binding.usage_turn_id.lock().await = turn_id;
         Ok(())
     }
 
@@ -2062,6 +2096,7 @@ impl SessionCommandState {
             ))
         })?;
         *binding.current_turn_id.lock().await = None;
+        *binding.usage_turn_id.lock().await = None;
         let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
             dcc_core::CoreError::Provider(format!(
                 "unknown provider runtime: {}",

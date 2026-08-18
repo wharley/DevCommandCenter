@@ -33,6 +33,10 @@ use dcc_core::{
             SessionId, SessionProjection, SessionSearchResult, SessionState, Turn, TurnId,
             TurnState, WorkspaceSessionSummary,
         },
+        usage::{
+            DailyUsageSummary, ModelTokenUsage, ModelUsageSummary, ProviderUsageSummary,
+            UsageDashboard, UsageDashboardInput, UsageTotals,
+        },
         workspace::{
             Workspace, WorkspaceId, WorkspacePushTarget, WorkspaceSetupReport,
             WorkspaceSetupStatus, WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind,
@@ -287,6 +291,7 @@ struct SessionMethods {
     wait_mcp_oauth: String,
     list_workspace_sessions: String,
     search_sessions: String,
+    usage_dashboard: String,
     respond_to_user_input: String,
     respond_to_permission_request: String,
 }
@@ -650,6 +655,13 @@ fn main() {
         .typ::<RespondToPermissionRequestInput>()
         .typ::<RespondToPermissionRequestOutput>()
         .typ::<SearchSessionsInput>()
+        .typ::<ModelTokenUsage>()
+        .typ::<UsageDashboardInput>()
+        .typ::<UsageTotals>()
+        .typ::<ProviderUsageSummary>()
+        .typ::<ModelUsageSummary>()
+        .typ::<DailyUsageSummary>()
+        .typ::<UsageDashboard>()
         .typ::<CreateDelegationInput>()
         .typ::<CreateDelegationOutput>()
         .typ::<ListDelegationsInput>()
@@ -816,6 +828,7 @@ fn main() {
             wait_mcp_oauth: "wait_mcp_oauth".to_string(),
             list_workspace_sessions: "list_workspace_sessions".to_string(),
             search_sessions: "search_sessions".to_string(),
+            usage_dashboard: "usage_dashboard".to_string(),
             respond_to_user_input: "respond_to_user_input".to_string(),
             respond_to_permission_request: "respond_to_permission_request".to_string(),
         },

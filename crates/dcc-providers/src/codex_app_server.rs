@@ -39,6 +39,7 @@ use dcc_core::{
             ProviderUsageWindow, SessionHandle,
         },
         session::{AssistantMessagePhase, SessionId},
+        usage::ModelTokenUsage,
     },
     ports::{
         provider::{ProviderPermissionRequest, ProviderPermissionResponse},
@@ -864,6 +865,22 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
                 .unwrap_or("")
                 .to_string(),
         }),
+        "thread/tokenUsage/updated" => {
+            let usage = params.pointer("/tokenUsage/last")?.as_object()?;
+            Some(ProviderEvent::TurnUsage {
+                models: vec![ModelTokenUsage {
+                    model: None,
+                    input_tokens: json_u64(usage, "inputTokens"),
+                    output_tokens: json_u64(usage, "outputTokens"),
+                    cached_input_tokens: json_u64(usage, "cachedInputTokens"),
+                    cache_write_input_tokens: json_u64(usage, "cacheWriteInputTokens"),
+                    reasoning_output_tokens: json_u64(usage, "reasoningOutputTokens"),
+                    total_tokens: json_u64(usage, "totalTokens"),
+                    cost_usd: None,
+                }],
+                at,
+            })
+        }
         "turn/completed" => {
             let status = params
                 .get("turn")
@@ -1016,6 +1033,10 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
         }
         _ => None,
     }
+}
+
+fn json_u64(object: &serde_json::Map<String, Value>, key: &str) -> u64 {
+    object.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
 fn classify_codex_model_event(
@@ -3464,6 +3485,45 @@ unified_exec                         stable             true
                 assert_eq!(content, "Segunda mensagem.");
             }
             other => panic!("expected second assistant delta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_codex_turn_token_usage_notification() {
+        let event = notification_to_event(
+            "thread/tokenUsage/updated",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "tokenUsage": {
+                    "last": {
+                        "inputTokens": 120,
+                        "outputTokens": 30,
+                        "cachedInputTokens": 80,
+                        "cacheWriteInputTokens": 4,
+                        "reasoningOutputTokens": 12,
+                        "totalTokens": 150
+                    },
+                    "total": {
+                        "inputTokens": 120,
+                        "outputTokens": 30,
+                        "cachedInputTokens": 80,
+                        "cacheWriteInputTokens": 4,
+                        "reasoningOutputTokens": 12,
+                        "totalTokens": 150
+                    }
+                }
+            }),
+        );
+        match event {
+            Some(ProviderEvent::TurnUsage { models, .. }) => {
+                assert_eq!(models.len(), 1);
+                assert_eq!(models[0].input_tokens, 120);
+                assert_eq!(models[0].cached_input_tokens, 80);
+                assert_eq!(models[0].reasoning_output_tokens, 12);
+                assert_eq!(models[0].total_tokens, 150);
+            }
+            other => panic!("expected Codex turn usage, got {other:?}"),
         }
     }
 

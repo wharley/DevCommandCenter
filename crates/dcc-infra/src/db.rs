@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::{fmt, path::Path};
 
 use async_trait::async_trait;
+use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::{from_str, to_string};
 
@@ -19,6 +20,10 @@ use dcc_core::{
             SessionProjection, SessionSearchResult, SessionState, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
+        usage::{
+            DailyUsageSummary, ModelTokenUsage, ModelUsageSummary, ProviderUsageSummary,
+            UsageDashboard, UsageDashboardInput, UsageTotals,
+        },
         workspace::{Workspace, WorkspaceId, WorkspaceSource, WorkspaceState},
         workspace_bundle::{
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
@@ -26,7 +31,7 @@ use dcc_core::{
         },
     },
     ports::{
-        DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo,
+        DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo,
         WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
@@ -179,6 +184,37 @@ CREATE VIRTUAL TABLE IF NOT EXISTS dcc_session_search USING fts5(
 	updated_at UNINDEXED,
 	tokenize = 'unicode61'
 );
+"#;
+
+const USAGE_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_turn_model_usage (
+	session_id TEXT NOT NULL,
+	turn_id TEXT NOT NULL,
+	model TEXT NOT NULL,
+	input_tokens INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+	cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
+	reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
+	total_tokens INTEGER NOT NULL DEFAULT 0,
+	cost_usd REAL NULL,
+	recorded_at TEXT NOT NULL,
+	PRIMARY KEY (session_id, turn_id, model),
+	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_turn_model_usage_recorded_at
+	ON dcc_turn_model_usage(recorded_at);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_turn_model_usage_session
+	ON dcc_turn_model_usage(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_sessions_created_at
+	ON dcc_sessions(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_session_events_completed_occurred_at
+	ON dcc_session_events(occurred_at, session_id)
+	WHERE json_extract(kind_json, '$.type') = 'turn_completed';
 "#;
 
 const DELEGATION_TABLE_SQL: &str = r#"
@@ -734,7 +770,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
@@ -2630,6 +2666,460 @@ impl SessionEventRepo for SqliteSessionRepo {
     }
 }
 
+fn merge_earliest(slot: &mut Option<String>, candidate: Option<String>) {
+    let Some(candidate) = candidate else {
+        return;
+    };
+    if slot.as_ref().is_none_or(|current| candidate < *current) {
+        *slot = Some(candidate);
+    }
+}
+
+fn merge_latest(slot: &mut Option<String>, candidate: Option<String>) {
+    let Some(candidate) = candidate else {
+        return;
+    };
+    if slot.as_ref().is_none_or(|current| candidate > *current) {
+        *slot = Some(candidate);
+    }
+}
+
+#[async_trait]
+impl UsageRepo for SqliteSessionRepo {
+    async fn replace_turn_usage(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        recorded_at: &str,
+        models: &[ModelTokenUsage],
+    ) -> Result<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let turn_model = conn
+            .query_row(
+                r#"
+				SELECT json_extract(kind_json, '$.model')
+				  FROM dcc_session_events
+				 WHERE session_id = ?1
+				   AND json_extract(kind_json, '$.turnId') = ?2
+				   AND json_extract(kind_json, '$.type') IN ('turn_model_effective', 'turn_started')
+				   AND json_extract(kind_json, '$.model') IS NOT NULL
+				 ORDER BY sequence DESC
+				 LIMIT 1
+				"#,
+                params![session_id.0.clone(), turn_id.0.clone()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .flatten();
+        let fallback_model = turn_model.or(conn
+            .query_row(
+                "SELECT model FROM dcc_sessions WHERE id = ?1",
+                params![session_id.0.clone()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .flatten());
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .execute(
+                "DELETE FROM dcc_turn_model_usage WHERE session_id = ?1 AND turn_id = ?2",
+                params![session_id.0.clone(), turn_id.0.clone()],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        for usage in models {
+            let model = usage
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| fallback_model.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            transaction
+                .execute(
+                    r#"
+					INSERT INTO dcc_turn_model_usage (
+						session_id, turn_id, model, input_tokens, output_tokens,
+						cached_input_tokens, cache_write_input_tokens,
+						reasoning_output_tokens, total_tokens, cost_usd, recorded_at
+					) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+					"#,
+                    params![
+                        session_id.0.clone(),
+                        turn_id.0.clone(),
+                        model,
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.cached_input_tokens,
+                        usage.cache_write_input_tokens,
+                        usage.reasoning_output_tokens,
+                        usage.total_tokens,
+                        usage.cost_usd,
+                        recorded_at,
+                    ],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn usage_dashboard(&self, input: &UsageDashboardInput) -> Result<UsageDashboard> {
+        let now = Utc::now();
+        let period_started_at = input.period_days.and_then(|days| {
+            (days > 0).then(|| (now - Duration::days(i64::from(days.min(3_650)))).to_rfc3339())
+        });
+        let project_id = input
+            .project_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut providers = BTreeMap::<String, ProviderUsageSummary>::new();
+
+        {
+            let mut statement = conn
+                .prepare(
+                    r#"
+					SELECT provider_id, COUNT(*), MIN(created_at), MAX(updated_at)
+					  FROM dcc_sessions
+					 WHERE (?1 IS NULL OR created_at >= ?1)
+					   AND (?2 IS NULL OR project_id = ?2)
+					 GROUP BY provider_id
+					"#,
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map(params![period_started_at, project_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            for row in rows {
+                let (provider_id, sessions, first, last) =
+                    row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                providers.insert(
+                    provider_id.clone(),
+                    ProviderUsageSummary {
+                        provider_id,
+                        sessions,
+                        first_used_at: first,
+                        last_used_at: last,
+                        ..ProviderUsageSummary::default()
+                    },
+                );
+            }
+        }
+
+        {
+            let mut statement = conn
+                .prepare(
+                    r#"
+					SELECT s.provider_id, COUNT(*), MIN(e.occurred_at), MAX(e.occurred_at)
+					  FROM dcc_session_events e
+					  JOIN dcc_sessions s ON s.id = e.session_id
+					 WHERE json_extract(e.kind_json, '$.type') = 'turn_completed'
+					   AND (?1 IS NULL OR e.occurred_at >= ?1)
+					   AND (?2 IS NULL OR s.project_id = ?2)
+					 GROUP BY s.provider_id
+					"#,
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map(params![period_started_at, project_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            for row in rows {
+                let (provider_id, turns, first, last) =
+                    row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let provider =
+                    providers
+                        .entry(provider_id.clone())
+                        .or_insert_with(|| ProviderUsageSummary {
+                            provider_id,
+                            ..ProviderUsageSummary::default()
+                        });
+                provider.turns = turns;
+                merge_earliest(&mut provider.first_used_at, first);
+                merge_latest(&mut provider.last_used_at, last);
+            }
+        }
+
+        {
+            let mut statement = conn
+                .prepare(
+                    r#"
+					SELECT s.provider_id,
+					       COUNT(DISTINCT u.session_id || ':' || u.turn_id),
+					       COALESCE(SUM(u.input_tokens), 0),
+					       COALESCE(SUM(u.output_tokens), 0),
+					       COALESCE(SUM(u.cached_input_tokens), 0),
+					       COALESCE(SUM(u.cache_write_input_tokens), 0),
+					       COALESCE(SUM(u.reasoning_output_tokens), 0),
+					       COALESCE(SUM(u.total_tokens), 0),
+					       SUM(u.cost_usd), MIN(u.recorded_at), MAX(u.recorded_at)
+					  FROM dcc_turn_model_usage u
+					  JOIN dcc_sessions s ON s.id = u.session_id
+					 WHERE (?1 IS NULL OR u.recorded_at >= ?1)
+					   AND (?2 IS NULL OR s.project_id = ?2)
+					 GROUP BY s.provider_id
+					"#,
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map(params![period_started_at, project_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u64>(1)?,
+                        row.get::<_, u64>(2)?,
+                        row.get::<_, u64>(3)?,
+                        row.get::<_, u64>(4)?,
+                        row.get::<_, u64>(5)?,
+                        row.get::<_, u64>(6)?,
+                        row.get::<_, u64>(7)?,
+                        row.get::<_, Option<f64>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, Option<String>>(10)?,
+                    ))
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            for row in rows {
+                let (
+                    provider_id,
+                    measured_turns,
+                    input_tokens,
+                    output_tokens,
+                    cached_input_tokens,
+                    cache_write_input_tokens,
+                    reasoning_output_tokens,
+                    total_tokens,
+                    cost_usd,
+                    first,
+                    last,
+                ) = row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let provider =
+                    providers
+                        .entry(provider_id.clone())
+                        .or_insert_with(|| ProviderUsageSummary {
+                            provider_id,
+                            ..ProviderUsageSummary::default()
+                        });
+                provider.measured_turns = measured_turns;
+                provider.input_tokens = input_tokens;
+                provider.output_tokens = output_tokens;
+                provider.cached_input_tokens = cached_input_tokens;
+                provider.cache_write_input_tokens = cache_write_input_tokens;
+                provider.reasoning_output_tokens = reasoning_output_tokens;
+                provider.total_tokens = total_tokens;
+                provider.cost_usd = cost_usd;
+                merge_earliest(&mut provider.first_used_at, first);
+                merge_latest(&mut provider.last_used_at, last);
+            }
+        }
+
+        let mut models = Vec::new();
+        {
+            let mut statement = conn
+                .prepare(
+                    r#"
+					SELECT s.provider_id, u.model,
+					       COUNT(DISTINCT u.session_id || ':' || u.turn_id),
+					       COALESCE(SUM(u.input_tokens), 0),
+					       COALESCE(SUM(u.output_tokens), 0),
+					       COALESCE(SUM(u.cached_input_tokens), 0),
+					       COALESCE(SUM(u.cache_write_input_tokens), 0),
+					       COALESCE(SUM(u.reasoning_output_tokens), 0),
+					       COALESCE(SUM(u.total_tokens), 0), SUM(u.cost_usd)
+					  FROM dcc_turn_model_usage u
+					  JOIN dcc_sessions s ON s.id = u.session_id
+					 WHERE (?1 IS NULL OR u.recorded_at >= ?1)
+					   AND (?2 IS NULL OR s.project_id = ?2)
+					 GROUP BY s.provider_id, u.model
+					"#,
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map(params![period_started_at, project_id], |row| {
+                    Ok(ModelUsageSummary {
+                        provider_id: row.get(0)?,
+                        model: row.get(1)?,
+                        measured_turns: row.get(2)?,
+                        input_tokens: row.get(3)?,
+                        output_tokens: row.get(4)?,
+                        cached_input_tokens: row.get(5)?,
+                        cache_write_input_tokens: row.get(6)?,
+                        reasoning_output_tokens: row.get(7)?,
+                        total_tokens: row.get(8)?,
+                        cost_usd: row.get(9)?,
+                    })
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            for row in rows {
+                models
+                    .push(row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?);
+            }
+        }
+        models.sort_by(|left, right| {
+            right
+                .total_tokens
+                .cmp(&left.total_tokens)
+                .then_with(|| right.measured_turns.cmp(&left.measured_turns))
+        });
+
+        let mut daily = BTreeMap::<(String, String), DailyUsageSummary>::new();
+        {
+            let mut statement = conn
+                .prepare(
+                    r#"
+					SELECT substr(e.occurred_at, 1, 10), s.provider_id, COUNT(*)
+					  FROM dcc_session_events e
+					  JOIN dcc_sessions s ON s.id = e.session_id
+					 WHERE json_extract(e.kind_json, '$.type') = 'turn_completed'
+					   AND (?1 IS NULL OR e.occurred_at >= ?1)
+					   AND (?2 IS NULL OR s.project_id = ?2)
+					 GROUP BY substr(e.occurred_at, 1, 10), s.provider_id
+					"#,
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map(params![period_started_at, project_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, u64>(2)?,
+                    ))
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            for row in rows {
+                let (date, provider_id, turns) =
+                    row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                daily.insert(
+                    (date.clone(), provider_id.clone()),
+                    DailyUsageSummary {
+                        date,
+                        provider_id,
+                        turns,
+                        ..DailyUsageSummary::default()
+                    },
+                );
+            }
+        }
+        {
+            let mut statement = conn
+                .prepare(
+                    r#"
+					SELECT substr(u.recorded_at, 1, 10), s.provider_id,
+					       COUNT(DISTINCT u.session_id || ':' || u.turn_id),
+					       COALESCE(SUM(u.total_tokens), 0)
+					  FROM dcc_turn_model_usage u
+					  JOIN dcc_sessions s ON s.id = u.session_id
+					 WHERE (?1 IS NULL OR u.recorded_at >= ?1)
+					   AND (?2 IS NULL OR s.project_id = ?2)
+					 GROUP BY substr(u.recorded_at, 1, 10), s.provider_id
+					"#,
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map(params![period_started_at, project_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, u64>(2)?,
+                        row.get::<_, u64>(3)?,
+                    ))
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            for row in rows {
+                let (date, provider_id, measured_turns, total_tokens) =
+                    row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let entry = daily
+                    .entry((date.clone(), provider_id.clone()))
+                    .or_insert_with(|| DailyUsageSummary {
+                        date,
+                        provider_id,
+                        ..DailyUsageSummary::default()
+                    });
+                entry.measured_turns = measured_turns;
+                entry.total_tokens = total_tokens;
+            }
+        }
+
+        let mut providers = providers.into_values().collect::<Vec<_>>();
+        providers.sort_by(|left, right| {
+            right
+                .total_tokens
+                .cmp(&left.total_tokens)
+                .then_with(|| right.turns.cmp(&left.turns))
+                .then_with(|| right.sessions.cmp(&left.sessions))
+        });
+        let any_cost = providers.iter().any(|provider| provider.cost_usd.is_some());
+        let totals = UsageTotals {
+            sessions: providers.iter().map(|provider| provider.sessions).sum(),
+            turns: providers.iter().map(|provider| provider.turns).sum(),
+            measured_turns: providers
+                .iter()
+                .map(|provider| provider.measured_turns)
+                .sum(),
+            input_tokens: providers.iter().map(|provider| provider.input_tokens).sum(),
+            output_tokens: providers
+                .iter()
+                .map(|provider| provider.output_tokens)
+                .sum(),
+            cached_input_tokens: providers
+                .iter()
+                .map(|provider| provider.cached_input_tokens)
+                .sum(),
+            cache_write_input_tokens: providers
+                .iter()
+                .map(|provider| provider.cache_write_input_tokens)
+                .sum(),
+            reasoning_output_tokens: providers
+                .iter()
+                .map(|provider| provider.reasoning_output_tokens)
+                .sum(),
+            total_tokens: providers.iter().map(|provider| provider.total_tokens).sum(),
+            cost_usd: any_cost.then(|| {
+                providers
+                    .iter()
+                    .filter_map(|provider| provider.cost_usd)
+                    .sum()
+            }),
+        };
+
+        Ok(UsageDashboard {
+            generated_at: now.to_rfc3339(),
+            period_started_at,
+            totals,
+            providers,
+            models,
+            daily: daily.into_values().collect(),
+        })
+    }
+}
+
 #[async_trait]
 impl DelegationRepo for SqliteSessionRepo {
     async fn save_delegation(&self, delegation: &Delegation) -> Result<()> {
@@ -2832,6 +3322,7 @@ mod tests {
             provider::ProviderId,
             repository::{Repository, RepositoryId},
             session::{SessionEventKind, SessionState, TurnId},
+            usage::{ModelTokenUsage, UsageDashboardInput},
             workspace::{
                 WorkspaceId, WorkspacePushTarget, WorkspaceSetupReport, WorkspaceSetupStatus,
                 WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
@@ -2841,7 +3332,7 @@ mod tests {
             },
         },
         ports::{
-            DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo,
+            DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo,
             WorkspaceBundleRepo, WorkspaceRepo,
         },
     };
@@ -2936,6 +3427,84 @@ mod tests {
             summary[0].last_turn_completed_at.as_deref(),
             Some("2026-01-01T00:00:09Z")
         );
+    }
+
+    #[test]
+    fn usage_dashboard_aggregates_and_replaces_turn_telemetry() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let session = Session {
+            id: SessionId("usage-session".to_string()),
+            project_id: ProjectId("usage-project".to_string()),
+            workspace_id: WorkspaceId("usage-workspace".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: Some("gpt-5.6-codex".to_string()),
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-08-18T10:00:00Z".to_string(),
+            updated_at: "2026-08-18T10:01:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_session(&session)).expect("save usage session");
+        futures::executor::block_on(repo.append_event(&SessionEventRecord {
+            event_id: "usage-completed".to_string(),
+            session_id: session.id.clone(),
+            sequence: 1,
+            occurred_at: "2026-08-18T10:01:00Z".to_string(),
+            kind: SessionEventKind::TurnCompleted {
+                turn_id: TurnId("usage-turn".to_string()),
+            },
+        }))
+        .expect("append completed turn");
+
+        let first = ModelTokenUsage {
+            model: None,
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_input_tokens: 40,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 8,
+            total_tokens: 120,
+            cost_usd: None,
+        };
+        futures::executor::block_on(repo.replace_turn_usage(
+            &session.id,
+            &TurnId("usage-turn".to_string()),
+            "2026-08-18T10:00:59Z",
+            &[first],
+        ))
+        .expect("record first usage");
+        let replacement = ModelTokenUsage {
+            model: None,
+            input_tokens: 150,
+            output_tokens: 30,
+            cached_input_tokens: 50,
+            cache_write_input_tokens: 5,
+            reasoning_output_tokens: 10,
+            total_tokens: 180,
+            cost_usd: None,
+        };
+        futures::executor::block_on(repo.replace_turn_usage(
+            &session.id,
+            &TurnId("usage-turn".to_string()),
+            "2026-08-18T10:01:00Z",
+            &[replacement],
+        ))
+        .expect("replace usage");
+
+        let dashboard = futures::executor::block_on(repo.usage_dashboard(&UsageDashboardInput {
+            period_days: None,
+            project_id: None,
+        }))
+        .expect("load usage dashboard");
+        assert_eq!(dashboard.totals.sessions, 1);
+        assert_eq!(dashboard.totals.turns, 1);
+        assert_eq!(dashboard.totals.measured_turns, 1);
+        assert_eq!(dashboard.totals.total_tokens, 180);
+        assert_eq!(dashboard.providers[0].provider_id, "codex");
+        assert_eq!(dashboard.models[0].model, "gpt-5.6-codex");
+        assert_eq!(dashboard.daily[0].turns, 1);
+        assert_eq!(dashboard.daily[0].total_tokens, 180);
     }
 
     #[test]

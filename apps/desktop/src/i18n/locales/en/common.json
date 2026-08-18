@@ -72,6 +72,7 @@
     "openProject": "Open project",
     "openSettings": "Open settings",
     "manageSkills": "Manage skills",
+    "openUsage": "Open DCC Usage",
     "openProjectMenu": "Open project menu",
     "projectActions": "Project actions",
     "workspaceActions": "Task actions",
@@ -2224,6 +2225,61 @@
     "update": "Update",
     "installing": "Updating…",
     "installFailed": "Could not install the update: {{message}}"
+  },
+  "usage": {
+    "title": "DCC Usage",
+    "description": "Real activity recorded by DCC, compared across providers and models.",
+    "refresh": "Refresh usage",
+    "loading": "Loading local usage…",
+    "error": "Usage data could not be loaded.",
+    "tryAgain": "Try again",
+    "units": {
+      "tokens": "tokens",
+      "turns": "turns",
+      "sessions": "sessions"
+    },
+    "period": {
+      "days": "{{count}}d",
+      "all": "All",
+      "project": "Current project"
+    },
+    "metrics": {
+      "tokens": "Measured tokens",
+      "tokenBreakdown": "{{input}} in · {{output}} out",
+      "activity": "Completed turns",
+      "sessions": "{{count}} sessions",
+      "coverage": "Token coverage",
+      "measuredTurns": "{{count}} measured turns",
+      "cost": "Reported cost",
+      "reportedCost": "Only when supplied by the provider"
+    },
+    "arena": {
+      "title": "Provider arena",
+      "byTokens": "Share of measured tokens",
+      "byTurns": "Share of completed turns",
+      "providerCount_one": "{{count}} provider",
+      "providerCount_other": "{{count}} providers"
+    },
+    "timeline": {
+      "title": "Activity over time",
+      "tokens": "Measured tokens by provider",
+      "turns": "Completed turns by provider",
+      "ariaLabel": "DCC usage timeline"
+    },
+    "providers": {
+      "title": "Provider scorecards",
+      "noTelemetry": "no tokens"
+    },
+    "models": {
+      "title": "Model leaderboard",
+      "awaiting": "Model token telemetry will appear after new measured turns.",
+      "turnCount_one": "{{count}} turn",
+      "turnCount_other": "{{count}} turns"
+    },
+    "empty": {
+      "title": "No DCC activity in this period",
+      "body": "Run a provider session or select a longer period to start the comparison."
+    }
   },
   "skills": {
     "title": "Skills",

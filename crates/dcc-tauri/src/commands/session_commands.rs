@@ -28,6 +28,7 @@ use dcc_core::{
             WorkspaceSessionSummary,
         },
         thread::Thread,
+        usage::{UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
     },
     ports::{
@@ -773,6 +774,17 @@ pub async fn list_workspace_sessions(
     let workspace_id = dcc_core::domain::workspace::WorkspaceId(_workspace_id);
     state
         .list_workspace_sessions(&workspace_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn usage_dashboard(
+    state: State<'_, SessionCommandState>,
+    input: UsageDashboardInput,
+) -> Result<UsageDashboard, String> {
+    state
+        .usage_dashboard(&input)
+        .await
         .map_err(|error| error.to_string())
 }
 

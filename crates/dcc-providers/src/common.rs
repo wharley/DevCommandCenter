@@ -26,6 +26,7 @@ use dcc_core::{
             ProviderId, SessionHandle,
         },
         session::{AssistantMessagePhase, SessionId},
+        usage::ModelTokenUsage,
         workspace::WorkspaceId,
     },
     ports::{Input, Provider, ProviderRuntimeConfig, SessionConfig},
@@ -950,7 +951,7 @@ fn parse_claude_terminal_value(
                 })
         }
         "result" => {
-            if value
+            let terminal_event = if value
                 .get("is_error")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
@@ -961,13 +962,84 @@ fn parse_claude_terminal_value(
                     .or_else(|| value.get("terminal_reason").and_then(Value::as_str))
                     .map(str::to_string)
                     .unwrap_or_else(|| "provider result reported an error".to_string());
-                Some(ProviderEvent::Failed { message, at })
+                ProviderEvent::Failed {
+                    message,
+                    at: at.clone(),
+                }
             } else {
-                Some(ProviderEvent::Completed { at })
+                ProviderEvent::Completed { at: at.clone() }
+            };
+            let models = parse_claude_result_usage(value);
+            if models.is_empty() {
+                Some(terminal_event)
+            } else {
+                state.claude_pending_events.push(terminal_event);
+                Some(ProviderEvent::TurnUsage { models, at })
             }
         }
         _ => None,
     }
+}
+
+fn json_u64(object: &serde_json::Map<String, Value>, key: &str) -> u64 {
+    object.get(key).and_then(Value::as_u64).unwrap_or(0)
+}
+
+fn parse_claude_result_usage(value: &Value) -> Vec<ModelTokenUsage> {
+    let mut models = value
+        .get("modelUsage")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|model_usage| model_usage.iter())
+        .filter_map(|(model, raw)| {
+            let raw = raw.as_object()?;
+            let input_tokens = json_u64(raw, "inputTokens");
+            let output_tokens = json_u64(raw, "outputTokens");
+            let cached_input_tokens = json_u64(raw, "cacheReadInputTokens");
+            let cache_write_input_tokens = json_u64(raw, "cacheCreationInputTokens");
+            Some(ModelTokenUsage {
+                model: Some(model.clone()),
+                input_tokens,
+                output_tokens,
+                cached_input_tokens,
+                cache_write_input_tokens,
+                reasoning_output_tokens: 0,
+                total_tokens: input_tokens
+                    .saturating_add(output_tokens)
+                    .saturating_add(cached_input_tokens)
+                    .saturating_add(cache_write_input_tokens),
+                cost_usd: raw.get("costUSD").and_then(Value::as_f64),
+            })
+        })
+        .collect::<Vec<_>>();
+    if !models.is_empty() {
+        return models;
+    }
+
+    let Some(usage) = value.get("usage").and_then(Value::as_object) else {
+        return models;
+    };
+    let input_tokens = json_u64(usage, "input_tokens");
+    let output_tokens = json_u64(usage, "output_tokens");
+    let cached_input_tokens = json_u64(usage, "cache_read_input_tokens");
+    let cache_write_input_tokens = json_u64(usage, "cache_creation_input_tokens");
+    let total_tokens = input_tokens
+        .saturating_add(output_tokens)
+        .saturating_add(cached_input_tokens)
+        .saturating_add(cache_write_input_tokens);
+    if total_tokens > 0 {
+        models.push(ModelTokenUsage {
+            model: None,
+            input_tokens,
+            output_tokens,
+            cached_input_tokens,
+            cache_write_input_tokens,
+            reasoning_output_tokens: 0,
+            total_tokens,
+            cost_usd: value.get("total_cost_usd").and_then(Value::as_f64),
+        });
+    }
+    models
 }
 
 fn codex_agent_message_phase(item: &serde_json::Map<String, Value>) -> AssistantMessagePhase {
@@ -2014,6 +2086,32 @@ mod tests {
         match result {
             ParsedProviderLine::Event(ProviderEvent::Completed { .. }) => {}
             other => panic!("expected turn completion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_claude_result_model_usage_before_completion() {
+        let mut state = ProviderStreamState::default();
+        let parsed = parse_provider_stream_line(
+            r#"{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.42,"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":2,"cache_creation_input_tokens":1},"modelUsage":{"claude-sonnet-4-6":{"inputTokens":10,"outputTokens":5,"cacheReadInputTokens":2,"cacheCreationInputTokens":1,"webSearchRequests":0,"costUSD":0.42,"contextWindow":200000,"maxOutputTokens":64000}}}"#,
+            &mut state,
+        );
+
+        match parsed {
+            ParsedProviderLine::Events(events) => {
+                assert_eq!(events.len(), 2);
+                match &events[0] {
+                    ProviderEvent::TurnUsage { models, .. } => {
+                        assert_eq!(models.len(), 1);
+                        assert_eq!(models[0].model.as_deref(), Some("claude-sonnet-4-6"));
+                        assert_eq!(models[0].total_tokens, 18);
+                        assert_eq!(models[0].cost_usd, Some(0.42));
+                    }
+                    other => panic!("expected turn usage, got {other:?}"),
+                }
+                assert!(matches!(events[1], ProviderEvent::Completed { .. }));
+            }
+            other => panic!("expected usage and completion events, got {other:?}"),
         }
     }
 
