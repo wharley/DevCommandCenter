@@ -25,4 +25,5 @@ export type WorkspaceSurfaceSelection =
 			name: string;
 			requestId: number;
 			focusLine?: number | null;
+			focusColumn?: number | null;
 	  };

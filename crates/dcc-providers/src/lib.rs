@@ -111,10 +111,16 @@ pub async fn provider_catalog() -> ProviderCatalog {
         common::stable_cli_capabilities(),
     ));
     for descriptor in &mut providers {
-        let runtime_version = provider_registry()
-            .get(&descriptor.id.0)
-            .and_then(|provider| provider.dcc_mcp_projection_version());
+        let runtime = provider_registry().get(&descriptor.id.0);
+        let runtime_version = runtime.and_then(|provider| provider.dcc_mcp_projection_version());
         expose_runtime_mcp_bridge(descriptor, runtime_version);
+        if let Some(runtime) = runtime {
+            let capabilities = runtime.capabilities();
+            descriptor.capabilities.supports_native_subagent_steering =
+                capabilities.supports_native_subagent_steering;
+            descriptor.capabilities.supports_native_subagent_interrupt =
+                capabilities.supports_native_subagent_interrupt;
+        }
     }
     ProviderCatalog { providers }
 }

@@ -396,6 +396,7 @@ mod tests {
                 provider_runtime: Some(ProviderRuntimeConfig {
                     home_path: Some("/tmp/codex-home".to_string()),
                     shadow_home_path: None,
+                    max_concurrent_subagents: None,
                 }),
                 working_directory_override: None,
                 state: SessionState::Active,
@@ -432,6 +433,7 @@ mod tests {
                 provider_runtime: Some(ProviderRuntimeConfig {
                     home_path: Some("/tmp/gemini-home".to_string()),
                     shadow_home_path: None,
+                    max_concurrent_subagents: None,
                 }),
                 plan_mode: None,
                 effort: None,

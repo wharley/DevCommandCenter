@@ -13,10 +13,11 @@ use dcc_core::domain::session::{
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, ApplyTaskTitleInput, ApplyTaskTitleOutput,
-        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, PrepareTurnOutput,
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
-        SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput, WaitMcpOauthInput,
+        InterruptNativeSubagentInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
+        NativeSubagentControlOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
+        StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput, WaitMcpOauthInput,
         WaitMcpOauthOutput,
     },
     state::SessionCommandState,
@@ -62,6 +63,22 @@ pub async fn steer_turn(
     input: SteerTurnInput,
 ) -> Result<SteerTurnOutput, String> {
     session_command_impl::steer_turn(state, input).await
+}
+
+#[tauri::command]
+pub async fn steer_native_subagent(
+    state: State<'_, SessionCommandState>,
+    input: SteerNativeSubagentInput,
+) -> Result<NativeSubagentControlOutput, String> {
+    session_command_impl::steer_native_subagent(state, input).await
+}
+
+#[tauri::command]
+pub async fn interrupt_native_subagent(
+    state: State<'_, SessionCommandState>,
+    input: InterruptNativeSubagentInput,
+) -> Result<NativeSubagentControlOutput, String> {
+    session_command_impl::interrupt_native_subagent(state, input).await
 }
 
 #[tauri::command]

@@ -61,6 +61,7 @@ export type FileSurfaceSource =
 			path: string;
 			name: string;
 			focusLine?: number | null;
+			focusColumn?: number | null;
 	  };
 
 /** Imperative handle the tab wrapper uses to drive the active surface. */
@@ -485,6 +486,7 @@ export const WorkspaceFileSurface = forwardRef<
 	const fileName = source.kind === "git" ? source.selection.name : source.name;
 	const focusLine =
 		source.kind === "git" ? source.selection.focusLine : source.focusLine;
+	const focusColumn = source.kind === "path" ? source.focusColumn : null;
 	const canEdit = Boolean(editable && workspaceRoot);
 
 	const editorRef = useRef<FileEditorHandle | null>(null);
@@ -830,6 +832,7 @@ export const WorkspaceFileSurface = forwardRef<
 						path={filePath}
 						content={editorContent}
 						focusLine={focusLine ?? null}
+						cursorColumn={focusColumn ?? null}
 						readOnly={!canEdit}
 						onChange={canEdit ? handleEditorChange : undefined}
 						onAnnotate={annotationsEnabled ? handleAnnotate : undefined}

@@ -104,6 +104,7 @@ import {
 	parseMissionValidationPersistence,
 } from "@/features/spec/mission-spec-content";
 import type { WorkspaceSurfaceSelection } from "./workspace-surface";
+import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { buildSafeContinuationPrompt } from "./conversation-recovery";
 
 /** Composer draft injection request; the nonce lets a repeated annotation re-fire. */
@@ -215,6 +216,7 @@ type WorkspacePanelProps = {
 	surfaceSelection: WorkspaceSurfaceSelection | null;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
+	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
 		planTitle: string | null;
@@ -294,6 +296,7 @@ export function WorkspacePanel({
 	surfaceSelection,
 	onCloseSurface,
 	onOpenPlanSurface,
+	onOpenFileReference,
 	onImplementPlanInNewThread,
 	terminalScopes,
 	onOpenTerminal,
@@ -971,6 +974,7 @@ export function WorkspacePanel({
 				name={surfaceSelection.name}
 				openRequestId={surfaceSelection.requestId}
 				focusLine={surfaceSelection.focusLine ?? null}
+				focusColumn={surfaceSelection.focusColumn ?? null}
 				onClose={onCloseSurface}
 				onSubmitAnnotation={handleSubmitAnnotation}
 				onEditInComposer={handleEditAnnotationInComposer}
@@ -1046,6 +1050,7 @@ export function WorkspacePanel({
 					workspacePath={workspacePath}
 					workspaceId={workspaceId}
 					providers={providerChoices}
+					providerId={sessionSnapshot?.providerId ?? selectedProviderId}
 					planMessageId={latestPlanMessage?.id ?? null}
 					planApproved={isLatestPlanApproved}
 					planReadOnly={isLatestPlanReadOnly}
@@ -1061,6 +1066,7 @@ export function WorkspacePanel({
 					onEditPrompt={replaceComposerDraft}
 					onContinueInterrupted={handleContinueInterrupted}
 					onOpenPlan={onOpenPlanSurface}
+					onOpenFileReference={onOpenFileReference}
 				/>
 
 				{effectiveSessionId ? (

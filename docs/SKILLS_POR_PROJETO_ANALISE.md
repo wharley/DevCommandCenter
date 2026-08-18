@@ -14,8 +14,8 @@ Este documento responde com base no código atual do DCC, não em hipóteses.
 
 **Sim, vale a pena — mas não como você provavelmente imagina.**
 
-Reimplementar "skills" como feature própria do DCC tem ganho **próximo de zero**: para o
-Claude, skills de projeto **já funcionam nativamente** (ver §3.1). O diferencial real não
+Reimplementar "skills" como feature própria do DCC tem ganho **próximo de zero**: para
+Claude e Codex, skills de projeto **já funcionam nativamente** (ver §3). O diferencial real não
 é *ter* skills — é o DCC ser o **compilador de contexto único entre múltiplos agentes**:
 o usuário escreve a skill **uma vez**, e o DCC a projeta para o formato nativo de cada
 provider no momento em que o worktree é montado.
@@ -24,8 +24,8 @@ Resumo de uma linha: **não construa um "motor de skills"; construa um "context 
 
 | Caminho | Veredito |
 |---|---|
-| DCC reimplementar skills do zero | ❌ Não vale — duplica o que o Claude já faz |
-| DCC ter UI para gerenciar `.claude/skills/` do repo | ✅ Vale — baixo custo, alto polimento |
+| DCC reimplementar skills do zero | ❌ Não vale — duplica o que os runtimes já fazem |
+| DCC ter UI para gerenciar skills nativas do repo | ✅ Vale — baixo custo, alto polimento |
 | DCC compilar uma fonte única → formato nativo de cada provider | ✅✅ É o diferencial |
 | Guardar a fonte de verdade no `.devcommandcenter/` | ✅ Correto — é a pasta que o DCC possui |
 | Esperar o Claude ler skills de dentro do `.dcc` | ❌ Impossível — ver §4 |
@@ -104,16 +104,17 @@ Implicações:
 - O único risco real é regressão: se algum dia o `settingSources` mudar para `["user"]`,
   as skills de projeto somem silenciosamente. Vale um teste de fumaça que proteja isso.
 
-### 3.2. Codex — `AGENTS.md`, sem progressive disclosure
+### 3.2. Codex — `.agents/skills/`, com progressive disclosure
 
-O Codex CLI lê `AGENTS.md` (raiz do repo e subpastas) e config global em `~/.codex/`.
-`AGENTS.md` é instrução **sempre presente** no contexto — não há um conceito de "skill
-com corpo carregado sob demanda" equivalente ao do Claude. Uma "skill" destinada ao Codex
-só pode ser entregue como **seção de `AGENTS.md`** ou como prompt injetado.
+O Codex atual descobre skills de repositório em `.agents/skills/` desde o diretório de
+trabalho até a raiz do repo. Ele carrega inicialmente nome, descrição e caminho; o corpo
+de `SKILL.md` entra no contexto quando a skill é escolhida explícita ou implicitamente.
+`AGENTS.md` continua válido para instruções sempre ativas e para compatibilidade com
+outros agentes, mas já não é o alvo correto para uma skill nativa do Codex.
 
 ### 3.3. Gemini CLI — `GEMINI.md`
 
-Mesmo padrão do Codex: `GEMINI.md` no repo + `~/.gemini/`. Instrução estática, sem
+`GEMINI.md` no repo + `~/.gemini/`. Instrução estática, sem
 disclosure. O headless adapter do DCC já invoca o Gemini com `--prompt`, então uma skill
 "para Gemini" vira texto de instrução, não artefato estruturado.
 
@@ -126,14 +127,15 @@ precisaria reconsiderar isso ou gravar fora do ignore.
 
 ### 3.5. Droid (Factory) e demais
 
-Convergem para `AGENTS.md` como padrão emergente cross-tool. Tratar como o caso Codex.
+Convergem para `AGENTS.md` como padrão emergente cross-tool. Tratar como alvo legado
+separado do Codex nativo.
 
 ### Tabela-resumo
 
 | Provider | Arquivo de projeto | Progressive disclosure? | Skills nativas? |
 |---|---|---|---|
 | Claude Code | `.claude/skills/`, `CLAUDE.md` | ✅ Sim | ✅ Sim (já ativo no DCC) |
-| Codex | `AGENTS.md` | ❌ Não | ❌ Não |
+| Codex | `.agents/skills/`, `AGENTS.md` | ✅ Sim | ✅ Sim |
 | Gemini | `GEMINI.md` | ❌ Não | ❌ Não |
 | Cursor | `.cursor/rules/*.mdc` | ⚠️ Parcial (por glob) | ⚠️ Parcial |
 | Droid/outros | `AGENTS.md` | ❌ Não | ❌ Não |
@@ -151,7 +153,7 @@ Mas a saída é justamente essa distinção:
 
 - **`.devcommandcenter/skills/` = FONTE DE VERDADE.** É onde *o humano e o DCC* editam.
   Versionado, compartilhado com o time, formato único do DCC.
-- **`.claude/skills/`, `AGENTS.md`, `GEMINI.md` = ARTEFATOS COMPILADOS.** Gerados pelo DCC
+- **`.claude/skills/`, `.agents/skills/`, `AGENTS.md`, `GEMINI.md` = ARTEFATOS COMPILADOS.** Gerados pelo DCC
   a partir da fonte. É *daqui* que os agentes leem.
 
 O `.dcc` é o **código-fonte**; os arquivos nativos são o **build**. O agente nunca lê o
@@ -175,7 +177,7 @@ código-fonte — lê o build. Essa é exatamente a relação que resolve a sua 
    "gerenciador de estado de engenharia".
 
 3. **Skills globais por provider sem sujar o repo.** Via `shadowHomePath`, o DCC pode
-   injetar skills em `~/.claude/skills/` (ou `~/.codex/`) de um HOME-sombra controlado —
+   injetar skills em `~/.claude/skills/` (ou `~/.agents/skills/`) de um HOME-sombra controlado —
    skills pessoais/da org que **não** vão para o `.git` do projeto.
 
 O diferencial do DCC, portanto, não é "ter skills". É ser a **camada de normalização de
@@ -198,6 +200,8 @@ contexto entre agentes heterogêneos** — coerente com o que o README já prome
     context.json        ──────►    iniciar a sessão)       ├──► AGENTS.md
     (quais skills, escopo,                                 │      (## Skill: revisar-pr ...
      quais providers)                                      │       corpo achatado)
+                                                           ├──► .agents/skills/revisar-pr/
+                                                           │      SKILL.md  (Codex nativo)
                                                            │
                                                            └──► GEMINI.md  (idem)
 ```
@@ -206,8 +210,8 @@ contexto entre agentes heterogêneos** — coerente com o que o README já prome
 
 1. **Fonte:** `.devcommandcenter/skills/<nome>/SKILL.md` — formato compatível com o do
    Claude (frontmatter `name`/`description` + corpo). Escolher o formato do Claude como
-   fonte é estratégico: a compilação para Claude vira **cópia identidade** (custo zero,
-   sem perda), e só Codex/Gemini exigem transformação.
+   fonte é estratégico: a compilação para Claude e Codex vira **cópia identidade**
+   (custo zero, sem perda), e só os alvos sempre ativos exigem transformação.
 
 2. **Manifesto:** `.devcommandcenter/context.json` — declara quais skills estão ativas,
    para quais providers cada uma se aplica, e escopo (glob de arquivos, por Comb).
@@ -215,8 +219,9 @@ contexto entre agentes heterogêneos** — coerente com o que o README já prome
 3. **Compilador:** uma etapa nova invocada pelo `setup-worktree.sh` (ponto de injeção
    que **já existe**). Para cada provider configurado no Comb:
    - **Claude:** copia/symlinka `.devcommandcenter/skills/*` → `.claude/skills/*`.
-   - **Codex/Gemini:** concatena os corpos das skills aplicáveis numa seção gerada e
-     delimitada de `AGENTS.md` / `GEMINI.md` (entre marcadores tipo
+   - **Codex:** copia a skill para `.agents/skills/*`, preservando progressive disclosure.
+   - **Droid/legado e Gemini:** concatena os corpos das skills aplicáveis numa seção
+     gerada e delimitada de `AGENTS.md` / `GEMINI.md` (entre marcadores tipo
      `<!-- dcc:skills:start -->` … `<!-- dcc:skills:end -->`, para reescrita idempotente).
    - **Cursor:** gera `.cursor/rules/<nome>.mdc`.
 
@@ -233,9 +238,10 @@ contexto entre agentes heterogêneos** — coerente com o que o README já prome
 
 Nenhuma decisão é boa sem o lado ruim explícito:
 
-1. **Compilação lossy.** Codex/Gemini não têm progressive disclosure. Skills projetadas
-   para eles incham o contexto: 20 skills viram 20 blocos de instrução sempre presentes.
-   Mitigação: o manifesto deve permitir ativar poucas skills por Comb, não todas.
+1. **Compilação lossy nos alvos sempre ativos.** Gemini e consumidores legados de
+   `AGENTS.md` não têm progressive disclosure. Skills projetadas para eles incham o
+   contexto: 20 skills viram 20 blocos de instrução sempre presentes. Mitigação: o
+   manifesto deve permitir ativar poucas skills por Comb, não todas.
 
 2. **Custo de manutenção do transpiler.** São 4–5 formatos de CLI, todos em evolução
    rápida. Cada mudança upstream pode quebrar a compilação. É manutenção contínua real.

@@ -28,6 +28,7 @@ type OpenFile = {
 	path: string;
 	name: string;
 	focusLine: number | null;
+	focusColumn: number | null;
 	/** Preview tabs (italic) are replaced by the next preview; editing pins them. */
 	preview: boolean;
 };
@@ -41,6 +42,7 @@ type FileTabsSurfaceProps = {
 	name: string;
 	openRequestId: number;
 	focusLine?: number | null;
+	focusColumn?: number | null;
 	/** Close the whole surface (no tabs left, or the user closed it). */
 	onClose: () => void;
 	onSubmitAnnotation?: (input: DiffAnnotationSubmit) => void;
@@ -60,6 +62,7 @@ export function FileTabsSurface({
 	name,
 	openRequestId,
 	focusLine,
+	focusColumn,
 	onClose,
 	onSubmitAnnotation,
 	onEditInComposer,
@@ -71,7 +74,13 @@ export function FileTabsSurface({
 		onSubmitAnnotation || onEditInComposer || onAddToReview,
 	);
 	const [openFiles, setOpenFiles] = useState<OpenFile[]>(() => [
-		{ path, name, focusLine: focusLine ?? null, preview: true },
+		{
+			path,
+			name,
+			focusLine: focusLine ?? null,
+			focusColumn: focusColumn ?? null,
+			preview: true,
+		},
 	]);
 	const [activePath, setActivePath] = useState<string>(path);
 	const [stateByPath, setStateByPath] = useState<Record<string, SurfaceState>>(
@@ -137,17 +146,29 @@ export function FileTabsSurface({
 					cursorByPathRef.current.delete(path);
 				}
 				return prev.map((file) =>
-					file.path === path ? { ...file, focusLine: focusLine ?? null } : file,
+					file.path === path
+						? {
+								...file,
+								focusLine: focusLine ?? null,
+								focusColumn: focusColumn ?? null,
+							}
+						: file,
 				);
 			}
 			const withoutPreview = prev.filter((file) => !file.preview);
 			return [
 				...withoutPreview,
-				{ path, name, focusLine: focusLine ?? null, preview: true },
+				{
+					path,
+					name,
+					focusLine: focusLine ?? null,
+					focusColumn: focusColumn ?? null,
+					preview: true,
+				},
 			];
 		});
 		activateTab(path);
-	}, [path, name, openRequestId, focusLine, activateTab]);
+	}, [path, name, openRequestId, focusLine, focusColumn, activateTab]);
 
 	// Preview replacement can remove a tab without going through closeTab. Prune
 	// its externalized editor state as soon as it is no longer represented in the
@@ -186,7 +207,8 @@ export function FileTabsSurface({
 			const focusLine = file?.focusLine ?? null;
 			const cursorLine = savedCursor?.lineNumber ?? focusLine;
 			const cursorColumn =
-				savedCursor?.column ?? (focusLine != null ? 1 : null);
+				savedCursor?.column ??
+				(focusLine != null ? (file?.focusColumn ?? 1) : null);
 
 			setSharedEditorPayload((prev) =>
 				prev?.path === filePath &&
@@ -516,6 +538,7 @@ export function FileTabsSurface({
 								path: file.path,
 								name: file.name,
 								focusLine: file.focusLine,
+								focusColumn: file.focusColumn,
 							}}
 							onStateChange={(next) => handleStateChange(file.path, next)}
 							onClose={onClose}

@@ -209,6 +209,7 @@ import {
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
 import type { WorkspaceSurfaceSelection } from "./features/panel/workspace-surface";
+import type { WorkspaceFileReference } from "./components/workspace-file-reference";
 import {
 	buildMissionContinueCriterionPrompt,
 	buildMissionReanchorPrompt,
@@ -229,6 +230,7 @@ import {
 	getProviderRuntimeDraft,
 	readProviderRuntimeSettings,
 	setProviderRuntimeDraft,
+	type ProviderRuntimeDraft,
 	type ProviderRuntimeSettings,
 	writeProviderRuntimeSettings,
 } from "./features/providers/provider-runtime-settings";
@@ -3498,7 +3500,7 @@ export default function App() {
 	}, []);
 
 	const handleChangeProviderRuntime = useCallback(
-		(providerId: string, draft: { homePath: string; shadowHomePath: string }) => {
+		(providerId: string, draft: ProviderRuntimeDraft) => {
 			setProviderRuntimeSettings((current) =>
 				setProviderRuntimeDraft(current, providerId, draft),
 			);
@@ -3660,6 +3662,22 @@ export default function App() {
 				name,
 				requestId: fileOpenRequestIdRef.current,
 				focusLine: null,
+			});
+		},
+		[],
+	);
+
+	const handleOpenConversationFile = useCallback(
+		({ path, line, column }: WorkspaceFileReference) => {
+			const name = path.split("/").pop() ?? path;
+			fileOpenRequestIdRef.current += 1;
+			setSurfaceSelection({
+				kind: "file-edit",
+				path,
+				name,
+				requestId: fileOpenRequestIdRef.current,
+				focusLine: line,
+				focusColumn: column,
 			});
 		},
 		[],
@@ -4668,6 +4686,7 @@ export default function App() {
 									surfaceSelection={surfaceSelection}
 									onCloseSurface={handleCloseSurface}
 									onOpenPlanSurface={openPlanSurface}
+									onOpenFileReference={handleOpenConversationFile}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
 									inspectorCollapsed={inspectorCollapsed}
 									onInspectorCollapsedChange={setInspectorCollapsed}

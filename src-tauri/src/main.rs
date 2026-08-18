@@ -7090,6 +7090,8 @@ pub fn run() {
             session_commands::run_pull_request_review_agent,
             session_commands::send_turn,
             session_commands::steer_turn,
+            session_commands::steer_native_subagent,
+            session_commands::interrupt_native_subagent,
             session_commands::queue_turn,
             session_commands::list_turn_queue,
             session_commands::remove_queued_turn,

@@ -55,6 +55,8 @@ use crate::codex_mcp::{
 };
 use crate::common::{append_tool_instructions, augmented_path};
 
+const CODEX_MULTI_AGENT_V2_FEATURE: &str = "multi_agent_v2";
+
 // ── JSON-RPC helpers ────────────────────────────────────────────────────────
 
 fn rpc_request(id: u64, method: &str, params: Value) -> String {
@@ -181,6 +183,59 @@ fn detect_codex_mcp_projection() -> Option<CodexMcpProjection> {
         return None;
     }
     CodexMcpProjection::from_cli_output(str::from_utf8(&output.stdout).ok()?)
+}
+
+fn codex_feature_list_contains(output: &str, feature: &str) -> bool {
+    output.lines().any(|line| {
+        line.split_ascii_whitespace()
+            .next()
+            .is_some_and(|name| name == feature)
+    })
+}
+
+fn detect_codex_multi_agent_v2_support() -> bool {
+    let output = StdCommand::new("codex")
+        .args(["features", "list"])
+        .env("PATH", augmented_path())
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    output.status.success()
+        && str::from_utf8(&output.stdout)
+            .is_ok_and(|stdout| codex_feature_list_contains(stdout, CODEX_MULTI_AGENT_V2_FEATURE))
+}
+
+const MAX_CONFIGURED_CODEX_SUBAGENTS: u16 = 64;
+
+fn codex_app_server_args(
+    enable_multi_agent_v2: bool,
+    max_concurrent_subagents: Option<u16>,
+) -> Result<Vec<String>> {
+    let mut args = vec![
+        "app-server".to_string(),
+        "-c".to_string(),
+        "notify=[]".to_string(),
+    ];
+    if enable_multi_agent_v2 {
+        args.extend([
+            "--enable".to_string(),
+            CODEX_MULTI_AGENT_V2_FEATURE.to_string(),
+        ]);
+
+        if let Some(limit) = max_concurrent_subagents {
+            if !(1..=MAX_CONFIGURED_CODEX_SUBAGENTS).contains(&limit) {
+                return Err(CoreError::InvalidInput(format!(
+                    "Codex subagent concurrency must be between 1 and {MAX_CONFIGURED_CODEX_SUBAGENTS}"
+                )));
+            }
+            args.extend([
+                "-c".to_string(),
+                format!("agents.max_concurrent_threads_per_session={limit}"),
+            ]);
+        }
+    }
+    Ok(args)
 }
 
 fn initialize_result_codex_version(result: &Value) -> Option<&str> {
@@ -450,6 +505,62 @@ fn codex_native_subagent_status(value: Option<&Value>) -> Option<NativeSubagentS
     }
 }
 
+fn codex_native_subagent_event_targets_root(
+    event: &ProviderEvent,
+    root_thread_id: Option<&str>,
+) -> bool {
+    let ProviderEvent::NativeSubagentActivity {
+        agent_thread_id,
+        path,
+        ..
+    } = event
+    else {
+        return false;
+    };
+    agent_thread_id
+        .as_deref()
+        .zip(root_thread_id)
+        .is_some_and(|(candidate, root)| candidate == root)
+        || path
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|candidate| matches!(candidate, "root" | "/root"))
+}
+
+fn codex_native_subagent_terminal_event(
+    method: &str,
+    params: &Value,
+    root_thread_id: Option<&str>,
+    was_active_subagent: bool,
+) -> Option<ProviderEvent> {
+    if !was_active_subagent || !matches!(method, "turn/completed" | "error") {
+        return None;
+    }
+    let thread_id = params
+        .get("threadId")
+        .and_then(Value::as_str)
+        .filter(|thread_id| !thread_id.is_empty() && Some(*thread_id) != root_thread_id)?;
+    let status = if method == "error" {
+        NativeSubagentStatus::Failed
+    } else {
+        match codex_native_subagent_status(params.get("turn").and_then(|turn| turn.get("status"))) {
+            Some(NativeSubagentStatus::Failed) => NativeSubagentStatus::Failed,
+            _ => NativeSubagentStatus::Completed,
+        }
+    };
+    Some(ProviderEvent::NativeSubagentActivity {
+        id: format!("codex-native:{thread_id}"),
+        agent_id: None,
+        agent_thread_id: Some(thread_id.to_string()),
+        path: None,
+        name: None,
+        role: None,
+        model: None,
+        status,
+        at: Utc::now().to_rfc3339(),
+    })
+}
+
 /// Converts only schema-backed Codex collaboration items into native
 /// subagent activity. This intentionally does not inspect agent messages or
 /// tool text: without one of these structured items, DCC shows nothing.
@@ -520,6 +631,11 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                         id: format!("codex-native:{identity}"),
                         agent_id,
                         agent_thread_id: thread_id,
+                        path: state
+                            .get("agentPath")
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string),
                         name: state
                             .get("agentNickname")
                             .or_else(|| state.get("name"))
@@ -579,6 +695,7 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                     id: format!("codex-native:{thread_id}"),
                     agent_id: None,
                     agent_thread_id: Some(thread_id.clone()),
+                    path: None,
                     name: None,
                     role: None,
                     model: None,
@@ -633,7 +750,7 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
-                .or(agent_path);
+                .or_else(|| agent_path.clone());
             let role = item
                 .get("agentRole")
                 .or_else(|| item.get("role"))
@@ -647,8 +764,9 @@ fn codex_native_subagent_events(params: &Value) -> Vec<ProviderEvent> {
                 ),
                 agent_id: None,
                 agent_thread_id: thread_id,
-                // Keep the provider's structured path verbatim. It identifies
-                // the executing subagent without guessing a nickname or role.
+                path: agent_path.clone(),
+                // Preserve the legacy name fallback so existing flat cards
+                // render exactly as before when the tree is unavailable.
                 name,
                 role,
                 model,
@@ -918,6 +1036,49 @@ fn classify_codex_model_event(
     }
 }
 
+fn codex_notification_belongs_to_root(params: &Value, current_thread_id: Option<&str>) -> bool {
+    match (
+        params.get("threadId").and_then(Value::as_str),
+        current_thread_id,
+    ) {
+        (Some(source), Some(root)) => source == root,
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
+fn codex_notification_thread_and_turn(params: &Value) -> Option<(&str, &str)> {
+    let thread_id = params
+        .get("threadId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())?;
+    let turn_id = params
+        .get("turn")
+        .and_then(|turn| turn.get("id"))
+        .or_else(|| params.get("turnId"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())?;
+    Some((thread_id, turn_id))
+}
+
+fn project_codex_notification_event(
+    method: &str,
+    params: &Value,
+    current_thread_id: Option<&str>,
+    current_turn_id: Option<&str>,
+) -> Option<ProviderEvent> {
+    let event = notification_to_event(method, params)?;
+    if matches!(event, ProviderEvent::NativeSubagentModelConfirmed { .. }) {
+        return classify_codex_model_event(
+            event,
+            current_thread_id,
+            current_turn_id,
+            params.get("turnId").and_then(Value::as_str),
+        );
+    }
+    codex_notification_belongs_to_root(params, current_thread_id).then_some(event)
+}
+
 // ── Per-session runtime ─────────────────────────────────────────────────────
 
 const MAX_PENDING_CODEX_MCP_APPROVALS: usize = 64;
@@ -926,6 +1087,59 @@ const MAX_ACTIVE_CODEX_MCP_TOOL_CALLS: usize = 128;
 const MAX_CODEX_RPC_STRING_ID_CHARS: usize = 256;
 const MAX_CODEX_MCP_ITEM_ID_CHARS: usize = 256;
 const MAX_CODEX_MCP_TOOL_NAME_CHARS: usize = 128;
+
+fn resolve_active_codex_subagent_turn(
+    target: &str,
+    root_thread_id: Option<&str>,
+    known_subagent_threads: &HashSet<String>,
+    active_subagent_turns: &HashMap<String, String>,
+) -> Result<String> {
+    let target = target.trim();
+    if target.is_empty() || target.chars().count() > MAX_CODEX_RPC_STRING_ID_CHARS {
+        return Err(CoreError::InvalidInput(
+            "Native subagent thread ID is invalid".to_string(),
+        ));
+    }
+    if root_thread_id == Some(target) {
+        return Err(CoreError::InvalidInput(
+            "The root Codex agent cannot be controlled as a subagent".to_string(),
+        ));
+    }
+    if !known_subagent_threads.contains(target) {
+        return Err(CoreError::Provider(
+            "The requested Codex subagent does not belong to this session".to_string(),
+        ));
+    }
+    active_subagent_turns.get(target).cloned().ok_or_else(|| {
+        CoreError::Provider("The requested Codex subagent is no longer active".to_string())
+    })
+}
+
+fn codex_native_subagent_control_prompt(
+    tool: &str,
+    target_thread_id: &str,
+    instruction: Option<&str>,
+) -> String {
+    let target = serde_json::to_string(target_thread_id).expect("thread ID serializes");
+    match (tool, instruction) {
+        ("send_message", Some(instruction)) => {
+            let message = serde_json::to_string(instruction).expect("instruction serializes");
+            format!(
+                "DCC native-subagent supervision request. Immediately call the native \
+                 collaboration.send_message tool exactly once with target={target} and \
+                 message={message}. Do not reinterpret or expand the message. After the tool \
+                 succeeds, continue the current parent task."
+            )
+        }
+        ("interrupt_agent", None) => format!(
+            "DCC native-subagent supervision request. Immediately call the native \
+             collaboration.interrupt_agent tool exactly once with target={target}. Do not \
+             interrupt the root agent or any other child. After the tool succeeds, continue the \
+             current parent task."
+        ),
+        _ => unreachable!("bounded native-subagent control operation"),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ActiveCodexMcpToolCall {
@@ -1264,6 +1478,8 @@ struct SessionRuntime {
     child: Mutex<Child>,
     thread_id: Mutex<Option<String>>,
     active_turn_id: Mutex<Option<String>>,
+    known_subagent_threads: Mutex<HashSet<String>>,
+    active_subagent_turns: Mutex<HashMap<String, String>>,
     mcp_definitions_by_wire_name: Mutex<CodexMcpDefinitionMap>,
     mcp_tool_policies: Mutex<CodexMcpToolPolicyMap>,
     mcp_status_snapshot: StdRwLock<Option<Vec<McpRuntimeStatus>>>,
@@ -1302,6 +1518,18 @@ impl SessionRuntime {
             .map_err(|_| CoreError::Provider(format!("codex {method} timed out")))?
             .map_err(|_| CoreError::Provider(format!("codex {method} cancelled")))?
             .map_err(|e| CoreError::Provider(format!("codex {method} error: {e}")))
+    }
+
+    async fn active_native_subagent_turn(&self, agent_thread_id: &str) -> Result<String> {
+        let root_thread_id = self.thread_id.lock().await.clone();
+        let known_subagent_threads = self.known_subagent_threads.lock().await;
+        let active_subagent_turns = self.active_subagent_turns.lock().await;
+        resolve_active_codex_subagent_turn(
+            agent_thread_id,
+            root_thread_id.as_deref(),
+            &known_subagent_threads,
+            &active_subagent_turns,
+        )
     }
 
     async fn send_mcp_thread_start_request(
@@ -1827,18 +2055,26 @@ pub struct CodexAppServerAdapter {
     pub capabilities: Capabilities,
     pub stable: bool,
     mcp_projection: Option<CodexMcpProjection>,
+    multi_agent_v2_supported: bool,
     state: Arc<AdapterState>,
 }
 
 impl CodexAppServerAdapter {
     pub fn new(capabilities: Capabilities) -> Self {
-        Self::with_mcp_projection(capabilities, detect_codex_mcp_projection())
+        Self::with_runtime_detection(
+            capabilities,
+            detect_codex_mcp_projection(),
+            detect_codex_multi_agent_v2_support(),
+        )
     }
 
-    fn with_mcp_projection(
-        capabilities: Capabilities,
+    fn with_runtime_detection(
+        mut capabilities: Capabilities,
         mcp_projection: Option<CodexMcpProjection>,
+        multi_agent_v2_supported: bool,
     ) -> Self {
+        capabilities.supports_native_subagent_steering = multi_agent_v2_supported;
+        capabilities.supports_native_subagent_interrupt = multi_agent_v2_supported;
         Self {
             id: ProviderId("codex".to_string()),
             label: "Codex".to_string(),
@@ -1846,6 +2082,7 @@ impl CodexAppServerAdapter {
             capabilities,
             stable: true,
             mcp_projection,
+            multi_agent_v2_supported,
             state: Arc::new(AdapterState::default()),
         }
     }
@@ -1856,9 +2093,14 @@ impl CodexAppServerAdapter {
 
     async fn start_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
         let mut cmd = Command::new("codex");
-        cmd.arg("app-server");
-        cmd.arg("-c");
-        cmd.arg("notify=[]");
+        let max_concurrent_subagents = cfg
+            .provider_runtime
+            .as_ref()
+            .and_then(|runtime| runtime.max_concurrent_subagents);
+        cmd.args(codex_app_server_args(
+            self.multi_agent_v2_supported,
+            max_concurrent_subagents,
+        )?);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -1917,6 +2159,8 @@ impl CodexAppServerAdapter {
             child: Mutex::new(child),
             thread_id: Mutex::new(None),
             active_turn_id: Mutex::new(None),
+            known_subagent_threads: Mutex::new(HashSet::new()),
+            active_subagent_turns: Mutex::new(HashMap::new()),
             mcp_definitions_by_wire_name: Mutex::new(HashMap::new()),
             mcp_tool_policies: Mutex::new(HashMap::new()),
             mcp_status_snapshot: StdRwLock::new(None),
@@ -2109,8 +2353,46 @@ impl CodexAppServerAdapter {
 
                 // Notification: has method + params and no response payload.
                 if let (Some(method), Some(params)) = (&msg.method, &msg.params) {
-                    if method == "turn/completed" || method == "error" {
+                    let current_thread_id = runtime.thread_id.lock().await.clone();
+                    let belongs_to_root =
+                        codex_notification_belongs_to_root(params, current_thread_id.as_deref());
+                    let mut terminal_subagent_event = None;
+                    if method == "turn/started" {
+                        if let Some((thread_id, turn_id)) =
+                            codex_notification_thread_and_turn(params)
+                        {
+                            if current_thread_id.as_deref() != Some(thread_id) {
+                                runtime
+                                    .active_subagent_turns
+                                    .lock()
+                                    .await
+                                    .insert(thread_id.to_string(), turn_id.to_string());
+                            }
+                        }
+                    }
+                    if matches!(method.as_str(), "turn/completed" | "error") {
+                        if let Some(thread_id) = params.get("threadId").and_then(Value::as_str) {
+                            if !belongs_to_root {
+                                let was_active_subagent = runtime
+                                    .active_subagent_turns
+                                    .lock()
+                                    .await
+                                    .remove(thread_id)
+                                    .is_some();
+                                terminal_subagent_event = codex_native_subagent_terminal_event(
+                                    method,
+                                    params,
+                                    current_thread_id.as_deref(),
+                                    was_active_subagent,
+                                );
+                            }
+                        }
+                    }
+                    if (method == "turn/completed" || method == "error") && belongs_to_root {
                         *runtime.active_turn_id.lock().await = None;
+                    }
+                    if let Some(event) = terminal_subagent_event.take() {
+                        let _ = runtime.events_tx.send(event);
                     }
                     if let Some(completed_item_id) = update_active_codex_mcp_tool_calls(
                         method,
@@ -2205,6 +2487,31 @@ impl CodexAppServerAdapter {
                     let native_subagent_events = codex_native_subagent_events(params);
                     if !native_subagent_events.is_empty() {
                         for event in native_subagent_events {
+                            if codex_native_subagent_event_targets_root(
+                                &event,
+                                current_thread_id.as_deref(),
+                            ) {
+                                continue;
+                            }
+                            if let ProviderEvent::NativeSubagentActivity {
+                                agent_thread_id: Some(agent_thread_id),
+                                status,
+                                ..
+                            } = &event
+                            {
+                                runtime
+                                    .known_subagent_threads
+                                    .lock()
+                                    .await
+                                    .insert(agent_thread_id.clone());
+                                if !matches!(status, NativeSubagentStatus::Running) {
+                                    runtime
+                                        .active_subagent_turns
+                                        .lock()
+                                        .await
+                                        .remove(agent_thread_id);
+                                }
+                            }
                             let _ = runtime.events_tx.send(event);
                         }
                         if let Some((call_id, thread_id)) =
@@ -2225,15 +2532,13 @@ impl CodexAppServerAdapter {
                                 );
                             }
                         }
-                    } else if let Some(event) = notification_to_event(method, params) {
-                        let current_thread_id = runtime.thread_id.lock().await.clone();
+                    } else {
                         let current_turn_id = runtime.active_turn_id.lock().await.clone();
-                        let source_turn_id = params.get("turnId").and_then(Value::as_str);
-                        if let Some(event) = classify_codex_model_event(
-                            event,
+                        if let Some(event) = project_codex_notification_event(
+                            method,
+                            params,
                             current_thread_id.as_deref(),
                             current_turn_id.as_deref(),
-                            source_turn_id,
                         ) {
                             let _ = runtime.events_tx.send(event);
                         }
@@ -2502,6 +2807,114 @@ impl Provider for CodexAppServerAdapter {
         Ok(())
     }
 
+    async fn steer_native_subagent(
+        &self,
+        handle: &SessionHandle,
+        agent_thread_id: &str,
+        prompt: &str,
+    ) -> Result<()> {
+        if !self.multi_agent_v2_supported {
+            return Err(CoreError::Provider(
+                "The installed Codex does not support native subagent supervision".to_string(),
+            ));
+        }
+        let prompt = prompt.trim();
+        if prompt.is_empty() || prompt.chars().count() > 32_000 {
+            return Err(CoreError::InvalidInput(
+                "Native subagent instruction must contain between 1 and 32000 characters"
+                    .to_string(),
+            ));
+        }
+        let runtime = self
+            .session_runtime(&handle.session_id)
+            .await
+            .ok_or_else(|| {
+                CoreError::Provider(format!(
+                    "no codex runtime for session {}",
+                    handle.session_id.0
+                ))
+            })?;
+        let target = agent_thread_id.trim();
+        let _child_turn_id = runtime.active_native_subagent_turn(target).await?;
+        let root_thread_id = runtime
+            .thread_id
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
+        let root_turn_id = runtime.active_turn_id.lock().await.clone().ok_or_else(|| {
+            CoreError::Provider("codex session has no active parent turn".to_string())
+        })?;
+        runtime
+            .send_request(
+                "turn/steer",
+                json!({
+                    "threadId": root_thread_id,
+                    "input": [{
+                        "type": "text",
+                        "text": codex_native_subagent_control_prompt(
+                            "send_message",
+                            target,
+                            Some(prompt),
+                        ),
+                    }],
+                    "expectedTurnId": root_turn_id,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn interrupt_native_subagent(
+        &self,
+        handle: &SessionHandle,
+        agent_thread_id: &str,
+    ) -> Result<()> {
+        if !self.multi_agent_v2_supported {
+            return Err(CoreError::Provider(
+                "The installed Codex does not support native subagent supervision".to_string(),
+            ));
+        }
+        let runtime = self
+            .session_runtime(&handle.session_id)
+            .await
+            .ok_or_else(|| {
+                CoreError::Provider(format!(
+                    "no codex runtime for session {}",
+                    handle.session_id.0
+                ))
+            })?;
+        let target = agent_thread_id.trim();
+        let _child_turn_id = runtime.active_native_subagent_turn(target).await?;
+        let root_thread_id = runtime
+            .thread_id
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
+        let root_turn_id = runtime.active_turn_id.lock().await.clone().ok_or_else(|| {
+            CoreError::Provider("codex session has no active parent turn".to_string())
+        })?;
+        runtime
+            .send_request(
+                "turn/steer",
+                json!({
+                    "threadId": root_thread_id,
+                    "input": [{
+                        "type": "text",
+                        "text": codex_native_subagent_control_prompt(
+                            "interrupt_agent",
+                            target,
+                            None,
+                        ),
+                    }],
+                    "expectedTurnId": root_turn_id,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn start_mcp_oauth(
         &self,
         handle: &SessionHandle,
@@ -2660,14 +3073,159 @@ mod tests {
             None
         );
 
-        let adapter = CodexAppServerAdapter::with_mcp_projection(
+        let adapter = CodexAppServerAdapter::with_runtime_detection(
             crate::codex::stable_codex_capabilities(),
             CodexMcpProjection::from_cli_output("codex-cli 0.146.0\n"),
+            true,
         );
         assert_eq!(
             adapter.dcc_mcp_projection_version(),
             Some("codex-cli@0.146.0+app-server-protocol-v2")
         );
+        assert!(adapter.multi_agent_v2_supported);
+        assert!(adapter.capabilities.supports_native_subagent_steering);
+        assert!(adapter.capabilities.supports_native_subagent_interrupt);
+
+        let unsupported = CodexAppServerAdapter::with_runtime_detection(
+            crate::codex::stable_codex_capabilities(),
+            None,
+            false,
+        );
+        assert!(!unsupported.capabilities.supports_native_subagent_steering);
+        assert!(!unsupported.capabilities.supports_native_subagent_interrupt);
+    }
+
+    #[test]
+    fn extracts_child_turn_identity_for_native_supervision() {
+        assert_eq!(
+            codex_notification_thread_and_turn(&json!({
+                "threadId": "thread-child",
+                "turn": { "id": "turn-child", "status": "inProgress" }
+            })),
+            Some(("thread-child", "turn-child"))
+        );
+        assert_eq!(
+            codex_notification_thread_and_turn(&json!({
+                "threadId": "thread-child",
+                "turnId": "turn-child"
+            })),
+            Some(("thread-child", "turn-child"))
+        );
+        assert_eq!(
+            codex_notification_thread_and_turn(&json!({
+                "threadId": "thread-child"
+            })),
+            None
+        );
+    }
+
+    #[test]
+    fn native_supervision_never_targets_the_root_or_an_unobserved_thread() {
+        let known = HashSet::from(["thread-child".to_string()]);
+        let active = HashMap::from([("thread-child".to_string(), "turn-child".to_string())]);
+
+        assert_eq!(
+            resolve_active_codex_subagent_turn(
+                "thread-child",
+                Some("thread-root"),
+                &known,
+                &active,
+            )
+            .expect("known active child"),
+            "turn-child"
+        );
+        assert!(matches!(
+            resolve_active_codex_subagent_turn("thread-root", Some("thread-root"), &known, &active,),
+            Err(CoreError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            resolve_active_codex_subagent_turn(
+                "thread-other",
+                Some("thread-root"),
+                &known,
+                &active,
+            ),
+            Err(CoreError::Provider(_))
+        ));
+    }
+
+    #[test]
+    fn native_supervision_is_mediated_by_the_root_collaboration_tools() {
+        let steer = codex_native_subagent_control_prompt(
+            "send_message",
+            "thread-child",
+            Some("review \"only\" this\nfile"),
+        );
+        assert!(steer.contains("collaboration.send_message"));
+        assert!(steer.contains("target=\"thread-child\""));
+        assert!(steer.contains("message=\"review \\\"only\\\" this\\nfile\""));
+
+        let interrupt =
+            codex_native_subagent_control_prompt("interrupt_agent", "thread-child", None);
+        assert!(interrupt.contains("collaboration.interrupt_agent"));
+        assert!(interrupt.contains("target=\"thread-child\""));
+        assert!(interrupt.contains("Do not interrupt the root agent"));
+    }
+
+    #[test]
+    fn enables_multi_agent_v2_only_when_the_cli_advertises_it() {
+        let features = r#"
+multi_agent                          stable             true
+multi_agent_v2                       stable             false
+unified_exec                         stable             true
+"#;
+        assert!(codex_feature_list_contains(
+            features,
+            CODEX_MULTI_AGENT_V2_FEATURE
+        ));
+        assert!(!codex_feature_list_contains(features, "multi_agent_v3"));
+        assert!(!codex_feature_list_contains(
+            "multi_agent_v20 stable true\n",
+            CODEX_MULTI_AGENT_V2_FEATURE
+        ));
+
+        assert_eq!(
+            codex_app_server_args(true, None).expect("valid Codex arguments"),
+            vec![
+                "app-server".to_string(),
+                "-c".to_string(),
+                "notify=[]".to_string(),
+                "--enable".to_string(),
+                "multi_agent_v2".to_string()
+            ]
+        );
+        assert_eq!(
+            codex_app_server_args(false, Some(4)).expect("legacy fallback arguments"),
+            vec![
+                "app-server".to_string(),
+                "-c".to_string(),
+                "notify=[]".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn configures_codex_subagent_concurrency_only_for_multi_agent_v2() {
+        assert_eq!(
+            codex_app_server_args(true, Some(4)).expect("valid concurrency"),
+            vec![
+                "app-server".to_string(),
+                "-c".to_string(),
+                "notify=[]".to_string(),
+                "--enable".to_string(),
+                "multi_agent_v2".to_string(),
+                "-c".to_string(),
+                "agents.max_concurrent_threads_per_session=4".to_string(),
+            ]
+        );
+        assert!(matches!(
+            codex_app_server_args(true, Some(0)),
+            Err(CoreError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            codex_app_server_args(true, Some(MAX_CONFIGURED_CODEX_SUBAGENTS + 1)),
+            Err(CoreError::InvalidInput(_))
+        ));
     }
 
     #[test]
@@ -2968,12 +3526,14 @@ mod tests {
             [ProviderEvent::NativeSubagentActivity {
                 id,
                 agent_thread_id: Some(thread_id),
+                path: Some(path),
                 name: Some(agent_path),
                 model: None,
                 status: NativeSubagentStatus::Running,
                 ..
             }] if id == "codex-native:thread-child-1"
                 && thread_id == "thread-child-1"
+                && path == "root/terra"
                 && agent_path == "root/terra"
         ));
     }
@@ -3043,11 +3603,35 @@ mod tests {
         assert!(matches!(
             events.as_slice(),
             [ProviderEvent::NativeSubagentActivity {
+                path: Some(path),
                 name: Some(name),
                 model: Some(model),
                 status: NativeSubagentStatus::Running,
                 ..
-            }] if name == "/root/luna" && model == "gpt-5.6-luna"
+            }] if path == "/root/luna" && name == "/root/luna" && model == "gpt-5.6-luna"
+        ));
+    }
+
+    #[test]
+    fn keeps_codex_agent_path_separate_from_its_nickname() {
+        let events = codex_native_subagent_events(&json!({
+            "item": {
+                "id": "activity-named",
+                "type": "subAgentActivity",
+                "agentPath": "/root/review/api",
+                "agentThreadId": "thread-child-named",
+                "agentNickname": "Lorentz",
+                "kind": "started"
+            }
+        }));
+        assert!(matches!(
+            events.as_slice(),
+            [ProviderEvent::NativeSubagentActivity {
+                path: Some(path),
+                name: Some(name),
+                status: NativeSubagentStatus::Running,
+                ..
+            }] if path == "/root/review/api" && name == "Lorentz"
         ));
     }
 
@@ -3145,6 +3729,51 @@ mod tests {
     }
 
     #[test]
+    fn keeps_child_turn_lifecycle_out_of_the_parent_provider_stream() {
+        let child_message = project_codex_notification_event(
+            "item/completed",
+            &json!({
+                "threadId": "thread-child",
+                "turnId": "turn-child",
+                "item": {
+                    "id": "child-message",
+                    "type": "agentMessage",
+                    "text": "child result",
+                    "phase": "final_answer"
+                }
+            }),
+            Some("thread-root"),
+            Some("turn-root"),
+        );
+        assert!(child_message.is_none());
+
+        let child_completion = project_codex_notification_event(
+            "turn/completed",
+            &json!({
+                "threadId": "thread-child",
+                "turn": { "id": "turn-child", "status": "completed" }
+            }),
+            Some("thread-root"),
+            Some("turn-root"),
+        );
+        assert!(child_completion.is_none());
+
+        let root_completion = project_codex_notification_event(
+            "turn/completed",
+            &json!({
+                "threadId": "thread-root",
+                "turn": { "id": "turn-root", "status": "completed" }
+            }),
+            Some("thread-root"),
+            Some("turn-root"),
+        );
+        assert!(matches!(
+            root_completion,
+            Some(ProviderEvent::Completed { .. })
+        ));
+    }
+
+    #[test]
     fn maps_codex_native_subagent_terminal_statuses_from_the_schema() {
         assert_eq!(
             codex_native_subagent_status(Some(&json!("completed"))),
@@ -3158,6 +3787,95 @@ mod tests {
             codex_native_subagent_status(Some(&json!("interrupted"))),
             Some(NativeSubagentStatus::Failed)
         );
+    }
+
+    #[test]
+    fn projects_child_turn_completion_as_terminal_subagent_activity() {
+        let completed = codex_native_subagent_terminal_event(
+            "turn/completed",
+            &json!({
+                "threadId": "thread-child",
+                "turn": { "id": "turn-child", "status": "completed" }
+            }),
+            Some("thread-root"),
+            true,
+        );
+        assert!(matches!(
+            completed,
+            Some(ProviderEvent::NativeSubagentActivity {
+                id,
+                agent_thread_id: Some(thread_id),
+                status: NativeSubagentStatus::Completed,
+                ..
+            }) if id == "codex-native:thread-child" && thread_id == "thread-child"
+        ));
+
+        let failed = codex_native_subagent_terminal_event(
+            "turn/completed",
+            &json!({
+                "threadId": "thread-child",
+                "turn": { "id": "turn-child", "status": "failed" }
+            }),
+            Some("thread-root"),
+            true,
+        );
+        assert!(matches!(
+            failed,
+            Some(ProviderEvent::NativeSubagentActivity {
+                status: NativeSubagentStatus::Failed,
+                ..
+            })
+        ));
+
+        assert!(codex_native_subagent_terminal_event(
+            "turn/completed",
+            &json!({
+                "threadId": "thread-root",
+                "turn": { "id": "turn-root", "status": "completed" }
+            }),
+            Some("thread-root"),
+            true,
+        )
+        .is_none());
+        assert!(codex_native_subagent_terminal_event(
+            "turn/completed",
+            &json!({
+                "threadId": "thread-child",
+                "turn": { "id": "turn-child", "status": "completed" }
+            }),
+            Some("thread-root"),
+            false,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn excludes_the_root_thread_from_native_subagent_activity() {
+        let root_events = codex_native_subagent_events(&json!({
+            "item": {
+                "id": "activity-root",
+                "type": "subAgentActivity",
+                "agentPath": "/root",
+                "agentThreadId": "thread-root",
+                "kind": "started"
+            }
+        }));
+        assert!(root_events
+            .iter()
+            .any(|event| codex_native_subagent_event_targets_root(event, Some("thread-root"))));
+
+        let child_events = codex_native_subagent_events(&json!({
+            "item": {
+                "id": "activity-child",
+                "type": "subAgentActivity",
+                "agentPath": "/root/reviewer",
+                "agentThreadId": "thread-child",
+                "kind": "started"
+            }
+        }));
+        assert!(child_events
+            .iter()
+            .all(|event| !codex_native_subagent_event_targets_root(event, Some("thread-root"))));
     }
 
     #[test]

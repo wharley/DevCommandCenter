@@ -97,11 +97,12 @@ use dcc_tauri::commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
     },
     session_commands::{
-        ApplyTaskTitleInput, ApplyTaskTitleOutput, ListMcpRuntimeStatusesInput,
-        ListMcpRuntimeStatusesOutput, McpTurnPreflightState, PrepareTurnOutput,
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
-        SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput, WaitMcpOauthInput,
+        ApplyTaskTitleInput, ApplyTaskTitleOutput, InterruptNativeSubagentInput,
+        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, McpTurnPreflightState,
+        NativeSubagentControlOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
+        StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput, WaitMcpOauthInput,
         WaitMcpOauthOutput,
     },
     workspace_commands::{
@@ -267,6 +268,8 @@ struct SessionMethods {
     prepare_turn: String,
     send_turn: String,
     steer_turn: String,
+    steer_native_subagent: String,
+    interrupt_native_subagent: String,
     queue_turn: String,
     list_turn_queue: String,
     remove_queued_turn: String,
@@ -617,6 +620,9 @@ fn main() {
         .typ::<SendTurnOutput>()
         .typ::<SteerTurnInput>()
         .typ::<SteerTurnOutput>()
+        .typ::<SteerNativeSubagentInput>()
+        .typ::<InterruptNativeSubagentInput>()
+        .typ::<NativeSubagentControlOutput>()
         .typ::<QueuedTurn>()
         .typ::<QueueTurnInput>()
         .typ::<RemoveQueuedTurnInput>()
@@ -791,6 +797,8 @@ fn main() {
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),
             steer_turn: "steer_turn".to_string(),
+            steer_native_subagent: "steer_native_subagent".to_string(),
+            interrupt_native_subagent: "interrupt_native_subagent".to_string(),
             queue_turn: "queue_turn".to_string(),
             list_turn_queue: "list_turn_queue".to_string(),
             remove_queued_turn: "remove_queued_turn".to_string(),

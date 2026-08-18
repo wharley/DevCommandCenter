@@ -69,6 +69,7 @@ export type WorkspaceMessageAnnotation =
 			id: string;
 			agentId?: string;
 			agentThreadId?: string;
+			path?: string;
 			name?: string;
 			role?: string;
 			model?: string;
@@ -291,6 +292,7 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					id: record.kind.id,
 					agent_id: record.kind.agentId,
 					agent_thread_id: record.kind.agentThreadId,
+					path: record.kind.path ?? null,
 					name: record.kind.name,
 					role: record.kind.role,
 					model: record.kind.model,
@@ -1491,6 +1493,7 @@ export function projectWorkspaceMessages(
 				id: item.id,
 				agentId: item.agent_id ?? undefined,
 				agentThreadId: item.agent_thread_id ?? undefined,
+				path: item.path ?? undefined,
 				name: item.name ?? undefined,
 				role: item.role ?? undefined,
 				requestedModel: requestedSubagentModels.get(item.agent_thread_id ?? item.id),
@@ -1501,6 +1504,7 @@ export function projectWorkspaceMessages(
 			if (annotation.type === "native-subagent") {
 				annotation.agentId = item.agent_id ?? annotation.agentId;
 				annotation.agentThreadId = item.agent_thread_id ?? annotation.agentThreadId;
+				annotation.path = item.path ?? annotation.path;
 				annotation.name = item.name ?? annotation.name;
 				annotation.role = item.role ?? annotation.role;
 				annotation.model = item.model ?? annotation.model;

@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
+	CODEX_SUBAGENT_CONCURRENCY_OPTIONS,
 	getProviderRuntimeDraft,
 	supportsProviderRuntime,
 	type ProviderRuntimeDraft,
@@ -73,6 +74,40 @@ function ProviderRuntimeCard({
 				</Button>
 			</CardHeader>
 			<CardContent className="space-y-3 px-4 py-4">
+				{provider.id === "codex" ? (
+					<div className="space-y-1.5 rounded-xl border border-border/50 bg-background/60 p-3">
+						<Label
+							htmlFor="codex-max-concurrent-subagents"
+							className="text-[12px]"
+						>
+							{t("settings.model.runtimeSubagentConcurrency")}
+						</Label>
+						<select
+							id="codex-max-concurrent-subagents"
+							value={draft.maxConcurrentSubagents}
+							onChange={(event) =>
+								onChangeRuntime(provider.id, {
+									...draft,
+									maxConcurrentSubagents: event.target.value,
+								})
+							}
+							className="h-9 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground shadow-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring"
+						>
+							<option value="">
+								{t("settings.model.runtimeSubagentConcurrencyAuto")}
+							</option>
+							{CODEX_SUBAGENT_CONCURRENCY_OPTIONS.map((option) => (
+								<option key={option} value={String(option)}>
+									{option}
+								</option>
+							))}
+						</select>
+						<p className="text-[11px] leading-relaxed text-muted-foreground">
+							{t("settings.model.runtimeSubagentConcurrencyHint")}
+						</p>
+					</div>
+				) : null}
+
 				<div className="space-y-1.5">
 					<Label htmlFor={`provider-home-${provider.id}`} className="text-[12px]">
 						{t("settings.model.runtimeHomePath")}

@@ -272,6 +272,8 @@ pub enum SessionEventKind {
         agent_id: Option<String>,
         #[serde(rename = "agentThreadId")]
         agent_thread_id: Option<String>,
+        #[serde(default)]
+        path: Option<String>,
         name: Option<String>,
         role: Option<String>,
         model: Option<String>,
@@ -667,5 +669,26 @@ mod tests {
     #[test]
     fn fold_returns_none_for_empty_logs() {
         assert!(SessionProjection::fold(&[]).is_none());
+    }
+
+    #[test]
+    fn native_subagent_path_is_backward_compatible_with_existing_events() {
+        let kind = serde_json::from_value::<SessionEventKind>(serde_json::json!({
+            "type": "turn_native_subagent_activity",
+            "turnId": "turn-1",
+            "id": "agent-1",
+            "agentId": null,
+            "agentThreadId": "thread-1",
+            "name": "Reviewer",
+            "role": "reviewer",
+            "model": null,
+            "status": "running"
+        }))
+        .expect("pre-tree native subagent events remain readable");
+
+        assert!(matches!(
+            kind,
+            SessionEventKind::TurnNativeSubagentActivity { path: None, .. }
+        ));
     }
 }

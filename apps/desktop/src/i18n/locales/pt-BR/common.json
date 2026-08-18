@@ -1498,13 +1498,16 @@
       "usageWindowSevenDaySonnet": "7 dias · Sonnet",
       "usageWindowOverage": "Uso adicional",
       "usageWindowSubscription": "Assinatura",
-      "runtimeTitle": "Homes dos provedores",
-      "runtimeHint": "Codex, Claude e Gemini usam homes isolados aqui. Cursor fica intocado.",
-      "runtimeBadge": "Runtime isolado",
+      "runtimeTitle": "Runtime dos provedores",
+      "runtimeHint": "Configure homes isolados e a orquestração do Codex para novas sessões. Cursor fica intocado.",
+      "runtimeBadge": "Runtime por sessão",
       "runtimeCardBody": "Homes isolados mantêm o runtime do provedor independente do shell do usuário.",
       "runtimeReset": "Redefinir",
       "runtimeHomePath": "Caminho do home",
       "runtimeShadowHomePath": "Caminho do shadow home",
+      "runtimeSubagentConcurrency": "Subagentes simultâneos",
+      "runtimeSubagentConcurrencyAuto": "Automático (Codex)",
+      "runtimeSubagentConcurrencyHint": "Limita os subagentes abertos ao mesmo tempo, sem contar o agente principal. Vale para novas sessões e não altera o config.toml.",
       "runtimeHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex",
       "runtimeShadowHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex-shadow",
       "runtimeNoSupportedProviders": "Nenhum provedor suportado está disponível no catálogo atual."
@@ -2080,11 +2083,31 @@
       "label": "Subagente",
       "fallbackName": "Subagente",
       "modelNotReported": "modelo não informado",
+      "treeLabel": "Árvore de agentes",
+      "principalAgent": "Agente principal",
+      "treeCount_one": "{{count}} subagente",
+      "treeCount_other": "{{count}} subagentes",
       "status": {
         "running": "Trabalhando",
         "completed": "Concluído",
-        "failed": "Falhou"
+        "failed": "Falhou",
+        "settled": "Encerrado"
+      },
+      "control": {
+        "instruct": "Instruir",
+        "interrupt": "Interromper",
+        "instructionPlaceholder": "Adicione uma orientação para este subagente…",
+        "cancel": "Cancelar",
+        "send": "Enviar instrução",
+        "instructionSent": "Instrução encaminhada pelo agente principal",
+        "instructionFailed": "Não foi possível encaminhar a instrução",
+        "interrupted": "Pedido de interrupção encaminhado pelo agente principal",
+        "interruptFailed": "Não foi possível encaminhar o pedido de interrupção"
       }
+    },
+    "fileReference": {
+      "open": "Abrir {{path}} no Code Dock",
+      "openAtPosition": "Abrir {{path}} no Code Dock em {{position}}"
     },
     "toolCall": {
       "running": "Executando",
@@ -2198,10 +2221,10 @@
       "bodyPlaceholder": "Instruções, passos, exemplos…",
       "targetAgents": "Agentes alvo"
     },
-    "targetsHint": "O Claude recebe uma cópia fiel (progressive disclosure). AGENTS.md e GEMINI.md são instruções sempre ativas; o Cursor escreve uma regra por skill e mantenha poucas skills ativas em alvos sempre-ativos.",
+    "targetsHint": "Claude e Codex recebem skills nativas com progressive disclosure. AGENTS.md e GEMINI.md são instruções sempre ativas; o Cursor escreve uma regra por skill. Mantenha poucas skills nos alvos sempre ativos.",
     "disableInvocation": {
       "title": "Desativar invocação pelo modelo",
-      "body": "Oculta do catálogo automático do modelo (excluída do AGENTS.md). Continua disponível como slash command."
+      "body": "No Codex, impede ativação implícita; em AGENTS.md e GEMINI.md, exclui o bloco sempre ativo. Continua disponível explicitamente quando o runtime suporta."
     },
     "cancel": "Cancelar",
     "save": "Salvar skill",
@@ -2209,6 +2232,10 @@
     "count_one": "{{count}} skill",
     "count_other": "{{count}} skills",
     "newSkill": "Nova skill",
+    "presets": {
+      "orchestration": "Preset de orquestração",
+      "orchestrationInstalled": "Orquestração instalada"
+    },
     "emptyList": "Ainda não há skills. Crie uma, e ela será compilada para os agentes que você escolher.",
     "slashOnlyBadge": "só slash",
     "editAria": "Editar {{name}}",

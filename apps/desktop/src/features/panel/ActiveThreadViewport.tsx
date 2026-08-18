@@ -27,6 +27,7 @@ import {
 	precedingUserPrompt,
 } from "./conversation-recovery";
 import { ConversationTrail } from "./ConversationTrail";
+import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import {
 	CONVERSATION_MESSAGE_PAGE_SIZE,
 	conversationWindowStart,
@@ -44,6 +45,7 @@ type ActiveThreadViewportProps = {
 	workspacePath: string | null;
 	workspaceId?: string | null;
 	providers?: ProviderCatalog["providers"];
+	providerId?: string | null;
 	planMessageId: string | null;
 	planApproved: boolean;
 	planReadOnly: boolean;
@@ -63,6 +65,7 @@ type ActiveThreadViewportProps = {
 	onEditPrompt?: (prompt: string) => void;
 	onContinueInterrupted?: (originalPrompt: string | null) => Promise<void> | void;
 	onOpenPlan: () => void;
+	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 };
 
 export function ActiveThreadViewport({
@@ -76,6 +79,7 @@ export function ActiveThreadViewport({
 	workspacePath,
 	workspaceId,
 	providers,
+	providerId,
 	planMessageId,
 	planApproved,
 	planReadOnly,
@@ -91,6 +95,7 @@ export function ActiveThreadViewport({
 	onEditPrompt,
 	onContinueInterrupted,
 	onOpenPlan,
+	onOpenFileReference,
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
 	const [hasNewActivity, setHasNewActivity] = useState(false);
@@ -304,6 +309,7 @@ export function ActiveThreadViewport({
 												}
 												sessionId={sessionId}
 												providers={providers}
+												providerId={providerId}
 												modelId={message.model}
 												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 												activeMissionSpecHash={activeMissionSpecHash}
@@ -321,6 +327,7 @@ export function ActiveThreadViewport({
 														: undefined
 												}
 												onOpenPlan={onOpenPlan}
+												onOpenFileReference={onOpenFileReference}
 												hidePendingApprovals
 											/>
 										</div>

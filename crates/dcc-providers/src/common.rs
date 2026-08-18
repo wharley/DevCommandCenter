@@ -211,6 +211,7 @@ fn parse_claude_native_subagent_hook(
         id,
         agent_id: Some(agent_id),
         agent_thread_id: None,
+        path: None,
         name: None,
         role: Some(role),
         model: None,
@@ -619,6 +620,7 @@ fn parse_claude_stream_value(
                             id,
                             agent_id: metadata.agent_id,
                             agent_thread_id: None,
+                            path: None,
                             name: metadata.name,
                             role: metadata.role,
                             model: None,
@@ -725,6 +727,7 @@ fn parse_claude_stream_value(
                         id,
                         agent_id: metadata.agent_id,
                         agent_thread_id: None,
+                        path: None,
                         name: metadata.name,
                         role: metadata.role,
                         model: None,
@@ -841,6 +844,7 @@ fn parse_claude_terminal_value(
                         id: id.to_string(),
                         agent_id: metadata.agent_id,
                         agent_thread_id: None,
+                        path: None,
                         name: metadata.name,
                         role: metadata.role,
                         model: None,
@@ -1821,6 +1825,8 @@ pub fn stable_cli_capabilities() -> Capabilities {
     Capabilities {
         streaming: true,
         supports_steering: false,
+        supports_native_subagent_steering: false,
+        supports_native_subagent_interrupt: false,
         mcp_support: McpSupportLevel::Unsupported,
         mcp_oauth_support: dcc_core::domain::provider::McpOauthSupport::Unsupported,
         tools: true,
@@ -1840,6 +1846,8 @@ pub fn experimental_cli_capabilities() -> Capabilities {
     Capabilities {
         streaming: true,
         supports_steering: false,
+        supports_native_subagent_steering: false,
+        supports_native_subagent_interrupt: false,
         mcp_support: McpSupportLevel::Unsupported,
         mcp_oauth_support: dcc_core::domain::provider::McpOauthSupport::Unsupported,
         tools: true,
@@ -1895,6 +1903,7 @@ mod tests {
             provider_runtime: Some(ProviderRuntimeConfig {
                 home_path: Some(shared_home.to_string_lossy().to_string()),
                 shadow_home_path: Some(shadow_home.to_string_lossy().to_string()),
+                max_concurrent_subagents: None,
             }),
             mcp_servers: Vec::new(),
         };

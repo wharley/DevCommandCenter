@@ -946,6 +946,8 @@ mod tests {
             Capabilities {
                 streaming: true,
                 supports_steering: false,
+                supports_native_subagent_steering: false,
+                supports_native_subagent_interrupt: false,
                 mcp_support: dcc_core::domain::provider::McpSupportLevel::Unsupported,
                 mcp_oauth_support: dcc_core::domain::provider::McpOauthSupport::Unsupported,
                 tools: true,

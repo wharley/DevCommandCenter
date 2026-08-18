@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 
-/** Target agents a source skill compiles to. `agents` covers Codex/Droid via AGENTS.md. */
-export type SkillTargetAgent = "claude" | "agents" | "gemini" | "cursor";
+/** Target agents a source skill compiles to. `agents` is the legacy always-on AGENTS.md target. */
+export type SkillTargetAgent =
+	| "claude"
+	| "codex"
+	| "agents"
+	| "gemini"
+	| "cursor";
 
 /** Provider-neutral skill. Source of truth lives in `.devcommandcenter/skills/`. */
 export type SkillRecord = {
@@ -44,7 +49,8 @@ export function deleteSkill(projectRoot: string, name: string) {
 
 /**
  * Projects the neutral source into each agent's native format inside `targetRoot`
- * (the active worktree, where agents run): `.claude/skills/` (copy) + `AGENTS.md` (flattened).
+ * (the active worktree, where agents run): native skill directories plus legacy
+ * always-on instruction targets such as `AGENTS.md`.
  */
 export function compileSkills(projectRoot: string, targetRoot: string) {
 	return invoke<void>("skills_compile", { projectRoot, targetRoot });

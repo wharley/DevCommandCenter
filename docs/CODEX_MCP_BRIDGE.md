@@ -21,6 +21,149 @@ actual contract through `thread/start.params.config.mcp_servers` and
 a missing field, rejected request, malformed status, or lost permission
 correlation fails closed.
 
+For interactive sessions, DCC also probes `codex features list`. When the
+installed CLI advertises `multi_agent_v2`, DCC enables that feature only for
+the child `codex app-server` process. It does not edit the user's `config.toml`.
+Older CLIs, failed probes, and unrecognized output fall back to the normal
+app-server launch without the override. Structured `collabAgentToolCall` and
+`subAgentActivity` notifications are then projected into DCC's native
+subagent timeline.
+
+## Per-session subagent concurrency
+
+The provider runtime settings expose a Codex-only **Concurrent subagents**
+control. **Automatic (Codex)** is the default and omits the setting entirely,
+so the installed Codex keeps choosing its own default. Selecting 1, 2, 4, 6,
+or 8 adds the official
+`agents.max_concurrent_threads_per_session=<n>` override only to the new child
+`codex app-server` process. The primary Sol thread is not counted by this
+limit, and DCC never edits the user's `config.toml`.
+
+The preference is stored with the existing provider-runtime settings and
+snapshotted into the DCC session configuration. It is passed only when the
+installed CLI advertises `multi_agent_v2`; otherwise DCC silently preserves
+the previous launch command. The adapter also rejects malformed or excessive
+values before spawning Codex, even if a caller bypasses the desktop selector.
+
+## Project orchestration skill
+
+The Skills dialog offers an opt-in **DCC Orchestration** preset for Codex. The
+editable source remains under
+`.devcommandcenter/skills/dcc-orchestration/SKILL.md`; DCC compiles it into the
+active worktree as `.agents/skills/dcc-orchestration/SKILL.md`, the current
+Codex repository-skill location. This keeps the workflow on Codex's native
+progressive-disclosure path instead of flattening it into every prompt through
+`AGENTS.md`.
+
+The preset asks the primary agent to keep ownership of requirements and
+integration, prefer Terra for bounded supporting work, avoid overlapping
+parallel writes, wait for required results, and validate the combined output.
+It respects Codex's configured concurrency rather than setting a DCC-specific
+limit. The Skills dialog exposes the generated entry for review before saving;
+installing the preset never changes a project silently.
+
+For Codex-targeted skills, DCC also generates `agents/openai.yaml` with an
+explicit `policy.allow_implicit_invocation` value derived from the existing
+"Disable model invocation" switch. The legacy `agents` target remains available
+for Droid and other consumers that require an always-on `AGENTS.md` block.
+
+## Authenticated multi-agent smoke
+
+The real Sol-to-Terra smoke is ignored by default and cannot consume model
+tokens in the normal test suite. With an authenticated local Codex session, run:
+
+```sh
+DCC_RUN_CODEX_MULTI_AGENT_SMOKE=1 \
+  cargo test -p dcc-mcp-fixture --test codex_multi_agent_smoke \
+  authenticated_codex_sol_delegates_to_terra_and_integrates_result \
+  -- --ignored --exact --nocapture
+```
+
+The fixture installs the shipped orchestration preset in a disposable
+workspace, starts the parent as `gpt-5.6-sol`, requests exactly one
+`gpt-5.6-terra` child, waits for it, and requires an exact parent integration
+sentinel. It rejects shell, file, web, MCP, permission, and user-input activity.
+The DCC event stream must identify the requested child and its running state.
+Because current app-server parent notifications do not always include the
+child's effective-model and terminal events, the fixture additionally audits
+the child's structured Codex rollout for the Terra `turn_context` and
+`task_complete` records; it does not inspect or print conversation content.
+
+Child-thread messages and `turn/completed` notifications are filtered out of
+the parent provider stream. This prevents a child completion from ending the
+Sol turn early or replacing its final response in the DCC timeline. The smoke
+removes its disposable workspace and stops the app-server, but the normal
+Codex thread-history records remain in the active `CODEX_HOME`. The run uses
+real models and therefore consumes tokens.
+
+The same opt-in suite also verifies direct same-turn steering of a running
+Terra child. The child enters a bounded interruptible wait, DCC sends a new
+instruction through `turn/steer`, and Sol must integrate only the replacement
+sentinel:
+
+```sh
+DCC_RUN_CODEX_MULTI_AGENT_SMOKE=1 \
+  cargo test -p dcc-mcp-fixture --test codex_multi_agent_smoke \
+  authenticated_codex_can_steer_a_running_terra_child_directly \
+  -- --ignored --exact --nocapture
+```
+
+Interruption has its own opt-in case. It requires a running Terra child to
+report `interrupted` while the Sol parent remains active and returns its exact
+confirmation sentinel:
+
+```sh
+DCC_RUN_CODEX_MULTI_AGENT_SMOKE=1 \
+  cargo test -p dcc-mcp-fixture --test codex_multi_agent_smoke \
+  authenticated_codex_can_interrupt_terra_without_stopping_sol \
+  -- --ignored --exact --nocapture
+```
+
+## Agent tree presentation
+
+DCC keeps the existing native-subagent cards and adds hierarchy only when the
+provider reports a bounded canonical path such as `/root/reviewer/api`. The
+provider contract carries that value in `path`, separately from the optional
+nickname in `name`; this prevents the tree from replacing or reinterpreting an
+identity already shown by the flat card.
+
+The conversation renders an implicit main-agent root and nests each path
+segment beneath it. Missing intermediate segments remain visible as structural
+branches. Events without a valid root path—including Claude events and older
+providers—continue through the unchanged flat-card presentation. Historical
+Codex sessions that stored a canonical path in `name` are recognized as a
+compatibility fallback. Invalid, unbounded, or incomplete paths are never used
+to hide an event.
+
+Codex may also report the primary thread through `subAgentActivity` with the
+exact path `/root`; DCC keeps that activity in the explicit main-agent row and
+never creates a duplicate child card for it. A child `turn/completed` or child
+error is projected as a sparse terminal activity keyed by `agentThreadId`, so
+the existing card retains its name, path, and model while moving out of
+**Working**. Historical turns recorded before terminal projection display a
+neutral **Ended** state after the parent settles instead of appearing to run
+forever.
+
+## Native subagent supervision
+
+When the installed Codex advertises `multi_agent_v2`, the provider catalog also
+exposes native-subagent steering and interruption. The conversation tree shows
+**Instruct** and **Interrupt** only on a running child in the currently
+streaming parent turn, and only when Codex supplied an `agentThreadId`. Other
+providers, completed children, historical messages, and older Codex versions
+retain the existing read-only cards.
+
+The adapter records child `turn/started` notifications and accepts only a
+thread previously observed as a native child of the same DCC session. It
+requires both the child's current turn and a live parent turn, and explicitly
+rejects the root as a child target. Codex Multi-Agent V2 rejects direct
+app-server input to child threads, so DCC steers the root turn with one bounded
+supervision request: Sol must invoke `collaboration.send_message` or
+`collaboration.interrupt_agent` for the validated child. The UI reports that
+the request was forwarded through the main agent; it does not claim the child
+action completed merely because `turn/steer` accepted it. Instructions are
+bounded to 32,000 characters.
+
 The provider catalog reports this path as `runtimeBridge`, distinct from a
 `verifiedBridge` backed by the complete authenticated conformance suite. The
 selected session's live status is authoritative. A failed negotiation records a

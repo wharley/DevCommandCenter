@@ -1101,6 +1101,7 @@ impl SessionCommandState {
                         id,
                         agent_id,
                         agent_thread_id,
+                        path,
                         name,
                         role,
                         model,
@@ -1117,6 +1118,7 @@ impl SessionCommandState {
                                         id: id.clone(),
                                         agent_id: agent_id.clone(),
                                         agent_thread_id: agent_thread_id.clone(),
+                                        path: path.clone(),
                                         name: name.clone(),
                                         role: role.clone(),
                                         model: model.clone(),
@@ -1128,6 +1130,7 @@ impl SessionCommandState {
                                         id,
                                         agent_id,
                                         agent_thread_id,
+                                        path,
                                         name,
                                         role,
                                         model,
@@ -1914,6 +1917,63 @@ impl SessionCommandState {
             )));
         }
         provider.steer(&binding.handle, prompt).await
+    }
+
+    pub async fn steer_native_subagent(
+        &self,
+        session_id: &SessionId,
+        agent_thread_id: &str,
+        prompt: &str,
+    ) -> Result<()> {
+        let binding = self.provider_binding(session_id)?.ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "no provider binding for session {}",
+                session_id.0
+            ))
+        })?;
+        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "unknown provider runtime: {}",
+                binding.provider_id
+            ))
+        })?;
+        if !provider.capabilities().supports_native_subagent_steering {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {} does not support steering native subagents",
+                binding.provider_id
+            )));
+        }
+        provider
+            .steer_native_subagent(&binding.handle, agent_thread_id, prompt)
+            .await
+    }
+
+    pub async fn interrupt_native_subagent(
+        &self,
+        session_id: &SessionId,
+        agent_thread_id: &str,
+    ) -> Result<()> {
+        let binding = self.provider_binding(session_id)?.ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "no provider binding for session {}",
+                session_id.0
+            ))
+        })?;
+        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "unknown provider runtime: {}",
+                binding.provider_id
+            ))
+        })?;
+        if !provider.capabilities().supports_native_subagent_interrupt {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {} does not support interrupting native subagents",
+                binding.provider_id
+            )));
+        }
+        provider
+            .interrupt_native_subagent(&binding.handle, agent_thread_id)
+            .await
     }
 
     pub async fn start_mcp_oauth(

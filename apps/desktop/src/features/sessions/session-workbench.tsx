@@ -69,6 +69,7 @@ import {
 } from "@/lib/workspace-api";
 import { pathBasename } from "@/lib/path-basename";
 import { Button } from "@/components/ui/button";
+import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import {
 	Dialog,
 	DialogClose,
@@ -151,6 +152,7 @@ type SessionWorkbenchProps = {
 	surfaceSelection: WorkspaceSurfaceSelection | null;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
+	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
 		planTitle: string | null;
@@ -238,6 +240,7 @@ export function SessionWorkbench({
 	surfaceSelection,
 	onCloseSurface,
 	onOpenPlanSurface,
+	onOpenFileReference,
 	onImplementPlanInNewThread,
 	composerPrefill,
 	onComposerPrefillConsumed,
@@ -739,6 +742,7 @@ export function SessionWorkbench({
 						surfaceSelection={surfaceSelection}
 						onCloseSurface={onCloseSurface}
 						onOpenPlanSurface={onOpenPlanSurface}
+						onOpenFileReference={onOpenFileReference}
 						onImplementPlanInNewThread={onImplementPlanInNewThread}
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}

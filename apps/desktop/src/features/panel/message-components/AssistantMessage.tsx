@@ -1,10 +1,24 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertCircle, Bot, ChevronRight, Copy, RotateCcw } from "lucide-react";
+import {
+	Activity,
+	AlertCircle,
+	Bot,
+	ChevronRight,
+	Copy,
+	GitBranch,
+	MessageSquarePlus,
+	RotateCcw,
+	Square,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { LazyStreamdown } from "@/components/streamdown-loader";
+import { WorkspaceFileLinkProvider } from "@/components/workspace-file-link-context";
+import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { cn } from "@/lib/utils";
 import { Reasoning } from "@/components/ai/reasoning";
 import { ToolCall } from "@/components/ai/tool-call";
@@ -25,6 +39,17 @@ import {
 	resolveNativeSubagentPresentation,
 } from "../native-subagent-presentation";
 import {
+	nativeSubagentControlAvailability,
+	nativeSubagentDisplayStatus,
+	projectNativeSubagentTree,
+	type NativeSubagentAnnotation,
+	type NativeSubagentTreeNode,
+} from "../native-subagent-tree";
+import {
+	interruptNativeSubagent,
+	steerNativeSubagent,
+} from "@/lib/session-api";
+import {
 	ASSISTANT_STREAMDOWN_SHIKI_THEME,
 	assistantStreamingAnimation,
 } from "./assistant-streaming-rendering";
@@ -32,6 +57,13 @@ import {
 type AssistantStatus = {
 	type: "incomplete";
 	reason?: string;
+};
+
+type NativeSubagentSupervision = {
+	sessionId?: string | null;
+	parentStreaming?: boolean;
+	supportsSteering?: boolean;
+	supportsInterrupt?: boolean;
 };
 
 function AssistantTextFallback({ text }: { text: string }) {
@@ -52,11 +84,6 @@ function isActivityAnnotation(annotation: WorkspaceMessageAnnotation) {
 	);
 }
 
-type NativeSubagentAnnotation = Extract<
-	WorkspaceMessageAnnotation,
-	{ type: "native-subagent" }
->;
-
 function resolveModelLabel(
 	model: string | null | undefined,
 	providers: ProviderCatalog["providers"] = [],
@@ -73,11 +100,20 @@ function resolveModelLabel(
 function NativeSubagentCard({
 	annotation,
 	providers,
+	treeLabel,
+	nested = false,
+	supervision,
 }: {
 	annotation: NativeSubagentAnnotation;
 	providers?: ProviderCatalog["providers"];
+	treeLabel?: string;
+	nested?: boolean;
+	supervision?: NativeSubagentSupervision;
 }) {
 	const { t } = useTranslation("common");
+	const [instructionOpen, setInstructionOpen] = useState(false);
+	const [instruction, setInstruction] = useState("");
+	const [pendingAction, setPendingAction] = useState<"steer" | "interrupt" | null>(null);
 	const {
 		modelName: modelLabel,
 		requestedModelName: requestedModelLabel,
@@ -96,29 +132,272 @@ function NativeSubagentCard({
 				Boolean(value) && value !== identity && all.indexOf(value) === index,
 		)
 		.join(" · ");
-	const status = t(`conversation.nativeSubagent.status.${annotation.status}`);
+	const status = t(
+		`conversation.nativeSubagent.status.${nativeSubagentDisplayStatus(
+			annotation,
+			supervision?.parentStreaming,
+		)}`,
+	);
+	const controls = nativeSubagentControlAvailability(annotation, supervision ?? {});
+	const canControl = controls.canSteer || controls.canInterrupt;
+
+	const handleSteer = async () => {
+		const prompt = instruction.trim();
+		if (!prompt || !supervision?.sessionId || !annotation.agentThreadId) return;
+		setPendingAction("steer");
+		try {
+			await steerNativeSubagent({
+				sessionId: supervision.sessionId,
+				agentThreadId: annotation.agentThreadId,
+				prompt,
+			});
+			setInstruction("");
+			setInstructionOpen(false);
+			toast.success(t("conversation.nativeSubagent.control.instructionSent"));
+		} catch (error) {
+			toast.error(t("conversation.nativeSubagent.control.instructionFailed"), {
+				description: error instanceof Error ? error.message : String(error),
+			});
+		} finally {
+			setPendingAction(null);
+		}
+	};
+
+	const handleInterrupt = async () => {
+		if (!supervision?.sessionId || !annotation.agentThreadId) return;
+		setPendingAction("interrupt");
+		try {
+			await interruptNativeSubagent({
+				sessionId: supervision.sessionId,
+				agentThreadId: annotation.agentThreadId,
+			});
+			setInstructionOpen(false);
+			toast.success(t("conversation.nativeSubagent.control.interrupted"));
+		} catch (error) {
+			toast.error(t("conversation.nativeSubagent.control.interruptFailed"), {
+				description: error instanceof Error ? error.message : String(error),
+			});
+		} finally {
+			setPendingAction(null);
+		}
+	};
 
 	return (
 		<div
-			className="mb-2 flex min-w-0 items-center gap-2 rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2 text-[12px]"
+			className={cn(
+				"flex min-w-0 flex-col gap-2 rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2 text-[12px]",
+				!nested && "mb-2",
+			)}
 			title={annotation.agentThreadId ?? undefined}
 		>
-			<Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-			<div className="min-w-0">
-				<div className="flex min-w-0 items-center gap-1.5">
-					<span className="shrink-0 font-medium text-foreground/85">
-						{t("conversation.nativeSubagent.label")}
-					</span>
-					{identity ? (
-						<span className="truncate text-foreground/85">{identity}</span>
-					) : null}
+			<div className="flex min-w-0 flex-wrap items-center gap-2">
+				<Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+				<div className="min-w-0 flex-1">
+					<div className="flex min-w-0 items-center gap-1.5">
+						<span className="shrink-0 font-medium text-foreground/85">
+							{treeLabel ?? t("conversation.nativeSubagent.label")}
+						</span>
+						{identity && identity !== treeLabel ? (
+							<span className="truncate text-foreground/85">{identity}</span>
+						) : null}
+					</div>
+					{details ? <div className="truncate text-muted-foreground">{details}</div> : null}
 				</div>
-				{details ? <div className="truncate text-muted-foreground">{details}</div> : null}
+				<span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+					{status}
+				</span>
+				{canControl ? (
+					<div className="flex shrink-0 items-center gap-1">
+						{controls.canSteer ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="h-7 gap-1 px-2 text-[11px]"
+								disabled={pendingAction != null}
+								onClick={() => setInstructionOpen((open) => !open)}
+							>
+								<MessageSquarePlus className="size-3" aria-hidden />
+								{t("conversation.nativeSubagent.control.instruct")}
+							</Button>
+						) : null}
+						{controls.canInterrupt ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="h-7 gap-1 px-2 text-[11px] text-destructive hover:text-destructive"
+								disabled={pendingAction != null}
+								onClick={() => void handleInterrupt()}
+							>
+								<Square className="size-3" aria-hidden />
+								{t("conversation.nativeSubagent.control.interrupt")}
+							</Button>
+						) : null}
+					</div>
+				) : null}
 			</div>
-			<span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
-				{status}
-			</span>
+			{instructionOpen && controls.canSteer ? (
+				<form
+					className="ml-5 flex min-w-0 flex-col gap-2"
+					onSubmit={(event) => {
+						event.preventDefault();
+						void handleSteer();
+					}}
+				>
+					<Textarea
+						value={instruction}
+						onChange={(event) => setInstruction(event.target.value)}
+						placeholder={t("conversation.nativeSubagent.control.instructionPlaceholder")}
+						maxLength={32_000}
+						rows={2}
+						className="min-h-16 resize-y text-[12px]"
+						autoFocus
+					/>
+					<div className="flex justify-end gap-1.5">
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="h-7 px-2 text-[11px]"
+							disabled={pendingAction != null}
+							onClick={() => setInstructionOpen(false)}
+						>
+							{t("conversation.nativeSubagent.control.cancel")}
+						</Button>
+						<Button
+							type="submit"
+							size="sm"
+							className="h-7 px-2 text-[11px]"
+							disabled={!instruction.trim() || pendingAction != null}
+						>
+							{t("conversation.nativeSubagent.control.send")}
+						</Button>
+					</div>
+				</form>
+			) : null}
 		</div>
+	);
+}
+
+function NativeSubagentTreeBranch({
+	node,
+	providers,
+	depth,
+	supervision,
+}: {
+	node: NativeSubagentTreeNode;
+	providers?: ProviderCatalog["providers"];
+	depth: number;
+	supervision?: NativeSubagentSupervision;
+}) {
+	return (
+		<div
+			role="treeitem"
+			aria-level={depth + 2}
+			className="relative border-l border-border/60 pl-3"
+		>
+			<div className="absolute -left-px top-4 h-px w-3 bg-border/60" aria-hidden />
+			{node.annotation ? (
+				<NativeSubagentCard
+					annotation={node.annotation}
+					providers={providers}
+					treeLabel={node.label}
+					nested
+					supervision={supervision}
+				/>
+			) : (
+				<div className="flex min-h-8 items-center gap-2 rounded-md px-2 text-[12px] text-muted-foreground">
+					<GitBranch className="size-3.5 shrink-0" aria-hidden />
+					<span className="truncate font-medium text-foreground/80">{node.label}</span>
+				</div>
+			)}
+			{node.children.length > 0 ? (
+				<div className="ml-3 mt-1 flex flex-col gap-1">
+					{node.children.map((child) => (
+						<NativeSubagentTreeBranch
+							key={child.key}
+							node={child}
+							providers={providers}
+							depth={depth + 1}
+							supervision={supervision}
+						/>
+					))}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function NativeSubagentTree({
+	annotations,
+	providers,
+	parentModelLabel,
+	supervision,
+}: {
+	annotations: NativeSubagentAnnotation[];
+	providers?: ProviderCatalog["providers"];
+	parentModelLabel?: string | null;
+	supervision?: NativeSubagentSupervision;
+}) {
+	const { t } = useTranslation("common");
+	const projection = useMemo(
+		() => projectNativeSubagentTree(annotations),
+		[annotations],
+	);
+
+	return (
+		<>
+			{projection.roots.length > 0 ? (
+				<div className="mb-2 rounded-lg border border-border/60 bg-muted/10 px-2.5 py-2">
+					<div className="mb-2 flex items-center gap-2 text-[12px] text-muted-foreground">
+						<GitBranch className="size-3.5 shrink-0" aria-hidden />
+						<span className="font-medium text-foreground/85">
+							{t("conversation.nativeSubagent.treeLabel")}
+						</span>
+						<span className="ml-auto text-[11px]">
+							{t("conversation.nativeSubagent.treeCount", {
+								count: projection.hierarchicalCount,
+							})}
+						</span>
+					</div>
+					<div role="tree" className="flex flex-col gap-1">
+						<div
+							role="treeitem"
+							aria-level={1}
+							className="flex min-h-8 items-center gap-2 rounded-md bg-muted/20 px-2 text-[12px]"
+						>
+							<Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+							<span className="font-medium text-foreground/85">
+								{t("conversation.nativeSubagent.principalAgent")}
+							</span>
+							{parentModelLabel ? (
+								<span className="truncate text-muted-foreground">{parentModelLabel}</span>
+							) : null}
+						</div>
+						<div className="ml-3 flex flex-col gap-1">
+							{projection.roots.map((node) => (
+								<NativeSubagentTreeBranch
+									key={node.key}
+									node={node}
+									providers={providers}
+									depth={0}
+									supervision={supervision}
+								/>
+							))}
+						</div>
+					</div>
+				</div>
+			) : null}
+			{projection.ungrouped.map((annotation) => (
+				<NativeSubagentCard
+					key={`native-subagent-${annotation.id}`}
+					annotation={annotation}
+					providers={providers}
+					supervision={supervision}
+				/>
+			))}
+		</>
 	);
 }
 
@@ -222,6 +501,7 @@ export function AssistantMessage({
 	isPlanReadOnly,
 	sessionId,
 	providers,
+	providerId,
 	modelId,
 	activeMissionSpecRelativePath,
 	activeMissionSpecHash,
@@ -229,6 +509,7 @@ export function AssistantMessage({
 	onDelegateTaskApprove,
 	onContinue,
 	onOpenPlan,
+	onOpenFileReference,
 	hidePendingApprovals = false,
 }: {
 	content: string;
@@ -243,6 +524,7 @@ export function AssistantMessage({
 	isPlanReadOnly?: boolean;
 	sessionId?: string | null;
 	providers?: ProviderCatalog["providers"];
+	providerId?: string | null;
 	modelId?: string | null;
 	activeMissionSpecRelativePath?: string | null;
 	activeMissionSpecHash?: string | null;
@@ -250,10 +532,23 @@ export function AssistantMessage({
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	onContinue?: () => void;
 	onOpenPlan?: () => void;
+	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	hidePendingApprovals?: boolean;
 }) {
 	const { t } = useTranslation("common");
 	const modelLabel = resolveModelLabel(modelId, providers);
+	const provider = providers?.find((candidate) => candidate.id === providerId);
+	const nativeSubagentSupervision = useMemo<NativeSubagentSupervision>(
+		() => ({
+			sessionId,
+			parentStreaming: streaming,
+			supportsSteering:
+				provider?.capabilities.supportsNativeSubagentSteering ?? false,
+			supportsInterrupt:
+				provider?.capabilities.supportsNativeSubagentInterrupt ?? false,
+		}),
+		[provider, sessionId, streaming],
+	);
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
 	const displayedPlan = plan ?? {
 		title: "Plan",
@@ -296,19 +591,42 @@ export function AssistantMessage({
 	const isValidationStale = Boolean(
 		validationReport?.specHash &&
 			activeMissionSpecHash &&
-			validationReport.specHash !== activeMissionSpecHash,
+		validationReport.specHash !== activeMissionSpecHash,
+	);
+	const handleOpenFileReference = useCallback(
+		(reference: WorkspaceFileReference) => {
+			onOpenFileReference?.(reference);
+		},
+		[onOpenFileReference],
+	);
+	const getFileReferenceTitle = useCallback(
+		(reference: WorkspaceFileReference) =>
+			reference.line
+				? t("conversation.fileReference.openAtPosition", {
+						path: reference.path,
+						position: reference.column
+							? `${reference.line}:${reference.column}`
+							: String(reference.line),
+					})
+				: t("conversation.fileReference.open", { path: reference.path }),
+		[t],
 	);
 	return (
-		<div
-			data-message-role="assistant"
-			className="conversation-thread-enter conversation-fade-in group/assistant flex min-w-0 justify-start"
+		<WorkspaceFileLinkProvider
+			workspaceRoot={onOpenFileReference ? (workspacePath ?? null) : null}
+			onOpenFile={handleOpenFileReference}
+			getTitle={getFileReferenceTitle}
 		>
 			<div
-				className={cn(
-					"relative flex min-w-0 flex-col pb-5",
-					showPlanCard ? "w-full max-w-3xl" : "w-full max-w-[52rem]",
-				)}
+				data-message-role="assistant"
+				className="conversation-thread-enter conversation-fade-in group/assistant flex min-w-0 justify-start"
 			>
+				<div
+					className={cn(
+						"relative flex min-w-0 flex-col pb-5",
+						showPlanCard ? "w-full max-w-3xl" : "w-full max-w-[52rem]",
+					)}
+				>
 				{modelLabel ? (
 					<div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
 						<Bot className="size-3.5 shrink-0" aria-hidden />
@@ -391,13 +709,14 @@ export function AssistantMessage({
 						})}
 					</AssistantActivityGroup>
 				) : null}
-				{nativeSubagentAnnotations.map((annotation) => (
-					<NativeSubagentCard
-						key={`native-subagent-${annotation.id}`}
-						annotation={annotation}
+				{nativeSubagentAnnotations.length > 0 ? (
+					<NativeSubagentTree
+						annotations={nativeSubagentAnnotations}
 						providers={providers}
+						parentModelLabel={modelLabel}
+						supervision={nativeSubagentSupervision}
 					/>
-				))}
+				) : null}
 				{requestAnnotations.length ? (
 					<div className="mb-2 flex flex-col gap-2">
 						{requestAnnotations.map((annotation) => {
@@ -520,7 +839,8 @@ export function AssistantMessage({
 						</Button>
 					</div>
 				)}
+				</div>
 			</div>
-		</div>
+		</WorkspaceFileLinkProvider>
 	);
 }

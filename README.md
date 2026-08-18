@@ -119,6 +119,7 @@ DCC was shaped by the broader ecosystem of AI coding tools, terminal-native deve
 - [Contributing guide](CONTRIBUTING.md)
 - [Support](SUPPORT.md)
 - [Release guide](docs/RELEASING.md)
+- [Codex orchestration](docs/CODEX_ORCHESTRATION.md)
 - [Delegation agents](docs/DELEGATION_AGENTS.md)
 - [Mobile web companion](docs/MOBILE_WEB.md)
 - [Mobile pairing security model](docs/SECURITY_MOBILE_PAIRING.md)

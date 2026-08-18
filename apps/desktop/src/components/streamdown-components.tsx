@@ -3,6 +3,13 @@ import type { Components, ExtraProps } from "streamdown";
 import { CodeBlock } from "@/components/ai/code-block";
 import { openExternal, openPath } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
+import {
+	parseWorkspaceFileReference,
+} from "./workspace-file-reference";
+import {
+	type WorkspaceFileLinkContextValue,
+	useWorkspaceFileLink,
+} from "./workspace-file-link-context";
 
 function getCodeLanguage(children: React.ReactNode) {
 	if (!React.isValidElement<{ className?: string }>(children)) {
@@ -32,13 +39,25 @@ function StreamdownPre({
 	return <CodeBlock code={code} language={language} className={className} />;
 }
 
-async function handleLinkClick(event: React.MouseEvent<HTMLAnchorElement>, href?: string) {
+async function handleLinkClick(
+	event: React.MouseEvent<HTMLAnchorElement>,
+	href: string | undefined,
+	workspaceFileLink: WorkspaceFileLinkContextValue | null,
+) {
 	if (!href) {
 		return;
 	}
 
 	event.preventDefault();
 	event.stopPropagation();
+	const workspaceReference = parseWorkspaceFileReference(
+		href,
+		workspaceFileLink?.workspaceRoot,
+	);
+	if (workspaceReference && workspaceFileLink) {
+		workspaceFileLink.onOpenFile(workspaceReference);
+		return;
+	}
 
 	if (href.startsWith("file://")) {
 		await openPath(decodeURIComponent(href.replace("file://", "")));
@@ -57,16 +76,28 @@ function StreamdownAnchor({
 	children,
 	className,
 	href,
+	title,
 	...props
 }: React.ComponentProps<"a"> & ExtraProps) {
+	const workspaceFileLink = useWorkspaceFileLink();
+	const workspaceReference = parseWorkspaceFileReference(
+		href,
+		workspaceFileLink?.workspaceRoot,
+	);
+	const fileTitle =
+		workspaceReference && workspaceFileLink?.getTitle
+			? workspaceFileLink.getTitle(workspaceReference)
+			: undefined;
 	return (
 		<a
 			href={href}
 			onClick={(event) => {
-				void handleLinkClick(event, href);
+				void handleLinkClick(event, href, workspaceFileLink);
 			}}
+			title={fileTitle ?? title}
 			className={cn(
 				"text-primary underline-offset-4 hover:underline",
+				workspaceReference && "cursor-pointer",
 				className,
 			)}
 			{...props}

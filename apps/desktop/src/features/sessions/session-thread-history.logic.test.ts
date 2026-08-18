@@ -1161,6 +1161,7 @@ describe("projectWorkspaceMessages", () => {
 				id: "agent-call-1",
 				agentId: "agent-1",
 				agentThreadId: "thread-child-1",
+				path: "/root/terra",
 				name: "Terra",
 				role: "explorer",
 				model: null,
@@ -1181,6 +1182,7 @@ describe("projectWorkspaceMessages", () => {
 					type: "native-subagent",
 					id: "agent-call-1",
 					name: "Terra",
+					path: "/root/terra",
 					role: "explorer",
 					model: undefined,
 					status: "running",
@@ -1204,6 +1206,7 @@ describe("projectWorkspaceMessages", () => {
 				id: status === "running" ? "spawn-call" : "child-status",
 				agentId: "agent-1",
 				agentThreadId: "thread-child-1",
+				path: "/root/reviewer",
 				name: status === "running" ? "Reviewer" : null,
 				role: status === "running" ? "reviewer" : null,
 				model: status === "running" ? "gpt-5.6-terra" : null,
@@ -1278,6 +1281,7 @@ describe("projectWorkspaceMessages", () => {
 				agentId: "agent-1",
 				agentThreadId: "thread-child-1",
 				name: "Terra",
+				path: "/root/reviewer",
 				role: "worker",
 				model: "gpt-5.6-terra",
 				status: "running",
@@ -1294,6 +1298,7 @@ describe("projectWorkspaceMessages", () => {
 				id: "agent-1",
 				agentId: null,
 				agentThreadId: null,
+				path: null,
 				name: null,
 				role: null,
 				model: null,
@@ -1316,6 +1321,7 @@ describe("projectWorkspaceMessages", () => {
 				type: "native-subagent",
 				id: "agent-1",
 				name: "Terra",
+				path: "/root/reviewer",
 				role: "worker",
 				model: "gpt-5.6-terra",
 				status: "completed",
@@ -1335,6 +1341,7 @@ describe("projectWorkspaceMessages", () => {
 				id: "codex-native:state-key",
 				agentId: null,
 				agentThreadId: "thread-child-1",
+				path: null,
 				name: "Luna",
 				role: "worker",
 				model: "gpt-5.5",
@@ -1352,6 +1359,7 @@ describe("projectWorkspaceMessages", () => {
 				id: "codex-native:thread-child-1",
 				agentId: null,
 				agentThreadId: "thread-child-1",
+				path: null,
 				name: null,
 				role: null,
 				model: null,
@@ -1389,7 +1397,7 @@ describe("projectWorkspaceMessages", () => {
 					sessionId: "session-a",
 					sequence: 2,
 					occurredAt: "2026-05-01T12:00:01Z",
-					kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "child", agentId: null, agentThreadId: "thread-luna", name: "/root/luna", role: null, model: null, status: "running" },
+					kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "child", agentId: null, agentThreadId: "thread-luna", path: "/root/luna", name: "/root/luna", role: null, model: null, status: "running" },
 				},
 				{
 					eventId: "requested",
@@ -1407,7 +1415,7 @@ describe("projectWorkspaceMessages", () => {
 		const messages = projectWorkspaceMessages([
 			sessionTurnStarted("session-a", "turn-1", "Investigate"),
 			{ eventId: "confirmed", sessionId: "session-a", sequence: 2, occurredAt: "2026-05-01T12:00:01Z", kind: { type: "turn_native_subagent_model_confirmed", turnId: "turn-1", correlationId: "thread-luna", model: "gpt-5.6-luna" } },
-			{ eventId: "activity", sessionId: "session-a", sequence: 3, occurredAt: "2026-05-01T12:00:02Z", kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "child", agentId: null, agentThreadId: "thread-luna", name: "/root/luna", role: null, model: null, status: "running" } },
+			{ eventId: "activity", sessionId: "session-a", sequence: 3, occurredAt: "2026-05-01T12:00:02Z", kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "child", agentId: null, agentThreadId: "thread-luna", path: "/root/luna", name: "/root/luna", role: null, model: null, status: "running" } },
 		], [], "session-a");
 		expect(messages[1]?.annotations?.[0]).toMatchObject({ model: "gpt-5.6-luna" });
 	});
@@ -1417,7 +1425,7 @@ describe("projectWorkspaceMessages", () => {
 			sessionTurnStarted("session-a", "turn-1", "Review"),
 			{ eventId: "requested", sessionId: "session-a", sequence: 2, occurredAt: "2026-05-01T12:00:01Z", kind: { type: "turn_native_subagent_model_requested", turnId: "turn-1", correlationId: "toolu_agent", model: "opus" } },
 			{ eventId: "confirmed", sessionId: "session-a", sequence: 3, occurredAt: "2026-05-01T12:00:02Z", kind: { type: "turn_native_subagent_model_confirmed", turnId: "turn-1", correlationId: "toolu_agent", model: "claude-opus-4-1" } },
-			{ eventId: "activity", sessionId: "session-a", sequence: 4, occurredAt: "2026-05-01T12:00:03Z", kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "toolu_agent", agentId: "agent-1", agentThreadId: null, name: "Reviewer", role: "reviewer", model: null, status: "running" } },
+			{ eventId: "activity", sessionId: "session-a", sequence: 4, occurredAt: "2026-05-01T12:00:03Z", kind: { type: "turn_native_subagent_activity", turnId: "turn-1", id: "toolu_agent", agentId: "agent-1", agentThreadId: null, path: null, name: "Reviewer", role: "reviewer", model: null, status: "running" } },
 		], [], "session-a");
 		expect(messages[1]?.annotations?.[0]).toMatchObject({
 			id: "toolu_agent",

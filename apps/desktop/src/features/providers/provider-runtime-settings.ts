@@ -9,9 +9,12 @@ export const PROVIDER_RUNTIME_SUPPORTED_IDS = new Set([
 	"grok",
 ]);
 
+export const CODEX_SUBAGENT_CONCURRENCY_OPTIONS = [1, 2, 4, 6, 8] as const;
+
 export type ProviderRuntimeDraft = {
 	homePath: string;
 	shadowHomePath: string;
+	maxConcurrentSubagents: string;
 };
 
 export type ProviderRuntimeSettings = Record<string, ProviderRuntimeDraft>;
@@ -19,7 +22,18 @@ export type ProviderRuntimeSettings = Record<string, ProviderRuntimeDraft>;
 const EMPTY_DRAFT: ProviderRuntimeDraft = {
 	homePath: "",
 	shadowHomePath: "",
+	maxConcurrentSubagents: "",
 };
+
+function normalizeMaxConcurrentSubagents(value: unknown): string {
+	const normalized = typeof value === "number" ? String(value) : value;
+	return typeof normalized === "string" &&
+		CODEX_SUBAGENT_CONCURRENCY_OPTIONS.some(
+			(option) => String(option) === normalized,
+		)
+		? normalized
+		: "";
+}
 
 function normalizeDraftEntry(value: unknown): ProviderRuntimeDraft | null {
 	if (!value || typeof value !== "object") {
@@ -31,6 +45,9 @@ function normalizeDraftEntry(value: unknown): ProviderRuntimeDraft | null {
 		homePath: typeof record.homePath === "string" ? record.homePath : "",
 		shadowHomePath:
 			typeof record.shadowHomePath === "string" ? record.shadowHomePath : "",
+		maxConcurrentSubagents: normalizeMaxConcurrentSubagents(
+			record.maxConcurrentSubagents,
+		),
 	};
 }
 
@@ -98,10 +115,15 @@ export function setProviderRuntimeDraft(
 		[providerId]: {
 			homePath: draft.homePath,
 			shadowHomePath: draft.shadowHomePath,
+			maxConcurrentSubagents: draft.maxConcurrentSubagents,
 		},
 	};
 
-	if (!draft.homePath.trim() && !draft.shadowHomePath.trim()) {
+	if (
+		!draft.homePath.trim() &&
+		!draft.shadowHomePath.trim() &&
+		!draft.maxConcurrentSubagents
+	) {
 		delete next[providerId];
 	}
 
@@ -130,13 +152,19 @@ export function draftToProviderRuntimeConfig(
 
 	const homePath = draft.homePath.trim();
 	const shadowHomePath = draft.shadowHomePath.trim();
+	const maxConcurrentSubagents = normalizeMaxConcurrentSubagents(
+		draft.maxConcurrentSubagents,
+	);
 
-	if (!homePath && !shadowHomePath) {
+	if (!homePath && !shadowHomePath && !maxConcurrentSubagents) {
 		return null;
 	}
 
 	return {
 		homePath: homePath || null,
 		shadowHomePath: shadowHomePath || null,
+		maxConcurrentSubagents: maxConcurrentSubagents
+			? Number(maxConcurrentSubagents)
+			: null,
 	};
 }

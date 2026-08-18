@@ -3,8 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { SESSION_METHODS } from "@dcc/contracts";
 import type {
 	CoreEvent,
+	InterruptNativeSubagentInput,
 	ListMcpRuntimeStatusesOutput,
 	McpRuntimeStatus,
+	NativeSubagentControlOutput,
 	PrepareTurnOutput,
 	SessionEventRecord,
 	SessionSearchResult,
@@ -35,6 +37,7 @@ import type {
 	SendTurnOutput,
 	SteerTurnInput,
 	SteerTurnOutput,
+	SteerNativeSubagentInput,
 	QueueTurnInput,
 	QueuedTurn,
 	RemoveQueuedTurnInput,
@@ -86,6 +89,20 @@ export async function sendTurn(input: SendTurnInput) {
 
 export function steerTurn(input: SteerTurnInput) {
 	return invoke<SteerTurnOutput>(SESSION_METHODS.steerTurn, { input });
+}
+
+export function steerNativeSubagent(input: SteerNativeSubagentInput) {
+	return invoke<NativeSubagentControlOutput>(
+		SESSION_METHODS.steerNativeSubagent,
+		{ input },
+	);
+}
+
+export function interruptNativeSubagent(input: InterruptNativeSubagentInput) {
+	return invoke<NativeSubagentControlOutput>(
+		SESSION_METHODS.interruptNativeSubagent,
+		{ input },
+	);
 }
 
 export function queueTurn(input: QueueTurnInput) {

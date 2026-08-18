@@ -118,6 +118,27 @@ pub struct RespondToPermissionRequestOutput {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct SteerNativeSubagentInput {
+    pub session_id: String,
+    pub agent_thread_id: String,
+    pub prompt: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InterruptNativeSubagentInput {
+    pub session_id: String,
+    pub agent_thread_id: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSubagentControlOutput {
+    pub ok: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchSessionsInput {
     #[serde(default)]
     pub query: String,
@@ -395,6 +416,46 @@ pub async fn steer_turn(
     record_turn_steer(&*state, &*state, &*state, input, turn_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn steer_native_subagent(
+    state: State<'_, SessionCommandState>,
+    input: SteerNativeSubagentInput,
+) -> Result<NativeSubagentControlOutput, String> {
+    let session_id = input.session_id.trim();
+    let agent_thread_id = input.agent_thread_id.trim();
+    let prompt = input.prompt.trim();
+    if session_id.is_empty() || agent_thread_id.is_empty() {
+        return Err("Session and native subagent IDs are required".to_string());
+    }
+    if prompt.is_empty() || prompt.chars().count() > 32_000 {
+        return Err(
+            "Native subagent instruction must contain between 1 and 32000 characters".to_string(),
+        );
+    }
+    state
+        .steer_native_subagent(&SessionId(session_id.to_string()), agent_thread_id, prompt)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(NativeSubagentControlOutput { ok: true })
+}
+
+#[tauri::command]
+pub async fn interrupt_native_subagent(
+    state: State<'_, SessionCommandState>,
+    input: InterruptNativeSubagentInput,
+) -> Result<NativeSubagentControlOutput, String> {
+    let session_id = input.session_id.trim();
+    let agent_thread_id = input.agent_thread_id.trim();
+    if session_id.is_empty() || agent_thread_id.is_empty() {
+        return Err("Session and native subagent IDs are required".to_string());
+    }
+    state
+        .interrupt_native_subagent(&SessionId(session_id.to_string()), agent_thread_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(NativeSubagentControlOutput { ok: true })
 }
 
 #[tauri::command]

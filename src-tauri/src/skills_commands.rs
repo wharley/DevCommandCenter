@@ -1,7 +1,7 @@
 //! Provider-neutral skills: single source of truth in `.devcommandcenter/skills/`,
 //! compiled to each agent's native format. This module owns the source CRUD and the
-//! compiler. Claude target is a faithful copy (`.claude/skills/<name>/SKILL.md`);
-//! the AGENTS.md target flattens skills into an idempotent, delimited block.
+//! compiler. Claude and Codex targets are faithful native skill copies; legacy
+//! always-on targets are flattened into idempotent, delimited instruction blocks.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,9 @@ use crate::{db_error, ApiResult};
 
 /// Target agent the source skill compiles to.
 pub const TARGET_CLAUDE: &str = "claude";
-/// Covers Codex, Droid and the emerging cross-tool `AGENTS.md` standard.
+/// Codex native progressive-disclosure skills in `.agents/skills`.
+pub const TARGET_CODEX: &str = "codex";
+/// Legacy always-on target for Droid and tools that consume `AGENTS.md`.
 pub const TARGET_AGENTS_MD: &str = "agents";
 /// Gemini CLI reads `GEMINI.md` (same always-on model as AGENTS.md).
 pub const TARGET_GEMINI: &str = "gemini";
@@ -168,6 +170,15 @@ fn render_skill_md(name: &str, description: &str, body: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: {description}\n---\n\n{body}\n",
         body = body.trim_end()
+    )
+}
+
+/// Optional Codex UI/invocation metadata. DCC always writes the policy explicitly so
+/// toggling `disable_model_invocation` remains deterministic across recompiles.
+fn render_codex_openai_yaml(disable_model_invocation: bool) -> String {
+    format!(
+        "policy:\n  allow_implicit_invocation: {}\n",
+        !disable_model_invocation
     )
 }
 
@@ -399,18 +410,36 @@ fn detect_context_sources(
         });
     }
 
-    let codex_skills = target.join(".codex").join("skills");
+    let codex_skills = target.join(".agents").join("skills");
     let codex_count = count_skill_md_dirs(&codex_skills);
     if codex_count > 0 {
+        let managed_count = read_managed_names(&codex_skills).len().min(codex_count);
         detections.push(SkillContextDetection {
             id: "codex-skills".to_string(),
             kind: "codex_skills".to_string(),
             title: "Codex skills".to_string(),
-            relative_path: ".codex/skills".to_string(),
+            relative_path: ".agents/skills".to_string(),
             root_kind: "target_root".to_string(),
             count: codex_count,
+            managed_count,
+            external_count: codex_count.saturating_sub(managed_count),
+            has_dcc_block: managed_count > 0,
+        });
+    }
+
+    // Keep inventory support for the pre-standard path without writing to it.
+    let legacy_codex_skills = target.join(".codex").join("skills");
+    let legacy_codex_count = count_skill_md_dirs(&legacy_codex_skills);
+    if legacy_codex_count > 0 {
+        detections.push(SkillContextDetection {
+            id: "codex-skills-legacy".to_string(),
+            kind: "codex_skills".to_string(),
+            title: "Codex skills (legacy)".to_string(),
+            relative_path: ".codex/skills".to_string(),
+            root_kind: "target_root".to_string(),
+            count: legacy_codex_count,
             managed_count: 0,
-            external_count: codex_count,
+            external_count: legacy_codex_count,
             has_dcc_block: false,
         });
     }
@@ -426,42 +455,19 @@ fn compile_skills(project_root: &str, target_root: &str) -> ApiResult<()> {
     let skills = load_skills(project_root);
     let target = Path::new(target_root);
 
-    // --- Claude target: faithful copy into .claude/skills/<name>/SKILL.md ---
-    let claude_root = target.join(".claude").join("skills");
-    let claude_names: Vec<String> = skills
-        .iter()
-        .filter(|s| s.target_agents.iter().any(|t| t == TARGET_CLAUDE))
-        .map(|s| s.name.clone())
-        .collect();
-
-    // Remove only skills DCC previously managed and that are now gone.
-    let managed_path = claude_root.join(MANAGED_MARKER_FILE);
-    let previous: Vec<String> = fs::read_to_string(&managed_path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
-    for stale in previous.iter().filter(|n| !claude_names.contains(n)) {
-        let dir = claude_root.join(stale);
-        if dir.exists() {
-            let _ = fs::remove_dir_all(&dir);
-        }
-    }
-
-    if !claude_names.is_empty() {
-        fs::create_dir_all(&claude_root)
-            .map_err(|e| db_error(format!("{}: {e}", claude_root.display())))?;
-    }
-    for skill in skills.iter().filter(|s| claude_names.contains(&s.name)) {
-        let dir = claude_root.join(&skill.name);
-        fs::create_dir_all(&dir).map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
-        let content = render_skill_md(&skill.name, &skill.description, &skill.body);
-        write_if_changed(&dir.join("SKILL.md"), &content)
-            .map_err(|e| db_error(format!("write SKILL.md: {e}")))?;
-    }
-    if claude_root.exists() {
-        let raw = serde_json::to_string(&claude_names).unwrap_or_else(|_| "[]".to_string());
-        let _ = write_if_changed(&managed_path, &raw);
-    }
+    // --- Native progressive-disclosure targets ---
+    compile_native_skills(
+        &target.join(".claude").join("skills"),
+        &skills,
+        TARGET_CLAUDE,
+        false,
+    )?;
+    compile_native_skills(
+        &target.join(".agents").join("skills"),
+        &skills,
+        TARGET_CODEX,
+        true,
+    )?;
 
     // --- Always-on block targets: flatten (skip disabled-from-model skills) ---
     compile_block_file(
@@ -478,6 +484,64 @@ fn compile_skills(project_root: &str, target_root: &str) -> ApiResult<()> {
     // --- Cursor target: one .mdc rule per skill ---
     compile_cursor(target, &skills_for_target(&skills, TARGET_CURSOR))?;
 
+    Ok(())
+}
+
+/// Writes native skill directories and removes only directories recorded as DCC-managed.
+fn compile_native_skills(
+    native_root: &Path,
+    skills: &[SkillRecord],
+    target_name: &str,
+    write_codex_policy: bool,
+) -> ApiResult<()> {
+    let native_skills: Vec<&SkillRecord> = skills
+        .iter()
+        .filter(|skill| {
+            skill
+                .target_agents
+                .iter()
+                .any(|target| target == target_name)
+        })
+        .collect();
+    let names: Vec<String> = native_skills
+        .iter()
+        .map(|skill| skill.name.clone())
+        .collect();
+
+    let managed_path = native_root.join(MANAGED_MARKER_FILE);
+    let previous = read_managed_names(native_root);
+    for stale in previous.iter().filter(|name| !names.contains(name)) {
+        let dir = native_root.join(stale);
+        if dir.exists() {
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    if !names.is_empty() {
+        fs::create_dir_all(native_root)
+            .map_err(|e| db_error(format!("{}: {e}", native_root.display())))?;
+    }
+    for skill in native_skills {
+        let dir = native_root.join(&skill.name);
+        fs::create_dir_all(&dir).map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
+        let content = render_skill_md(&skill.name, &skill.description, &skill.body);
+        write_if_changed(&dir.join("SKILL.md"), &content)
+            .map_err(|e| db_error(format!("write SKILL.md: {e}")))?;
+        if write_codex_policy {
+            let agents_dir = dir.join("agents");
+            fs::create_dir_all(&agents_dir)
+                .map_err(|e| db_error(format!("{}: {e}", agents_dir.display())))?;
+            write_if_changed(
+                &agents_dir.join("openai.yaml"),
+                &render_codex_openai_yaml(skill.disable_model_invocation),
+            )
+            .map_err(|e| db_error(format!("write agents/openai.yaml: {e}")))?;
+        }
+    }
+    if native_root.exists() {
+        let raw = serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string());
+        let _ = write_if_changed(&managed_path, &raw);
+    }
     Ok(())
 }
 
@@ -644,6 +708,18 @@ mod tests {
     }
 
     #[test]
+    fn renders_codex_invocation_policy() {
+        assert_eq!(
+            render_codex_openai_yaml(false),
+            "policy:\n  allow_implicit_invocation: true\n"
+        );
+        assert_eq!(
+            render_codex_openai_yaml(true),
+            "policy:\n  allow_implicit_invocation: false\n"
+        );
+    }
+
+    #[test]
     fn extract_body_without_frontmatter() {
         assert_eq!(extract_body("just a body"), "just a body");
     }
@@ -737,5 +813,40 @@ mod tests {
             .expect("cursor rules detected");
         assert_eq!(cursor.count, 1);
         assert_eq!(cursor.external_count, 1);
+    }
+
+    #[test]
+    fn compiles_codex_skills_to_agents_directory() {
+        let source = tempdir().expect("source tempdir");
+        let target = tempdir().expect("target tempdir");
+        let mut orchestration = skill("dcc-orchestration", &[TARGET_CODEX]);
+        orchestration.description = "Delegate suitable work".to_string();
+        orchestration.disable_model_invocation = false;
+
+        skills_save(source.path().to_string_lossy().into_owned(), orchestration).unwrap();
+        compile_skills(
+            &source.path().to_string_lossy(),
+            &target.path().to_string_lossy(),
+        )
+        .unwrap();
+
+        let native_root = target.path().join(".agents/skills/dcc-orchestration");
+        let skill_md = fs::read_to_string(native_root.join("SKILL.md")).unwrap();
+        let openai_yaml = fs::read_to_string(native_root.join("agents/openai.yaml")).unwrap();
+        assert!(skill_md.contains("name: dcc-orchestration"));
+        assert!(skill_md.contains("Body of dcc-orchestration."));
+        assert!(openai_yaml.contains("allow_implicit_invocation: true"));
+
+        let detections = detect_context_sources(
+            &source.path().to_string_lossy(),
+            Some(&target.path().to_string_lossy()),
+        );
+        let codex = detections
+            .iter()
+            .find(|item| item.id == "codex-skills")
+            .expect("Codex native skills detected");
+        assert_eq!(codex.relative_path, ".agents/skills");
+        assert_eq!(codex.managed_count, 1);
+        assert_eq!(codex.external_count, 0);
     }
 }

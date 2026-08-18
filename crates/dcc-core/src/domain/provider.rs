@@ -116,6 +116,14 @@ pub struct Capabilities {
     /// interrupting it or starting a second turn.
     #[serde(default)]
     pub supports_steering: bool,
+    /// The adapter can append user guidance to a provider-native subagent's
+    /// currently active turn.
+    #[serde(default)]
+    pub supports_native_subagent_steering: bool,
+    /// The adapter can interrupt a provider-native subagent without stopping
+    /// the parent session.
+    #[serde(default)]
+    pub supports_native_subagent_interrupt: bool,
     pub mcp_support: McpSupportLevel,
     #[serde(default)]
     pub mcp_oauth_support: McpOauthSupport,
@@ -259,6 +267,10 @@ pub enum ProviderEvent {
         id: String,
         agent_id: Option<String>,
         agent_thread_id: Option<String>,
+        /// Canonical provider task path (for example `/root/reviewer`).
+        /// Kept separate from the user-facing nickname so older flat
+        /// presentations do not lose their existing identity.
+        path: Option<String>,
         name: Option<String>,
         role: Option<String>,
         /// Confirmed/effective model reported by the provider. Requested

@@ -1498,13 +1498,16 @@
       "usageWindowSevenDaySonnet": "7 days · Sonnet",
       "usageWindowOverage": "Overage",
       "usageWindowSubscription": "Subscription",
-      "runtimeTitle": "Provider homes",
-      "runtimeHint": "Codex, Claude, and Gemini use isolated homes here. Cursor stays untouched.",
-      "runtimeBadge": "Isolated runtime",
+      "runtimeTitle": "Provider runtime",
+      "runtimeHint": "Configure isolated homes and Codex orchestration for new sessions. Cursor stays untouched.",
+      "runtimeBadge": "Per-session runtime",
       "runtimeCardBody": "Isolated home directories keep the provider runtime independent from the user shell.",
       "runtimeReset": "Reset",
       "runtimeHomePath": "Home path",
       "runtimeShadowHomePath": "Shadow home path",
+      "runtimeSubagentConcurrency": "Concurrent subagents",
+      "runtimeSubagentConcurrencyAuto": "Automatic (Codex)",
+      "runtimeSubagentConcurrencyHint": "Limits subagent threads open at once, excluding the primary agent. Applies to new sessions and does not edit config.toml.",
       "runtimeHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex",
       "runtimeShadowHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex-shadow",
       "runtimeNoSupportedProviders": "No supported providers are available in the current catalog."
@@ -2080,11 +2083,31 @@
       "label": "Subagent",
       "fallbackName": "Subagent",
       "modelNotReported": "model not reported",
+      "treeLabel": "Agent tree",
+      "principalAgent": "Main agent",
+      "treeCount_one": "{{count}} subagent",
+      "treeCount_other": "{{count}} subagents",
       "status": {
         "running": "Working",
         "completed": "Completed",
-        "failed": "Failed"
+        "failed": "Failed",
+        "settled": "Ended"
+      },
+      "control": {
+        "instruct": "Instruct",
+        "interrupt": "Interrupt",
+        "instructionPlaceholder": "Add guidance for this subagent…",
+        "cancel": "Cancel",
+        "send": "Send instruction",
+        "instructionSent": "Instruction forwarded through the main agent",
+        "instructionFailed": "Could not forward the instruction",
+        "interrupted": "Interrupt request forwarded through the main agent",
+        "interruptFailed": "Could not forward the interrupt request"
       }
+    },
+    "fileReference": {
+      "open": "Open {{path}} in Code Dock",
+      "openAtPosition": "Open {{path}} in Code Dock at {{position}}"
     },
     "toolCall": {
       "running": "Running",
@@ -2198,10 +2221,10 @@
       "bodyPlaceholder": "Instructions, steps, examples…",
       "targetAgents": "Target agents"
     },
-    "targetsHint": "Claude gets a faithful copy (progressive disclosure). AGENTS.md and GEMINI.md are always-on instruction; Cursor writes one rule per skill — keep few skills enabled in always-on targets.",
+    "targetsHint": "Claude and Codex receive native skills with progressive disclosure. AGENTS.md and GEMINI.md are always-on instructions; Cursor writes one rule per skill. Keep few skills enabled in always-on targets.",
     "disableInvocation": {
       "title": "Disable model invocation",
-      "body": "Hide from the model's auto-catalog (excluded from AGENTS.md). Still available as a slash command."
+      "body": "In Codex, prevents implicit activation; in AGENTS.md and GEMINI.md, excludes the always-on block. It remains explicitly available where the runtime supports it."
     },
     "cancel": "Cancel",
     "save": "Save skill",
@@ -2209,6 +2232,10 @@
     "count_one": "{{count}} skill",
     "count_other": "{{count}} skills",
     "newSkill": "New skill",
+    "presets": {
+      "orchestration": "Orchestration preset",
+      "orchestrationInstalled": "Orchestration installed"
+    },
     "emptyList": "No skills yet. Create one — it will be compiled for the agents you pick.",
     "slashOnlyBadge": "slash-only",
     "editAria": "Edit {{name}}",

@@ -1,4 +1,4 @@
-import { FileText, FolderSearch, Pencil, Plus, Trash2 } from "lucide-react";
+import { FileText, FolderSearch, Pencil, Plus, Trash2, Workflow } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ORCHESTRATION_PRESET } from "./orchestration-preset";
 import {
 	compileSkills,
 	deleteSkill,
@@ -35,13 +36,14 @@ export type SkillsDialogProps = {
 	onSkillsChanged?: () => void;
 	/** Project root (`rootPath`) — the source of truth `.devcommandcenter/skills/` lives here. */
 	projectRoot: string | null;
-	/** Active worktree path where compiled artifacts (`.claude/skills`, `AGENTS.md`) land. */
+	/** Active worktree path where native skills and compiled instruction artifacts land. */
 	targetRoot: string | null;
 };
 
 const TARGET_LABELS: Record<SkillTargetAgent, string> = {
 	claude: "Claude (.claude/skills)",
-	agents: "Codex · Droid (AGENTS.md)",
+	codex: "Codex (.agents/skills)",
+	agents: "Droid · legacy (AGENTS.md)",
 	gemini: "Gemini (GEMINI.md)",
 	cursor: "Cursor (.cursor/rules)",
 };
@@ -68,6 +70,17 @@ function emptyForm(): FormState {
 	};
 }
 
+function orchestrationPresetForm(): FormState {
+	return {
+		editingExisting: false,
+		name: ORCHESTRATION_PRESET.name,
+		description: ORCHESTRATION_PRESET.description,
+		body: ORCHESTRATION_PRESET.body,
+		targetAgents: ORCHESTRATION_PRESET.targetAgents,
+		disableModelInvocation: ORCHESTRATION_PRESET.disableModelInvocation,
+	};
+}
+
 export function SkillsDialog({
 	open,
 	onOpenChange,
@@ -81,6 +94,9 @@ export function SkillsDialog({
 	const [loading, setLoading] = useState(false);
 	const [form, setForm] = useState<FormState | null>(null);
 	const [busy, setBusy] = useState(false);
+	const orchestrationInstalled = skills.some(
+		(skill) => skill.name === ORCHESTRATION_PRESET.name,
+	);
 
 	const refresh = useCallback(async () => {
 		if (!projectRoot) {
@@ -272,6 +288,12 @@ export function SkillsDialog({
 									{TARGET_LABELS.claude}
 								</ToggleGroupItem>
 								<ToggleGroupItem
+									value="codex"
+									className="w-full justify-start border border-border/60 px-3 py-2"
+								>
+									{TARGET_LABELS.codex}
+								</ToggleGroupItem>
+								<ToggleGroupItem
 									value="agents"
 									className="w-full justify-start border border-border/60 px-3 py-2"
 								>
@@ -323,15 +345,28 @@ export function SkillsDialog({
 					</div>
 				) : (
 					<div className="flex flex-col gap-3">
-						<div className="flex items-center justify-between">
+						<div className="flex items-center justify-between gap-3">
 							<p className="text-[12px] text-muted-foreground">
 								{loading
 									? t("skills.loading")
 									: t("skills.count", { count: skills.length })}
 							</p>
-							<Button size="sm" onClick={() => setForm(emptyForm())}>
-								<Plus className="size-4" /> {t("skills.newSkill")}
-							</Button>
+							<div className="flex shrink-0 gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={orchestrationInstalled}
+									onClick={() => setForm(orchestrationPresetForm())}
+								>
+									<Workflow className="size-4" />
+									{orchestrationInstalled
+										? t("skills.presets.orchestrationInstalled")
+										: t("skills.presets.orchestration")}
+								</Button>
+								<Button size="sm" onClick={() => setForm(emptyForm())}>
+									<Plus className="size-4" /> {t("skills.newSkill")}
+								</Button>
+							</div>
 						</div>
 
 						<ScrollArea className="max-h-[320px]">

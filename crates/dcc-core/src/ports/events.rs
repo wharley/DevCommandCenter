@@ -173,6 +173,7 @@ pub enum CoreEvent {
         id: String,
         agent_id: Option<String>,
         agent_thread_id: Option<String>,
+        path: Option<String>,
         name: Option<String>,
         role: Option<String>,
         model: Option<String>,

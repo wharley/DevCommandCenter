@@ -165,6 +165,8 @@ pub struct ProviderRuntimeConfig {
     pub home_path: Option<String>,
     #[serde(default)]
     pub shadow_home_path: Option<String>,
+    #[serde(default)]
+    pub max_concurrent_subagents: Option<u16>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -263,6 +265,25 @@ pub trait Provider: Send + Sync {
     async fn steer(&self, _handle: &SessionHandle, _prompt: &str) -> Result<()> {
         Err(crate::CoreError::Provider(
             "This provider does not support steering an active turn".to_string(),
+        ))
+    }
+    async fn steer_native_subagent(
+        &self,
+        _handle: &SessionHandle,
+        _agent_thread_id: &str,
+        _prompt: &str,
+    ) -> Result<()> {
+        Err(crate::CoreError::Provider(
+            "This provider does not support steering native subagents".to_string(),
+        ))
+    }
+    async fn interrupt_native_subagent(
+        &self,
+        _handle: &SessionHandle,
+        _agent_thread_id: &str,
+    ) -> Result<()> {
+        Err(crate::CoreError::Provider(
+            "This provider does not support interrupting native subagents".to_string(),
         ))
     }
     async fn start_mcp_oauth(
