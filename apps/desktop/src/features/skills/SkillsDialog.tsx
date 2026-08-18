@@ -221,12 +221,12 @@ export function SkillsDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="w-full sm:max-w-2xl">
-				<DialogHeader>
+			<DialogContent className="max-h-[calc(100dvh-2rem)] min-w-0 w-full overflow-x-hidden overflow-y-auto sm:max-w-2xl">
+				<DialogHeader className="min-w-0">
 					<DialogTitle>{t("skills.title")}</DialogTitle>
-					<DialogDescription>
+					<DialogDescription className="min-w-0 break-words">
 						{t("skills.description")}
-						<code className="ml-1 rounded bg-muted px-1 py-0.5 text-[11px]">
+						<code className="ml-1 inline-block max-w-full break-all rounded bg-muted px-1 py-0.5 align-middle text-[11px]">
 							.devcommandcenter/skills/
 						</code>
 					</DialogDescription>
@@ -237,7 +237,7 @@ export function SkillsDialog({
 						{t("skills.selectProject")}
 					</p>
 				) : form ? (
-					<div className="flex flex-col gap-4">
+					<div className="flex min-w-0 flex-col gap-4">
 						<div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3">
 							<div className="flex min-w-0 flex-col gap-1.5">
 								<Label htmlFor="skill-name">{t("skills.fields.name")}</Label>
@@ -344,8 +344,8 @@ export function SkillsDialog({
 						</DialogFooter>
 					</div>
 				) : (
-					<div className="flex flex-col gap-3">
-						<div className="flex items-center justify-between gap-3">
+					<div className="flex min-w-0 flex-col gap-3">
+						<div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
 							<p className="text-[12px] text-muted-foreground">
 								{loading
 									? t("skills.loading")
@@ -369,8 +369,8 @@ export function SkillsDialog({
 							</div>
 						</div>
 
-						<ScrollArea className="max-h-[320px]">
-							<div className="flex flex-col gap-2 pr-3">
+						<ScrollArea className="max-h-[320px] min-w-0 w-full">
+							<div className="flex min-w-0 w-full flex-col gap-2 pr-3">
 								{skills.length === 0 && !loading ? (
 									<p className="py-8 text-center text-sm text-muted-foreground">
 										{t("skills.emptyList")}
@@ -379,7 +379,7 @@ export function SkillsDialog({
 								{skills.map((skill) => (
 									<div
 										key={skill.name}
-										className="flex items-start justify-between gap-3 rounded-md border border-border/60 px-3 py-2"
+										className="flex min-w-0 w-full items-start justify-between gap-3 rounded-md border border-border/60 px-3 py-2"
 									>
 										<div className="min-w-0">
 											<div className="flex items-center gap-2">
@@ -440,7 +440,7 @@ export function SkillsDialog({
 							</div>
 						</ScrollArea>
 
-						<div className="rounded-md border border-border/60 px-3 py-2">
+						<div className="min-w-0 rounded-md border border-border/60 px-3 py-2">
 							<div className="mb-2 flex items-start justify-between gap-3">
 								<div className="min-w-0">
 									<p className="text-[13px] font-medium">
