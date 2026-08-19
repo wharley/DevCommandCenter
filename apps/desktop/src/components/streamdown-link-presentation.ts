@@ -13,9 +13,9 @@ function isExternalWebUrl(href: string | undefined) {
 	return /^https?:\/\//i.test(href?.trim() ?? "");
 }
 
-function isLocalFileHref(href: string | undefined) {
+export function isLocalFileHref(href: string | undefined) {
 	const value = href?.trim() ?? "";
-	return value.startsWith("file://") || /^([a-zA-Z]:\\|\/)/.test(value);
+	return value.startsWith("file://") || /^(?:[a-zA-Z]:[\\/]|\/)/.test(value);
 }
 
 export function getStreamdownLinkKind(

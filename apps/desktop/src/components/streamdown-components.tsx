@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import {
 	getStreamdownLinkKind,
 	isCodeFileReference,
+	isLocalFileHref,
 } from "./streamdown-link-presentation";
 import {
 	parseWorkspaceFileReference,
@@ -52,6 +53,7 @@ async function handleLinkClick(
 	if (!href) {
 		return;
 	}
+	const linkTarget = href.trim();
 
 	event.preventDefault();
 	event.stopPropagation();
@@ -64,13 +66,13 @@ async function handleLinkClick(
 		return;
 	}
 
-	if (href.startsWith("file://")) {
-		await openPath(decodeURIComponent(href.replace("file://", "")));
+	if (linkTarget.startsWith("file://")) {
+		await openPath(decodeURIComponent(linkTarget.replace("file://", "")));
 		return;
 	}
 
-	if (/^([a-zA-Z]:\\|\/)/.test(href)) {
-		await openPath(href);
+	if (isLocalFileHref(linkTarget)) {
+		await openPath(linkTarget);
 		return;
 	}
 

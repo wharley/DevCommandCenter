@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	getStreamdownLinkKind,
 	isCodeFileReference,
+	isLocalFileHref,
 } from "./streamdown-link-presentation";
 
 describe("getStreamdownLinkKind", () => {
@@ -10,6 +11,8 @@ describe("getStreamdownLinkKind", () => {
 		expect(getStreamdownLinkKind("https://example.com", null)).toBe("external");
 		expect(getStreamdownLinkKind("file:///tmp/notes.md", null)).toBe("file");
 		expect(getStreamdownLinkKind("/tmp/main.ts:14:2", null)).toBe("file");
+		expect(getStreamdownLinkKind("C:/work/main.ts", null)).toBe("file");
+		expect(getStreamdownLinkKind("C:\\work\\main.ts", null)).toBe("file");
 		expect(getStreamdownLinkKind("#section", null)).toBe("default");
 	});
 
@@ -21,6 +24,13 @@ describe("getStreamdownLinkKind", () => {
 				column: null,
 			}),
 		).toBe("workspace-file");
+	});
+});
+
+describe("isLocalFileHref", () => {
+	it("accepts Windows absolute paths with either separator", () => {
+		expect(isLocalFileHref("C:/work/main.ts")).toBe(true);
+		expect(isLocalFileHref("C:\\work\\main.ts")).toBe(true);
 	});
 });
 
