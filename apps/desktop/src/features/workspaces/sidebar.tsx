@@ -1395,13 +1395,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							<Button
 								type="button"
 								variant="ghost"
-								size="sm"
-								className="gap-1.5 text-muted-foreground hover:text-foreground"
+								size="icon"
+								className="text-muted-foreground hover:text-foreground"
 								aria-label={t("usage.title")}
 								onClick={onOpenUsage}
 							>
 								<BarChart3 className="size-4" strokeWidth={1.85} aria-hidden />
-								<span className="text-xs font-medium">Usage</span>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="top">{t("usage.title")}</TooltipContent>
@@ -1411,13 +1410,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							<Button
 								type="button"
 								variant="ghost"
-								size="sm"
-								className="relative gap-1.5 text-muted-foreground hover:text-foreground"
+								size="icon"
+								className="relative text-muted-foreground hover:text-foreground"
 								aria-label="Skills"
 								onClick={onOpenSkills}
 							>
 								<Sparkles className="size-4" strokeWidth={1.85} aria-hidden />
-								<span className="text-xs font-medium">Skills</span>
 								{skillCount > 0 ? (
 									<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-sidebar bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">
 										{skillCount}
@@ -1432,13 +1430,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							<Button
 								type="button"
 								variant="ghost"
-								size="sm"
-								className="gap-1.5 text-muted-foreground hover:text-foreground"
+								size="icon"
+								className="text-muted-foreground hover:text-foreground"
 								aria-label={t("sidebar.openSettings")}
 								onClick={onOpenSettings}
 							>
 								<Settings2 className="size-4" strokeWidth={1.85} aria-hidden />
-								<span className="text-xs font-medium">{t("sidebar.settingsShort")}</span>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="top">{t("sidebar.openSettings")}</TooltipContent>
