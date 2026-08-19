@@ -19,19 +19,20 @@ use dcc_tauri::{
         UpdateRepositoryIdentityInput, WorkspaceApplyDelegationWorktreeInput,
         WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
-        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
-        WorkspaceGitCommitPushInput, WorkspaceGitCompleteMergeInput,
-        WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictStateInput,
-        WorkspaceGitConflictStateOutput, WorkspaceGitFilePreviewContentOutput,
-        WorkspaceGitFilePreviewInput, WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput,
-        WorkspaceGitPushInput, WorkspaceGitStatusInput, WorkspaceGitStatusOutput,
-        WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput,
-        WorkspaceIdInput, WorkspacePrepareDelegationWorktreeInput,
-        WorkspacePrepareDelegationWorktreeOutput, WorkspaceProjectAutomationConfigOutput,
-        WorkspaceRecordSetupOutcomeInput, WorkspaceRemoveDelegationWorktreeInput,
-        WorkspaceRunProjectTasksInput, WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput,
-        WorkspaceRunSetupOutput, WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution,
-        WriteWorkspaceFileInput, WriteWorkspaceFileOutput,
+        WorkspaceDiskUsageInput, WorkspaceDiskUsageOutput, WorkspaceGitAcceptConflictInput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
+        WorkspaceGitCompleteMergeInput, WorkspaceGitCompleteMergeOutput,
+        WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
+        WorkspaceGitFilePreviewContentOutput, WorkspaceGitFilePreviewInput,
+        WorkspaceGitMarkConflictResolvedInput, WorkspaceGitPathInput, WorkspaceGitPushInput,
+        WorkspaceGitStatusInput, WorkspaceGitStatusOutput, WorkspaceGitSyncBaseInput,
+        WorkspaceGitSyncBaseOutput, WorkspaceGitValidationConfigOutput, WorkspaceIdInput,
+        WorkspacePrepareDelegationWorktreeInput, WorkspacePrepareDelegationWorktreeOutput,
+        WorkspaceProjectAutomationConfigOutput, WorkspaceRecordSetupOutcomeInput,
+        WorkspaceRemoveDelegationWorktreeInput, WorkspaceRunProjectTasksInput,
+        WorkspaceRunProjectTasksOutput, WorkspaceRunSetupInput, WorkspaceRunSetupOutput,
+        WorkspaceSaveProjectAutomationInput, WorkspaceSourceUrlResolution, WriteWorkspaceFileInput,
+        WriteWorkspaceFileOutput,
     },
     delivery_failure::{
         WorkspaceDeliveryFailureInput, WorkspaceDeliveryFailureOutput,
@@ -521,6 +522,14 @@ pub async fn restore_workspace(
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::restore_workspace(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_disk_usage(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceDiskUsageInput,
+) -> Result<WorkspaceDiskUsageOutput, String> {
+    dcc_tauri::commands::workspace_commands::workspace_disk_usage(state, input).await
 }
 
 #[tauri::command]

@@ -63,11 +63,11 @@ use crate::{
         },
     },
     commands::workspace_support::{
-        broken_workspace_message, cleanup_workspace_files, ensure_pushable_branch,
-        find_workspace_by_root, next_available_branch_name, preflight_workspace_root,
-        purge_broken_workspace_by_root, push_branch_refspec, push_branch_refspec_to_remote,
-        resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
-        resolve_default_remote_name, resolve_workspace_active_root,
+        broken_workspace_message, cleanup_workspace_files, directory_logical_size,
+        ensure_pushable_branch, find_workspace_by_root, next_available_branch_name,
+        preflight_workspace_root, purge_broken_workspace_by_root, push_branch_refspec,
+        push_branch_refspec_to_remote, resolve_branch_diff_base, resolve_current_branch_name,
+        resolve_current_commit_sha, resolve_default_remote_name, resolve_workspace_active_root,
         resolve_workspace_broken_reason, resolve_workspace_setup_root,
         resolve_workspace_target_branch, run_git_network_output_with_workspace_auth,
     },
@@ -8820,6 +8820,26 @@ pub struct WorkspaceIdInput {
     pub workspace_id: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiskUsageInput {
+    pub workspace_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiskUsageEntry {
+    pub workspace_id: String,
+    pub bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiskUsageOutput {
+    pub workspaces: Vec<WorkspaceDiskUsageEntry>,
+    pub total_bytes: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameWorkspaceInput {
@@ -9007,6 +9027,69 @@ pub async fn restore_workspace(
     repo.save_workspace(&workspace)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn workspace_disk_usage(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceDiskUsageInput,
+) -> Result<WorkspaceDiskUsageOutput, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let mut seen_ids = BTreeSet::new();
+    let mut worktrees = Vec::new();
+
+    for workspace_id in input.workspace_ids {
+        if !seen_ids.insert(workspace_id.clone()) {
+            continue;
+        }
+        let workspace = repo
+            .get_workspace(&WorkspaceId(workspace_id.clone()))
+            .await
+            .map_err(|error| error.to_string())?;
+        let Some(workspace) = workspace else {
+            continue;
+        };
+        let path = workspace
+            .worktree_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty() && *path != workspace.root_path.trim())
+            .map(PathBuf::from);
+        worktrees.push((workspace_id, path));
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut measured_paths = HashMap::<PathBuf, u64>::new();
+        let mut workspaces = Vec::with_capacity(worktrees.len());
+        for (workspace_id, path) in worktrees {
+            let bytes = match path {
+                Some(path) => {
+                    if let Some(bytes) = measured_paths.get(&path) {
+                        *bytes
+                    } else {
+                        let bytes = directory_logical_size(&path)?;
+                        measured_paths.insert(path, bytes);
+                        bytes
+                    }
+                }
+                None => 0,
+            };
+            workspaces.push(WorkspaceDiskUsageEntry {
+                workspace_id,
+                bytes,
+            });
+        }
+        let total_bytes = measured_paths
+            .values()
+            .copied()
+            .fold(0_u64, u64::saturating_add);
+        Ok(WorkspaceDiskUsageOutput {
+            workspaces,
+            total_bytes,
+        })
+    })
+    .await
+    .map_err(|error| format!("failed to measure workspace disk usage: {error}"))?
 }
 
 #[tauri::command]

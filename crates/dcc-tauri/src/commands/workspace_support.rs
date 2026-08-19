@@ -97,6 +97,52 @@ pub(crate) fn cleanup_workspace_files(workspace: &Workspace) -> Result<(), Strin
     Ok(())
 }
 
+/// Returns the logical size of a directory without following symbolic links.
+///
+/// Worktrees may contain symlinks into large dependency caches. Following them
+/// would both overstate the space reclaimed by deletion and risk walking a
+/// cycle, so only regular files are counted.
+pub(crate) fn directory_logical_size(root: &Path) -> Result<u64, String> {
+    if !root.exists() {
+        return Ok(0);
+    }
+
+    let mut total = 0_u64;
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let entries = std::fs::read_dir(&directory).map_err(|error| {
+            format!(
+                "failed to inspect workspace path {}: {}",
+                directory.display(),
+                error
+            )
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to inspect workspace path {}: {}",
+                    directory.display(),
+                    error
+                )
+            })?;
+            let metadata = std::fs::symlink_metadata(entry.path()).map_err(|error| {
+                format!(
+                    "failed to inspect workspace entry {}: {}",
+                    entry.path().display(),
+                    error
+                )
+            })?;
+            let file_type = metadata.file_type();
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                total = total.saturating_add(metadata.len());
+            }
+        }
+    }
+    Ok(total)
+}
+
 pub(crate) async fn find_workspace_by_root(
     repo: &SqliteWorkspaceRepo,
     workspace_root: &str,
@@ -147,7 +193,7 @@ pub(crate) async fn preflight_workspace_root(
 
 #[cfg(test)]
 mod tests {
-    use super::cleanup_workspace_files;
+    use super::{cleanup_workspace_files, directory_logical_size};
     use dcc_core::domain::{
         project::ProjectId,
         workspace::{Workspace, WorkspaceId, WorkspaceState},
@@ -181,6 +227,21 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn directory_size_counts_nested_files() {
+        let root = temp_path("directory-size");
+        fs::create_dir_all(root.join("nested")).expect("create nested directory");
+        fs::write(root.join("one.txt"), b"1234").expect("write first file");
+        fs::write(root.join("nested/two.txt"), b"123456").expect("write nested file");
+
+        assert_eq!(
+            directory_logical_size(&root).expect("measure directory"),
+            10
+        );
+
+        fs::remove_dir_all(root).expect("remove temp directory");
     }
 
     #[test]

@@ -4486,6 +4486,7 @@ export default function App() {
 							collapsed={sidebarCollapsed}
 							isCreatingWorkspace={isCreatingWorkspace}
 							showAgentStates={!isRemoteBackend}
+							showCompletedDiskUsage={!isRemoteBackend}
 							sessionQueryScope={backendCacheKey}
 							onSelectWorkspace={handleSelectWorkspaceSurface}
 							onCreateWorkspace={() => {

@@ -57,6 +57,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import type { Repository, WorkspaceRemoteBranchDeletionTarget } from "@dcc/contracts";
 import { AppUpdateButton, type AppUpdateInfo } from "@/features/updater";
 import { cn } from "@/lib/utils";
+import { workspaceDiskUsage } from "@/lib/workspace-api";
 import type { WorkspaceSummary } from "./types";
 import {
 	createInitialRailSectionState,
@@ -80,6 +81,10 @@ import { useWorkspaceAgentActivities } from "./use-workspace-agent-states";
 import { ProjectEditDialog } from "./project-edit-dialog";
 import { ProjectIdentityGlyph } from "./project-identity";
 import { repositoryDisplayName } from "./repository-display-name";
+import {
+	formatDiskBytes,
+	workspaceDiskUsageIds,
+} from "./workspace-disk-usage";
 
 type VirtualItem =
 	| {
@@ -223,6 +228,7 @@ type WorkspacesSidebarProps = {
 	collapsed: boolean;
 	isCreatingWorkspace?: boolean;
 	showAgentStates?: boolean;
+	showCompletedDiskUsage?: boolean;
 	sessionQueryScope?: string;
 	onSelectWorkspace: (workspaceId: string) => void;
 	onCreateWorkspace: () => void;
@@ -284,6 +290,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	collapsed,
 	isCreatingWorkspace = false,
 	showAgentStates = true,
+	showCompletedDiskUsage = true,
 	sessionQueryScope = "local",
 	onSelectWorkspace,
 	onCreateWorkspace,
@@ -312,7 +319,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	selectedWorkspaceId,
 	workspaces,
 }: WorkspacesSidebarProps) {
-	const { t } = useTranslation("common");
+	const { t, i18n } = useTranslation("common");
 	const workspaceAgentActivities = useWorkspaceAgentActivities(workspaces, {
 		enabled: showAgentStates,
 		scope: sessionQueryScope,
@@ -338,6 +345,66 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		useState<WorkspaceSummary | null>(null);
 	const [deleteRemoteBranch, setDeleteRemoteBranch] = useState(false);
 	const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
+	const [completedDiskUsage, setCompletedDiskUsage] = useState<{
+		status: "idle" | "loading" | "ready" | "error";
+		totalBytes: number;
+		bytesByWorkspaceId: Record<string, number>;
+	}>({ status: "idle", totalBytes: 0, bytesByWorkspaceId: {} });
+	const completedDiskUsageIds = useMemo(
+		() => workspaceDiskUsageIds(completedRows),
+		[completedRows],
+	);
+	useEffect(() => {
+		if (!showCompletedDiskUsage || completedDiskUsageIds.length === 0) {
+			setCompletedDiskUsage({
+				status: "idle",
+				totalBytes: 0,
+				bytesByWorkspaceId: {},
+			});
+			return;
+		}
+
+		let cancelled = false;
+		setCompletedDiskUsage((current) => ({ ...current, status: "loading" }));
+		void workspaceDiskUsage({ workspaceIds: completedDiskUsageIds })
+			.then((result) => {
+				if (cancelled) return;
+				setCompletedDiskUsage({
+					status: "ready",
+					totalBytes: result.totalBytes,
+					bytesByWorkspaceId: Object.fromEntries(
+						result.workspaces.map((workspace) => [
+							workspace.workspaceId,
+							workspace.bytes,
+						]),
+					),
+				});
+			})
+			.catch((error) => {
+				if (cancelled) return;
+				console.warn("[dcc] failed to measure completed worktrees", error);
+				setCompletedDiskUsage({
+					status: "error",
+					totalBytes: 0,
+					bytesByWorkspaceId: {},
+				});
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [completedDiskUsageIds, showCompletedDiskUsage]);
+
+	const workspaceDeletionBytes = useMemo(() => {
+		if (!workspaceDeletionTarget || completedDiskUsage.status !== "ready") {
+			return null;
+		}
+		return workspaceDiskUsageIds([workspaceDeletionTarget]).reduce(
+			(total, workspaceId) =>
+				total + (completedDiskUsage.bytesByWorkspaceId[workspaceId] ?? 0),
+			0,
+		);
+	}, [completedDiskUsage, workspaceDeletionTarget]);
 
 	const [sectionOpenState, setSectionOpenState] = useState(() => ({
 		...createInitialRailSectionState(activeGroups),
@@ -717,6 +784,24 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/75" />
 								)}
 								<span className="truncate">{item.label}</span>
+								{item.headerVariant === "completed" &&
+								completedDiskUsage.status === "ready" ? (
+									<span
+										className="shrink-0 text-[10px] font-normal tabular-nums text-muted-foreground/70"
+										title={t("sidebar.completedDiskUsageTitle", {
+											size: formatDiskBytes(
+												completedDiskUsage.totalBytes,
+												i18n.resolvedLanguage,
+											),
+										})}
+									>
+										·{" "}
+										{formatDiskBytes(
+											completedDiskUsage.totalBytes,
+											i18n.resolvedLanguage,
+										)}
+									</span>
+								) : null}
 								{item.pinnedAt ? (
 									<Pin
 										className="size-3 shrink-0 rotate-[-12deg] text-muted-foreground/65"
@@ -895,6 +980,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			);
 		},
 		[
+			completedDiskUsage,
+			i18n.resolvedLanguage,
 			isCreatingWorkspace,
 			isRemovingProject,
 			onArchiveWorkspace,
@@ -1467,6 +1554,22 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							{t("sidebar.deleteWorkspaceDescription")}
 						</DialogDescription>
 					</DialogHeader>
+					{workspaceDeletionTarget &&
+					completedDiskUsage.status === "loading" ? (
+						<div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
+							<Loader2 className="size-3.5 animate-spin" aria-hidden />
+							{t("sidebar.calculatingWorkspaceDiskUsage")}
+						</div>
+					) : workspaceDeletionBytes !== null ? (
+						<p className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
+							{t("sidebar.workspaceDiskSpaceFreed", {
+								size: formatDiskBytes(
+									workspaceDeletionBytes,
+									i18n.resolvedLanguage,
+								),
+							})}
+						</p>
+					) : null}
 					{workspaceDeletionTarget?.remoteDeletionTargets?.length ? (
 						<label className="flex min-w-0 max-w-full cursor-pointer items-start gap-2.5 overflow-hidden rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-sm">
 							<input

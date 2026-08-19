@@ -127,9 +127,10 @@ use dcc_tauri::commands::{
         SetWorkspacePinnedInput, UpdateRepositoryIdentityInput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceDeliveryPolicy,
-        WorkspaceGitAcceptConflictInput, WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput,
-        WorkspaceGitChangeEntry, WorkspaceGitCommitPushInput, WorkspaceGitCommitSuggestionInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceDeliveryPolicy, WorkspaceDiskUsageEntry,
+        WorkspaceDiskUsageInput, WorkspaceDiskUsageOutput, WorkspaceGitAcceptConflictInput,
+        WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
+        WorkspaceGitCommitPushInput, WorkspaceGitCommitSuggestionInput,
         WorkspaceGitCommitSuggestionOutput, WorkspaceGitCompleteMergeInput,
         WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
         WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
@@ -174,6 +175,7 @@ struct WorkspaceMethods {
     restore_workspace_bundle: String,
     delete_workspace_bundle: String,
     delete_workspace: String,
+    workspace_disk_usage: String,
     delete_repository: String,
     update_repository_identity: String,
     set_repository_pinned: String,
@@ -567,6 +569,9 @@ fn main() {
         .typ::<WorkspacePrepareDelegationWorktreeInput>()
         .typ::<WorkspacePrepareDelegationWorktreeOutput>()
         .typ::<WorkspaceRemoveDelegationWorktreeInput>()
+        .typ::<WorkspaceDiskUsageInput>()
+        .typ::<WorkspaceDiskUsageEntry>()
+        .typ::<WorkspaceDiskUsageOutput>()
         .typ::<CodeRabbitCliStatusState>()
         .typ::<CodeRabbitReviewType>()
         .typ::<CodeRabbitFindingSeverity>()
@@ -696,6 +701,7 @@ fn main() {
                 restore_workspace_bundle: "restore_workspace_bundle".to_string(),
                 delete_workspace_bundle: "delete_workspace_bundle".to_string(),
                 delete_workspace: "delete_workspace".to_string(),
+                workspace_disk_usage: "workspace_disk_usage".to_string(),
                 delete_repository: "delete_repository".to_string(),
                 update_repository_identity: "update_repository_identity".to_string(),
                 set_repository_pinned: "set_repository_pinned".to_string(),

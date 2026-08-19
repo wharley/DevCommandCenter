@@ -131,6 +131,8 @@ import type {
 	WorkspaceRunSetupInput,
 	WorkspaceRunSetupOutput,
 	WorkspaceBundleStateOutput,
+	WorkspaceDiskUsageInput,
+	WorkspaceDiskUsageOutput,
 	WorkspaceSourceUrlResolution,
 	Repository,
 	Workspace,
@@ -177,6 +179,12 @@ export function completeWorkspace(workspaceId: string) {
 
 export function restoreWorkspace(workspaceId: string) {
 	return invoke<void>(WORKSPACE_METHODS.restoreWorkspace, { input: { workspaceId } });
+}
+
+export function workspaceDiskUsage(input: WorkspaceDiskUsageInput) {
+	return invoke<WorkspaceDiskUsageOutput>(WORKSPACE_METHODS.workspaceDiskUsage, {
+		input,
+	});
 }
 
 export function renameWorkspace(input: RenameWorkspaceInput) {
