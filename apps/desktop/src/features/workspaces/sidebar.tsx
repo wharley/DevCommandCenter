@@ -1357,7 +1357,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 														<span className="truncate">{projectLabel}</span>
 													</span>
 												</span>
-												<span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+												<span className="mt-1.5 shrink-0 self-start whitespace-nowrap text-[10px] font-medium leading-4 text-muted-foreground">
 													<WorkspaceActivityTime activity={activity} bare />
 												</span>
 											</button>
