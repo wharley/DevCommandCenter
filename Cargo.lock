@@ -1063,7 +1063,7 @@ dependencies = [
 
 [[package]]
 name = "dev-command-center-tauri"
-version = "0.1.55"
+version = "0.1.56"
 dependencies = [
  "async-trait",
  "axum",
