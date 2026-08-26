@@ -16,9 +16,9 @@ use crate::{
         WorkspaceChangeRequestCreateInput, WorkspaceGitPushInput,
     },
     commands::workspace_support::{
-        ensure_pushable_branch, find_workspace_by_root, preflight_workspace_root,
-        resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
-        resolve_workspace_target_branch, workspace_branch_hints,
+        ensure_pushable_branch, find_workspace_by_root, preferred_workspace_branch_name,
+        preflight_workspace_root, resolve_branch_diff_base, resolve_current_branch_name,
+        resolve_current_commit_sha, resolve_workspace_target_branch, workspace_branch_hints,
     },
     delivery_failure::{
         capture_workspace_delivery_failure, clear_workspace_delivery_failure,
@@ -951,10 +951,22 @@ pub async fn workspace_change_request_create(
 
     let source = imported_workspace_source(&state, root).await?;
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    let title = input
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or(workspace_change_request_title(&state, root).await?);
+    let preferred_branch = preferred_workspace_branch_name(title.as_deref());
     let head_branch = if let Some(source) = source.as_ref() {
         source.head_branch.clone()
     } else {
-        ensure_pushable_branch(root, protected_branch.as_deref())?
+        ensure_pushable_branch(
+            root,
+            protected_branch.as_deref(),
+            preferred_branch.as_deref(),
+        )?
     };
     let base_branch = if let Some(source) = source.as_ref() {
         source.base_branch.clone()
@@ -977,13 +989,6 @@ pub async fn workspace_change_request_create(
         input.forge_login.as_deref(),
     )?
     .and_then(|context| context.effective_login);
-    let title = input
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .or(workspace_change_request_title(&state, root).await?);
 
     push_current_branch(&state, root, protected_branch.as_deref(), login.as_deref())
         .await
@@ -1013,10 +1018,16 @@ pub async fn workspace_change_request_context(
 
     let source = imported_workspace_source(&state, root).await?;
     let protected_branch = resolve_workspace_target_branch(&state, root).await;
+    let title = workspace_change_request_title(&state, root).await?;
+    let preferred_branch = preferred_workspace_branch_name(title.as_deref());
     let head_branch = if let Some(source) = source.as_ref() {
         source.head_branch.clone()
     } else {
-        ensure_pushable_branch(root, protected_branch.as_deref())?
+        ensure_pushable_branch(
+            root,
+            protected_branch.as_deref(),
+            preferred_branch.as_deref(),
+        )?
     };
     let base_branch = if let Some(source) = source.as_ref() {
         source.base_branch.clone()
@@ -1033,7 +1044,6 @@ pub async fn workspace_change_request_context(
             base_stripped.to_string()
         }
     };
-    let title = workspace_change_request_title(&state, root).await?;
     let forge = forge_context::resolve_workspace_forge_context(
         &state.db_path,
         root,

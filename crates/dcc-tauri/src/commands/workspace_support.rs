@@ -193,7 +193,10 @@ pub(crate) async fn preflight_workspace_root(
 
 #[cfg(test)]
 mod tests {
-    use super::{cleanup_workspace_files, directory_logical_size};
+    use super::{
+        cleanup_workspace_files, directory_logical_size, ensure_pushable_branch,
+        preferred_workspace_branch_name, resolve_current_branch_name,
+    };
     use dcc_core::domain::{
         project::ProjectId,
         workspace::{Workspace, WorkspaceId, WorkspaceState},
@@ -201,6 +204,7 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
+        process::Command,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -227,6 +231,32 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    fn run_test_git(root: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .expect("run git command");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn create_test_repository(name: &str) -> PathBuf {
+        let root = temp_path(name);
+        fs::create_dir_all(&root).expect("create repository root");
+        run_test_git(&root, &["init", "-b", "main"]);
+        run_test_git(&root, &["config", "user.email", "dcc-tests@example.com"]);
+        run_test_git(&root, &["config", "user.name", "DCC Tests"]);
+        fs::write(root.join("README.md"), "# Test\n").expect("write initial file");
+        run_test_git(&root, &["add", "README.md"]);
+        run_test_git(&root, &["commit", "-m", "initial"]);
+        root
     }
 
     #[test]
@@ -270,6 +300,109 @@ mod tests {
 
         assert!(root_path.exists(), "root path must be preserved");
         fs::remove_dir_all(&root_path).expect("remove root dir");
+    }
+
+    #[test]
+    fn preferred_workspace_branch_names_are_semantic_and_stable() {
+        assert_eq!(
+            preferred_workspace_branch_name(Some("Adjust checkout")),
+            Some("dcc/adjust-checkout".to_string())
+        );
+        assert_eq!(
+            preferred_workspace_branch_name(Some("Fix adjust checkout")),
+            Some("dcc/fix/adjust-checkout".to_string())
+        );
+        assert_eq!(
+            preferred_workspace_branch_name(Some("Corrigir validação do checkout")),
+            Some("dcc/fix/validacao-do-checkout".to_string())
+        );
+        assert_eq!(
+            preferred_workspace_branch_name(Some("Add upsell")),
+            Some("dcc/feat/add-upsell".to_string())
+        );
+        assert_eq!(
+            preferred_workspace_branch_name(Some("feat: add upsell")),
+            Some("dcc/feat/add-upsell".to_string())
+        );
+        assert_eq!(preferred_workspace_branch_name(Some("Nova tarefa")), None);
+    }
+
+    #[test]
+    fn materializing_semantic_branch_keeps_the_technical_worktree_path() {
+        let root = create_test_repository("semantic-branch-root");
+        let worktree = temp_path("semantic-branch-worktree-main-123");
+        run_test_git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                worktree.to_str().expect("utf-8 worktree path"),
+                "main",
+            ],
+        );
+
+        let branch = ensure_pushable_branch(
+            worktree.to_str().expect("utf-8 worktree path"),
+            Some("main"),
+            Some("dcc/fix/adjust-checkout"),
+        )
+        .expect("materialize semantic branch");
+
+        assert_eq!(branch, "dcc/fix/adjust-checkout");
+        assert_eq!(
+            resolve_current_branch_name(worktree.to_str().expect("utf-8 worktree path"))
+                .expect("resolve materialized branch"),
+            "dcc/fix/adjust-checkout"
+        );
+        assert!(worktree.exists(), "worktree path must not be renamed");
+
+        run_test_git(
+            &root,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                worktree.to_str().expect("utf-8 worktree path"),
+            ],
+        );
+        fs::remove_dir_all(root).expect("remove repository root");
+    }
+
+    #[test]
+    fn existing_working_branch_is_never_renamed_by_a_new_suggestion() {
+        let root = create_test_repository("existing-branch-root");
+        let worktree = temp_path("existing-branch-worktree");
+        run_test_git(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "user/existing-work",
+                worktree.to_str().expect("utf-8 worktree path"),
+                "main",
+            ],
+        );
+
+        let branch = ensure_pushable_branch(
+            worktree.to_str().expect("utf-8 worktree path"),
+            Some("main"),
+            Some("dcc/feat/add-upsell"),
+        )
+        .expect("keep existing branch");
+
+        assert_eq!(branch, "user/existing-work");
+        run_test_git(
+            &root,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                worktree.to_str().expect("utf-8 worktree path"),
+            ],
+        );
+        fs::remove_dir_all(root).expect("remove repository root");
     }
 }
 
@@ -474,9 +607,124 @@ fn branch_name_from_worktree_path(root: &str) -> String {
     format!("dcc/{dir}")
 }
 
-fn materialize_workspace_branch(root: &str) -> Result<String, String> {
-    let preferred = branch_name_from_worktree_path(root);
-    let branch = next_available_branch_name(root, &preferred);
+fn fold_branch_character(character: char) -> Option<char> {
+    match character {
+        'a'..='z' | '0'..='9' => Some(character),
+        'A'..='Z' => Some(character.to_ascii_lowercase()),
+        'á' | 'à' | 'â' | 'ã' | 'ä' | 'Á' | 'À' | 'Â' | 'Ã' | 'Ä' => Some('a'),
+        'é' | 'è' | 'ê' | 'ë' | 'É' | 'È' | 'Ê' | 'Ë' => Some('e'),
+        'í' | 'ì' | 'î' | 'ï' | 'Í' | 'Ì' | 'Î' | 'Ï' => Some('i'),
+        'ó' | 'ò' | 'ô' | 'õ' | 'ö' | 'Ó' | 'Ò' | 'Ô' | 'Õ' | 'Ö' => Some('o'),
+        'ú' | 'ù' | 'û' | 'ü' | 'Ú' | 'Ù' | 'Û' | 'Ü' => Some('u'),
+        'ç' | 'Ç' => Some('c'),
+        'ñ' | 'Ñ' => Some('n'),
+        _ => None,
+    }
+}
+
+fn semantic_branch_slug(title: &str) -> String {
+    let mut slug = String::with_capacity(title.len().min(64));
+    let mut pending_separator = false;
+
+    for character in title.chars() {
+        if let Some(folded) = fold_branch_character(character) {
+            if pending_separator && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(folded);
+            pending_separator = false;
+        } else {
+            pending_separator = true;
+        }
+
+        if slug.len() >= 64 {
+            break;
+        }
+    }
+
+    slug.trim_matches('-').to_string()
+}
+
+fn semantic_branch_kind(slug: &str) -> (Option<&'static str>, &str) {
+    for prefix in [
+        "fix-",
+        "bugfix-",
+        "correct-",
+        "repair-",
+        "corrigir-",
+        "corrija-",
+        "correcao-",
+        "consertar-",
+        "conserte-",
+    ] {
+        if let Some(remainder) = slug.strip_prefix(prefix).filter(|value| !value.is_empty()) {
+            return (Some("fix"), remainder);
+        }
+    }
+
+    for prefix in ["feat-", "feature-"] {
+        if let Some(remainder) = slug.strip_prefix(prefix).filter(|value| !value.is_empty()) {
+            return (Some("feat"), remainder);
+        }
+    }
+
+    if [
+        "add-",
+        "create-",
+        "implement-",
+        "introduce-",
+        "adicionar-",
+        "adicione-",
+        "criar-",
+        "crie-",
+        "implementar-",
+        "implemente-",
+        "incluir-",
+        "inclua-",
+    ]
+    .iter()
+    .any(|prefix| slug.starts_with(prefix))
+    {
+        return (Some("feat"), slug);
+    }
+
+    (None, slug)
+}
+
+/// Derives the branch created when a detached DCC worktree is first published.
+/// Classification is intentionally conservative: ambiguous titles keep the
+/// flat `dcc/<slug>` form instead of guessing a change type.
+pub(crate) fn preferred_workspace_branch_name(title: Option<&str>) -> Option<String> {
+    let title = title?.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.is_empty()
+        || title.eq_ignore_ascii_case("new task")
+        || title.eq_ignore_ascii_case("nova tarefa")
+        || title.eq_ignore_ascii_case("new session")
+    {
+        return None;
+    }
+
+    let slug = semantic_branch_slug(&title);
+    if slug.is_empty() {
+        return None;
+    }
+    let (kind, semantic_slug) = semantic_branch_kind(&slug);
+    Some(match kind {
+        Some(kind) => format!("dcc/{kind}/{semantic_slug}"),
+        None => format!("dcc/{semantic_slug}"),
+    })
+}
+
+fn materialize_workspace_branch(root: &str, preferred: Option<&str>) -> Result<String, String> {
+    // Preserve the historical path-derived name as a last-resort fallback for
+    // provisional, missing, or invalid task titles.
+    let fallback = branch_name_from_worktree_path(root);
+    let preferred = preferred
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .filter(|branch| git_command_succeeds(root, &["check-ref-format", "--branch", branch]))
+        .unwrap_or(fallback.as_str());
+    let branch = next_available_branch_name(root, preferred);
     let checkout = run_git_output(root, &["switch", "-c", &branch])?;
     if !checkout.status.success() {
         return Err(git_output_err("git switch -c", &checkout.stderr));
@@ -487,6 +735,7 @@ fn materialize_workspace_branch(root: &str) -> Result<String, String> {
 pub(crate) fn ensure_pushable_branch(
     root: &str,
     protected_branch: Option<&str>,
+    preferred_branch: Option<&str>,
 ) -> Result<String, String> {
     let raw_branch = resolve_current_branch_name(root)?;
     let protected_branch = protected_branch
@@ -496,7 +745,7 @@ pub(crate) fn ensure_pushable_branch(
         return Ok(raw_branch);
     }
 
-    materialize_workspace_branch(root)
+    materialize_workspace_branch(root, preferred_branch)
 }
 
 pub(crate) fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) -> Option<String> {

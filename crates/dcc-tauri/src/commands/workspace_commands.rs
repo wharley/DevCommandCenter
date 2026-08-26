@@ -65,11 +65,12 @@ use crate::{
     commands::workspace_support::{
         broken_workspace_message, cleanup_workspace_files, directory_logical_size,
         ensure_pushable_branch, find_workspace_by_root, next_available_branch_name,
-        preflight_workspace_root, purge_broken_workspace_by_root, push_branch_refspec,
-        push_branch_refspec_to_remote, resolve_branch_diff_base, resolve_current_branch_name,
-        resolve_current_commit_sha, resolve_default_remote_name, resolve_workspace_active_root,
-        resolve_workspace_broken_reason, resolve_workspace_setup_root,
-        resolve_workspace_target_branch, run_git_network_output_with_workspace_auth,
+        preferred_workspace_branch_name, preflight_workspace_root, purge_broken_workspace_by_root,
+        push_branch_refspec, push_branch_refspec_to_remote, resolve_branch_diff_base,
+        resolve_current_branch_name, resolve_current_commit_sha, resolve_default_remote_name,
+        resolve_workspace_active_root, resolve_workspace_broken_reason,
+        resolve_workspace_setup_root, resolve_workspace_target_branch,
+        run_git_network_output_with_workspace_auth,
     },
     delivery_failure::{
         capture_workspace_delivery_failure, clear_workspace_delivery_failure,
@@ -2601,9 +2602,10 @@ async fn push_current_branch_inner(
     forge_login: Option<&str>,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(db_path).map_err(|error| error.to_string())?;
-    if let Some(source) = find_workspace_by_root(&repo, root)
-        .await?
-        .and_then(|workspace| workspace.source)
+    let workspace = find_workspace_by_root(&repo, root).await?;
+    if let Some(source) = workspace
+        .as_ref()
+        .and_then(|workspace| workspace.source.clone())
     {
         let push_target = source.push_target.unwrap_or(WorkspacePushTarget {
             remote_name: source.remote_name,
@@ -2645,7 +2647,10 @@ async fn push_current_branch_inner(
         );
     }
 
-    let branch = ensure_pushable_branch(root, protected_branch)?;
+    let preferred_branch = workspace
+        .as_ref()
+        .and_then(|workspace| preferred_workspace_branch_name(workspace.name.as_deref()));
+    let branch = ensure_pushable_branch(root, protected_branch, preferred_branch.as_deref())?;
     push_branch_refspec(db_path, root, &branch, forge_login)
 }
 
