@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
+import type { WorkspaceSummary } from "./types";
 import {
 	deriveAgentActivityFromSessions,
 	deriveAgentStateFromSessions,
+	runningWorkspaceActivities,
 } from "./use-workspace-agent-states";
 
 type SummaryOverrides = {
@@ -113,5 +115,67 @@ describe("deriveAgentStateFromSessions", () => {
 		const summary = makeSummary({});
 
 		expect(deriveAgentStateFromSessions([summary])).toBeNull();
+	});
+});
+
+describe("runningWorkspaceActivities", () => {
+	const workspace = (
+		id: string,
+		status: WorkspaceSummary["status"] = "ready",
+	): WorkspaceSummary => ({
+		id,
+		name: `Task ${id}`,
+		branch: "main",
+		status,
+	});
+
+	it("keeps only active tasks and orders the newest execution first", () => {
+		const result = runningWorkspaceActivities(
+			[
+				workspace("older"),
+				workspace("completed-activity"),
+				workspace("newer"),
+				workspace("archived", "archived"),
+			],
+			{
+				older: {
+					state: "active",
+					startedAt: "2026-08-26T12:00:00.000Z",
+					completedAt: null,
+				},
+				"completed-activity": {
+					state: "completed",
+					startedAt: "2026-08-26T12:30:00.000Z",
+					completedAt: "2026-08-26T12:31:00.000Z",
+				},
+				newer: {
+					state: "active",
+					startedAt: "2026-08-26T13:00:00.000Z",
+					completedAt: null,
+				},
+				archived: {
+					state: "active",
+					startedAt: "2026-08-26T14:00:00.000Z",
+					completedAt: null,
+				},
+			},
+		);
+
+		expect(result.map(({ workspace: entry }) => entry.id)).toEqual([
+			"newer",
+			"older",
+		]);
+	});
+
+	it("uses workspace id as a stable fallback when start times are unavailable", () => {
+		const result = runningWorkspaceActivities(
+			[workspace("b"), workspace("a")],
+			{
+				a: { state: "active", startedAt: null, completedAt: null },
+				b: { state: "active", startedAt: "invalid", completedAt: null },
+			},
+		);
+
+		expect(result.map(({ workspace: entry }) => entry.id)).toEqual(["a", "b"]);
 	});
 });

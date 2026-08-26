@@ -76,8 +76,14 @@ import {
 	WAITING_SECTION_ID,
 	workspaceRailDisplayTitle,
 } from "./workspace-rail-shared";
-import { WorkspaceRailRowItem } from "./workspace-rail-row";
-import { useWorkspaceAgentActivities } from "./use-workspace-agent-states";
+import {
+	WorkspaceActivityTime,
+	WorkspaceRailRowItem,
+} from "./workspace-rail-row";
+import {
+	runningWorkspaceActivities,
+	useWorkspaceAgentActivities,
+} from "./use-workspace-agent-states";
 import { ProjectEditDialog } from "./project-edit-dialog";
 import { ProjectIdentityGlyph } from "./project-identity";
 import { repositoryDisplayName } from "./repository-display-name";
@@ -106,6 +112,7 @@ const ROW_HEIGHT = 72;
 const GROUP_GAP = 10;
 const EMPTY_GROUP_GAP = 8;
 const BOTTOM_PADDING = 8;
+const RUNNING_TASK_PREVIEW_LIMIT = 4;
 
 function getGroupGapSize(previousHasRows: boolean, nextHasRows: boolean) {
 	return previousHasRows && nextHasRows ? GROUP_GAP : EMPTY_GROUP_GAP;
@@ -324,6 +331,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		enabled: showAgentStates,
 		scope: sessionQueryScope,
 	});
+	const runningActivities = useMemo(
+		() => runningWorkspaceActivities(workspaces, workspaceAgentActivities),
+		[workspaceAgentActivities, workspaces],
+	);
+	const [showAllRunningTasks, setShowAllRunningTasks] = useState(false);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const { activeGroups, waitingRows, completedRows } = useMemo(
 		() => projectWorkspaceRailGroups(workspaces, repositories),
@@ -336,6 +348,21 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			),
 		[repositories],
 	);
+	const projectLabelsBySourceKey = useMemo(
+		() => new Map(activeGroups.map((group) => [group.sourceKey, group.label])),
+		[activeGroups],
+	);
+	const visibleRunningActivities = showAllRunningTasks
+		? runningActivities
+		: runningActivities.slice(0, RUNNING_TASK_PREVIEW_LIMIT);
+	const hiddenRunningActivityCount =
+		runningActivities.length - visibleRunningActivities.length;
+
+	useEffect(() => {
+		if (runningActivities.length <= RUNNING_TASK_PREVIEW_LIMIT) {
+			setShowAllRunningTasks(false);
+		}
+	}, [runningActivities.length]);
 	const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(
 		null,
 	);
@@ -1263,6 +1290,107 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						<span>{t("sidebar.pullRequests")}</span>
 					</button>
 				</div>
+
+				{runningActivities.length > 0 ? (
+					<section
+						aria-label={t("sidebar.runningTasks", {
+							count: runningActivities.length,
+						})}
+						className="px-2 pb-3"
+					>
+						<div className="mb-1 flex items-center gap-1.5 px-1">
+							<h2 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">
+								{t("sidebar.running")}
+							</h2>
+							<span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500/10 px-1 text-[9px] font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+								{runningActivities.length}
+							</span>
+						</div>
+						<div className="space-y-px rounded-lg border border-border/45 bg-foreground/[0.018] p-0.5">
+							{visibleRunningActivities.map(({ workspace, activity }) => {
+								const title = workspaceRailDisplayTitle(workspace);
+								const sourceKey = projectGroupingKey(workspace);
+								const memberProjects = [...new Set(workspace.memberProjectNames ?? [])];
+								const projectLabel =
+									memberProjects.length > 1
+										? memberProjects.join(" · ")
+										: projectLabelsBySourceKey.get(sourceKey) ??
+											memberProjects[0] ??
+											workspace.projectId ??
+											t("sidebar.unknownProject");
+								const repository = repositoriesBySourceKey.get(sourceKey) ?? null;
+								const selected = selectedWorkspaceId === workspace.id;
+
+								return (
+									<Tooltip key={workspace.id} delayDuration={450}>
+										<TooltipTrigger asChild>
+											<button
+												type="button"
+												aria-current={selected ? "location" : undefined}
+												aria-label={t("sidebar.openWorkspace", { label: title })}
+												onClick={() => onSelectWorkspace(workspace.id)}
+												className={cn(
+													"flex h-11 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left transition-colors",
+													selected
+														? "workspace-row-selected text-foreground"
+														: "text-foreground/85 hover:bg-accent/60 hover:text-foreground",
+												)}
+											>
+												<Loader2
+													className="size-3.5 shrink-0 animate-spin text-amber-600 dark:text-amber-300"
+													strokeWidth={2}
+													aria-hidden
+												/>
+												<span className="flex min-w-0 flex-1 flex-col">
+													<span className="truncate text-[12px] font-medium leading-4">
+														{title}
+													</span>
+													<span className="flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted-foreground">
+														{repository ? (
+															<ProjectIdentityGlyph
+																icon={repository.icon}
+																color={repository.color}
+																size="sm"
+																className="size-3 shrink-0"
+															/>
+														) : null}
+														<span className="truncate">{projectLabel}</span>
+													</span>
+												</span>
+												<span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+													<WorkspaceActivityTime activity={activity} bare />
+												</span>
+											</button>
+										</TooltipTrigger>
+										<TooltipContent side="right">
+											{t("sidebar.runningTaskTooltip", { title, project: projectLabel })}
+										</TooltipContent>
+									</Tooltip>
+								);
+							})}
+							{hiddenRunningActivityCount > 0 ? (
+								<button
+									type="button"
+									onClick={() => setShowAllRunningTasks(true)}
+									className="flex h-7 w-full items-center justify-center rounded-md text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+								>
+									{t("sidebar.showMoreRunningTasks", {
+										count: hiddenRunningActivityCount,
+									})}
+								</button>
+							) : showAllRunningTasks &&
+							  runningActivities.length > RUNNING_TASK_PREVIEW_LIMIT ? (
+								<button
+									type="button"
+									onClick={() => setShowAllRunningTasks(false)}
+									className="flex h-7 w-full items-center justify-center rounded-md text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+								>
+									{t("sidebar.showFewerRunningTasks")}
+								</button>
+							) : null}
+						</div>
+					</section>
+				) : null}
 
 				<div className="flex items-center justify-between px-3">
 					<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">

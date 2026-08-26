@@ -12,6 +12,36 @@ export type WorkspaceAgentActivity = {
 	completedAt: string | null;
 };
 
+export type RunningWorkspaceActivity = {
+	workspace: WorkspaceSummary;
+	activity: WorkspaceAgentActivity;
+};
+
+function activityStartedAtMs(activity: WorkspaceAgentActivity): number {
+	if (!activity.startedAt) return 0;
+	const parsed = Date.parse(activity.startedAt);
+	return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export function runningWorkspaceActivities(
+	workspaces: WorkspaceSummary[],
+	activities: Record<string, WorkspaceAgentActivity>,
+): RunningWorkspaceActivity[] {
+	return workspaces
+		.flatMap((workspace) => {
+			if (workspace.status === "archived" || workspace.status === "completed") {
+				return [];
+			}
+			const activity = activities[workspace.id];
+			return activity?.state === "active" ? [{ workspace, activity }] : [];
+		})
+		.sort(
+			(left, right) =>
+				activityStartedAtMs(right.activity) - activityStartedAtMs(left.activity) ||
+				left.workspace.id.localeCompare(right.workspace.id),
+		);
+}
+
 function isRunningSession(summary: WorkspaceSessionSummary): boolean {
 	return (
 		summary.lastTurnState === "running" ||

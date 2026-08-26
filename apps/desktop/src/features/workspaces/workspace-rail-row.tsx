@@ -93,7 +93,7 @@ const recapToneClass: Record<WorkspaceRecapTone, string> = {
 	done: "text-muted-foreground/80",
 };
 
-function WorkspaceActivityTime({
+export function WorkspaceActivityTime({
 	activity,
 	bare = false,
 }: {
