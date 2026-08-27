@@ -25,7 +25,7 @@ use dcc_core::{
         provider::McpOauthSupport,
         session::{
             QueuedTurn, SessionEventRecord, SessionId, SessionProjection, SessionSearchResult,
-            WorkspaceSessionSummary,
+            TurnReviewFile, WorkspaceSessionSummary,
         },
         thread::Thread,
         usage::{UsageDashboard, UsageDashboardInput},
@@ -145,6 +145,125 @@ pub struct SearchSessionsInput {
     pub query: String,
     #[serde(default = "default_search_limit")]
     pub limit: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LastTurnReviewInput {
+    pub session_id: String,
+    pub workspace_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnReviewSummary {
+    pub snapshot_id: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub workspace_id: String,
+    pub state: String,
+    pub compatibility: String,
+    pub base_fingerprint: Option<String>,
+    pub result_fingerprint: Option<String>,
+    pub files: Vec<TurnReviewFile>,
+    pub insertions: u32,
+    pub deletions: u32,
+    pub diff_truncated: bool,
+    pub excluded_preexisting_untracked_count: usize,
+    pub observed_validations: Vec<String>,
+    pub turn_outcome: Option<String>,
+    pub outcome_reason: Option<String>,
+    pub error: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnReviewFileDiffInput {
+    pub snapshot_id: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnReviewFileDiffOutput {
+    pub snapshot_id: String,
+    pub path: String,
+    pub diff: Option<String>,
+    pub preview_unavailable: bool,
+}
+
+#[tauri::command]
+pub async fn last_turn_review(
+    state: State<'_, SessionCommandState>,
+    input: LastTurnReviewInput,
+) -> Result<Option<TurnReviewSummary>, String> {
+    let session_id = SessionId(input.session_id.trim().to_string());
+    let workspace_id = input.workspace_id.trim();
+    if session_id.0.is_empty() || workspace_id.is_empty() {
+        return Err("sessionId and workspaceId are required".to_string());
+    }
+    let change_set = state
+        .list_turn_change_sets(&session_id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|item| item.workspace_id.0 == workspace_id);
+    let Some(change_set) = change_set else {
+        return Ok(None);
+    };
+    let change_set = state
+        .normalize_interrupted_turn_change_set(change_set)
+        .await
+        .map_err(|error| error.to_string())?;
+    let compatibility = state.turn_change_set_compatibility(&change_set).await;
+    let (insertions, deletions) = crate::turn_review::file_totals(&change_set.files);
+    Ok(Some(TurnReviewSummary {
+        snapshot_id: change_set.snapshot_id,
+        session_id: change_set.session_id.0,
+        turn_id: change_set.turn_id.0,
+        workspace_id: change_set.workspace_id.0,
+        state: change_set.state,
+        compatibility,
+        base_fingerprint: change_set.base_tree,
+        result_fingerprint: change_set.result_tree,
+        files: change_set.files,
+        insertions,
+        deletions,
+        diff_truncated: change_set.diff_truncated,
+        excluded_preexisting_untracked_count: change_set.baseline_untracked.len(),
+        observed_validations: change_set.observed_validations,
+        turn_outcome: change_set.turn_outcome,
+        outcome_reason: change_set.outcome_reason,
+        error: change_set.error,
+        completed_at: change_set.completed_at,
+    }))
+}
+
+#[tauri::command]
+pub async fn turn_review_file_diff(
+    state: State<'_, SessionCommandState>,
+    input: TurnReviewFileDiffInput,
+) -> Result<TurnReviewFileDiffOutput, String> {
+    let snapshot_id = input.snapshot_id.trim();
+    let path = input.path.trim();
+    if snapshot_id.is_empty() || path.is_empty() || path.starts_with('/') {
+        return Err("a valid snapshotId and relative path are required".to_string());
+    }
+    let change_set = state
+        .get_turn_change_set(snapshot_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "turn review snapshot not found".to_string())?;
+    let file = change_set
+        .files
+        .iter()
+        .find(|file| file.path == path)
+        .ok_or_else(|| "file is not part of this turn review snapshot".to_string())?;
+    Ok(TurnReviewFileDiffOutput {
+        snapshot_id: snapshot_id.to_string(),
+        path: path.to_string(),
+        diff: change_set.file_diffs.get(path).cloned(),
+        preview_unavailable: file.preview_unavailable,
+    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -371,7 +490,6 @@ pub async fn send_turn(
     // TurnAborted so the UI does not get stuck on session.turn.started.
     let turn_id = output.turn.id.clone();
     let session_id = output.session.id.clone();
-
     let abort_turn = |reason: String| {
         let state = &state;
         let session_id = session_id.clone();
@@ -390,12 +508,17 @@ pub async fn send_turn(
     {
         return Err(abort_turn(error.to_string()).await);
     }
+    if let Err(error) = state
+        .capture_turn_review_baseline(&output.session, &turn_id)
+        .await
+    {
+        eprintln!("[DCC] turn review baseline persistence failed: {error}");
+    }
 
     if let Err(error) = state
         .send_provider_input(&output.session.id, Input::Turn(provider_turn_input))
         .await
     {
-        let _ = state.set_active_turn(&output.session.id, None).await;
         return Err(abort_turn(error.to_string()).await);
     }
 
@@ -524,10 +647,22 @@ pub async fn abort_run(
     _app: AppHandle,
     input: AbortRunInput,
 ) -> Result<AbortRunOutput, String> {
+    let session_id = input.session_id.clone();
+    let active_turn_id = state
+        .list_events_by_session(&session_id)
+        .await
+        .ok()
+        .and_then(|events| SessionProjection::fold(&events))
+        .and_then(|projection| projection.active_turn_id);
+    if let Some(turn_id) = active_turn_id.as_ref() {
+        state
+            .quiesce_turn_for_abort(&session_id, turn_id, input.reason.as_deref())
+            .await
+            .map_err(|error| error.to_string())?;
+    }
     let output = run_abort_run(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
-    let _ = state.cancel_provider_session(&output.session.id).await;
     Ok(output)
 }
 

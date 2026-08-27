@@ -75,8 +75,8 @@ labels show planning state, not a delivery date.
 | **M0 — Trust and measurement baseline** | Implemented locally and review-approved — pending deploy | Publish the product narrative and a small, opt-in, local-only measurement model. Document the audited download-statistic methodology and limitations, and make the landing/README show the canonical workflow. | Every public metric has a source, definition, and update date. No public number is described as unique people unless it is actually deduplicated. Local product signals exclude prompt content, repository paths, session IDs, and credentials; users can inspect/reset them. |
 | **M1 — Workspace Split View v1** | Implemented locally and review-approved — pending commit/release | Keep conversation as the fixed primary pane and allow exactly one secondary surface: Changes, Terminal, Files/Editor, or Preview. Add resizing, persistence per project, keyboard focus, and responsive fallback. This is a frontend layout milestone: no new backend orchestration model. | Conversation plus each secondary surface works without losing session state. A compact layout remains usable. The selected surface and ratio restore safely. Keyboard navigation and focus restoration work. Existing terminal and Inspector workflows do not regress. |
 | **M2 — Unified Palette** | Implemented locally and review-approved — pending commit/release | Deliver the first palette slice: `Cmd/Ctrl+K` alias, local debounced project/session/file discovery, explicit `@` session FTS search, and a capped recent-items list (40). Continue evolving it toward projects, workspaces, threads, and contextual actions such as last diff, terminal, and active review. | The v1 results navigate to the correct entity and respect project/workspace context. Search is local, session FTS is explicit through `@` plus at least two local characters and debounced, and recent items are capped at 40. Prompt content is not indexed by default. Commands show a clear target before mutation. |
-| **M3 — Last Turn Review** | Proposed | Capture a bounded, attributable change snapshot for a completed agent turn and expose `Changes from last turn` in the conversation and Inspector. Include base/result fingerprints, changed files and diffs, relevant validation evidence, and a clear distinction from accumulated workspace changes. | A user reaches the last-turn diff in one action. DCC does not attribute pre-existing or subsequent manual changes to the agent turn. No-change, unavailable Git data, and failed collection are distinct states. Relevant tests cover normal, concurrent, and changed-workspace cases. |
-| **M4 — Guarded Undo** | Proposed | First implement fingerprint-guarded restoration of intact last-turn changes with preview and explicit confirmation. Later, add a three-way reconciliation path for overlapping changes. | The first implementation restores only content proved unchanged since the snapshot. A fingerprint mismatch blocks automatic mutation and presents a preview/manual route. The three-way path never silently resolves overlapping edits. No reset, force-push, hook bypass, or destructive global checkout is used. |
+| **M3 — Last Turn Review** | Implemented locally and backend/frontend review-approved — pending commit/release | Capture a bounded, attributable change snapshot for a completed agent turn and expose `Changes from last turn` in Split View, the Inspector, and review cards. Snapshots preserve base/result evidence, changed-file manifests, immutable historical previews, relevant validation evidence, and a clear distinction from accumulated workspace changes. | A user reaches the last-turn diff in one action. DCC does not attribute pre-existing or subsequent manual changes to the agent turn. No-change, unavailable Git data, compatibility, and failed collection are distinct states. Relevant tests cover normal, concurrent, multi-root, and changed-workspace cases. |
+| **M4 — Guarded Undo** | Blocked pending a safe restoration design | First implement fingerprint-guarded restoration of intact last-turn changes with preview and explicit confirmation. Later, add a three-way reconciliation path for overlapping changes. | The first implementation restores only content proved unchanged since the snapshot. A fingerprint mismatch blocks automatic mutation and presents a preview/manual route. The three-way path never silently resolves overlapping edits. No reset, force-push, hook bypass, destructive global checkout, Git-tree snapshot, or snapshot-quarantine content is used as a restoration source. |
 | **M5 — Release-grade macOS distribution** | Implemented locally and statically reviewed — pending macOS CI with Apple signing/notarization secrets | Add signed, notarized, stapled DMGs for supported macOS architectures while retaining the existing signed `.app.tar.gz` updater path during a verified migration. Publish checksums and installation guidance. | A clean macOS installation works from the DMG without avoidable Gatekeeper warnings. Updates preserve data. DMG, updater archive, architecture selection, checksums, and fallback behavior are validated in release checks. Release secrets stay isolated. |
 | **M6 — Delivery integration** | Proposed | Connect turn review, validation evidence, and safe recovery to the existing Delivery Status / delivery-workflow model. Add only reviewable automations that land in a queue. | A workspace can answer what changed, what was validated, what blocks delivery, and which human action is next. Delivery actions revalidate captured branch, workspace, remote, and push target before mutation. Automations never merge, force-push, or discard work silently. |
 
@@ -94,9 +94,38 @@ none of it is marked shipped.
   pending commit/release. Its session FTS remains local and is only invoked by
   an explicit `@` query with at least two local characters; searches are
   debounced, `Cmd/Ctrl+K` is an alias, and recents are capped at 40.
+- **M3:** Last Turn Review is implemented locally and approved by backend and
+  frontend reviews, pending commit/release. See the implementation scope and
+  deliberate limitations below.
 - **M5:** DMG support for Apple Silicon and Intel, while retaining the updater
   archive path, is implemented locally and static-review approved. It remains
   pending macOS CI that has the required Apple signing and notarization secrets.
+
+### M3 Last Turn Review local implementation
+
+The local implementation captures per-turn, per-root snapshots in a dedicated
+table, outside transcript storage and session FTS. Historical content is read
+through an immutable `snapshotId` plus path preview; it is not reconstructed
+from the current workspace. Base and result evidence are captured before the
+terminal phase, and the lifecycle covers desktop, queue, HTTP, and abort paths.
+
+It includes explicit state reporting, compatibility handling, and multi-root
+coverage. The review is reachable from Split View, the Inspector, and the
+conversation/review card surfaces, with English and Brazilian Portuguese copy.
+
+The following limitations are deliberate in v1:
+
+- Untracked files record manifest evidence only; their content and historical
+  preview are unavailable.
+- Compatibility cannot be inferred for older data; affected snapshots are
+  explicitly unavailable rather than guessed.
+- Repositories with clean filters or process filters, including Git LFS, are
+  unavailable for snapshot capture in this version.
+- Diff generation, manifests, and capture deadlines are bounded. Any bound or
+  collection failure is reported as an explicit state.
+- Temporary snapshot quarantine is isolated from the workspace and swept on
+  startup. It is capture infrastructure only, not a source of user-visible
+  restoration.
 
 ## Dependency and risk map
 
@@ -112,9 +141,11 @@ M0 trust/measurement
 
 M1 deliberately precedes snapshots: it makes the existing conversation,
 terminal, changes, editor, and preview surfaces feel like one workbench without
-introducing a new data model. M3 establishes provenance before M4 attempts any
-restoration. M5 may progress alongside the product work, but its signing and
-release controls remain independently gated.
+introducing a new data model. M3 now establishes review provenance locally, but
+M4 remains blocked until restoration has an independently safe design. In
+particular, M4 must not treat Git trees or M3's isolated quarantine as a restore
+source. M5 may progress alongside the product work, but its signing and release
+controls remain independently gated.
 
 ### Guardrails
 
@@ -123,6 +154,11 @@ release controls remain independently gated.
 - Snapshot metadata must be versioned and migration-tested. Old workspaces and
   sessions remain readable even when a snapshot is unavailable.
 - Bound stored diff and command output sizes; report truncation clearly.
+- Do not capture untracked-file content in M3 v1, and mark clean/process-filter
+  repositories (including Git LFS) unavailable rather than risking an invalid
+  snapshot.
+- Keep snapshot quarantine isolated and sweep it at startup; it is never an
+  Undo source.
 - Preserve the distinction between the comparison base, checkout reference, and
   push target. Never infer a write target only from the name `origin`.
 - Keep raw runtime diagnostics behind an explicit details affordance. Daily UI

@@ -216,6 +216,7 @@ import {
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
 import type { WorkspaceSurfaceSelection } from "./features/panel/workspace-surface";
+import { isTurnReviewIdentityActive } from "./features/panel/turn-review.logic";
 import type { WorkspaceFileReference } from "./components/workspace-file-reference";
 import {
 	buildMissionContinueCriterionPrompt,
@@ -1983,6 +1984,35 @@ export default function App() {
 	const openPlanSurface = useCallback(() => {
 		requestSurfaceSelection({ kind: "plan" });
 	}, [requestSurfaceSelection]);
+	const openTurnReviewSurface = useCallback(
+		(sessionId: string) => {
+			const workspaceId = activeWorkspace?.id ?? selectedWorkspace?.id ?? null;
+			if (!workspaceId) return;
+			requestSurfaceSelection({ kind: "turn-review", sessionId, workspaceId });
+		},
+		[activeWorkspace?.id, requestSurfaceSelection, selectedWorkspace?.id],
+	);
+	useEffect(() => {
+		const selection = surfaceSelectionRef.current;
+		if (selection?.kind !== "turn-review") return;
+		const activeReviewWorkspaceId =
+			activeWorkspace?.id ?? selectedWorkspace?.id ?? null;
+		const activeSessionWorkspace =
+			effectiveSelectedSessionId && activeReviewWorkspaceId
+				? {
+						sessionId: effectiveSelectedSessionId,
+						workspaceId: activeReviewWorkspaceId,
+					}
+				: null;
+		if (!isTurnReviewIdentityActive(selection, activeSessionWorkspace)) {
+			requestSurfaceSelection(null);
+		}
+	}, [
+		activeWorkspace?.id,
+		effectiveSelectedSessionId,
+		requestSurfaceSelection,
+		selectedWorkspace?.id,
+	]);
 	const runWorkbenchCommand = useCallback(
 		(command: WorkbenchCommand) => {
 			recordUxMetric("command_palette_action");
@@ -4753,6 +4783,7 @@ export default function App() {
 							) : hasWorkspace && selectedWorkspace ? (
 								<SessionWorkbench
 									workspaceId={selectedWorkspace.id}
+									turnReviewWorkspaceId={activeWorkspace?.id ?? selectedWorkspace.id}
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
 									workspacePath={selectedSessionWorkspacePath}
@@ -4837,6 +4868,7 @@ export default function App() {
 									onFileSurfaceClosed={handleFileSurfaceClosed}
 									onCloseSurface={handleCloseSurface}
 									onOpenPlanSurface={openPlanSurface}
+									onOpenTurnReview={openTurnReviewSurface}
 									onOpenFileReference={handleOpenConversationFile}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
 									inspectorCollapsed={inspectorCollapsed}
@@ -4924,6 +4956,7 @@ export default function App() {
 											: null
 									}
 									workspaceId={selectedWorkspace?.id ?? null}
+									turnReviewWorkspaceId={activeWorkspace?.id ?? selectedWorkspace?.id ?? null}
 									workspaceName={selectedWorkspace?.name ?? null}
 									workspaceBranch={selectedWorkspace?.branch ?? null}
 									workspacePath={selectedLocalWorkspacePath}
@@ -4967,6 +5000,7 @@ export default function App() {
 										setInspectorPresentation(pinned ? "pinned" : "contextual")
 									}
 									onRequestClose={closeInspector}
+									onOpenLastTurnReview={openTurnReviewSurface}
 									onContextualActionComplete={
 										handleInspectorContextualActionComplete
 									}

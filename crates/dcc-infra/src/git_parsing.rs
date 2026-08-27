@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub struct GitNameStatusEntry {
     pub status: String,
     pub path: String,
+    pub old_path: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,8 +35,10 @@ pub fn parse_name_status_z(stdout: &[u8]) -> Vec<GitNameStatusEntry> {
         }
 
         let mut path = fields[index].to_string();
+        let mut old_path = None;
         index += 1;
         if (raw_status.starts_with('R') || raw_status.starts_with('C')) && index < fields.len() {
+            old_path = Some(path);
             path = fields[index].to_string();
             index += 1;
         }
@@ -47,6 +50,7 @@ pub fn parse_name_status_z(stdout: &[u8]) -> Vec<GitNameStatusEntry> {
         entries.push(GitNameStatusEntry {
             status: raw_status.chars().next().unwrap_or('M').to_string(),
             path,
+            old_path,
         });
     }
 

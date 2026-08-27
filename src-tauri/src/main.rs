@@ -7105,6 +7105,8 @@ pub fn run() {
             session_commands::close_session,
             session_commands::restore_session,
             session_commands::list_thread_events,
+            session_commands::last_turn_review,
+            session_commands::turn_review_file_diff,
             session_commands::list_mcp_runtime_statuses,
             session_commands::start_mcp_oauth,
             session_commands::wait_mcp_oauth,

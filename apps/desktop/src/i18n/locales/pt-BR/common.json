@@ -2716,6 +2716,55 @@
     "loading": "Listando arquivos…",
     "empty": "Nenhum arquivo encontrado."
   },
+  "turnReview": {
+    "action": "Alterações do último turno",
+    "title": "Revisão do último turno",
+    "subtitle": "Evidência Git limitada capturada para este workspace",
+    "close": "Fechar revisão do último turno",
+    "loading": "Carregando revisão do turno…",
+    "failed": "Não foi possível carregar a revisão do turno.",
+    "unavailable": "Não há revisão capturada para esta sessão e workspace.",
+    "fileCount_one": "{{count}} arquivo",
+    "fileCount_other": "{{count}} arquivos",
+    "fileList": "Arquivos observados durante o turno",
+    "noChanges": "Nenhuma alteração foi observada durante este turno.",
+    "collectingHint": "As alterações observadas ainda estão sendo coletadas.",
+    "selectFile": "Selecione um arquivo para inspecionar o diff capturado.",
+    "previewUnavailable": "Não há preview de texto capturado para este arquivo.",
+    "diffFailed": "Não foi possível carregar o diff capturado deste arquivo.",
+    "attributionNotice": "Estas alterações foram observadas durante o turno do provedor. O DCC não consegue distinguir edições simultâneas feitas por uma pessoa ou processo de terminal.",
+    "partialNotice": "Esta captura é parcial. Revise as limitações abaixo antes de confiar na lista de arquivos.",
+    "diffTruncatedNotice": "O diff capturado atingiu o limite de tamanho e foi truncado.",
+    "divergedNotice": "O workspace mudou depois deste snapshot. A revisão abaixo permanece imutável e não inclui alterações posteriores.",
+    "excludedUntracked_one": "{{count}} arquivo não rastreado preexistente foi excluído da atribuição.",
+    "excludedUntracked_other": "{{count}} arquivos não rastreados preexistentes foram excluídos da atribuição.",
+    "observedValidations": "Categorias de comandos de validação observadas: {{values}}. Os resultados não foram capturados.",
+    "fingerprints": "Fingerprints base e resultado",
+    "outcomes": {
+      "completed": "Turno concluído",
+      "aborted": "Turno interrompido"
+    },
+    "outcomeReasons": {
+      "interrupted": "O turno foi interrompido pelo usuário ou cliente.",
+      "timeout": "O turno terminou após atingir um limite de tempo.",
+      "provider": "O provedor parou antes de concluir o turno.",
+      "other": "O turno terminou antes da conclusão. O motivo original não é exibido para evitar a exposição de detalhes sensíveis."
+    },
+    "states": {
+      "collecting": "Coletando",
+      "available": "Disponível",
+      "partial": "Parcial",
+      "no_changes": "Sem alterações",
+      "unavailable": "Indisponível",
+      "failed": "Falha na captura",
+      "interrupted": "Interrompido"
+    },
+    "compatibility": {
+      "matches_result": "Workspace corresponde ao snapshot",
+      "diverged": "Workspace mudou depois",
+      "unavailable": "Estado atual indisponível"
+    }
+  },
   "workspaceSearch": {
     "title": "Buscar no workspace",
     "description": "Encontrar texto nos arquivos rastreados",

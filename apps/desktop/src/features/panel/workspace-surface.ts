@@ -20,6 +20,11 @@ export type WorkspaceSurfaceSelection =
 			kind: "plan";
 	  }
 	| {
+			kind: "turn-review";
+			sessionId: string;
+			workspaceId: string;
+	  }
+	| {
 			kind: "file-edit";
 			path: string;
 			name: string;

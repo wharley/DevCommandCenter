@@ -19,6 +19,7 @@ use dcc_tauri::{
         RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
         RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
         StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput, WaitMcpOauthInput,
+        LastTurnReviewInput, TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary,
         WaitMcpOauthOutput,
     },
     state::SessionCommandState,
@@ -181,6 +182,22 @@ pub async fn list_thread_events(
     session_id: String,
 ) -> Result<Vec<SessionEventRecord>, String> {
     session_command_impl::list_thread_events(state, app, session_id).await
+}
+
+#[tauri::command]
+pub async fn last_turn_review(
+    state: State<'_, SessionCommandState>,
+    input: LastTurnReviewInput,
+) -> Result<Option<TurnReviewSummary>, String> {
+    session_command_impl::last_turn_review(state, input).await
+}
+
+#[tauri::command]
+pub async fn turn_review_file_diff(
+    state: State<'_, SessionCommandState>,
+    input: TurnReviewFileDiffInput,
+) -> Result<TurnReviewFileDiffOutput, String> {
+    session_command_impl::turn_review_file_diff(state, input).await
 }
 
 #[tauri::command]

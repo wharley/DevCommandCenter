@@ -6,6 +6,7 @@ import {
 	ChevronRight,
 	ChevronUp,
 	Code2,
+	FileDiff,
 	GitFork,
 	GitBranch,
 	Info,
@@ -62,6 +63,7 @@ import { GitlabPipelineSection } from "./gitlab-pipeline-section";
 import { WorkspaceDeliveryFailureSection } from "./workspace-delivery-failure-section";
 import { WorkspaceReviewStateSection } from "./workspace-review-state-section";
 import { projectWorkspacePlanMessages } from "@/features/panel/thread-projection";
+import { TurnReviewActionSummary } from "@/features/panel/turn-review-action-summary";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
@@ -186,6 +188,7 @@ type WorkspaceInspectorSidebarProps = {
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	currentRepository: Repository | null;
 	workspaceId: string | null;
+	turnReviewWorkspaceId?: string | null;
 	workspaceName: string | null;
 	workspaceBranch: string | null;
 	workspacePath: string | null;
@@ -247,6 +250,7 @@ type WorkspaceInspectorSidebarProps = {
 	isPinned: boolean;
 	onPinnedChange: (pinned: boolean) => void;
 	onRequestClose: () => void;
+	onOpenLastTurnReview?: (sessionId: string) => void;
 	onContextualActionComplete?: () => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
@@ -1560,6 +1564,7 @@ export function WorkspaceInspectorSidebar({
 	sessionSnapshot,
 	currentRepository,
 	workspaceId,
+	turnReviewWorkspaceId = workspaceId,
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
@@ -1592,6 +1597,7 @@ export function WorkspaceInspectorSidebar({
 	isPinned,
 	onPinnedChange,
 	onRequestClose,
+	onOpenLastTurnReview,
 	onContextualActionComplete,
 	activeTab,
 	onTabChange,
@@ -3423,6 +3429,24 @@ export function WorkspaceInspectorSidebar({
 						/>
 
 						<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
+							{sessionId && onOpenLastTurnReview ? (
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="h-8 w-full shrink-0 justify-start gap-2 text-[11px]"
+									onClick={() => onOpenLastTurnReview(sessionId)}
+								>
+									<FileDiff className="size-3.5" />
+									<span>{t("turnReview.action")}</span>
+									{turnReviewWorkspaceId ? (
+										<TurnReviewActionSummary
+											sessionId={sessionId}
+											workspaceId={turnReviewWorkspaceId}
+										/>
+									) : null}
+								</Button>
+							) : null}
 							<div className="shrink-0">
 								<BranchToolbar
 									branch={gitBranch ?? ""}

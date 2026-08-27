@@ -90,6 +90,7 @@ export type { RuntimeSessionSnapshot } from "./workbench-types";
 
 type SessionWorkbenchProps = {
 	workspaceId: string;
+	turnReviewWorkspaceId?: string | null;
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
@@ -165,6 +166,7 @@ type SessionWorkbenchProps = {
 	onFileSurfaceClosed?: () => void;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
+	onOpenTurnReview: (sessionId: string) => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
@@ -203,6 +205,7 @@ type SessionWorkbenchProps = {
 
 export function SessionWorkbench({
 	workspaceId,
+	turnReviewWorkspaceId = workspaceId,
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
@@ -258,6 +261,7 @@ export function SessionWorkbench({
 	onFileSurfaceClosed,
 	onCloseSurface,
 	onOpenPlanSurface,
+	onOpenTurnReview,
 	onOpenFileReference,
 	onImplementPlanInNewThread,
 	composerPrefill,
@@ -765,6 +769,7 @@ export function SessionWorkbench({
 					) : null}
 					<WorkspacePanel
 						workspaceId={workspaceId}
+						turnReviewWorkspaceId={turnReviewWorkspaceId}
 						workspaceName={workspaceName}
 						workspaceBranch={workspaceBranch}
 						workspacePath={workspacePath}
@@ -809,6 +814,7 @@ export function SessionWorkbench({
 						onFileSurfaceClosed={onFileSurfaceClosed}
 						onCloseSurface={onCloseSurface}
 						onOpenPlanSurface={onOpenPlanSurface}
+						onOpenTurnReview={onOpenTurnReview}
 						onOpenFileReference={onOpenFileReference}
 						onImplementPlanInNewThread={onImplementPlanInNewThread}
 						terminalScopes={terminalScopes}

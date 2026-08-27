@@ -108,7 +108,8 @@ use dcc_tauri::commands::{
         NativeSubagentControlOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
         RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
         RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
-        StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput, WaitMcpOauthInput,
+        LastTurnReviewInput, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
+        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
         WaitMcpOauthOutput,
     },
     workspace_commands::{
@@ -291,6 +292,8 @@ struct SessionMethods {
     close_session: String,
     restore_session: String,
     list_thread_events: String,
+    last_turn_review: String,
+    turn_review_file_diff: String,
     list_mcp_runtime_statuses: String,
     start_mcp_oauth: String,
     wait_mcp_oauth: String,
@@ -657,6 +660,10 @@ fn main() {
         .typ::<CloseSessionOutput>()
         .typ::<RestoreSessionInput>()
         .typ::<RestoreSessionOutput>()
+        .typ::<LastTurnReviewInput>()
+        .typ::<TurnReviewSummary>()
+        .typ::<TurnReviewFileDiffInput>()
+        .typ::<TurnReviewFileDiffOutput>()
         .typ::<ListMcpRuntimeStatusesInput>()
         .typ::<ListMcpRuntimeStatusesOutput>()
         .typ::<StartMcpOauthInput>()
@@ -838,6 +845,8 @@ fn main() {
             close_session: "close_session".to_string(),
             restore_session: "restore_session".to_string(),
             list_thread_events: "list_thread_events".to_string(),
+            last_turn_review: "last_turn_review".to_string(),
+            turn_review_file_diff: "turn_review_file_diff".to_string(),
             list_mcp_runtime_statuses: "list_mcp_runtime_statuses".to_string(),
             start_mcp_oauth: "start_mcp_oauth".to_string(),
             wait_mcp_oauth: "wait_mcp_oauth".to_string(),

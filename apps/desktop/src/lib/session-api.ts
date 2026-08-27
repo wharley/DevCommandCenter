@@ -11,6 +11,8 @@ import type {
 	SessionEventRecord,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
+	TurnReviewSummary,
+	TurnReviewFileDiffOutput,
 } from "@dcc/contracts";
 import type {
 	AbortRunInput,
@@ -167,6 +169,18 @@ export function respondToPermissionRequest(input: RespondToPermissionRequestInpu
 export function loadSessionThreadEvents(sessionId: string) {
 	return invoke<SessionEventRecord[]>(SESSION_METHODS.listThreadEvents, {
 		sessionId,
+	});
+}
+
+export function loadLastTurnReview(sessionId: string, workspaceId: string) {
+	return invoke<TurnReviewSummary | null>(SESSION_METHODS.lastTurnReview, {
+		input: { sessionId, workspaceId },
+	});
+}
+
+export function loadTurnReviewFileDiff(snapshotId: string, path: string) {
+	return invoke<TurnReviewFileDiffOutput>(SESSION_METHODS.turnReviewFileDiff, {
+		input: { snapshotId, path },
 	});
 }
 

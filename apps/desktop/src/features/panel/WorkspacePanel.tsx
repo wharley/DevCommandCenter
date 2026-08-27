@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { LoaderCircle } from "lucide-react";
+import { FileDiff, LoaderCircle } from "lucide-react";
 import type { WorkspaceSessionSummary, WorkspaceSetupReport } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -118,6 +118,13 @@ import {
 	readSecondarySurfaceWidth,
 	resolveSecondarySurfaceRestoration,
 } from "./secondary-surface-layout";
+import { TurnReviewSurface } from "./turn-review-surface";
+import { TurnReviewActionSummary } from "./turn-review-action-summary";
+import {
+	latestTurnReviewTerminalEvent,
+	shouldInvalidateTurnReview,
+} from "./turn-review.logic";
+import { lastTurnReviewQueryKey } from "./turn-review-query";
 
 /** Composer draft injection request; the nonce lets a repeated annotation re-fire. */
 type ComposerPrefill = {
@@ -178,6 +185,8 @@ function buildReviewContent(
 
 type WorkspacePanelProps = {
 	workspaceId: string;
+	/** Active bundle member whose per-turn evidence should be reviewed. */
+	turnReviewWorkspaceId?: string | null;
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
@@ -235,6 +244,7 @@ type WorkspacePanelProps = {
 	onFileSurfaceClosed?: () => void;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
+	onOpenTurnReview: (sessionId: string) => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
@@ -275,6 +285,7 @@ type WorkspacePanelProps = {
 
 export function WorkspacePanel({
 	workspaceId,
+	turnReviewWorkspaceId = workspaceId,
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
@@ -319,6 +330,7 @@ export function WorkspacePanel({
 	onFileSurfaceClosed,
 	onCloseSurface,
 	onOpenPlanSurface,
+	onOpenTurnReview,
 	onOpenFileReference,
 	onImplementPlanInNewThread,
 	terminalScopes,
@@ -353,6 +365,50 @@ export function WorkspacePanel({
 		[onFileSurfaceClosed, onCloseSurface],
 	);
 	const queryClient = useQueryClient();
+	const activeTurnReviewSessionId =
+		workspaceSurfaceSelection?.kind === "turn-review"
+			? workspaceSurfaceSelection.sessionId
+			: null;
+	const terminalReviewEvent = useMemo(
+		() =>
+			activeTurnReviewSessionId
+				? latestTurnReviewTerminalEvent(
+						sessionEvents,
+						activeTurnReviewSessionId,
+					)
+				: null,
+		[activeTurnReviewSessionId, sessionEvents],
+	);
+	const reviewInvalidationRef = useRef<{
+		identity: string | null;
+		terminalEvent: string | null;
+	}>({ identity: null, terminalEvent: null });
+	useEffect(() => {
+		const selection =
+			workspaceSurfaceSelection?.kind === "turn-review"
+				? workspaceSurfaceSelection
+				: null;
+		const identity = selection
+			? `${selection.sessionId}:${selection.workspaceId}`
+			: null;
+		const previous = reviewInvalidationRef.current;
+		const next = {
+			identity,
+			terminalEvent: terminalReviewEvent,
+		};
+		reviewInvalidationRef.current = next;
+		if (!selection || !shouldInvalidateTurnReview(previous, next)) return;
+		void queryClient.invalidateQueries({
+			queryKey: lastTurnReviewQueryKey(
+				selection.sessionId,
+				selection.workspaceId,
+			),
+		});
+	}, [
+		queryClient,
+		terminalReviewEvent,
+		workspaceSurfaceSelection,
+	]);
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
 	);
@@ -1195,6 +1251,24 @@ export function WorkspacePanel({
 				) : null}
 
 				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">
+					{effectiveSessionId && sessionSnapshot?.activeTurnId === null && lastTurnState ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="xs"
+							className="mb-2 h-7 w-full max-w-xl justify-start gap-1.5 px-2 text-[11px] text-muted-foreground"
+							onClick={() => onOpenTurnReview(effectiveSessionId)}
+						>
+							<FileDiff className="size-3.5" />
+							<span>{t("turnReview.action")}</span>
+							{turnReviewWorkspaceId ? (
+								<TurnReviewActionSummary
+									sessionId={effectiveSessionId}
+									workspaceId={turnReviewWorkspaceId}
+								/>
+							) : null}
+						</Button>
+					) : null}
 					<WorkspaceComposer
 						draftKey={workspaceId}
 						disabled={false}
@@ -1247,7 +1321,13 @@ export function WorkspacePanel({
 		</div>
 	);
 	const secondarySurfaceContent =
-		workspaceSurfaceSelection?.kind === "git-diff" ? (
+		workspaceSurfaceSelection?.kind === "turn-review" ? (
+			<TurnReviewSurface
+				sessionId={workspaceSurfaceSelection.sessionId}
+				workspaceId={workspaceSurfaceSelection.workspaceId}
+				onClose={onCloseSurface}
+			/>
+		) : workspaceSurfaceSelection?.kind === "git-diff" ? (
 			<WorkspaceEditorSurface
 				workspaceRoot={workspacePath}
 				selection={workspaceSurfaceSelection.file}

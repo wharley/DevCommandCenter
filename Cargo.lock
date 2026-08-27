@@ -970,6 +970,7 @@ dependencies = [
  "specta",
  "tauri",
  "tauri-specta",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml_edit 0.20.2",

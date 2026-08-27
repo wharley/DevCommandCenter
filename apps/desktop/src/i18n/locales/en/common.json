@@ -2716,6 +2716,55 @@
     "loading": "Listing files…",
     "empty": "No files match."
   },
+  "turnReview": {
+    "action": "Changes from last turn",
+    "title": "Last turn review",
+    "subtitle": "Bounded Git evidence captured for this workspace",
+    "close": "Close last turn review",
+    "loading": "Loading turn review…",
+    "failed": "The turn review could not be loaded.",
+    "unavailable": "No captured review is available for this session and workspace.",
+    "fileCount_one": "{{count}} file",
+    "fileCount_other": "{{count}} files",
+    "fileList": "Files observed during the turn",
+    "noChanges": "No changes were observed during this turn.",
+    "collectingHint": "The observed changes are still being collected.",
+    "selectFile": "Select a file to inspect its captured diff.",
+    "previewUnavailable": "A captured text preview is unavailable for this file.",
+    "diffFailed": "The captured diff for this file could not be loaded.",
+    "attributionNotice": "These changes were observed during the provider turn. DCC cannot distinguish simultaneous edits made by a person or terminal process.",
+    "partialNotice": "This capture is partial. Review the limitations below before relying on its file list.",
+    "diffTruncatedNotice": "The captured diff reached its size limit and was truncated.",
+    "divergedNotice": "The workspace has changed since this snapshot. The review below remains immutable and does not include later edits.",
+    "excludedUntracked_one": "{{count}} pre-existing untracked file was excluded from attribution.",
+    "excludedUntracked_other": "{{count}} pre-existing untracked files were excluded from attribution.",
+    "observedValidations": "Observed validation command categories: {{values}}. Outcomes were not captured.",
+    "fingerprints": "Base and result fingerprints",
+    "outcomes": {
+      "completed": "Turn completed",
+      "aborted": "Turn aborted"
+    },
+    "outcomeReasons": {
+      "interrupted": "The turn was interrupted by the user or client.",
+      "timeout": "The turn ended after reaching a time limit.",
+      "provider": "The provider stopped before completing the turn.",
+      "other": "The turn ended before completion. The original reason is not displayed to avoid exposing sensitive details."
+    },
+    "states": {
+      "collecting": "Collecting",
+      "available": "Available",
+      "partial": "Partial",
+      "no_changes": "No changes",
+      "unavailable": "Unavailable",
+      "failed": "Capture failed",
+      "interrupted": "Interrupted"
+    },
+    "compatibility": {
+      "matches_result": "Workspace matches snapshot",
+      "diverged": "Workspace changed later",
+      "unavailable": "Current state unavailable"
+    }
+  },
   "workspaceSearch": {
     "title": "Search in workspace",
     "description": "Find text across tracked files",

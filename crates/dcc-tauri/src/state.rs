@@ -30,7 +30,7 @@ use dcc_core::{
         repository::{Repository, RepositoryId},
         session::{
             AssistantMessagePhase, Session, SessionEventKind, SessionEventRecord, SessionId,
-            SessionSearchResult, TurnId, WorkspaceSessionSummary,
+            SessionSearchResult, TurnChangeSet, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
         usage::{ModelTokenUsage, UsageDashboard, UsageDashboardInput},
@@ -51,8 +51,15 @@ use dcc_infra::{
     mcp_db::SqliteMcpRepo,
 };
 
+use crate::turn_review::{
+    capture_baseline, capture_result, cleanup_all_snapshot_quarantines, cleanup_snapshot,
+    current_snapshot_matches, observed_validations_for_turn, GitTurnBaseline,
+    TURN_REVIEW_CAPTURE_VERSION,
+};
+
 use crate::delivery_failure::{
-    WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureSnapshot,
+    sanitize_delivery_failure_output, WorkspaceDeliveryFailureOperation,
+    WorkspaceDeliveryFailureSnapshot,
 };
 use crate::events::TauriEventBus;
 use dcc_providers::provider_runtime;
@@ -199,6 +206,8 @@ struct ProviderSessionBinding {
     provider_id: String,
     handle: SessionHandle,
     current_turn_id: Arc<AsyncMutex<Option<String>>>,
+    aborting_turn_id: Arc<AsyncMutex<Option<String>>>,
+    terminal_lock: Arc<AsyncMutex<()>>,
     usage_turn_id: Arc<AsyncMutex<Option<String>>>,
     assistant_messages: Arc<AsyncMutex<AssistantMessageTracker>>,
     projected_mcp_definition_ids: Arc<HashSet<McpDefinitionId>>,
@@ -256,11 +265,16 @@ impl SessionCommandState {
             .path()
             .app_data_dir()
             .unwrap_or_else(|_| PathBuf::from("."));
-        Self::from_parts(db_path, app_data_dir, Arc::new(TauriEventBus::new(app)))
+        Self::from_parts(
+            db_path,
+            app_data_dir,
+            Arc::new(TauriEventBus::new(app)),
+            true,
+        )
     }
 
     pub fn new_headless(db_path: PathBuf, app_data_dir: PathBuf) -> Self {
-        Self::from_parts(db_path, app_data_dir, Arc::new(NoopEventBus))
+        Self::from_parts(db_path, app_data_dir, Arc::new(NoopEventBus), true)
     }
 
     pub fn new_with_event_bus(
@@ -268,14 +282,26 @@ impl SessionCommandState {
         app_data_dir: PathBuf,
         event_bus: Arc<dyn EventBus>,
     ) -> Self {
-        Self::from_parts(db_path, app_data_dir, event_bus)
+        Self::from_parts(db_path, app_data_dir, event_bus, false)
     }
 
-    fn from_parts(db_path: PathBuf, app_data_dir: PathBuf, event_bus: Arc<dyn EventBus>) -> Self {
+    fn from_parts(
+        db_path: PathBuf,
+        app_data_dir: PathBuf,
+        event_bus: Arc<dyn EventBus>,
+        recover_interrupted: bool,
+    ) -> Self {
+        let session_repo =
+            SqliteSessionRepo::open(&db_path).expect("failed to open sqlite session repo");
+        if recover_interrupted {
+            cleanup_all_snapshot_quarantines(&app_data_dir.join("turn-review").join("snapshots"));
+            let _ = session_repo
+                .recover_interrupted_turn_change_sets(&Utc::now().to_rfc3339())
+                .unwrap_or_default();
+        }
         Self {
             app_data_dir,
-            session_repo: SqliteSessionRepo::open(&db_path)
-                .expect("failed to open sqlite session repo"),
+            session_repo,
             db_path,
             event_bus,
             store: Arc::new(Mutex::new(SessionStore::default())),
@@ -455,7 +481,7 @@ impl SessionCommandState {
             .await
     }
 
-    async fn append_session_event(
+    pub(crate) async fn append_session_event(
         &self,
         session_id: &SessionId,
         kind: SessionEventKind,
@@ -474,6 +500,334 @@ impl SessionCommandState {
         Ok(record)
     }
 
+    fn turn_review_snapshot_root(&self, snapshot_id: &str) -> PathBuf {
+        self.app_data_dir
+            .join("turn-review")
+            .join("snapshots")
+            .join(snapshot_id)
+    }
+
+    fn turn_review_compatibility_root(&self) -> PathBuf {
+        self.turn_review_snapshot_root(&Uuid::new_v4().to_string())
+    }
+
+    pub fn list_turn_change_sets(&self, session_id: &SessionId) -> Result<Vec<TurnChangeSet>> {
+        self.session_repo
+            .list_turn_change_sets_by_session(session_id)
+    }
+
+    pub fn get_turn_change_set(&self, snapshot_id: &str) -> Result<Option<TurnChangeSet>> {
+        self.session_repo.get_turn_change_set(snapshot_id)
+    }
+
+    pub async fn normalize_interrupted_turn_change_set(
+        &self,
+        change_set: TurnChangeSet,
+    ) -> Result<TurnChangeSet> {
+        // A missing provider binding is only a transient runtime observation:
+        // startup and attach can both briefly have no binding. Reads therefore
+        // never mutate durable capture state. Terminal paths own finalization.
+        Ok(change_set)
+    }
+
+    pub async fn turn_change_set_compatibility(&self, change_set: &TurnChangeSet) -> String {
+        if !matches!(
+            change_set.state.as_str(),
+            "available" | "partial" | "no_changes"
+        ) {
+            return "unavailable".to_string();
+        }
+        let Some(expected_tree) = change_set.result_tree.as_deref() else {
+            return "unavailable".to_string();
+        };
+        let captured_new_untracked = change_set
+            .files
+            .iter()
+            .filter(|file| file.untracked)
+            .count();
+        if !change_set.baseline_untracked.is_empty()
+            || captured_new_untracked != change_set.result_untracked.len()
+        {
+            return "unavailable".to_string();
+        }
+        let Ok(Some(session)) =
+            SessionRepo::get_session(&self.session_repo, &change_set.session_id).await
+        else {
+            return "unavailable".to_string();
+        };
+        let Ok(roots) = self.turn_review_roots(&session).await else {
+            return "unavailable".to_string();
+        };
+        let Some((_, root)) = roots
+            .into_iter()
+            .find(|(workspace_id, _)| workspace_id == &change_set.workspace_id)
+        else {
+            return "unavailable".to_string();
+        };
+        match current_snapshot_matches(
+            &root,
+            &self.turn_review_compatibility_root(),
+            expected_tree,
+            &change_set.baseline_untracked,
+            &change_set.result_untracked,
+        ) {
+            Ok(true) => "matches_result".to_string(),
+            Ok(false) => "diverged".to_string(),
+            Err(_) => "unavailable".to_string(),
+        }
+    }
+
+    async fn turn_review_roots(&self, session: &Session) -> Result<Vec<(WorkspaceId, String)>> {
+        let (primary, additional) = self
+            .resolve_session_working_directories(session, true)
+            .await?;
+        let mut roots = vec![(session.workspace_id.clone(), primary)];
+        roots.extend(
+            session
+                .additional_workspace_ids
+                .iter()
+                .cloned()
+                .zip(additional),
+        );
+        Ok(roots)
+    }
+
+    pub async fn capture_turn_review_baseline(
+        &self,
+        session: &Session,
+        turn_id: &TurnId,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let roots = match self.turn_review_roots(session).await {
+            Ok(roots) => roots,
+            Err(error) => {
+                self.session_repo.save_turn_change_set(&TurnChangeSet {
+                    snapshot_id: Uuid::new_v4().to_string(),
+                    session_id: session.id.clone(),
+                    turn_id: turn_id.clone(),
+                    workspace_id: session.workspace_id.clone(),
+                    capture_version: TURN_REVIEW_CAPTURE_VERSION,
+                    state: "unavailable".to_string(),
+                    base_tree: None,
+                    result_tree: None,
+                    baseline_untracked: Vec::new(),
+                    result_untracked: Vec::new(),
+                    files: Vec::new(),
+                    file_diffs: Default::default(),
+                    observed_validations: Vec::new(),
+                    diff_truncated: false,
+                    turn_outcome: None,
+                    outcome_reason: None,
+                    error: Some(error.to_string()),
+                    created_at: now.clone(),
+                    completed_at: Some(now),
+                })?;
+                return Ok(());
+            }
+        };
+        for (workspace_id, root) in roots {
+            let snapshot_id = Uuid::new_v4().to_string();
+            let snapshot_root = self.turn_review_snapshot_root(&snapshot_id);
+            let (state, base_tree, baseline_untracked, error, completed_at) =
+                if !dcc_infra::git::is_git_repo(PathBuf::from(&root).as_path()) {
+                    (
+                        "unavailable".to_string(),
+                        None,
+                        Vec::new(),
+                        Some("workspace is not an available Git worktree".to_string()),
+                        Some(now.clone()),
+                    )
+                } else {
+                    match capture_baseline(&root, &snapshot_root) {
+                        Ok(baseline) => (
+                            "collecting".to_string(),
+                            Some(baseline.tree),
+                            baseline.untracked,
+                            None,
+                            None,
+                        ),
+                        Err(error) => {
+                            cleanup_snapshot(&snapshot_root);
+                            (
+                                "failed".to_string(),
+                                None,
+                                Vec::new(),
+                                Some(error),
+                                Some(now.clone()),
+                            )
+                        }
+                    }
+                };
+            let keep_quarantine = state == "collecting";
+            let change_set = TurnChangeSet {
+                snapshot_id,
+                session_id: session.id.clone(),
+                turn_id: turn_id.clone(),
+                workspace_id,
+                capture_version: TURN_REVIEW_CAPTURE_VERSION,
+                state,
+                base_tree,
+                result_tree: None,
+                baseline_untracked,
+                result_untracked: Vec::new(),
+                files: Vec::new(),
+                file_diffs: Default::default(),
+                observed_validations: Vec::new(),
+                diff_truncated: false,
+                turn_outcome: None,
+                outcome_reason: None,
+                error,
+                created_at: now.clone(),
+                completed_at,
+            };
+            if let Err(error) = self.session_repo.save_turn_change_set(&change_set) {
+                cleanup_snapshot(&snapshot_root);
+                return Err(error);
+            }
+            if !keep_quarantine {
+                cleanup_snapshot(&snapshot_root);
+            }
+        }
+        Ok(())
+    }
+
+    /// Finalizes immutable review evidence before TurnCompleted is made visible.
+    /// Failure is represented as a durable review state instead of failing the
+    /// provider turn itself.
+    pub async fn capture_turn_review_result(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        turn_outcome: &str,
+        outcome_reason: Option<&str>,
+        force_partial: bool,
+    ) -> Result<Vec<TurnChangeSet>> {
+        let history =
+            SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await?;
+        let session = SessionRepo::get_session(&self.session_repo, session_id).await?;
+        let observed_validations =
+            observed_validations_for_turn(history.iter().filter_map(|event| match &event.kind {
+                SessionEventKind::TurnToolCallStarted {
+                    turn_id: candidate_turn_id,
+                    command: Some(command),
+                    ..
+                } if candidate_turn_id == turn_id => Some(command.clone()),
+                _ => None,
+            }));
+        let now = Utc::now().to_rfc3339();
+        let outcome_reason = outcome_reason.and_then(|reason| {
+            let (sanitized, _) = sanitize_delivery_failure_output(reason);
+            let bounded = sanitized.chars().take(512).collect::<String>();
+            (!bounded.trim().is_empty()).then_some(bounded)
+        });
+        let mut change_sets = self
+            .session_repo
+            .list_turn_change_sets_by_session(session_id)?
+            .into_iter()
+            .filter(|item| &item.turn_id == turn_id)
+            .collect::<Vec<_>>();
+        if change_sets.is_empty() {
+            if let Some(session) = session.as_ref() {
+                let missing = TurnChangeSet {
+                    snapshot_id: Uuid::new_v4().to_string(),
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                    workspace_id: session.workspace_id.clone(),
+                    capture_version: TURN_REVIEW_CAPTURE_VERSION,
+                    state: "unavailable".to_string(),
+                    base_tree: None,
+                    result_tree: None,
+                    baseline_untracked: Vec::new(),
+                    result_untracked: Vec::new(),
+                    files: Vec::new(),
+                    file_diffs: Default::default(),
+                    observed_validations: observed_validations.clone(),
+                    diff_truncated: false,
+                    turn_outcome: Some(turn_outcome.to_string()),
+                    outcome_reason: outcome_reason.clone(),
+                    error: Some("turn baseline is unavailable".to_string()),
+                    created_at: now.clone(),
+                    completed_at: Some(now.clone()),
+                };
+                self.session_repo.save_turn_change_set(&missing)?;
+                return Ok(vec![missing]);
+            }
+            return Ok(Vec::new());
+        }
+        let roots = match session.as_ref() {
+            Some(session) => self.turn_review_roots(session).await.unwrap_or_default(),
+            None => Vec::new(),
+        }
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+        for change_set in &mut change_sets {
+            if change_set.turn_outcome.is_some() {
+                continue;
+            }
+            change_set.observed_validations = observed_validations.clone();
+            change_set.turn_outcome = Some(turn_outcome.to_string());
+            change_set.outcome_reason = outcome_reason.clone();
+            if change_set.state != "collecting" {
+                if force_partial && matches!(change_set.state.as_str(), "available" | "no_changes")
+                {
+                    change_set.state = "partial".to_string();
+                }
+                change_set.completed_at = Some(now.clone());
+                cleanup_snapshot(&self.turn_review_snapshot_root(&change_set.snapshot_id));
+                self.session_repo.save_turn_change_set(change_set)?;
+                continue;
+            }
+            let Some(root) = roots.get(&change_set.workspace_id) else {
+                change_set.state = "unavailable".to_string();
+                change_set.error =
+                    Some("workspace root is unavailable at turn completion".to_string());
+                change_set.completed_at = Some(now.clone());
+                cleanup_snapshot(&self.turn_review_snapshot_root(&change_set.snapshot_id));
+                self.session_repo.save_turn_change_set(change_set)?;
+                continue;
+            };
+            let Some(base_tree) = change_set.base_tree.clone() else {
+                change_set.state = "failed".to_string();
+                change_set.error = Some("turn baseline fingerprint is missing".to_string());
+                change_set.completed_at = Some(now.clone());
+                cleanup_snapshot(&self.turn_review_snapshot_root(&change_set.snapshot_id));
+                self.session_repo.save_turn_change_set(change_set)?;
+                continue;
+            };
+            let baseline = GitTurnBaseline {
+                tree: base_tree,
+                untracked: change_set.baseline_untracked.clone(),
+            };
+            let snapshot_root = self.turn_review_snapshot_root(&change_set.snapshot_id);
+            let captured = capture_result(root, &snapshot_root, &baseline);
+            cleanup_snapshot(&snapshot_root);
+            match captured {
+                Ok(result) => {
+                    change_set.state = result.status;
+                    if force_partial
+                        && matches!(change_set.state.as_str(), "available" | "no_changes")
+                    {
+                        change_set.state = "partial".to_string();
+                    }
+                    change_set.result_tree = Some(result.tree);
+                    change_set.baseline_untracked = result.excluded_preexisting_untracked;
+                    change_set.result_untracked = result.result_untracked;
+                    change_set.files = result.files;
+                    change_set.file_diffs = result.file_diffs;
+                    change_set.diff_truncated = result.diff_truncated;
+                    change_set.error = None;
+                }
+                Err(error) => {
+                    change_set.state = "failed".to_string();
+                    change_set.error = Some(error);
+                }
+            }
+            change_set.completed_at = Some(now.clone());
+            self.session_repo.save_turn_change_set(change_set)?;
+        }
+        Ok(change_sets)
+    }
+
     async fn append_and_publish_session_event(
         &self,
         session_id: &SessionId,
@@ -485,12 +839,116 @@ impl SessionCommandState {
         Ok(())
     }
 
+    async fn turn_has_terminal_event(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<bool> {
+        Ok(
+            SessionEventRepo::list_events_by_session(&self.session_repo, session_id)
+                .await?
+                .iter()
+                .any(|event| match &event.kind {
+                    SessionEventKind::TurnCompleted { turn_id: candidate }
+                    | SessionEventKind::TurnAborted {
+                        turn_id: candidate, ..
+                    } => candidate == turn_id,
+                    _ => false,
+                }),
+        )
+    }
+
+    async fn emit_turn_completed_locked(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<bool> {
+        if self.turn_has_terminal_event(session_id, turn_id).await? {
+            return Ok(false);
+        }
+        self.capture_turn_review_result(session_id, turn_id, "completed", None, false)
+            .await?;
+        self.append_and_publish_session_event(
+            session_id,
+            SessionEventKind::TurnCompleted {
+                turn_id: turn_id.clone(),
+            },
+            dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
+                session_id: session_id.0.clone(),
+                turn_id: turn_id.0.clone(),
+            },
+        )
+        .await?;
+        Ok(true)
+    }
+
+    pub async fn emit_turn_completed(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<bool> {
+        if let Some(binding) = self.provider_binding(session_id)? {
+            let _terminal = binding.terminal_lock.lock().await;
+            if binding.aborting_turn_id.lock().await.as_deref() == Some(turn_id.0.as_str()) {
+                return Ok(false);
+            }
+            if binding.current_turn_id.lock().await.as_deref() != Some(turn_id.0.as_str()) {
+                return Ok(false);
+            }
+            let emitted = self.emit_turn_completed_locked(session_id, turn_id).await?;
+            if emitted {
+                *binding.current_turn_id.lock().await = None;
+            }
+            return Ok(emitted);
+        }
+        self.emit_turn_completed_locked(session_id, turn_id).await
+    }
+
     pub async fn emit_turn_aborted(
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
         reason: Option<String>,
     ) -> Result<()> {
+        if let Some(binding) = self.provider_binding(session_id)? {
+            let _terminal = binding.terminal_lock.lock().await;
+            if binding.aborting_turn_id.lock().await.as_deref() == Some(turn_id.0.as_str()) {
+                return Ok(());
+            }
+            let current_turn_id = binding.current_turn_id.lock().await.clone();
+            if current_turn_id.as_deref() != Some(turn_id.0.as_str()) {
+                if current_turn_id.is_some()
+                    || self.turn_has_terminal_event(session_id, turn_id).await?
+                {
+                    return Ok(());
+                }
+            }
+            self.emit_turn_aborted_locked(session_id, turn_id, reason.clone())
+                .await?;
+            if binding.current_turn_id.lock().await.as_deref() == Some(turn_id.0.as_str()) {
+                *binding.current_turn_id.lock().await = None;
+            }
+            return Ok(());
+        }
+        self.emit_turn_aborted_locked(session_id, turn_id, reason)
+            .await
+    }
+
+    async fn emit_turn_aborted_locked(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        reason: Option<String>,
+    ) -> Result<()> {
+        if self.turn_has_terminal_event(session_id, turn_id).await? {
+            return Ok(());
+        }
+        if let Err(error) = self
+            .capture_turn_review_result(session_id, turn_id, "aborted", reason.as_deref(), true)
+            .await
+        {
+            eprintln!("[DCC] aborted turn review capture failed: {error}");
+        }
         self.append_and_publish_session_event(
             session_id,
             SessionEventKind::TurnAborted {
@@ -504,6 +962,51 @@ impl SessionCommandState {
             },
         )
         .await
+    }
+
+    /// Claims the turn under the terminal transition lock, cancels the
+    /// provider, then reacquires the lock to capture conservative evidence.
+    /// Provider cancellation is not treated as proof that no final write raced
+    /// with it, so aborted reviews are always finalized as partial.
+    pub async fn quiesce_turn_for_abort(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        reason: Option<&str>,
+    ) -> Result<()> {
+        let Some(binding) = self.provider_binding(session_id)? else {
+            self.capture_turn_review_result(session_id, turn_id, "aborted", reason, true)
+                .await?;
+            return Ok(());
+        };
+        {
+            let _terminal = binding.terminal_lock.lock().await;
+            if binding.current_turn_id.lock().await.as_deref() != Some(turn_id.0.as_str()) {
+                return Ok(());
+            }
+            *binding.aborting_turn_id.lock().await = Some(turn_id.0.clone());
+        }
+        if let Some(provider) = provider_runtime(&binding.provider_id) {
+            let _ = provider.cancel(&binding.handle).await;
+        }
+        let _terminal = binding.terminal_lock.lock().await;
+        if binding.aborting_turn_id.lock().await.as_deref() != Some(turn_id.0.as_str()) {
+            return Ok(());
+        }
+        if let Err(error) = self
+            .capture_turn_review_result(session_id, turn_id, "aborted", reason, true)
+            .await
+        {
+            eprintln!("[DCC] aborted turn review capture failed after cancellation: {error}");
+        }
+        *binding.current_turn_id.lock().await = None;
+        *binding.aborting_turn_id.lock().await = None;
+        *binding.usage_turn_id.lock().await = None;
+        if let Ok(mut store) = self.store.lock() {
+            store.provider_sessions.remove(session_id);
+        }
+        let _ = self.clear_mcp_runtime_statuses(session_id).await;
+        Ok(())
     }
 
     pub async fn attach_provider_session(&self, session: &Session) -> Result<()> {
@@ -588,6 +1091,8 @@ impl SessionCommandState {
             provider_id: session.provider_id.clone(),
             handle: handle.clone(),
             current_turn_id: Arc::new(AsyncMutex::new(None)),
+            aborting_turn_id: Arc::new(AsyncMutex::new(None)),
+            terminal_lock: Arc::new(AsyncMutex::new(())),
             usage_turn_id: Arc::new(AsyncMutex::new(None)),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(
@@ -1685,7 +2190,8 @@ impl SessionCommandState {
                         }
                     }
                     Ok(ProviderEvent::Completed { .. }) => {
-                        let turn_id = binding.current_turn_id.lock().await.take();
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        let mut completed = false;
                         if let Some(turn_id) = turn_id {
                             let mut remaining = {
                                 let mut tracker = binding.assistant_messages.lock().await;
@@ -1712,61 +2218,38 @@ impl SessionCommandState {
                                     )
                                     .await;
                             }
-                            let _ = state
-                                .append_and_publish_session_event(
-                                    &session_id,
-                                    SessionEventKind::TurnCompleted {
-                                        turn_id: TurnId(turn_id.clone()),
-                                    },
-                                    dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
-                                        session_id: session_id.0.clone(),
-                                        turn_id,
-                                    },
-                                )
-                                .await;
+                            match state
+                                .emit_turn_completed(&session_id, &TurnId(turn_id))
+                                .await
+                            {
+                                Ok(emitted) => completed = emitted,
+                                Err(error) => {
+                                    eprintln!("[DCC] completed turn finalization failed: {error}")
+                                }
+                            }
                         }
-                        if let Err(error) = state.dispatch_next_queued_turn(&session_id).await {
-                            eprintln!("[DCC] queued turn dispatch failed: {error}");
+                        if completed {
+                            if let Err(error) = state.dispatch_next_queued_turn(&session_id).await {
+                                eprintln!("[DCC] queued turn dispatch failed: {error}");
+                            }
                         }
                     }
                     Ok(ProviderEvent::Failed { message, .. }) => {
-                        let turn_id = binding.current_turn_id.lock().await.take();
+                        let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
                             binding.assistant_messages.lock().await.active.clear();
                             let _ = state
-                                .append_and_publish_session_event(
-                                    &session_id,
-                                    SessionEventKind::TurnAborted {
-                                        turn_id: TurnId(turn_id.clone()),
-                                        reason: Some(message.clone()),
-                                    },
-                                    dcc_core::ports::events::CoreEvent::SessionTurnAborted {
-                                        session_id: session_id.0.clone(),
-                                        turn_id,
-                                        reason: Some(message),
-                                    },
-                                )
+                                .emit_turn_aborted(&session_id, &TurnId(turn_id), Some(message))
                                 .await;
                         }
                     }
                     Err(error) => {
-                        let turn_id = binding.current_turn_id.lock().await.take();
+                        let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
                             binding.assistant_messages.lock().await.active.clear();
                             let reason = error.to_string();
                             let _ = state
-                                .append_and_publish_session_event(
-                                    &session_id,
-                                    SessionEventKind::TurnAborted {
-                                        turn_id: TurnId(turn_id.clone()),
-                                        reason: Some(reason.clone()),
-                                    },
-                                    dcc_core::ports::events::CoreEvent::SessionTurnAborted {
-                                        session_id: session_id.0.clone(),
-                                        turn_id,
-                                        reason: Some(reason),
-                                    },
-                                )
+                                .emit_turn_aborted(&session_id, &TurnId(turn_id), Some(reason))
                                 .await;
                         }
                     }
@@ -1826,6 +2309,7 @@ impl SessionCommandState {
             ))
         })?;
         *binding.assistant_messages.lock().await = AssistantMessageTracker::default();
+        *binding.aborting_turn_id.lock().await = None;
         *binding.current_turn_id.lock().await = turn_id.clone();
         *binding.usage_turn_id.lock().await = turn_id;
         Ok(())
@@ -1909,10 +2393,15 @@ impl SessionCommandState {
                 .await;
             return Err(error);
         }
+        if let Err(error) = self
+            .capture_turn_review_baseline(&output.session, &turn_id)
+            .await
+        {
+            eprintln!("[DCC] queued turn review baseline persistence failed: {error}");
+        }
         if let Err(error) =
             mark_queued_turn_dispatched(self, self, session_id, queued.id, turn_id.clone()).await
         {
-            let _ = self.set_active_turn(session_id, None).await;
             let _ = self
                 .emit_turn_aborted(session_id, &turn_id, Some(error.to_string()))
                 .await;
@@ -1922,7 +2411,6 @@ impl SessionCommandState {
             .send_provider_input(session_id, Input::Turn(provider_input))
             .await
         {
-            let _ = self.set_active_turn(session_id, None).await;
             let _ = self
                 .emit_turn_aborted(session_id, &turn_id, Some(error.to_string()))
                 .await;
@@ -2095,15 +2583,39 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
-        *binding.current_turn_id.lock().await = None;
-        *binding.usage_turn_id.lock().await = None;
         let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
             dcc_core::CoreError::Provider(format!(
                 "unknown provider runtime: {}",
                 binding.provider_id
             ))
         })?;
+        let cancelling_turn = {
+            let _terminal = binding.terminal_lock.lock().await;
+            let turn_id = binding.current_turn_id.lock().await.clone();
+            *binding.aborting_turn_id.lock().await = turn_id.clone();
+            turn_id
+        };
         let result = provider.cancel(&binding.handle).await;
+        {
+            let _terminal = binding.terminal_lock.lock().await;
+            if let Some(turn_id) = cancelling_turn.as_deref() {
+                if binding.current_turn_id.lock().await.as_deref() == Some(turn_id) {
+                    if let Err(error) = self
+                        .emit_turn_aborted_locked(
+                            session_id,
+                            &TurnId(turn_id.to_string()),
+                            Some("Provider session cancelled".to_string()),
+                        )
+                        .await
+                    {
+                        eprintln!("[DCC] cancelled turn finalization failed: {error}");
+                    }
+                }
+            }
+            *binding.current_turn_id.lock().await = None;
+            *binding.aborting_turn_id.lock().await = None;
+            *binding.usage_turn_id.lock().await = None;
+        }
         if let Ok(mut store) = self.store.lock() {
             store.provider_sessions.remove(session_id);
         }

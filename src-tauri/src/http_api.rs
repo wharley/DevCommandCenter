@@ -16,11 +16,11 @@ use dcc_core::{
         AbortRunInput, CloseSessionInput, RestoreSessionInput, ResumeSessionInput, SendTurnInput,
         StartThreadInput,
     },
-    domain::session::SessionId,
+    domain::session::{SessionId, SessionProjection},
     domain::workspace::WorkspaceId,
     ports::{
         provider::ProviderPermissionResponse, provider::ProviderUserInputResponse, CoreEvent,
-        EventBus, Input, ProviderTurnInput,
+        EventBus, Input, ProviderTurnInput, SessionEventRepo,
     },
 };
 use dcc_infra::db::SqliteSessionRepo;
@@ -2091,14 +2091,12 @@ async fn send_turn_handler(
         .await
         .map_err(|error| classify_session_error(error.to_string()))?;
     let turn_id = output.turn.id.clone();
-
     if let Err(error) = state.attach_provider_session(&output.session).await {
         let _ = state
             .emit_turn_aborted(&output.session.id, &turn_id, Some(error.to_string()))
             .await;
         return Err(classify_session_error(error.to_string()));
     }
-
     if let Err(error) = state
         .set_active_turn(&output.session.id, Some(turn_id.0.clone()))
         .await
@@ -2108,12 +2106,17 @@ async fn send_turn_handler(
             .await;
         return Err(classify_session_error(error.to_string()));
     }
+    if let Err(error) = state
+        .capture_turn_review_baseline(&output.session, &turn_id)
+        .await
+    {
+        eprintln!("[DCC] HTTP turn review baseline persistence failed: {error}");
+    }
 
     if let Err(error) = state
         .send_provider_input(&output.session.id, Input::Turn(provider_turn_input))
         .await
     {
-        let _ = state.set_active_turn(&output.session.id, None).await;
         let _ = state
             .emit_turn_aborted(&output.session.id, &turn_id, Some(error.to_string()))
             .await;
@@ -2144,18 +2147,34 @@ async fn abort_session_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, HttpApiError> {
     let state = headless_session_state(config).await?;
+    let session_id = SessionId(session_id);
+    let active_turn_id = state
+        .list_events_by_session(&session_id)
+        .await
+        .ok()
+        .and_then(|events| SessionProjection::fold(&events))
+        .and_then(|projection| projection.active_turn_id);
+    if let Some(turn_id) = active_turn_id.as_ref() {
+        state
+            .quiesce_turn_for_abort(
+                &session_id,
+                turn_id,
+                Some("Stopped from remote HTTP"),
+            )
+            .await
+            .map_err(|error| classify_session_error(error.to_string()))?;
+    }
     let output = abort_run(
         &*state,
         &*state,
         &*state,
         AbortRunInput {
-            session_id: SessionId(session_id),
+            session_id,
             reason: Some("Stopped from remote HTTP".to_string()),
         },
     )
     .await
     .map_err(|error| classify_session_error(error.to_string()))?;
-    let _ = state.cancel_provider_session(&output.session.id).await;
     Ok(Json(serde_json::to_value(output).map_err(|error| {
         HttpApiError::internal(error.to_string())
     })?))

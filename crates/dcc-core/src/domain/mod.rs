@@ -37,8 +37,8 @@ pub use provider::{
 pub use repository::{Repository, RepositoryId};
 pub use session::{
     Checkpoint, CheckpointId, Session, SessionEventKind, SessionEventRecord, SessionId,
-    SessionProjection, SessionSearchResult, SessionState, Turn, TurnId, TurnState,
-    WorkspaceSessionSummary,
+    SessionProjection, SessionSearchResult, SessionState, Turn, TurnChangeSet, TurnId,
+    TurnReviewFile, TurnReviewUntrackedFingerprint, TurnState, WorkspaceSessionSummary,
 };
 pub use thread::{Thread, ThreadId};
 pub use usage::{

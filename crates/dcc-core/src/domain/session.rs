@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::BTreeMap;
 
 use super::{
     project::ProjectId, provider::ProviderApprovalPolicy, thread::Thread, workspace::WorkspaceId,
@@ -366,6 +367,63 @@ pub enum SessionEventKind {
         reason: Option<String>,
     },
     SessionResumed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnReviewFile {
+    pub path: String,
+    #[serde(rename = "oldPath", default)]
+    pub old_path: Option<String>,
+    pub status: String,
+    pub insertions: u32,
+    pub deletions: u32,
+    #[serde(default)]
+    pub untracked: bool,
+    #[serde(default)]
+    pub binary: bool,
+    #[serde(rename = "previewUnavailable", default)]
+    pub preview_unavailable: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnReviewUntrackedFingerprint {
+    pub path: String,
+    pub sha256: String,
+}
+
+/// Versioned persistence record kept outside the session transcript. The
+/// transcript remains small; file diffs are loaded lazily by snapshot + path.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnChangeSet {
+    pub snapshot_id: String,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub workspace_id: WorkspaceId,
+    pub capture_version: u32,
+    pub state: String,
+    pub base_tree: Option<String>,
+    pub result_tree: Option<String>,
+    #[serde(default)]
+    pub baseline_untracked: Vec<String>,
+    #[serde(default)]
+    pub result_untracked: Vec<TurnReviewUntrackedFingerprint>,
+    #[serde(default)]
+    pub files: Vec<TurnReviewFile>,
+    #[serde(default)]
+    pub file_diffs: BTreeMap<String, String>,
+    #[serde(default)]
+    pub observed_validations: Vec<String>,
+    pub diff_truncated: bool,
+    #[serde(default)]
+    pub turn_outcome: Option<String>,
+    #[serde(default)]
+    pub outcome_reason: Option<String>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub completed_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

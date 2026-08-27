@@ -5,6 +5,7 @@ use std::{fmt, path::Path};
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
+use serde::de::DeserializeOwned;
 use serde_json::{from_str, to_string};
 
 use dcc_core::{
@@ -17,7 +18,8 @@ use dcc_core::{
         repository::{Repository, RepositoryId},
         session::{
             AssistantMessagePhase, Session, SessionEventKind, SessionEventRecord, SessionId,
-            SessionProjection, SessionSearchResult, SessionState, TurnId, WorkspaceSessionSummary,
+            SessionProjection, SessionSearchResult, SessionState, TurnChangeSet, TurnId,
+            WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
         usage::{
@@ -215,6 +217,36 @@ CREATE INDEX IF NOT EXISTS idx_dcc_sessions_created_at
 CREATE INDEX IF NOT EXISTS idx_dcc_session_events_completed_occurred_at
 	ON dcc_session_events(occurred_at, session_id)
 	WHERE json_extract(kind_json, '$.type') = 'turn_completed';
+"#;
+
+const TURN_CHANGE_SET_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_turn_change_sets (
+    snapshot_id TEXT PRIMARY KEY NOT NULL,
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    capture_version INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    base_tree TEXT NULL,
+    result_tree TEXT NULL,
+    baseline_untracked_json TEXT NOT NULL DEFAULT '[]',
+    result_untracked_json TEXT NOT NULL DEFAULT '[]',
+    files_json TEXT NOT NULL DEFAULT '[]',
+    file_diffs_json TEXT NOT NULL DEFAULT '{}',
+    observed_validations_json TEXT NOT NULL DEFAULT '[]',
+    diff_truncated INTEGER NOT NULL DEFAULT 0,
+    turn_outcome TEXT NULL,
+    outcome_reason TEXT NULL,
+    error TEXT NULL,
+    created_at TEXT NOT NULL,
+    completed_at TEXT NULL,
+    UNIQUE(session_id, turn_id, workspace_id),
+    FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_turn_change_sets_session_completed
+ON dcc_turn_change_sets(session_id, completed_at DESC);
 "#;
 
 const DELEGATION_TABLE_SQL: &str = r#"
@@ -770,7 +802,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
@@ -810,6 +842,18 @@ impl SqliteSessionRepo {
             "additional_workspace_ids_json",
             "TEXT NOT NULL DEFAULT '[]'",
         )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_turn_change_sets",
+            "turn_outcome",
+            "TEXT NULL",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_turn_change_sets",
+            "outcome_reason",
+            "TEXT NULL",
+        )?;
         // Compatibility cleanup for bundles removed before their sessions were
         // deleted explicitly. Keep orphaned single-workspace history unchanged;
         // only multi-root sessions can be identified safely here.
@@ -828,6 +872,180 @@ impl SqliteSessionRepo {
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::rebuild_search_index_sync(&conn)?;
         Ok(())
+    }
+
+    pub fn save_turn_change_set(&self, change_set: &TurnChangeSet) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_turn_change_sets (
+                snapshot_id, session_id, turn_id, workspace_id, capture_version,
+                state, base_tree, result_tree, baseline_untracked_json,
+                result_untracked_json, files_json, file_diffs_json,
+                observed_validations_json, diff_truncated, turn_outcome,
+                outcome_reason, error, created_at, completed_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+            ON CONFLICT(session_id, turn_id, workspace_id) DO UPDATE SET
+                state = excluded.state,
+                base_tree = excluded.base_tree,
+                result_tree = excluded.result_tree,
+                baseline_untracked_json = excluded.baseline_untracked_json,
+                result_untracked_json = excluded.result_untracked_json,
+                files_json = excluded.files_json,
+                file_diffs_json = excluded.file_diffs_json,
+                observed_validations_json = excluded.observed_validations_json,
+                diff_truncated = excluded.diff_truncated,
+                turn_outcome = COALESCE(dcc_turn_change_sets.turn_outcome, excluded.turn_outcome),
+                outcome_reason = COALESCE(dcc_turn_change_sets.outcome_reason, excluded.outcome_reason),
+                error = excluded.error,
+                completed_at = excluded.completed_at
+            WHERE dcc_turn_change_sets.turn_outcome IS NULL
+            "#,
+            params![
+                change_set.snapshot_id,
+                change_set.session_id.0,
+                change_set.turn_id.0,
+                change_set.workspace_id.0,
+                change_set.capture_version,
+                change_set.state,
+                change_set.base_tree,
+                change_set.result_tree,
+                to_string(&change_set.baseline_untracked)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                to_string(&change_set.result_untracked)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                to_string(&change_set.files)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                to_string(&change_set.file_diffs)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                to_string(&change_set.observed_validations)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                change_set.diff_truncated,
+                change_set.turn_outcome,
+                change_set.outcome_reason,
+                change_set.error,
+                change_set.created_at,
+                change_set.completed_at,
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    fn turn_change_set_json<T: DeserializeOwned>(
+        column: usize,
+        raw: String,
+    ) -> rusqlite::Result<T> {
+        serde_json::from_str(&raw).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+    }
+
+    fn turn_change_set_from_row(row: &Row<'_>) -> rusqlite::Result<TurnChangeSet> {
+        Ok(TurnChangeSet {
+            snapshot_id: row.get(0)?,
+            session_id: SessionId(row.get(1)?),
+            turn_id: TurnId(row.get(2)?),
+            workspace_id: WorkspaceId(row.get(3)?),
+            capture_version: row.get(4)?,
+            state: row.get(5)?,
+            base_tree: row.get(6)?,
+            result_tree: row.get(7)?,
+            baseline_untracked: Self::turn_change_set_json(8, row.get(8)?)?,
+            result_untracked: Self::turn_change_set_json(9, row.get(9)?)?,
+            files: Self::turn_change_set_json(10, row.get(10)?)?,
+            file_diffs: Self::turn_change_set_json(11, row.get(11)?)?,
+            observed_validations: Self::turn_change_set_json(12, row.get(12)?)?,
+            diff_truncated: row.get(13)?,
+            turn_outcome: row.get(14)?,
+            outcome_reason: row.get(15)?,
+            error: row.get(16)?,
+            created_at: row.get(17)?,
+            completed_at: row.get(18)?,
+        })
+    }
+
+    pub fn get_turn_change_set(&self, snapshot_id: &str) -> Result<Option<TurnChangeSet>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            r#"SELECT snapshot_id, session_id, turn_id, workspace_id, capture_version,
+                      state, base_tree, result_tree, baseline_untracked_json,
+                      result_untracked_json, files_json, file_diffs_json,
+                      observed_validations_json, diff_truncated, turn_outcome,
+                      outcome_reason, error, created_at, completed_at
+                 FROM dcc_turn_change_sets WHERE snapshot_id = ?1"#,
+            params![snapshot_id],
+            Self::turn_change_set_from_row,
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    pub fn list_turn_change_sets_by_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<TurnChangeSet>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                r#"SELECT snapshot_id, session_id, turn_id, workspace_id, capture_version,
+                          state, base_tree, result_tree, baseline_untracked_json,
+                          result_untracked_json, files_json, '{}' AS file_diffs_json,
+                          observed_validations_json, diff_truncated, turn_outcome,
+                          outcome_reason, error, created_at, completed_at
+                     FROM dcc_turn_change_sets
+                    WHERE session_id = ?1
+                    ORDER BY COALESCE(completed_at, created_at) DESC, snapshot_id DESC"#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map(params![session_id.0], Self::turn_change_set_from_row)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    pub fn recover_interrupted_turn_change_sets(&self, completed_at: &str) -> Result<Vec<String>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                "SELECT snapshot_id FROM dcc_turn_change_sets WHERE state = 'collecting' AND turn_outcome IS NULL",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let snapshot_ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        drop(statement);
+        conn.execute(
+            r#"UPDATE dcc_turn_change_sets
+                  SET state = 'interrupted',
+                      turn_outcome = 'aborted',
+                      outcome_reason = 'Application restarted before review capture completed',
+                      error = 'turn ended before review evidence could be finalized',
+                      completed_at = ?1
+                WHERE state = 'collecting' AND turn_outcome IS NULL"#,
+            params![completed_at],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(snapshot_ids)
     }
 
     pub fn list_session_ids_for_workspace_scope(
@@ -3426,6 +3644,120 @@ mod tests {
         assert_eq!(
             summary[0].last_turn_completed_at.as_deref(),
             Some("2026-01-01T00:00:09Z")
+        );
+    }
+
+    #[test]
+    fn sqlite_session_repo_roundtrips_turn_change_sets_without_session_events() {
+        let conn = in_memory_conn();
+        let workspace_repo =
+            SqliteWorkspaceRepo::from_connection(conn.clone()).expect("workspace repo");
+        let repo = SqliteSessionRepo::from_connection(conn).expect("session repo");
+        let workspace = Workspace {
+            id: WorkspaceId("review-workspace".to_string()),
+            project_id: ProjectId("review-project".to_string()),
+            name: Some("Review".to_string()),
+            root_path: "/tmp/review-workspace".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/review-workspace".to_string()),
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            created_at: "2026-08-27T10:00:00Z".to_string(),
+            updated_at: "2026-08-27T10:00:00Z".to_string(),
+        };
+        futures::executor::block_on(workspace_repo.save_workspace(&workspace)).unwrap();
+        let session = Session {
+            id: SessionId("review-session".to_string()),
+            project_id: workspace.project_id.clone(),
+            workspace_id: workspace.id.clone(),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-08-27T10:00:00Z".to_string(),
+            updated_at: "2026-08-27T10:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_session(&session)).unwrap();
+        let mut diffs = BTreeMap::new();
+        diffs.insert("src/lib.rs".to_string(), "captured diff".to_string());
+        let change_set = TurnChangeSet {
+            snapshot_id: "snapshot-1".to_string(),
+            session_id: session.id.clone(),
+            turn_id: TurnId("turn-1".to_string()),
+            workspace_id: workspace.id.clone(),
+            capture_version: 1,
+            state: "available".to_string(),
+            base_tree: Some("base".to_string()),
+            result_tree: Some("result".to_string()),
+            baseline_untracked: Vec::new(),
+            result_untracked: Vec::new(),
+            files: vec![dcc_core::domain::session::TurnReviewFile {
+                path: "src/lib.rs".to_string(),
+                old_path: None,
+                status: "M".to_string(),
+                insertions: 2,
+                deletions: 1,
+                untracked: false,
+                binary: false,
+                preview_unavailable: false,
+            }],
+            file_diffs: diffs,
+            observed_validations: vec!["test".to_string()],
+            diff_truncated: false,
+            turn_outcome: Some("completed".to_string()),
+            outcome_reason: None,
+            error: None,
+            created_at: "2026-08-27T10:00:01Z".to_string(),
+            completed_at: Some("2026-08-27T10:00:02Z".to_string()),
+        };
+        repo.save_turn_change_set(&change_set).unwrap();
+
+        let loaded = repo.get_turn_change_set("snapshot-1").unwrap().unwrap();
+        assert_eq!(loaded.session_id, session.id);
+        assert_eq!(loaded.files[0].path, "src/lib.rs");
+        assert_eq!(loaded.turn_outcome.as_deref(), Some("completed"));
+        assert_eq!(
+            loaded.file_diffs.get("src/lib.rs").map(String::as_str),
+            Some("captured diff")
+        );
+        let summaries = repo.list_turn_change_sets_by_session(&session.id).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].file_diffs.is_empty());
+        let mut competing_terminal = loaded.clone();
+        competing_terminal.state = "partial".to_string();
+        competing_terminal.turn_outcome = Some("aborted".to_string());
+        competing_terminal.outcome_reason = Some("late abort".to_string());
+        repo.save_turn_change_set(&competing_terminal).unwrap();
+        let stable = repo.get_turn_change_set("snapshot-1").unwrap().unwrap();
+        assert_eq!(stable.state, "available");
+        assert_eq!(stable.turn_outcome.as_deref(), Some("completed"));
+        assert!(stable.outcome_reason.is_none());
+        let mut orphaned = stable.clone();
+        orphaned.snapshot_id = "snapshot-orphaned".to_string();
+        orphaned.turn_id = TurnId("turn-orphaned".to_string());
+        orphaned.state = "collecting".to_string();
+        orphaned.turn_outcome = None;
+        orphaned.completed_at = None;
+        repo.save_turn_change_set(&orphaned).unwrap();
+        assert_eq!(
+            repo.recover_interrupted_turn_change_sets("2026-08-27T10:10:00Z")
+                .unwrap(),
+            vec!["snapshot-orphaned"]
+        );
+        let recovered = repo
+            .get_turn_change_set("snapshot-orphaned")
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.state, "interrupted");
+        assert_eq!(recovered.turn_outcome.as_deref(), Some("aborted"));
+        assert!(
+            futures::executor::block_on(repo.list_events_by_session(&session.id))
+                .unwrap()
+                .is_empty()
         );
     }
 
