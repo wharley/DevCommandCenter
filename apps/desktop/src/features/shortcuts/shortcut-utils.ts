@@ -3,7 +3,8 @@ const QUICK_OPEN_KEY = "p";
 const WORKSPACE_SEARCH_KEY = "f";
 const INSPECTOR_GIT_MODE_KEY = "g";
 const INSPECTOR_CODE_MODE_KEY = "e";
-const COMMAND_PALETTE_KEY = "p";
+const COMMAND_PALETTE_KEY = "k";
+const LEGACY_COMMAND_PALETTE_KEY = "p";
 const TOGGLE_TERMINAL_KEY = "j";
 const FOCUS_COMPOSER_KEY = "l";
 
@@ -16,6 +17,10 @@ export function getPrimaryShortcutModifier(platform = navigator.platform) {
 }
 
 export function getCommandPaletteShortcutKeys(platform = navigator.platform) {
+	return [getPrimaryShortcutModifier(platform), "K"];
+}
+
+export function getLegacyCommandPaletteShortcutKeys(platform = navigator.platform) {
 	return [getPrimaryShortcutModifier(platform), "Shift", "P"];
 }
 
@@ -99,7 +104,10 @@ export function isCommandPaletteShortcut(
 	event: Parameters<typeof isModifiedShortcut>[0],
 	platform = navigator.platform,
 ) {
-	return isModifiedShortcut(event, COMMAND_PALETTE_KEY, true, platform);
+	return (
+		isModifiedShortcut(event, COMMAND_PALETTE_KEY, false, platform) ||
+		isModifiedShortcut(event, LEGACY_COMMAND_PALETTE_KEY, true, platform)
+	);
 }
 
 export function isToggleTerminalShortcut(

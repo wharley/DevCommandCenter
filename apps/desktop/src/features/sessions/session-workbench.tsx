@@ -159,6 +159,10 @@ type SessionWorkbenchProps = {
 	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	surfaceSelection: WorkspaceSurfaceSelection | null;
+	surfaceSelectionWorkspaceId: string | null;
+	fileSurfaceTransitionRequestId?: number;
+	onFileSurfaceTransitionConfirmed?: () => void;
+	onFileSurfaceClosed?: () => void;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
@@ -248,6 +252,10 @@ export function SessionWorkbench({
 	onAgentDelegate,
 	sessionActionSessionId,
 	surfaceSelection,
+	surfaceSelectionWorkspaceId,
+	fileSurfaceTransitionRequestId,
+	onFileSurfaceTransitionConfirmed,
+	onFileSurfaceClosed,
 	onCloseSurface,
 	onOpenPlanSurface,
 	onOpenFileReference,
@@ -795,6 +803,10 @@ export function SessionWorkbench({
 						onAgentDelegate={onAgentDelegate}
 						sessionActionSessionId={sessionActionSessionId}
 						surfaceSelection={surfaceSelection}
+						surfaceSelectionWorkspaceId={surfaceSelectionWorkspaceId}
+						fileSurfaceTransitionRequestId={fileSurfaceTransitionRequestId}
+						onFileSurfaceTransitionConfirmed={onFileSurfaceTransitionConfirmed}
+						onFileSurfaceClosed={onFileSurfaceClosed}
 						onCloseSurface={onCloseSurface}
 						onOpenPlanSurface={onOpenPlanSurface}
 						onOpenFileReference={onOpenFileReference}

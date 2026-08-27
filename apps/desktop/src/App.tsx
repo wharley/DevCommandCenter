@@ -1234,8 +1234,72 @@ export default function App() {
 	);
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
+	const [surfaceSelectionWorkspaceId, setSurfaceSelectionWorkspaceId] =
+		useState<string | null>(null);
+	const surfaceSelectionRef = useRef<WorkspaceSurfaceSelection | null>(null);
+	surfaceSelectionRef.current = surfaceSelection;
+	const pendingSurfaceTransitionRef = useRef<{
+		id: number;
+		next: WorkspaceSurfaceSelection | null;
+		afterTransition?: () => void;
+	} | null>(null);
+	const surfaceTransitionRequestIdRef = useRef(0);
+	const [fileSurfaceTransitionRequestId, setFileSurfaceTransitionRequestId] =
+		useState(0);
 	const inspectorBeforeMergeRef = useRef<boolean | null>(null);
 	const fileOpenRequestIdRef = useRef(0);
+	const applySurfaceSelection = useCallback(
+		(next: WorkspaceSurfaceSelection | null) => {
+			if (
+				surfaceSelectionRef.current?.kind === "merge-conflict" &&
+				next === null &&
+				inspectorBeforeMergeRef.current === false
+			) {
+				setInspectorCollapsed(false);
+			}
+			if (next === null) inspectorBeforeMergeRef.current = null;
+			setSurfaceSelection(next);
+			setSurfaceSelectionWorkspaceId(next ? selectedWorkspaceId : null);
+		},
+		[selectedWorkspaceId, setInspectorCollapsed],
+	);
+	const requestSurfaceSelection = useCallback(
+		(
+			next: WorkspaceSurfaceSelection | null,
+			afterTransition?: () => void,
+		) => {
+			if (
+				surfaceSelectionRef.current?.kind === "file-edit" &&
+				next?.kind !== "file-edit"
+			) {
+				surfaceTransitionRequestIdRef.current += 1;
+				const id = surfaceTransitionRequestIdRef.current;
+				pendingSurfaceTransitionRef.current = { id, next, afterTransition };
+				setFileSurfaceTransitionRequestId(id);
+				return;
+			}
+			applySurfaceSelection(next);
+			afterTransition?.();
+		},
+		[applySurfaceSelection],
+	);
+	const handleFileSurfaceTransitionConfirmed = useCallback(() => {
+		const transition = pendingSurfaceTransitionRef.current;
+		if (!transition) return;
+		pendingSurfaceTransitionRef.current = null;
+		applySurfaceSelection(transition.next);
+		transition.afterTransition?.();
+	}, [applySurfaceSelection]);
+	const handleFileSurfaceClosed = useCallback(() => {
+		applySurfaceSelection(null);
+	}, [applySurfaceSelection]);
+	const requestWorkspaceSelection = useCallback(
+		(workspaceId: string) => {
+			if (workspaceId === selectedWorkspaceId) return;
+			requestSurfaceSelection(null, () => setSelectedWorkspaceId(workspaceId));
+		},
+		[requestSurfaceSelection, selectedWorkspaceId, setSelectedWorkspaceId],
+	);
 	const [workspaceComposerPrefill, setWorkspaceComposerPrefill] =
 		useState<WorkspaceComposerPrefillRequest | null>(null);
 	const { theme, setTheme, density, setDensity } = useAppearance();
@@ -1369,9 +1433,9 @@ export default function App() {
 	const handleSelectWorkspaceSurface = useCallback(
 		(workspaceId: string) => {
 			setGlobalSurface(null);
-			setSelectedWorkspaceId(workspaceId);
+			requestWorkspaceSelection(workspaceId);
 		},
-		[setSelectedWorkspaceId],
+		[requestWorkspaceSelection],
 	);
 	const handleWorkOnPullRequest = useCallback(
 		async (pullRequest: PullRequestHubItem) => {
@@ -1386,7 +1450,7 @@ export default function App() {
 			// The creation hook already adds the workspace optimistically and selects it.
 			// Keep this explicit here because this flow also switches away from the PR
 			// surface immediately after the workspace is ready.
-			setSelectedWorkspaceId(result.workspace.id);
+			requestWorkspaceSelection(result.workspace.id);
 			setGlobalSurface(null);
 			requestNewTaskComposerFocus(result.workspace.id);
 			// Refresh in the background. Waiting for the PR list refetch here keeps the
@@ -1403,7 +1467,7 @@ export default function App() {
 			createWorkspaceFromSourceUrl,
 			queryClient,
 			requestNewTaskComposerFocus,
-			setSelectedWorkspaceId,
+			requestWorkspaceSelection,
 			t,
 		],
 	);
@@ -1896,15 +1960,16 @@ export default function App() {
 	}, [openContextualInspector]);
 	const handleReviewDelegation = useCallback(
 		(delegationId: string) => {
-			setInspectorMode("git");
-			openContextualInspector();
-			setSurfaceSelection(null);
-			setReviewDelegationRequest((current) => ({
-				delegationId,
-				nonce: (current?.nonce ?? 0) + 1,
-			}));
+			requestSurfaceSelection(null, () => {
+				setInspectorMode("git");
+				openContextualInspector();
+				setReviewDelegationRequest((current) => ({
+					delegationId,
+					nonce: (current?.nonce ?? 0) + 1,
+				}));
+			});
 		},
-		[openContextualInspector],
+		[openContextualInspector, requestSurfaceSelection],
 	);
 	const toggleGitInspector = useCallback(() => {
 		if (inspectorCollapsed) {
@@ -1916,9 +1981,8 @@ export default function App() {
 		closeInspector();
 	}, [closeInspector, inspectorCollapsed, openContextualInspector]);
 	const openPlanSurface = useCallback(() => {
-		setSurfaceSelection({ kind: "plan" });
-		setInspectorCollapsed(true);
-	}, [setInspectorCollapsed]);
+		requestSurfaceSelection({ kind: "plan" });
+	}, [requestSurfaceSelection]);
 	const runWorkbenchCommand = useCallback(
 		(command: WorkbenchCommand) => {
 			recordUxMetric("command_palette_action");
@@ -2110,8 +2174,8 @@ export default function App() {
 		setSessionSnapshotsById({});
 		setPendingPrompt(null);
 		setPendingPromptSessionId(null);
-		setSurfaceSelection(null);
-	}, [selectedWorkspace?.id]);
+		requestSurfaceSelection(null);
+	}, [requestSurfaceSelection, selectedWorkspace?.id]);
 
 	useEffect(() => {
 		setIsCommandPaletteOpen(false);
@@ -2123,12 +2187,12 @@ export default function App() {
 		setSessionSnapshotsById({});
 		setPendingPrompt(null);
 		setPendingPromptSessionId(null);
-		setSurfaceSelection(null);
+		requestSurfaceSelection(null);
 		setWorkspaceRepositoryContext(null);
 		setIsSessionSearchOpen(false);
 		setIsQuickOpenOpen(false);
 		setIsWorkspaceSearchOpen(false);
-	}, [backendCacheKey, selectedWorkspace?.id]);
+	}, [backendCacheKey, requestSurfaceSelection, selectedWorkspace?.id]);
 
 	useEffect(() => {
 		if (!pendingSessionNavigation) {
@@ -3596,7 +3660,7 @@ export default function App() {
 					sessionId: result.sessionId,
 					workspaceId: result.workspaceId,
 				});
-				setSelectedWorkspaceId(result.workspaceId);
+				requestWorkspaceSelection(result.workspaceId);
 				void queryClient.invalidateQueries({
 					queryKey: getWorkspaceSessionsCacheKey(
 						backendCacheKey,
@@ -3621,7 +3685,7 @@ export default function App() {
 			backendCacheKey,
 			queryClient,
 			selectedWorkspace?.id,
-			setSelectedWorkspaceId,
+			requestWorkspaceSelection,
 		],
 	);
 
@@ -3668,7 +3732,7 @@ export default function App() {
 
 	const handleOpenEditorFile = useCallback(
 		(selection: WorkspaceGitPreviewSelection | null) => {
-			setSurfaceSelection(
+			requestSurfaceSelection(
 				selection
 					? {
 							kind: "git-diff",
@@ -3677,7 +3741,7 @@ export default function App() {
 					: null,
 			);
 		},
-		[],
+		[requestSurfaceSelection],
 	);
 
 	const handleOpenMergeConflictResolver = useCallback(
@@ -3686,11 +3750,15 @@ export default function App() {
 			baseBranch: string | null;
 			forgeLogin: string | null;
 		}) => {
-			inspectorBeforeMergeRef.current = inspectorCollapsed;
-			setInspectorCollapsed(true);
-			setSurfaceSelection({ kind: "merge-conflict", ...input });
+			requestSurfaceSelection(
+				{ kind: "merge-conflict", ...input },
+				() => {
+					inspectorBeforeMergeRef.current = inspectorCollapsed;
+					setInspectorCollapsed(true);
+				},
+			);
 		},
-		[inspectorCollapsed, setInspectorCollapsed],
+		[inspectorCollapsed, requestSurfaceSelection, setInspectorCollapsed],
 	);
 
 	const handleMergeConflictStateChanged = useCallback(async (workspaceRoot: string) => {
@@ -3715,7 +3783,7 @@ export default function App() {
 	const handleOpenFileFromQuickOpen = useCallback(
 		({ path, name }: { path: string; name: string }) => {
 			fileOpenRequestIdRef.current += 1;
-			setSurfaceSelection({
+			requestSurfaceSelection({
 				kind: "file-edit",
 				path,
 				name,
@@ -3723,14 +3791,14 @@ export default function App() {
 				focusLine: null,
 			});
 		},
-		[],
+		[requestSurfaceSelection],
 	);
 
 	const handleOpenConversationFile = useCallback(
 		({ path, line, column }: WorkspaceFileReference) => {
 			const name = path.split("/").pop() ?? path;
 			fileOpenRequestIdRef.current += 1;
-			setSurfaceSelection({
+			requestSurfaceSelection({
 				kind: "file-edit",
 				path,
 				name,
@@ -3739,14 +3807,14 @@ export default function App() {
 				focusColumn: column,
 			});
 		},
-		[],
+		[requestSurfaceSelection],
 	);
 
 	const handleOpenSearchMatch = useCallback(
 		({ path, line }: { path: string; line: number }) => {
 			const name = path.split("/").pop() ?? path;
 			fileOpenRequestIdRef.current += 1;
-			setSurfaceSelection({
+			requestSurfaceSelection({
 				kind: "file-edit",
 				path,
 				name,
@@ -3754,7 +3822,7 @@ export default function App() {
 				focusLine: line,
 			});
 		},
-		[],
+		[requestSurfaceSelection],
 	);
 
 	const handlePrefillComposer = useCallback(
@@ -3783,7 +3851,7 @@ export default function App() {
 	);
 
 	const handleOpenMissionSpec = useCallback((spec: MissionSpecEntry | null) => {
-		setSurfaceSelection(
+		requestSurfaceSelection(
 			spec
 				? {
 						kind: "mission-spec",
@@ -3791,18 +3859,11 @@ export default function App() {
 				  }
 				: null,
 		);
-	}, []);
+	}, [requestSurfaceSelection]);
 
 	const handleCloseSurface = useCallback(() => {
-		if (
-			surfaceSelection?.kind === "merge-conflict" &&
-			inspectorBeforeMergeRef.current === false
-		) {
-			setInspectorCollapsed(false);
-		}
-		inspectorBeforeMergeRef.current = null;
-		setSurfaceSelection(null);
-	}, [setInspectorCollapsed, surfaceSelection]);
+		requestSurfaceSelection(null);
+	}, [requestSurfaceSelection]);
 	const handleOpenAgentSession = useCallback(
 		(sessionId: string) => {
 			setSelectedSessionId(sessionId);
@@ -4333,7 +4394,7 @@ export default function App() {
 				return next;
 			});
 			if (selectedWorkspace && affectedWorkspaceIds.includes(selectedWorkspace.id)) {
-				setSurfaceSelection(null);
+				requestSurfaceSelection(null);
 			}
 			await refreshWorkspaceCollections();
 		},
@@ -4343,6 +4404,7 @@ export default function App() {
 			purgeSessionsEvents,
 			queryClient,
 			refreshWorkspaceCollections,
+			requestSurfaceSelection,
 			selectedWorkspace,
 		],
 	);
@@ -4607,6 +4669,12 @@ export default function App() {
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 								onOpenSkills={() => setIsSkillsOpen(true)}
 								onOpenUsage={() => setIsUsageOpen(true)}
+								workspaceRoot={selectedWorkspacePath}
+								recentSessions={workspaceSessions}
+								selectedWorkspace={selectedWorkspace}
+								queryScope={backendCacheKey}
+								onSelectSession={handleSelectSessionSearchResult}
+								onSelectFile={handleOpenFileFromQuickOpen}
 								onRunWorkbenchCommand={runWorkbenchCommand}
 								onDelegate={
 									selectedSessionSnapshot
@@ -4763,6 +4831,10 @@ export default function App() {
 									onAgentDelegate={handleAgentDelegate}
 									sessionActionSessionId={sessionActionSessionId}
 									surfaceSelection={surfaceSelection}
+									surfaceSelectionWorkspaceId={surfaceSelectionWorkspaceId}
+									fileSurfaceTransitionRequestId={fileSurfaceTransitionRequestId}
+									onFileSurfaceTransitionConfirmed={handleFileSurfaceTransitionConfirmed}
+									onFileSurfaceClosed={handleFileSurfaceClosed}
 									onCloseSurface={handleCloseSurface}
 									onOpenPlanSurface={openPlanSurface}
 									onOpenFileReference={handleOpenConversationFile}

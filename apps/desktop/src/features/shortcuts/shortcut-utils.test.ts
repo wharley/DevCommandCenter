@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	getOpenPreferredEditorShortcutKeys,
 	getCommandPaletteShortcutKeys,
+	getLegacyCommandPaletteShortcutKeys,
 	getFocusComposerShortcutKeys,
 	getToggleTerminalShortcutKeys,
 	getInspectorCodeModeShortcutKeys,
@@ -244,11 +245,37 @@ describe("shortcut-utils", () => {
 			shiftKey,
 			defaultPrevented: false,
 		});
+		expect(isCommandPaletteShortcut(macEvent("k", false), "MacIntel")).toBe(true);
 		expect(isCommandPaletteShortcut(macEvent("p", true), "MacIntel")).toBe(true);
+		expect(
+			isCommandPaletteShortcut(
+				{
+					key: "k",
+					metaKey: false,
+					ctrlKey: true,
+					altKey: false,
+					shiftKey: false,
+					defaultPrevented: false,
+				},
+				"Win32",
+			),
+		).toBe(true);
+		expect(isCommandPaletteShortcut(macEvent("k", true), "MacIntel")).toBe(false);
+		expect(
+			isCommandPaletteShortcut(
+				{ ...macEvent("k", false), defaultPrevented: true },
+				"MacIntel",
+			),
+		).toBe(false);
 		expect(isFocusComposerShortcut(macEvent("l", true), "MacIntel")).toBe(true);
 		expect(isToggleTerminalShortcut(macEvent("j", false), "MacIntel")).toBe(true);
 		expect(isToggleTerminalShortcut(macEvent("j", true), "MacIntel")).toBe(false);
-		expect(getCommandPaletteShortcutKeys("Win32")).toEqual(["Ctrl", "Shift", "P"]);
+		expect(getCommandPaletteShortcutKeys("Win32")).toEqual(["Ctrl", "K"]);
+		expect(getLegacyCommandPaletteShortcutKeys("Win32")).toEqual([
+			"Ctrl",
+			"Shift",
+			"P",
+		]);
 		expect(getFocusComposerShortcutKeys("MacIntel")).toEqual(["Cmd", "Shift", "L"]);
 		expect(getToggleTerminalShortcutKeys("Linux")).toEqual(["Ctrl", "J"]);
 	});

@@ -30,6 +30,21 @@ export function hasDirtyFileSurfaceState(
 }
 
 /**
+ * The editor invokes this only after its own dirty-buffer confirmation. Prefer
+ * the direct completion callback so it does not re-enter an external close
+ * transition and ask the user a second time.
+ */
+export function resolveConfirmedFileSurfaceCloseHandler({
+	onFileSurfaceClosed,
+	onCloseSurface,
+}: {
+	onFileSurfaceClosed?: () => void;
+	onCloseSurface: () => void;
+}) {
+	return onFileSurfaceClosed ?? onCloseSurface;
+}
+
+/**
  * Clean inactive file surfaces are reproducible from their externalized buffer
  * and query data, so keeping their observers mounted only retains large payloads.
  * Dirty and saving tabs stay alive to preserve conflict reconciliation and writes.

@@ -14,6 +14,7 @@ import {
 	getFocusComposerShortcutKeys,
 	getInspectorCodeModeShortcutKeys,
 	getInspectorGitModeShortcutKeys,
+	getLegacyCommandPaletteShortcutKeys,
 	getOpenPreferredEditorShortcutKeys,
 	getPrimaryShortcutModifier,
 	getQuickOpenShortcutKeys,
@@ -36,6 +37,7 @@ export function ShortcutCheatsheetDialog({
 			const modifier = getPrimaryShortcutModifier();
 			return [
 				{ actionKey: "shortcutsSheet.commandPalette" as const, keys: getCommandPaletteShortcutKeys() },
+				{ actionKey: "shortcutsSheet.commandPaletteLegacy" as const, keys: getLegacyCommandPaletteShortcutKeys() },
 				{ actionKey: "shortcutsSheet.focusComposer" as const, keys: getFocusComposerShortcutKeys() },
 				{ actionKey: "shortcutsSheet.toggleTerminal" as const, keys: getToggleTerminalShortcutKeys() },
 				{ actionKey: "shortcutsSheet.quickOpen" as const, keys: getQuickOpenShortcutKeys() },

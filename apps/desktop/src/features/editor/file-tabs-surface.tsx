@@ -43,6 +43,10 @@ type FileTabsSurfaceProps = {
 	openRequestId: number;
 	focusLine?: number | null;
 	focusColumn?: number | null;
+	/** Monotonic external close request; dirty tabs still use the normal confirmation. */
+	closeRequestId?: number;
+	/** Completes an app-level surface transition after the dirty-buffer guard. */
+	onExternalCloseConfirmed?: () => void;
 	/** Close the whole surface (no tabs left, or the user closed it). */
 	onClose: () => void;
 	onSubmitAnnotation?: (input: DiffAnnotationSubmit) => void;
@@ -63,6 +67,8 @@ export function FileTabsSurface({
 	openRequestId,
 	focusLine,
 	focusColumn,
+	closeRequestId = 0,
+	onExternalCloseConfirmed,
 	onClose,
 	onSubmitAnnotation,
 	onEditInComposer,
@@ -111,6 +117,7 @@ export function FileTabsSurface({
 	activePathRef.current = activePath;
 	const stateByPathRef = useRef(stateByPath);
 	stateByPathRef.current = stateByPath;
+	const lastCloseRequestIdRef = useRef(closeRequestId);
 
 	const saveEditorState = useCallback((filePath: string) => {
 		const editor = sharedEditorRef.current;
@@ -323,13 +330,21 @@ export function FileTabsSurface({
 		);
 	}, []);
 
-	const requestCloseAll = useCallback(() => {
+	const requestCloseAll = useCallback((onConfirmed = onClose) => {
 		const anyDirty = hasDirtyFileSurfaceState(stateByPathRef.current);
 		if (anyDirty && !window.confirm(t("fileSurface.discardConfirm"))) {
 			return;
 		}
-		onClose();
+		onConfirmed();
 	}, [onClose, t]);
+
+	// Parent surfaces (for example a compact split-view backdrop) must never
+	// bypass the same dirty-buffer guard used by the editor's own close button.
+	useEffect(() => {
+		if (closeRequestId === lastCloseRequestIdRef.current) return;
+		lastCloseRequestIdRef.current = closeRequestId;
+		requestCloseAll(onExternalCloseConfirmed ?? onClose);
+	}, [closeRequestId, onClose, onExternalCloseConfirmed, requestCloseAll]);
 
 	const handleAnnotate = useCallback((payload: DiffAnnotationPayload) => {
 		const { anchor, ...rest } = payload;
@@ -489,7 +504,7 @@ export function FileTabsSurface({
 						type="button"
 						variant="ghost"
 						size="sm"
-						onClick={requestCloseAll}
+						onClick={() => requestCloseAll()}
 						aria-label={t("fileTabs.closeAll")}
 						className="px-2 text-muted-foreground hover:text-foreground"
 					>

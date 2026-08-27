@@ -20,6 +20,7 @@ import {
 	type DiffAnnotationSubmit,
 } from "@/features/editor/WorkspaceEditorSurface";
 import { FileTabsSurface } from "@/features/editor/file-tabs-surface";
+import { resolveConfirmedFileSurfaceCloseHandler } from "@/features/editor/file-surface.logic";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
 import { WorkspacePlanSurface } from "@/features/editor/WorkspacePlanSurface";
 import { WorkspaceMergeConflictResolver } from "@/features/merge/WorkspaceMergeConflictResolver";
@@ -106,6 +107,17 @@ import {
 import type { WorkspaceSurfaceSelection } from "./workspace-surface";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { buildSafeContinuationPrompt } from "./conversation-recovery";
+import {
+	canDockSecondarySurface,
+	clampSecondarySurfaceWidthForContainer,
+	MAX_SECONDARY_SURFACE_WIDTH,
+	MIN_SECONDARY_SURFACE_WIDTH,
+	persistRestorableSecondarySurfaceSelection,
+	persistSecondarySurfaceWidth,
+	readRestorableSecondarySurfaceSelection,
+	readSecondarySurfaceWidth,
+	resolveSecondarySurfaceRestoration,
+} from "./secondary-surface-layout";
 
 /** Composer draft injection request; the nonce lets a repeated annotation re-fire. */
 type ComposerPrefill = {
@@ -214,6 +226,13 @@ type WorkspacePanelProps = {
 	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	surfaceSelection: WorkspaceSurfaceSelection | null;
+	/** Workspace that owns `surfaceSelection`, used to avoid cross-workspace restore races. */
+	surfaceSelectionWorkspaceId: string | null;
+	/** Monotonic request from App to close/replace a dirty file surface safely. */
+	fileSurfaceTransitionRequestId?: number;
+	onFileSurfaceTransitionConfirmed?: () => void;
+	/** The editor already confirmed its own close before invoking this callback. */
+	onFileSurfaceClosed?: () => void;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
@@ -294,6 +313,10 @@ export function WorkspacePanel({
 	onAgentDelegate,
 	sessionActionSessionId,
 	surfaceSelection,
+	surfaceSelectionWorkspaceId,
+	fileSurfaceTransitionRequestId = 0,
+	onFileSurfaceTransitionConfirmed,
+	onFileSurfaceClosed,
 	onCloseSurface,
 	onOpenPlanSurface,
 	onOpenFileReference,
@@ -319,6 +342,16 @@ export function WorkspacePanel({
 	delegateSignal,
 }: WorkspacePanelProps) {
 	const { t } = useTranslation("common");
+	const workspaceSurfaceSelection =
+		surfaceSelectionWorkspaceId === workspaceId ? surfaceSelection : null;
+	const handleConfirmedFileSurfaceClose = useMemo(
+		() =>
+			resolveConfirmedFileSurfaceCloseHandler({
+				onFileSurfaceClosed,
+				onCloseSurface,
+			}),
+		[onFileSurfaceClosed, onCloseSurface],
+	);
 	const queryClient = useQueryClient();
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
@@ -327,6 +360,32 @@ export function WorkspacePanel({
 		[],
 	);
 	const [isApprovingPlan, setIsApprovingPlan] = useState(false);
+	const [secondarySurfaceWidth, setSecondarySurfaceWidth] = useState(() =>
+		readSecondarySurfaceWidth(workspaceId),
+	);
+	const [secondarySurfaceContainerWidth, setSecondarySurfaceContainerWidth] =
+		useState(0);
+	const [isSecondarySurfaceResizing, setIsSecondarySurfaceResizing] =
+		useState(false);
+	const [secondarySurfaceContainer, setSecondarySurfaceContainer] =
+		useState<HTMLDivElement | null>(null);
+	const secondarySurfaceRef = useRef<HTMLElement | null>(null);
+	const secondarySurfaceLastFocusRef = useRef<HTMLElement | null>(null);
+	const wasSecondarySurfaceOpenRef = useRef(false);
+	const secondarySurfaceResizeFrameRef = useRef<number | null>(null);
+	const secondarySurfaceResizeRef = useRef<{
+		startX: number;
+		startWidth: number;
+	} | null>(null);
+	const secondarySurfaceWidthRef = useRef(secondarySurfaceWidth);
+	secondarySurfaceWidthRef.current = secondarySurfaceWidth;
+	const restoredSecondarySurfaceWorkspaceRef = useRef<string | null>(null);
+	const setSecondarySurfaceContainerNode = useCallback(
+		(node: HTMLDivElement | null) => {
+			setSecondarySurfaceContainer(node);
+		},
+		[],
+	);
 	const openPreferredTerminal = useCallback(() => {
 		if (!onOpenTerminal) return;
 		const preferredScope =
@@ -347,6 +406,8 @@ export function WorkspacePanel({
 		setReviewAnnotations([]);
 		setIsApprovingPlan(false);
 		planHandoffInFlightRef.current = false;
+		setSecondarySurfaceWidth(readSecondarySurfaceWidth(workspaceId));
+		restoredSecondarySurfaceWorkspaceRef.current = null;
 	}, [workspaceId]);
 
 	useEffect(() => {
@@ -355,6 +416,129 @@ export function WorkspacePanel({
 			onExternalComposerPrefillConsumed?.(externalComposerPrefill);
 		}
 	}, [externalComposerPrefill, onExternalComposerPrefillConsumed]);
+
+	const updateSecondarySurfaceWidth = useCallback(
+		(nextWidth: number, persist = false) => {
+			const width = clampSecondarySurfaceWidthForContainer(
+				nextWidth,
+				secondarySurfaceContainerWidth,
+			);
+			secondarySurfaceWidthRef.current = width;
+			setSecondarySurfaceWidth(width);
+			if (persist) persistSecondarySurfaceWidth(workspaceId, width);
+		},
+		[secondarySurfaceContainerWidth, workspaceId],
+	);
+
+	useEffect(() => {
+		const container = secondarySurfaceContainer;
+		if (!container) return;
+		const updateContainerWidth = () => {
+			setSecondarySurfaceContainerWidth(
+				Math.round(container.getBoundingClientRect().width),
+			);
+		};
+		updateContainerWidth();
+		if (typeof ResizeObserver === "undefined") {
+			window.addEventListener("resize", updateContainerWidth);
+			return () => window.removeEventListener("resize", updateContainerWidth);
+		}
+		const observer = new ResizeObserver(updateContainerWidth);
+		observer.observe(container);
+		return () => observer.disconnect();
+	}, [secondarySurfaceContainer]);
+
+	useEffect(() => {
+		if (!isSecondarySurfaceResizing) return;
+
+		let pendingClientX: number | null = null;
+		const flushResize = () => {
+			secondarySurfaceResizeFrameRef.current = null;
+			const resize = secondarySurfaceResizeRef.current;
+			if (!resize || pendingClientX === null) return;
+			const clientX = pendingClientX;
+			pendingClientX = null;
+			// The companion surface is on the right; dragging its left edge left widens it.
+			updateSecondarySurfaceWidth(resize.startWidth + resize.startX - clientX);
+		};
+		const onMouseMove = (event: MouseEvent) => {
+			pendingClientX = event.clientX;
+			if (secondarySurfaceResizeFrameRef.current === null) {
+				secondarySurfaceResizeFrameRef.current = requestAnimationFrame(flushResize);
+			}
+		};
+		const onMouseUp = () => {
+			if (secondarySurfaceResizeFrameRef.current !== null) {
+				cancelAnimationFrame(secondarySurfaceResizeFrameRef.current);
+				flushResize();
+			}
+			persistSecondarySurfaceWidth(
+				workspaceId,
+				secondarySurfaceWidthRef.current,
+			);
+			secondarySurfaceResizeRef.current = null;
+			setIsSecondarySurfaceResizing(false);
+		};
+
+		const previousCursor = document.body.style.cursor;
+		const previousUserSelect = document.body.style.userSelect;
+		document.body.style.cursor = "col-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("mousemove", onMouseMove);
+		window.addEventListener("mouseup", onMouseUp);
+		return () => {
+			if (secondarySurfaceResizeFrameRef.current !== null) {
+				cancelAnimationFrame(secondarySurfaceResizeFrameRef.current);
+				secondarySurfaceResizeFrameRef.current = null;
+			}
+			document.body.style.cursor = previousCursor;
+			document.body.style.userSelect = previousUserSelect;
+			window.removeEventListener("mousemove", onMouseMove);
+			window.removeEventListener("mouseup", onMouseUp);
+		};
+	}, [isSecondarySurfaceResizing, updateSecondarySurfaceWidth, workspaceId]);
+
+	useEffect(() => {
+		if (
+			restoredSecondarySurfaceWorkspaceRef.current !== workspaceId &&
+			surfaceSelection === null
+		) {
+			return;
+		}
+		if (
+			surfaceSelection !== null &&
+			surfaceSelectionWorkspaceId !== workspaceId
+		) {
+			return;
+		}
+		const selection = workspaceSurfaceSelection?.kind === "plan" ? "plan" : null;
+		persistRestorableSecondarySurfaceSelection(workspaceId, selection);
+	}, [
+		surfaceSelection,
+		surfaceSelectionWorkspaceId,
+		workspaceId,
+		workspaceSurfaceSelection?.kind,
+	]);
+
+	useEffect(() => {
+		const decision = resolveSecondarySurfaceRestoration({
+			workspaceId,
+			restoredWorkspaceId: restoredSecondarySurfaceWorkspaceRef.current,
+			surfaceWorkspaceId: surfaceSelectionWorkspaceId,
+			hasSurfaceSelection: surfaceSelection !== null,
+			storedSelection: readRestorableSecondarySurfaceSelection(workspaceId),
+		});
+		if (decision === "wait") return;
+		restoredSecondarySurfaceWorkspaceRef.current = workspaceId;
+		if (decision === "plan") {
+			onOpenPlanSurface();
+		}
+	}, [
+		onOpenPlanSurface,
+		surfaceSelection,
+		surfaceSelectionWorkspaceId,
+		workspaceId,
+	]);
 
 	// Build a turn that honors the workspace's persisted effort/ultrathink so a
 	// direct send matches what the user would get from the composer.
@@ -389,12 +573,12 @@ export function WorkspacePanel({
 			);
 			void onSubmitPrompt(turn, {
 				forceNewSession: newSession,
-				targetSessionId: surfaceSelection?.kind === "git-diff"
-					? surfaceSelection.file.targetSessionId ?? null
+				targetSessionId: workspaceSurfaceSelection?.kind === "git-diff"
+					? workspaceSurfaceSelection.file.targetSessionId ?? null
 					: null,
 			});
 		},
-		[buildAnnotationTurn, onSubmitPrompt, surfaceSelection],
+		[buildAnnotationTurn, onSubmitPrompt, workspaceSurfaceSelection],
 	);
 	const handleEditAnnotationInComposer = useCallback(
 		({
@@ -941,74 +1125,7 @@ export function WorkspacePanel({
 		activeMissionSpec != null &&
 		parseMissionValidationPersistence(activeMissionSpec.content) === "auto";
 
-	const surfaceContent = surfaceSelection ? (
-		surfaceSelection.kind === "merge-conflict" ? (
-			<WorkspaceMergeConflictResolver
-				workspaceRoot={surfaceSelection.workspaceRoot}
-				currentWorkspaceLabel={workspaceRailDisplayTitle({
-					name: workspaceName,
-					branch: workspaceBranch,
-				})}
-				baseBranch={surfaceSelection.baseBranch}
-				forgeLogin={surfaceSelection.forgeLogin}
-				onClose={onCloseSurface}
-				onStateChanged={() =>
-					onMergeConflictStateChanged(surfaceSelection.workspaceRoot)
-				}
-				onResolveWithAgent={onResolveConflictWithAgent}
-				onOpenAgentSession={onOpenAgentSession}
-			/>
-		) : surfaceSelection.kind === "git-diff" ? (
-			<WorkspaceEditorSurface
-				workspaceRoot={workspacePath}
-				selection={surfaceSelection.file}
-				onClose={onCloseSurface}
-				onSubmitAnnotation={handleSubmitAnnotation}
-				onEditInComposer={handleEditAnnotationInComposer}
-				onAddToReview={handleAddToReview}
-			/>
-		) : surfaceSelection.kind === "file-edit" ? (
-			<FileTabsSurface
-				workspaceRoot={workspacePath}
-				path={surfaceSelection.path}
-				name={surfaceSelection.name}
-				openRequestId={surfaceSelection.requestId}
-				focusLine={surfaceSelection.focusLine ?? null}
-				focusColumn={surfaceSelection.focusColumn ?? null}
-				onClose={onCloseSurface}
-				onSubmitAnnotation={handleSubmitAnnotation}
-				onEditInComposer={handleEditAnnotationInComposer}
-				onAddToReview={handleAddToReview}
-			/>
-		) : surfaceSelection.kind === "plan" ? (
-			latestPlan && latestPlanMarkdown ? (
-				<WorkspacePlanSurface
-					plan={latestPlan}
-					version={latestPlanVersion}
-					workspacePath={workspacePath}
-					approved={isLatestPlanApproved}
-					approving={isApprovingPlan}
-					readOnly={isLatestPlanReadOnly}
-					needsInput={latestPlanNeedsInput}
-					onApprove={handleApprovePlan}
-					onClose={onCloseSurface}
-					onRequestRevision={handleRequestPlanRevision}
-					delegationTargets={planImplementationTargets}
-					onDelegate={handleDelegatePlan}
-					onImplementInNewThread={handleImplementPlanInNewThread}
-				/>
-			) : (
-				<div className="flex h-full items-center justify-center bg-background p-8 text-sm text-muted-foreground">
-					The plan is no longer available in this session.
-				</div>
-			)
-		) : (
-			<WorkspaceMissionSpecSurface
-				spec={surfaceSelection.spec}
-				onClose={onCloseSurface}
-			/>
-		)
-	) : (
+	const primaryContent = (
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			<header
 				className={[
@@ -1129,6 +1246,173 @@ export function WorkspacePanel({
 			</div>
 		</div>
 	);
+	const secondarySurfaceContent =
+		workspaceSurfaceSelection?.kind === "git-diff" ? (
+			<WorkspaceEditorSurface
+				workspaceRoot={workspacePath}
+				selection={workspaceSurfaceSelection.file}
+				onClose={onCloseSurface}
+				onSubmitAnnotation={handleSubmitAnnotation}
+				onEditInComposer={handleEditAnnotationInComposer}
+				onAddToReview={handleAddToReview}
+			/>
+		) : workspaceSurfaceSelection?.kind === "file-edit" ? (
+			<FileTabsSurface
+				workspaceRoot={workspacePath}
+				path={workspaceSurfaceSelection.path}
+				name={workspaceSurfaceSelection.name}
+				openRequestId={workspaceSurfaceSelection.requestId}
+				focusLine={workspaceSurfaceSelection.focusLine ?? null}
+				focusColumn={workspaceSurfaceSelection.focusColumn ?? null}
+				closeRequestId={fileSurfaceTransitionRequestId}
+				onExternalCloseConfirmed={onFileSurfaceTransitionConfirmed}
+				onClose={handleConfirmedFileSurfaceClose}
+				onSubmitAnnotation={handleSubmitAnnotation}
+				onEditInComposer={handleEditAnnotationInComposer}
+				onAddToReview={handleAddToReview}
+			/>
+		) : workspaceSurfaceSelection?.kind === "plan" ? (
+			latestPlan && latestPlanMarkdown ? (
+				<WorkspacePlanSurface
+					plan={latestPlan}
+					version={latestPlanVersion}
+					workspacePath={workspacePath}
+					approved={isLatestPlanApproved}
+					approving={isApprovingPlan}
+					readOnly={isLatestPlanReadOnly}
+					needsInput={latestPlanNeedsInput}
+					onApprove={handleApprovePlan}
+					onClose={onCloseSurface}
+					onRequestRevision={handleRequestPlanRevision}
+					delegationTargets={planImplementationTargets}
+					onDelegate={handleDelegatePlan}
+					onImplementInNewThread={handleImplementPlanInNewThread}
+				/>
+			) : (
+				<div className="flex h-full items-center justify-center bg-background p-8 text-sm text-muted-foreground">
+					The plan is no longer available in this session.
+				</div>
+			)
+		) : null;
+	const isSecondarySurfaceOpen = secondarySurfaceContent !== null;
+	const shouldDockSecondarySurface =
+		inspectorCollapsed !== false &&
+		canDockSecondarySurface(secondarySurfaceContainerWidth);
+	const visibleSecondarySurfaceWidth = clampSecondarySurfaceWidthForContainer(
+		secondarySurfaceWidth,
+		secondarySurfaceContainerWidth,
+	);
+	const requestSecondarySurfaceClose = useCallback(() => {
+		onCloseSurface();
+	}, [onCloseSurface]);
+
+	useEffect(() => {
+		if (isSecondarySurfaceOpen && !wasSecondarySurfaceOpenRef.current) {
+			const activeElement = document.activeElement;
+			secondarySurfaceLastFocusRef.current =
+				activeElement instanceof HTMLElement ? activeElement : null;
+			const frame = requestAnimationFrame(() => secondarySurfaceRef.current?.focus());
+			wasSecondarySurfaceOpenRef.current = true;
+			return () => cancelAnimationFrame(frame);
+		}
+		if (!isSecondarySurfaceOpen && wasSecondarySurfaceOpenRef.current) {
+			wasSecondarySurfaceOpenRef.current = false;
+			secondarySurfaceLastFocusRef.current?.focus();
+			secondarySurfaceLastFocusRef.current = null;
+		}
+	}, [isSecondarySurfaceOpen]);
+
+	// A pinned inspector already consumes the right side of the workbench. Keep the
+	// conversation usable by presenting the companion surface as an overlay until
+	// that inspector is collapsed again.
+	const surfaceContent =
+		workspaceSurfaceSelection?.kind === "merge-conflict" ? (
+			<WorkspaceMergeConflictResolver
+				workspaceRoot={workspaceSurfaceSelection.workspaceRoot}
+				currentWorkspaceLabel={workspaceRailDisplayTitle({
+					name: workspaceName,
+					branch: workspaceBranch,
+				})}
+				baseBranch={workspaceSurfaceSelection.baseBranch}
+				forgeLogin={workspaceSurfaceSelection.forgeLogin}
+				onClose={onCloseSurface}
+				onStateChanged={() =>
+					onMergeConflictStateChanged(workspaceSurfaceSelection.workspaceRoot)
+				}
+				onResolveWithAgent={onResolveConflictWithAgent}
+				onOpenAgentSession={onOpenAgentSession}
+			/>
+		) : workspaceSurfaceSelection?.kind === "mission-spec" ? (
+			<WorkspaceMissionSpecSurface
+				spec={workspaceSurfaceSelection.spec}
+				onClose={onCloseSurface}
+			/>
+		) : (
+			<div
+				ref={setSecondarySurfaceContainerNode}
+				className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+			>
+				{primaryContent}
+				{secondarySurfaceContent ? (
+					<>
+						<button
+							type="button"
+							aria-label={t("workbench.secondarySurface.close")}
+							className={`absolute inset-0 z-30 cursor-default bg-black/20 backdrop-blur-[1px] ${
+								shouldDockSecondarySurface ? "min-[1180px]:hidden" : ""
+							}`}
+							onClick={requestSecondarySurfaceClose}
+						/>
+						<div
+							role="separator"
+							aria-orientation="vertical"
+							aria-label={t("workbench.secondarySurface.resize")}
+							aria-valuemin={MIN_SECONDARY_SURFACE_WIDTH}
+							aria-valuemax={MAX_SECONDARY_SURFACE_WIDTH}
+							aria-valuenow={visibleSecondarySurfaceWidth}
+							tabIndex={0}
+							className={`relative z-40 hidden w-1.5 shrink-0 cursor-col-resize border-l border-border/60 bg-muted/20 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+								shouldDockSecondarySurface ? "min-[1180px]:block" : ""
+							}`}
+							onMouseDown={(event) => {
+								event.preventDefault();
+								secondarySurfaceResizeRef.current = {
+									startX: event.clientX,
+									startWidth: visibleSecondarySurfaceWidth,
+								};
+								setIsSecondarySurfaceResizing(true);
+							}}
+							onKeyDown={(event) => {
+								const keyboardWidths: Record<string, number> = {
+									ArrowLeft: visibleSecondarySurfaceWidth + 16,
+									ArrowRight: visibleSecondarySurfaceWidth - 16,
+									Home: MIN_SECONDARY_SURFACE_WIDTH,
+									End: MAX_SECONDARY_SURFACE_WIDTH,
+								};
+								const nextWidth = keyboardWidths[event.key];
+								if (nextWidth === undefined) return;
+								event.preventDefault();
+								updateSecondarySurfaceWidth(nextWidth, true);
+							}}
+						/>
+						<aside
+							ref={secondarySurfaceRef}
+							role="region"
+							aria-label={t("workbench.secondarySurface.ariaLabel")}
+							tabIndex={-1}
+							className={`absolute inset-y-0 right-0 z-40 flex min-h-0 max-w-full flex-col overflow-hidden border-l border-border/60 bg-background shadow-2xl ${
+								shouldDockSecondarySurface
+									? "min-[1180px]:relative min-[1180px]:z-auto min-[1180px]:shrink-0 min-[1180px]:shadow-none"
+									: ""
+							}`}
+							style={{ width: visibleSecondarySurfaceWidth }}
+						>
+							{secondarySurfaceContent}
+						</aside>
+					</>
+				) : null}
+			</div>
+		);
 
 	return (
 		<>
