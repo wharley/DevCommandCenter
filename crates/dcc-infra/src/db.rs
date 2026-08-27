@@ -914,6 +914,33 @@ pub struct SqliteSessionRepo {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// Capability proving that the caller owns the process-wide maintenance
+/// lease.  The lease acquisition bridge is deliberately outside this Phase
+/// 1B DB surface; keeping the constructor private makes startup/retention
+/// impossible to invoke without that bridge being added explicitly.
+#[allow(dead_code)]
+pub(crate) struct MaintenanceAuthority {
+    _private: (),
+}
+
+#[allow(dead_code)]
+impl MaintenanceAuthority {
+    fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RestoreRetentionCandidate {
+    pub(crate) restore_set_id: RestoreSetId,
+    pub(crate) workspace_id: WorkspaceId,
+    pub(crate) artifact_bytes: u64,
+    pub(crate) file_count: u32,
+    pub(crate) completed_at: String,
+    pub(crate) created_at: String,
+}
+
 impl fmt::Debug for SqliteSessionRepo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SqliteSessionRepo").finish_non_exhaustive()
@@ -1375,6 +1402,320 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         load_turn_restore_set(&conn, restore_set_id)
+    }
+
+    /// Marks v2 captures left in `collecting` after a restart as failed.  The
+    /// update is a transaction-level CAS and deliberately does not touch M3
+    /// change-set rows or any artifact data.
+    #[allow(dead_code)]
+    pub(crate) fn recover_interrupted_restore_sets(
+        &self,
+        authority: &MaintenanceAuthority,
+        completed_at: &str,
+    ) -> Result<Vec<String>> {
+        let _ = authority;
+        require_maintenance_timestamp(completed_at)?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = transaction
+            .prepare(
+                "SELECT restore_set_id FROM dcc_turn_restore_sets WHERE state = 'collecting' ORDER BY restore_set_id",
+            )
+            .map_err(guarded_undo_error)?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(guarded_undo_error)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(guarded_undo_error)?;
+        drop(statement);
+        for id in &ids {
+            let restore_set_id = RestoreSetId(id.clone());
+            let (set, files) = load_turn_restore_set(&transaction, &restore_set_id)?
+                .ok_or_else(|| guarded_undo_error("collecting restoration set disappeared"))?;
+            if set.state != RestoreSetState::Collecting
+                || set.capture_version != RESTORE_CAPTURE_VERSION
+                || !files.is_empty()
+                || set.file_count != 0
+                || set.artifact_bytes != 0
+                || set.manifest_digest.is_some()
+            {
+                return Err(guarded_undo_error(
+                    "invalid collecting restoration set during recovery",
+                ));
+            }
+            let changed = transaction
+                .execute(
+                    r#"UPDATE dcc_turn_restore_sets
+                          SET state = 'failed', reason_code = 'capture_interrupted',
+                              completed_at = ?1
+                        WHERE restore_set_id = ?2 AND state = 'collecting'"#,
+                    params![completed_at, id],
+                )
+                .map_err(guarded_undo_error)?;
+            if changed != 1 {
+                return Err(guarded_undo_error(
+                    "restoration recovery compare-and-swap lost",
+                ));
+            }
+        }
+        transaction.commit().map_err(guarded_undo_error)?;
+        Ok(ids)
+    }
+
+    /// Expires an eligible set while retaining its complete manifest and file
+    /// rows for audit/accounting.  An active journal is an explicit barrier.
+    #[allow(dead_code)]
+    pub(crate) fn expire_eligible_restore_set(
+        &self,
+        authority: &MaintenanceAuthority,
+        restore_set_id: &RestoreSetId,
+        completed_at: &str,
+    ) -> Result<bool> {
+        let _ = authority;
+        require_maintenance_timestamp(completed_at)?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some((set, _files)) = load_turn_restore_set(&transaction, restore_set_id)? else {
+            transaction.commit().map_err(guarded_undo_error)?;
+            return Ok(false);
+        };
+        if set.state == RestoreSetState::Expired {
+            return Ok(false);
+        }
+        if set.state != RestoreSetState::Eligible {
+            return Ok(false);
+        }
+        let active: Option<i64> = transaction
+            .query_row(
+                "SELECT 1 FROM dcc_undo_operations WHERE restore_set_id = ?1 AND active = 1 LIMIT 1",
+                params![restore_set_id.0],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(guarded_undo_error)?;
+        if active.is_some() {
+            return Err(guarded_undo_error(
+                "active undo journal blocks retention expiration",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                r#"UPDATE dcc_turn_restore_sets
+                      SET state = 'expired', reason_code = 'retention_expired',
+                          completed_at = ?1
+                    WHERE restore_set_id = ?2 AND state = 'eligible'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM dcc_undo_operations
+                           WHERE restore_set_id = ?2 AND active = 1
+                      )"#,
+                params![completed_at, restore_set_id.0],
+            )
+            .map_err(guarded_undo_error)?;
+        if changed != 1 {
+            return Err(guarded_undo_error(
+                "retention expiration compare-and-swap lost",
+            ));
+        }
+        transaction.commit().map_err(guarded_undo_error)?;
+        Ok(true)
+    }
+
+    /// Records an artifact integrity failure without deleting the manifest or
+    /// its rows.  Only the two artifact-specific reasons are accepted.
+    #[allow(dead_code)]
+    pub(crate) fn fail_eligible_restore_set_integrity(
+        &self,
+        authority: &MaintenanceAuthority,
+        restore_set_id: &RestoreSetId,
+        reason: &GuardedUndoReasonCode,
+        completed_at: &str,
+    ) -> Result<bool> {
+        let _ = authority;
+        if !matches!(
+            reason,
+            GuardedUndoReasonCode::ArtifactMissing | GuardedUndoReasonCode::ArtifactCorrupt
+        ) {
+            return Err(guarded_undo_error(
+                "integrity failure requires artifact_missing or artifact_corrupt",
+            ));
+        }
+        require_maintenance_timestamp(completed_at)?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some((set, _files)) = load_turn_restore_set(&transaction, restore_set_id)? else {
+            transaction.commit().map_err(guarded_undo_error)?;
+            return Ok(false);
+        };
+        if set.state == RestoreSetState::Failed {
+            if set.reason_code.as_ref() == Some(reason) {
+                return Ok(false);
+            }
+            return Ok(false);
+        }
+        if set.state != RestoreSetState::Eligible {
+            return Ok(false);
+        }
+        let active: Option<i64> = transaction
+            .query_row(
+                "SELECT 1 FROM dcc_undo_operations WHERE restore_set_id = ?1 AND active = 1 LIMIT 1",
+                params![restore_set_id.0],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(guarded_undo_error)?;
+        if active.is_some() {
+            return Err(guarded_undo_error(
+                "active undo journal blocks integrity failure transition",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                r#"UPDATE dcc_turn_restore_sets
+                      SET state = 'failed', reason_code = ?1, completed_at = ?2
+                    WHERE restore_set_id = ?3 AND state = 'eligible'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM dcc_undo_operations
+                           WHERE restore_set_id = ?3 AND active = 1
+                      )"#,
+                params![reason.as_str(), completed_at, restore_set_id.0],
+            )
+            .map_err(guarded_undo_error)?;
+        if changed != 1 {
+            return Err(guarded_undo_error(
+                "integrity failure compare-and-swap lost",
+            ));
+        }
+        transaction.commit().map_err(guarded_undo_error)?;
+        Ok(true)
+    }
+
+    /// Returns oldest-first eligible sets, bounded by both count and retained
+    /// artifact bytes.  A candidate that exceeds the remaining byte budget
+    /// stops the oldest-first prefix; newer sets are not preferred over it.
+    #[allow(dead_code)]
+    pub(crate) fn list_retention_candidates(
+        &self,
+        authority: &MaintenanceAuthority,
+        workspace_id: &WorkspaceId,
+        max_count: u32,
+        max_bytes: u64,
+    ) -> Result<Vec<RestoreRetentionCandidate>> {
+        let _ = authority;
+        if max_count == 0 || max_bytes == 0 {
+            return Ok(Vec::new());
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn.transaction().map_err(guarded_undo_error)?;
+        let mut statement = transaction
+            .prepare(
+                r#"SELECT restore_set_id, workspace_id, artifact_bytes,
+                          file_count, completed_at, created_at
+                     FROM dcc_turn_restore_sets AS sets
+                    WHERE workspace_id = ?1 AND state = 'eligible'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM dcc_undo_operations operation
+                           WHERE operation.restore_set_id = sets.restore_set_id
+                             AND operation.active = 1
+                      )
+                    ORDER BY completed_at ASC, created_at ASC, restore_set_id ASC
+                    LIMIT ?2"#,
+            )
+            .map_err(guarded_undo_error)?;
+        let rows = statement
+            .query_map(params![workspace_id.0, i64::from(max_count)], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(guarded_undo_error)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(guarded_undo_error)?;
+        drop(statement);
+        let mut out = Vec::new();
+        let mut bytes = 0_u64;
+        for (id, persisted_workspace, artifact_bytes, file_count, completed_at, created_at) in rows
+        {
+            let candidate_bytes = checked_u64(artifact_bytes, "artifact_bytes")?;
+            let candidate_count = checked_u32(file_count, "file_count")?;
+            let restore_set_id = RestoreSetId(id);
+            let (set, _files) = load_turn_restore_set(&transaction, &restore_set_id)?
+                .ok_or_else(|| guarded_undo_error("retention candidate disappeared"))?;
+            if set.state != RestoreSetState::Eligible
+                || set.workspace_id.0 != persisted_workspace
+                || set.artifact_bytes != candidate_bytes
+                || set.file_count != candidate_count
+                || set.completed_at.as_deref() != Some(completed_at.as_str())
+                || set.created_at != created_at
+            {
+                return Err(guarded_undo_error(
+                    "retention candidate changed during enumeration",
+                ));
+            }
+            if candidate_bytes > max_bytes.saturating_sub(bytes) {
+                break;
+            }
+            bytes = bytes
+                .checked_add(candidate_bytes)
+                .ok_or_else(|| guarded_undo_error("retention accounting overflow"))?;
+            out.push(RestoreRetentionCandidate {
+                restore_set_id,
+                workspace_id: WorkspaceId(persisted_workspace),
+                artifact_bytes: candidate_bytes,
+                file_count: candidate_count,
+                completed_at,
+                created_at,
+            });
+        }
+        transaction.commit().map_err(guarded_undo_error)?;
+        Ok(out)
+    }
+
+    /// Lists opaque artifact references while retaining set/ordinal order.
+    /// Missing or malformed rows fail closed; no artifact file is opened.
+    #[allow(dead_code)]
+    pub(crate) fn list_referenced_artifact_keys(
+        &self,
+        authority: &MaintenanceAuthority,
+        restore_set_ids: &[RestoreSetId],
+    ) -> Result<Vec<ArtifactKey>> {
+        let _ = authority;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn.transaction().map_err(guarded_undo_error)?;
+        let mut out = Vec::new();
+        for restore_set_id in restore_set_ids {
+            let Some((_set, files)) = load_turn_restore_set(&transaction, restore_set_id)? else {
+                return Err(guarded_undo_error("referenced restoration set is missing"));
+            };
+            out.extend(files.into_iter().map(|file| file.pre_artifact_key));
+        }
+        transaction.commit().map_err(guarded_undo_error)?;
+        Ok(out)
     }
 
     /// Phase 0 fixture journal insertion. It records no filesystem mutation and
@@ -3351,6 +3692,16 @@ fn guarded_undo_error(error: impl ToString) -> dcc_core::CoreError {
     dcc_core::CoreError::Repository(format!("guarded undo: {}", error.to_string()))
 }
 
+fn require_maintenance_timestamp(value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        Err(guarded_undo_error(
+            "maintenance timestamp must not be empty",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn optional_json<T: serde::Serialize>(value: &Option<T>) -> Result<Option<String>> {
     value
         .as_ref()
@@ -3582,6 +3933,9 @@ fn load_turn_restore_set(
         completed_at,
         expires_at,
     };
+    // Validate the complete parent before interpreting any state-specific
+    // child rows.  This rejects unknown/future states and reasons closed.
+    restore_set.validate().map_err(guarded_undo_error)?;
     if restore_set.file_count > MAX_RESTORE_FILES {
         return Err(guarded_undo_error(
             "restoration accounting exceeds file limit",
@@ -3643,14 +3997,11 @@ fn load_turn_restore_set(
         file.validate().map_err(guarded_undo_error)?;
         files.push(file);
     }
-    if matches!(
-        &restore_set.state,
-        RestoreSetState::Eligible | RestoreSetState::Consumed
-    ) {
+    if !files.is_empty() {
         validate_restore_set_manifest(&restore_set, &files).map_err(guarded_undo_error)?;
-    } else if !files.is_empty() {
+    } else if restore_set.manifest_digest.is_some() {
         return Err(guarded_undo_error(
-            "unavailable or unknown restoration set contains usable file rows",
+            "restoration manifest is missing its file rows",
         ));
     }
     Ok(Some((restore_set, files)))
@@ -4915,6 +5266,30 @@ mod tests {
             result_sha256: Sha256Digest([0x22; 32]),
             metadata_fingerprint: guarded_metadata(),
         }
+    }
+
+    fn persist_eligible_restore_set(
+        repo: &SqliteSessionRepo,
+        conn: &Arc<Mutex<Connection>>,
+        suffix: &str,
+        completed_at: &str,
+    ) -> (TurnRestoreSet, TurnRestoreFile) {
+        seed_guarded_undo_parents(&conn.lock().unwrap(), suffix);
+        let collecting = collecting_restore_set(suffix);
+        repo.create_turn_restore_set(&collecting).unwrap();
+        let file = eligible_restore_file(suffix);
+        let mut eligible = collecting;
+        eligible.state = RestoreSetState::Eligible;
+        eligible.file_count = 1;
+        eligible.artifact_bytes = file.pre_size;
+        eligible.manifest_digest =
+            Some(canonical_restore_manifest_digest(std::slice::from_ref(&file)).unwrap());
+        eligible.completed_at = Some(completed_at.to_owned());
+        eligible.expires_at = Some("t9".to_owned());
+        assert!(repo
+            .finalize_turn_restore_set(&eligible, std::slice::from_ref(&file))
+            .unwrap());
+        (eligible, file)
     }
 
     #[test]
@@ -6327,14 +6702,9 @@ mod tests {
                 params![collecting.restore_set_id.0],
             )
             .unwrap();
-        let loaded = repo
+        assert!(repo
             .get_turn_restore_set(&collecting.restore_set_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            loaded.0.state,
-            RestoreSetState::Unknown("future_state".to_owned())
-        );
+            .is_err());
         assert!(repo
             .finalize_turn_restore_set(
                 &TurnRestoreSet {
@@ -6424,5 +6794,215 @@ mod tests {
                 "missing migrated table {table}"
             );
         }
+    }
+
+    #[test]
+    fn phase1b_recovery_is_authorized_cas_and_idempotent() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        seed_guarded_undo_parents(&conn.lock().unwrap(), "recover");
+        let collecting = collecting_restore_set("recover");
+        repo.create_turn_restore_set(&collecting).unwrap();
+        let authority = MaintenanceAuthority::new();
+
+        assert_eq!(
+            repo.recover_interrupted_restore_sets(&authority, "t2")
+                .unwrap(),
+            vec!["restore-recover".to_owned()]
+        );
+        assert!(repo
+            .recover_interrupted_restore_sets(&authority, "t3")
+            .unwrap()
+            .is_empty());
+        let (set, files) = repo
+            .get_turn_restore_set(&collecting.restore_set_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(set.state, RestoreSetState::Failed);
+        assert_eq!(
+            set.reason_code,
+            Some(GuardedUndoReasonCode::CaptureInterrupted)
+        );
+        assert_eq!(set.completed_at.as_deref(), Some("t2"));
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn phase1b_expiry_preserves_audit_rows_and_rejects_active_journal() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        let (eligible, file) = persist_eligible_restore_set(&repo, &conn, "expire", "t2");
+        let authority = MaintenanceAuthority::new();
+        let before = repo
+            .get_turn_restore_set(&eligible.restore_set_id)
+            .unwrap()
+            .unwrap();
+        conn.lock()
+            .unwrap()
+            .execute(
+                r#"INSERT INTO dcc_undo_operations (
+                    operation_id, restore_set_id, journal_version, state, active,
+                    prepared_identity_json, created_at, updated_at
+                ) VALUES ('op-expire', ?1, 1, 'preparing', 1, '{}', 't3', 't3')"#,
+                params![eligible.restore_set_id.0],
+            )
+            .unwrap();
+        assert!(repo
+            .expire_eligible_restore_set(&authority, &eligible.restore_set_id, "t4")
+            .is_err());
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_undo_operations SET state = 'completed', active = 0 WHERE operation_id = 'op-expire'",
+                [],
+            )
+            .unwrap();
+        assert!(repo
+            .expire_eligible_restore_set(&authority, &eligible.restore_set_id, "t4")
+            .unwrap());
+        assert!(!repo
+            .expire_eligible_restore_set(&authority, &eligible.restore_set_id, "t5")
+            .unwrap());
+        let (expired, files) = repo
+            .get_turn_restore_set(&eligible.restore_set_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(expired.state, RestoreSetState::Expired);
+        assert_eq!(
+            expired.reason_code,
+            Some(GuardedUndoReasonCode::RetentionExpired)
+        );
+        assert_eq!(expired.artifact_bytes, before.0.artifact_bytes);
+        assert_eq!(expired.file_count, before.0.file_count);
+        assert_eq!(expired.manifest_digest, before.0.manifest_digest);
+        assert_eq!(files, vec![file]);
+        assert_eq!(
+            conn.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM dcc_turn_restore_files WHERE restore_set_id = ?1",
+                    params![eligible.restore_set_id.0],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn phase1b_integrity_failure_is_reason_restricted_and_keeps_manifest() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        let (eligible, file) = persist_eligible_restore_set(&repo, &conn, "integrity", "t2");
+        let authority = MaintenanceAuthority::new();
+        assert!(repo
+            .fail_eligible_restore_set_integrity(
+                &authority,
+                &eligible.restore_set_id,
+                &GuardedUndoReasonCode::HeadChanged,
+                "t3",
+            )
+            .is_err());
+        assert!(repo
+            .fail_eligible_restore_set_integrity(
+                &authority,
+                &eligible.restore_set_id,
+                &GuardedUndoReasonCode::ArtifactCorrupt,
+                "t4",
+            )
+            .unwrap());
+        assert!(!repo
+            .fail_eligible_restore_set_integrity(
+                &authority,
+                &eligible.restore_set_id,
+                &GuardedUndoReasonCode::ArtifactCorrupt,
+                "t5",
+            )
+            .unwrap());
+        let (failed, files) = repo
+            .get_turn_restore_set(&eligible.restore_set_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed.state, RestoreSetState::Failed);
+        assert_eq!(
+            failed.reason_code,
+            Some(GuardedUndoReasonCode::ArtifactCorrupt)
+        );
+        assert_eq!(files, vec![file]);
+    }
+
+    #[test]
+    fn phase1b_retention_candidates_are_ordered_and_bounded() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        let (first, _) = persist_eligible_restore_set(&repo, &conn, "candidate-a", "t1");
+        let (second, _) = persist_eligible_restore_set(&repo, &conn, "candidate-b", "t1");
+        let (third, _) = persist_eligible_restore_set(&repo, &conn, "candidate-c", "t2");
+        conn.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO dcc_workspaces (id, project_id, root_path, base_branch, state, created_at, updated_at) VALUES ('workspace-retention', 'project', '/tmp/retention', 'main', 'ready', 't0', 't0')",
+                [],
+            )
+            .unwrap();
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_turn_restore_sets SET workspace_id = 'workspace-retention' WHERE restore_set_id IN ('restore-candidate-a', 'restore-candidate-b', 'restore-candidate-c')",
+                [],
+            )
+            .unwrap();
+        let authority = MaintenanceAuthority::new();
+        let candidates = repo
+            .list_retention_candidates(
+                &authority,
+                &WorkspaceId("workspace-retention".to_owned()),
+                2,
+                8,
+            )
+            .unwrap();
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.restore_set_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                first.restore_set_id.0.as_str(),
+                second.restore_set_id.0.as_str()
+            ]
+        );
+        let byte_bounded = repo
+            .list_retention_candidates(
+                &authority,
+                &WorkspaceId("workspace-retention".to_owned()),
+                20,
+                7,
+            )
+            .unwrap();
+        assert_eq!(byte_bounded.len(), 1);
+        assert_eq!(byte_bounded[0].artifact_bytes, 4);
+        assert_eq!(third.artifact_bytes, 4);
+    }
+
+    #[test]
+    fn phase1b_artifact_references_are_opaque_and_deterministic() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        let (first, first_file) = persist_eligible_restore_set(&repo, &conn, "refs-a", "t1");
+        let (second, second_file) = persist_eligible_restore_set(&repo, &conn, "refs-b", "t1");
+        let authority = MaintenanceAuthority::new();
+        let keys = repo
+            .list_referenced_artifact_keys(
+                &authority,
+                &[second.restore_set_id.clone(), first.restore_set_id.clone()],
+            )
+            .unwrap();
+        assert_eq!(
+            keys,
+            vec![second_file.pre_artifact_key, first_file.pre_artifact_key]
+        );
+        assert!(repo
+            .list_referenced_artifact_keys(&authority, &[RestoreSetId("missing".to_owned())],)
+            .is_err());
     }
 }

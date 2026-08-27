@@ -6,6 +6,9 @@
 
 pub mod coordinator;
 
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+pub mod macos_root;
+
 // Phase 1A deliberately exports no operational filesystem adapter. Every
 // current platform fails closed until a reviewed implementation exists.
 pub mod unsupported;
