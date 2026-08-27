@@ -12,8 +12,8 @@
 #![cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 
 use std::{
-    collections::BTreeMap,
-    ffi::CString,
+    collections::{BTreeMap, HashSet},
+    ffi::{CStr, CString},
     fmt,
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
@@ -41,6 +41,7 @@ const ACL_TYPE_EXTENDED: libc::c_int = 0x0000_0100;
 const ACL_FIRST_ENTRY: libc::c_int = 0;
 const ENOENT_MACOS: i32 = 2;
 const ENOATTR_MACOS: i32 = 93;
+const MAX_RECOVERY_ENTRIES: usize = 4096;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum MacArtifactStoreError {
@@ -187,6 +188,21 @@ pub struct MacArtifactStore {
     staging: File,
     objects: File,
     _lock: File,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct OrphanRecoveryReport {
+    pub staging_removed: u32,
+    pub objects_removed: u32,
+}
+
+impl fmt::Debug for OrphanRecoveryReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OrphanRecoveryReport")
+            .field("staging_removed", &self.staging_removed)
+            .field("objects_removed", &self.objects_removed)
+            .finish()
+    }
 }
 
 impl fmt::Debug for MacArtifactStore {
@@ -462,6 +478,59 @@ impl MacArtifactStore {
         Ok(())
     }
 
+    /// Recover only opaque, canonical orphan names while the instance lock is
+    /// held by this store.  The caller supplies keys already verified against
+    /// its durable manifest; those objects are never removed here.
+    pub fn recover_orphans(
+        &self,
+        referenced: &HashSet<ArtifactKey>,
+    ) -> Result<OrphanRecoveryReport, MacArtifactStoreError> {
+        let staging_entries = enumerate_entries(&self.staging, RecoveryArea::Staging)?;
+        let object_entries = enumerate_entries(&self.objects, RecoveryArea::Objects)?;
+
+        // Validate the complete snapshot before deleting anything.  An unknown
+        // name, symlink, hardlink, directory, or unsafe metadata therefore
+        // fails closed without partially cleaning a later entry.
+        for entry in staging_entries.iter().chain(object_entries.iter()) {
+            let directory = match entry.area {
+                RecoveryArea::Staging => &self.staging,
+                RecoveryArea::Objects => &self.objects,
+            };
+            let file = self.open_named(directory, &entry.name)?;
+            inspect_artifact(&file, 1)?;
+        }
+
+        let mut report = OrphanRecoveryReport {
+            staging_removed: 0,
+            objects_removed: 0,
+        };
+        for entry in staging_entries {
+            if !key_is_referenced(referenced, entry.key) {
+                unlink(&self.staging, &entry.name)?;
+                report.staging_removed = report
+                    .staging_removed
+                    .checked_add(1)
+                    .ok_or(MacArtifactStoreError::ArtifactStoreUnsafe)?;
+            }
+        }
+        if report.staging_removed != 0 {
+            fsync_dir(&self.staging)?;
+        }
+        for entry in object_entries {
+            if !key_is_referenced(referenced, entry.key) {
+                unlink(&self.objects, &entry.name)?;
+                report.objects_removed = report
+                    .objects_removed
+                    .checked_add(1)
+                    .ok_or(MacArtifactStoreError::ArtifactStoreUnsafe)?;
+            }
+        }
+        if report.objects_removed != 0 {
+            fsync_dir(&self.objects)?;
+        }
+        Ok(report)
+    }
+
     fn complete_linked_publish(
         &self,
         staged: &StagedArtifact,
@@ -674,6 +743,103 @@ fn inspect_artifact(
         sha256: Sha256Digest(hasher.finalize().into()),
         metadata,
     })
+}
+
+#[derive(Clone, Copy)]
+enum RecoveryArea {
+    Staging,
+    Objects,
+}
+
+struct RecoveryEntry {
+    key: ArtifactKey,
+    name: Vec<u8>,
+    area: RecoveryArea,
+}
+
+fn enumerate_entries(
+    directory: &File,
+    area: RecoveryArea,
+) -> Result<Vec<RecoveryEntry>, MacArtifactStoreError> {
+    // Open `.` relative to the retained directory to get an independent
+    // directory offset; dup would inherit a possibly exhausted readdir offset.
+    let dot = CString::new(".").unwrap();
+    let duplicated = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            dot.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if duplicated < 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    #[cfg(test)]
+    assert_cloexec(duplicated);
+    let stream = unsafe { libc::fdopendir(duplicated) };
+    if stream.is_null() {
+        unsafe { libc::close(duplicated) };
+        return Err(io::Error::last_os_error().into());
+    }
+    let mut entries = Vec::new();
+    loop {
+        unsafe { *libc::__error() = 0 };
+        let item = unsafe { libc::readdir(stream) };
+        if item.is_null() {
+            let errno = unsafe { *libc::__error() };
+            let closed = unsafe { libc::closedir(stream) };
+            if errno != 0 {
+                return Err(io::Error::from_raw_os_error(errno).into());
+            }
+            if closed != 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+            break;
+        }
+        let raw_name = unsafe { CStr::from_ptr((*item).d_name.as_ptr()) }.to_bytes();
+        if raw_name == b"." || raw_name == b".." {
+            continue;
+        }
+        if entries.len() >= MAX_RECOVERY_ENTRIES {
+            unsafe { libc::closedir(stream) };
+            return Err(MacArtifactStoreError::ArtifactStoreUnsafe);
+        }
+        let key = parse_canonical_key(raw_name).ok_or_else(|| {
+            unsafe { libc::closedir(stream) };
+            MacArtifactStoreError::ArtifactStoreUnsafe
+        })?;
+        entries.push(RecoveryEntry {
+            key,
+            name: raw_name.to_vec(),
+            area,
+        });
+    }
+    Ok(entries)
+}
+
+fn parse_canonical_key(name: &[u8]) -> Option<ArtifactKey> {
+    if name.len() != 32 {
+        return None;
+    }
+    let mut bytes = [0_u8; 16];
+    for (index, pair) in name.chunks_exact(2).enumerate() {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        bytes[index] = (high << 4) | low;
+    }
+    Some(ArtifactKey(bytes))
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+fn key_is_referenced(referenced: &HashSet<ArtifactKey>, key: ArtifactKey) -> bool {
+    referenced.contains(&key)
 }
 
 fn walk_absolute_directory(
@@ -1174,6 +1340,137 @@ mod tests {
         } else {
             assert!(result.is_ok());
         }
+    }
+
+    #[test]
+    fn recovers_valid_orphans_idempotently_and_never_deletes_unknown_names() {
+        let (_workspace_dir, _app_data_dir, _workspace, store) = setup();
+        let orphan_stage = store
+            .stage_with_key(
+                &CapturedBytes::from_slice(b"staging-orphan"),
+                1024,
+                ArtifactKey([21; 16]),
+            )
+            .unwrap();
+        let orphan_object = store
+            .stage_with_key(
+                &CapturedBytes::from_slice(b"object-orphan"),
+                1024,
+                ArtifactKey([22; 16]),
+            )
+            .unwrap();
+        assert!(matches!(
+            store.publish(&orphan_object),
+            Ok(PublishState::Published(_))
+        ));
+        let referenced = HashSet::new();
+        let report = store.recover_orphans(&referenced).unwrap();
+        assert_eq!(report.staging_removed, 1);
+        assert_eq!(report.objects_removed, 1);
+        assert!(!exists(&store.staging, key_name(orphan_stage.key).as_bytes()).unwrap());
+        assert!(!exists(&store.objects, key_name(orphan_object.key).as_bytes()).unwrap());
+        let second = store.recover_orphans(&referenced).unwrap();
+        assert_eq!(second.staging_removed, 0);
+        assert_eq!(second.objects_removed, 0);
+
+        let retained = store
+            .stage_with_key(
+                &CapturedBytes::from_slice(b"retained"),
+                1024,
+                ArtifactKey([24; 16]),
+            )
+            .unwrap();
+        let mut referenced = HashSet::new();
+        referenced.insert(retained.key);
+        assert_eq!(
+            store.recover_orphans(&referenced).unwrap(),
+            OrphanRecoveryReport {
+                staging_removed: 0,
+                objects_removed: 0,
+            }
+        );
+        store.cleanup_staged(&retained).unwrap();
+
+        let unknown = CString::new("unknown-entry").unwrap();
+        let fd = unsafe {
+            libc::openat(
+                store.staging.as_raw_fd(),
+                unknown.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
+                MODE_FILE as libc::c_uint,
+            )
+        };
+        assert!(fd >= 0);
+        unsafe { libc::close(fd) };
+        let protected = store
+            .stage_with_key(
+                &CapturedBytes::from_slice(b"must-remain"),
+                1024,
+                ArtifactKey([23; 16]),
+            )
+            .unwrap();
+        assert_eq!(
+            store.recover_orphans(&referenced),
+            Err(MacArtifactStoreError::ArtifactStoreUnsafe)
+        );
+        assert!(exists(&store.staging, key_name(protected.key).as_bytes()).unwrap());
+        unsafe { libc::unlinkat(store.staging.as_raw_fd(), unknown.as_ptr(), 0) };
+        store.cleanup_staged(&protected).unwrap();
+    }
+
+    #[test]
+    fn recovery_bounds_entries_and_rejects_canonical_symlink() {
+        let (_workspace_dir, _app_data_dir, _workspace, store) = setup();
+        let mut names = Vec::new();
+        for value in 0..=MAX_RECOVERY_ENTRIES {
+            let key = ArtifactKey((value as u128).to_be_bytes());
+            let name = key_name(key);
+            let fd = unsafe {
+                libc::openat(
+                    store.objects.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
+                    MODE_FILE as libc::c_uint,
+                )
+            };
+            assert!(fd >= 0);
+            unsafe { libc::close(fd) };
+            names.push(name);
+        }
+        assert_eq!(
+            store.recover_orphans(&HashSet::new()),
+            Err(MacArtifactStoreError::ArtifactStoreUnsafe)
+        );
+        for name in names {
+            unsafe { libc::unlinkat(store.objects.as_raw_fd(), name.as_ptr(), 0) };
+        }
+        fsync_dir(&store.objects).unwrap();
+
+        let target = CString::new("00000000000000000000000000000001").unwrap();
+        let link = CString::new("00000000000000000000000000000002").unwrap();
+        let fd = unsafe {
+            libc::openat(
+                store.objects.as_raw_fd(),
+                target.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
+                MODE_FILE as libc::c_uint,
+            )
+        };
+        assert!(fd >= 0);
+        unsafe { libc::close(fd) };
+        assert_eq!(
+            unsafe { libc::symlinkat(target.as_ptr(), store.objects.as_raw_fd(), link.as_ptr()) },
+            0
+        );
+        assert!(matches!(
+            store.recover_orphans(&HashSet::new()),
+            Err(MacArtifactStoreError::Io(_)) | Err(MacArtifactStoreError::ArtifactStoreUnsafe)
+        ));
+        unsafe {
+            libc::unlinkat(store.objects.as_raw_fd(), link.as_ptr(), 0);
+            libc::unlinkat(store.objects.as_raw_fd(), target.as_ptr(), 0);
+        }
+        fsync_dir(&store.objects).unwrap();
     }
 
     #[test]
