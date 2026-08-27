@@ -14,6 +14,14 @@ use dcc_core::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
             DelegationStatus,
         },
+        guarded_undo::{
+            validate_restore_set_manifest, ArtifactKey, GitIdentityV1, GuardedUndoReasonCode,
+            OpaqueRepoPath, PhysicalRootId, PreparedIdentityV1, RecoveryDetailsV1,
+            RegularFileMetadataV1, RestoreSetId, RestoreSetState, Sha256Digest, TurnRestoreFile,
+            TurnRestoreSet, UndoOperation, UndoOperationFile, UndoOperationFileState,
+            UndoOperationId, UndoOperationState, VerificationOutcome, MAX_RESTORE_FILES,
+            RESTORE_CAPTURE_VERSION, UNDO_JOURNAL_SCHEMA_VERSION,
+        },
         project::ProjectId,
         repository::{Repository, RepositoryId},
         session::{
@@ -247,6 +255,139 @@ CREATE TABLE IF NOT EXISTS dcc_turn_change_sets (
 
 CREATE INDEX IF NOT EXISTS idx_dcc_turn_change_sets_session_completed
 ON dcc_turn_change_sets(session_id, completed_at DESC);
+"#;
+
+const GUARDED_UNDO_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_turn_restore_sets (
+    restore_set_id TEXT PRIMARY KEY NOT NULL,
+    snapshot_id TEXT NOT NULL UNIQUE,
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    root_id BLOB NULL CHECK(root_id IS NULL OR (typeof(root_id) = 'blob' AND length(root_id) BETWEEN 3 AND 1024)),
+    capture_version INTEGER NOT NULL CHECK(capture_version > 0),
+    state TEXT NOT NULL CHECK(length(state) BETWEEN 1 AND 64),
+    reason_code TEXT NULL CHECK(reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 64),
+    git_identity_json TEXT NULL CHECK(git_identity_json IS NULL OR length(git_identity_json) BETWEEN 1 AND 65536),
+    artifact_bytes INTEGER NOT NULL DEFAULT 0 CHECK(artifact_bytes >= 0),
+    file_count INTEGER NOT NULL DEFAULT 0 CHECK(file_count >= 0),
+    manifest_digest BLOB NULL CHECK(manifest_digest IS NULL OR (typeof(manifest_digest) = 'blob' AND length(manifest_digest) = 32)),
+    created_at TEXT NOT NULL,
+    completed_at TEXT NULL,
+    expires_at TEXT NULL,
+    FOREIGN KEY (snapshot_id) REFERENCES dcc_turn_change_sets(snapshot_id) ON DELETE RESTRICT,
+    FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE RESTRICT,
+    FOREIGN KEY (workspace_id) REFERENCES dcc_workspaces(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_turn_restore_sets_workspace_state
+ON dcc_turn_restore_sets(workspace_id, state, completed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_turn_restore_sets_session_turn
+ON dcc_turn_restore_sets(session_id, turn_id);
+
+CREATE TABLE IF NOT EXISTS dcc_turn_restore_files (
+    restore_set_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+    path_bytes BLOB NOT NULL CHECK(typeof(path_bytes) = 'blob' AND length(path_bytes) BETWEEN 3 AND 4096),
+    status TEXT NOT NULL CHECK(length(status) BETWEEN 1 AND 64),
+    pre_size INTEGER NOT NULL CHECK(pre_size >= 0),
+    pre_sha256 BLOB NOT NULL CHECK(typeof(pre_sha256) = 'blob' AND length(pre_sha256) = 32),
+    pre_artifact_key BLOB NOT NULL CHECK(typeof(pre_artifact_key) = 'blob' AND length(pre_artifact_key) = 16),
+    result_size INTEGER NOT NULL CHECK(result_size >= 0),
+    result_sha256 BLOB NOT NULL CHECK(typeof(result_sha256) = 'blob' AND length(result_sha256) = 32),
+    metadata_fingerprint_json TEXT NOT NULL CHECK(length(metadata_fingerprint_json) BETWEEN 1 AND 4096),
+    PRIMARY KEY (restore_set_id, ordinal),
+    UNIQUE (restore_set_id, path_bytes),
+    UNIQUE (restore_set_id, pre_artifact_key),
+    FOREIGN KEY (restore_set_id) REFERENCES dcc_turn_restore_sets(restore_set_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS dcc_undo_operations (
+    operation_id TEXT PRIMARY KEY NOT NULL,
+    restore_set_id TEXT NOT NULL,
+    journal_version INTEGER NOT NULL CHECK(journal_version > 0),
+    state TEXT NOT NULL CHECK(length(state) BETWEEN 1 AND 64),
+    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
+    preview_token_digest BLOB NULL CHECK(preview_token_digest IS NULL OR (typeof(preview_token_digest) = 'blob' AND length(preview_token_digest) = 32)),
+    prepared_identity_json TEXT NOT NULL CHECK(length(prepared_identity_json) BETWEEN 1 AND 131072),
+    reason_code TEXT NULL CHECK(reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 64),
+    recovery_details_json TEXT NULL CHECK(recovery_details_json IS NULL OR length(recovery_details_json) BETWEEN 1 AND 1024),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT NULL,
+    UNIQUE (operation_id, restore_set_id),
+    FOREIGN KEY (restore_set_id) REFERENCES dcc_turn_restore_sets(restore_set_id) ON DELETE RESTRICT,
+    CHECK(
+        (state IN ('completed', 'rolled_back', 'blocked') AND active = 0)
+        OR
+        (state NOT IN ('completed', 'rolled_back', 'blocked') AND active = 1)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_undo_operations_one_active_set
+ON dcc_undo_operations(restore_set_id) WHERE active = 1;
+
+CREATE INDEX IF NOT EXISTS idx_dcc_undo_operations_state_updated
+ON dcc_undo_operations(state, updated_at);
+
+CREATE TABLE IF NOT EXISTS dcc_undo_operation_files (
+    operation_id TEXT NOT NULL,
+    restore_set_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+    path_bytes BLOB NOT NULL CHECK(typeof(path_bytes) = 'blob' AND length(path_bytes) BETWEEN 3 AND 4096),
+    exchange_artifact_key BLOB NOT NULL CHECK(typeof(exchange_artifact_key) = 'blob' AND length(exchange_artifact_key) = 16),
+    expected_result_size INTEGER NOT NULL CHECK(expected_result_size >= 0),
+    expected_result_sha256 BLOB NOT NULL CHECK(typeof(expected_result_sha256) = 'blob' AND length(expected_result_sha256) = 32),
+    expected_metadata_json TEXT NOT NULL CHECK(length(expected_metadata_json) BETWEEN 1 AND 4096),
+    pre_size INTEGER NOT NULL CHECK(pre_size >= 0),
+    pre_sha256 BLOB NOT NULL CHECK(typeof(pre_sha256) = 'blob' AND length(pre_sha256) = 32),
+    displaced_size INTEGER NULL CHECK(displaced_size IS NULL OR displaced_size >= 0),
+    displaced_sha256 BLOB NULL CHECK(displaced_sha256 IS NULL OR (typeof(displaced_sha256) = 'blob' AND length(displaced_sha256) = 32)),
+    displaced_metadata_json TEXT NULL CHECK(displaced_metadata_json IS NULL OR length(displaced_metadata_json) BETWEEN 1 AND 4096),
+    state TEXT NOT NULL CHECK(length(state) BETWEEN 1 AND 64),
+    verification_outcome TEXT NOT NULL CHECK(length(verification_outcome) BETWEEN 1 AND 64),
+    recovery_details_json TEXT NULL CHECK(recovery_details_json IS NULL OR length(recovery_details_json) BETWEEN 1 AND 1024),
+    updated_at TEXT NOT NULL,
+    CHECK(
+        (displaced_size IS NULL AND displaced_sha256 IS NULL AND displaced_metadata_json IS NULL)
+        OR
+        (displaced_size IS NOT NULL AND displaced_sha256 IS NOT NULL AND displaced_metadata_json IS NOT NULL)
+    ),
+    PRIMARY KEY (operation_id, ordinal),
+    UNIQUE (operation_id, path_bytes),
+    FOREIGN KEY (operation_id, restore_set_id)
+        REFERENCES dcc_undo_operations(operation_id, restore_set_id) ON DELETE CASCADE,
+    FOREIGN KEY (restore_set_id, ordinal)
+        REFERENCES dcc_turn_restore_files(restore_set_id, ordinal) ON DELETE RESTRICT
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_dcc_undo_operations_preserve_active
+BEFORE DELETE ON dcc_undo_operations
+WHEN OLD.active = 1
+BEGIN
+    SELECT RAISE(ABORT, 'active undo journal cannot be deleted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_dcc_undo_operation_files_preserve_active
+BEFORE DELETE ON dcc_undo_operation_files
+WHEN EXISTS (
+    SELECT 1 FROM dcc_undo_operations operation
+     WHERE operation.operation_id = OLD.operation_id AND operation.active = 1
+)
+BEGIN
+    SELECT RAISE(ABORT, 'active undo journal file cannot be deleted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_dcc_turn_restore_files_preserve_active
+BEFORE DELETE ON dcc_turn_restore_files
+WHEN EXISTS (
+    SELECT 1 FROM dcc_undo_operations operation
+     WHERE operation.restore_set_id = OLD.restore_set_id AND operation.active = 1
+)
+BEGIN
+    SELECT RAISE(ABORT, 'restoration file referenced by active journal cannot be deleted');
+END;
 "#;
 
 const DELEGATION_TABLE_SQL: &str = r#"
@@ -802,7 +943,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
@@ -1046,6 +1187,567 @@ impl SqliteSessionRepo {
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(snapshot_ids)
+    }
+
+    /// Creates only the empty `collecting` Phase 0 row. Raw artifacts and
+    /// capture v2 are intentionally outside this implementation.
+    pub fn create_turn_restore_set(&self, restore_set: &TurnRestoreSet) -> Result<()> {
+        restore_set.validate().map_err(guarded_undo_error)?;
+        if restore_set.state != RestoreSetState::Collecting
+            || restore_set.file_count != 0
+            || restore_set.artifact_bytes != 0
+            || restore_set.manifest_digest.is_some()
+        {
+            return Err(guarded_undo_error(
+                "new restoration set must be an empty collecting record",
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let attribution: Option<(String, String, String)> = conn
+            .query_row(
+                "SELECT session_id, turn_id, workspace_id FROM dcc_turn_change_sets WHERE snapshot_id = ?1",
+                params![restore_set.snapshot_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if attribution
+            != Some((
+                restore_set.session_id.0.clone(),
+                restore_set.turn_id.0.clone(),
+                restore_set.workspace_id.0.clone(),
+            ))
+        {
+            return Err(guarded_undo_error(
+                "restoration attribution does not match its M3 snapshot",
+            ));
+        }
+        conn.execute(
+            r#"INSERT INTO dcc_turn_restore_sets (
+                restore_set_id, snapshot_id, session_id, turn_id, workspace_id,
+                root_id, capture_version, state, reason_code, git_identity_json,
+                artifact_bytes, file_count, manifest_digest, created_at,
+                completed_at, expires_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, 0, 0, NULL, ?10, NULL, NULL)"#,
+            params![
+                restore_set.restore_set_id.0,
+                restore_set.snapshot_id,
+                restore_set.session_id.0,
+                restore_set.turn_id.0,
+                restore_set.workspace_id.0,
+                restore_set
+                    .root_id
+                    .as_ref()
+                    .map(|root_id| root_id.0.as_slice()),
+                restore_set.capture_version,
+                restore_set.state.as_str(),
+                optional_json(&restore_set.git_identity)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                restore_set.created_at,
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    /// Finalizes a collecting set with one compare-and-swap transaction. An
+    /// eligible state cannot become visible before all file rows, accounting,
+    /// and the canonical manifest digest are committed together.
+    pub fn finalize_turn_restore_set(
+        &self,
+        restore_set: &TurnRestoreSet,
+        files: &[TurnRestoreFile],
+    ) -> Result<bool> {
+        restore_set.validate().map_err(guarded_undo_error)?;
+        if restore_set.state == RestoreSetState::Collecting
+            || !RestoreSetState::Collecting.can_transition_to(&restore_set.state)
+        {
+            return Err(guarded_undo_error("invalid restoration final state"));
+        }
+        if restore_set.state == RestoreSetState::Eligible {
+            validate_restore_set_manifest(restore_set, files).map_err(guarded_undo_error)?;
+        } else if !files.is_empty()
+            || restore_set.file_count != 0
+            || restore_set.artifact_bytes != 0
+            || restore_set.manifest_digest.is_some()
+        {
+            return Err(guarded_undo_error(
+                "ineligible or failed restoration set cannot retain usable file rows",
+            ));
+        }
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let (persisted_set, persisted_files) =
+            load_turn_restore_set(&transaction, &restore_set.restore_set_id)?
+                .ok_or_else(|| guarded_undo_error("restoration set does not exist"))?;
+        let current_state = persisted_set.state.clone();
+        if current_state == restore_set.state {
+            let mut replay_files = files.to_vec();
+            replay_files.sort_by_key(|file| file.ordinal);
+            if persisted_set == *restore_set && persisted_files == replay_files {
+                return Ok(false);
+            }
+            return Err(guarded_undo_error(
+                "conflicting idempotent restoration finalization",
+            ));
+        }
+        if current_state != RestoreSetState::Collecting
+            || !current_state.can_transition_to(&restore_set.state)
+            || persisted_set.capture_version != RESTORE_CAPTURE_VERSION
+            || persisted_set.snapshot_id != restore_set.snapshot_id
+            || persisted_set.session_id != restore_set.session_id
+            || persisted_set.turn_id != restore_set.turn_id
+            || persisted_set.workspace_id != restore_set.workspace_id
+            || persisted_set.created_at != restore_set.created_at
+            || persisted_set
+                .root_id
+                .as_ref()
+                .is_some_and(|root_id| Some(root_id) != restore_set.root_id.as_ref())
+            || persisted_set
+                .git_identity
+                .as_ref()
+                .is_some_and(|git| Some(git) != restore_set.git_identity.as_ref())
+        {
+            return Err(guarded_undo_error(
+                "restoration lifecycle compare-and-swap rejected",
+            ));
+        }
+
+        for file in files {
+            insert_turn_restore_file(&transaction, file)?;
+        }
+        let changed = transaction
+            .execute(
+                r#"UPDATE dcc_turn_restore_sets
+                      SET state = ?1, reason_code = ?2, root_id = ?3,
+                          git_identity_json = ?4, artifact_bytes = ?5,
+                          file_count = ?6, manifest_digest = ?7,
+                          completed_at = ?8, expires_at = ?9
+                    WHERE restore_set_id = ?10 AND state = 'collecting'"#,
+                params![
+                    restore_set.state.as_str(),
+                    restore_set
+                        .reason_code
+                        .as_ref()
+                        .map(|reason| reason.as_str()),
+                    restore_set
+                        .root_id
+                        .as_ref()
+                        .map(|root_id| root_id.0.as_slice()),
+                    optional_json(&restore_set.git_identity)
+                        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                    i64::try_from(restore_set.artifact_bytes)
+                        .map_err(|_| guarded_undo_error("artifact accounting exceeds SQLite"))?,
+                    i64::from(restore_set.file_count),
+                    restore_set.manifest_digest.map(|digest| digest.0.to_vec()),
+                    restore_set.completed_at,
+                    restore_set.expires_at,
+                    restore_set.restore_set_id.0,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if changed != 1 {
+            return Err(guarded_undo_error(
+                "restoration lifecycle compare-and-swap lost",
+            ));
+        }
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(true)
+    }
+
+    pub fn get_turn_restore_set(
+        &self,
+        restore_set_id: &RestoreSetId,
+    ) -> Result<Option<(TurnRestoreSet, Vec<TurnRestoreFile>)>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        load_turn_restore_set(&conn, restore_set_id)
+    }
+
+    /// Phase 0 fixture journal insertion. It records no filesystem mutation and
+    /// requires the referenced restoration set to already be eligible.
+    pub fn create_undo_operation(
+        &self,
+        operation: &UndoOperation,
+        files: &[UndoOperationFile],
+    ) -> Result<()> {
+        operation.validate().map_err(guarded_undo_error)?;
+        if operation.state != UndoOperationState::Preparing {
+            return Err(guarded_undo_error(
+                "new undo journal must begin in preparing",
+            ));
+        }
+        if !operation.active {
+            return Err(guarded_undo_error("new undo journal must be active"));
+        }
+        if operation.preview_token_digest.is_none() {
+            return Err(guarded_undo_error(
+                "new undo journal requires a persisted preview token digest",
+            ));
+        }
+        for (ordinal, file) in files.iter().enumerate() {
+            file.validate().map_err(guarded_undo_error)?;
+            if file.operation_id != operation.operation_id || file.ordinal as usize != ordinal {
+                return Err(guarded_undo_error(
+                    "operation file ownership or ordinal is invalid",
+                ));
+            }
+            if file.state != UndoOperationFileState::Staged
+                || file.verification_outcome != VerificationOutcome::Pending
+                || file.displaced_size.is_some()
+                || file.recovery_details.is_some()
+            {
+                return Err(guarded_undo_error(
+                    "new undo journal files must be staged and unmodified",
+                ));
+            }
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let (restore_set, restore_files) =
+            load_turn_restore_set(&transaction, &operation.restore_set_id)?
+                .ok_or_else(|| guarded_undo_error("restoration set does not exist"))?;
+        if restore_set.state != RestoreSetState::Eligible {
+            return Err(guarded_undo_error(
+                "only an eligible known restoration set may start an operation",
+            ));
+        }
+        if files.is_empty() || files.len() != restore_files.len() {
+            return Err(guarded_undo_error(
+                "journal files do not cover the complete restoration manifest",
+            ));
+        }
+        if operation.prepared_identity.root_id
+            != restore_set.root_id.clone().expect("eligible root")
+            || operation.prepared_identity.git
+                != restore_set
+                    .git_identity
+                    .clone()
+                    .expect("eligible git identity")
+            || Some(operation.prepared_identity.manifest_digest) != restore_set.manifest_digest
+        {
+            return Err(guarded_undo_error(
+                "prepared identity is not bound to the restoration manifest",
+            ));
+        }
+        validate_operation_manifest_binding(operation, files, &restore_set, &restore_files)?;
+        transaction
+            .execute(
+                r#"INSERT INTO dcc_undo_operations (
+                    operation_id, restore_set_id, journal_version, state, active,
+                    preview_token_digest, prepared_identity_json, reason_code,
+                    recovery_details_json, created_at, updated_at, completed_at
+                ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
+                params![
+                    operation.operation_id.0,
+                    operation.restore_set_id.0,
+                    operation.journal_version,
+                    operation.state.as_str(),
+                    operation
+                        .preview_token_digest
+                        .map(|digest| digest.0.to_vec()),
+                    to_string(&operation.prepared_identity)
+                        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                    operation.reason_code.as_ref().map(|reason| reason.as_str()),
+                    optional_json(&operation.recovery_details)?,
+                    operation.created_at,
+                    operation.updated_at,
+                    operation.completed_at,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        for file in files {
+            insert_undo_operation_file(&transaction, file)?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_undo_operation(
+        &self,
+        operation_id: &UndoOperationId,
+    ) -> Result<Option<(UndoOperation, Vec<UndoOperationFile>)>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some(operation) = load_undo_operation(&conn, operation_id)? else {
+            return Ok(None);
+        };
+        if operation.0.journal_version == UNDO_JOURNAL_SCHEMA_VERSION
+            && operation.0.state.is_known()
+        {
+            let restore = load_turn_restore_set(&conn, &operation.0.restore_set_id)?
+                .ok_or_else(|| guarded_undo_error("restoration set disappeared"))?;
+            validate_operation_manifest_binding(
+                &operation.0,
+                &operation.1,
+                &restore.0,
+                &restore.1,
+            )?;
+        }
+        Ok(Some(operation))
+    }
+
+    pub fn transition_undo_operation_file(
+        &self,
+        expected: &UndoOperationFileState,
+        next_file: &UndoOperationFile,
+    ) -> Result<bool> {
+        next_file.validate().map_err(guarded_undo_error)?;
+        if !expected.is_known()
+            || !next_file.state.is_known()
+            || !expected.can_transition_to(&next_file.state)
+        {
+            return Err(guarded_undo_error("invalid undo file transition"));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let (operation, files) = load_undo_operation(&transaction, &next_file.operation_id)?
+            .ok_or_else(|| guarded_undo_error("undo operation does not exist"))?;
+        if !operation.active {
+            return Err(guarded_undo_error(
+                "terminal undo operation files are immutable",
+            ));
+        }
+        let (restore_set, restore_files) =
+            load_turn_restore_set(&transaction, &operation.restore_set_id)?
+                .ok_or_else(|| guarded_undo_error("restoration set disappeared"))?;
+        validate_operation_manifest_binding(&operation, &files, &restore_set, &restore_files)?;
+        let current = files
+            .into_iter()
+            .find(|file| file.ordinal == next_file.ordinal)
+            .ok_or_else(|| guarded_undo_error("undo operation file does not exist"))?;
+        if current.state == next_file.state {
+            if current == *next_file {
+                return Ok(false);
+            }
+            return Err(guarded_undo_error(
+                "conflicting idempotent undo file transition",
+            ));
+        }
+        if &current.state != expected || !current.state.can_transition_to(&next_file.state) {
+            return Err(guarded_undo_error(
+                "undo file lifecycle compare-and-swap rejected",
+            ));
+        }
+        if current.operation_id != next_file.operation_id
+            || current.restore_set_id != next_file.restore_set_id
+            || current.ordinal != next_file.ordinal
+            || current.path_bytes != next_file.path_bytes
+            || current.exchange_artifact_key != next_file.exchange_artifact_key
+            || current.expected_result_size != next_file.expected_result_size
+            || current.expected_result_sha256 != next_file.expected_result_sha256
+            || current.expected_metadata != next_file.expected_metadata
+            || current.pre_size != next_file.pre_size
+            || current.pre_sha256 != next_file.pre_sha256
+        {
+            return Err(guarded_undo_error("immutable undo file identity changed"));
+        }
+        let changed = transaction
+            .execute(
+                r#"UPDATE dcc_undo_operation_files
+                      SET displaced_size = ?1, displaced_sha256 = ?2,
+                          displaced_metadata_json = ?3, state = ?4,
+                          verification_outcome = ?5, recovery_details_json = ?6,
+                          updated_at = ?7
+                    WHERE operation_id = ?8 AND ordinal = ?9 AND state = ?10"#,
+                params![
+                    next_file
+                        .displaced_size
+                        .map(i64::try_from)
+                        .transpose()
+                        .map_err(|_| guarded_undo_error("displaced_size exceeds SQLite"))?,
+                    next_file.displaced_sha256.map(|digest| digest.0.to_vec()),
+                    optional_json(&next_file.displaced_metadata)?,
+                    next_file.state.as_str(),
+                    next_file.verification_outcome.as_str(),
+                    optional_json(&next_file.recovery_details)?,
+                    next_file.updated_at,
+                    next_file.operation_id.0,
+                    i64::from(next_file.ordinal),
+                    expected.as_str(),
+                ],
+            )
+            .map_err(guarded_undo_error)?;
+        if changed != 1 {
+            return Err(guarded_undo_error("undo file compare-and-swap lost"));
+        }
+        transaction.commit().map_err(guarded_undo_error)?;
+        Ok(true)
+    }
+
+    /// Journal compare-and-swap. `completed` consumes the restoration set in
+    /// the same transaction. Blocked/rolled-back operations become inactive so
+    /// a later prepare can create a distinct operation; recovery-required rows
+    /// remain active and therefore keep blocking cleanup and retries.
+    pub fn transition_undo_operation(
+        &self,
+        operation_id: &UndoOperationId,
+        expected: &UndoOperationState,
+        next: &UndoOperationState,
+        reason: Option<&GuardedUndoReasonCode>,
+        recovery_details: Option<&RecoveryDetailsV1>,
+        updated_at: &str,
+    ) -> Result<bool> {
+        if !expected.is_known() || !next.is_known() || !expected.can_transition_to(next) {
+            return Err(guarded_undo_error("invalid undo operation transition"));
+        }
+        if let Some(reason) = reason {
+            if !reason.is_known() {
+                return Err(guarded_undo_error("unknown undo reason code"));
+            }
+        }
+        if let Some(details) = recovery_details {
+            details.validate().map_err(guarded_undo_error)?;
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let (current, restore_set_id, journal_version): (String, String, i64) = transaction
+            .query_row(
+                "SELECT state, restore_set_id, journal_version FROM dcc_undo_operations WHERE operation_id = ?1",
+                params![operation_id.0],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .ok_or_else(|| guarded_undo_error("undo operation does not exist"))?;
+        let current: UndoOperationState = current.parse().map_err(guarded_undo_error)?;
+        if checked_u32(journal_version, "journal_version")? != UNDO_JOURNAL_SCHEMA_VERSION {
+            return Err(guarded_undo_error(
+                "unknown undo journal version cannot transition",
+            ));
+        }
+        let persisted = load_undo_operation(&transaction, operation_id)?
+            .ok_or_else(|| guarded_undo_error("undo operation disappeared"))?;
+        let restore = load_turn_restore_set(&transaction, &persisted.0.restore_set_id)?
+            .ok_or_else(|| guarded_undo_error("restoration set disappeared"))?;
+        validate_operation_manifest_binding(&persisted.0, &persisted.1, &restore.0, &restore.1)?;
+        if &current == next {
+            if persisted.0.reason_code.as_ref() == reason
+                && persisted.0.recovery_details.as_ref() == recovery_details
+            {
+                return Ok(false);
+            }
+            return Err(guarded_undo_error("conflicting idempotent undo transition"));
+        }
+        if &current != expected || !current.can_transition_to(next) {
+            return Err(guarded_undo_error(
+                "undo operation lifecycle compare-and-swap rejected",
+            ));
+        }
+        let inactive = matches!(
+            next,
+            UndoOperationState::Completed
+                | UndoOperationState::RolledBack
+                | UndoOperationState::Blocked
+        );
+        let mut desired = persisted.0;
+        desired.state = next.clone();
+        desired.active = !inactive;
+        desired.reason_code = reason.cloned();
+        desired.recovery_details = recovery_details.cloned();
+        desired.updated_at = updated_at.to_owned();
+        desired.completed_at = inactive.then(|| updated_at.to_owned());
+        desired.validate().map_err(guarded_undo_error)?;
+        if next == &UndoOperationState::Prepared
+            && persisted
+                .1
+                .iter()
+                .any(|file| file.state != UndoOperationFileState::Staged)
+        {
+            return Err(guarded_undo_error(
+                "prepared journal requires every exchange file staged",
+            ));
+        }
+        if next == &UndoOperationState::Completed
+            && persisted.1.iter().any(|file| {
+                file.state != UndoOperationFileState::Verified
+                    || file.verification_outcome != VerificationOutcome::Verified
+            })
+        {
+            return Err(guarded_undo_error(
+                "completed journal requires every file verified",
+            ));
+        }
+        if next == &UndoOperationState::RolledBack
+            && persisted.1.iter().any(|file| {
+                file.state != UndoOperationFileState::RolledBack
+                    || file.verification_outcome != VerificationOutcome::Verified
+            })
+        {
+            return Err(guarded_undo_error(
+                "rolled-back journal requires every file rollback verified",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                r#"UPDATE dcc_undo_operations
+                      SET state = ?1, active = ?2, reason_code = ?3,
+                          recovery_details_json = ?4, updated_at = ?5,
+                          completed_at = CASE WHEN ?2 = 0 THEN ?5 ELSE completed_at END
+                    WHERE operation_id = ?6 AND state = ?7"#,
+                params![
+                    next.as_str(),
+                    if inactive { 0 } else { 1 },
+                    reason.map(|reason| reason.as_str()),
+                    optional_json(&recovery_details.cloned())?,
+                    updated_at,
+                    operation_id.0,
+                    expected.as_str(),
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if changed != 1 {
+            return Err(guarded_undo_error("undo lifecycle compare-and-swap lost"));
+        }
+        if next == &UndoOperationState::Completed {
+            let consumed = transaction
+                .execute(
+                    "UPDATE dcc_turn_restore_sets SET state = 'consumed', reason_code = NULL, completed_at = ?1 WHERE restore_set_id = ?2 AND state = 'eligible'",
+                    params![updated_at, restore_set_id],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            if consumed != 1 {
+                return Err(guarded_undo_error(
+                    "completed operation could not atomically consume restoration set",
+                ));
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(true)
     }
 
     pub fn list_session_ids_for_workspace_scope(
@@ -2645,6 +3347,569 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
     }
 }
 
+fn guarded_undo_error(error: impl ToString) -> dcc_core::CoreError {
+    dcc_core::CoreError::Repository(format!("guarded undo: {}", error.to_string()))
+}
+
+fn optional_json<T: serde::Serialize>(value: &Option<T>) -> Result<Option<String>> {
+    value
+        .as_ref()
+        .map(|value| to_string(value).map_err(guarded_undo_error))
+        .transpose()
+}
+
+fn parse_guarded_json<T: DeserializeOwned>(raw: &str, field: &str) -> Result<T> {
+    from_str(raw).map_err(|_| guarded_undo_error(format!("invalid {field} schema")))
+}
+
+fn checked_u64(value: i64, field: &str) -> Result<u64> {
+    u64::try_from(value).map_err(|_| guarded_undo_error(format!("invalid {field}")))
+}
+
+fn checked_u32(value: i64, field: &str) -> Result<u32> {
+    u32::try_from(value).map_err(|_| guarded_undo_error(format!("invalid {field}")))
+}
+
+fn digest_from_blob(bytes: Vec<u8>) -> Result<Sha256Digest> {
+    Sha256Digest::from_slice(&bytes).map_err(guarded_undo_error)
+}
+
+fn artifact_key_from_blob(bytes: Vec<u8>) -> Result<ArtifactKey> {
+    ArtifactKey::from_slice(&bytes).map_err(guarded_undo_error)
+}
+
+fn validate_operation_manifest_binding(
+    operation: &UndoOperation,
+    operation_files: &[UndoOperationFile],
+    restore_set: &TurnRestoreSet,
+    restore_files: &[TurnRestoreFile],
+) -> Result<()> {
+    let state_matches = restore_set.state == RestoreSetState::Eligible
+        || (restore_set.state == RestoreSetState::Consumed
+            && operation.state == UndoOperationState::Completed);
+    if restore_set.capture_version != RESTORE_CAPTURE_VERSION
+        || !state_matches
+        || operation.restore_set_id != restore_set.restore_set_id
+        || operation_files.is_empty()
+        || operation_files.len() != restore_files.len()
+        || operation_files
+            .iter()
+            .any(|file| !file.state.is_known() || !file.verification_outcome.is_known())
+        || operation.prepared_identity.root_id
+            != restore_set
+                .root_id
+                .clone()
+                .ok_or_else(|| guarded_undo_error("eligible set has no physical root"))?
+        || operation.prepared_identity.git
+            != restore_set
+                .git_identity
+                .clone()
+                .ok_or_else(|| guarded_undo_error("eligible set has no Git identity"))?
+        || Some(operation.prepared_identity.manifest_digest) != restore_set.manifest_digest
+    {
+        return Err(guarded_undo_error(
+            "undo journal is not bound to an eligible restoration manifest",
+        ));
+    }
+    validate_restore_set_manifest(restore_set, restore_files).map_err(guarded_undo_error)?;
+    let mut exchange_keys = BTreeSet::new();
+    for (journal, restored) in operation_files.iter().zip(restore_files) {
+        if journal.operation_id != operation.operation_id
+            || journal.restore_set_id != restore_set.restore_set_id
+            || journal.ordinal != restored.ordinal
+            || journal.path_bytes != restored.path_bytes
+            || journal.expected_result_size != restored.result_size
+            || journal.expected_result_sha256 != restored.result_sha256
+            || journal.expected_metadata != restored.metadata_fingerprint
+            || journal.pre_size != restored.pre_size
+            || journal.pre_sha256 != restored.pre_sha256
+            || !exchange_keys.insert(journal.exchange_artifact_key.0)
+        {
+            return Err(guarded_undo_error(
+                "undo journal file is not bound to its opaque restoration record",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn insert_turn_restore_file(conn: &Connection, file: &TurnRestoreFile) -> Result<()> {
+    file.validate().map_err(guarded_undo_error)?;
+    conn.execute(
+        r#"INSERT INTO dcc_turn_restore_files (
+            restore_set_id, ordinal, path_bytes, status, pre_size, pre_sha256,
+            pre_artifact_key, result_size, result_sha256, metadata_fingerprint_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+        params![
+            file.restore_set_id.0,
+            i64::from(file.ordinal),
+            file.path_bytes.0,
+            file.status.as_str(),
+            i64::try_from(file.pre_size)
+                .map_err(|_| guarded_undo_error("pre_size exceeds SQLite"))?,
+            file.pre_sha256.0.to_vec(),
+            file.pre_artifact_key.0.to_vec(),
+            i64::try_from(file.result_size)
+                .map_err(|_| guarded_undo_error("result_size exceeds SQLite"))?,
+            file.result_sha256.0.to_vec(),
+            to_string(&file.metadata_fingerprint).map_err(guarded_undo_error)?,
+        ],
+    )
+    .map_err(guarded_undo_error)?;
+    Ok(())
+}
+
+fn load_turn_restore_set(
+    conn: &Connection,
+    restore_set_id: &RestoreSetId,
+) -> Result<Option<(TurnRestoreSet, Vec<TurnRestoreFile>)>> {
+    let bounds = conn
+        .query_row(
+            r#"SELECT COALESCE(length(git_identity_json), 0),
+                      COALESCE(length(root_id), 0),
+                      (SELECT COUNT(*) FROM dcc_turn_restore_files files WHERE files.restore_set_id = sets.restore_set_id),
+                      (SELECT COALESCE(MAX(length(path_bytes)), 0) FROM dcc_turn_restore_files files WHERE files.restore_set_id = sets.restore_set_id),
+                      (SELECT COALESCE(MAX(length(metadata_fingerprint_json)), 0) FROM dcc_turn_restore_files files WHERE files.restore_set_id = sets.restore_set_id)
+                 FROM dcc_turn_restore_sets sets WHERE restore_set_id = ?1"#,
+            params![restore_set_id.0],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(guarded_undo_error)?;
+    let Some((git_json_bytes, root_bytes, child_count, max_path, max_metadata)) = bounds else {
+        return Ok(None);
+    };
+    if git_json_bytes > 65_536
+        || root_bytes > 1_024
+        || child_count > i64::from(MAX_RESTORE_FILES)
+        || max_path > 4_096
+        || max_metadata > 4_096
+    {
+        return Err(guarded_undo_error(
+            "restoration record exceeds persistence bounds",
+        ));
+    }
+    let raw = conn
+        .query_row(
+            r#"SELECT restore_set_id, snapshot_id, session_id, turn_id,
+                      workspace_id, root_id, capture_version, state, reason_code,
+                      git_identity_json, artifact_bytes, file_count,
+                      manifest_digest, created_at, completed_at, expires_at
+                 FROM dcc_turn_restore_sets WHERE restore_set_id = ?1"#,
+            params![restore_set_id.0],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<Vec<u8>>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, Option<Vec<u8>>>(12)?,
+                    row.get::<_, String>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(guarded_undo_error)?;
+    let Some((
+        id,
+        snapshot_id,
+        session_id,
+        turn_id,
+        workspace_id,
+        root_id,
+        capture_version,
+        state,
+        reason,
+        git_json,
+        artifact_bytes,
+        file_count,
+        digest,
+        created_at,
+        completed_at,
+        expires_at,
+    )) = raw
+    else {
+        return Ok(None);
+    };
+    let root_id = root_id.map(PhysicalRootId);
+    if let Some(root_id) = &root_id {
+        root_id.validate().map_err(guarded_undo_error)?;
+    }
+    let git_identity = git_json
+        .as_deref()
+        .map(|json| parse_guarded_json::<GitIdentityV1>(json, "git identity"))
+        .transpose()?;
+    if let Some(git_identity) = &git_identity {
+        git_identity.validate().map_err(guarded_undo_error)?;
+    }
+    let state: RestoreSetState = state.parse().map_err(guarded_undo_error)?;
+    let reason_code = reason
+        .map(|reason| reason.parse().map_err(guarded_undo_error))
+        .transpose()?;
+    let restore_set = TurnRestoreSet {
+        restore_set_id: RestoreSetId(id),
+        snapshot_id,
+        session_id: SessionId(session_id),
+        turn_id: TurnId(turn_id),
+        workspace_id: WorkspaceId(workspace_id),
+        root_id,
+        capture_version: checked_u32(capture_version, "capture_version")?,
+        state,
+        reason_code,
+        git_identity,
+        artifact_bytes: checked_u64(artifact_bytes, "artifact_bytes")?,
+        file_count: checked_u32(file_count, "file_count")?,
+        manifest_digest: digest.map(digest_from_blob).transpose()?,
+        created_at,
+        completed_at,
+        expires_at,
+    };
+    if restore_set.file_count > MAX_RESTORE_FILES {
+        return Err(guarded_undo_error(
+            "restoration accounting exceeds file limit",
+        ));
+    }
+    let mut statement = conn
+        .prepare(
+            r#"SELECT ordinal, path_bytes, status, pre_size, pre_sha256,
+                      pre_artifact_key, result_size, result_sha256,
+                      metadata_fingerprint_json
+                 FROM dcc_turn_restore_files WHERE restore_set_id = ?1
+                ORDER BY ordinal"#,
+        )
+        .map_err(guarded_undo_error)?;
+    let raw_files = statement
+        .query_map(params![restore_set_id.0], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, Vec<u8>>(4)?,
+                row.get::<_, Vec<u8>>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, Vec<u8>>(7)?,
+                row.get::<_, String>(8)?,
+            ))
+        })
+        .map_err(guarded_undo_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(guarded_undo_error)?;
+    let mut files = Vec::with_capacity(raw_files.len());
+    for (
+        ordinal,
+        path,
+        status,
+        pre_size,
+        pre_digest,
+        artifact_key,
+        result_size,
+        result_digest,
+        metadata_json,
+    ) in raw_files
+    {
+        let metadata: RegularFileMetadataV1 = parse_guarded_json(&metadata_json, "file metadata")?;
+        metadata.validate().map_err(guarded_undo_error)?;
+        let file = TurnRestoreFile {
+            restore_set_id: restore_set.restore_set_id.clone(),
+            ordinal: checked_u32(ordinal, "ordinal")?,
+            path_bytes: OpaqueRepoPath::from_persisted(path),
+            status: status.parse().map_err(guarded_undo_error)?,
+            pre_size: checked_u64(pre_size, "pre_size")?,
+            pre_sha256: digest_from_blob(pre_digest)?,
+            pre_artifact_key: artifact_key_from_blob(artifact_key)?,
+            result_size: checked_u64(result_size, "result_size")?,
+            result_sha256: digest_from_blob(result_digest)?,
+            metadata_fingerprint: metadata,
+        };
+        file.validate().map_err(guarded_undo_error)?;
+        files.push(file);
+    }
+    if matches!(
+        &restore_set.state,
+        RestoreSetState::Eligible | RestoreSetState::Consumed
+    ) {
+        validate_restore_set_manifest(&restore_set, &files).map_err(guarded_undo_error)?;
+    } else if !files.is_empty() {
+        return Err(guarded_undo_error(
+            "unavailable or unknown restoration set contains usable file rows",
+        ));
+    }
+    Ok(Some((restore_set, files)))
+}
+
+fn insert_undo_operation_file(conn: &Connection, file: &UndoOperationFile) -> Result<()> {
+    file.validate().map_err(guarded_undo_error)?;
+    conn.execute(
+        r#"INSERT INTO dcc_undo_operation_files (
+            operation_id, restore_set_id, ordinal, path_bytes, exchange_artifact_key,
+            expected_result_size, expected_result_sha256, expected_metadata_json,
+            pre_size, pre_sha256, displaced_size, displaced_sha256,
+            displaced_metadata_json, state, verification_outcome,
+            recovery_details_json, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"#,
+        params![
+            file.operation_id.0,
+            file.restore_set_id.0,
+            i64::from(file.ordinal),
+            file.path_bytes.0,
+            file.exchange_artifact_key.0.to_vec(),
+            i64::try_from(file.expected_result_size)
+                .map_err(|_| guarded_undo_error("expected_result_size exceeds SQLite"))?,
+            file.expected_result_sha256.0.to_vec(),
+            to_string(&file.expected_metadata).map_err(guarded_undo_error)?,
+            i64::try_from(file.pre_size)
+                .map_err(|_| guarded_undo_error("pre_size exceeds SQLite"))?,
+            file.pre_sha256.0.to_vec(),
+            file.displaced_size
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| guarded_undo_error("displaced_size exceeds SQLite"))?,
+            file.displaced_sha256.map(|digest| digest.0.to_vec()),
+            optional_json(&file.displaced_metadata)?,
+            file.state.as_str(),
+            file.verification_outcome.as_str(),
+            optional_json(&file.recovery_details)?,
+            file.updated_at,
+        ],
+    )
+    .map_err(guarded_undo_error)?;
+    Ok(())
+}
+
+fn load_undo_operation(
+    conn: &Connection,
+    operation_id: &UndoOperationId,
+) -> Result<Option<(UndoOperation, Vec<UndoOperationFile>)>> {
+    let bounds = conn
+        .query_row(
+            r#"SELECT length(prepared_identity_json),
+                      COALESCE(length(recovery_details_json), 0),
+                      (SELECT COUNT(*) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
+                      (SELECT COALESCE(MAX(length(path_bytes)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
+                      (SELECT COALESCE(MAX(length(expected_metadata_json)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
+                      (SELECT COALESCE(MAX(length(displaced_metadata_json)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
+                      (SELECT COALESCE(MAX(length(recovery_details_json)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id)
+                 FROM dcc_undo_operations operations WHERE operation_id = ?1"#,
+            params![operation_id.0],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(guarded_undo_error)?;
+    let Some((
+        prepared_bytes,
+        recovery_bytes,
+        child_count,
+        max_path,
+        max_expected,
+        max_displaced,
+        max_recovery,
+    )) = bounds
+    else {
+        return Ok(None);
+    };
+    if prepared_bytes > 131_072
+        || recovery_bytes > 1_024
+        || child_count > i64::from(MAX_RESTORE_FILES)
+        || max_path > 4_096
+        || max_expected > 4_096
+        || max_displaced > 4_096
+        || max_recovery > 1_024
+    {
+        return Err(guarded_undo_error(
+            "undo journal exceeds persistence bounds",
+        ));
+    }
+    let raw = conn
+        .query_row(
+            r#"SELECT operation_id, restore_set_id, journal_version, state,
+                      active, preview_token_digest, prepared_identity_json,
+                      reason_code, recovery_details_json, created_at, updated_at,
+                      completed_at
+                 FROM dcc_undo_operations WHERE operation_id = ?1"#,
+            params![operation_id.0],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, bool>(4)?,
+                    row.get::<_, Option<Vec<u8>>>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(guarded_undo_error)?;
+    let Some((
+        id,
+        set_id,
+        version,
+        state,
+        active,
+        token,
+        prepared_json,
+        reason,
+        recovery_json,
+        created_at,
+        updated_at,
+        completed_at,
+    )) = raw
+    else {
+        return Ok(None);
+    };
+    let prepared_identity: PreparedIdentityV1 =
+        parse_guarded_json(&prepared_json, "prepared identity")?;
+    prepared_identity.validate().map_err(guarded_undo_error)?;
+    let recovery_details = recovery_json
+        .as_deref()
+        .map(|json| parse_guarded_json::<RecoveryDetailsV1>(json, "recovery details"))
+        .transpose()?;
+    if let Some(details) = &recovery_details {
+        details.validate().map_err(guarded_undo_error)?;
+    }
+    let operation = UndoOperation {
+        operation_id: UndoOperationId(id),
+        restore_set_id: RestoreSetId(set_id),
+        journal_version: checked_u32(version, "journal_version")?,
+        state: state.parse().map_err(guarded_undo_error)?,
+        active,
+        preview_token_digest: token.map(digest_from_blob).transpose()?,
+        prepared_identity,
+        reason_code: reason
+            .map(|value| value.parse().map_err(guarded_undo_error))
+            .transpose()?,
+        recovery_details,
+        created_at,
+        updated_at,
+        completed_at,
+    };
+    let mut statement = conn
+        .prepare(
+            r#"SELECT ordinal, restore_set_id, path_bytes, exchange_artifact_key, expected_result_size,
+                  expected_result_sha256, expected_metadata_json, pre_size,
+                  pre_sha256, displaced_size, displaced_sha256,
+                  displaced_metadata_json, state, verification_outcome,
+                  recovery_details_json, updated_at
+             FROM dcc_undo_operation_files WHERE operation_id = ?1 ORDER BY ordinal"#,
+        )
+        .map_err(guarded_undo_error)?;
+    let rows = statement
+        .query_map(params![operation_id.0], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Vec<u8>>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, Vec<u8>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, Vec<u8>>(8)?,
+                row.get::<_, Option<i64>>(9)?,
+                row.get::<_, Option<Vec<u8>>>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, String>(13)?,
+                row.get::<_, Option<String>>(14)?,
+                row.get::<_, String>(15)?,
+            ))
+        })
+        .map_err(guarded_undo_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(guarded_undo_error)?;
+    let mut files = Vec::with_capacity(rows.len());
+    for (
+        ordinal,
+        restore_set_id,
+        path,
+        key,
+        expected_size,
+        expected_digest,
+        expected_meta,
+        pre_size,
+        pre_digest,
+        displaced_size,
+        displaced_digest,
+        displaced_meta,
+        state,
+        outcome,
+        recovery,
+        updated_at,
+    ) in rows
+    {
+        let file = UndoOperationFile {
+            operation_id: operation.operation_id.clone(),
+            restore_set_id: RestoreSetId(restore_set_id),
+            ordinal: checked_u32(ordinal, "ordinal")?,
+            path_bytes: OpaqueRepoPath::from_persisted(path),
+            exchange_artifact_key: artifact_key_from_blob(key)?,
+            expected_result_size: checked_u64(expected_size, "expected_result_size")?,
+            expected_result_sha256: digest_from_blob(expected_digest)?,
+            expected_metadata: parse_guarded_json(&expected_meta, "expected metadata")?,
+            pre_size: checked_u64(pre_size, "pre_size")?,
+            pre_sha256: digest_from_blob(pre_digest)?,
+            displaced_size: displaced_size
+                .map(|value| checked_u64(value, "displaced_size"))
+                .transpose()?,
+            displaced_sha256: displaced_digest.map(digest_from_blob).transpose()?,
+            displaced_metadata: displaced_meta
+                .as_deref()
+                .map(|json| parse_guarded_json(json, "displaced metadata"))
+                .transpose()?,
+            state: state.parse().map_err(guarded_undo_error)?,
+            verification_outcome: outcome.parse().map_err(guarded_undo_error)?,
+            recovery_details: recovery
+                .as_deref()
+                .map(|json| parse_guarded_json(json, "file recovery details"))
+                .transpose()?,
+            updated_at,
+        };
+        if file.state.is_known() && file.verification_outcome.is_known() {
+            file.validate().map_err(guarded_undo_error)?;
+        }
+        files.push(file);
+    }
+    if operation.state.is_known() {
+        operation.validate().map_err(guarded_undo_error)?;
+    }
+    Ok(Some((operation, files)))
+}
+
 #[async_trait]
 impl SessionRepo for SqliteSessionRepo {
     async fn save_session(&self, session: &Session) -> Result<()> {
@@ -3537,6 +4802,12 @@ mod tests {
                 Delegation, DelegationBudget, DelegationContextPolicy, DelegationId,
                 DelegationMode, DelegationStatus,
             },
+            guarded_undo::{
+                canonical_restore_manifest_digest, ArtifactKey, CheckoutRefV1,
+                GuardedUndoReasonCode, IndexIdentityV1, OpaqueRepoPath, PhysicalRootId,
+                RestoreFileStatus, Sha256Digest, RESTORE_CAPTURE_VERSION,
+                UNDO_JOURNAL_SCHEMA_VERSION,
+            },
             provider::ProviderId,
             repository::{Repository, RepositoryId},
             session::{SessionEventKind, SessionState, TurnId},
@@ -3559,6 +4830,91 @@ mod tests {
         Arc::new(Mutex::new(
             Connection::open_in_memory().expect("open in-memory sqlite"),
         ))
+    }
+
+    fn guarded_git_identity() -> GitIdentityV1 {
+        GitIdentityV1 {
+            schema_version: 1,
+            worktree_identity: b"fixture-worktree".to_vec(),
+            head_oid: vec![0x42; 20],
+            checkout_ref: CheckoutRefV1::Symbolic {
+                full_name: "refs/heads/main".to_owned(),
+            },
+            index: IndexIdentityV1 {
+                sha256: Sha256Digest([0x33; 32]),
+                size: 128,
+                stat_identity: b"fixture-index-stat".to_vec(),
+            },
+        }
+    }
+
+    fn guarded_metadata() -> RegularFileMetadataV1 {
+        RegularFileMetadataV1 {
+            schema_version: 1,
+            adapter: "fixture".to_owned(),
+            file_identity: b"fixture-file-identity".to_vec(),
+            link_count: 1,
+            fields: BTreeMap::from([("mode".to_owned(), b"100644".to_vec())]),
+        }
+    }
+
+    fn seed_guarded_undo_parents(conn: &Connection, suffix: &str) {
+        conn.execute(
+            "INSERT INTO dcc_workspaces (id, project_id, root_path, base_branch, state, created_at, updated_at) VALUES (?1, 'project', '/tmp/guarded', 'main', 'ready', 't0', 't0')",
+            params![format!("workspace-{suffix}")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dcc_sessions (id, project_id, workspace_id, provider_id, state, created_at, updated_at) VALUES (?1, 'project', ?2, 'fixture', 'active', 't0', 't0')",
+            params![format!("session-{suffix}"), format!("workspace-{suffix}")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dcc_turn_change_sets (snapshot_id, session_id, turn_id, workspace_id, capture_version, state, created_at) VALUES (?1, ?2, ?3, ?4, 1, 'available', 't0')",
+            params![
+                format!("snapshot-{suffix}"),
+                format!("session-{suffix}"),
+                format!("turn-{suffix}"),
+                format!("workspace-{suffix}"),
+            ],
+        )
+        .unwrap();
+    }
+
+    fn collecting_restore_set(suffix: &str) -> TurnRestoreSet {
+        TurnRestoreSet {
+            restore_set_id: RestoreSetId(format!("restore-{suffix}")),
+            snapshot_id: format!("snapshot-{suffix}"),
+            session_id: SessionId(format!("session-{suffix}")),
+            turn_id: TurnId(format!("turn-{suffix}")),
+            workspace_id: WorkspaceId(format!("workspace-{suffix}")),
+            root_id: Some(PhysicalRootId(vec![1, 1, 7, 9])),
+            capture_version: RESTORE_CAPTURE_VERSION,
+            state: RestoreSetState::Collecting,
+            reason_code: None,
+            git_identity: Some(guarded_git_identity()),
+            artifact_bytes: 0,
+            file_count: 0,
+            manifest_digest: None,
+            created_at: "t1".to_owned(),
+            completed_at: None,
+            expires_at: None,
+        }
+    }
+
+    fn eligible_restore_file(suffix: &str) -> TurnRestoreFile {
+        TurnRestoreFile {
+            restore_set_id: RestoreSetId(format!("restore-{suffix}")),
+            ordinal: 0,
+            path_bytes: OpaqueRepoPath::unix(b"src/lib-\xff.rs").unwrap(),
+            status: RestoreFileStatus::Modified,
+            pre_size: 4,
+            pre_sha256: Sha256Digest([0x11; 32]),
+            pre_artifact_key: ArtifactKey([0x21; 16]),
+            result_size: 5,
+            result_sha256: Sha256Digest([0x22; 32]),
+            metadata_fingerprint: guarded_metadata(),
+        }
     }
 
     #[test]
@@ -4630,5 +5986,443 @@ mod tests {
         let deleted = futures::executor::block_on(repo.get_workspace_bundle(&bundle.id))
             .expect("get deleted workspace bundle");
         assert!(deleted.is_none());
+    }
+
+    #[test]
+    fn guarded_undo_phase_zero_roundtrip_lifecycle_and_cascades() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        seed_guarded_undo_parents(&conn.lock().unwrap(), "one");
+        let mut collecting = collecting_restore_set("one");
+        collecting.root_id = None;
+        collecting.git_identity = None;
+        repo.create_turn_restore_set(&collecting).unwrap();
+        assert_eq!(
+            repo.get_turn_restore_set(&collecting.restore_set_id)
+                .unwrap()
+                .unwrap(),
+            (collecting.clone(), Vec::new())
+        );
+
+        let restore_file = eligible_restore_file("one");
+        let mut eligible = collecting.clone();
+        eligible.root_id = Some(PhysicalRootId(vec![1, 1, 7, 9]));
+        eligible.git_identity = Some(guarded_git_identity());
+        eligible.state = RestoreSetState::Eligible;
+        eligible.file_count = 1;
+        eligible.artifact_bytes = restore_file.pre_size;
+        eligible.manifest_digest =
+            Some(canonical_restore_manifest_digest(std::slice::from_ref(&restore_file)).unwrap());
+        eligible.completed_at = Some("t2".to_owned());
+        eligible.expires_at = Some("t9".to_owned());
+        assert!(repo
+            .finalize_turn_restore_set(&eligible, std::slice::from_ref(&restore_file))
+            .unwrap());
+        assert_eq!(
+            repo.get_turn_restore_set(&eligible.restore_set_id)
+                .unwrap()
+                .unwrap()
+                .1[0]
+                .path_bytes,
+            restore_file.path_bytes,
+            "SQLite BLOB must round-trip non-UTF-8 path bytes exactly"
+        );
+        assert!(!repo
+            .finalize_turn_restore_set(&eligible, std::slice::from_ref(&restore_file))
+            .unwrap());
+        let mut conflicting = eligible.clone();
+        conflicting.expires_at = Some("different".to_owned());
+        assert!(repo
+            .finalize_turn_restore_set(&conflicting, std::slice::from_ref(&restore_file))
+            .is_err());
+
+        let operation = UndoOperation {
+            operation_id: UndoOperationId("operation-one".to_owned()),
+            restore_set_id: eligible.restore_set_id.clone(),
+            journal_version: UNDO_JOURNAL_SCHEMA_VERSION,
+            state: UndoOperationState::Preparing,
+            active: true,
+            preview_token_digest: Some(Sha256Digest([0x44; 32])),
+            prepared_identity: PreparedIdentityV1 {
+                schema_version: 1,
+                root_id: eligible.root_id.clone().unwrap(),
+                git: eligible.git_identity.clone().unwrap(),
+                manifest_digest: eligible.manifest_digest.unwrap(),
+                coordinator_generation: 7,
+            },
+            reason_code: None,
+            recovery_details: None,
+            created_at: "t3".to_owned(),
+            updated_at: "t3".to_owned(),
+            completed_at: None,
+        };
+        let mut operation_file = UndoOperationFile {
+            operation_id: operation.operation_id.clone(),
+            restore_set_id: operation.restore_set_id.clone(),
+            ordinal: 0,
+            path_bytes: restore_file.path_bytes.clone(),
+            exchange_artifact_key: ArtifactKey([0x55; 16]),
+            expected_result_size: restore_file.result_size,
+            expected_result_sha256: restore_file.result_sha256,
+            expected_metadata: restore_file.metadata_fingerprint.clone(),
+            pre_size: restore_file.pre_size,
+            pre_sha256: restore_file.pre_sha256,
+            displaced_size: None,
+            displaced_sha256: None,
+            displaced_metadata: None,
+            state: UndoOperationFileState::Staged,
+            verification_outcome: VerificationOutcome::Pending,
+            recovery_details: None,
+            updated_at: "t3".to_owned(),
+        };
+        repo.create_undo_operation(&operation, std::slice::from_ref(&operation_file))
+            .unwrap();
+        let clone_journal_row = |restore_set_sql: &str, ordinal: i64| {
+            conn.lock().unwrap().execute(
+                &format!(
+                    r#"INSERT INTO dcc_undo_operation_files (
+                        operation_id, restore_set_id, ordinal, path_bytes,
+                        exchange_artifact_key, expected_result_size,
+                        expected_result_sha256, expected_metadata_json, pre_size,
+                        pre_sha256, displaced_size, displaced_sha256,
+                        displaced_metadata_json, state, verification_outcome,
+                        recovery_details_json, updated_at
+                    ) SELECT operation_id, {restore_set_sql}, ?1, path_bytes,
+                             exchange_artifact_key, expected_result_size,
+                             expected_result_sha256, expected_metadata_json,
+                             pre_size, pre_sha256, displaced_size, displaced_sha256,
+                             displaced_metadata_json, state, verification_outcome,
+                             recovery_details_json, updated_at
+                        FROM dcc_undo_operation_files
+                       WHERE operation_id = 'operation-one' AND ordinal = 0"#
+                ),
+                params![ordinal],
+            )
+        };
+        assert!(
+            clone_journal_row("restore_set_id", 99).is_err(),
+            "journal child without a source restore_file must violate its composite FK"
+        );
+        assert!(
+            clone_journal_row("'restore-mismatch'", 98).is_err(),
+            "journal child with a mismatched restore_set must violate its parent composite FK"
+        );
+        assert!(conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM dcc_undo_operations WHERE operation_id = 'operation-one'",
+                []
+            )
+            .is_err());
+        assert!(conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM dcc_undo_operation_files WHERE operation_id = 'operation-one'",
+                [],
+            )
+            .is_err());
+        assert!(conn
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM dcc_turn_restore_files WHERE restore_set_id = 'restore-one'",
+                [],
+            )
+            .is_err());
+        assert!(repo
+            .transition_undo_operation(
+                &operation.operation_id,
+                &UndoOperationState::Preparing,
+                &UndoOperationState::Prepared,
+                None,
+                None,
+                "t4"
+            )
+            .unwrap());
+        assert!(!repo
+            .transition_undo_operation(
+                &operation.operation_id,
+                &UndoOperationState::Prepared,
+                &UndoOperationState::Prepared,
+                None,
+                None,
+                "ignored"
+            )
+            .unwrap());
+        let mut tampered_metadata = restore_file.metadata_fingerprint.clone();
+        tampered_metadata
+            .fields
+            .insert("mode".to_owned(), b"100755".to_vec());
+        conn.lock()
+            .unwrap()
+            .execute(
+                r#"UPDATE dcc_undo_operation_files
+                      SET path_bytes = ?1, expected_result_sha256 = ?2,
+                          expected_metadata_json = ?3
+                    WHERE operation_id = 'operation-one' AND ordinal = 0"#,
+                params![
+                    OpaqueRepoPath::unix(b"src/tampered.rs").unwrap().0,
+                    vec![0x99_u8; 32],
+                    serde_json::to_string(&tampered_metadata).unwrap(),
+                ],
+            )
+            .unwrap();
+        assert!(repo
+            .transition_undo_operation(
+                &operation.operation_id,
+                &UndoOperationState::Prepared,
+                &UndoOperationState::Prepared,
+                None,
+                None,
+                "tampered-idempotent-replay",
+            )
+            .is_err());
+        conn.lock()
+            .unwrap()
+            .execute(
+                r#"UPDATE dcc_undo_operation_files
+                      SET path_bytes = ?1, expected_result_sha256 = ?2,
+                          expected_metadata_json = ?3
+                    WHERE operation_id = 'operation-one' AND ordinal = 0"#,
+                params![
+                    restore_file.path_bytes.0.clone(),
+                    restore_file.result_sha256.0.to_vec(),
+                    serde_json::to_string(&restore_file.metadata_fingerprint).unwrap(),
+                ],
+            )
+            .unwrap();
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_undo_operation_files SET state = 'future_state' WHERE operation_id = 'operation-one' AND ordinal = 0",
+                [],
+            )
+            .unwrap();
+        assert!(repo
+            .transition_undo_operation(
+                &operation.operation_id,
+                &UndoOperationState::Prepared,
+                &UndoOperationState::Applying,
+                None,
+                None,
+                "unknown-child-state",
+            )
+            .is_err());
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_undo_operation_files SET state = 'staged' WHERE operation_id = 'operation-one' AND ordinal = 0",
+                [],
+            )
+            .unwrap();
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_undo_operation_files SET verification_outcome = 'future_outcome' WHERE operation_id = 'operation-one' AND ordinal = 0",
+                [],
+            )
+            .unwrap();
+        assert!(repo
+            .transition_undo_operation(
+                &operation.operation_id,
+                &UndoOperationState::Prepared,
+                &UndoOperationState::Applying,
+                None,
+                None,
+                "unknown-child-outcome",
+            )
+            .is_err());
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_undo_operation_files SET verification_outcome = 'pending' WHERE operation_id = 'operation-one' AND ordinal = 0",
+                [],
+            )
+            .unwrap();
+        repo.transition_undo_operation(
+            &operation.operation_id,
+            &UndoOperationState::Prepared,
+            &UndoOperationState::Applying,
+            None,
+            None,
+            "t5",
+        )
+        .unwrap();
+
+        operation_file.state = UndoOperationFileState::Applied;
+        operation_file.displaced_size = Some(restore_file.result_size);
+        operation_file.displaced_sha256 = Some(restore_file.result_sha256);
+        operation_file.displaced_metadata = Some(restore_file.metadata_fingerprint.clone());
+        operation_file.updated_at = "t6".to_owned();
+        repo.transition_undo_operation_file(&UndoOperationFileState::Staged, &operation_file)
+            .unwrap();
+        operation_file.state = UndoOperationFileState::Verified;
+        operation_file.verification_outcome = VerificationOutcome::Verified;
+        operation_file.updated_at = "t7".to_owned();
+        repo.transition_undo_operation_file(&UndoOperationFileState::Applied, &operation_file)
+            .unwrap();
+        repo.transition_undo_operation(
+            &operation.operation_id,
+            &UndoOperationState::Applying,
+            &UndoOperationState::Verifying,
+            None,
+            None,
+            "t8",
+        )
+        .unwrap();
+        repo.transition_undo_operation(
+            &operation.operation_id,
+            &UndoOperationState::Verifying,
+            &UndoOperationState::Completed,
+            None,
+            None,
+            "t9",
+        )
+        .unwrap();
+        let completed = repo
+            .get_undo_operation(&operation.operation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed.0.state, UndoOperationState::Completed);
+        assert!(!completed.0.active);
+        assert_eq!(
+            repo.get_turn_restore_set(&eligible.restore_set_id)
+                .unwrap()
+                .unwrap()
+                .0
+                .state,
+            RestoreSetState::Consumed
+        );
+
+        let locked = conn.lock().unwrap();
+        locked
+            .execute(
+                "DELETE FROM dcc_undo_operations WHERE operation_id = 'operation-one'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(locked.query_row("SELECT COUNT(*) FROM dcc_undo_operation_files WHERE operation_id = 'operation-one'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        locked
+            .execute(
+                "DELETE FROM dcc_turn_restore_sets WHERE restore_set_id = 'restore-one'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(locked.query_row("SELECT COUNT(*) FROM dcc_turn_restore_files WHERE restore_set_id = 'restore-one'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn guarded_undo_unknown_values_preserve_rows_and_corrupt_schema_fails_closed() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        seed_guarded_undo_parents(&conn.lock().unwrap(), "future");
+        let collecting = collecting_restore_set("future");
+        repo.create_turn_restore_set(&collecting).unwrap();
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_turn_restore_sets SET state = 'future_state' WHERE restore_set_id = ?1",
+                params![collecting.restore_set_id.0],
+            )
+            .unwrap();
+        let loaded = repo
+            .get_turn_restore_set(&collecting.restore_set_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            loaded.0.state,
+            RestoreSetState::Unknown("future_state".to_owned())
+        );
+        assert!(repo
+            .finalize_turn_restore_set(
+                &TurnRestoreSet {
+                    state: RestoreSetState::Failed,
+                    reason_code: Some(GuardedUndoReasonCode::InvalidPersistedRecord),
+                    completed_at: Some("t2".to_owned()),
+                    ..collecting.clone()
+                },
+                &[]
+            )
+            .is_err());
+
+        let mut corrupt = guarded_git_identity();
+        corrupt.schema_version = 99;
+        conn.lock().unwrap().execute(
+            "UPDATE dcc_turn_restore_sets SET state = 'collecting', git_identity_json = ?1 WHERE restore_set_id = ?2",
+            params![serde_json::to_string(&corrupt).unwrap(), collecting.restore_set_id.0],
+        ).unwrap();
+        assert!(repo
+            .get_turn_restore_set(&collecting.restore_set_id)
+            .is_err());
+    }
+
+    #[test]
+    fn guarded_undo_finalization_idempotency_is_independent_of_input_order() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        seed_guarded_undo_parents(&conn.lock().unwrap(), "order");
+        let collecting = collecting_restore_set("order");
+        repo.create_turn_restore_set(&collecting).unwrap();
+        let mut first = eligible_restore_file("order");
+        first.path_bytes = OpaqueRepoPath::unix(b"a.txt").unwrap();
+        let mut second = first.clone();
+        second.ordinal = 1;
+        second.path_bytes = OpaqueRepoPath::unix(b"z.txt").unwrap();
+        second.pre_artifact_key = ArtifactKey([0x23; 16]);
+        let reversed = vec![second, first];
+        let mut eligible = collecting;
+        eligible.state = RestoreSetState::Eligible;
+        eligible.file_count = 2;
+        eligible.artifact_bytes = reversed.iter().map(|file| file.pre_size).sum();
+        eligible.manifest_digest = Some(canonical_restore_manifest_digest(&reversed).unwrap());
+        eligible.completed_at = Some("t2".to_owned());
+        eligible.expires_at = Some("t9".to_owned());
+        assert!(repo
+            .finalize_turn_restore_set(&eligible, &reversed)
+            .unwrap());
+        assert!(!repo
+            .finalize_turn_restore_set(&eligible, &reversed)
+            .unwrap());
+    }
+
+    #[test]
+    fn guarded_undo_schema_migrates_an_existing_m3_database() {
+        let conn = in_memory_conn();
+        {
+            let locked = conn.lock().unwrap();
+            locked.execute_batch(&format!("PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}")).unwrap();
+            assert_eq!(
+                locked
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE name = 'dcc_turn_restore_sets'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+        }
+        SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        let locked = conn.lock().unwrap();
+        for table in [
+            "dcc_turn_restore_sets",
+            "dcc_turn_restore_files",
+            "dcc_undo_operations",
+            "dcc_undo_operation_files",
+        ] {
+            assert_eq!(
+                locked
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                        params![table],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                1,
+                "missing migrated table {table}"
+            );
+        }
     }
 }

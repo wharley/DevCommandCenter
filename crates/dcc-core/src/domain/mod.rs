@@ -1,4 +1,5 @@
 pub mod delegation;
+pub mod guarded_undo;
 pub mod mcp;
 pub mod mcp_conformance;
 pub mod model_registry;
@@ -14,6 +15,14 @@ pub mod workspace_bundle;
 pub use delegation::{
     Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
     DelegationStatus,
+};
+pub use guarded_undo::{
+    account_restore_files, canonical_restore_manifest_digest, classify_capture_version,
+    validate_restore_set_manifest, CaptureVersionDecision, CheckoutRefV1, GitIdentityV1,
+    GuardedUndoReasonCode, GuardedUndoSchemaError, IndexIdentityV1, PreparedIdentityV1,
+    RecoveryDetailsV1, RegularFileMetadataV1, RestoreAccounting, RestoreFileStatus, RestoreSetId,
+    RestoreSetState, TurnRestoreFile, TurnRestoreSet, UndoOperation, UndoOperationFile,
+    UndoOperationFileState, UndoOperationId, UndoOperationState, VerificationOutcome,
 };
 pub use mcp::{
     McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
