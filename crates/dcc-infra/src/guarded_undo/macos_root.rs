@@ -1,8 +1,7 @@
 //! macOS descriptor-relative workspace-root adapter for capture-v2.
 //!
-//! This module is intentionally not exported yet.  The lifecycle, artifact
-//! store, and UI must provide their own reviewed integration before enabling
-//! it.  Every path operation is rooted at a retained descriptor and uses
+//! The lifecycle, artifact store, and UI remain separate from this adapter.
+//! Every path operation is rooted at a retained descriptor and uses
 //! `O_NOFOLLOW`.
 
 #![cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
@@ -21,8 +20,9 @@ use std::{
 
 use dcc_core::domain::guarded_undo::{
     GuardedUndoReasonCode, OpaqueRepoPath, PhysicalRootId, RegularFileMetadataV1, Sha256Digest,
-    MAX_PREIMAGE_BYTES_PER_FILE,
+    MAX_INDEX_BYTES, MAX_PREIMAGE_BYTES_PER_FILE,
 };
+use sha2::{Digest, Sha256};
 
 const PATH_VERSION: u8 = 1;
 const PATH_UNIX_BYTES: u8 = 1;
@@ -92,6 +92,10 @@ impl From<io::Error> for MacWorkspaceRootError {
 pub struct CapturedBytes(Vec<u8>);
 
 impl CapturedBytes {
+    pub fn from_slice(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         &self.0
     }
@@ -117,6 +121,23 @@ pub struct StableFileCapture {
     pub metadata: RegularFileMetadataV1,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct StableDigestObservation {
+    pub(crate) size: u64,
+    pub(crate) sha256: Sha256Digest,
+    pub(crate) stat_identity: Vec<u8>,
+}
+
+impl fmt::Debug for StableDigestObservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StableDigestObservation")
+            .field("size", &self.size)
+            .field("identity", &"[redacted]")
+            .finish()
+    }
+}
+
 impl fmt::Debug for StableFileCapture {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -131,6 +152,7 @@ impl fmt::Debug for StableFileCapture {
 pub struct MacWorkspaceRoot {
     root: File,
     root_id: PhysicalRootId,
+    ancestry: Vec<PhysicalRootId>,
 }
 
 impl fmt::Debug for MacWorkspaceRoot {
@@ -149,6 +171,7 @@ impl MacWorkspaceRoot {
         }
         let root = open_directory(RawFd::from(-1), OsStr::new("/"))?;
         let mut current = root;
+        let mut ancestry = vec![physical_id(&fstat(current.as_raw_fd())?)];
         for component in path.components() {
             let Component::Normal(name) = component else {
                 if matches!(component, Component::RootDir) {
@@ -157,6 +180,7 @@ impl MacWorkspaceRoot {
                 return Err(MacWorkspaceRootError::InvalidPath);
             };
             current = open_directory(current.as_raw_fd(), name)?;
+            ancestry.push(physical_id(&fstat(current.as_raw_fd())?));
         }
         let stat = fstat(current.as_raw_fd())?;
         if !is_directory(stat.st_mode) {
@@ -166,11 +190,125 @@ impl MacWorkspaceRoot {
         Ok(Self {
             root_id: physical_id(&stat),
             root: current,
+            ancestry,
         })
     }
 
     pub fn physical_root_id(&self) -> PhysicalRootId {
         self.root_id.clone()
+    }
+
+    pub(crate) fn ancestry_ids(&self) -> Vec<PhysicalRootId> {
+        self.ancestry.clone()
+    }
+
+    pub(crate) fn validate_relative_directory(
+        &self,
+        path: &OpaqueRepoPath,
+    ) -> Result<PhysicalRootId, MacWorkspaceRootError> {
+        let components = decode_relative_path(path)?;
+        let mut current = self.root.try_clone()?;
+        validate_directory_fd(current.as_raw_fd())?;
+        for component in components {
+            current = open_directory(current.as_raw_fd(), component)?;
+            validate_directory_fd(current.as_raw_fd())?;
+        }
+        Ok(physical_id(&fstat(current.as_raw_fd())?))
+    }
+
+    pub(crate) fn observe_index_stable(
+        &self,
+        path: &OpaqueRepoPath,
+        maximum_bytes: u64,
+    ) -> Result<StableDigestObservation, MacWorkspaceRootError> {
+        self.observe_index_stable_inner(path, maximum_bytes, None)
+    }
+
+    fn observe_index_stable_inner(
+        &self,
+        path: &OpaqueRepoPath,
+        maximum_bytes: u64,
+        test_hook: Option<&dyn Fn()>,
+    ) -> Result<StableDigestObservation, MacWorkspaceRootError> {
+        if maximum_bytes > MAX_INDEX_BYTES {
+            return Err(MacWorkspaceRootError::FileTooLarge);
+        }
+        let first = self.observe_index_once(path, maximum_bytes)?;
+        if let Some(hook) = test_hook {
+            hook();
+        }
+        let second = self.observe_index_once(path, maximum_bytes)?;
+        if first != second {
+            return Err(MacWorkspaceRootError::FileChanged);
+        }
+        Ok(StableDigestObservation {
+            size: second.snapshot.size,
+            sha256: second.sha256,
+            stat_identity: second.snapshot.stat_identity,
+        })
+    }
+
+    fn observe_index_once(
+        &self,
+        path: &OpaqueRepoPath,
+        maximum_bytes: u64,
+    ) -> Result<IndexReadOnce, MacWorkspaceRootError> {
+        let file = self.open_index_file(path)?;
+        let before = inspect_index_fd(file.as_raw_fd())?;
+        if before.size > maximum_bytes {
+            return Err(MacWorkspaceRootError::FileTooLarge);
+        }
+        let mut reader = (&file).take(maximum_bytes.saturating_add(1));
+        let mut hasher = Sha256::new();
+        let mut total = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = reader.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            total = total
+                .checked_add(count as u64)
+                .ok_or(MacWorkspaceRootError::FileTooLarge)?;
+            if total > maximum_bytes {
+                return Err(MacWorkspaceRootError::FileTooLarge);
+            }
+            hasher.update(&buffer[..count]);
+        }
+        let after = inspect_index_fd(file.as_raw_fd())?;
+        if before != after || after.size != total {
+            return Err(MacWorkspaceRootError::FileChanged);
+        }
+        Ok(IndexReadOnce {
+            sha256: Sha256Digest(hasher.finalize().into()),
+            snapshot: after,
+        })
+    }
+
+    fn open_index_file(&self, path: &OpaqueRepoPath) -> Result<File, MacWorkspaceRootError> {
+        let components = decode_relative_path(path)?;
+        let mut current = self.root.try_clone()?;
+        validate_directory_fd(current.as_raw_fd())?;
+        for (index, component) in components.iter().enumerate() {
+            if index + 1 == components.len() {
+                let name = CString::new(component.as_bytes())
+                    .map_err(|_| MacWorkspaceRootError::InvalidPath)?;
+                let fd = unsafe {
+                    libc::openat(
+                        current.as_raw_fd(),
+                        name.as_ptr(),
+                        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+                    )
+                };
+                if fd < 0 {
+                    return Err(io::Error::last_os_error().into());
+                }
+                return Ok(unsafe { File::from_raw_fd(fd) });
+            }
+            current = open_directory(current.as_raw_fd(), component)?;
+            validate_directory_fd(current.as_raw_fd())?;
+        }
+        Err(MacWorkspaceRootError::InvalidPath)
     }
 
     pub fn inspect_regular(
@@ -287,6 +425,18 @@ struct ReadOnce {
     snapshot: FdSnapshot,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct IndexFdSnapshot {
+    size: u64,
+    stat_identity: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct IndexReadOnce {
+    sha256: Sha256Digest,
+    snapshot: IndexFdSnapshot,
+}
+
 fn decode_relative_path(path: &OpaqueRepoPath) -> Result<Vec<&OsStr>, MacWorkspaceRootError> {
     let bytes = path.as_persisted_bytes();
     if bytes.len() < 3
@@ -389,6 +539,59 @@ fn inspect_fd(fd: RawFd) -> Result<FdSnapshot, MacWorkspaceRootError> {
     Ok(FdSnapshot { size, metadata })
 }
 
+fn validate_directory_fd(fd: RawFd) -> Result<(), MacWorkspaceRootError> {
+    let stat = fstat(fd)?;
+    let effective_uid = unsafe { libc::geteuid() };
+    if !is_directory(stat.st_mode)
+        || stat.st_uid != effective_uid
+        || stat.st_mode & (libc::S_IWGRP | libc::S_IWOTH) != 0
+        || stat.st_flags != 0
+    {
+        return Err(MacWorkspaceRootError::AdapterUnsupported);
+    }
+    reject_xattrs(fd)?;
+    reject_extended_acl(fd)?;
+    Ok(())
+}
+
+fn inspect_index_fd(fd: RawFd) -> Result<IndexFdSnapshot, MacWorkspaceRootError> {
+    let stat = fstat(fd)?;
+    let effective_uid = unsafe { libc::geteuid() };
+    if !is_regular(stat.st_mode)
+        || stat.st_uid != effective_uid
+        || stat.st_nlink != 1
+        || stat.st_mode & (libc::S_ISUID | libc::S_ISGID | libc::S_IWGRP | libc::S_IWOTH) != 0
+        || stat.st_flags != 0
+    {
+        return Err(MacWorkspaceRootError::AdapterUnsupported);
+    }
+    reject_xattrs(fd)?;
+    reject_extended_acl(fd)?;
+    let size =
+        u64::try_from(stat.st_size).map_err(|_| MacWorkspaceRootError::AdapterUnsupported)?;
+    Ok(IndexFdSnapshot {
+        size,
+        stat_identity: canonical_index_stat_identity(&stat),
+    })
+}
+
+fn canonical_index_stat_identity(stat: &libc::stat) -> Vec<u8> {
+    let mut identity = Vec::with_capacity(1 + 8 * 7 + 4 * 3 + 8 * 4);
+    identity.push(1);
+    identity.extend_from_slice(&(stat.st_dev as i64).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_ino as u64).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_mode as u32).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_uid as u32).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_gid as u32).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_nlink as u64).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_size as i64).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_mtime as i64).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_mtime_nsec as i64).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_ctime as i64).to_le_bytes());
+    identity.extend_from_slice(&(stat.st_ctime_nsec as i64).to_le_bytes());
+    identity
+}
+
 fn physical_id(stat: &libc::stat) -> PhysicalRootId {
     let mut id = Vec::with_capacity(17);
     id.extend_from_slice(&[1, 1]);
@@ -488,7 +691,10 @@ mod tests {
     use super::*;
     use std::{
         fs,
-        os::unix::{ffi::OsStringExt, fs::symlink},
+        os::unix::{
+            ffi::OsStringExt,
+            fs::{symlink, PermissionsExt},
+        },
     };
     fn root() -> (tempfile::TempDir, MacWorkspaceRoot) {
         let directory = tempfile::tempdir_in("/private/tmp").unwrap();
@@ -530,6 +736,18 @@ mod tests {
 
     fn path(raw: &[u8]) -> OpaqueRepoPath {
         OpaqueRepoPath::unix(raw).unwrap()
+    }
+
+    fn index_root() -> (tempfile::TempDir, MacWorkspaceRoot) {
+        let directory = tempfile::tempdir_in("/private/tmp").unwrap();
+        fs::create_dir(directory.path().join(".git")).unwrap();
+        fs::write(directory.path().join(".git/index"), b"DIRC-index").unwrap();
+        remove_fixture_xattrs(directory.path());
+        remove_fixture_xattrs(&directory.path().join(".git"));
+        remove_fixture_xattrs(&directory.path().join(".git/index"));
+        let canonical = fs::canonicalize(directory.path()).unwrap();
+        let root = MacWorkspaceRoot::open_absolute(&canonical).unwrap();
+        (directory, root)
     }
 
     #[test]
@@ -654,5 +872,153 @@ mod tests {
         };
         let debug = format!("{capture:?}");
         assert!(!debug.contains("hello"));
+    }
+
+    #[test]
+    fn validates_rooted_git_directory_and_observes_index_stably() {
+        let (_directory, root) = index_root();
+        let directory_id = root.validate_relative_directory(&path(b".git")).unwrap();
+        directory_id.validate().unwrap();
+        let observation = root
+            .observe_index_stable(&path(b".git/index"), MAX_INDEX_BYTES)
+            .unwrap();
+        assert_eq!(observation.size, 10);
+        assert_eq!(observation.sha256, Sha256Digest::of(b"DIRC-index"));
+        assert!(!observation.stat_identity.is_empty());
+        let file = root.open_index_file(&path(b".git/index")).unwrap();
+        assert_ne!(
+            unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC,
+            0
+        );
+    }
+
+    #[test]
+    fn directory_validation_rejects_aliases_permissions_and_extended_metadata() {
+        let (directory, root) = index_root();
+        symlink(".git", directory.path().join("git-link")).unwrap();
+        assert!(root
+            .validate_relative_directory(&path(b"git-link"))
+            .is_err());
+        assert!(root
+            .validate_relative_directory(&OpaqueRepoPath::from_persisted(vec![1, 1, b'.', b'.']))
+            .is_err());
+
+        let writable = directory.path().join("writable");
+        fs::create_dir(&writable).unwrap();
+        remove_fixture_xattrs(&writable);
+        fs::set_permissions(&writable, fs::Permissions::from_mode(0o770)).unwrap();
+        assert!(root
+            .validate_relative_directory(&path(b"writable"))
+            .is_err());
+
+        let extended = directory.path().join("extended");
+        fs::create_dir(&extended).unwrap();
+        let extended_path = CString::new(extended.as_os_str().as_bytes()).unwrap();
+        let name = CString::new("user.test").unwrap();
+        assert_eq!(
+            unsafe {
+                libc::setxattr(
+                    extended_path.as_ptr(),
+                    name.as_ptr(),
+                    b"x".as_ptr() as *const _,
+                    1,
+                    0,
+                    0,
+                )
+            },
+            0
+        );
+        assert!(root
+            .validate_relative_directory(&path(b"extended"))
+            .is_err());
+    }
+
+    #[test]
+    fn index_observation_rejects_links_permissions_metadata_and_replacement() {
+        let (directory, root) = index_root();
+        let index = directory.path().join(".git/index");
+        symlink("index", directory.path().join(".git/index-link")).unwrap();
+        assert!(root
+            .observe_index_stable(&path(b".git/index-link"), MAX_INDEX_BYTES)
+            .is_err());
+        fs::create_dir(directory.path().join(".git/index-dir")).unwrap();
+        assert!(root
+            .observe_index_stable(&path(b".git/index-dir"), MAX_INDEX_BYTES)
+            .is_err());
+        let fifo = CString::new(
+            directory
+                .path()
+                .join(".git/index-fifo")
+                .as_os_str()
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert!(root
+            .observe_index_stable(&path(b".git/index-fifo"), MAX_INDEX_BYTES)
+            .is_err());
+
+        let hard = directory.path().join(".git/index-hard");
+        fs::hard_link(&index, &hard).unwrap();
+        assert!(root
+            .observe_index_stable(&path(b".git/index-hard"), MAX_INDEX_BYTES)
+            .is_err());
+        fs::remove_file(&hard).unwrap();
+
+        fs::set_permissions(&index, fs::Permissions::from_mode(0o660)).unwrap();
+        assert!(root
+            .observe_index_stable(&path(b".git/index"), MAX_INDEX_BYTES)
+            .is_err());
+        fs::set_permissions(&index, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let name = CString::new("user.test").unwrap();
+        let index_path = CString::new(index.as_os_str().as_bytes()).unwrap();
+        assert_eq!(
+            unsafe {
+                libc::setxattr(
+                    index_path.as_ptr(),
+                    name.as_ptr(),
+                    b"x".as_ptr() as *const _,
+                    1,
+                    0,
+                    0,
+                )
+            },
+            0
+        );
+        assert!(root
+            .observe_index_stable(&path(b".git/index"), MAX_INDEX_BYTES)
+            .is_err());
+        remove_fixture_xattrs(&index);
+
+        let hook = || {
+            fs::rename(&index, directory.path().join(".git/old-index")).unwrap();
+            fs::write(&index, b"DIRC-index").unwrap();
+            fs::set_permissions(&index, fs::Permissions::from_mode(0o600)).unwrap();
+            remove_fixture_xattrs(&index);
+        };
+        assert!(matches!(
+            root.observe_index_stable_inner(&path(b".git/index"), MAX_INDEX_BYTES, Some(&hook)),
+            Err(MacWorkspaceRootError::FileChanged)
+        ));
+    }
+
+    #[test]
+    fn index_observation_accepts_exact_64_mib_boundary_with_bounded_memory() {
+        let (directory, root) = index_root();
+        let index = directory.path().join(".git/index");
+        let file = fs::OpenOptions::new().write(true).open(&index).unwrap();
+        file.set_len(MAX_INDEX_BYTES).unwrap();
+        remove_fixture_xattrs(&index);
+        let observation = root
+            .observe_index_stable(&path(b".git/index"), MAX_INDEX_BYTES)
+            .unwrap();
+        assert_eq!(observation.size, MAX_INDEX_BYTES);
+
+        file.set_len(MAX_INDEX_BYTES + 1).unwrap();
+        assert!(matches!(
+            root.observe_index_stable(&path(b".git/index"), MAX_INDEX_BYTES),
+            Err(MacWorkspaceRootError::FileTooLarge)
+        ));
     }
 }
