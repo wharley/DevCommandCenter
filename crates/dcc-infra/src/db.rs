@@ -4,7 +4,7 @@ use std::{fmt, path::Path};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Row};
 use serde::de::DeserializeOwned;
 use serde_json::{from_str, to_string};
 
@@ -914,6 +914,21 @@ pub struct SqliteSessionRepo {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// Content-free projection of a capture-v2 restoration record for review UI.
+///
+/// It deliberately excludes artifact locators, digests, physical identities,
+/// paths, and captured content. Callers must treat a failed lookup as
+/// unavailable rather than inferring restoration eligibility.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GuardedUndoCaptureSummary {
+    pub state: String,
+    pub reason_code: Option<String>,
+    pub file_count: u32,
+    pub artifact_bytes: u64,
+    pub completed_at: Option<String>,
+    pub expires_at: Option<String>,
+}
+
 /// Capability proving that the caller owns the process-wide maintenance
 /// lease.  The lease acquisition bridge is deliberately outside this Phase
 /// 1B DB surface; keeping the constructor private makes startup/retention
@@ -956,6 +971,16 @@ impl SqliteSessionRepo {
         };
         repo.ensure_schema()?;
         Ok(repo)
+    }
+
+    /// Opens an existing session database for a strictly read-only projection.
+    /// This deliberately skips schema creation and migration work.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self> {
+        let conn = Connection::open_with_flags(path.as_ref(), OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
 
     pub fn from_connection(conn: Arc<Mutex<Connection>>) -> Result<Self> {
@@ -1402,6 +1427,59 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         load_turn_restore_set(&conn, restore_set_id)
+    }
+
+    /// Loads the one restoration record attributed to an M3 snapshot without
+    /// exposing raw restoration metadata. The unique snapshot relationship is
+    /// verified explicitly so a damaged database fails closed.
+    pub fn get_guarded_undo_capture_summary(
+        &self,
+        snapshot_id: &str,
+    ) -> Result<Option<GuardedUndoCaptureSummary>> {
+        if snapshot_id.trim().is_empty() || snapshot_id.len() > 512 {
+            return Err(guarded_undo_error("invalid restoration snapshot lookup"));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let ids = conn
+            .prepare(
+                "SELECT restore_set_id FROM dcc_turn_restore_sets WHERE snapshot_id = ?1 LIMIT 2",
+            )
+            .map_err(guarded_undo_error)?
+            .query_map(params![snapshot_id], |row| row.get::<_, String>(0))
+            .map_err(guarded_undo_error)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(guarded_undo_error)?;
+        let Some(restore_set_id) = ids.first() else {
+            return Ok(None);
+        };
+        if ids.len() != 1 {
+            return Err(guarded_undo_error(
+                "restoration snapshot has conflicting records",
+            ));
+        }
+        let Some((restore_set, _files)) =
+            load_turn_restore_set(&conn, &RestoreSetId(restore_set_id.clone()))?
+        else {
+            return Err(guarded_undo_error(
+                "restoration record disappeared during lookup",
+            ));
+        };
+        if restore_set.snapshot_id != snapshot_id {
+            return Err(guarded_undo_error("restoration attribution mismatch"));
+        }
+        Ok(Some(GuardedUndoCaptureSummary {
+            state: restore_set.state.as_str().to_owned(),
+            reason_code: restore_set
+                .reason_code
+                .map(|reason| reason.as_str().to_owned()),
+            file_count: restore_set.file_count,
+            artifact_bytes: restore_set.artifact_bytes,
+            completed_at: restore_set.completed_at,
+            expires_at: restore_set.expires_at,
+        }))
     }
 
     /// Marks v2 captures left in `collecting` after a restart as failed.  The
@@ -5290,6 +5368,42 @@ mod tests {
             .finalize_turn_restore_set(&eligible, std::slice::from_ref(&file))
             .unwrap());
         (eligible, file)
+    }
+
+    #[test]
+    fn guarded_undo_summary_lookup_is_content_free_and_fails_closed() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        assert_eq!(
+            repo.get_guarded_undo_capture_summary("snapshot-missing")
+                .unwrap(),
+            None
+        );
+
+        let (eligible, _file) = persist_eligible_restore_set(&repo, &conn, "summary", "t2");
+        assert_eq!(
+            repo.get_guarded_undo_capture_summary(&eligible.snapshot_id)
+                .unwrap(),
+            Some(GuardedUndoCaptureSummary {
+                state: "eligible".to_owned(),
+                reason_code: None,
+                file_count: 1,
+                artifact_bytes: 4,
+                completed_at: Some("t2".to_owned()),
+                expires_at: Some("t9".to_owned()),
+            })
+        );
+
+        conn.lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_turn_restore_sets SET state = 'future_state' WHERE snapshot_id = ?1",
+                params![eligible.snapshot_id],
+            )
+            .unwrap();
+        assert!(repo
+            .get_guarded_undo_capture_summary("snapshot-summary")
+            .is_err());
     }
 
     #[test]

@@ -7,6 +7,7 @@ import { loadLastTurnReview, loadTurnReviewFileDiff } from "@/lib/session-api";
 import { cn } from "@/lib/utils";
 import {
 	reconcileTurnReviewSelection,
+	resolveGuardedUndoCapture,
 	resolveTurnReviewOutcome,
 	resolveTurnReviewPreviewState,
 } from "./turn-review.logic";
@@ -60,6 +61,16 @@ export function TurnReviewSurface({
 		review?.turnOutcome,
 		review?.outcomeReason,
 	);
+	const guardedUndoCapture = review?.guardedUndo ?? null;
+	const guardedUndo = resolveGuardedUndoCapture(guardedUndoCapture);
+	const guardedUndoReason = t(`turnReview.guardedUndo.reasons.${guardedUndo.reason}`, {
+		count: guardedUndoCapture?.fileCount ?? 0,
+		expiresAt: guardedUndoCapture?.expiresAt
+			? t("turnReview.guardedUndo.validUntil", {
+				expiresAt: guardedUndoCapture.expiresAt,
+			})
+			: "",
+	});
 	const fingerprints = useMemo(() => {
 		if (!review) return null;
 		return {
@@ -108,6 +119,18 @@ export function TurnReviewSurface({
 							<span className="rounded-full border px-2 py-0.5 font-medium">{stateLabel}</span>
 							{outcome ? <span className={cn("rounded-full border px-2 py-0.5 font-medium", outcome.outcome === "completed" ? "text-emerald-600" : "text-amber-600")}>{t(`turnReview.outcomes.${outcome.outcome}`)}</span> : null}
 							<span className={cn("rounded-full border px-2 py-0.5", review.compatibility === "matches_result" ? "text-emerald-600" : "text-amber-600")}>{compatibilityLabel}</span>
+							<span
+								className={cn(
+									"rounded-full border px-2 py-0.5",
+									guardedUndo.state === "eligible"
+										? "text-emerald-600"
+										: guardedUndo.state === "failed"
+											? "text-destructive"
+											: "text-amber-600",
+								)}
+							>
+								{t(`turnReview.guardedUndo.states.${guardedUndo.state}`)}
+							</span>
 							<span className="ml-auto tabular-nums text-muted-foreground">{t("turnReview.fileCount", { count: review.files.length })} · <span className="text-emerald-600">+{review.insertions}</span> <span className="text-destructive">−{review.deletions}</span></span>
 						</div>
 						<p className="text-muted-foreground">{t("turnReview.attributionNotice")}</p>
@@ -118,6 +141,14 @@ export function TurnReviewSurface({
 						{review.excludedPreexistingUntrackedCount > 0 ? <p className="text-amber-600">{t("turnReview.excludedUntracked", { count: review.excludedPreexistingUntrackedCount })}</p> : null}
 						{review.observedValidations.length > 0 ? <p className="flex gap-1.5 text-muted-foreground"><CheckCircle2 className="mt-0.5 size-3.5 shrink-0" />{t("turnReview.observedValidations", { values: review.observedValidations.join(", ") })}</p> : null}
 						{review.error ? <p className="text-destructive">{review.error}</p> : null}
+						<p
+							className={cn(
+								"text-muted-foreground",
+								guardedUndo.state === "failed" && "text-destructive",
+							)}
+						>
+							{guardedUndoReason}
+						</p>
 						<details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">{t("turnReview.fingerprints")}</summary><code className="mt-1 block">{fingerprints?.base} → {fingerprints?.result}</code></details>
 					</div>
 					<div className="grid min-h-0 flex-1 grid-cols-[minmax(150px,38%)_1fr]">

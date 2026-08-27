@@ -5,6 +5,7 @@ import {
 	latestTurnReviewTerminalEvent,
 	reconcileTurnReviewSelection,
 	resolveTurnReviewOutcome,
+	resolveGuardedUndoCapture,
 	resolveTurnReviewPreviewState,
 	shouldInvalidateTurnReview,
 } from "./turn-review.logic";
@@ -96,6 +97,57 @@ describe("turn review presentation", () => {
 			reason: "other",
 		});
 		expect(resolveTurnReviewOutcome("unexpected", "anything")).toBeNull();
+	});
+
+	it("shows an explicit unavailable status when capture v2 is absent", () => {
+		expect(resolveGuardedUndoCapture(null)).toEqual({
+			state: "unavailable",
+			reason: "capture_v2_missing",
+		});
+	});
+
+	it("maps guarded undo state and reason without exposing artifact metadata", () => {
+		expect(
+			resolveGuardedUndoCapture({
+				state: "ineligible",
+				reasonCode: "hardlink_unsupported",
+				fileCount: 0,
+				artifactBytes: 0,
+				completedAt: "t1",
+				expiresAt: null,
+			}),
+		).toEqual({ state: "ineligible", reason: "unsupported" });
+	});
+
+	it.each([
+		["eligible", "protected"],
+		["collecting", "collecting"],
+		["expired", "expired"],
+		["consumed", "consumed"],
+	] as const)("maps a null reason for %s to its own safe presentation", (state, reason) => {
+		expect(
+			resolveGuardedUndoCapture({
+				state,
+				reasonCode: null,
+				fileCount: 2,
+				artifactBytes: 12,
+				completedAt: "t1",
+				expiresAt: state === "eligible" ? "t2" : null,
+			}),
+		).toEqual({ state, reason });
+	});
+
+	it("fails closed when the persisted guarded undo state is unknown", () => {
+		expect(
+			resolveGuardedUndoCapture({
+				state: "future_state",
+				reasonCode: null,
+				fileCount: 0,
+				artifactBytes: 0,
+				completedAt: null,
+				expiresAt: null,
+			}),
+		).toEqual({ state: "failed", reason: "ineligible" });
 	});
 });
 

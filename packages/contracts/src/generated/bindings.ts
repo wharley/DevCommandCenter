@@ -688,6 +688,20 @@ export type GithubCliStatusOutput = {
 
 export type GithubCliStatusState = "ready" | "error";
 
+/**
+ *  Content-free capture-v2 status associated with this review snapshot.
+ *  Artifact locations, hashes, physical identities, paths, and bytes never
+ *  cross the desktop contract.
+ */
+export type GuardedUndoCaptureSummary = {
+	state: string,
+	reasonCode: string | null,
+	fileCount: number,
+	artifactBytes: number,
+	completedAt: string | null,
+	expiresAt: string | null,
+};
+
 export type HealthStatus = "Healthy" | ({ Degraded: {
 	reason: string,
 } }) & { Unhealthy?: never } | ({ Unhealthy: {
@@ -1786,6 +1800,7 @@ export type TurnReviewSummary = {
 	outcomeReason: string | null,
 	error: string | null,
 	completedAt: string | null,
+	guardedUndo: GuardedUndoCaptureSummary | null,
 };
 
 export type TurnState = "running" | "completed" | "aborted";

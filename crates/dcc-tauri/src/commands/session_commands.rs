@@ -37,7 +37,10 @@ use dcc_core::{
         SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
     },
 };
-use dcc_infra::db::SqliteWorkspaceRepo;
+use dcc_infra::db::{
+    GuardedUndoCaptureSummary as InfraGuardedUndoCaptureSummary, SqliteSessionRepo,
+    SqliteWorkspaceRepo,
+};
 
 use crate::state::SessionCommandState;
 
@@ -175,6 +178,34 @@ pub struct TurnReviewSummary {
     pub outcome_reason: Option<String>,
     pub error: Option<String>,
     pub completed_at: Option<String>,
+    pub guarded_undo: Option<GuardedUndoCaptureSummary>,
+}
+
+/// Content-free capture-v2 status associated with this review snapshot.
+/// Artifact locations, hashes, physical identities, paths, and bytes never
+/// cross the desktop contract.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardedUndoCaptureSummary {
+    pub state: String,
+    pub reason_code: Option<String>,
+    pub file_count: u32,
+    pub artifact_bytes: u64,
+    pub completed_at: Option<String>,
+    pub expires_at: Option<String>,
+}
+
+impl From<InfraGuardedUndoCaptureSummary> for GuardedUndoCaptureSummary {
+    fn from(value: InfraGuardedUndoCaptureSummary) -> Self {
+        Self {
+            state: value.state,
+            reason_code: value.reason_code,
+            file_count: value.file_count,
+            artifact_bytes: value.artifact_bytes,
+            completed_at: value.completed_at,
+            expires_at: value.expires_at,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
@@ -216,6 +247,11 @@ pub async fn last_turn_review(
         .await
         .map_err(|error| error.to_string())?;
     let compatibility = state.turn_change_set_compatibility(&change_set).await;
+    let guarded_undo = SqliteSessionRepo::open_read_only(state.db_path())
+        .map_err(|error| error.to_string())?
+        .get_guarded_undo_capture_summary(&change_set.snapshot_id)
+        .map_err(|error| error.to_string())?
+        .map(GuardedUndoCaptureSummary::from);
     let (insertions, deletions) = crate::turn_review::file_totals(&change_set.files);
     Ok(Some(TurnReviewSummary {
         snapshot_id: change_set.snapshot_id,
@@ -236,6 +272,7 @@ pub async fn last_turn_review(
         outcome_reason: change_set.outcome_reason,
         error: change_set.error,
         completed_at: change_set.completed_at,
+        guarded_undo,
     }))
 }
 
@@ -1226,5 +1263,21 @@ mod tests {
             ]),
             McpPreflightReadiness::Ready
         );
+    }
+
+    #[test]
+    fn guarded_undo_summary_contract_excludes_artifact_identifiers() {
+        let summary = GuardedUndoCaptureSummary::from(InfraGuardedUndoCaptureSummary {
+            state: "eligible".to_owned(),
+            reason_code: None,
+            file_count: 2,
+            artifact_bytes: 12,
+            completed_at: Some("t1".to_owned()),
+            expires_at: Some("t2".to_owned()),
+        });
+        assert_eq!(summary.state, "eligible");
+        assert_eq!(summary.file_count, 2);
+        assert_eq!(summary.artifact_bytes, 12);
+        assert_eq!(summary.reason_code, None);
     }
 }

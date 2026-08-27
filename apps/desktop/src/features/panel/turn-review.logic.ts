@@ -1,4 +1,4 @@
-import type { CoreEvent, TurnReviewFile } from "@dcc/contracts";
+import type { CoreEvent, TurnReviewFile, TurnReviewSummary } from "@dcc/contracts";
 
 export type TurnReviewIdentity = {
 	sessionId: string;
@@ -80,6 +80,115 @@ export type TurnReviewOutcomePresentation = {
 	outcome: "completed" | "aborted";
 	reason: "interrupted" | "timeout" | "provider" | "other" | null;
 };
+
+export type GuardedUndoCapturePresentation = {
+	state:
+		| "eligible"
+		| "ineligible"
+		| "failed"
+		| "collecting"
+		| "expired"
+		| "consumed"
+		| "unavailable";
+	reason:
+		| "capture_v2_missing"
+		| "protected"
+		| "collecting"
+		| "expired"
+		| "consumed"
+		| "interrupted"
+		| "unsupported"
+		| "limit"
+		| "storage"
+		| "ineligible";
+};
+
+export function resolveGuardedUndoCapture(
+	capture: TurnReviewSummary["guardedUndo"],
+): GuardedUndoCapturePresentation {
+	if (!capture) return { state: "unavailable", reason: "capture_v2_missing" };
+	const state = [
+		"eligible",
+		"ineligible",
+		"failed",
+		"collecting",
+		"expired",
+		"consumed",
+	].includes(capture.state)
+		? (capture.state as GuardedUndoCapturePresentation["state"])
+		: "failed";
+	if (state === "failed" && capture.state !== "failed") {
+		return { state, reason: "ineligible" };
+	}
+	const reason = capture.reasonCode;
+	if (!reason) {
+		return {
+			state,
+			reason:
+				state === "eligible"
+					? "protected"
+					: state === "collecting"
+						? "collecting"
+						: state === "expired"
+							? "expired"
+							: state === "consumed"
+								? "consumed"
+								: "ineligible",
+		};
+	}
+	if (
+		[
+			"capture_interrupted",
+			"operation_interrupted",
+			"capture_timeout",
+			"capture_race",
+			"concurrent_workspace_mutation",
+			"mutation_in_progress",
+		].includes(reason ?? "")
+	) {
+		return { state, reason: "interrupted" };
+	}
+	if (
+		[
+			"adapter_unsupported",
+			"filesystem_unsupported",
+			"extended_metadata_unsupported",
+			"symlink_or_reparse_point",
+			"hardlink_unsupported",
+			"non_regular_file",
+			"submodule",
+			"sparse_or_skip_worktree",
+		].includes(reason ?? "")
+	) {
+		return { state, reason: "unsupported" };
+	}
+	if (
+		[
+			"file_too_large",
+			"set_too_large",
+			"baseline_too_large",
+			"too_many_files",
+			"too_many_baseline_files",
+			"insufficient_disk_space",
+			"index_too_large",
+		].includes(reason ?? "")
+	) {
+		return { state, reason: "limit" };
+	}
+	if (
+		[
+			"artifact_missing",
+			"artifact_corrupt",
+			"artifact_store_unsafe",
+			"app_instance_conflict",
+			"permission_denied",
+			"io_error",
+		].includes(reason ?? "")
+	) {
+		return { state, reason: "storage" };
+	}
+	return { state, reason: "ineligible" };
+}
 
 export function resolveTurnReviewOutcome(
 	turnOutcome: unknown,

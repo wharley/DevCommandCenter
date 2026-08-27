@@ -2763,6 +2763,31 @@
       "matches_result": "Workspace corresponde ao snapshot",
       "diverged": "Workspace mudou depois",
       "unavailable": "Estado atual indisponível"
+    },
+    "guardedUndo": {
+      "states": {
+        "eligible": "Guarded Undo protegido",
+        "ineligible": "Guarded Undo indisponível",
+        "failed": "Falha na captura do Guarded Undo",
+        "collecting": "Guarded Undo coletando",
+        "expired": "Guarded Undo expirado",
+        "consumed": "Guarded Undo consumido",
+        "unavailable": "Ainda não protegido"
+      },
+      "reasons": {
+        "capture_v2_missing": "Ainda não protegido — a captura v2 está indisponível para este turno.",
+        "protected_one": "{{count}} arquivo está protegido pelo Guarded Undo{{expiresAt}}.",
+        "protected_other": "{{count}} arquivos estão protegidos pelo Guarded Undo{{expiresAt}}.",
+        "collecting": "A captura de segurança do Guarded Undo ainda está coletando.",
+        "expired": "Esta captura do Guarded Undo expirou.",
+        "consumed": "Esta captura do Guarded Undo já foi consumida.",
+        "interrupted": "A captura de segurança foi interrompida ou o workspace mudou durante a observação.",
+        "unsupported": "Este workspace usa recursos de filesystem ou Git fora do contrato de segurança atual.",
+        "limit": "A captura de segurança excedeu um limite configurado de tamanho ou arquivos.",
+        "storage": "O armazenamento privado de artefatos de segurança não pôde ser usado com segurança.",
+        "ineligible": "Este turno não atende às condições atuais de segurança do Guarded Undo."
+      },
+      "validUntil": " (válido até {{expiresAt}})"
     }
   },
   "workspaceSearch": {

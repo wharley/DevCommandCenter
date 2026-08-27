@@ -2763,6 +2763,31 @@
       "matches_result": "Workspace matches snapshot",
       "diverged": "Workspace changed later",
       "unavailable": "Current state unavailable"
+    },
+    "guardedUndo": {
+      "states": {
+        "eligible": "Guarded Undo protected",
+        "ineligible": "Guarded Undo unavailable",
+        "failed": "Guarded Undo capture failed",
+        "collecting": "Guarded Undo collecting",
+        "expired": "Guarded Undo expired",
+        "consumed": "Guarded Undo consumed",
+        "unavailable": "Not yet protected"
+      },
+      "reasons": {
+        "capture_v2_missing": "Not yet protected — capture v2 is unavailable for this turn.",
+        "protected_one": "{{count}} file is protected by Guarded Undo{{expiresAt}}.",
+        "protected_other": "{{count}} files are protected by Guarded Undo{{expiresAt}}.",
+        "collecting": "The Guarded Undo safety capture is still collecting.",
+        "expired": "This Guarded Undo capture has expired.",
+        "consumed": "This Guarded Undo capture has already been consumed.",
+        "interrupted": "The safety capture was interrupted or the workspace changed while it was being observed.",
+        "unsupported": "This workspace uses filesystem or Git features outside the current safety contract.",
+        "limit": "The safety capture exceeded a configured size or file-count limit.",
+        "storage": "The private safety artifact store could not be used safely.",
+        "ineligible": "This turn does not meet the current Guarded Undo safety conditions."
+      },
+      "validUntil": " (valid until {{expiresAt}})"
     }
   },
   "workspaceSearch": {
