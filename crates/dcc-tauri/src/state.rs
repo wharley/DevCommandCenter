@@ -69,6 +69,36 @@ const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
 type DeliveryFailureStore =
     HashMap<String, HashMap<WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureSnapshot>>;
 
+/// Durable, content-free identity of an M3 turn-review snapshot.
+///
+/// A reference is returned only after its `TurnChangeSet` row has been
+/// persisted. It intentionally carries no filesystem location, review
+/// content, fingerprints, or artifact information.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct M3SnapshotRef {
+    pub snapshot_id: String,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub workspace_id: WorkspaceId,
+}
+
+/// The durable M3 snapshots created while a provider turn is starting.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct M3BaselineCapture {
+    pub snapshots: Vec<M3SnapshotRef>,
+}
+
+impl M3SnapshotRef {
+    fn after_persist(change_set: &TurnChangeSet) -> Self {
+        Self {
+            snapshot_id: change_set.snapshot_id.clone(),
+            session_id: change_set.session_id.clone(),
+            turn_id: change_set.turn_id.clone(),
+            workspace_id: change_set.workspace_id.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WorkspaceCommandState {
     pub db_path: PathBuf,
@@ -596,12 +626,12 @@ impl SessionCommandState {
         &self,
         session: &Session,
         turn_id: &TurnId,
-    ) -> Result<()> {
+    ) -> Result<M3BaselineCapture> {
         let now = Utc::now().to_rfc3339();
         let roots = match self.turn_review_roots(session).await {
             Ok(roots) => roots,
             Err(error) => {
-                self.session_repo.save_turn_change_set(&TurnChangeSet {
+                let unavailable = TurnChangeSet {
                     snapshot_id: Uuid::new_v4().to_string(),
                     session_id: session.id.clone(),
                     turn_id: turn_id.clone(),
@@ -621,10 +651,14 @@ impl SessionCommandState {
                     error: Some(error.to_string()),
                     created_at: now.clone(),
                     completed_at: Some(now),
-                })?;
-                return Ok(());
+                };
+                self.session_repo.save_turn_change_set(&unavailable)?;
+                return Ok(M3BaselineCapture {
+                    snapshots: vec![M3SnapshotRef::after_persist(&unavailable)],
+                });
             }
         };
+        let mut snapshots = Vec::with_capacity(roots.len());
         for (workspace_id, root) in roots {
             let snapshot_id = Uuid::new_v4().to_string();
             let snapshot_root = self.turn_review_snapshot_root(&snapshot_id);
@@ -684,11 +718,12 @@ impl SessionCommandState {
                 cleanup_snapshot(&snapshot_root);
                 return Err(error);
             }
+            snapshots.push(M3SnapshotRef::after_persist(&change_set));
             if !keep_quarantine {
                 cleanup_snapshot(&snapshot_root);
             }
         }
-        Ok(())
+        Ok(M3BaselineCapture { snapshots })
     }
 
     /// Finalizes immutable review evidence before TurnCompleted is made visible.
@@ -3002,6 +3037,165 @@ mod tests {
 
         drop(state);
         drop(repo);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn baseline_capture_refs_match_the_durable_rows_without_cross_root_attribution() {
+        let db_path = std::env::temp_dir().join(format!("dcc-baseline-{}.sqlite", Uuid::new_v4()));
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let primary_root = tempfile::tempdir().expect("primary root");
+        let secondary_root = tempfile::tempdir().expect("secondary root");
+        let state =
+            SessionCommandState::new_headless(db_path.clone(), app_data.path().to_path_buf());
+        let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let primary = sample_workspace(
+            "primary",
+            primary_root.path().to_str().expect("UTF-8 primary path"),
+        );
+        let secondary = sample_workspace(
+            "secondary",
+            secondary_root
+                .path()
+                .to_str()
+                .expect("UTF-8 secondary path"),
+        );
+        futures::executor::block_on(repo.save_workspace(&primary)).expect("save primary");
+        futures::executor::block_on(repo.save_workspace(&secondary)).expect("save secondary");
+        let bundle_id = WorkspaceBundleId("baseline-bundle".to_string());
+        futures::executor::block_on(repo.save_workspace_bundle(
+            &WorkspaceBundle {
+                id: bundle_id.clone(),
+                name: "baseline".to_string(),
+                primary_workspace_id: primary.id.clone(),
+                state: WorkspaceBundleState::Ready,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            &[
+                WorkspaceBundleMember {
+                    bundle_id: bundle_id.clone(),
+                    workspace_id: primary.id.clone(),
+                    created_for_bundle: true,
+                    position: 0,
+                },
+                WorkspaceBundleMember {
+                    bundle_id,
+                    workspace_id: secondary.id.clone(),
+                    created_for_bundle: true,
+                    position: 1,
+                },
+            ],
+        ))
+        .expect("save workspace bundle");
+        let session = Session {
+            id: SessionId("baseline-session".to_string()),
+            project_id: primary.project_id.clone(),
+            workspace_id: primary.id.clone(),
+            additional_workspace_ids: vec![secondary.id.clone()],
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(SessionRepo::save_session(&state, &session))
+            .expect("save session");
+        let turn_id = TurnId("baseline-turn".to_string());
+
+        let capture =
+            futures::executor::block_on(state.capture_turn_review_baseline(&session, &turn_id))
+                .expect("capture durable baseline rows");
+
+        assert_eq!(capture.snapshots.len(), 2);
+        let rows = state
+            .list_turn_change_sets(&session.id)
+            .expect("list durable rows");
+        assert_eq!(rows.len(), capture.snapshots.len());
+        for snapshot in &capture.snapshots {
+            let row = state
+                .get_turn_change_set(&snapshot.snapshot_id)
+                .expect("load durable row")
+                .expect("returned reference has a durable row");
+            assert_eq!(row.session_id, snapshot.session_id);
+            assert_eq!(row.turn_id, snapshot.turn_id);
+            assert_eq!(row.workspace_id, snapshot.workspace_id);
+            assert_eq!(row.state, "unavailable");
+        }
+        let returned_ids = capture
+            .snapshots
+            .iter()
+            .map(|snapshot| snapshot.snapshot_id.as_str())
+            .collect::<HashSet<_>>();
+        let persisted_ids = rows
+            .iter()
+            .map(|row| row.snapshot_id.as_str())
+            .collect::<HashSet<_>>();
+        assert_eq!(returned_ids, persisted_ids);
+        assert!(capture
+            .snapshots
+            .iter()
+            .any(|snapshot| snapshot.workspace_id == primary.id));
+        assert!(capture
+            .snapshots
+            .iter()
+            .any(|snapshot| snapshot.workspace_id == secondary.id));
+
+        drop(repo);
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn baseline_root_resolution_error_still_returns_a_persisted_unavailable_ref() {
+        let db_path = std::env::temp_dir().join(format!("dcc-baseline-{}.sqlite", Uuid::new_v4()));
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state =
+            SessionCommandState::new_headless(db_path.clone(), app_data.path().to_path_buf());
+        let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let primary = sample_workspace("missing-root-workspace", "/tmp/missing-root-workspace");
+        futures::executor::block_on(repo.save_workspace(&primary)).expect("save primary");
+        let session = Session {
+            id: SessionId("missing-root-session".to_string()),
+            project_id: primary.project_id.clone(),
+            workspace_id: primary.id.clone(),
+            // A second root without a ready DCC bundle makes root resolution
+            // fail before any workspace capture is attempted.
+            additional_workspace_ids: vec![WorkspaceId("missing-secondary".to_string())],
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(SessionRepo::save_session(&state, &session))
+            .expect("save session");
+        let turn_id = TurnId("missing-root-turn".to_string());
+
+        let capture =
+            futures::executor::block_on(state.capture_turn_review_baseline(&session, &turn_id))
+                .expect("unavailable row is still durable");
+
+        assert_eq!(capture.snapshots.len(), 1);
+        let snapshot = &capture.snapshots[0];
+        assert_eq!(snapshot.session_id, session.id);
+        assert_eq!(snapshot.turn_id, turn_id);
+        assert_eq!(snapshot.workspace_id, session.workspace_id);
+        let row = state
+            .get_turn_change_set(&snapshot.snapshot_id)
+            .expect("load durable unavailable row")
+            .expect("returned reference has a durable row");
+        assert_eq!(row.state, "unavailable");
+        assert_eq!(row.session_id, snapshot.session_id);
+        assert_eq!(row.turn_id, snapshot.turn_id);
+        assert_eq!(row.workspace_id, snapshot.workspace_id);
+
+        drop(repo);
+        drop(state);
         let _ = std::fs::remove_file(db_path);
     }
 }
