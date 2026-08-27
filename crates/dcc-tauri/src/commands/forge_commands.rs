@@ -277,6 +277,25 @@ pub struct PullRequestHubReviewCapabilities {
     pub resolve_threads: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestHubMergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubMergeCapabilities {
+    pub allowed_methods: Vec<PullRequestHubMergeMethod>,
+    pub viewer_can_merge: bool,
+    pub viewer_permission: Option<String>,
+    pub mergeable: Option<String>,
+    pub merge_state_status: Option<String>,
+    pub head_sha: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestHubComment {
@@ -355,6 +374,7 @@ pub struct PullRequestHubDetailOutput {
     pub files: Vec<PullRequestHubFile>,
     pub inline_comments: Vec<PullRequestHubInlineComment>,
     pub review_capabilities: PullRequestHubReviewCapabilities,
+    pub merge_capabilities: Option<PullRequestHubMergeCapabilities>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -370,6 +390,31 @@ pub struct PullRequestHubCommentInput {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestHubCommentOutput {
     pub comment: PullRequestHubComment,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubMergeInput {
+    pub repository_root: String,
+    pub number: u32,
+    pub method: PullRequestHubMergeMethod,
+    pub expected_head_sha: String,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestHubMergeStatus {
+    Merged,
+    Queued,
+    Submitted,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubMergeOutput {
+    pub status: PullRequestHubMergeStatus,
+    pub url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1200,6 +1245,68 @@ fn github_checks(value: &Value) -> Vec<PullRequestHubCheck> {
         .collect()
 }
 
+fn github_viewer_permission(repository: &Value) -> Option<String> {
+    let permissions = repository.get("permissions")?;
+    ["admin", "maintain", "push", "triage", "pull"]
+        .into_iter()
+        .find(|permission| {
+            permissions
+                .get(permission)
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .map(ToString::to_string)
+}
+
+fn github_merge_capabilities(
+    pull_request: &Value,
+    repository: &Value,
+) -> PullRequestHubMergeCapabilities {
+    let mut allowed_methods = Vec::new();
+    if repository
+        .get("allow_merge_commit")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        allowed_methods.push(PullRequestHubMergeMethod::Merge);
+    }
+    if repository
+        .get("allow_squash_merge")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        allowed_methods.push(PullRequestHubMergeMethod::Squash);
+    }
+    if repository
+        .get("allow_rebase_merge")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        allowed_methods.push(PullRequestHubMergeMethod::Rebase);
+    }
+
+    PullRequestHubMergeCapabilities {
+        allowed_methods,
+        viewer_can_merge: repository
+            .pointer("/permissions/push")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        viewer_permission: github_viewer_permission(repository),
+        mergeable: pull_request
+            .get("mergeable")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        merge_state_status: pull_request
+            .get("mergeStateStatus")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        head_sha: pull_request
+            .get("headRefOid")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+    }
+}
+
 fn gitlab_pipeline_state(status: &str) -> String {
     match status.to_ascii_lowercase().as_str() {
         "success" => "success".to_string(),
@@ -1875,6 +1982,13 @@ pub async fn pull_request_hub_detail(
                 input.number,
                 context.effective_login.as_deref(),
             )?;
+            let repository = crate::commands::forge::github::repository_merge_capabilities_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                context.effective_login.as_deref(),
+            )?;
             let checks = github_checks(raw.get("statusCheckRollup").unwrap_or(&Value::Null));
             let comments = raw
                 .get("comments")
@@ -1941,6 +2055,7 @@ pub async fn pull_request_hub_detail(
                     reply_to_threads: true,
                     resolve_threads: true,
                 },
+                merge_capabilities: Some(github_merge_capabilities(&raw, &repository)),
             })
         }
         ForgeCliProvider::Gitlab => {
@@ -2029,9 +2144,123 @@ pub async fn pull_request_hub_detail(
                     reply_to_threads: true,
                     resolve_threads: true,
                 },
+                merge_capabilities: None,
             })
         }
     }
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubMergeInput,
+) -> Result<PullRequestHubMergeOutput, String> {
+    let root = input.repository_root.trim();
+    if root.is_empty() {
+        return Err("repository_root is empty".to_string());
+    }
+    let expected_head_sha = input.expected_head_sha.trim();
+    if expected_head_sha.is_empty() {
+        return Err(
+            "The reviewed pull request commit is unavailable. Refresh and try again.".to_string(),
+        );
+    }
+    let context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+    if context.provider != ForgeCliProvider::Github {
+        return Err(
+            "Direct merge methods are currently supported only for GitHub pull requests."
+                .to_string(),
+        );
+    }
+
+    let pull_request = crate::commands::forge::github::pull_request_detail_json(
+        root,
+        &context.host,
+        input.number,
+        context.effective_login.as_deref(),
+    )?;
+    let repository = crate::commands::forge::github::repository_merge_capabilities_json(
+        root,
+        &context.host,
+        &context.namespace,
+        &context.repo,
+        context.effective_login.as_deref(),
+    )?;
+    let capabilities = github_merge_capabilities(&pull_request, &repository);
+    if !capabilities.viewer_can_merge {
+        return Err(
+            "The selected GitHub account does not have permission to merge this pull request."
+                .to_string(),
+        );
+    }
+    if !capabilities.allowed_methods.contains(&input.method) {
+        return Err("The selected merge method is not enabled for this repository.".to_string());
+    }
+    if pull_request.get("state").and_then(Value::as_str) != Some("OPEN") {
+        return Err("Only open pull requests can be merged.".to_string());
+    }
+    if pull_request
+        .get("isDraft")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err("Draft pull requests cannot be merged.".to_string());
+    }
+    if capabilities.mergeable.as_deref() == Some("CONFLICTING") {
+        return Err("This pull request has merge conflicts.".to_string());
+    }
+    let current_head_sha = capabilities.head_sha.as_deref().ok_or_else(|| {
+        "GitHub did not return the current pull request commit. Refresh and try again.".to_string()
+    })?;
+    if current_head_sha != expected_head_sha {
+        return Err(
+            "The pull request received new commits after it was loaded. Refresh and review the latest commit before merging."
+                .to_string(),
+        );
+    }
+
+    crate::commands::forge::github::merge_pull_request(
+        root,
+        &context.host,
+        &context.namespace,
+        &context.repo,
+        input.number,
+        input.method,
+        expected_head_sha,
+        context.effective_login.as_deref(),
+    )?;
+
+    let result = crate::commands::forge::github::pull_request_merge_state_json(
+        root,
+        &context.host,
+        &context.namespace,
+        &context.repo,
+        input.number,
+        context.effective_login.as_deref(),
+    )?;
+    let status = if result.get("state").and_then(Value::as_str) == Some("MERGED") {
+        PullRequestHubMergeStatus::Merged
+    } else if !result
+        .get("autoMergeRequest")
+        .unwrap_or(&Value::Null)
+        .is_null()
+    {
+        PullRequestHubMergeStatus::Queued
+    } else {
+        PullRequestHubMergeStatus::Submitted
+    };
+    Ok(PullRequestHubMergeOutput {
+        status,
+        url: result
+            .get("url")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+    })
 }
 
 #[tauri::command]
@@ -3595,9 +3824,10 @@ fn map_gitlab_review_comments(
 #[cfg(test)]
 mod tests {
     use super::{
-        github_checks, github_comment, github_hub_file, github_thread_inline_comments,
-        gitlab_hub_file, is_provisional_task_title, map_github_review_state,
-        map_gitlab_review_comments, map_gitlab_review_state, preferred_change_request_title,
+        github_checks, github_comment, github_hub_file, github_merge_capabilities,
+        github_thread_inline_comments, gitlab_hub_file, is_provisional_task_title,
+        map_github_review_state, map_gitlab_review_comments, map_gitlab_review_state,
+        preferred_change_request_title, PullRequestHubMergeMethod,
     };
     use crate::commands::forge::gitlab::{
         GitlabApproval, GitlabApprovals, GitlabDiscussion, GitlabDiscussionAuthor,
@@ -3706,6 +3936,42 @@ mod tests {
         assert_eq!(checks[0].state, "success");
         assert_eq!(checks[1].name, "deploy");
         assert_eq!(checks[1].state, "pending");
+    }
+
+    #[test]
+    fn maps_github_merge_methods_permission_and_reviewed_head() {
+        let capabilities = github_merge_capabilities(
+            &json!({
+                "mergeable": "MERGEABLE",
+                "mergeStateStatus": "CLEAN",
+                "headRefOid": "abc123"
+            }),
+            &json!({
+                "allow_merge_commit": true,
+                "allow_squash_merge": true,
+                "allow_rebase_merge": false,
+                "permissions": {
+                    "admin": false,
+                    "maintain": true,
+                    "push": true,
+                    "triage": true,
+                    "pull": true
+                }
+            }),
+        );
+
+        assert_eq!(
+            capabilities.allowed_methods,
+            vec![
+                PullRequestHubMergeMethod::Merge,
+                PullRequestHubMergeMethod::Squash
+            ]
+        );
+        assert!(capabilities.viewer_can_merge);
+        assert_eq!(capabilities.viewer_permission.as_deref(), Some("maintain"));
+        assert_eq!(capabilities.mergeable.as_deref(), Some("MERGEABLE"));
+        assert_eq!(capabilities.merge_state_status.as_deref(), Some("CLEAN"));
+        assert_eq!(capabilities.head_sha.as_deref(), Some("abc123"));
     }
 
     #[test]

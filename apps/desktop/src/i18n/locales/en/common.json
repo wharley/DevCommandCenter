@@ -274,6 +274,45 @@
       "skipped": "Skipped",
       "unknown": "No status"
     },
+    "merge": {
+      "action": "Merge",
+      "chooseMethod": "Choose a merge method",
+      "loadingCapabilities": "Checking permissions and available methods…",
+      "capabilitiesUnavailable": "Unable to verify the merge conditions.",
+      "unsupportedProvider": "Direct merge is available for GitHub pull requests.",
+      "noPermission": "The selected account does not have permission to merge in this repository.",
+      "draftBlocked": "A draft pull request cannot be merged.",
+      "conflictsBlocked": "Resolve the conflicts before merging.",
+      "commitUnavailable": "Unable to confirm the current pull request commit.",
+      "noMethods": "This repository has no merge methods enabled.",
+      "confirmTitle": "Merge this pull request?",
+      "confirmDescription": "Confirm the exact target, method, and reviewed commit before continuing.",
+      "repository": "Repository",
+      "target": "Target",
+      "method": "Method",
+      "commit": "Commit",
+      "protectionNotice": "GitHub will still enforce approvals, checks, branch protection, and merge queues. DCC never bypasses these rules as an administrator.",
+      "cancel": "Cancel",
+      "confirm": "Confirm merge",
+      "success": "Pull request merged successfully.",
+      "queued": "Merge accepted by GitHub and added to the queue.",
+      "submitted": "Merge command accepted by GitHub.",
+      "error": "Unable to merge the pull request.",
+      "methods": {
+        "merge": {
+          "label": "Merge pull request",
+          "description": "Create a merge commit while preserving every commit."
+        },
+        "squash": {
+          "label": "Squash and merge",
+          "description": "Combine the changes into a single commit."
+        },
+        "rebase": {
+          "label": "Rebase and merge",
+          "description": "Reapply the commits on top of the target branch."
+        }
+      }
+    },
     "code": {
       "title": "Change overview",
       "description": "Understand the impact before deciding to open a protected worktree.",

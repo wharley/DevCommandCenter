@@ -274,6 +274,45 @@
       "skipped": "Ignoradas",
       "unknown": "Sem status"
     },
+    "merge": {
+      "action": "Mesclar",
+      "chooseMethod": "Escolher método de merge",
+      "loadingCapabilities": "Verificando permissões e métodos disponíveis…",
+      "capabilitiesUnavailable": "Não foi possível verificar as condições de merge.",
+      "unsupportedProvider": "O merge direto está disponível para pull requests do GitHub.",
+      "noPermission": "A conta selecionada não tem permissão para fazer merge neste repositório.",
+      "draftBlocked": "Um pull request em rascunho não pode receber merge.",
+      "conflictsBlocked": "Resolva os conflitos antes de fazer merge.",
+      "commitUnavailable": "Não foi possível confirmar o commit atual do pull request.",
+      "noMethods": "Este repositório não possui métodos de merge habilitados.",
+      "confirmTitle": "Mesclar este pull request?",
+      "confirmDescription": "Confirme exatamente o destino, o método e o commit revisado antes de continuar.",
+      "repository": "Repositório",
+      "target": "Destino",
+      "method": "Método",
+      "commit": "Commit",
+      "protectionNotice": "O GitHub ainda aplicará aprovações, checks, proteções de branch e merge queue. O DCC nunca ignora essas regras como administrador.",
+      "cancel": "Cancelar",
+      "confirm": "Confirmar merge",
+      "success": "Pull request mesclado com sucesso.",
+      "queued": "Merge aceito pelo GitHub e adicionado à fila.",
+      "submitted": "Solicitação de merge aceita pelo GitHub.",
+      "error": "Não foi possível mesclar o pull request.",
+      "methods": {
+        "merge": {
+          "label": "Merge pull request",
+          "description": "Cria um merge commit preservando todos os commits."
+        },
+        "squash": {
+          "label": "Squash and merge",
+          "description": "Combina as alterações em um único commit."
+        },
+        "rebase": {
+          "label": "Rebase and merge",
+          "description": "Reaplica os commits sobre a branch de destino."
+        }
+      }
+    },
     "code": {
       "title": "Visão da alteração",
       "description": "Resumo do impacto antes de decidir abrir um worktree protegido.",

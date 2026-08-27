@@ -45,6 +45,8 @@ import type {
 	PullRequestHubDetailOutput,
 	PullRequestHubListInput,
 	PullRequestHubListOutput,
+	PullRequestHubMergeInput,
+	PullRequestHubMergeOutput,
 	PullRequestHubSubmitReviewInput,
 	PullRequestHubSubmitReviewOutput,
 	PullRequestHubThreadReplyInput,
@@ -683,6 +685,12 @@ export function pullRequestHubDetail(input: PullRequestHubDetailInput) {
 
 export function pullRequestHubComment(input: PullRequestHubCommentInput) {
 	return invoke<PullRequestHubCommentOutput>(WORKSPACE_METHODS.pullRequestHubComment, {
+		input,
+	});
+}
+
+export function pullRequestHubMerge(input: PullRequestHubMergeInput) {
+	return invoke<PullRequestHubMergeOutput>(WORKSPACE_METHODS.pullRequestHubMerge, {
 		input,
 	});
 }

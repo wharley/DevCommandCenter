@@ -79,7 +79,9 @@ use dcc_tauri::commands::{
         PullRequestHubCommentInput, PullRequestHubCommentOutput, PullRequestHubDetailInput,
         PullRequestHubDetailOutput, PullRequestHubDraftComment, PullRequestHubFile,
         PullRequestHubInlineComment, PullRequestHubItem, PullRequestHubListInput,
-        PullRequestHubListOutput, PullRequestHubReviewCapabilities, PullRequestHubReviewEvent,
+        PullRequestHubListOutput, PullRequestHubMergeCapabilities, PullRequestHubMergeInput,
+        PullRequestHubMergeMethod, PullRequestHubMergeOutput, PullRequestHubMergeStatus,
+        PullRequestHubReviewCapabilities, PullRequestHubReviewEvent,
         PullRequestHubSubmitReviewInput, PullRequestHubSubmitReviewOutput,
         PullRequestHubThreadReplyInput, PullRequestHubThreadReplyOutput,
         PullRequestHubThreadResolveInput, PullRequestHubThreadResolveOutput, PullRequestHubWarning,
@@ -214,6 +216,7 @@ struct WorkspaceMethods {
     pull_request_hub_list: String,
     pull_request_hub_detail: String,
     pull_request_hub_comment: String,
+    pull_request_hub_merge: String,
     pull_request_hub_submit_review: String,
     pull_request_hub_reply_thread: String,
     pull_request_hub_resolve_thread: String,
@@ -522,6 +525,11 @@ fn main() {
         .typ::<PullRequestHubDetailOutput>()
         .typ::<PullRequestHubCommentInput>()
         .typ::<PullRequestHubCommentOutput>()
+        .typ::<PullRequestHubMergeMethod>()
+        .typ::<PullRequestHubMergeCapabilities>()
+        .typ::<PullRequestHubMergeInput>()
+        .typ::<PullRequestHubMergeStatus>()
+        .typ::<PullRequestHubMergeOutput>()
         .typ::<PullRequestHubFile>()
         .typ::<PullRequestHubInlineComment>()
         .typ::<PullRequestHubReviewCapabilities>()
@@ -743,6 +751,7 @@ fn main() {
                 pull_request_hub_list: "pull_request_hub_list".to_string(),
                 pull_request_hub_detail: "pull_request_hub_detail".to_string(),
                 pull_request_hub_comment: "pull_request_hub_comment".to_string(),
+                pull_request_hub_merge: "pull_request_hub_merge".to_string(),
                 pull_request_hub_submit_review: "pull_request_hub_submit_review".to_string(),
                 pull_request_hub_reply_thread: "pull_request_hub_reply_thread".to_string(),
                 pull_request_hub_resolve_thread: "pull_request_hub_resolve_thread".to_string(),

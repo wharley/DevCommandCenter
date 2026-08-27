@@ -6,12 +6,12 @@ use dcc_tauri::{
         ForgeCliSelectLoginInput, ForgeCliStatusInput, ForgeCliStatusOutput, GithubCliStatusInput,
         GithubCliStatusOutput, PullRequestHubCommentInput, PullRequestHubCommentOutput,
         PullRequestHubDetailInput, PullRequestHubDetailOutput, PullRequestHubListInput,
-        PullRequestHubListOutput, PullRequestHubSubmitReviewInput,
-        PullRequestHubSubmitReviewOutput, WorkspaceForgeContextInput, WorkspaceForgeContextOutput,
-        WorkspacePipelineJobInput, WorkspacePipelineJobLogOutput, WorkspacePipelineStatusInput,
-        WorkspacePipelineStatusOutput, WorkspacePrReviewCommentsInput,
-        WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
-        WorkspaceReviewStateInput, WorkspaceReviewStateOutput,
+        PullRequestHubListOutput, PullRequestHubMergeInput, PullRequestHubMergeOutput,
+        PullRequestHubSubmitReviewInput, PullRequestHubSubmitReviewOutput,
+        WorkspaceForgeContextInput, WorkspaceForgeContextOutput, WorkspacePipelineJobInput,
+        WorkspacePipelineJobLogOutput, WorkspacePipelineStatusInput, WorkspacePipelineStatusOutput,
+        WorkspacePrReviewCommentsInput, WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput,
+        WorkspacePrStatusOutput, WorkspaceReviewStateInput, WorkspaceReviewStateOutput,
     },
     commands::workspace_commands::{
         RepositoryIdInput, WorkspaceChangeRequestContextInput, WorkspaceChangeRequestContextOutput,
@@ -42,6 +42,14 @@ pub async fn pull_request_hub_comment(
     input: PullRequestHubCommentInput,
 ) -> Result<PullRequestHubCommentOutput, String> {
     dcc_tauri::commands::forge_commands::pull_request_hub_comment(state, input).await
+}
+
+#[tauri::command]
+pub async fn pull_request_hub_merge(
+    state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubMergeInput,
+) -> Result<PullRequestHubMergeOutput, String> {
+    dcc_tauri::commands::forge_commands::pull_request_hub_merge(state, input).await
 }
 
 #[tauri::command]

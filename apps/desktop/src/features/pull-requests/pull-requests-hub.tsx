@@ -1,13 +1,20 @@
-import type { ProviderCatalog, ProviderRuntimeConfig, PullRequestHubItem } from "@dcc/contracts";
+import type {
+	ProviderCatalog,
+	ProviderRuntimeConfig,
+	PullRequestHubItem,
+	PullRequestHubMergeMethod,
+} from "@dcc/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	ArrowUpRight,
 	Check,
+	ChevronDown,
 	CircleAlert,
 	CircleDot,
 	Clock3,
 	Code2,
 	GitBranch,
+	GitMerge,
 	GitPullRequest,
 	Loader2,
 	MessageSquare,
@@ -18,14 +25,30 @@ import {
 } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { LazyStreamdown } from "@/components/streamdown-loader";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { openExternal } from "@/lib/shell-api";
 import {
 	pullRequestHubComment,
 	pullRequestHubDetail,
 	pullRequestHubList,
+	pullRequestHubMerge,
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
 import { PullRequestCodeReview } from "./pull-request-code-review";
@@ -45,6 +68,7 @@ type PullRequestsHubProps = {
 };
 
 const LIST_QUERY_KEY = ["pullRequestHub", "list"] as const;
+const MERGE_METHODS: PullRequestHubMergeMethod[] = ["merge", "squash", "rebase"];
 
 function relativeDate(value: string | null, locale: string) {
 	if (!value) return "";
@@ -108,6 +132,8 @@ export function PullRequestsHub({
 	const [activeTab, setActiveTab] = useState<PullRequestTab>("summary");
 	const [comment, setComment] = useState("");
 	const [workingOnId, setWorkingOnId] = useState<string | null>(null);
+	const [pendingMergeMethod, setPendingMergeMethod] =
+		useState<PullRequestHubMergeMethod | null>(null);
 
 	const listQuery = useQuery({
 		queryKey: LIST_QUERY_KEY,
@@ -163,6 +189,24 @@ export function PullRequestsHub({
 		enabled: Boolean(selected) && activeTab === "code",
 		staleTime: 20_000,
 	});
+	const mergeCapabilities = detailQuery.data?.mergeCapabilities;
+	const mergeUnavailableReason = detailQuery.isPending
+		? t("pullRequests.merge.loadingCapabilities")
+		: detailQuery.isError
+			? t("pullRequests.merge.capabilitiesUnavailable")
+			: !mergeCapabilities
+				? t("pullRequests.merge.unsupportedProvider")
+				: !mergeCapabilities.viewerCanMerge
+					? t("pullRequests.merge.noPermission")
+					: selected?.isDraft
+						? t("pullRequests.merge.draftBlocked")
+						: mergeCapabilities.mergeable === "CONFLICTING"
+							? t("pullRequests.merge.conflictsBlocked")
+							: !mergeCapabilities.headSha
+								? t("pullRequests.merge.commitUnavailable")
+								: mergeCapabilities.allowedMethods.length === 0
+									? t("pullRequests.merge.noMethods")
+									: null;
 	const commentMutation = useMutation({
 		mutationFn: async () => {
 			if (!selected) throw new Error(t("pullRequests.noSelection"));
@@ -181,6 +225,40 @@ export function PullRequestsHub({
 				}),
 				queryClient.invalidateQueries({ queryKey: LIST_QUERY_KEY }),
 			]);
+		},
+	});
+	const mergeMutation = useMutation({
+		mutationFn: async (method: PullRequestHubMergeMethod) => {
+			if (!selected) throw new Error(t("pullRequests.noSelection"));
+			const expectedHeadSha = mergeCapabilities?.headSha;
+			if (!expectedHeadSha) {
+				throw new Error(t("pullRequests.merge.commitUnavailable"));
+			}
+			return pullRequestHubMerge({
+				repositoryRoot: selected.repositoryRoot,
+				number: selected.number,
+				method,
+				expectedHeadSha,
+				forgeLogin: selected.forgeLogin,
+			});
+		},
+		onSuccess: async (output) => {
+			setPendingMergeMethod(null);
+			toast.success(
+				t(
+					output.status === "merged"
+						? "pullRequests.merge.success"
+						: output.status === "queued"
+							? "pullRequests.merge.queued"
+							: "pullRequests.merge.submitted",
+				),
+			);
+			await queryClient.invalidateQueries({ queryKey: ["pullRequestHub"] });
+		},
+		onError: (error) => {
+			toast.error(
+				error instanceof Error ? error.message : t("pullRequests.merge.error"),
+			);
 		},
 	});
 
@@ -352,6 +430,47 @@ export function PullRequestsHub({
 											{t("pullRequests.workOn")}
 										</Button>
 									)}
+									{selected.provider === "github" ? (
+										<DropdownMenu>
+											<DropdownMenuTrigger asChild>
+												<Button
+													size="sm"
+													variant="outline"
+													disabled={Boolean(mergeUnavailableReason) || mergeMutation.isPending}
+													title={mergeUnavailableReason ?? t("pullRequests.merge.chooseMethod")}
+												>
+													{mergeMutation.isPending ? (
+														<Loader2 className="mr-1.5 size-3.5 animate-spin" />
+													) : (
+														<GitMerge className="mr-1.5 size-3.5" />
+													)}
+													{t("pullRequests.merge.action")}
+													<ChevronDown className="ml-1 size-3" />
+												</Button>
+											</DropdownMenuTrigger>
+											<DropdownMenuContent align="end" className="w-56">
+												{MERGE_METHODS.filter((method) =>
+													mergeCapabilities?.allowedMethods.includes(method),
+												).map((method) => (
+													<DropdownMenuItem
+														key={method}
+														className="flex-col items-start gap-0.5 px-2 py-1.5"
+														onSelect={() => {
+															mergeMutation.reset();
+															setPendingMergeMethod(method);
+														}}
+													>
+														<span className="font-medium">
+															{t(`pullRequests.merge.methods.${method}.label`)}
+														</span>
+														<span className="text-[10px] leading-4 text-muted-foreground">
+															{t(`pullRequests.merge.methods.${method}.description`)}
+														</span>
+													</DropdownMenuItem>
+												))}
+											</DropdownMenuContent>
+										</DropdownMenu>
+									) : null}
 									<Button
 										size="icon-sm"
 										variant="ghost"
@@ -476,6 +595,95 @@ export function PullRequestsHub({
 					</>
 				)}
 			</section>
+			<Dialog
+				open={pendingMergeMethod !== null}
+				onOpenChange={(open) => {
+					if (!open && !mergeMutation.isPending) {
+						setPendingMergeMethod(null);
+						mergeMutation.reset();
+					}
+				}}
+			>
+				<DialogContent showCloseButton={false}>
+					<DialogHeader>
+						<DialogTitle>{t("pullRequests.merge.confirmTitle")}</DialogTitle>
+						<DialogDescription className="text-[12px] leading-relaxed">
+							{t("pullRequests.merge.confirmDescription")}
+						</DialogDescription>
+					</DialogHeader>
+					{selected && pendingMergeMethod ? (
+						<div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 text-[11px]">
+							<div className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-2">
+								<span className="text-muted-foreground">
+									{t("pullRequests.merge.repository")}
+								</span>
+								<strong className="truncate font-medium">{selected.repositoryName}</strong>
+								<span className="text-muted-foreground">
+									{t("pullRequests.merge.target")}
+								</span>
+								<strong className="truncate font-medium">
+									{selected.headBranch} → {selected.baseBranch}
+								</strong>
+								<span className="text-muted-foreground">
+									{t("pullRequests.merge.method")}
+								</span>
+								<strong className="font-medium">
+									{t(`pullRequests.merge.methods.${pendingMergeMethod}.label`)}
+								</strong>
+								<span className="text-muted-foreground">
+									{t("pullRequests.merge.commit")}
+								</span>
+								<code className="font-mono text-[10px]">
+									{mergeCapabilities?.headSha?.slice(0, 12)}
+								</code>
+								<span className="text-muted-foreground">{t("pullRequests.checks")}</span>
+								<span className="flex items-center gap-1.5">
+									<CheckState state={selected.checksState} />
+									{t(`pullRequests.checkStates.${selected.checksState}`, {
+										defaultValue: selected.checksState,
+									})}
+								</span>
+							</div>
+							<p className="border-t border-border/70 pt-2 text-[10px] leading-4 text-muted-foreground">
+								{t("pullRequests.merge.protectionNotice")}
+							</p>
+						</div>
+					) : null}
+					{mergeMutation.isError ? (
+						<p className="text-[11px] text-red-500">
+							{mergeMutation.error instanceof Error
+								? mergeMutation.error.message
+								: t("pullRequests.merge.error")}
+						</p>
+					) : null}
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							disabled={mergeMutation.isPending}
+							onClick={() => {
+								setPendingMergeMethod(null);
+								mergeMutation.reset();
+							}}
+						>
+							{t("pullRequests.merge.cancel")}
+						</Button>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={!pendingMergeMethod || mergeMutation.isPending}
+							onClick={() => {
+								if (pendingMergeMethod) mergeMutation.mutate(pendingMergeMethod);
+							}}
+						>
+							{mergeMutation.isPending ? (
+								<Loader2 className="mr-1.5 size-3.5 animate-spin" />
+							) : null}
+							{t("pullRequests.merge.confirm")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

@@ -1099,9 +1099,99 @@ pub(crate) fn pull_request_detail_json(
             "view",
             &number.to_string(),
             "--json",
-            "body,comments,statusCheckRollup",
+            "body,comments,statusCheckRollup,state,isDraft,mergeable,mergeStateStatus,headRefOid,url",
         ],
     )
+}
+
+pub(crate) fn repository_merge_capabilities_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let endpoint = format!("/repos/{namespace}/{repo}");
+    run_hub_gh_json(root, host, login, &["api", "--hostname", host, &endpoint])
+}
+
+pub(crate) fn pull_request_merge_state_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let repository = format!("{host}/{namespace}/{repo}");
+    run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--repo",
+            &repository,
+            "--json",
+            "state,url,autoMergeRequest",
+        ],
+    )
+}
+
+pub(crate) fn merge_pull_request(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    number: u32,
+    method: crate::commands::forge_commands::PullRequestHubMergeMethod,
+    expected_head_sha: &str,
+    login: Option<&str>,
+) -> Result<(), String> {
+    let gh = resolve_cli_binary("gh")?;
+    let auth = resolve_auth_context(host, login)?;
+    let repository = format!("{host}/{namespace}/{repo}");
+    let number = number.to_string();
+    let method_flag = match method {
+        crate::commands::forge_commands::PullRequestHubMergeMethod::Merge => "--merge",
+        crate::commands::forge_commands::PullRequestHubMergeMethod::Squash => "--squash",
+        crate::commands::forge_commands::PullRequestHubMergeMethod::Rebase => "--rebase",
+    };
+    let mut command = Command::new(gh);
+    command
+        .current_dir(root)
+        .args([
+            "pr",
+            "merge",
+            &number,
+            "--repo",
+            &repository,
+            method_flag,
+            "--match-head-commit",
+            expected_head_sha,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Err(if detail.trim().is_empty() {
+        "GitHub did not accept the pull request merge.".to_string()
+    } else {
+        detail.trim().to_string()
+    })
 }
 
 pub(crate) fn pull_request_files_json(
