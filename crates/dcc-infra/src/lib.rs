@@ -5,6 +5,8 @@ pub mod fs;
 pub mod git;
 mod git_command;
 mod git_parsing;
+#[cfg(feature = "guarded-undo-capture-v2")]
+pub mod guarded_undo;
 pub mod mcp_db;
 pub mod mcp_probe;
 pub mod process;

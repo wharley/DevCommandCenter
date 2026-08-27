@@ -327,6 +327,16 @@ extensible_string_enum!(GuardedUndoReasonCode {
     PreviewExpired => "preview_expired", PreviewConsumed => "preview_consumed",
     PreviewContextChanged => "preview_context_changed", MutationInProgress => "mutation_in_progress",
     AdapterUnsupported => "adapter_unsupported", OperationInterrupted => "operation_interrupted",
+    ConcurrentWorkspaceMutation => "concurrent_workspace_mutation",
+    AppInstanceConflict => "app_instance_conflict",
+    ArtifactStoreUnsafe => "artifact_store_unsafe",
+    FilesystemUnsupported => "filesystem_unsupported",
+    InsufficientDiskSpace => "insufficient_disk_space",
+    PathAliasCollision => "path_alias_collision",
+    ExtendedMetadataUnsupported => "extended_metadata_unsupported",
+    GitAttributesChanged => "git_attributes_changed",
+    TrackedManifestChanged => "tracked_manifest_changed",
+    AssumeUnchanged => "assume_unchanged",
     DisplacedTargetMismatch => "displaced_target_mismatch", DisplacedFileMissing => "displaced_file_missing",
     DisplacedFileCorrupt => "displaced_file_corrupt", RecoveryTargetChanged => "recovery_target_changed",
     ExchangeRollbackFailed => "exchange_rollback_failed", ManualRecoveryRequired => "manual_recovery_required",
@@ -1197,6 +1207,26 @@ mod tests {
         let future: GuardedUndoReasonCode = "future_reason".parse().unwrap();
         assert_eq!(future.as_str(), "future_reason");
         assert!(!future.is_known());
+    }
+
+    #[test]
+    fn phase_1a_reason_codes_are_stable_and_known() {
+        for raw in [
+            "concurrent_workspace_mutation",
+            "app_instance_conflict",
+            "artifact_store_unsafe",
+            "filesystem_unsupported",
+            "insufficient_disk_space",
+            "path_alias_collision",
+            "extended_metadata_unsupported",
+            "git_attributes_changed",
+            "tracked_manifest_changed",
+            "assume_unchanged",
+        ] {
+            let reason: GuardedUndoReasonCode = raw.parse().unwrap();
+            assert_eq!(reason.as_str(), raw);
+            assert!(reason.is_known());
+        }
     }
 
     #[test]

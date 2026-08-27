@@ -76,7 +76,7 @@ labels show planning state, not a delivery date.
 | **M1 — Workspace Split View v1** | Committed locally (`9ee3625`) — pending release | Keep conversation as the fixed primary pane and allow exactly one secondary surface: Changes, Terminal, Files/Editor, or Preview. Add resizing, persistence per project, keyboard focus, and responsive fallback. This is a frontend layout milestone: no new backend orchestration model. | Conversation plus each secondary surface works without losing session state. A compact layout remains usable. The selected surface and ratio restore safely. Keyboard navigation and focus restoration work. Existing terminal and Inspector workflows do not regress. |
 | **M2 — Unified Palette** | Committed locally (`9ee3625`) — pending release | Deliver the first palette slice: `Cmd/Ctrl+K` alias, local debounced project/session/file discovery, explicit `@` session FTS search, and a capped recent-items list (40). Continue evolving it toward projects, workspaces, threads, and contextual actions such as last diff, terminal, and active review. | The v1 results navigate to the correct entity and respect project/workspace context. Search is local, session FTS is explicit through `@` plus at least two local characters and debounced, and recent items are capped at 40. Prompt content is not indexed by default. Commands show a clear target before mutation. |
 | **M3 — Last Turn Review** | Committed locally (`754d751`) — pending release | Capture a bounded, attributable change snapshot for a completed agent turn and expose `Changes from last turn` in Split View, the Inspector, and review cards. Snapshots preserve base/result evidence, changed-file manifests, immutable historical previews, relevant validation evidence, and a clear distinction from accumulated workspace changes. | A user reaches the last-turn diff in one action. DCC does not attribute pre-existing or subsequent manual changes to the agent turn. No-change, unavailable Git data, compatibility, and failed collection are distinct states. Relevant tests cover normal, concurrent, multi-root, and changed-workspace cases. |
-| **M4 — Guarded Undo** | Safe design completed and approved — implementation pending capture v2 | Implement the strict capture v2 and fingerprint-guarded restoration contract in the [Guarded Undo design](GUARDED_UNDO_DESIGN.md). The first slice restores only eligible, intact raw-byte preimages after preview and explicit confirmation; later work may add three-way reconciliation. | The first implementation restores only content proved unchanged since capture v2, journals every mutation, and remains recoverable after interruption. A mismatch blocks automatic mutation and presents a preview/manual route. Capture v1, Git trees, and snapshot quarantine are never restoration sources. No cross-process or multi-file atomicity is claimed. |
+| **M4 — Guarded Undo** | Phase 0 implemented and approved (`f1cded2`); Phase 1 in progress | Implement the strict capture v2 and fingerprint-guarded restoration contract in the [Guarded Undo design](GUARDED_UNDO_DESIGN.md). Phase 1 is capture-only (behind a feature flag), with a physical-root coordinator, active turn intervals, private raw preimages, retention, and startup recovery; the Undo button remains disabled. | Capture v1, Git trees, and snapshot quarantine remain NO-GO restoration sources. Known overlapping DCC turns/mutations on one physical root make capture ineligible. Capture failure never blocks terminal turn events. A single-instance app-data lock gates startup/retention, and Windows remains adapter-unsupported until handle-relative tests pass. |
 | **M5 — Release-grade macOS distribution** | Implemented locally and statically reviewed — pending macOS CI with Apple signing/notarization secrets | Add signed, notarized, stapled DMGs for supported macOS architectures while retaining the existing signed `.app.tar.gz` updater path during a verified migration. Publish checksums and installation guidance. | A clean macOS installation works from the DMG without avoidable Gatekeeper warnings. Updates preserve data. DMG, updater archive, architecture selection, checksums, and fallback behavior are validated in release checks. Release secrets stay isolated. |
 | **M6 — Delivery integration** | Proposed | Connect turn review, validation evidence, and safe recovery to the existing Delivery Status / delivery-workflow model. Add only reviewable automations that land in a queue. | A workspace can answer what changed, what was validated, what blocks delivery, and which human action is next. Delivery actions revalidate captured branch, workspace, remote, and push target before mutation. Automations never merge, force-push, or discard work silently. |
 
@@ -94,10 +94,13 @@ none of it is marked shipped.
   debounced, `Cmd/Ctrl+K` is an alias, and recents are capped at 40.
 - **M3:** Last Turn Review is committed locally in `754d751`, pending release.
   See the implementation scope and deliberate limitations below.
-- **M4:** the safe restoration design is completed and approved. Implementation
-  remains pending capture v2; capture v1 is review evidence only and is a
-  NO-GO for Undo. See [Guarded Undo: Capture v2 and Restoration
-  Contract](GUARDED_UNDO_DESIGN.md).
+- **M4:** Phase 0 schema/fixtures are implemented and approved in `f1cded2`;
+  Phase 1 capture v2 is in progress behind a feature flag. Capture v1 remains
+  review evidence only and is a NO-GO for Undo. The Phase 1 coordinator,
+  active-interval registry, single-instance app-data lock, and terminal-event
+  fail-open integration are specified in [Guarded Undo: Capture v2 and
+  Restoration Contract](GUARDED_UNDO_DESIGN.md); the Undo button remains
+  disabled.
 - **M5:** DMG support for Apple Silicon and Intel, while retaining the updater
   archive path, is implemented locally and static-review approved. It remains
   pending macOS CI that has the required Apple signing and notarization secrets.
@@ -130,6 +133,9 @@ The following limitations are deliberate in v1:
 - Temporary snapshot quarantine is isolated from the workspace and swept on
   startup. It is capture infrastructure only, not a source of user-visible
   restoration.
+- A Phase 1 sentinel filter test must prove that no M4 capture or future
+  restoration path accepts `captureVersion = 1`, M3 Git trees, rendered diffs,
+  or quarantine objects as restoration content.
 
 ## Dependency and risk map
 
@@ -146,11 +152,11 @@ M0 trust/measurement
 M1 deliberately precedes snapshots: it makes the existing conversation,
 terminal, changes, editor, and preview surfaces feel like one workbench without
 introducing a new data model. M3 establishes review provenance locally. M4 now
-has an independently approved [safe restoration design](GUARDED_UNDO_DESIGN.md)
-and remains implementation-blocked on capture v2. Capture v1, Git trees, and
-M3's isolated quarantine are not restoration sources. M5 may progress alongside
-the product work, but its signing and release controls remain independently
-gated.
+has Phase 0 implemented and approved (`f1cded2`) and Phase 1 in progress under
+the [safe restoration design](GUARDED_UNDO_DESIGN.md). Capture v1, Git trees,
+and M3's isolated quarantine are not restoration sources. M5 may progress
+alongside the product work, but its signing and release controls remain
+independently gated.
 
 ### Guardrails
 
@@ -164,6 +170,13 @@ gated.
   snapshot.
 - Keep snapshot quarantine isolated and sweep it at startup; it is never an
   Undo source.
+- Guarded Undo startup cleanup, retention, and recovery require the single
+  instance app-data lifetime lock; if it is unavailable, fail closed without
+  cleanup.
+- Phase 1 captures run off the async/UI runtime and a capture failure must not
+  suppress a terminal turn event. A same-user process that can alter both the
+  database and artifact directory is outside the integrity boundary; do not
+  market these checks as protection against a malicious agent.
 - Preserve the distinction between the comparison base, checkout reference, and
   push target. Never infer a write target only from the name `origin`.
 - Keep raw runtime diagnostics behind an explicit details affordance. Daily UI

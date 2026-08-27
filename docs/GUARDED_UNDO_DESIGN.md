@@ -1,6 +1,6 @@
 # Guarded Undo: Capture v2 and Restoration Contract
 
-Status: safe design approved; implementation pending
+Status: Phase 0 implemented and approved (`f1cded2`); Phase 1 in progress
 
 Milestone: M4
 
@@ -65,6 +65,13 @@ captured and verified.
 Neither M3 nor M4 proves authorship at the operating-system level. The turn
 boundary is an observed DCC interval. Capture v2 is eligible only under the
 strict conditions below.
+
+Hashes, file identities, and restrictive permissions detect accidental
+corruption and integrity drift; they do not defend against a same-user
+adversary who can modify both the SQLite database and the private artifact
+directory. DCC MUST NOT market Guarded Undo as protection against a malicious
+agent or other same-user attacker. The contract is fail-closed integrity
+evidence for the local DCC process, not an authenticated security boundary.
 
 ## Minimum eligible scope (v1)
 
@@ -286,15 +293,22 @@ content is a state transition, not a best-effort fallback.
 Reason codes are API values and MUST remain backward compatible. New codes may
 be added; existing meanings may not be reused.
 
+Phase 1A exports no operational filesystem adapter on any platform. An adapter
+that lacks a reviewed filesystem-capability and extended-metadata contract MUST
+fail closed with `adapter_unsupported`; it MUST NOT create, chmod, inspect, or
+claim a private artifact store.
+
 | Class | Codes |
 | --- | --- |
-| Version/scope | `capture_v1_evidence_only`, `capture_v2_missing`, `multiple_roots`, `detached_head`, `bare_repository` |
+| Version/scope | `capture_v1_evidence_only`, `capture_v2_missing`, `unknown_capture_version`, `multiple_roots`, `detached_head`, `bare_repository`, `schema_unsupported`, `invalid_persisted_record` |
 | Git identity | `head_changed`, `ref_changed`, `index_changed`, `index_unreadable`, `repository_identity_changed` |
 | File kind/status | `unsupported_status`, `unmerged_path`, `untracked_path`, `symlink_or_reparse_point`, `hardlink_unsupported`, `submodule`, `non_regular_file`, `metadata_changed` |
-| Git conversion | `git_filter_present`, `working_tree_encoding_present`, `sparse_or_skip_worktree` |
-| Bounds | `too_many_baseline_files`, `baseline_too_large`, `too_many_files`, `file_too_large`, `set_too_large`, `index_too_large`, `capture_timeout` |
-| Integrity/I/O | `capture_race`, `artifact_missing`, `artifact_corrupt`, `permission_denied`, `io_error`, `workspace_missing` |
-| Prepare/execute | `target_missing`, `target_result_mismatch`, `preview_expired`, `preview_consumed`, `preview_context_changed`, `mutation_in_progress`, `adapter_unsupported` |
+| Git conversion | `git_filter_present`, `working_tree_encoding_present`, `sparse_or_skip_worktree`, `git_attributes_changed`, `assume_unchanged` |
+| Bounds | `too_many_baseline_files`, `baseline_too_large`, `too_many_files`, `file_too_large`, `set_too_large`, `index_too_large`, `capture_timeout`, `retention_expired` |
+| Integrity/I/O | `capture_race`, `capture_interrupted`, `artifact_missing`, `artifact_corrupt`, `permission_denied`, `io_error`, `workspace_missing`, `artifact_store_unsafe`, `filesystem_unsupported`, `extended_metadata_unsupported`, `insufficient_disk_space` |
+| Concurrency | `concurrent_workspace_mutation`, `mutation_in_progress`, `app_instance_conflict`, `path_alias_collision` |
+| Baseline manifest | `tracked_manifest_changed` |
+| Prepare/execute | `no_target_changes`, `target_missing`, `target_result_mismatch`, `preview_expired`, `preview_consumed`, `preview_context_changed`, `adapter_unsupported` |
 | Recovery | `operation_interrupted`, `displaced_target_mismatch`, `displaced_file_missing`, `displaced_file_corrupt`, `recovery_target_changed`, `exchange_rollback_failed`, `manual_recovery_required` |
 
 Raw Git stderr, OS error strings, absolute paths, and file content MUST NOT be
@@ -320,6 +334,9 @@ The oldest eligible sets are expired first when a count or byte limit is
 reached. Retention MUST NOT delete artifacts or displaced files referenced by
 a nonterminal Undo operation. Workspace/session deletion MUST either delete
 terminal artifacts or retain them only until an active recovery is resolved.
+Retention and privacy purge are single-instance operations: they MUST run only
+while the app-data lifetime lock is held. If ownership cannot be established,
+the operation fails closed and leaves all artifacts untouched.
 
 Raw preimages are sensitive local repository content. They MUST:
 
@@ -433,9 +450,28 @@ the operation.
 - Execute and other workspace mutations use an exclusive lease.
 - Every lease observes a monotonically increasing generation. A prepared token
   is invalid after the generation changes.
+- Phase 1 MUST maintain a minimum active-interval registry keyed by
+  `PhysicalRootId`, recording the owning `(session_id, turn_id)` and the
+  baseline generation. A second known DCC turn or capture interval on the
+  same physical root overlaps the first; the affected restoration set MUST
+  finalize as `ineligible` with `concurrent_workspace_mutation`.
+- Every known DCC mutator (editor save, Git/index/checkout action, delivery
+  mutation, or workspace removal) MUST acquire the exclusive lease and dirty
+  the root generation. A generation change between a turn's baseline and
+  result edges makes that capture `ineligible` with
+  `concurrent_workspace_mutation` (or
+  `mutation_in_progress` when no turn interval owns the root).
 - Lock ordering for multi-workspace operations is stable by opaque root ID.
   M4 v1 itself accepts only one root.
 - The coordinator is cancellation-safe and releases leases on unwind.
+
+The process MUST acquire a single-instance lifetime lock in the DCC app-data
+directory before startup recovery, retention, artifact purge, or interval
+registry initialization. Phase 1 selects this lock as the minimum ownership
+mechanism. If it cannot be acquired, startup MUST fail closed and MUST NOT
+run cleanup, retention, recovery, or capture; no second process may delete or
+rewrite artifacts owned by the lock holder. The lock is held for the complete
+process lifetime and released only during orderly shutdown.
 
 This coordinator covers only mutations made by the current DCC process.
 Terminals, editors, Git hooks, filesystem watchers, other DCC processes, and
@@ -581,9 +617,30 @@ The UI MUST distinguish unsupported, expired, changed-after-turn, corrupt, and
 recovery-required states. It MUST NOT turn a reason-code failure into a generic
 toast or imply that external concurrent edits were impossible.
 
+## Phase 1 turn-lifecycle integration
+
+Capture v2 begins after the durable `TurnStarted`/active-turn claim and before
+`send_provider_input` in all three production paths: the desktop
+`commands::session_commands::send_turn`, the HTTP `send_turn_handler`, and
+`SessionCommandState::dispatch_next_queued_turn`. It ends immediately before
+the terminal transition in `emit_turn_completed_locked` or
+`emit_turn_aborted_locked`; `quiesce_turn_for_abort` and
+`cancel_provider_session` use the same idempotent finalizer. The
+`(session_id, turn_id, workspace_id, snapshot_id)` binding is the ownership key,
+while the physical root identity is the coordinator key.
+
+Capture work MUST run through `spawn_blocking` with a bounded deadline and
+cancellation-safe cleanup. A capture failure is persisted as `failed` or
+`ineligible` with a stable reason code and is never allowed to block, suppress,
+or duplicate the terminal `TurnCompleted`/`TurnAborted` event. Provider stream
+termination without a terminal event marks an in-progress capture as
+`failed(operation_interrupted)` while the process is alive; startup converts
+leftover `collecting` rows to `failed(capture_interrupted)` after acquiring the
+single-instance lifetime lock.
+
 ## Phased implementation
 
-### Phase 0 — Schema and fixtures
+### Phase 0 — Schema and fixtures (implemented and approved in `f1cded2`)
 
 - Add migration-tested restoration and journal tables.
 - Add canonical manifest serialization, reason-code types, size accounting,
@@ -595,15 +652,33 @@ toast or imply that external concurrent edits were impossible.
 
 - Implement platform inspection and private raw-preimage storage behind a
   feature flag.
+- Implement the minimum physical-root coordinator and active-interval
+  registry before the provider can mutate a turn. Known overlapping DCC
+  intervals and DCC mutations dirty the generation and make the affected
+  capture ineligible; external processes remain residual races.
 - Capture baseline/result identities and classify eligibility.
-- Add retention, startup cleanup, integrity audit, and privacy controls.
+- Run baseline/result I/O in `spawn_blocking` (with cancellation and bounded
+  deadlines) so capture cannot block the async/UI runtime. Capture failures
+  MUST persist `failed` or `ineligible` and MUST NOT prevent the terminal
+  `TurnCompleted` or `TurnAborted` event from being recorded and published.
+- Acquire the app-data single-instance lifetime lock before startup cleanup,
+  retention, integrity audit, privacy controls, or capture; failure to acquire
+  it is fail-closed and performs no cleanup.
+- Keep the Phase 1 implementation behind a feature flag. Windows remains
+  explicitly `adapter_unsupported` until the handle-relative,
+  reparse-rejecting adapter and its tests are complete.
 - Compare M3 evidence with M4 classification in tests without using M3 as an
   artifact source.
 
+M3 remains a review-only surface: `captureVersion = 1` is always NO-GO for
+Undo. Phase 1 MUST include a sentinel filter test proving that no capture,
+preview, or restoration path can consume M3 trees, rendered diffs, or the M3
+quarantine as restoration content.
+
 ### Phase 2 — Read-only prepare and preview
 
-- Add the coordinator shared lease, prepare API, bounded inverse previews, and
-  expiring single-use tokens.
+- Add only the read-only prepare API, bounded inverse previews, and expiring
+  single-use tokens bound to the Phase 1 manifest and coordinator generation.
 - Exercise later unrelated edits, target edits, Git/index/ref changes, and
   external-race fixtures.
 

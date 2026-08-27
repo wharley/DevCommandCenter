@@ -8,6 +8,7 @@ publish = false
 [features]
 default = []
 test-support = []
+guarded-undo-capture-v2 = ["dep:thiserror"]
 
 [dependencies]
 dcc-core = { path = "../dcc-core" }
@@ -20,6 +21,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.11", features = ["json"] }
 serde = "1"
 serde_json = "1"
+thiserror = { version = "2", optional = true }
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
 toml = "0.8"
 uuid = { version = "1", features = ["v4"] }
