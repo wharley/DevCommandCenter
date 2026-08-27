@@ -8,6 +8,9 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Row};
 use serde::de::DeserializeOwned;
 use serde_json::{from_str, to_string};
 
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
+
 use dcc_core::{
     domain::{
         delegation::{
@@ -1305,6 +1308,83 @@ impl SqliteSessionRepo {
         Ok(())
     }
 
+    /// Records a zero-file preflight decision when capture cannot safely
+    /// create a collecting row. Attribution and insertion share one SQLite
+    /// transaction, so a snapshot is never attached to caller-supplied IDs
+    /// without proving the durable M3 relationship.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) fn record_capture_v2_preflight_terminal(
+        &self,
+        restore_set: &TurnRestoreSet,
+    ) -> Result<()> {
+        restore_set.validate().map_err(guarded_undo_error)?;
+        if !matches!(
+            restore_set.state,
+            RestoreSetState::Failed | RestoreSetState::Ineligible
+        ) || restore_set.file_count != 0
+            || restore_set.artifact_bytes != 0
+            || restore_set.manifest_digest.is_some()
+        {
+            return Err(guarded_undo_error(
+                "preflight terminal restoration record must contain zero files",
+            ));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn.transaction().map_err(guarded_undo_error)?;
+        let attribution: Option<(String, String, String)> = transaction
+            .query_row(
+                "SELECT session_id, turn_id, workspace_id FROM dcc_turn_change_sets WHERE snapshot_id = ?1",
+                params![restore_set.snapshot_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(guarded_undo_error)?;
+        if attribution
+            != Some((
+                restore_set.session_id.0.clone(),
+                restore_set.turn_id.0.clone(),
+                restore_set.workspace_id.0.clone(),
+            ))
+        {
+            return Err(guarded_undo_error(
+                "preflight restoration attribution mismatch",
+            ));
+        }
+        transaction
+            .execute(
+                r#"INSERT INTO dcc_turn_restore_sets (
+                    restore_set_id, snapshot_id, session_id, turn_id, workspace_id,
+                    root_id, capture_version, state, reason_code, git_identity_json,
+                    artifact_bytes, file_count, manifest_digest, created_at,
+                    completed_at, expires_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, 0, NULL, ?11, ?12, NULL)"#,
+                params![
+                    restore_set.restore_set_id.0,
+                    restore_set.snapshot_id,
+                    restore_set.session_id.0,
+                    restore_set.turn_id.0,
+                    restore_set.workspace_id.0,
+                    restore_set.root_id.as_ref().map(|root| root.0.as_slice()),
+                    restore_set.capture_version,
+                    restore_set.state.as_str(),
+                    restore_set
+                        .reason_code
+                        .as_ref()
+                        .map(|reason| reason.as_str()),
+                    optional_json(&restore_set.git_identity)
+                        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+                    restore_set.created_at,
+                    restore_set.completed_at,
+                ],
+            )
+            .map_err(guarded_undo_error)?;
+        transaction.commit().map_err(guarded_undo_error)?;
+        Ok(())
+    }
+
     /// Finalizes a collecting set with one compare-and-swap transaction. An
     /// eligible state cannot become visible before all file rows, accounting,
     /// and the canonical manifest digest are committed together.
@@ -1543,6 +1623,51 @@ impl SqliteSessionRepo {
         }
         transaction.commit().map_err(guarded_undo_error)?;
         Ok(ids)
+    }
+
+    /// Startup-only capture-v2 recovery. Possession of the store proves the
+    /// caller holds its app-data lifetime lock; no maintenance authority is
+    /// exposed outside this database module.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) fn recover_capture_v2_startup(
+        &self,
+        store: &MacArtifactStore,
+        completed_at: &str,
+    ) -> Result<OrphanRecoveryReport> {
+        let authority = MaintenanceAuthority::new();
+        self.recover_interrupted_restore_sets(&authority, completed_at)?;
+        let referenced = {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let mut statement = conn
+                .prepare(
+                    r#"SELECT files.pre_artifact_key
+                         FROM dcc_turn_restore_files AS files
+                         JOIN dcc_turn_restore_sets AS sets
+                           ON sets.restore_set_id = files.restore_set_id
+                        WHERE sets.state = 'eligible'
+                        ORDER BY files.restore_set_id, files.ordinal"#,
+                )
+                .map_err(guarded_undo_error)?;
+            let raw = statement
+                .query_map([], |row| row.get::<_, Vec<u8>>(0))
+                .map_err(guarded_undo_error)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(guarded_undo_error)?;
+            let mut keys = std::collections::HashSet::with_capacity(raw.len());
+            for bytes in raw {
+                let key = ArtifactKey::from_slice(&bytes).map_err(guarded_undo_error)?;
+                // The store is content-addressed, so multiple eligible files
+                // and sets may legitimately reference the same artifact.
+                keys.insert(key);
+            }
+            keys
+        };
+        store
+            .recover_orphans(&referenced)
+            .map_err(|_| guarded_undo_error("capture artifact recovery failed"))
     }
 
     /// Expires an eligible set while retaining its complete manifest and file

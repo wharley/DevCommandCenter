@@ -4,6 +4,8 @@
 //! prepare API, or workspace mutation. It only provides private-storage and
 //! coordination primitives used by later reviewed phases.
 
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+pub mod capture_v2_service;
 pub mod coordinator;
 #[cfg(feature = "guarded-undo-capture-v2")]
 pub mod git_inspector;

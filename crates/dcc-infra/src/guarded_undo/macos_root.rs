@@ -49,6 +49,14 @@ pub enum MacWorkspaceRootError {
     FileTooLarge,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CapturePathClassification {
+    RegularSingleLink,
+    Symlink,
+    Hardlink,
+    NonRegular,
+}
+
 impl fmt::Display for MacWorkspaceRootError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -222,6 +230,45 @@ impl MacWorkspaceRoot {
         maximum_bytes: u64,
     ) -> Result<StableDigestObservation, MacWorkspaceRootError> {
         self.observe_index_stable_inner(path, maximum_bytes, None)
+    }
+
+    pub(crate) fn classify_capture_path(
+        &self,
+        path: &OpaqueRepoPath,
+    ) -> Result<CapturePathClassification, MacWorkspaceRootError> {
+        let components = decode_relative_path(path)?;
+        let (name, parents) = components
+            .split_last()
+            .ok_or(MacWorkspaceRootError::InvalidPath)?;
+        let mut current = self.root.try_clone()?;
+        validate_directory_fd(current.as_raw_fd())?;
+        for component in parents {
+            current = open_directory(current.as_raw_fd(), component)?;
+            validate_directory_fd(current.as_raw_fd())?;
+        }
+        let name = CString::new(name.as_bytes()).map_err(|_| MacWorkspaceRootError::InvalidPath)?;
+        let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
+        if unsafe {
+            libc::fstatat(
+                current.as_raw_fd(),
+                name.as_ptr(),
+                &mut stat,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(io::Error::last_os_error().into());
+        }
+        let kind = stat.st_mode & libc::S_IFMT;
+        if kind == libc::S_IFLNK {
+            Ok(CapturePathClassification::Symlink)
+        } else if kind != libc::S_IFREG {
+            Ok(CapturePathClassification::NonRegular)
+        } else if stat.st_nlink != 1 {
+            Ok(CapturePathClassification::Hardlink)
+        } else {
+            Ok(CapturePathClassification::RegularSingleLink)
+        }
     }
 
     fn observe_index_stable_inner(
@@ -792,6 +839,14 @@ mod tests {
             directory.path().join("src/hard"),
         )
         .unwrap();
+        assert_eq!(
+            root.classify_capture_path(&path(b"src/link")).unwrap(),
+            CapturePathClassification::Symlink
+        );
+        assert_eq!(
+            root.classify_capture_path(&path(b"src/hard")).unwrap(),
+            CapturePathClassification::Hardlink
+        );
         assert!(root.inspect_regular(&path(b"src/hard")).is_err());
         unsafe {
             libc::mkfifo(
@@ -801,6 +856,10 @@ mod tests {
                 0o600,
             )
         };
+        assert_eq!(
+            root.classify_capture_path(&path(b"src/fifo")).unwrap(),
+            CapturePathClassification::NonRegular
+        );
         assert!(root.inspect_regular(&path(b"src/fifo")).is_err());
         let non_utf8 = directory
             .path()

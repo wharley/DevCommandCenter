@@ -20,6 +20,7 @@ use std::{
     os::fd::{AsRawFd, FromRawFd, RawFd},
     os::unix::ffi::OsStrExt,
     path::Path,
+    sync::{Arc, Mutex},
 };
 
 use dcc_core::domain::guarded_undo::{
@@ -184,10 +185,29 @@ pub enum PublishState {
     StagedOnly(StagedArtifact),
 }
 
+struct InitializedDirectories {
+    staging: File,
+    objects: File,
+}
+
+pub struct MacArtifactStoreLease {
+    app_data: File,
+    ancestry: Vec<PhysicalRootId>,
+    _lock: File,
+    directories: Mutex<Option<InitializedDirectories>>,
+}
+
+impl fmt::Debug for MacArtifactStoreLease {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MacArtifactStoreLease")
+            .finish_non_exhaustive()
+    }
+}
+
 pub struct MacArtifactStore {
     staging: File,
     objects: File,
-    _lock: File,
+    _lease: Arc<MacArtifactStoreLease>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -216,25 +236,65 @@ impl MacArtifactStore {
         app_data_abs: &Path,
         workspace: &MacWorkspaceRoot,
     ) -> Result<Self, MacArtifactStoreError> {
+        Arc::new(MacArtifactStoreLease::acquire(app_data_abs)?).bind_workspace(workspace)
+    }
+}
+
+impl MacArtifactStoreLease {
+    pub fn acquire(app_data_abs: &Path) -> Result<Self, MacArtifactStoreError> {
         let (app_data, ancestry) = walk_absolute_directory(app_data_abs)?;
-        if overlaps_excluding_root(&ancestry, &workspace.ancestry_ids()) {
-            return Err(MacArtifactStoreError::InvalidPath);
-        }
+        #[cfg(test)]
+        remove_fixture_provenance(app_data.as_raw_fd());
+        validate_app_data_dir(&app_data)?;
         ensure_fs(&app_data)?;
         let lock = open_lock(&app_data)?;
-        let store = mkdir_validated(&app_data, STORE_DIR)?;
-        fsync_dir(&app_data)?;
-        let staging = mkdir_validated(&store, STAGING_DIR)?;
-        let objects = mkdir_validated(&store, OBJECTS_DIR)?;
-        fsync_dir(&store)?;
-        fsync_dir(&app_data)?;
         Ok(Self {
-            staging,
-            objects,
+            app_data,
+            ancestry,
             _lock: lock,
+            directories: Mutex::new(None),
         })
     }
 
+    pub fn bind_workspace(
+        self: &Arc<Self>,
+        workspace: &MacWorkspaceRoot,
+    ) -> Result<MacArtifactStore, MacArtifactStoreError> {
+        if overlaps_excluding_root(&self.ancestry, &workspace.ancestry_ids()) {
+            return Err(MacArtifactStoreError::InvalidPath);
+        }
+        let mut directories = self
+            .directories
+            .lock()
+            .map_err(|_| MacArtifactStoreError::ArtifactStoreUnsafe)?;
+        if directories.is_none() {
+            let store = mkdir_validated(&self.app_data, STORE_DIR)?;
+            let staging = mkdir_validated(&store, STAGING_DIR)?;
+            let objects = mkdir_validated(&store, OBJECTS_DIR)?;
+            fsync_dir(&store)?;
+            fsync_dir(&self.app_data)?;
+            *directories = Some(InitializedDirectories { staging, objects });
+        }
+        let initialized = directories
+            .as_ref()
+            .ok_or(MacArtifactStoreError::ArtifactStoreUnsafe)?;
+        let staging = initialized
+            .staging
+            .try_clone()
+            .map_err(MacArtifactStoreError::from)?;
+        let objects = initialized
+            .objects
+            .try_clone()
+            .map_err(MacArtifactStoreError::from)?;
+        Ok(MacArtifactStore {
+            staging,
+            objects,
+            _lease: Arc::clone(self),
+        })
+    }
+}
+
+impl MacArtifactStore {
     pub fn stage(
         &self,
         bytes: &CapturedBytes,
@@ -969,6 +1029,21 @@ fn validate_dir(file: &File) -> Result<(), MacArtifactStoreError> {
     Ok(())
 }
 
+fn validate_app_data_dir(file: &File) -> Result<(), MacArtifactStoreError> {
+    let stat = fstat(file.as_raw_fd())?;
+    if !is_directory(stat.st_mode)
+        || stat.st_uid != unsafe { libc::geteuid() }
+        || stat.st_nlink < 2
+        || stat.st_flags != 0
+        || stat.st_mode & (libc::S_IWGRP | libc::S_IWOTH) != 0
+    {
+        return Err(MacArtifactStoreError::Integrity);
+    }
+    reject_xattrs(file.as_raw_fd())?;
+    reject_acl(file.as_raw_fd())?;
+    Ok(())
+}
+
 fn validate_file(file: &File, mode: libc::mode_t) -> Result<(), MacArtifactStoreError> {
     let stat = fstat(file.as_raw_fd())?;
     if !is_regular(stat.st_mode)
@@ -1005,8 +1080,6 @@ fn fsync_dir(file: &File) -> Result<(), MacArtifactStoreError> {
 }
 fn full_sync(file: &File) -> Result<(), MacArtifactStoreError> {
     if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_FULLFSYNC) } != 0 {
-        #[cfg(test)]
-        eprintln!("fullsync errno={:?}", io::Error::last_os_error());
         return Err(io::Error::last_os_error().into());
     }
     Ok(())
@@ -1035,6 +1108,19 @@ fn reject_xattrs(fd: RawFd) -> Result<(), MacArtifactStoreError> {
     #[cfg(not(test))]
     let _ = actual;
     Err(MacArtifactStoreError::ExtendedMetadataUnsupported)
+}
+
+#[cfg(test)]
+fn remove_fixture_provenance(fd: RawFd) {
+    let name = CString::new("com.apple.provenance").unwrap();
+    let result = unsafe { libc::fremovexattr(fd, name.as_ptr(), 0) };
+    if result != 0 {
+        let error = io::Error::last_os_error();
+        assert!(matches!(
+            error.raw_os_error(),
+            Some(ENOENT_MACOS) | Some(ENOATTR_MACOS)
+        ));
+    }
 }
 
 fn reject_acl(fd: RawFd) -> Result<(), MacArtifactStoreError> {
@@ -1163,6 +1249,75 @@ mod tests {
         let workspace = MacWorkspaceRoot::open_absolute(&workspace_path).unwrap();
         let store = MacArtifactStore::open(app_data_dir.path(), &workspace).unwrap();
         (workspace_dir, app_data_dir, workspace, store)
+    }
+
+    #[test]
+    fn one_lease_binds_distinct_workspaces_and_initializes_once() {
+        let workspace_one_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace_two_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let app_data_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace_one = MacWorkspaceRoot::open_absolute(workspace_one_dir.path()).unwrap();
+        let workspace_two = MacWorkspaceRoot::open_absolute(workspace_two_dir.path()).unwrap();
+        let lease = Arc::new(MacArtifactStoreLease::acquire(app_data_dir.path()).unwrap());
+        assert!(!app_data_dir.path().join(".dcc-guarded-undo").exists());
+        let store_one = lease.bind_workspace(&workspace_one).unwrap();
+        let store_two = lease.bind_workspace(&workspace_two).unwrap();
+        let staged = store_one
+            .stage(&CapturedBytes::from_slice(b"shared-lease"), 1024)
+            .unwrap();
+        let published = match store_two.publish(&staged).unwrap() {
+            PublishState::Published(value) => value,
+            _ => panic!("unexpected publish state"),
+        };
+        assert_eq!(
+            store_one.verify(published.key, published.size, published.sha256),
+            Ok(published)
+        );
+    }
+
+    #[test]
+    fn concurrent_bind_initialization_is_single_and_safe() {
+        let workspace_one_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace_two_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let app_data_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace_one = MacWorkspaceRoot::open_absolute(workspace_one_dir.path()).unwrap();
+        let workspace_two = MacWorkspaceRoot::open_absolute(workspace_two_dir.path()).unwrap();
+        let lease = Arc::new(MacArtifactStoreLease::acquire(app_data_dir.path()).unwrap());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let first = {
+            let lease = Arc::clone(&lease);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                lease.bind_workspace(&workspace_one).unwrap()
+            })
+        };
+        let second = {
+            let lease = Arc::clone(&lease);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                lease.bind_workspace(&workspace_two).unwrap()
+            })
+        };
+        let first = first.join().unwrap();
+        let second = second.join().unwrap();
+        assert_eq!(
+            fstat(first.staging.as_raw_fd()).unwrap().st_mode & 0o777,
+            MODE_DIR
+        );
+        assert_eq!(
+            fstat(second.objects.as_raw_fd()).unwrap().st_mode & 0o777,
+            MODE_DIR
+        );
+        assert!(app_data_dir
+            .path()
+            .join(".dcc-guarded-undo/staging")
+            .is_dir());
+        assert!(app_data_dir
+            .path()
+            .join(".dcc-guarded-undo/objects")
+            .is_dir());
     }
 
     #[test]
