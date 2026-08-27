@@ -4505,6 +4505,18 @@ export default function App() {
 										void handleQuickCreateTask(repository);
 									}
 							}
+							onOpenBranchFromProject={
+								isRemoteBackend
+									? undefined
+									: (repository) => {
+										setGlobalSurface(null);
+										openWorkspaceDialog("open", {
+											projectId: repository.projectId,
+											workspaceRoot: repository.workspaceRoot,
+											label: repository.label,
+										});
+									}
+							}
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onOpenSkills={() => setIsSkillsOpen(true)}
 							onOpenUsage={() => setIsUsageOpen(true)}

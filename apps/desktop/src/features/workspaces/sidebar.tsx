@@ -5,6 +5,7 @@ import {
 	ChevronRight,
 	Clock3,
 	FolderPlus,
+	GitBranch,
 	GitPullRequest,
 	Loader2,
 	MoreHorizontal,
@@ -246,6 +247,12 @@ type WorkspacesSidebarProps = {
 		baseBranch: string;
 		label: string;
 	}) => void;
+	onOpenBranchFromProject?: (input: {
+		projectId: string;
+		workspaceRoot: string;
+		baseBranch: string;
+		label: string;
+	}) => void;
 	repositories: Repository[];
 	skillCount?: number;
 	appUpdate?: AppUpdateInfo;
@@ -303,6 +310,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onCreateWorkspace,
 	onCloneWorkspace,
 	onCreateWorkspaceFromProject,
+	onOpenBranchFromProject,
 	repositories,
 	skillCount = 0,
 	appUpdate = null,
@@ -749,6 +757,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					repository !== null &&
 					Boolean(onCreateWorkspaceFromProject) &&
 					!isCreatingWorkspace;
+				const canOpenProjectBranch =
+					item.headerVariant === "project" &&
+					repository !== null &&
+					Boolean(onOpenBranchFromProject) &&
+					!isCreatingWorkspace;
 				const canRemoveProject =
 					item.headerVariant === "project" &&
 					Boolean(item.sourceKey) &&
@@ -763,7 +776,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					repository !== null &&
 					Boolean(onSetProjectPinned);
 				const canManageProject =
-					canCreateProjectWorkspace || canEditProject || canPinProject || canRemoveProject;
+					canCreateProjectWorkspace ||
+					canOpenProjectBranch ||
+					canEditProject ||
+					canPinProject ||
+					canRemoveProject;
 
 				return (
 					<div
@@ -876,6 +893,36 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								</TooltipTrigger>
 								<TooltipContent side="top">
 									{t("sidebar.newWorkspace")}
+								</TooltipContent>
+							</Tooltip>
+						) : null}
+
+						{canOpenProjectBranch ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("sidebar.openBranchFromProject", {
+											label: item.label,
+										})}
+										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
+										onClick={(event) => {
+											event.stopPropagation();
+											onOpenBranchFromProject?.({
+												projectId: repository.projectId,
+												workspaceRoot: repository.rootPath,
+												baseBranch: repository.baseBranch,
+												label: repositoryDisplayName(repository),
+											});
+										}}
+									>
+										<GitBranch className="size-3.5" strokeWidth={2} aria-hidden />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="top">
+									{t("sidebar.openBranch")}
 								</TooltipContent>
 							</Tooltip>
 						) : null}
@@ -1015,6 +1062,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			onRenameWorkspace,
 			onCompleteWorkspace,
 			onCreateWorkspaceFromProject,
+			onOpenBranchFromProject,
 			onDeleteProject,
 			onUpdateProjectIdentity,
 			onSetProjectPinned,

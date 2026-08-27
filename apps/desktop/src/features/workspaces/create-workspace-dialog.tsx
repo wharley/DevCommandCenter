@@ -38,8 +38,11 @@ import type {
 import {
 	includePickedRepository,
 	inferProjectIdFromWorkspaceRoot,
+	initialWorkspaceStart,
+	isBranchWorkspaceSource,
 	normalizeWorkspaceRoot,
 	repositoryNameFromWorkspaceRoot,
+	type WorkspaceStart,
 } from "./create-workspace-dialog.logic";
 import { listLocalBranches, resolveWorkspaceSourceUrl } from "../../lib/workspace-api";
 import {
@@ -176,7 +179,7 @@ export function CreateWorkspaceDialog({
 	const [availableBranches, setAvailableBranches] = useState<string[]>([]);
 	const [isLoadingBranches, setIsLoadingBranches] = useState(false);
 	const [creationScope, setCreationScope] = useState<"single" | "multi">("single");
-	const [workspaceStart, setWorkspaceStart] = useState<"new" | "source">("new");
+	const [workspaceStart, setWorkspaceStart] = useState<WorkspaceStart>("new");
 	const [sourceUrl, setSourceUrl] = useState("");
 	const [validatedSourceUrl, setValidatedSourceUrl] = useState("");
 	const [sourceResolution, setSourceResolution] =
@@ -218,7 +221,7 @@ export function CreateWorkspaceDialog({
 			setAvailableBranches([]);
 			setIsLoadingBranches(false);
 			setCreationScope("single");
-			setWorkspaceStart("new");
+			setWorkspaceStart(initialWorkspaceStart(repositoryContext !== null));
 			setSourceUrl("");
 			setValidatedSourceUrl("");
 			setSourceResolution(null);
@@ -395,6 +398,12 @@ export function CreateWorkspaceDialog({
 				url: sourceUrl.trim(),
 				forgeLogin: null,
 			});
+			if (!isBranchWorkspaceSource(resolution.kind)) {
+				toast.error(t("workspaceDialog.pullRequestUrlTitle"), {
+					description: t("workspaceDialog.pullRequestUrlDescription"),
+				});
+				return;
+			}
 			setSourceResolution(resolution);
 			setValidatedSourceUrl(sourceUrl.trim());
 		} catch (error) {
@@ -411,7 +420,7 @@ export function CreateWorkspaceDialog({
 		mode === "open" &&
 		creationScope === "single" &&
 		repositoryContext !== null &&
-		workspaceStart === "source";
+		workspaceStart === "branch";
 
 	const canSubmit = useMemo(() => {
 		if (mode === "open" && creationScope === "multi") {
@@ -740,11 +749,11 @@ export function CreateWorkspaceDialog({
 							</Button>
 							<Button
 								type="button"
-								variant={workspaceStart === "source" ? "secondary" : "ghost"}
+								variant={workspaceStart === "branch" ? "secondary" : "ghost"}
 								size="sm"
 								className="h-7 gap-1.5 text-[12px]"
 								disabled={isSubmitting || isResolvingSource}
-								onClick={() => setWorkspaceStart("source")}
+								onClick={() => setWorkspaceStart("branch")}
 							>
 								<Link2 className="size-3.5" aria-hidden />
 								{t("workspaceDialog.existingBranchOrPr")}
@@ -884,11 +893,7 @@ export function CreateWorkspaceDialog({
 											className="size-3.5 text-emerald-600 dark:text-emerald-400"
 											aria-hidden
 										/>
-										{sourceResolution.kind === "pull_request"
-											? t("workspaceDialog.pullRequestResolved", {
-													number: String(sourceResolution.changeRequestNumber ?? ""),
-												})
-											: t("workspaceDialog.branchResolved")}
+										{t("workspaceDialog.branchResolved")}
 									</div>
 									{sourceResolution.title ? (
 										<p className="mt-1 truncate text-foreground">

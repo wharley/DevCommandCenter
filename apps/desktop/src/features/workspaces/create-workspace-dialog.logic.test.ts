@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
 	includePickedRepository,
 	inferProjectIdFromWorkspaceRoot,
+	initialWorkspaceStart,
+	isBranchWorkspaceSource,
 	repositoryNameFromWorkspaceRoot,
 } from "./create-workspace-dialog.logic";
 
@@ -39,5 +41,17 @@ describe("includePickedRepository", () => {
 
 	it("uses the selected folder name as its project label", () => {
 		expect(repositoryNameFromWorkspaceRoot("/projects/New App/")).toBe("New App");
+	});
+});
+
+describe("branch workspace entry", () => {
+	it("opens directly in branch mode when launched from a project", () => {
+		expect(initialWorkspaceStart(true)).toBe("branch");
+		expect(initialWorkspaceStart(false)).toBe("new");
+	});
+
+	it("keeps pull requests in the dedicated Pull Requests surface", () => {
+		expect(isBranchWorkspaceSource("branch")).toBe(true);
+		expect(isBranchWorkspaceSource("pull_request")).toBe(false);
 	});
 });

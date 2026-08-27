@@ -33,6 +33,16 @@ export function includePickedRepository<Repository extends { rootPath: string }>
 	return [pickedRepository, ...repositories];
 }
 
+export type WorkspaceStart = "new" | "branch";
+
+export function initialWorkspaceStart(hasRepositoryContext: boolean): WorkspaceStart {
+	return hasRepositoryContext ? "branch" : "new";
+}
+
+export function isBranchWorkspaceSource(kind: "branch" | "pull_request"): boolean {
+	return kind === "branch";
+}
+
 function sanitizeProjectIdSegment(value: string): string {
 	const sanitized = value
 		.trim()
