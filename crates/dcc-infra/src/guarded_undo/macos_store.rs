@@ -243,8 +243,6 @@ impl MacArtifactStore {
 impl MacArtifactStoreLease {
     pub fn acquire(app_data_abs: &Path) -> Result<Self, MacArtifactStoreError> {
         let (app_data, ancestry) = walk_absolute_directory(app_data_abs)?;
-        #[cfg(test)]
-        remove_fixture_provenance(app_data.as_raw_fd());
         validate_app_data_dir(&app_data)?;
         ensure_fs(&app_data)?;
         let lock = open_lock(&app_data)?;
@@ -1145,31 +1143,21 @@ fn reject_xattrs(fd: RawFd) -> Result<(), MacArtifactStoreError> {
     let mut names = vec![0_u8; size as usize];
     let actual =
         unsafe { libc::flistxattr(fd, names.as_mut_ptr() as *mut libc::c_char, names.len(), 0) };
-    #[cfg(test)]
-    if actual > 0
-        && names[..actual as usize]
-            .split(|byte| *byte == 0)
-            .filter(|name| !name.is_empty())
-            .eq([b"com.apple.provenance".as_slice()].into_iter())
-    {
+    if actual > 0 && actual as usize == names.len() && contains_only_system_provenance(&names) {
+        // Sandboxed macOS processes may attach this protected marker to the
+        // app-data root and newly created store entries. The store never reads
+        // or restores its value, and it cannot redirect descriptor-rooted I/O.
+        // Every other extended attribute remains unsupported and fails closed.
         return Ok(());
     }
-    #[cfg(not(test))]
-    let _ = actual;
     Err(MacArtifactStoreError::ExtendedMetadataUnsupported)
 }
 
-#[cfg(test)]
-fn remove_fixture_provenance(fd: RawFd) {
-    let name = CString::new("com.apple.provenance").unwrap();
-    let result = unsafe { libc::fremovexattr(fd, name.as_ptr(), 0) };
-    if result != 0 {
-        let error = io::Error::last_os_error();
-        assert!(matches!(
-            error.raw_os_error(),
-            Some(ENOENT_MACOS) | Some(ENOATTR_MACOS)
-        ));
-    }
+fn contains_only_system_provenance(names: &[u8]) -> bool {
+    names
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+        .eq([b"com.apple.provenance".as_slice()].into_iter())
 }
 
 fn reject_acl(fd: RawFd) -> Result<(), MacArtifactStoreError> {
@@ -1285,6 +1273,19 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir_in;
+
+    #[test]
+    fn xattr_policy_accepts_only_the_system_provenance_marker() {
+        assert!(contains_only_system_provenance(b"com.apple.provenance\0"));
+        assert!(!contains_only_system_provenance(b""));
+        assert!(!contains_only_system_provenance(b"user.dcc\0"));
+        assert!(!contains_only_system_provenance(
+            b"com.apple.provenance\0user.dcc\0"
+        ));
+        assert!(!contains_only_system_provenance(
+            b"com.apple.provenance\0com.apple.provenance\0"
+        ));
+    }
 
     fn setup() -> (
         tempfile::TempDir,
