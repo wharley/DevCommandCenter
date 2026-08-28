@@ -548,11 +548,16 @@ pub async fn send_turn(
             .await;
         return Err(error.to_string());
     }
-    if let Err(error) = state
+    match state
         .capture_turn_review_baseline(&output.session, &turn_id)
         .await
     {
-        eprintln!("[DCC] turn review baseline persistence failed: {error}");
+        Ok(baseline) => {
+            let _ = state
+                .begin_capture_v2_after_m3(&output.session, &turn_id, baseline)
+                .await;
+        }
+        Err(error) => eprintln!("[DCC] turn review baseline persistence failed: {error}"),
     }
 
     if let Err(error) = state

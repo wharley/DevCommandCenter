@@ -622,10 +622,15 @@ toast or imply that external concurrent edits were impossible.
 Capture v2 begins after the durable `TurnStarted`/active-turn claim and before
 `send_provider_input` in all three production paths: the desktop
 `commands::session_commands::send_turn`, the HTTP `send_turn_handler`, and
-`SessionCommandState::dispatch_next_queued_turn`. It ends immediately before
-the terminal transition in `emit_turn_completed_locked` or
-`emit_turn_aborted_locked`; `quiesce_turn_for_abort` and
-`cancel_provider_session` use the same idempotent finalizer. The
+`SessionCommandState::dispatch_next_queued_turn`. At the terminal edge, DCC
+first appends or finds the unique durable terminal event and then immediately
+polls the cancellation-safe M4 finalizer in the same persistence future. The
+event's canonical outcome selects the finalization mode; event publication,
+arbiter commit, binding cleanup, and command return wait for that finalizer.
+This ordering prevents a competing terminal request from making restoration
+eligibility authoritative while still allowing a retry to finish an active
+capture after cancellation or process-local interruption. `quiesce_turn_for_abort`
+and `cancel_provider_session` use the same idempotent finalizer. The
 `(session_id, turn_id, workspace_id, snapshot_id)` binding is the ownership key,
 while the physical root identity is the coordinator key.
 
@@ -634,9 +639,11 @@ cancellation-safe cleanup. A capture failure is persisted as `failed` or
 `ineligible` with a stable reason code and is never allowed to block, suppress,
 or duplicate the terminal `TurnCompleted`/`TurnAborted` event. Provider stream
 termination without a terminal event marks an in-progress capture as
-`failed(operation_interrupted)` while the process is alive; startup converts
-leftover `collecting` rows to `failed(capture_interrupted)` after acquiring the
-single-instance lifetime lock.
+`failed(operation_interrupted)` while the process is alive. Phase 1 initializes
+recovery lazily at the first feature-enabled capture attempt: it acquires the
+single-instance lifetime lock and converts leftover `collecting` rows to
+`failed(capture_interrupted)` before admitting any new M4 begin. Until that
+gate succeeds, it performs neither capture nor global cleanup.
 
 ## Phased implementation
 

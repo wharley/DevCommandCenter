@@ -51,6 +51,7 @@ pub struct CaptureV2Request {
     pub turn_id: TurnId,
     pub workspace_id: WorkspaceId,
     pub workspace_absolute: PathBuf,
+    pub expected_physical_root_id: PhysicalRootId,
 }
 
 impl fmt::Debug for CaptureV2Request {
@@ -264,6 +265,15 @@ impl CaptureV2Service {
             }
         };
         let root_id = root.physical_root_id();
+        if root_id != request.expected_physical_root_id {
+            return self.preflight_error(
+                &request,
+                Some(root_id),
+                None,
+                RestoreSetState::Failed,
+                GuardedUndoReasonCode::RepositoryIdentityChanged,
+            );
+        }
         let store = match self.store_lease.bind_workspace(&root) {
             Ok(store) => Arc::new(store),
             Err(error) => {
@@ -554,6 +564,23 @@ impl CaptureV2Service {
 
     pub fn finish(&self, handle: CaptureHandle) -> Result<CaptureV2Summary, CaptureV2Error> {
         self.finish_at(handle, self.clock.now())
+    }
+
+    /// Terminalizes a capture without ever making it restorable while the
+    /// embedding application has not yet wired every known workspace mutator
+    /// into the physical-root coordinator. Any staged preimages are cleaned
+    /// and the set is explicitly ineligible rather than risking an undo that
+    /// could overwrite a concurrent editor/Git action.
+    pub fn finish_without_known_mutation_coverage(
+        &self,
+        mut handle: CaptureHandle,
+    ) -> Result<CaptureV2Summary, CaptureV2Error> {
+        handle.interval.take();
+        self.finalize_noneligible(
+            &mut handle,
+            RestoreSetState::Ineligible,
+            GuardedUndoReasonCode::AdapterUnsupported,
+        )
     }
 
     fn finish_at(
@@ -1306,12 +1333,16 @@ mod tests {
                 Arc::new(WorkspaceMutationCoordinator::new()),
             )
             .unwrap();
+            let expected_physical_root_id = MacWorkspaceRoot::open_absolute(&workspace)
+                .unwrap()
+                .physical_root_id();
             let request = CaptureV2Request {
                 snapshot_id: "snapshot-1".to_owned(),
                 session_id: SessionId("session-1".to_owned()),
                 turn_id: TurnId("turn-1".to_owned()),
                 workspace_id: WorkspaceId("workspace-1".to_owned()),
                 workspace_absolute: workspace,
+                expected_physical_root_id,
             };
             Self {
                 _workspace_dir: workspace_dir,
@@ -1433,6 +1464,32 @@ mod tests {
                 files[0].pre_sha256,
             )
             .unwrap();
+    }
+
+    #[test]
+    fn incomplete_known_mutation_coverage_can_never_create_an_eligible_set() {
+        let fixture = Fixture::new();
+        let handle = fixture.service.begin(fixture.request.clone()).unwrap();
+        fixture.write_tracked(b"after\n");
+
+        let summary = fixture
+            .service
+            .finish_without_known_mutation_coverage(handle)
+            .unwrap();
+
+        assert_eq!(summary.state, RestoreSetState::Ineligible);
+        assert_eq!(
+            summary.reason_code,
+            Some(GuardedUndoReasonCode::AdapterUnsupported)
+        );
+        assert_eq!(summary.file_count, 0);
+        let (set, files) = fixture
+            .repo
+            .get_turn_restore_set(&summary.restore_set_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(set.state, RestoreSetState::Ineligible);
+        assert!(files.is_empty());
     }
 
     #[test]
@@ -1738,6 +1795,9 @@ mod tests {
                 session_id: SessionId("session-2".to_owned()),
                 turn_id: TurnId("turn-3".to_owned()),
                 workspace_id: WorkspaceId("workspace-2".to_owned()),
+                expected_physical_root_id: MacWorkspaceRoot::open_absolute(&workspace_two_path)
+                    .unwrap()
+                    .physical_root_id(),
                 workspace_absolute: workspace_two_path,
             })
             .unwrap();
@@ -1798,6 +1858,28 @@ mod tests {
             summary.reason_code,
             Some(GuardedUndoReasonCode::NonRegularFile)
         );
+    }
+
+    #[test]
+    fn expected_physical_root_mismatch_fails_before_artifact_capture() {
+        let fixture = Fixture::new();
+        let mut request = fixture.request.clone();
+        request.expected_physical_root_id = PhysicalRootId(vec![0x7f; 16]);
+
+        let error = fixture.service.begin(request).unwrap_err();
+        assert_eq!(
+            error.reason_code,
+            GuardedUndoReasonCode::RepositoryIdentityChanged
+        );
+        let conn = Connection::open(fixture.app_data.join("sessions.sqlite")).unwrap();
+        let persisted: (String, i64, i64) = conn
+            .query_row(
+                "SELECT reason_code, file_count, artifact_bytes FROM dcc_turn_restore_sets WHERE snapshot_id = 'snapshot-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(persisted, ("repository_identity_changed".to_owned(), 0, 0));
     }
 
     #[test]

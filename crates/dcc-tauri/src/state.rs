@@ -1,6 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    path::PathBuf,
+    path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -65,6 +65,11 @@ use crate::delivery_failure::{
     WorkspaceDeliveryFailureSnapshot,
 };
 use crate::events::TauriEventBus;
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+use crate::guarded_undo_runtime::{
+    BeginDisposition, ConfigureOutcome, GuardedUndoCaptureRequest, RecoveryOutcome,
+};
+use crate::guarded_undo_runtime::{CaptureTerminalMode, FinalizeTurnOutcome};
 use crate::process_runtime_registry::{ProcessRuntime, ProcessRuntimeRegistry};
 use crate::terminal_arbiter::{
     PersistThenCommitError, TerminalArbiterError, TerminalClaimResult, TerminalIntent, TerminalKey,
@@ -93,6 +98,54 @@ pub struct M3SnapshotRef {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct M3BaselineCapture {
     pub snapshots: Vec<M3SnapshotRef>,
+    root_bindings: Vec<M3RootBinding>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct M3RootBinding {
+    workspace_id: WorkspaceId,
+    workspace_absolute: PathBuf,
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    physical_root_id: dcc_core::domain::guarded_undo::PhysicalRootId,
+}
+
+impl std::fmt::Debug for M3RootBinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("M3RootBinding([redacted])")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureV2StartDisposition {
+    Disabled,
+    Started,
+    Skipped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CaptureV2StartReport {
+    pub disposition: CaptureV2StartDisposition,
+    pub active_captures: u32,
+    pub failed_captures: u32,
+}
+
+impl CaptureV2StartReport {
+    fn disabled() -> Self {
+        Self {
+            disposition: CaptureV2StartDisposition::Disabled,
+            active_captures: 0,
+            failed_captures: 0,
+        }
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    fn skipped() -> Self {
+        Self {
+            disposition: CaptureV2StartDisposition::Skipped,
+            active_captures: 0,
+            failed_captures: 0,
+        }
+    }
 }
 
 impl M3SnapshotRef {
@@ -264,9 +317,12 @@ enum TerminalRequest {
 
 #[derive(Clone, Copy, Debug)]
 enum TerminalSource {
-    Passive,
+    ProviderFailed,
     Quiesce,
     Cancel,
+    /// A TurnStarted whose provider binding was never installed. This path
+    /// intentionally has no M4 capture to finalize.
+    Unbound,
 }
 
 #[derive(Default)]
@@ -705,6 +761,23 @@ impl SessionCommandState {
         Ok(roots)
     }
 
+    fn lexical_absolute_root(path: &Path) -> Option<PathBuf> {
+        if !path.is_absolute() {
+            return None;
+        }
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::ParentDir => return None,
+                Component::CurDir => {}
+                Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                    normalized.push(component.as_os_str())
+                }
+            }
+        }
+        Some(normalized)
+    }
+
     pub async fn capture_turn_review_baseline(
         &self,
         session: &Session,
@@ -738,11 +811,22 @@ impl SessionCommandState {
                 self.session_repo.save_turn_change_set(&unavailable)?;
                 return Ok(M3BaselineCapture {
                     snapshots: vec![M3SnapshotRef::after_persist(&unavailable)],
+                    root_bindings: Vec::new(),
                 });
             }
         };
         let mut snapshots = Vec::with_capacity(roots.len());
+        let mut root_bindings = Vec::with_capacity(roots.len());
         for (workspace_id, root) in roots {
+            let workspace_absolute = Self::lexical_absolute_root(Path::new(&root));
+            #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+            let physical_before = workspace_absolute.as_ref().and_then(|workspace_absolute| {
+                dcc_infra::guarded_undo::macos_root::MacWorkspaceRoot::open_absolute(
+                    workspace_absolute,
+                )
+                .ok()
+                .map(|opened| opened.physical_root_id())
+            });
             let snapshot_id = Uuid::new_v4().to_string();
             let snapshot_root = self.turn_review_snapshot_root(&snapshot_id);
             let (state, base_tree, baseline_untracked, error, completed_at) =
@@ -802,11 +886,279 @@ impl SessionCommandState {
                 return Err(error);
             }
             snapshots.push(M3SnapshotRef::after_persist(&change_set));
+            if keep_quarantine {
+                #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+                if let (Some(workspace_absolute), Some(expected)) =
+                    (workspace_absolute, physical_before)
+                {
+                    if let Ok(reopened) =
+                        dcc_infra::guarded_undo::macos_root::MacWorkspaceRoot::open_absolute(
+                            &workspace_absolute,
+                        )
+                    {
+                        if reopened.physical_root_id() == expected {
+                            root_bindings.push(M3RootBinding {
+                                workspace_id: change_set.workspace_id.clone(),
+                                workspace_absolute,
+                                physical_root_id: expected,
+                            });
+                        }
+                    }
+                }
+                #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+                if let Some(workspace_absolute) = workspace_absolute {
+                    root_bindings.push(M3RootBinding {
+                        workspace_id: change_set.workspace_id.clone(),
+                        workspace_absolute,
+                    });
+                }
+            }
             if !keep_quarantine {
                 cleanup_snapshot(&snapshot_root);
             }
         }
-        Ok(M3BaselineCapture { snapshots })
+        Ok(M3BaselineCapture {
+            snapshots,
+            root_bindings,
+        })
+    }
+
+    /// Starts capture-v2 only from the exact M3 rows just persisted for this
+    /// turn. Any validation or adapter failure is deliberately fail-soft: the
+    /// provider turn may continue with the M3 path and terminalization remains
+    /// responsible for durable session state.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub async fn begin_capture_v2_after_m3(
+        &self,
+        session: &Session,
+        turn_id: &TurnId,
+        baseline: M3BaselineCapture,
+    ) -> CaptureV2StartReport {
+        const MAX_CAPTURE_ROOTS: usize = 1;
+        if baseline.snapshots.len() != MAX_CAPTURE_ROOTS {
+            return CaptureV2StartReport::skipped();
+        }
+
+        let roots = match self.turn_review_roots(session).await {
+            Ok(roots) => roots,
+            Err(_) => return CaptureV2StartReport::skipped(),
+        };
+        if roots.len() != baseline.snapshots.len() {
+            return CaptureV2StartReport::skipped();
+        }
+
+        let mut roots_by_workspace = HashMap::with_capacity(roots.len());
+        for (workspace_id, root) in roots {
+            let Some(root) = Self::lexical_absolute_root(Path::new(&root)) else {
+                return CaptureV2StartReport::skipped();
+            };
+            if roots_by_workspace.insert(workspace_id, root).is_some() {
+                return CaptureV2StartReport::skipped();
+            }
+        }
+
+        if baseline.root_bindings.len() != baseline.snapshots.len() {
+            return CaptureV2StartReport::skipped();
+        }
+        let mut bindings_by_workspace = HashMap::with_capacity(baseline.root_bindings.len());
+        for binding in &baseline.root_bindings {
+            if bindings_by_workspace
+                .insert(binding.workspace_id.clone(), binding)
+                .is_some()
+            {
+                return CaptureV2StartReport::skipped();
+            }
+            if roots_by_workspace.get(&binding.workspace_id) != Some(&binding.workspace_absolute) {
+                return CaptureV2StartReport::skipped();
+            }
+        }
+
+        let mut requested_workspaces = HashSet::with_capacity(baseline.snapshots.len());
+        for snapshot in &baseline.snapshots {
+            if snapshot.session_id != session.id
+                || snapshot.turn_id != *turn_id
+                || !requested_workspaces.insert(snapshot.workspace_id.clone())
+            {
+                return CaptureV2StartReport::skipped();
+            }
+            let Some(root) = roots_by_workspace.get(&snapshot.workspace_id) else {
+                return CaptureV2StartReport::skipped();
+            };
+            if !bindings_by_workspace.contains_key(&snapshot.workspace_id) {
+                return CaptureV2StartReport::skipped();
+            }
+            if roots_by_workspace
+                .values()
+                .any(|other| other != root && (other.starts_with(root) || root.starts_with(other)))
+            {
+                return CaptureV2StartReport::skipped();
+            }
+        }
+        if requested_workspaces.len() != roots_by_workspace.len() {
+            return CaptureV2StartReport::skipped();
+        }
+
+        let references = baseline.snapshots.clone();
+        let session_id = session.id.clone();
+        let expected_turn = turn_id.clone();
+        let repo = self.session_repo.clone();
+        let rows_valid = tokio::task::spawn_blocking(move || {
+            references.iter().all(|reference| {
+                let Ok(Some(row)) = repo.get_turn_change_set(&reference.snapshot_id) else {
+                    return false;
+                };
+                row.snapshot_id == reference.snapshot_id
+                    && row.session_id == session_id
+                    && row.session_id == reference.session_id
+                    && row.turn_id == expected_turn
+                    && row.turn_id == reference.turn_id
+                    && row.workspace_id == reference.workspace_id
+                    && row.capture_version == TURN_REVIEW_CAPTURE_VERSION
+                    && row.state == "collecting"
+                    && row.turn_outcome.is_none()
+                    && row.completed_at.is_none()
+            })
+        })
+        .await
+        .unwrap_or(false);
+        if !rows_valid {
+            return CaptureV2StartReport::skipped();
+        }
+
+        let runtime = self.runtime.guarded_undo_runtime();
+        let configured = match self
+            .runtime
+            .configure_guarded_undo_capture(&self.db_path, &self.app_data_dir)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(_) => return CaptureV2StartReport::skipped(),
+        };
+        if matches!(configured, ConfigureOutcome::Disabled) {
+            return CaptureV2StartReport::disabled();
+        }
+        if matches!(configured, ConfigureOutcome::Unavailable) {
+            return CaptureV2StartReport::skipped();
+        }
+
+        let Some(recovery_roots) = self.capture_v2_recovery_roots(session).await else {
+            return CaptureV2StartReport::skipped();
+        };
+        match runtime.recovery_all(recovery_roots).await {
+            Ok(RecoveryOutcome::Recovered | RecoveryOutcome::AlreadyRecovered) => {}
+            Ok(RecoveryOutcome::Disabled | RecoveryOutcome::Unavailable) | Err(_) => {
+                return CaptureV2StartReport::skipped()
+            }
+        }
+
+        // Recovery/configuration can yield while workspace metadata changes.
+        // Re-read the cooperative mapping immediately before handing the
+        // immutable M3 binding to the blocking capture worker.
+        let late_roots = match self.turn_review_roots(session).await {
+            Ok(roots) if roots.len() == bindings_by_workspace.len() => roots,
+            _ => return CaptureV2StartReport::skipped(),
+        };
+        for (workspace_id, root) in late_roots {
+            let Some(root) = Self::lexical_absolute_root(Path::new(&root)) else {
+                return CaptureV2StartReport::skipped();
+            };
+            let Some(binding) = bindings_by_workspace.get(&workspace_id) else {
+                return CaptureV2StartReport::skipped();
+            };
+            if binding.workspace_absolute != root {
+                return CaptureV2StartReport::skipped();
+            }
+        }
+
+        let requests = baseline
+            .snapshots
+            .into_iter()
+            .filter_map(|snapshot| {
+                roots_by_workspace
+                    .get(&snapshot.workspace_id)
+                    .and_then(|workspace_absolute| {
+                        bindings_by_workspace
+                            .get(&snapshot.workspace_id)
+                            .map(|binding| (workspace_absolute.clone(), *binding))
+                    })
+                    .map(|(workspace_absolute, binding)| GuardedUndoCaptureRequest {
+                        snapshot_id: snapshot.snapshot_id,
+                        session_id: snapshot.session_id,
+                        turn_id: snapshot.turn_id,
+                        workspace_id: snapshot.workspace_id,
+                        workspace_absolute,
+                        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+                        expected_physical_root_id: binding.physical_root_id.clone(),
+                    })
+            })
+            .collect::<Vec<_>>();
+        if requests.len() != requested_workspaces.len() {
+            return CaptureV2StartReport::skipped();
+        }
+
+        let key = TerminalKey::new(session.id.clone(), turn_id.clone());
+        let report = match runtime.begin_turn(key, requests).await {
+            Ok(report) => report,
+            Err(_) => return CaptureV2StartReport::skipped(),
+        };
+        match report.disposition {
+            BeginDisposition::Disabled => CaptureV2StartReport::disabled(),
+            BeginDisposition::Started | BeginDisposition::Replayed => CaptureV2StartReport {
+                disposition: CaptureV2StartDisposition::Started,
+                active_captures: report.active_captures,
+                failed_captures: report.failed_captures,
+            },
+        }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    pub async fn begin_capture_v2_after_m3(
+        &self,
+        _session: &Session,
+        _turn_id: &TurnId,
+        _baseline: M3BaselineCapture,
+    ) -> CaptureV2StartReport {
+        CaptureV2StartReport::disabled()
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    async fn capture_v2_recovery_roots(&self, session: &Session) -> Option<Vec<PathBuf>> {
+        let db_path = self.db_path.clone();
+        let mut roots = tokio::task::spawn_blocking(move || {
+            let workspace_repo = SqliteWorkspaceRepo::open(&db_path).ok()?;
+            let workspaces = futures::executor::block_on(workspace_repo.list_workspaces()).ok()?;
+            let mut roots = Vec::new();
+            for workspace in workspaces {
+                let path = workspace
+                    .worktree_path
+                    .as_deref()
+                    .unwrap_or(workspace.root_path.as_str());
+                let root = Self::lexical_absolute_root(Path::new(path))?;
+                // A removed worktree is a stale registry entry, not an
+                // authorized live root. Skip NotFound only; permission,
+                // alias, type, and policy errors remain in the set so the
+                // platform recovery adapter can fail closed.
+                match std::fs::metadata(&root) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    _ => {}
+                }
+                if !roots.iter().any(|existing| existing == &root) {
+                    roots.push(root);
+                }
+            }
+            Some(roots)
+        })
+        .await
+        .ok()
+        .flatten()?;
+        let session_roots = self.turn_review_roots(session).await.ok()?;
+        for (_, path) in session_roots {
+            let root = Self::lexical_absolute_root(Path::new(&path))?;
+            if !roots.iter().any(|existing| existing == &root) {
+                roots.push(root);
+            }
+        }
+        Some(roots)
     }
 
     /// Finalizes immutable review evidence before TurnCompleted is made visible.
@@ -1159,6 +1511,66 @@ impl SessionCommandState {
             .await
     }
 
+    /// Finalize the process-scoped M4 capture only after the durable terminal
+    /// event has been inserted or found. The database event is authoritative:
+    /// a pre-existing/competing outcome is finalized conservatively as a
+    /// cancellation, while only the leader's inserted outcome selects the
+    /// provider-failure mode. M4 is deliberately fail-soft; a failure here
+    /// must never undo or delay the durable terminal transition.
+    async fn finalize_capture_v2_after_terminal(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        outcome: TerminalIntent,
+        inserted: bool,
+        source: Option<TerminalSource>,
+    ) {
+        let Some(mode) = Self::capture_mode_for_terminal(outcome, inserted, source) else {
+            return;
+        };
+        let key = TerminalKey::new(session_id.clone(), turn_id.clone());
+        let runtime = self.runtime.guarded_undo_runtime();
+        let report = match runtime.finalize_turn(&key, mode).await {
+            Ok(FinalizeTurnOutcome::NotTracked) => return,
+            Ok(FinalizeTurnOutcome::Finalized(report)) => report,
+            Err(_) => {
+                eprintln!("[DCC] guarded undo terminal finalization failed");
+                return;
+            }
+        };
+        if runtime
+            .forget_finalized_after_terminal_append(&key, &report)
+            .is_err()
+        {
+            eprintln!("[DCC] guarded undo finalized capture cleanup failed");
+        }
+    }
+
+    fn capture_mode_for_terminal(
+        outcome: TerminalIntent,
+        inserted: bool,
+        source: Option<TerminalSource>,
+    ) -> Option<CaptureTerminalMode> {
+        if matches!(source, Some(TerminalSource::Unbound)) {
+            return None;
+        }
+        Some(match (outcome, inserted, source) {
+            // Completion is fully represented by the canonical durable event,
+            // so a retry can safely finish M4 even when it did not insert it.
+            (TerminalIntent::Completed, _, _) => CaptureTerminalMode::Completed,
+            (TerminalIntent::Aborted, true, Some(TerminalSource::ProviderFailed)) => {
+                CaptureTerminalMode::ProviderFailed
+            }
+            // An aborted event does not durably encode whether the original
+            // source was cancellation or provider failure. Existing/opposite
+            // outcomes therefore use the conservative interrupted mode.
+            (TerminalIntent::Aborted, _, _) => CaptureTerminalMode::Cancelled,
+            // This branch is defensive: terminalize_turn currently claims
+            // Aborted for every non-completed request.
+            (TerminalIntent::ProviderFailed, _, _) => CaptureTerminalMode::ProviderFailed,
+        })
+    }
+
     async fn terminalize_turn_with_binding(
         &self,
         session_id: &SessionId,
@@ -1188,6 +1600,17 @@ impl SessionCommandState {
             let TerminalClaimResult::AlreadyCommitted(outcome) = claim else {
                 unreachable!()
             };
+            self.finalize_capture_v2_after_terminal(
+                session_id,
+                turn_id,
+                outcome,
+                false,
+                match &request {
+                    TerminalRequest::Aborted { source, .. } => Some(*source),
+                    TerminalRequest::Completed => None,
+                },
+            )
+            .await;
             let remove_binding = matches!(
                 (&request, outcome),
                 (
@@ -1223,8 +1646,20 @@ impl SessionCommandState {
         let persistence = claim
             .persist_then_commit_with(|_| async {
                 if let Some(existing) = self.find_terminal_event(session_id, turn_id).await? {
+                    let outcome = Self::terminal_outcome(&existing)?;
+                    self.finalize_capture_v2_after_terminal(
+                        session_id,
+                        turn_id,
+                        outcome,
+                        false,
+                        match &request {
+                            TerminalRequest::Aborted { source, .. } => Some(*source),
+                            TerminalRequest::Completed => None,
+                        },
+                    )
+                    .await;
                     return Ok((
-                        Self::terminal_outcome(&existing)?,
+                        outcome,
                         TerminalPersistence {
                             record: existing,
                             inserted: false,
@@ -1273,21 +1708,31 @@ impl SessionCommandState {
                     .capture_turn_review_result(session_id, turn_id, outcome_name, reason, partial)
                     .await
                 {
-                    if partial {
-                        eprintln!("[DCC] aborted turn review capture failed: {error}");
-                    } else {
-                        return Err(error);
-                    }
+                    let _ = error;
+                    eprintln!("[DCC] terminal turn review capture failed");
                 }
                 let append = self.append_session_event(session_id, kind).await?;
                 let (record, inserted) = match append {
                     AppendEventOutcome::Inserted(record) => (record, true),
                     AppendEventOutcome::Existing(record) => (record, false),
                 };
-                Ok((
-                    Self::terminal_outcome(&record)?,
-                    TerminalPersistence { record, inserted },
-                ))
+                let outcome = Self::terminal_outcome(&record)?;
+                // Poll finalization in the same persistence future that
+                // observed the durable append. finalize_turn starts its
+                // cancellation-safe worker before yielding, closing the
+                // post-append window without making M4 authoritative.
+                self.finalize_capture_v2_after_terminal(
+                    session_id,
+                    turn_id,
+                    outcome,
+                    inserted,
+                    match &request {
+                        TerminalRequest::Aborted { source, .. } => Some(*source),
+                        TerminalRequest::Completed => None,
+                    },
+                )
+                .await;
+                Ok((outcome, TerminalPersistence { record, inserted }))
             })
             .await
             .map_err(|error| match error {
@@ -1433,7 +1878,7 @@ impl SessionCommandState {
                     turn_id,
                     TerminalRequest::Aborted {
                         reason,
-                        source: TerminalSource::Passive,
+                        source: TerminalSource::ProviderFailed,
                     },
                 )
                 .await?;
@@ -1446,7 +1891,7 @@ impl SessionCommandState {
                 turn_id,
                 TerminalRequest::Aborted {
                     reason,
-                    source: TerminalSource::Passive,
+                    source: TerminalSource::ProviderFailed,
                 },
             )
             .await?;
@@ -1469,7 +1914,7 @@ impl SessionCommandState {
                 turn_id,
                 TerminalRequest::Aborted {
                     reason,
-                    source: TerminalSource::Passive,
+                    source: TerminalSource::Unbound,
                 },
                 None,
             )
@@ -2932,11 +3377,18 @@ impl SessionCommandState {
                 .await;
             return Err(error);
         }
-        if let Err(error) = self
+        match self
             .capture_turn_review_baseline(&output.session, &turn_id)
             .await
         {
-            eprintln!("[DCC] queued turn review baseline persistence failed: {error}");
+            Ok(baseline) => {
+                let _ = self
+                    .begin_capture_v2_after_m3(&output.session, &turn_id, baseline)
+                    .await;
+            }
+            Err(error) => {
+                eprintln!("[DCC] queued turn review baseline persistence failed: {error}")
+            }
         }
         if let Err(error) =
             mark_queued_turn_dispatched(self, self, session_id, queued.id, turn_id.clone()).await
@@ -3331,6 +3783,50 @@ mod tests {
         },
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn capture_v2_terminal_mode_uses_durable_insert_and_source() {
+        assert_eq!(
+            SessionCommandState::capture_mode_for_terminal(TerminalIntent::Completed, true, None,),
+            Some(CaptureTerminalMode::Completed)
+        );
+        assert_eq!(
+            SessionCommandState::capture_mode_for_terminal(
+                TerminalIntent::Aborted,
+                true,
+                Some(TerminalSource::ProviderFailed),
+            ),
+            Some(CaptureTerminalMode::ProviderFailed)
+        );
+        assert_eq!(
+            SessionCommandState::capture_mode_for_terminal(
+                TerminalIntent::Aborted,
+                true,
+                Some(TerminalSource::Quiesce),
+            ),
+            Some(CaptureTerminalMode::Cancelled)
+        );
+    }
+
+    #[test]
+    fn capture_v2_preexisting_terminal_uses_canonical_outcome_and_unbound_is_skipped() {
+        assert_eq!(
+            SessionCommandState::capture_mode_for_terminal(TerminalIntent::Completed, false, None,),
+            Some(CaptureTerminalMode::Completed)
+        );
+        assert_eq!(
+            SessionCommandState::capture_mode_for_terminal(TerminalIntent::Aborted, false, None,),
+            Some(CaptureTerminalMode::Cancelled)
+        );
+        assert_eq!(
+            SessionCommandState::capture_mode_for_terminal(
+                TerminalIntent::Aborted,
+                true,
+                Some(TerminalSource::Unbound),
+            ),
+            None
+        );
+    }
 
     #[derive(Clone, Default)]
     struct CountingEventBus(Arc<AtomicUsize>);
@@ -3868,6 +4364,16 @@ mod tests {
             futures::executor::block_on(state.capture_turn_review_baseline(&session, &turn_id))
                 .expect("unavailable row is still durable");
 
+        let report = futures::executor::block_on(state.begin_capture_v2_after_m3(
+            &session,
+            &turn_id,
+            capture.clone(),
+        ));
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Skipped);
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Disabled);
+
         assert_eq!(capture.snapshots.len(), 1);
         let snapshot = &capture.snapshots[0];
         assert_eq!(snapshot.session_id, session.id);
@@ -3885,6 +4391,220 @@ mod tests {
         drop(repo);
         drop(state);
         let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn capture_v2_start_rejects_empty_baseline_without_initializing_runtime() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-capture-v2-empty-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
+        let session = sample_session("capture-v2-empty");
+        let report = futures::executor::block_on(state.begin_capture_v2_after_m3(
+            &session,
+            &TurnId("empty-turn".to_string()),
+            M3BaselineCapture::default(),
+        ));
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Skipped);
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Disabled);
+        assert_eq!(report.active_captures, 0);
+        assert_eq!(report.failed_captures, 0);
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    #[test]
+    fn capture_v2_feature_off_returns_before_row_or_root_lookup() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-capture-v2-off-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
+        let session = sample_session("never-persisted");
+        let turn_id = TurnId("never-persisted-turn".to_owned());
+        let baseline = M3BaselineCapture {
+            snapshots: vec![M3SnapshotRef {
+                snapshot_id: "never-persisted-snapshot".to_owned(),
+                session_id: session.id.clone(),
+                turn_id: turn_id.clone(),
+                workspace_id: session.workspace_id.clone(),
+            }],
+            root_bindings: vec![M3RootBinding {
+                workspace_id: session.workspace_id.clone(),
+                workspace_absolute: PathBuf::from("/definitely-not-looked-up"),
+            }],
+        };
+        let report = futures::executor::block_on(
+            state.begin_capture_v2_after_m3(&session, &turn_id, baseline),
+        );
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Disabled);
+        assert!(state
+            .get_turn_change_set("never-persisted-snapshot")
+            .unwrap()
+            .is_none());
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[test]
+    fn capture_v2_rejects_worktree_mapping_change_after_m3() {
+        let db_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let app_data = tempfile::tempdir_in("/private/tmp").unwrap();
+        let original_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let replacement_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let original = std::fs::canonicalize(original_root.path()).unwrap();
+        let replacement = std::fs::canonicalize(replacement_root.path()).unwrap();
+        for arguments in [
+            vec!["init", "-q"],
+            vec!["config", "user.name", "DCC Test"],
+            vec!["config", "user.email", "dcc@example.invalid"],
+        ] {
+            assert!(std::process::Command::new("/usr/bin/git")
+                .current_dir(&original)
+                .args(arguments)
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(original.join("tracked.txt"), b"before\n").unwrap();
+        assert!(std::process::Command::new("/usr/bin/git")
+            .current_dir(&original)
+            .args(["add", "--", "tracked.txt"])
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("/usr/bin/git")
+            .current_dir(&original)
+            .args(["commit", "--no-gpg-sign", "--no-verify", "-qm", "initial"])
+            .status()
+            .unwrap()
+            .success());
+
+        let db_path = std::fs::canonicalize(db_root.path())
+            .unwrap()
+            .join("sessions.sqlite");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).unwrap(),
+        );
+        let repo = SqliteWorkspaceRepo::open(&db_path).unwrap();
+        let workspace = sample_workspace("mapping-swap", original.to_str().unwrap());
+        futures::executor::block_on(repo.save_workspace(&workspace)).unwrap();
+        let session = Session {
+            id: SessionId("mapping-swap-session".to_owned()),
+            project_id: workspace.project_id.clone(),
+            workspace_id: workspace.id.clone(),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_owned(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        futures::executor::block_on(SessionRepo::save_session(&state, &session)).unwrap();
+        let turn_id = TurnId("mapping-swap-turn".to_owned());
+        let baseline =
+            futures::executor::block_on(state.capture_turn_review_baseline(&session, &turn_id))
+                .unwrap();
+        assert_eq!(baseline.root_bindings.len(), 1);
+
+        let replacement_workspace = sample_workspace("mapping-swap", replacement.to_str().unwrap());
+        futures::executor::block_on(repo.save_workspace(&replacement_workspace)).unwrap();
+        let report = futures::executor::block_on(
+            state.begin_capture_v2_after_m3(&session, &turn_id, baseline),
+        );
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Skipped);
+
+        drop(repo);
+        drop(state);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn recovery_roots_skip_stale_unrelated_and_fallback_to_root_path() {
+        let db_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let app_data = tempfile::tempdir_in("/private/tmp").unwrap();
+        let current_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let fallback_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let current = std::fs::canonicalize(current_root.path()).unwrap();
+        let fallback = std::fs::canonicalize(fallback_root.path()).unwrap();
+        let db_path = std::fs::canonicalize(db_root.path())
+            .unwrap()
+            .join("sessions.sqlite");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).unwrap(),
+        );
+        let repo = SqliteWorkspaceRepo::open(&db_path).unwrap();
+
+        let current_workspace = sample_workspace("recovery-current", current.to_str().unwrap());
+        let stale_workspace = sample_workspace(
+            "recovery-stale",
+            "/private/tmp/dcc-definitely-missing-stale-worktree",
+        );
+        let mut fallback_workspace =
+            sample_workspace("recovery-fallback", fallback.to_str().unwrap());
+        fallback_workspace.worktree_path = None;
+        fallback_workspace.root_path = fallback.to_string_lossy().into_owned();
+        for workspace in [&current_workspace, &stale_workspace, &fallback_workspace] {
+            repo.save_workspace(workspace).await.unwrap();
+        }
+        let session = Session {
+            id: SessionId("recovery-current-session".to_owned()),
+            project_id: current_workspace.project_id.clone(),
+            workspace_id: current_workspace.id.clone(),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_owned(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        SessionRepo::save_session(&state, &session).await.unwrap();
+
+        let roots = state
+            .capture_v2_recovery_roots(&session)
+            .await
+            .expect("bounded recovery roots");
+        assert!(roots.contains(&current));
+        assert!(roots.contains(&fallback));
+        assert!(!roots
+            .iter()
+            .any(|root| root.ends_with("dcc-definitely-missing-stale-worktree")));
+
+        drop(repo);
+        drop(state);
+    }
+
+    #[test]
+    fn capture_v2_root_policy_is_absolute_and_component_safe() {
+        assert_eq!(
+            SessionCommandState::lexical_absolute_root(Path::new("/tmp/./workspace")),
+            Some(PathBuf::from("/tmp/workspace"))
+        );
+        assert_eq!(
+            SessionCommandState::lexical_absolute_root(Path::new("relative/workspace")),
+            None
+        );
+        assert_eq!(
+            SessionCommandState::lexical_absolute_root(Path::new("/tmp/../workspace")),
+            None
+        );
     }
 
     #[test]
@@ -4008,7 +4728,7 @@ mod tests {
             &turn_id,
             TerminalRequest::Aborted {
                 reason: Some("cancelled".to_string()),
-                source: TerminalSource::Passive,
+                source: TerminalSource::ProviderFailed,
             },
         ))
         .expect("aborted terminal");

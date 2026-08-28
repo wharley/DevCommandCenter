@@ -95,11 +95,13 @@ none of it is marked shipped.
 - **M3:** Last Turn Review is committed locally in `754d751`, pending release.
   See the implementation scope and deliberate limitations below.
 - **M4:** Phase 0 schema/fixtures are implemented and approved in `f1cded2`;
-  Phase 1 capture v2 is in progress behind a feature flag. Capture v1 remains
-  review evidence only and is a NO-GO for Undo. The Phase 1 coordinator,
-  active-interval registry, single-instance app-data lock, and terminal-event
-  fail-open integration are specified in [Guarded Undo: Capture v2 and
-  Restoration Contract](GUARDED_UNDO_DESIGN.md); the Undo button remains
+  Phase 1 now has cancellation-safe single-root START/terminal integration,
+  physical M3→M4 binding, process-scoped recovery, and the app-data lifetime
+  lock behind a default-off feature flag. Capture v1 remains review evidence
+  only and is a NO-GO for Undo. Until every known editor/Git/delivery mutator
+  participates in the physical-root coordinator, completed captures finalize
+  explicitly ineligible and cannot create an `Eligible` restore set. Recovery
+  is lazy but gates the first feature-enabled begin. The Undo button remains
   disabled.
 - **M5:** DMG support for Apple Silicon and Intel, while retaining the updater
   archive path, is implemented locally and static-review approved. It remains

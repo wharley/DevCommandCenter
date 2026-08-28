@@ -19,7 +19,13 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+use std::path::PathBuf;
+
+use crate::guarded_undo_runtime::ConfigureOutcome;
 use crate::guarded_undo_runtime::GuardedUndoRuntime;
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+use crate::guarded_undo_runtime::GuardedUndoRuntimeError;
 use crate::terminal_arbiter::TerminalArbiter;
 use dcc_core::ports::{events::CoreEvent, EventBus};
 use dcc_core::Result as CoreResult;
@@ -131,6 +137,8 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for AcquireAfterOpenError<E
 /// must retain its own stronger store/lease validation and must never inherit
 /// filesystem authorization from this registry.
 pub struct ProcessRuntime {
+    #[allow(dead_code)] // Retained even when capture-v2 is compiled out.
+    scope: RuntimeScopeKey,
     terminal_arbiter: Arc<TerminalArbiter>,
     #[allow(dead_code)] // Wired by the guarded-undo lifecycle integration.
     guarded_undo_runtime: Arc<GuardedUndoRuntime>,
@@ -145,8 +153,9 @@ impl fmt::Debug for ProcessRuntime {
 }
 
 impl ProcessRuntime {
-    fn new() -> Self {
+    fn new(scope: RuntimeScopeKey) -> Self {
         Self {
+            scope,
             terminal_arbiter: Arc::new(TerminalArbiter::default()),
             guarded_undo_runtime: Arc::new(GuardedUndoRuntime::new()),
             session_store: Arc::new(Mutex::new(crate::state::SessionStore::default())),
@@ -161,6 +170,61 @@ impl ProcessRuntime {
     #[allow(dead_code)] // Wired by the guarded-undo lifecycle integration.
     pub(crate) fn guarded_undo_runtime(&self) -> Arc<GuardedUndoRuntime> {
         Arc::clone(&self.guarded_undo_runtime)
+    }
+
+    /// Configures guarded undo only for the physical scope from which this
+    /// process runtime was acquired. The SQLite repository is opened here so
+    /// callers cannot inject a repository from another runtime scope.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) async fn configure_guarded_undo_capture(
+        &self,
+        sqlite_path: &Path,
+        app_data_directory: &Path,
+    ) -> Result<ConfigureOutcome, ConfigureGuardedUndoCaptureError> {
+        // Scope walking and SQLite opening are synchronous filesystem work.
+        // Keep it out of the async caller and make cancellation of that caller
+        // harmless: this worker only validates/opens transient resources; it
+        // cannot install a capture driver or acquire the artifact-store lease.
+        let expected_scope = self.scope;
+        let sqlite_path = sqlite_path.to_path_buf();
+        let app_data_directory = app_data_directory.to_path_buf();
+        let (repo, app_data_directory) = tokio::task::spawn_blocking(move || {
+            open_guarded_undo_configuration(expected_scope, sqlite_path, app_data_directory)
+        })
+        .await
+        .map_err(|_| ConfigureGuardedUndoCaptureError::Worker)??;
+        self.guarded_undo_runtime
+            .configure_capture_v2_scoped(
+                app_data_directory,
+                repo,
+                self.scope.configuration_identity(),
+            )
+            .await
+            .map_err(ConfigureGuardedUndoCaptureError::Runtime)
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    #[allow(dead_code)] // Feature-off state facade returns before configuration.
+    pub(crate) async fn configure_guarded_undo_capture(
+        &self,
+        _sqlite_path: &Path,
+        _app_data_directory: &Path,
+    ) -> Result<ConfigureOutcome, ConfigureGuardedUndoCaptureError> {
+        Ok(ConfigureOutcome::Disabled)
+    }
+
+    #[cfg(test)]
+    fn validate_guarded_undo_scope(
+        &self,
+        sqlite_path: &Path,
+        app_data_directory: &Path,
+    ) -> Result<(), ConfigureGuardedUndoCaptureError> {
+        let current = resolve_scope(sqlite_path, app_data_directory)
+            .map_err(|_| ConfigureGuardedUndoCaptureError::Scope)?;
+        if current != self.scope {
+            return Err(ConfigureGuardedUndoCaptureError::ScopeMismatch);
+        }
+        Ok(())
     }
 
     pub(crate) fn register_event_bus(&self, bus: &Arc<dyn EventBus>) -> CoreResult<()> {
@@ -220,6 +284,70 @@ impl ProcessRuntime {
     }
 }
 
+#[cfg(any(test, all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+impl RuntimeScopeKey {
+    fn configuration_identity(self) -> [u8; 32] {
+        let mut identity = [0_u8; 32];
+        identity[..8].copy_from_slice(&self.sqlite_file.device.to_be_bytes());
+        identity[8..16].copy_from_slice(&self.sqlite_file.inode.to_be_bytes());
+        identity[16..24].copy_from_slice(&self.app_data_directory.device.to_be_bytes());
+        identity[24..].copy_from_slice(&self.app_data_directory.inode.to_be_bytes());
+        identity
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Feature-off configuration is an infallible no-op.
+pub(crate) enum ConfigureGuardedUndoCaptureError {
+    Scope,
+    ScopeMismatch,
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    Repository,
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    Worker,
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    Runtime(GuardedUndoRuntimeError),
+}
+
+impl fmt::Debug for ConfigureGuardedUndoCaptureError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ConfigureGuardedUndoCaptureError([redacted])")
+    }
+}
+
+impl fmt::Display for ConfigureGuardedUndoCaptureError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Scope => "guarded undo runtime scope unavailable",
+            Self::ScopeMismatch => "guarded undo runtime scope does not match",
+            #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+            Self::Repository => "guarded undo repository unavailable",
+            #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+            Self::Worker => "guarded undo configuration unavailable",
+            #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+            Self::Runtime(_) => "guarded undo runtime unavailable",
+        })
+    }
+}
+
+impl std::error::Error for ConfigureGuardedUndoCaptureError {}
+
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+fn open_guarded_undo_configuration(
+    expected_scope: RuntimeScopeKey,
+    sqlite_path: PathBuf,
+    app_data_directory: PathBuf,
+) -> Result<(dcc_infra::db::SqliteSessionRepo, PathBuf), ConfigureGuardedUndoCaptureError> {
+    let current = resolve_scope(&sqlite_path, &app_data_directory)
+        .map_err(|_| ConfigureGuardedUndoCaptureError::Scope)?;
+    if current != expected_scope {
+        return Err(ConfigureGuardedUndoCaptureError::ScopeMismatch);
+    }
+    let repo = dcc_infra::db::SqliteSessionRepo::open(&sqlite_path)
+        .map_err(|_| ConfigureGuardedUndoCaptureError::Repository)?;
+    Ok((repo, app_data_directory))
+}
+
 pub struct ProcessRuntimeRegistry {
     runtimes: Mutex<HashMap<RuntimeScopeKey, Weak<ProcessRuntime>>>,
 }
@@ -264,7 +392,7 @@ impl ProcessRuntimeRegistry {
         if let Some(runtime) = runtimes.get(&key).and_then(Weak::upgrade) {
             return Ok((consumer, runtime));
         }
-        let runtime = Arc::new(ProcessRuntime::new());
+        let runtime = Arc::new(ProcessRuntime::new(key));
         runtimes.insert(key, Arc::downgrade(&runtime));
         Ok((consumer, runtime))
     }
@@ -543,6 +671,13 @@ mod tests {
             &first.guarded_undo_runtime(),
             &second.guarded_undo_runtime()
         ));
+        first
+            .validate_guarded_undo_scope(&db_alias, &app_alias)
+            .unwrap();
+        assert_eq!(
+            first.scope.configuration_identity(),
+            second.scope.configuration_identity()
+        );
         assert_eq!(registry.entry_count(), 1);
     }
 
@@ -570,6 +705,24 @@ mod tests {
         assert!(Arc::ptr_eq(&runtime, &replay_runtime));
     }
 
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn feature_off_configuration_is_a_noop_without_scope_io() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let runtime = acquire(&registry, &scope.db, &scope.app_data).unwrap();
+        assert_eq!(
+            runtime
+                .configure_guarded_undo_capture(
+                    Path::new("/missing-redacted-db"),
+                    Path::new("/missing-redacted-app-data"),
+                )
+                .await
+                .unwrap(),
+            ConfigureOutcome::Disabled
+        );
+    }
+
     #[test]
     fn distinct_database_or_app_data_identity_is_isolated() {
         let registry = ProcessRuntimeRegistry::isolated();
@@ -581,6 +734,18 @@ mod tests {
         assert!(!Arc::ptr_eq(&first_runtime, &other_db));
         assert!(!Arc::ptr_eq(&first_runtime, &other_app));
         assert!(!Arc::ptr_eq(&other_db, &other_app));
+        assert_eq!(
+            first_runtime.validate_guarded_undo_scope(&second.db, &first.app_data),
+            Err(ConfigureGuardedUndoCaptureError::ScopeMismatch)
+        );
+        assert_eq!(
+            first_runtime.validate_guarded_undo_scope(&first.db, &second.app_data),
+            Err(ConfigureGuardedUndoCaptureError::ScopeMismatch)
+        );
+        assert_ne!(
+            first_runtime.scope.configuration_identity(),
+            other_db.scope.configuration_identity()
+        );
     }
 
     #[test]

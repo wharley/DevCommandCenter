@@ -18,17 +18,26 @@ use std::{
     },
 };
 
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+use dcc_core::domain::guarded_undo::PhysicalRootId;
 use dcc_core::domain::{
     session::{SessionId, TurnId},
     workspace::WorkspaceId,
 };
+use dcc_infra::db::SqliteSessionRepo;
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 
 use crate::terminal_arbiter::TerminalKey;
 
 const MAX_TRACKED_TURNS: usize = 1_024;
-const MAX_CAPTURE_ROOTS_PER_TURN: usize = 16;
+// Capture v2/M4 v1 is deliberately single-root. Multi-root turns require a
+// separate attribution and lock-ordering design extension.
+const MAX_CAPTURE_ROOTS_PER_TURN: usize = 1;
+// Startup recovery is global to the app-data store, not a single provider
+// turn. Keep its bounded admission independent from the stricter per-turn
+// capture fan-out limit.
+const MAX_RECOVERY_ROOTS: usize = 1_024;
 
 /// Ephemeral binding between one durable M3 snapshot and its physical
 /// workspace path. The path is consumed by the platform adapter and is never
@@ -40,6 +49,8 @@ pub(crate) struct GuardedUndoCaptureRequest {
     pub turn_id: TurnId,
     pub workspace_id: WorkspaceId,
     pub workspace_absolute: PathBuf,
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub expected_physical_root_id: PhysicalRootId,
 }
 
 impl fmt::Debug for GuardedUndoCaptureRequest {
@@ -58,6 +69,8 @@ fn capture_request_fingerprint(
         append_fingerprint_field(&mut entry, request.snapshot_id.as_bytes())?;
         append_fingerprint_field(&mut entry, request.workspace_id.0.as_bytes())?;
         append_fingerprint_field(&mut entry, &path)?;
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        append_fingerprint_field(&mut entry, &request.expected_physical_root_id.0)?;
         entries.push(entry);
     }
     entries.sort_unstable();
@@ -78,6 +91,58 @@ fn capture_request_fingerprint(
         hasher.update(entry);
     }
     Ok(CaptureRequestFingerprint(hasher.finalize().into()))
+}
+
+fn configuration_fingerprint(scope_identity: &[u8]) -> ConfigurationFingerprint {
+    let mut hasher = Sha256::new();
+    hasher.update(b"dcc-guarded-undo-physical-scope:v1\0");
+    hasher.update(scope_identity);
+    ConfigurationFingerprint(hasher.finalize().into())
+}
+
+fn recovery_roots_fingerprint(
+    roots: &[PathBuf],
+) -> Result<RecoveryRootsFingerprint, GuardedUndoRuntimeError> {
+    if roots.is_empty() {
+        return Err(GuardedUndoRuntimeError::EmptyRecoverySet);
+    }
+    if roots.len() > MAX_RECOVERY_ROOTS {
+        return Err(GuardedUndoRuntimeError::RecoveryRootLimitExceeded);
+    }
+    let mut encoded = Vec::with_capacity(roots.len());
+    let mut distinct = HashSet::with_capacity(roots.len());
+    for root in roots {
+        let path = platform_path_bytes(root)?;
+        if !distinct.insert(path.clone()) {
+            return Err(GuardedUndoRuntimeError::DuplicateRecoveryRoot);
+        }
+        encoded.push(path);
+    }
+    encoded.sort_unstable();
+    let mut hasher = Sha256::new();
+    hasher.update(b"dcc-guarded-undo-recovery-roots:v1\0");
+    hasher.update(
+        u64::try_from(encoded.len())
+            .map_err(|_| GuardedUndoRuntimeError::RecoveryRootLimitExceeded)?
+            .to_be_bytes(),
+    );
+    for path in encoded {
+        append_fingerprint_field_to_hasher(&mut hasher, &path)?;
+    }
+    Ok(RecoveryRootsFingerprint(hasher.finalize().into()))
+}
+
+fn append_fingerprint_field_to_hasher(
+    hasher: &mut Sha256,
+    value: &[u8],
+) -> Result<(), GuardedUndoRuntimeError> {
+    hasher.update(
+        u64::try_from(value.len())
+            .map_err(|_| GuardedUndoRuntimeError::InvalidAttribution)?
+            .to_be_bytes(),
+    );
+    hasher.update(value);
+    Ok(())
 }
 
 fn append_fingerprint_field(
@@ -218,12 +283,17 @@ pub(crate) enum FinalizeTurnOutcome {
 pub(crate) enum GuardedUndoRuntimeError {
     CapacityExhausted,
     CaptureRootLimitExceeded,
+    RecoveryRootLimitExceeded,
     DuplicateSnapshot,
     DuplicateWorkspace,
+    DuplicateRecoveryRoot,
     EmptyCaptureSet,
+    EmptyRecoverySet,
     GenerationExhausted,
     InvalidAttribution,
     Poisoned,
+    ConfigurationMismatch,
+    RecoveryRootsMismatch,
     ReplayRequestMismatch,
     AlreadyConfigured,
 }
@@ -233,12 +303,17 @@ impl fmt::Display for GuardedUndoRuntimeError {
         formatter.write_str(match self {
             Self::CapacityExhausted => "guarded undo runtime capacity exhausted",
             Self::CaptureRootLimitExceeded => "guarded undo capture root limit exceeded",
+            Self::RecoveryRootLimitExceeded => "guarded undo recovery root limit exceeded",
             Self::DuplicateSnapshot => "guarded undo capture has a duplicate snapshot",
             Self::DuplicateWorkspace => "guarded undo capture has a duplicate workspace",
+            Self::DuplicateRecoveryRoot => "guarded undo recovery has a duplicate root",
             Self::EmptyCaptureSet => "guarded undo capture set is empty",
+            Self::EmptyRecoverySet => "guarded undo recovery root set is empty",
             Self::GenerationExhausted => "guarded undo runtime generation exhausted",
             Self::InvalidAttribution => "guarded undo capture attribution is invalid",
             Self::Poisoned => "guarded undo runtime unavailable",
+            Self::ConfigurationMismatch => "guarded undo runtime configuration does not match",
+            Self::RecoveryRootsMismatch => "guarded undo recovery roots do not match",
             Self::ReplayRequestMismatch => "guarded undo capture replay does not match",
             Self::AlreadyConfigured => "guarded undo runtime already configured",
         })
@@ -246,6 +321,22 @@ impl fmt::Display for GuardedUndoRuntimeError {
 }
 
 impl std::error::Error for GuardedUndoRuntimeError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConfigureOutcome {
+    Disabled,
+    Configured,
+    AlreadyConfigured,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecoveryOutcome {
+    Disabled,
+    Recovered,
+    AlreadyRecovered,
+    Unavailable,
+}
 
 trait CaptureLease: Send {
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
@@ -278,6 +369,8 @@ trait CaptureDriver: Send + Sync {
         lease: DynCaptureLease,
         mode: CaptureTerminalMode,
     ) -> Result<GuardedUndoCaptureSummary, DriverFailure>;
+
+    fn recover_all(&self, roots: Vec<PathBuf>) -> Result<(), DriverFailure>;
 }
 
 struct ActiveTurn {
@@ -292,6 +385,24 @@ struct CaptureRequestFingerprint([u8; 32]);
 impl fmt::Debug for CaptureRequestFingerprint {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("CaptureRequestFingerprint([redacted])")
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ConfigurationFingerprint([u8; 32]);
+
+impl fmt::Debug for ConfigurationFingerprint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ConfigurationFingerprint([redacted])")
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct RecoveryRootsFingerprint([u8; 32]);
+
+impl fmt::Debug for RecoveryRootsFingerprint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RecoveryRootsFingerprint([redacted])")
     }
 }
 
@@ -339,8 +450,45 @@ impl TurnState {
 
 struct Inner {
     driver: Mutex<Option<Arc<dyn CaptureDriver>>>,
+    configuration: Mutex<ConfigurationState>,
+    recovery: Mutex<RecoveryState>,
     registry: Mutex<TurnRegistry>,
     next_generation: AtomicU64,
+    next_attempt: AtomicU64,
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    coordinator: Arc<dcc_infra::guarded_undo::coordinator::WorkspaceMutationCoordinator>,
+}
+
+enum ConfigurationState {
+    Unconfigured,
+    Configuring {
+        attempt: u64,
+        fingerprint: ConfigurationFingerprint,
+        notify: Arc<Notify>,
+    },
+    Configured {
+        fingerprint: ConfigurationFingerprint,
+    },
+    Failed {
+        attempt: u64,
+        fingerprint: ConfigurationFingerprint,
+    },
+}
+
+enum RecoveryState {
+    Unrecovered,
+    Recovering {
+        attempt: u64,
+        fingerprint: RecoveryRootsFingerprint,
+        notify: Arc<Notify>,
+    },
+    Recovered {
+        fingerprint: RecoveryRootsFingerprint,
+    },
+    Failed {
+        attempt: u64,
+        fingerprint: RecoveryRootsFingerprint,
+    },
 }
 
 #[derive(Default)]
@@ -393,18 +541,235 @@ impl GuardedUndoRuntime {
         Self {
             inner: Arc::new(Inner {
                 driver: Mutex::new(None),
+                configuration: Mutex::new(ConfigurationState::Unconfigured),
+                recovery: Mutex::new(RecoveryState::Unrecovered),
                 registry: Mutex::new(TurnRegistry::default()),
                 next_generation: AtomicU64::new(0),
+                next_attempt: AtomicU64::new(0),
+                #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+                coordinator: Arc::new(
+                    dcc_infra::guarded_undo::coordinator::WorkspaceMutationCoordinator::new(),
+                ),
             }),
         }
     }
 
+    /// Lazily creates the one capture-v2 service (and therefore the one
+    /// app-data lifetime lease) owned by this process runtime.
     #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
-    pub(crate) fn install_capture_v2_service(
+    pub(super) async fn configure_capture_v2_scoped(
         &self,
-        service: Arc<dcc_infra::guarded_undo::capture_v2_service::CaptureV2Service>,
-    ) -> Result<(), GuardedUndoRuntimeError> {
-        self.install_driver(Arc::new(CaptureV2Driver { service }))
+        app_data_absolute: PathBuf,
+        repo: SqliteSessionRepo,
+        physical_scope_identity: [u8; 32],
+    ) -> Result<ConfigureOutcome, GuardedUndoRuntimeError> {
+        let fingerprint = configuration_fingerprint(&physical_scope_identity);
+        let coordinator = Arc::clone(&self.inner.coordinator);
+        self.configure_with_factory(
+            fingerprint,
+            Box::new(move || {
+                dcc_infra::guarded_undo::capture_v2_service::CaptureV2Service::with_system_git(
+                    app_data_absolute,
+                    repo,
+                    coordinator,
+                )
+                .map(|service| {
+                    Arc::new(CaptureV2Driver {
+                        service: Arc::new(service),
+                    }) as Arc<dyn CaptureDriver>
+                })
+                .map_err(|_| DriverFailure)
+            }),
+        )
+        .await
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    pub(super) async fn configure_capture_v2_scoped(
+        &self,
+        _app_data_absolute: PathBuf,
+        _repo: SqliteSessionRepo,
+        _physical_scope_identity: [u8; 32],
+    ) -> Result<ConfigureOutcome, GuardedUndoRuntimeError> {
+        Ok(ConfigureOutcome::Disabled)
+    }
+
+    /// Runs global startup recovery once for the canonical authorized root
+    /// set. A failed attempt is retryable; cancellation of an async waiter does
+    /// not cancel or duplicate the blocking worker.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) async fn recovery_all(
+        &self,
+        roots: Vec<PathBuf>,
+    ) -> Result<RecoveryOutcome, GuardedUndoRuntimeError> {
+        self.recovery_all_with_driver(roots).await
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    pub(crate) async fn recovery_all(
+        &self,
+        _roots: Vec<PathBuf>,
+    ) -> Result<RecoveryOutcome, GuardedUndoRuntimeError> {
+        Ok(RecoveryOutcome::Disabled)
+    }
+
+    async fn configure_with_factory(
+        &self,
+        fingerprint: ConfigurationFingerprint,
+        factory: Box<
+            dyn FnOnce() -> Result<Arc<dyn CaptureDriver>, DriverFailure> + Send + 'static,
+        >,
+    ) -> Result<ConfigureOutcome, GuardedUndoRuntimeError> {
+        enum Action {
+            Start { attempt: u64, notify: Arc<Notify> },
+            Wait { attempt: u64, notify: Arc<Notify> },
+        }
+
+        let action = {
+            let mut state = self
+                .inner
+                .configuration
+                .lock()
+                .map_err(|_| GuardedUndoRuntimeError::Poisoned)?;
+            match &*state {
+                ConfigurationState::Configured {
+                    fingerprint: current,
+                } => {
+                    return if current == &fingerprint {
+                        Ok(ConfigureOutcome::AlreadyConfigured)
+                    } else {
+                        Err(GuardedUndoRuntimeError::ConfigurationMismatch)
+                    };
+                }
+                ConfigurationState::Configuring {
+                    attempt,
+                    fingerprint: current,
+                    notify,
+                } => {
+                    if current != &fingerprint {
+                        return Err(GuardedUndoRuntimeError::ConfigurationMismatch);
+                    }
+                    Action::Wait {
+                        attempt: *attempt,
+                        notify: Arc::clone(notify),
+                    }
+                }
+                ConfigurationState::Failed {
+                    fingerprint: current,
+                    ..
+                } if current != &fingerprint => {
+                    return Err(GuardedUndoRuntimeError::ConfigurationMismatch);
+                }
+                ConfigurationState::Unconfigured | ConfigurationState::Failed { .. } => {
+                    let attempt = self.allocate_attempt()?;
+                    let notify = Arc::new(Notify::new());
+                    *state = ConfigurationState::Configuring {
+                        attempt,
+                        fingerprint,
+                        notify: Arc::clone(&notify),
+                    };
+                    Action::Start { attempt, notify }
+                }
+            }
+        };
+
+        let started = matches!(&action, Action::Start { .. });
+        let (attempt, notify) = match action {
+            Action::Start { attempt, notify } => {
+                let inner = Arc::clone(&self.inner);
+                let worker_notify = Arc::clone(&notify);
+                tokio::task::spawn_blocking(move || {
+                    complete_configuration(inner, attempt, fingerprint, factory, worker_notify)
+                });
+                (attempt, notify)
+            }
+            Action::Wait { attempt, notify } => (attempt, notify),
+        };
+        let available = wait_for_configuration(&self.inner, attempt, fingerprint, &notify).await?;
+        Ok(if available {
+            if started {
+                ConfigureOutcome::Configured
+            } else {
+                ConfigureOutcome::AlreadyConfigured
+            }
+        } else {
+            ConfigureOutcome::Unavailable
+        })
+    }
+
+    async fn recovery_all_with_driver(
+        &self,
+        roots: Vec<PathBuf>,
+    ) -> Result<RecoveryOutcome, GuardedUndoRuntimeError> {
+        let fingerprint = recovery_roots_fingerprint(&roots)?;
+        let Some(driver) = self.driver()? else {
+            return Ok(RecoveryOutcome::Unavailable);
+        };
+        enum Action {
+            Start { attempt: u64, notify: Arc<Notify> },
+            Wait { attempt: u64, notify: Arc<Notify> },
+        }
+        let action = {
+            let mut state = self
+                .inner
+                .recovery
+                .lock()
+                .map_err(|_| GuardedUndoRuntimeError::Poisoned)?;
+            match &*state {
+                // Recovery is a one-time global maintenance operation. Once
+                // it completed, a later session may have a different current
+                // root set (for example after a workspace was added); do not
+                // rerun global cleanup or reject capture solely for that.
+                RecoveryState::Recovered { .. } => {
+                    return Ok(RecoveryOutcome::AlreadyRecovered);
+                }
+                RecoveryState::Recovering {
+                    attempt,
+                    fingerprint: current,
+                    notify,
+                } => {
+                    if current != &fingerprint {
+                        return Err(GuardedUndoRuntimeError::RecoveryRootsMismatch);
+                    }
+                    Action::Wait {
+                        attempt: *attempt,
+                        notify: Arc::clone(notify),
+                    }
+                }
+                RecoveryState::Unrecovered | RecoveryState::Failed { .. } => {
+                    let attempt = self.allocate_attempt()?;
+                    let notify = Arc::new(Notify::new());
+                    *state = RecoveryState::Recovering {
+                        attempt,
+                        fingerprint,
+                        notify: Arc::clone(&notify),
+                    };
+                    Action::Start { attempt, notify }
+                }
+            }
+        };
+        let started = matches!(&action, Action::Start { .. });
+        let (attempt, notify) = match action {
+            Action::Start { attempt, notify } => {
+                let inner = Arc::clone(&self.inner);
+                let worker_notify = Arc::clone(&notify);
+                tokio::task::spawn_blocking(move || {
+                    complete_recovery(inner, driver, attempt, fingerprint, roots, worker_notify)
+                });
+                (attempt, notify)
+            }
+            Action::Wait { attempt, notify } => (attempt, notify),
+        };
+        let recovered = wait_for_recovery(&self.inner, attempt, fingerprint, &notify).await?;
+        Ok(if recovered {
+            if started {
+                RecoveryOutcome::Recovered
+            } else {
+                RecoveryOutcome::AlreadyRecovered
+            }
+        } else {
+            RecoveryOutcome::Unavailable
+        })
     }
 
     fn install_driver(
@@ -451,6 +816,9 @@ impl GuardedUndoRuntime {
             }
         }
         let fingerprint = capture_request_fingerprint(&requests)?;
+        if !self.recovery_admits_capture()? {
+            return Ok(BeginTurnReport::disabled());
+        }
         let Some(driver) = self.driver()? else {
             return Ok(BeginTurnReport::disabled());
         };
@@ -692,9 +1060,27 @@ impl GuardedUndoRuntime {
             .map_err(|_| GuardedUndoRuntimeError::Poisoned)
     }
 
+    fn recovery_admits_capture(&self) -> Result<bool, GuardedUndoRuntimeError> {
+        self.inner
+            .recovery
+            .lock()
+            .map(|state| matches!(*state, RecoveryState::Recovered { .. }))
+            .map_err(|_| GuardedUndoRuntimeError::Poisoned)
+    }
+
     fn allocate_generation(&self) -> Result<u64, GuardedUndoRuntimeError> {
         self.inner
             .next_generation
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current.checked_add(1)
+            })
+            .map(|previous| previous + 1)
+            .map_err(|_| GuardedUndoRuntimeError::GenerationExhausted)
+    }
+
+    fn allocate_attempt(&self) -> Result<u64, GuardedUndoRuntimeError> {
+        self.inner
+            .next_attempt
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current.checked_add(1)
             })
@@ -737,6 +1123,16 @@ impl GuardedUndoRuntime {
     fn with_test_driver(driver: Arc<dyn CaptureDriver>) -> Self {
         let runtime = Self::new();
         runtime.install_driver(driver).expect("install test driver");
+        *runtime.inner.recovery.lock().expect("test recovery state") = RecoveryState::Recovered {
+            fingerprint: RecoveryRootsFingerprint([0; 32]),
+        };
+        runtime
+    }
+
+    #[cfg(test)]
+    fn with_unrecovered_test_driver(driver: Arc<dyn CaptureDriver>) -> Self {
+        let runtime = Self::new();
+        runtime.install_driver(driver).expect("install test driver");
         runtime
     }
 
@@ -758,6 +1154,195 @@ impl GuardedUndoRuntime {
             .lock()
             .map(|registry| registry.turns.len())
             .unwrap_or(usize::MAX)
+    }
+}
+
+fn complete_configuration(
+    inner: Arc<Inner>,
+    attempt: u64,
+    fingerprint: ConfigurationFingerprint,
+    factory: Box<dyn FnOnce() -> Result<Arc<dyn CaptureDriver>, DriverFailure> + Send + 'static>,
+    notify: Arc<Notify>,
+) {
+    let created = catch_unwind(AssertUnwindSafe(factory));
+    if let Ok(mut state) = inner.configuration.lock() {
+        let owns_attempt = matches!(
+            &*state,
+            ConfigurationState::Configuring {
+                attempt: current_attempt,
+                fingerprint: current_fingerprint,
+                ..
+            } if *current_attempt == attempt && *current_fingerprint == fingerprint
+        );
+        if owns_attempt {
+            match created {
+                Ok(Ok(driver)) => match inner.driver.lock() {
+                    Ok(mut slot) if slot.is_none() => {
+                        *slot = Some(driver);
+                        *state = ConfigurationState::Configured { fingerprint };
+                    }
+                    _ => {
+                        *state = ConfigurationState::Failed {
+                            attempt,
+                            fingerprint,
+                        };
+                    }
+                },
+                Ok(Err(_)) | Err(_) => {
+                    *state = ConfigurationState::Failed {
+                        attempt,
+                        fingerprint,
+                    };
+                }
+            }
+        }
+    }
+    notify.notify_waiters();
+}
+
+async fn wait_for_configuration(
+    inner: &Arc<Inner>,
+    attempt: u64,
+    fingerprint: ConfigurationFingerprint,
+    notify: &Arc<Notify>,
+) -> Result<bool, GuardedUndoRuntimeError> {
+    loop {
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let should_wait = {
+            let state = inner
+                .configuration
+                .lock()
+                .map_err(|_| GuardedUndoRuntimeError::Poisoned)?;
+            match &*state {
+                ConfigurationState::Configured {
+                    fingerprint: current,
+                } => {
+                    return if *current == fingerprint {
+                        Ok(true)
+                    } else {
+                        Err(GuardedUndoRuntimeError::ConfigurationMismatch)
+                    };
+                }
+                ConfigurationState::Failed {
+                    attempt: current_attempt,
+                    fingerprint: current,
+                } => {
+                    if *current != fingerprint {
+                        return Err(GuardedUndoRuntimeError::ConfigurationMismatch);
+                    }
+                    if *current_attempt == attempt {
+                        return Ok(false);
+                    }
+                    return Ok(false);
+                }
+                ConfigurationState::Configuring {
+                    attempt: current_attempt,
+                    fingerprint: current,
+                    notify: current_notify,
+                } => {
+                    if *current != fingerprint {
+                        return Err(GuardedUndoRuntimeError::ConfigurationMismatch);
+                    }
+                    *current_attempt == attempt && Arc::ptr_eq(current_notify, notify)
+                }
+                ConfigurationState::Unconfigured => return Ok(false),
+            }
+        };
+        if !should_wait {
+            return Ok(false);
+        }
+        notified.await;
+    }
+}
+
+fn complete_recovery(
+    inner: Arc<Inner>,
+    driver: Arc<dyn CaptureDriver>,
+    attempt: u64,
+    fingerprint: RecoveryRootsFingerprint,
+    roots: Vec<PathBuf>,
+    notify: Arc<Notify>,
+) {
+    let result = catch_unwind(AssertUnwindSafe(|| driver.recover_all(roots)));
+    if let Ok(mut state) = inner.recovery.lock() {
+        let owns_attempt = matches!(
+            &*state,
+            RecoveryState::Recovering {
+                attempt: current_attempt,
+                fingerprint: current_fingerprint,
+                ..
+            } if *current_attempt == attempt && *current_fingerprint == fingerprint
+        );
+        if owns_attempt {
+            *state = if matches!(result, Ok(Ok(()))) {
+                RecoveryState::Recovered { fingerprint }
+            } else {
+                RecoveryState::Failed {
+                    attempt,
+                    fingerprint,
+                }
+            };
+        }
+    }
+    notify.notify_waiters();
+}
+
+async fn wait_for_recovery(
+    inner: &Arc<Inner>,
+    attempt: u64,
+    fingerprint: RecoveryRootsFingerprint,
+    notify: &Arc<Notify>,
+) -> Result<bool, GuardedUndoRuntimeError> {
+    loop {
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let should_wait = {
+            let state = inner
+                .recovery
+                .lock()
+                .map_err(|_| GuardedUndoRuntimeError::Poisoned)?;
+            match &*state {
+                RecoveryState::Recovered {
+                    fingerprint: current,
+                } => {
+                    return if *current == fingerprint {
+                        Ok(true)
+                    } else {
+                        Err(GuardedUndoRuntimeError::RecoveryRootsMismatch)
+                    };
+                }
+                RecoveryState::Failed {
+                    attempt: current_attempt,
+                    fingerprint: current,
+                } => {
+                    if *current != fingerprint {
+                        return Err(GuardedUndoRuntimeError::RecoveryRootsMismatch);
+                    }
+                    if *current_attempt == attempt {
+                        return Ok(false);
+                    }
+                    return Ok(false);
+                }
+                RecoveryState::Recovering {
+                    attempt: current_attempt,
+                    fingerprint: current,
+                    notify: current_notify,
+                } => {
+                    if *current != fingerprint {
+                        return Err(GuardedUndoRuntimeError::RecoveryRootsMismatch);
+                    }
+                    *current_attempt == attempt && Arc::ptr_eq(current_notify, notify)
+                }
+                RecoveryState::Unrecovered => return Ok(false),
+            }
+        };
+        if !should_wait {
+            return Ok(false);
+        }
+        notified.await;
     }
 }
 
@@ -934,6 +1519,7 @@ impl CaptureDriver for CaptureV2Driver {
                 turn_id: request.turn_id,
                 workspace_id: request.workspace_id,
                 workspace_absolute: request.workspace_absolute,
+                expected_physical_root_id: request.expected_physical_root_id,
             })
             .map(|handle| Box::new(handle) as DynCaptureLease)
             .map_err(|_| DriverFailure)
@@ -951,7 +1537,12 @@ impl CaptureDriver for CaptureV2Driver {
             .downcast::<CaptureHandle>()
             .map_err(|_| DriverFailure)?;
         let summary = match mode {
-            CaptureTerminalMode::Completed => self.service.finish(*handle),
+            // DCC has not yet routed every editor/Git/delivery mutator through
+            // the physical-root coordinator. Keep Phase 1 capture fail-closed
+            // until that coverage is complete; no set may become Eligible.
+            CaptureTerminalMode::Completed => {
+                self.service.finish_without_known_mutation_coverage(*handle)
+            }
             CaptureTerminalMode::Cancelled => self.service.cancel(*handle),
             CaptureTerminalMode::ProviderFailed => self.service.provider_failed(*handle),
         }
@@ -962,6 +1553,13 @@ impl CaptureDriver for CaptureV2Driver {
             file_count: summary.file_count,
             artifact_bytes: summary.artifact_bytes,
         })
+    }
+
+    fn recover_all(&self, roots: Vec<PathBuf>) -> Result<(), DriverFailure> {
+        self.service
+            .recover_startup_all(roots.iter())
+            .map(|_| ())
+            .map_err(|_| DriverFailure)
     }
 }
 
@@ -1013,12 +1611,16 @@ mod tests {
     struct FakeDriver {
         begin_gate: Option<Arc<Gate>>,
         finalize_gate: Option<Arc<Gate>>,
+        recovery_gate: Option<Arc<Gate>>,
         begin_started: Arc<AtomicBool>,
         finalize_started: Arc<AtomicBool>,
+        recovery_started: Arc<AtomicBool>,
         begin_calls: AtomicUsize,
         finalize_calls: AtomicUsize,
+        recovery_calls: AtomicUsize,
         drops: Arc<AtomicUsize>,
         fail_finalize: bool,
+        fail_recovery: AtomicBool,
     }
 
     impl FakeDriver {
@@ -1026,12 +1628,16 @@ mod tests {
             Arc::new(Self {
                 begin_gate: None,
                 finalize_gate: None,
+                recovery_gate: None,
                 begin_started: Arc::new(AtomicBool::new(false)),
                 finalize_started: Arc::new(AtomicBool::new(false)),
+                recovery_started: Arc::new(AtomicBool::new(false)),
                 begin_calls: AtomicUsize::new(0),
                 finalize_calls: AtomicUsize::new(0),
+                recovery_calls: AtomicUsize::new(0),
                 drops: Arc::new(AtomicUsize::new(0)),
                 fail_finalize: false,
+                fail_recovery: AtomicBool::new(false),
             })
         }
     }
@@ -1072,6 +1678,19 @@ mod tests {
                 artifact_bytes: 7,
             })
         }
+
+        fn recover_all(&self, _roots: Vec<PathBuf>) -> Result<(), DriverFailure> {
+            self.recovery_calls.fetch_add(1, Ordering::SeqCst);
+            self.recovery_started.store(true, Ordering::SeqCst);
+            if let Some(gate) = self.recovery_gate.as_ref() {
+                gate.wait();
+            }
+            if self.fail_recovery.load(Ordering::SeqCst) {
+                Err(DriverFailure)
+            } else {
+                Ok(())
+            }
+        }
     }
 
     fn key() -> TerminalKey {
@@ -1096,6 +1715,8 @@ mod tests {
             turn_id: TurnId(format!("turn-{index}")),
             workspace_id: WorkspaceId(format!("workspace-{index}")),
             workspace_absolute: PathBuf::from(format!("/redacted-test-workspace-{index}")),
+            #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+            expected_physical_root_id: PhysicalRootId(vec![1, 1, index as u8]),
         }
     }
 
@@ -1146,18 +1767,299 @@ mod tests {
         );
     }
 
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn unsupported_configuration_and_recovery_are_noops() {
+        let temporary = tempfile::tempdir().unwrap();
+        let repo = SqliteSessionRepo::open(temporary.path().join("sessions.sqlite3")).unwrap();
+        let runtime = GuardedUndoRuntime::new();
+        assert_eq!(
+            runtime
+                .configure_capture_v2_scoped(temporary.path().join("app-data"), repo, [7; 32],)
+                .await
+                .unwrap(),
+            ConfigureOutcome::Disabled
+        );
+        assert_eq!(
+            runtime.recovery_all(Vec::new()).await.unwrap(),
+            RecoveryOutcome::Disabled
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_configuration_builds_exactly_one_driver_and_rejects_mismatch() {
+        let runtime = GuardedUndoRuntime::new();
+        let fingerprint = configuration_fingerprint(&[1; 32]);
+        let gate = Arc::new(Gate::closed());
+        let started = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut waiters = Vec::new();
+        for _ in 0..32 {
+            let runtime = runtime.clone();
+            let gate = Arc::clone(&gate);
+            let started = Arc::clone(&started);
+            let calls = Arc::clone(&calls);
+            waiters.push(tokio::spawn(async move {
+                runtime
+                    .configure_with_factory(
+                        fingerprint,
+                        Box::new(move || {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            started.store(true, Ordering::SeqCst);
+                            gate.wait();
+                            Ok(FakeDriver::new() as Arc<dyn CaptureDriver>)
+                        }),
+                    )
+                    .await
+            }));
+        }
+        wait_until(|| started.load(Ordering::SeqCst)).await;
+        gate.release();
+        let mut configured = 0;
+        for waiter in waiters {
+            match waiter.await.unwrap().unwrap() {
+                ConfigureOutcome::Configured => configured += 1,
+                ConfigureOutcome::AlreadyConfigured => {}
+                unexpected => panic!("unexpected configure outcome: {unexpected:?}"),
+            }
+        }
+        assert_eq!(configured, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let divergent = configuration_fingerprint(&[2; 32]);
+        assert_eq!(
+            runtime
+                .configure_with_factory(
+                    divergent,
+                    Box::new(|| Ok(FakeDriver::new() as Arc<dyn CaptureDriver>)),
+                )
+                .await,
+            Err(GuardedUndoRuntimeError::ConfigurationMismatch)
+        );
+        assert!(
+            !format!("{:?}", GuardedUndoRuntimeError::ConfigurationMismatch)
+                .contains("other-redacted")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelled_configuration_waiter_does_not_duplicate_worker_and_failure_retries() {
+        let runtime = GuardedUndoRuntime::new();
+        let fingerprint = configuration_fingerprint(&[1; 32]);
+        let gate = Arc::new(Gate::closed());
+        let started = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let waiter = tokio::spawn({
+            let runtime = runtime.clone();
+            let gate = Arc::clone(&gate);
+            let started = Arc::clone(&started);
+            let calls = Arc::clone(&calls);
+            async move {
+                runtime
+                    .configure_with_factory(
+                        fingerprint,
+                        Box::new(move || {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            started.store(true, Ordering::SeqCst);
+                            gate.wait();
+                            Err(DriverFailure)
+                        }),
+                    )
+                    .await
+            }
+        });
+        wait_until(|| started.load(Ordering::SeqCst)).await;
+        waiter.abort();
+        gate.release();
+        let retried = runtime
+            .configure_with_factory(
+                fingerprint,
+                Box::new({
+                    let calls = Arc::clone(&calls);
+                    move || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Ok(FakeDriver::new() as Arc<dyn CaptureDriver>)
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            retried,
+            ConfigureOutcome::Configured | ConfigureOutcome::Unavailable
+        ));
+        if retried == ConfigureOutcome::Unavailable {
+            assert_eq!(
+                runtime
+                    .configure_with_factory(
+                        fingerprint,
+                        Box::new({
+                            let calls = Arc::clone(&calls);
+                            move || {
+                                calls.fetch_add(1, Ordering::SeqCst);
+                                Ok(FakeDriver::new() as Arc<dyn CaptureDriver>)
+                            }
+                        }),
+                    )
+                    .await
+                    .unwrap(),
+                ConfigureOutcome::Configured
+            );
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn recovery_is_single_flight_order_independent_and_cancel_safe() {
+        let gate = Arc::new(Gate::closed());
+        let driver = Arc::new(FakeDriver {
+            begin_gate: None,
+            finalize_gate: None,
+            recovery_gate: Some(Arc::clone(&gate)),
+            begin_started: Arc::new(AtomicBool::new(false)),
+            finalize_started: Arc::new(AtomicBool::new(false)),
+            recovery_started: Arc::new(AtomicBool::new(false)),
+            begin_calls: AtomicUsize::new(0),
+            finalize_calls: AtomicUsize::new(0),
+            recovery_calls: AtomicUsize::new(0),
+            drops: Arc::new(AtomicUsize::new(0)),
+            fail_finalize: false,
+            fail_recovery: AtomicBool::new(false),
+        });
+        let runtime = GuardedUndoRuntime::with_unrecovered_test_driver(driver.clone());
+        let roots = vec![PathBuf::from("/root-a"), PathBuf::from("/root-b")];
+        let leader = tokio::spawn({
+            let runtime = runtime.clone();
+            let roots = roots.clone();
+            async move { runtime.recovery_all_with_driver(roots).await }
+        });
+        wait_until(|| driver.recovery_started.load(Ordering::SeqCst)).await;
+        assert_eq!(
+            runtime
+                .recovery_all_with_driver(vec![PathBuf::from("/different-root")])
+                .await,
+            Err(GuardedUndoRuntimeError::RecoveryRootsMismatch)
+        );
+        assert_eq!(driver.recovery_calls.load(Ordering::SeqCst), 1);
+        leader.abort();
+        let gated = runtime.begin_turn(key(), vec![request()]).await.unwrap();
+        assert_eq!(gated.disposition, BeginDisposition::Disabled);
+        assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 0);
+        let follower = tokio::spawn({
+            let runtime = runtime.clone();
+            async move {
+                runtime
+                    .recovery_all_with_driver(vec![
+                        PathBuf::from("/root-b"),
+                        PathBuf::from("/root-a"),
+                    ])
+                    .await
+            }
+        });
+        gate.release();
+        assert_eq!(
+            follower.await.unwrap().unwrap(),
+            RecoveryOutcome::AlreadyRecovered
+        );
+        assert_eq!(driver.recovery_calls.load(Ordering::SeqCst), 1);
+        let admitted = runtime.begin_turn(key(), vec![request()]).await.unwrap();
+        assert_eq!(admitted.disposition, BeginDisposition::Started);
+        assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            runtime
+                .recovery_all_with_driver(vec![PathBuf::from("/different-root")])
+                .await,
+            Ok(RecoveryOutcome::AlreadyRecovered)
+        );
+        assert_eq!(driver.recovery_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_recovery_is_retryable_and_invalid_sets_never_call_driver() {
+        let driver = FakeDriver::new();
+        driver.fail_recovery.store(true, Ordering::SeqCst);
+        let runtime = GuardedUndoRuntime::with_unrecovered_test_driver(driver.clone());
+        assert_eq!(
+            runtime
+                .recovery_all_with_driver(vec![PathBuf::from("/root-a")])
+                .await
+                .unwrap(),
+            RecoveryOutcome::Unavailable
+        );
+        let gated = runtime.begin_turn(key(), vec![request()]).await.unwrap();
+        assert_eq!(gated.disposition, BeginDisposition::Disabled);
+        assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 0);
+        driver.fail_recovery.store(false, Ordering::SeqCst);
+        assert_eq!(
+            runtime
+                .recovery_all_with_driver(vec![PathBuf::from("/corrected-root")])
+                .await
+                .unwrap(),
+            RecoveryOutcome::Recovered
+        );
+        assert_eq!(driver.recovery_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            runtime
+                .begin_turn(key(), vec![request()])
+                .await
+                .unwrap()
+                .disposition,
+            BeginDisposition::Started
+        );
+        assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 1);
+
+        let other = GuardedUndoRuntime::with_unrecovered_test_driver(FakeDriver::new());
+        assert_eq!(
+            other.recovery_all_with_driver(Vec::new()).await,
+            Err(GuardedUndoRuntimeError::EmptyRecoverySet)
+        );
+        assert_eq!(
+            other
+                .recovery_all_with_driver(vec![PathBuf::from("/same"), PathBuf::from("/same")])
+                .await,
+            Err(GuardedUndoRuntimeError::DuplicateRecoveryRoot)
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn recovery_allows_a_bounded_global_root_set_larger_than_turn_capture_limit() {
+        let driver = FakeDriver::new();
+        let runtime = GuardedUndoRuntime::with_unrecovered_test_driver(driver.clone());
+        let roots = (0..=MAX_CAPTURE_ROOTS_PER_TURN)
+            .map(|index| PathBuf::from(format!("/recovery-root-{index}")))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            runtime.recovery_all_with_driver(roots).await.unwrap(),
+            RecoveryOutcome::Recovered
+        );
+        assert_eq!(driver.recovery_calls.load(Ordering::SeqCst), 1);
+
+        let oversized = (0..=MAX_RECOVERY_ROOTS)
+            .map(|index| PathBuf::from(format!("/oversized-recovery-root-{index}")))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            runtime.recovery_all_with_driver(oversized).await,
+            Err(GuardedUndoRuntimeError::RecoveryRootLimitExceeded)
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn concurrent_begin_callers_share_one_blocking_begin() {
         let gate = Arc::new(Gate::closed());
         let driver = Arc::new(FakeDriver {
             begin_gate: Some(Arc::clone(&gate)),
             finalize_gate: None,
+            recovery_gate: None,
             begin_started: Arc::new(AtomicBool::new(false)),
             finalize_started: Arc::new(AtomicBool::new(false)),
+            recovery_started: Arc::new(AtomicBool::new(false)),
             begin_calls: AtomicUsize::new(0),
             finalize_calls: AtomicUsize::new(0),
+            recovery_calls: AtomicUsize::new(0),
             drops: Arc::new(AtomicUsize::new(0)),
             fail_finalize: false,
+            fail_recovery: AtomicBool::new(false),
         });
         let runtime = GuardedUndoRuntime::with_test_driver(driver.clone());
         let mut waiters = Vec::new();
@@ -1177,33 +2079,34 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn replay_identity_is_order_independent_and_rejects_set_or_path_changes() {
+    async fn replay_identity_rejects_snapshot_or_path_changes() {
         let gate = Arc::new(Gate::closed());
         let driver = Arc::new(FakeDriver {
             begin_gate: Some(Arc::clone(&gate)),
             finalize_gate: None,
+            recovery_gate: None,
             begin_started: Arc::new(AtomicBool::new(false)),
             finalize_started: Arc::new(AtomicBool::new(false)),
+            recovery_started: Arc::new(AtomicBool::new(false)),
             begin_calls: AtomicUsize::new(0),
             finalize_calls: AtomicUsize::new(0),
+            recovery_calls: AtomicUsize::new(0),
             drops: Arc::new(AtomicUsize::new(0)),
             fail_finalize: false,
+            fail_recovery: AtomicBool::new(false),
         });
         let runtime = GuardedUndoRuntime::with_test_driver(driver.clone());
         let first = request_in_default_turn(1);
-        let second = request_in_default_turn(2);
         let leader = tokio::spawn({
             let runtime = runtime.clone();
             let first = first.clone();
-            let second = second.clone();
-            async move { runtime.begin_turn(key(), vec![first, second]).await }
+            async move { runtime.begin_turn(key(), vec![first]).await }
         });
         wait_until(|| driver.begin_started.load(Ordering::SeqCst)).await;
         let replay = tokio::spawn({
             let runtime = runtime.clone();
             let first = first.clone();
-            let second = second.clone();
-            async move { runtime.begin_turn(key(), vec![second, first]).await }
+            async move { runtime.begin_turn(key(), vec![first]).await }
         });
         gate.release();
         assert_eq!(
@@ -1214,23 +2117,21 @@ mod tests {
             replay.await.unwrap().unwrap().disposition,
             BeginDisposition::Replayed
         );
-        assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 1);
 
         let mut path_changed = first.clone();
         path_changed.workspace_absolute = PathBuf::from("/different-redacted-workspace");
         assert_eq!(
-            runtime
-                .begin_turn(key(), vec![path_changed, second.clone()])
-                .await,
+            runtime.begin_turn(key(), vec![path_changed]).await,
             Err(GuardedUndoRuntimeError::ReplayRequestMismatch)
         );
         let mut set_changed = first;
         set_changed.snapshot_id = "different-snapshot".to_owned();
         assert_eq!(
-            runtime.begin_turn(key(), vec![set_changed, second]).await,
+            runtime.begin_turn(key(), vec![set_changed]).await,
             Err(GuardedUndoRuntimeError::ReplayRequestMismatch)
         );
-        assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1269,29 +2170,6 @@ mod tests {
             Err(GuardedUndoRuntimeError::CaptureRootLimitExceeded)
         );
 
-        let first = request();
-        let mut duplicate_snapshot = request_for(1);
-        duplicate_snapshot.session_id = key().session_id;
-        duplicate_snapshot.turn_id = key().turn_id;
-        duplicate_snapshot.snapshot_id = first.snapshot_id.clone();
-        assert_eq!(
-            runtime
-                .begin_turn(key(), vec![first.clone(), duplicate_snapshot])
-                .await,
-            Err(GuardedUndoRuntimeError::DuplicateSnapshot)
-        );
-
-        let mut duplicate_workspace = request_for(2);
-        duplicate_workspace.session_id = key().session_id;
-        duplicate_workspace.turn_id = key().turn_id;
-        duplicate_workspace.workspace_id = first.workspace_id.clone();
-        assert_eq!(
-            runtime
-                .begin_turn(key(), vec![first, duplicate_workspace])
-                .await,
-            Err(GuardedUndoRuntimeError::DuplicateWorkspace)
-        );
-
         assert_eq!(driver.begin_calls.load(Ordering::SeqCst), 0);
         assert_eq!(runtime.phase(&key()), None);
     }
@@ -1302,12 +2180,16 @@ mod tests {
         let driver = Arc::new(FakeDriver {
             begin_gate: Some(Arc::clone(&gate)),
             finalize_gate: None,
+            recovery_gate: None,
             begin_started: Arc::new(AtomicBool::new(false)),
             finalize_started: Arc::new(AtomicBool::new(false)),
+            recovery_started: Arc::new(AtomicBool::new(false)),
             begin_calls: AtomicUsize::new(0),
             finalize_calls: AtomicUsize::new(0),
+            recovery_calls: AtomicUsize::new(0),
             drops: Arc::new(AtomicUsize::new(0)),
             fail_finalize: false,
+            fail_recovery: AtomicBool::new(false),
         });
         let runtime = GuardedUndoRuntime::with_test_driver(driver.clone());
         let waiter = tokio::spawn({
@@ -1327,12 +2209,16 @@ mod tests {
         let driver = Arc::new(FakeDriver {
             begin_gate: None,
             finalize_gate: Some(Arc::clone(&gate)),
+            recovery_gate: None,
             begin_started: Arc::new(AtomicBool::new(false)),
             finalize_started: Arc::new(AtomicBool::new(false)),
+            recovery_started: Arc::new(AtomicBool::new(false)),
             begin_calls: AtomicUsize::new(0),
             finalize_calls: AtomicUsize::new(0),
+            recovery_calls: AtomicUsize::new(0),
             drops: Arc::new(AtomicUsize::new(0)),
             fail_finalize: false,
+            fail_recovery: AtomicBool::new(false),
         });
         let runtime = GuardedUndoRuntime::with_test_driver(driver.clone());
         runtime.begin_turn(key(), vec![request()]).await.unwrap();
@@ -1381,12 +2267,16 @@ mod tests {
         let driver = Arc::new(FakeDriver {
             begin_gate: None,
             finalize_gate: None,
+            recovery_gate: None,
             begin_started: Arc::new(AtomicBool::new(false)),
             finalize_started: Arc::new(AtomicBool::new(false)),
+            recovery_started: Arc::new(AtomicBool::new(false)),
             begin_calls: AtomicUsize::new(0),
             finalize_calls: AtomicUsize::new(0),
+            recovery_calls: AtomicUsize::new(0),
             drops: Arc::new(AtomicUsize::new(0)),
             fail_finalize: true,
+            fail_recovery: AtomicBool::new(false),
         });
         let runtime = GuardedUndoRuntime::with_test_driver(driver);
         runtime.begin_turn(key(), vec![request()]).await.unwrap();
