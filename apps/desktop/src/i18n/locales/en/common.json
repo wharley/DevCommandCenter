@@ -1129,6 +1129,8 @@
       },
       "listView": "Show as list",
       "treeView": "Show as tree",
+      "backToList": "Back to changed files",
+      "expandDiff": "Open expanded diff",
       "emptyWorking": "The workspace has no local changes.",
       "emptyBranch": "This branch has no changes against its base yet.",
       "loadingGit": "Reading changed files…",

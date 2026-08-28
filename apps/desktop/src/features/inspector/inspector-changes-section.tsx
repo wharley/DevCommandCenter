@@ -8,7 +8,6 @@ import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-
 import {
 	ChevronRight,
 	CloudIcon,
-	FileDiff,
 	GitCompareArrows,
 	LaptopIcon,
 	List as ListIcon,
@@ -47,7 +46,10 @@ import { useCodeRabbitIntegrationEnabled } from "@/features/settings/coderabbit-
 import { CodeRabbitReviewSection } from "./coderabbit-review-section";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { useWorkspaceGitBranchDiff, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
-import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
+import {
+	WorkspaceGitFilePreview,
+	type WorkspaceGitPreviewSelection,
+} from "./workspace-git-file-preview";
 import {
 	changeGroupBelongsToScope,
 	defaultInspectorChangesScope,
@@ -762,6 +764,7 @@ type InspectorChangesSectionProps = {
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
 	targetSessionId?: string | null;
 	headerAction?: ReactNode;
+	onOpenExpandedPreview?: () => void;
 	/** A commit/push/PR action is reconciling the Git state shown below. */
 	isGitActionInProgress?: boolean;
 };
@@ -774,6 +777,7 @@ export function InspectorChangesSection({
 	reviewCommentsByPath = EMPTY_REVIEW_COMMENTS_BY_PATH,
 	targetSessionId = null,
 	headerAction = null,
+	onOpenExpandedPreview,
 	isGitActionInProgress = false,
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
@@ -930,26 +934,73 @@ export function InspectorChangesSection({
 	const visibleSummary = summarizeInspectorChanges(visibleChanges);
 	const hasReviewableChanges = hasAny || branchChanges.length > 0;
 
+	if (selectedPreview) {
+		return (
+			<div className="relative flex min-h-0 flex-1 flex-col">
+				<WorkspaceGitFilePreview
+					workspaceRoot={root}
+					selection={selectedPreview}
+					onBack={() => handleSelectPreview(null)}
+					onExpand={onOpenExpandedPreview}
+					forceUnified
+				/>
+				{isGitActionInProgress ? (
+					<div
+						className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-md border border-border/60 bg-background/95 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm backdrop-blur-[1px]"
+						role="status"
+						aria-live="polite"
+					>
+						<LoaderCircleIcon className="size-3.5 animate-spin text-primary" aria-hidden />
+						{t("inspector.changes.updatingGit")}
+					</div>
+				) : null}
+			</div>
+		);
+	}
+
 	return (
 		<div className="relative flex min-h-0 flex-1 flex-col">
 			<div className="shrink-0 border-b border-border/50 bg-background">
-				<div className="flex min-h-11 items-center gap-2 px-3 py-2">
-					<div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-						<FileDiff className="size-3.5" strokeWidth={1.9} />
+				<div className="flex min-h-10 items-center gap-1 px-2 py-1.5">
+					<div
+						className="flex min-w-0 flex-1 gap-0.5 rounded-md bg-muted/35 p-0.5"
+						role="tablist"
+						aria-label={t("inspector.changes.scopeLabel")}
+					>
+						{(["working", "branch"] as const).map((scope) => {
+							const active = scope === activeScope;
+							const count =
+								scope === "working" ? workingChanges.length : branchChanges.length;
+							const Icon = scope === "working" ? LaptopIcon : GitCompareArrows;
+							return (
+								<button
+									key={scope}
+									type="button"
+									role="tab"
+									aria-selected={active}
+									onClick={() => handleScopeChange(scope)}
+									className={cn(
+										"flex h-7 min-w-0 flex-1 items-center justify-center gap-1 rounded-[5px] px-1.5 text-[10.5px] font-medium transition-colors",
+										active
+											? "bg-background text-foreground shadow-sm"
+											: "text-muted-foreground hover:text-foreground",
+									)}
+								>
+									<Icon className="size-3.5 shrink-0" strokeWidth={1.9} />
+									<span className="truncate">{t(`inspector.changes.scopes.${scope}`)}</span>
+									<span className="shrink-0 tabular-nums opacity-65">{count}</span>
+								</button>
+							);
+						})}
 					</div>
-					<div className="min-w-0 flex-1">
-						<div className="flex min-w-0 items-baseline gap-2">
-							<p className="truncate text-[12px] font-semibold text-foreground">
-								{t("inspector.changes.title")}
-							</p>
-							<span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-								{t("inspector.changes.fileCount", { count: visibleSummary.fileCount })}
-							</span>
-						</div>
-						<div className="mt-0.5 flex items-center gap-1.5 text-[10px] tabular-nums">
-							<span className="text-emerald-600 dark:text-emerald-400">+{visibleSummary.insertions}</span>
-							<span className="text-destructive">−{visibleSummary.deletions}</span>
-						</div>
+					<div
+						className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums"
+						aria-label={t("inspector.changes.fileCount", {
+							count: visibleSummary.fileCount,
+						})}
+					>
+						<span className="text-emerald-600 dark:text-emerald-400">+{visibleSummary.insertions}</span>
+						<span className="text-destructive">−{visibleSummary.deletions}</span>
 					</div>
 					{headerAction}
 					<Tooltip>
@@ -958,7 +1009,7 @@ export function InspectorChangesSection({
 								type="button"
 								variant="ghost"
 								size="icon-xs"
-								className="size-7 text-muted-foreground hover:text-foreground"
+								className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
 								aria-label={t(
 									changesTreeView
 										? "inspector.changes.listView"
@@ -981,37 +1032,6 @@ export function InspectorChangesSection({
 							)}
 						</TooltipContent>
 					</Tooltip>
-				</div>
-				<div
-					className="flex gap-1 px-2 pb-2"
-					role="tablist"
-					aria-label={t("inspector.changes.scopeLabel")}
-				>
-					{(["working", "branch"] as const).map((scope) => {
-						const active = scope === activeScope;
-						const count =
-							scope === "working" ? workingChanges.length : branchChanges.length;
-						const Icon = scope === "working" ? LaptopIcon : GitCompareArrows;
-						return (
-							<button
-								key={scope}
-								type="button"
-								role="tab"
-								aria-selected={active}
-								onClick={() => handleScopeChange(scope)}
-								className={cn(
-									"flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[10.5px] font-medium transition-colors",
-									active
-										? "bg-muted text-foreground shadow-sm"
-										: "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-								)}
-							>
-								<Icon className="size-3.5 shrink-0" strokeWidth={1.9} />
-								<span className="truncate">{t(`inspector.changes.scopes.${scope}`)}</span>
-								<span className="shrink-0 tabular-nums opacity-70">{count}</span>
-							</button>
-						);
-					})}
 				</div>
 			</div>
 			<ScrollArea
@@ -1037,9 +1057,7 @@ export function InspectorChangesSection({
 							treeView={changesTreeView}
 							onToggleTreeView={() => setChangesTreeView((v) => !v)}
 							showViewToggle={false}
-							selectedPath={
-								selectedPreview?.group === "staged" ? selectedPreview.path : null
-							}
+							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
 							onSelect={handleSelectPreview}
 						/>
@@ -1068,9 +1086,7 @@ export function InspectorChangesSection({
 									strokeWidth={2}
 								/>
 							}
-							selectedPath={
-								selectedPreview?.group === "unstaged" ? selectedPreview.path : null
-							}
+							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
 							onSelect={handleSelectPreview}
 						/>
@@ -1098,11 +1114,7 @@ export function InspectorChangesSection({
 							workspaceRoot={root}
 							gitBusy={gitBusy}
 							treeView={changesTreeView}
-							selectedPath={
-								selectedPreview?.group === "committed"
-									? selectedPreview.path
-									: null
-							}
+							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
 							onSelect={handleSelectPreview}
 						/>

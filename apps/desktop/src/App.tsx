@@ -1957,9 +1957,12 @@ export default function App() {
 	const closeInspector = useCallback(() => {
 		// A manual close is an explicit override of the pin. The next opening
 		// should be contextual again unless the user pins it again.
+		if (surfaceSelectionRef.current?.kind === "git-diff") {
+			requestSurfaceSelection(null);
+		}
 		setInspectorPresentation("contextual");
 		setInspectorCollapsed(true);
-	}, [setInspectorCollapsed]);
+	}, [requestSurfaceSelection, setInspectorCollapsed]);
 	const handleInspectorContextualActionComplete = useCallback(() => {
 		if (
 			shouldCollapseContextualInspector(
@@ -5020,6 +5023,7 @@ export default function App() {
 										setInspectorPresentation(pinned ? "pinned" : "contextual")
 									}
 									onRequestClose={closeInspector}
+									onOpenExpandedPreview={() => setInspectorCollapsed(true)}
 									onOpenLastTurnReview={openTurnReviewSurface}
 									onContextualActionComplete={
 										handleInspectorContextualActionComplete

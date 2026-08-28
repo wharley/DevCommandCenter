@@ -1,6 +1,14 @@
 import type { CodeRabbitFindingSeverity, WorkspacePrReviewComment } from "@dcc/contracts";
-import { AlertCircle, FileCode2, LoaderCircle } from "lucide-react";
+import {
+	AlertCircle,
+	ArrowLeft,
+	Expand,
+	FileCode2,
+	LoaderCircle,
+} from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { WorkspaceChangesDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
 import { useWorkspaceGitFilePreviewContent } from "./use-workspace-git-file-preview-content";
 
@@ -29,12 +37,20 @@ export type WorkspaceGitPreviewSelection = {
 type WorkspaceGitFilePreviewProps = {
 	workspaceRoot: string | null;
 	selection: WorkspaceGitPreviewSelection | null;
+	onBack?: () => void;
+	onExpand?: () => void;
+	/** Narrow review panes need one readable code column instead of a split diff. */
+	forceUnified?: boolean;
 };
 
 export function WorkspaceGitFilePreview({
 	workspaceRoot,
 	selection,
+	onBack,
+	onExpand,
+	forceUnified = false,
 }: WorkspaceGitFilePreviewProps) {
+	const { t } = useTranslation("common");
 	const effectiveWorkspaceRoot = selection?.workspaceRootOverride ?? workspaceRoot;
 	const query = useWorkspaceGitFilePreviewContent(
 		selection && effectiveWorkspaceRoot
@@ -88,8 +104,21 @@ export function WorkspaceGitFilePreview({
 	const snapshot = query.data;
 
 	return (
-		<div className="flex min-h-[180px] flex-1 flex-col overflow-hidden rounded-md border border-border/50 bg-background/60">
-			<div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/45 px-3 py-2">
+		<div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+			<div className="flex min-h-11 items-center gap-2 border-b border-border/50 px-2 py-1.5">
+				{onBack ? (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+						onClick={onBack}
+						aria-label={t("inspector.changes.backToList")}
+						title={t("inspector.changes.backToList")}
+					>
+						<ArrowLeft className="size-4" strokeWidth={1.8} />
+					</Button>
+				) : null}
 				<div className="min-w-0">
 					<div className="truncate text-[11.5px] font-medium text-foreground">
 						{selection.name}
@@ -98,10 +127,7 @@ export function WorkspaceGitFilePreview({
 						{selection.path}
 					</div>
 				</div>
-				<div className="flex flex-wrap items-center gap-1">
-					<Badge variant="secondary" className="h-4 rounded-full px-1.5 text-[9.5px] font-semibold">
-						{selection.group}
-					</Badge>
+				<div className="ml-auto flex shrink-0 items-center gap-1">
 					<Badge variant="outline" className="h-4 rounded-full px-1.5 text-[9.5px] font-semibold">
 						{selection.status}
 					</Badge>
@@ -110,10 +136,20 @@ export function WorkspaceGitFilePreview({
 							{selection.baseBranch.replace(/^origin\//, "")}
 						</Badge>
 					) : null}
+					{onExpand ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							className="ml-0.5 size-7 text-muted-foreground hover:text-foreground"
+							onClick={onExpand}
+							aria-label={t("inspector.changes.expandDiff")}
+							title={t("inspector.changes.expandDiff")}
+						>
+							<Expand className="size-3.5" strokeWidth={1.8} />
+						</Button>
+					) : null}
 				</div>
-			</div>
-			<div className="border-b border-border/35 px-3 py-1.5 text-[10px] text-muted-foreground">
-				Showing read-only code diff for the selected file.
 			</div>
 			{snapshot ? (
 				<WorkspaceChangesDiffLoader
@@ -121,8 +157,9 @@ export function WorkspaceGitFilePreview({
 					path={selection.path}
 					originalText={snapshot.originalText}
 					modifiedText={snapshot.modifiedText}
-					inline={snapshot.inline}
-					className="min-h-[280px] rounded-b-md"
+					inline={forceUnified || snapshot.inline}
+					machineAnnotations={selection.machineAnnotations}
+					className="min-h-0"
 				/>
 			) : (
 				<div className="flex min-h-[180px] flex-1 items-center justify-center px-4 py-6 text-center text-[11px] text-muted-foreground">

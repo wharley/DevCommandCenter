@@ -248,6 +248,7 @@ type WorkspaceInspectorSidebarProps = {
 	isPinned: boolean;
 	onPinnedChange: (pinned: boolean) => void;
 	onRequestClose: () => void;
+	onOpenExpandedPreview?: () => void;
 	onOpenLastTurnReview?: (sessionId: string) => void;
 	onContextualActionComplete?: () => void;
 	activeTab: InspectorTab;
@@ -1594,6 +1595,7 @@ export function WorkspaceInspectorSidebar({
 	isPinned,
 	onPinnedChange,
 	onRequestClose,
+	onOpenExpandedPreview,
 	onOpenLastTurnReview,
 	onContextualActionComplete,
 	activeTab,
@@ -3598,6 +3600,7 @@ export function WorkspaceInspectorSidebar({
 										activeDelegationReview?.delegation.childSessionId ??
 										(isSessionWorktreeView ? sessionId : null)
 									}
+									onOpenExpandedPreview={onOpenExpandedPreview}
 									headerAction={
 										sessionId && onOpenLastTurnReview ? (
 											<Tooltip>
@@ -3605,12 +3608,12 @@ export function WorkspaceInspectorSidebar({
 													<Button
 														type="button"
 														variant="ghost"
-														size="xs"
-														className="h-7 shrink-0 gap-1.5 px-2 text-[10.5px] text-muted-foreground hover:text-foreground"
+														size="icon-xs"
+														className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
 														onClick={() => onOpenLastTurnReview(sessionId)}
+														aria-label={t("turnReview.action")}
 													>
 														<FileDiff className="size-3.5" strokeWidth={1.8} />
-														<span>{t("turnReview.action")}</span>
 													</Button>
 												</TooltipTrigger>
 												<TooltipContent side="bottom">

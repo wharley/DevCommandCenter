@@ -117,6 +117,7 @@ import {
 	readRestorableSecondarySurfaceSelection,
 	readSecondarySurfaceWidth,
 	resolveSecondarySurfaceRestoration,
+	shouldRenderGitDiffSurface,
 } from "./secondary-surface-layout";
 import { TurnReviewSurface } from "./turn-review-surface";
 import { TurnReviewActionSummary } from "./turn-review-action-summary";
@@ -1327,7 +1328,8 @@ export function WorkspacePanel({
 				workspaceId={workspaceSurfaceSelection.workspaceId}
 				onClose={onCloseSurface}
 			/>
-		) : workspaceSurfaceSelection?.kind === "git-diff" ? (
+		) : workspaceSurfaceSelection?.kind === "git-diff" &&
+			shouldRenderGitDiffSurface(inspectorCollapsed) ? (
 			<WorkspaceEditorSurface
 				workspaceRoot={workspacePath}
 				selection={workspaceSurfaceSelection.file}

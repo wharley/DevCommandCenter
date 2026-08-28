@@ -57,6 +57,15 @@ export function canDockSecondarySurface(containerWidth: number) {
 	return containerWidth >= MIN_PRIMARY_SURFACE_WIDTH + MIN_SECONDARY_SURFACE_WIDTH;
 }
 
+/**
+ * Changed files are reviewed inside the visible Inspector. The companion
+ * surface remains available when the Inspector is closed or when the user
+ * explicitly asks for the expanded review.
+ */
+export function shouldRenderGitDiffSurface(inspectorCollapsed?: boolean) {
+	return inspectorCollapsed !== false;
+}
+
 export function readSecondarySurfaceWidth(workspaceId: string) {
 	if (typeof window === "undefined") return DEFAULT_SECONDARY_SURFACE_WIDTH;
 	try {

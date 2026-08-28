@@ -13,6 +13,7 @@ import {
 	resolveSecondarySurfaceRestoration,
 	secondarySurfaceSelectionStorageKey,
 	secondarySurfaceStorageKey,
+	shouldRenderGitDiffSurface,
 } from "./secondary-surface-layout";
 
 describe("secondary surface layout", () => {
@@ -37,6 +38,12 @@ describe("secondary surface layout", () => {
 		expect(clampSecondarySurfaceWidthForContainer(840, 900)).toBe(500);
 		expect(canDockSecondarySurface(760)).toBe(true);
 		expect(canDockSecondarySurface(759)).toBe(false);
+	});
+
+	it("routes changed-file review into the visible Inspector", () => {
+		expect(shouldRenderGitDiffSurface(false)).toBe(false);
+		expect(shouldRenderGitDiffSurface(true)).toBe(true);
+		expect(shouldRenderGitDiffSurface()).toBe(true);
 	});
 
 	it("persists an independent validated preference per workspace", () => {
