@@ -8,7 +8,7 @@ use crate::{
         },
         project::{Project, ProjectId},
         repository::{Repository, RepositoryId},
-        session::{Session, SessionEventRecord, SessionId, TurnId},
+        session::{Session, SessionEventKind, SessionEventRecord, SessionId, TurnId},
         thread::{Thread, ThreadId},
         usage::{ModelTokenUsage, UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
@@ -148,6 +148,42 @@ pub trait SessionRepo: Send + Sync {
 #[async_trait]
 pub trait SessionEventRepo: Send + Sync {
     async fn append_event(&self, event: &SessionEventRecord) -> Result<AppendEventOutcome>;
+    /// Returns the canonical durable terminal event for one turn.
+    ///
+    /// The default keeps lightweight mocks source-compatible. Production
+    /// repositories should override it with an indexed, metadata-validating
+    /// lookup. Multiple terminal records or records attributed to another
+    /// session fail closed.
+    async fn find_terminal_event(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<Option<SessionEventRecord>> {
+        let events = self.list_events_by_session(session_id).await?;
+        let mut terminal = None;
+        for event in events {
+            if event.session_id != *session_id {
+                return Err(crate::CoreError::Repository(
+                    "terminal event session attribution is inconsistent".to_string(),
+                ));
+            }
+            let event_turn_id = match &event.kind {
+                SessionEventKind::TurnCompleted { turn_id }
+                | SessionEventKind::TurnAborted { turn_id, .. } => turn_id,
+                _ => continue,
+            };
+            if event_turn_id != turn_id {
+                continue;
+            }
+            if terminal.is_some() {
+                return Err(crate::CoreError::Repository(
+                    "multiple terminal events exist for one turn".to_string(),
+                ));
+            }
+            terminal = Some(event);
+        }
+        Ok(terminal)
+    }
     async fn list_events_by_session(
         &self,
         session_id: &SessionId,

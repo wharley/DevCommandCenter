@@ -4953,6 +4953,55 @@ impl SessionEventRepo for SqliteSessionRepo {
         Ok(AppendEventOutcome::Inserted(canonical))
     }
 
+    async fn find_terminal_event(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<Option<SessionEventRecord>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                r#"
+                SELECT event_id, session_id, sequence, kind_json, occurred_at,
+                       terminal_turn_id, terminal_kind
+                  FROM dcc_session_events
+                 WHERE session_id = ?1 AND terminal_turn_id = ?2
+                 LIMIT 2
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map(
+                params![session_id.0.clone(), turn_id.0.clone()],
+                Self::event_with_metadata_from_row,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut canonical = None;
+        for row in rows {
+            let (event, terminal_turn_id, terminal_kind) =
+                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            Self::validate_event_metadata(
+                &event,
+                terminal_turn_id.as_deref(),
+                terminal_kind.as_deref(),
+            )?;
+            if event.session_id != *session_id {
+                return Err(dcc_core::CoreError::Repository(
+                    "terminal event session attribution is inconsistent".to_string(),
+                ));
+            }
+            if canonical.replace(event).is_some() {
+                return Err(dcc_core::CoreError::Repository(
+                    "multiple terminal events exist for one turn".to_string(),
+                ));
+            }
+        }
+        Ok(canonical)
+    }
+
     async fn list_events_by_session(
         &self,
         session_id: &SessionId,
@@ -7547,6 +7596,130 @@ mod tests {
             occurred_at: "2026-01-01T00:00:00Z".to_owned(),
             kind,
         }
+    }
+
+    #[test]
+    fn terminal_precheck_returns_none_completed_and_aborted_canonical_events() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        event_session(&repo, "terminal-precheck-session");
+        let session_id = SessionId("terminal-precheck-session".to_owned());
+        let missing_turn = TurnId("missing-turn".to_owned());
+        assert!(
+            futures::executor::block_on(repo.find_terminal_event(&session_id, &missing_turn))
+                .expect("query missing terminal")
+                .is_none()
+        );
+
+        let completed = event_record(
+            "precheck-completed",
+            &session_id.0,
+            99,
+            SessionEventKind::TurnCompleted {
+                turn_id: TurnId("completed-turn".to_owned()),
+            },
+        );
+        let aborted = event_record(
+            "precheck-aborted",
+            &session_id.0,
+            99,
+            SessionEventKind::TurnAborted {
+                turn_id: TurnId("aborted-turn".to_owned()),
+                reason: Some("test-only reason".to_owned()),
+            },
+        );
+        futures::executor::block_on(repo.append_event(&completed)).expect("append completed");
+        futures::executor::block_on(repo.append_event(&aborted)).expect("append aborted");
+
+        let completed_result = futures::executor::block_on(
+            repo.find_terminal_event(&session_id, &TurnId("completed-turn".to_owned())),
+        )
+        .expect("find completed")
+        .expect("completed exists");
+        assert_eq!(completed_result.event_id, "precheck-completed");
+        assert!(matches!(
+            completed_result.kind,
+            SessionEventKind::TurnCompleted { .. }
+        ));
+
+        let aborted_result = futures::executor::block_on(
+            repo.find_terminal_event(&session_id, &TurnId("aborted-turn".to_owned())),
+        )
+        .expect("find aborted")
+        .expect("aborted exists");
+        assert_eq!(aborted_result.event_id, "precheck-aborted");
+        assert!(matches!(
+            aborted_result.kind,
+            SessionEventKind::TurnAborted { .. }
+        ));
+
+        let conn = repo.conn.lock().expect("lock database");
+        let plan = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT event_id FROM dcc_session_events WHERE session_id = ?1 AND terminal_turn_id = ?2 LIMIT 2",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map(params![session_id.0, "completed-turn"], |row| {
+                        row.get::<_, String>(3)
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .expect("explain terminal lookup");
+        assert!(plan
+            .iter()
+            .any(|detail| detail.contains("idx_dcc_session_events_terminal_turn")));
+    }
+
+    #[test]
+    fn terminal_precheck_rejects_corrupt_or_nonterminal_metadata() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        event_session(&repo, "terminal-corrupt-session");
+        let session_id = SessionId("terminal-corrupt-session".to_owned());
+        let completed = event_record(
+            "corrupt-terminal",
+            &session_id.0,
+            1,
+            SessionEventKind::TurnCompleted {
+                turn_id: TurnId("corrupt-turn".to_owned()),
+            },
+        );
+        futures::executor::block_on(repo.append_event(&completed)).expect("append completed");
+        repo.conn
+            .lock()
+            .expect("lock database")
+            .execute(
+                "UPDATE dcc_session_events SET terminal_kind = 'aborted' WHERE event_id = ?1",
+                params![completed.event_id],
+            )
+            .expect("corrupt metadata");
+        assert!(futures::executor::block_on(
+            repo.find_terminal_event(&session_id, &TurnId("corrupt-turn".to_owned()),)
+        )
+        .expect_err("corrupt terminal metadata must fail")
+        .to_string()
+        .contains("terminal metadata is inconsistent"));
+
+        let nonterminal_kind = to_string(&SessionEventKind::TurnDelta {
+            turn_id: TurnId("nonterminal-turn".to_owned()),
+            content: "delta".to_owned(),
+        })
+        .expect("serialize nonterminal");
+        repo.conn
+            .lock()
+            .expect("lock database")
+            .execute(
+                r#"INSERT INTO dcc_session_events
+                   (event_id, session_id, sequence, occurred_at, kind_json,
+                    terminal_turn_id, terminal_kind)
+                   VALUES ('nonterminal-corrupt', ?1, 2, 't2', ?2, 'nonterminal-turn', 'completed')"#,
+                params![session_id.0, nonterminal_kind],
+            )
+            .expect("insert nonterminal metadata corruption");
+        assert!(futures::executor::block_on(repo.find_terminal_event(
+            &SessionId("terminal-corrupt-session".to_owned()),
+            &TurnId("nonterminal-turn".to_owned()),
+        ))
+        .is_err());
     }
 
     #[test]
