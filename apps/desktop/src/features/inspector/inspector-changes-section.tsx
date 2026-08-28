@@ -8,6 +8,8 @@ import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-
 import {
 	ChevronRight,
 	CloudIcon,
+	FileDiff,
+	GitCompareArrows,
 	LaptopIcon,
 	List as ListIcon,
 	ListTree,
@@ -17,7 +19,14 @@ import {
 	PlusIcon,
 	Undo2Icon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AnimatedShinyText } from "@/components/ui/animated-shiny-text";
@@ -25,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { WorkspaceGitChangeEntry, WorkspacePrReviewComment } from "@dcc/contracts";
 import {
 	workspaceGitDiscardFile,
@@ -38,6 +48,12 @@ import { CodeRabbitReviewSection } from "./coderabbit-review-section";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { useWorkspaceGitBranchDiff, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
 import type { WorkspaceGitPreviewSelection } from "./workspace-git-file-preview";
+import {
+	changeGroupBelongsToScope,
+	defaultInspectorChangesScope,
+	summarizeInspectorChanges,
+	type InspectorChangesScope,
+} from "./inspector-changes-presentation";
 
 export { WORKSPACE_GIT_STATUS_QUERY_KEY, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY };
 
@@ -184,9 +200,9 @@ function ChangeRow({
 	return (
 		<div
 			className={cn(
-				"group/row relative flex items-center gap-1.5 py-[1.5px] pl-2 pr-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent/60",
+				"group/row relative mx-1 flex min-h-8 items-center gap-2 rounded-md py-1 pl-2 pr-2 text-[11.5px] text-muted-foreground transition-[background-color,color,box-shadow] hover:bg-accent/55",
 				onSelect && "cursor-pointer",
-				selected && "bg-muted/60 text-foreground",
+				selected && "bg-primary/[0.08] text-foreground shadow-[inset_2px_0_0_var(--primary)]",
 			)}
 			style={treeIndentPx > 0 ? { paddingLeft: treeIndentPx } : undefined}
 			title={entry.absolutePath}
@@ -216,7 +232,7 @@ function ChangeRow({
 			}}
 		>
 			<img src={iconSrc} alt="" className="size-3.5 shrink-0" />
-			<span className="min-w-0 max-w-[40%] truncate font-medium text-foreground sm:max-w-[52%]">
+			<span className="min-w-0 max-w-[46%] truncate font-medium text-foreground sm:max-w-[58%]">
 				<ShinyFlash active={flashingPaths.has(entry.path)}>{entry.name}</ShinyFlash>
 			</span>
 			<span
@@ -510,18 +526,18 @@ function ShinyFlash({ active, children }: { active: boolean; children: React.Rea
 function BranchDiffSection({
 	workspaceRoot,
 	gitBusy,
+	treeView,
 	selectedPath = null,
 	reviewCommentCounts,
 	onSelect,
 }: {
 	workspaceRoot: string;
 	gitBusy: boolean;
+	treeView: boolean;
 	selectedPath?: string | null;
 	reviewCommentCounts?: Map<string, number>;
 	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
-	const [open, setOpen] = useState(true);
-	const [treeView, setTreeView] = useState(true);
 	const query = useWorkspaceGitBranchDiff(workspaceRoot);
 	const prevDataRef = useRef(query.data?.changes);
 	const [flashingPaths, setFlashingPaths] = useState<Set<string>>(new Set());
@@ -531,10 +547,12 @@ function BranchDiffSection({
 		const curr = query.data?.changes;
 		prevDataRef.current = curr;
 		if (!prev || !curr) return;
-			const prevPaths = new Set(prev.map((entry: WorkspaceGitChangeEntry) => entry.path));
-			const newPaths = curr
-				.filter((entry: WorkspaceGitChangeEntry) => !prevPaths.has(entry.path))
-				.map((entry: WorkspaceGitChangeEntry) => entry.path);
+		const prevPaths = new Set(
+			prev.map((entry: WorkspaceGitChangeEntry) => entry.path),
+		);
+		const newPaths = curr
+			.filter((entry: WorkspaceGitChangeEntry) => !prevPaths.has(entry.path))
+			.map((entry: WorkspaceGitChangeEntry) => entry.path);
 		if (newPaths.length === 0) return;
 		setFlashingPaths(new Set(newPaths));
 		const id = window.setTimeout(() => setFlashingPaths(new Set()), 3100);
@@ -548,69 +566,55 @@ function BranchDiffSection({
 	if (!loading && changes.length === 0) return null;
 
 	return (
-		<div className="border-b border-border/40 last:border-b-0">
-			<div className="group/header flex w-full items-center gap-1 py-1 pl-1 pr-2 text-[11.5px] font-semibold tracking-[-0.01em] text-muted-foreground">
-				<Button
-					type="button"
-					variant="ghost"
-					size="xs"
-					onClick={() => setOpen((v) => !v)}
-					aria-expanded={open}
-					className="h-auto min-w-0 flex-1 justify-start gap-1 rounded-none px-0 text-left hover:bg-transparent hover:text-foreground dark:hover:bg-transparent aria-expanded:bg-transparent aria-expanded:text-foreground"
-				>
-					<ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} strokeWidth={2} aria-hidden />
-					<CloudIcon className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} />
-					<span className="truncate">Remote{baseBranch ? ` ← ${baseBranch.replace("origin/", "")}` : ""}</span>
-				</Button>
-				<RowIconButton
-					aria-label={treeView ? "Switch to list view" : "Switch to tree view"}
-					onClick={() => setTreeView((v) => !v)}
-					className="text-transparent hover:bg-transparent group-hover/header:text-muted-foreground group-hover/header:hover:text-foreground"
-				>
-					{treeView ? <ListIcon className="size-3.5" strokeWidth={2} /> : <ListTree className="size-3.5" strokeWidth={2} />}
-				</RowIconButton>
-				<Badge variant="secondary" className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px] font-semibold">
-					{loading ? <LoaderCircleIcon className="size-2.5 animate-spin" /> : changes.length}
-				</Badge>
+		<div className="pb-2">
+			<div className="flex min-h-8 items-center gap-2 border-b border-border/35 px-3 text-[10.5px] text-muted-foreground">
+				<CloudIcon className="size-3.5 shrink-0" strokeWidth={1.8} />
+				<span className="min-w-0 flex-1 truncate">
+					{baseBranch ? baseBranch.replace("origin/", "") : "Remote"}
+				</span>
+				{loading ? <LoaderCircleIcon className="size-3 animate-spin" /> : null}
 			</div>
-			{open && (
-				<div className={cn("pb-2 pl-1 transition-opacity duration-150", loading && "pointer-events-none opacity-40")}>
-					{treeView ? (
-						<ChangesTreeView
-							entries={changes}
-							group="committed"
-							workspaceRoot={workspaceRoot}
-							gitBusy={gitBusy}
-							runGit={async () => {}}
-							flashingPaths={flashingPaths}
-							selectedPath={selectedPath}
-							reviewCommentCounts={reviewCommentCounts}
-							onSelect={(selection) =>
-								onSelect?.({ ...selection, baseBranch })
-							}
-						/>
-					) : (
-						<div className="pb-2 pl-1">
-								{changes.map((entry: WorkspaceGitChangeEntry) => (
-									<ChangeRow
-										key={`remote-${entry.path}-${entry.status}`}
-										entry={entry}
-										group="committed"
-										workspaceRoot={workspaceRoot}
-										gitBusy={gitBusy}
-									runGit={async () => {}}
-									flashingPaths={flashingPaths}
-									selected={selectedPath === entry.path}
-									reviewCommentCount={reviewCommentCounts?.get(entry.path) ?? 0}
-									onSelect={(selection) =>
-										onSelect?.({ ...selection, baseBranch })
-									}
-								/>
-							))}
-						</div>
-					)}
-				</div>
-			)}
+			<div
+				className={cn(
+					"pt-1 transition-opacity duration-150",
+					loading && "pointer-events-none opacity-40",
+				)}
+			>
+				{treeView ? (
+					<ChangesTreeView
+						entries={changes}
+						group="committed"
+						workspaceRoot={workspaceRoot}
+						gitBusy={gitBusy}
+						runGit={async () => {}}
+						flashingPaths={flashingPaths}
+						selectedPath={selectedPath}
+						reviewCommentCounts={reviewCommentCounts}
+						onSelect={(selection) =>
+							onSelect?.({ ...selection, baseBranch })
+						}
+					/>
+				) : (
+					<div className="pb-1">
+						{changes.map((entry: WorkspaceGitChangeEntry) => (
+							<ChangeRow
+								key={`remote-${entry.path}-${entry.status}`}
+								entry={entry}
+								group="committed"
+								workspaceRoot={workspaceRoot}
+								gitBusy={gitBusy}
+								runGit={async () => {}}
+								flashingPaths={flashingPaths}
+								selected={selectedPath === entry.path}
+								reviewCommentCount={reviewCommentCounts?.get(entry.path) ?? 0}
+								onSelect={(selection) =>
+									onSelect?.({ ...selection, baseBranch })
+								}
+							/>
+						))}
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }
@@ -681,15 +685,15 @@ function ChangesGroup({
 	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	return (
-		<div className="border-b border-border/40 last:border-b-0">
-			<div className="group/header flex w-full items-center gap-1 py-1 pl-1 pr-2 text-[11.5px] font-semibold tracking-[-0.01em] text-muted-foreground">
+		<div className="border-b border-border/35 last:border-b-0">
+			<div className="group/header flex min-h-9 w-full items-center gap-1 px-2 text-[10.5px] font-semibold uppercase tracking-[0.055em] text-muted-foreground">
 				<Button
 					type="button"
 					variant="ghost"
 					size="xs"
 					onClick={onToggle}
 					aria-expanded={open}
-					className="h-auto min-w-0 flex-1 justify-start gap-1 rounded-none px-0 text-left hover:bg-transparent hover:text-foreground dark:hover:bg-transparent aria-expanded:bg-transparent aria-expanded:text-foreground"
+					className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-none px-0 text-left hover:bg-transparent hover:text-foreground dark:hover:bg-transparent aria-expanded:bg-transparent aria-expanded:text-foreground"
 				>
 					<ChevronRight
 						className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
@@ -712,10 +716,7 @@ function ChangesGroup({
 				{showViewToggle ? (
 					<ViewToggle treeView={treeView} onToggle={onToggleTreeView} />
 				) : null}
-				<Badge
-					variant="secondary"
-					className="h-4 min-w-[16px] justify-center rounded-full px-1 text-[9.5px] font-semibold"
-				>
+				<Badge variant="secondary" className="h-5 min-w-5 justify-center rounded-full px-1.5 text-[9.5px] font-semibold">
 					{count}
 				</Badge>
 			</div>
@@ -760,6 +761,7 @@ type InspectorChangesSectionProps = {
 	onPrefillComposer?: (text: string) => void;
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
 	targetSessionId?: string | null;
+	headerAction?: ReactNode;
 	/** A commit/push/PR action is reconciling the Git state shown below. */
 	isGitActionInProgress?: boolean;
 };
@@ -771,13 +773,18 @@ export function InspectorChangesSection({
 	onPrefillComposer,
 	reviewCommentsByPath = EMPTY_REVIEW_COMMENTS_BY_PATH,
 	targetSessionId = null,
+	headerAction = null,
 	isGitActionInProgress = false,
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
 	const [stagedOpen, setStagedOpen] = useState(true);
 	const [unstagedOpen, setUnstagedOpen] = useState(true);
-	const [changesTreeView, setChangesTreeView] = useState(true);
+	const [changesTreeView, setChangesTreeView] = useState(false);
+	const [scopePreference, setScopePreference] = useState<{
+		root: string;
+		scope: InspectorChangesScope;
+	} | null>(null);
 	const [gitBusy, setGitBusy] = useState(false);
 	const codeRabbitEnabled = useCodeRabbitIntegrationEnabled();
 
@@ -845,6 +852,18 @@ export function InspectorChangesSection({
 		},
 		[onSelectPreview, reviewCommentsByPath, root, targetSessionId],
 	);
+	const handleScopeChange = useCallback(
+		(scope: InspectorChangesScope) => {
+			setScopePreference({ root, scope });
+			if (
+				selectedPreview &&
+				!changeGroupBelongsToScope(selectedPreview.group, scope)
+			) {
+				onSelectPreview(null);
+			}
+		},
+		[onSelectPreview, root, selectedPreview],
+	);
 
 	const unstageAll = useCallback(
 		async (paths: string[]) => {
@@ -902,88 +921,205 @@ export function InspectorChangesSection({
 
 	const data = query.data!;
 	const hasAny = data.staged.length > 0 || data.unstaged.length > 0;
-	const hasReviewableChanges =
-		hasAny || (branchDiffQuery.data?.changes.length ?? 0) > 0;
+	const workingChanges = [...data.staged, ...data.unstaged];
+	const branchChanges = branchDiffQuery.data?.changes ?? [];
+	const activeScope =
+		(scopePreference?.root === root ? scopePreference.scope : null) ??
+		defaultInspectorChangesScope(workingChanges.length, branchChanges.length);
+	const visibleChanges = activeScope === "working" ? workingChanges : branchChanges;
+	const visibleSummary = summarizeInspectorChanges(visibleChanges);
+	const hasReviewableChanges = hasAny || branchChanges.length > 0;
 
 	return (
 		<div className="relative flex min-h-0 flex-1 flex-col">
+			<div className="shrink-0 border-b border-border/50 bg-background">
+				<div className="flex min-h-11 items-center gap-2 px-3 py-2">
+					<div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+						<FileDiff className="size-3.5" strokeWidth={1.9} />
+					</div>
+					<div className="min-w-0 flex-1">
+						<div className="flex min-w-0 items-baseline gap-2">
+							<p className="truncate text-[12px] font-semibold text-foreground">
+								{t("inspector.changes.title")}
+							</p>
+							<span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+								{t("inspector.changes.fileCount", { count: visibleSummary.fileCount })}
+							</span>
+						</div>
+						<div className="mt-0.5 flex items-center gap-1.5 text-[10px] tabular-nums">
+							<span className="text-emerald-600 dark:text-emerald-400">+{visibleSummary.insertions}</span>
+							<span className="text-destructive">−{visibleSummary.deletions}</span>
+						</div>
+					</div>
+					{headerAction}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className="size-7 text-muted-foreground hover:text-foreground"
+								aria-label={t(
+									changesTreeView
+										? "inspector.changes.listView"
+										: "inspector.changes.treeView",
+								)}
+								onClick={() => setChangesTreeView((value) => !value)}
+							>
+								{changesTreeView ? (
+									<ListIcon className="size-4" />
+								) : (
+									<ListTree className="size-4" />
+								)}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">
+							{t(
+								changesTreeView
+									? "inspector.changes.listView"
+									: "inspector.changes.treeView",
+							)}
+						</TooltipContent>
+					</Tooltip>
+				</div>
+				<div
+					className="flex gap-1 px-2 pb-2"
+					role="tablist"
+					aria-label={t("inspector.changes.scopeLabel")}
+				>
+					{(["working", "branch"] as const).map((scope) => {
+						const active = scope === activeScope;
+						const count =
+							scope === "working" ? workingChanges.length : branchChanges.length;
+						const Icon = scope === "working" ? LaptopIcon : GitCompareArrows;
+						return (
+							<button
+								key={scope}
+								type="button"
+								role="tab"
+								aria-selected={active}
+								onClick={() => handleScopeChange(scope)}
+								className={cn(
+									"flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[10.5px] font-medium transition-colors",
+									active
+										? "bg-muted text-foreground shadow-sm"
+										: "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+								)}
+							>
+								<Icon className="size-3.5 shrink-0" strokeWidth={1.9} />
+								<span className="truncate">{t(`inspector.changes.scopes.${scope}`)}</span>
+								<span className="shrink-0 tabular-nums opacity-70">{count}</span>
+							</button>
+						);
+					})}
+				</div>
+			</div>
 			<ScrollArea
 				viewportProps={{ "data-inspector-scroll-key": "git-changes" }}
-				className="min-h-0 flex-1 bg-muted/15 font-mono text-[11.5px]"
+				className="min-h-0 flex-1 bg-muted/[0.08] text-[11.5px]"
 				aria-label="Git changes"
-			>
-			<div className="min-w-0 max-w-full overflow-x-hidden pr-2">
-				{data.staged.length > 0 ? (
-					<ChangesGroup
-						label="Staged changes"
-						count={data.staged.length}
-						open={stagedOpen}
-						onToggle={() => setStagedOpen((v) => !v)}
-						entries={data.staged}
-						group="staged"
-						workspaceRoot={root}
-						gitBusy={gitBusy}
-						runGit={runGit}
-						onBatchAll={() => unstageAll(data.staged.map((e) => e.path))}
-						batchAriaLabel="Unstage all changes"
-						BatchIcon={MinusIcon}
-						treeView={changesTreeView}
-						onToggleTreeView={() => setChangesTreeView((v) => !v)}
-						showViewToggle
-						selectedPath={selectedPreview?.group === "staged" ? selectedPreview.path : null}
-						reviewCommentCounts={reviewCommentCounts}
-						onSelect={handleSelectPreview}
-					/>
-				) : null}
-				{data.unstaged.length > 0 ? (
-					<ChangesGroup
-						label="Changes"
-						count={data.unstaged.length}
-						open={unstagedOpen}
-						onToggle={() => setUnstagedOpen((v) => !v)}
-						entries={data.unstaged}
-						group="unstaged"
-						workspaceRoot={root}
-						gitBusy={gitBusy}
-						runGit={runGit}
-						onBatchAll={stageAll}
-						batchDisabled={data.conflictCount > 0}
-						batchAriaLabel="Stage all changes"
-						BatchIcon={PlusIcon}
-						treeView={changesTreeView}
-						onToggleTreeView={() => setChangesTreeView((v) => !v)}
-						showViewToggle={data.staged.length === 0}
-						icon={<LaptopIcon className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} />}
-						selectedPath={selectedPreview?.group === "unstaged" ? selectedPreview.path : null}
-						reviewCommentCounts={reviewCommentCounts}
-						onSelect={handleSelectPreview}
-					/>
-				) : null}
-				{!hasAny ? (
-					<div className="px-3 py-3 text-[11px] leading-5 text-muted-foreground">
-						{t("inspector.changes.emptyOnBranch")}
-					</div>
-				) : null}
-				{Boolean(root) && (
-					<BranchDiffSection
-						workspaceRoot={root}
-						gitBusy={gitBusy}
-						selectedPath={selectedPreview?.group === "committed" ? selectedPreview.path : null}
-						reviewCommentCounts={reviewCommentCounts}
-						onSelect={handleSelectPreview}
-					/>
-				)}
-				{codeRabbitEnabled && hasReviewableChanges ? (
-					<CodeRabbitReviewSection
-						workspaceRoot={root}
-						staged={data.staged}
-						unstaged={data.unstaged}
-						baseBranch={branchDiffQuery.data?.baseBranch ?? null}
-						onSelectPreview={handleSelectPreview}
-						onPrefillComposer={onPrefillComposer}
-					/>
-				) : null}
-			</div>
+				>
+					<div className="min-w-0 max-w-full overflow-x-hidden py-1">
+					{activeScope === "working" && data.staged.length > 0 ? (
+						<ChangesGroup
+							label={t("inspector.changes.groups.staged")}
+							count={data.staged.length}
+							open={stagedOpen}
+							onToggle={() => setStagedOpen((v) => !v)}
+							entries={data.staged}
+							group="staged"
+							workspaceRoot={root}
+							gitBusy={gitBusy}
+							runGit={runGit}
+							onBatchAll={() => unstageAll(data.staged.map((e) => e.path))}
+							batchAriaLabel="Unstage all changes"
+							BatchIcon={MinusIcon}
+							treeView={changesTreeView}
+							onToggleTreeView={() => setChangesTreeView((v) => !v)}
+							showViewToggle={false}
+							selectedPath={
+								selectedPreview?.group === "staged" ? selectedPreview.path : null
+							}
+							reviewCommentCounts={reviewCommentCounts}
+							onSelect={handleSelectPreview}
+						/>
+					) : null}
+					{activeScope === "working" && data.unstaged.length > 0 ? (
+						<ChangesGroup
+							label={t("inspector.changes.groups.unstaged")}
+							count={data.unstaged.length}
+							open={unstagedOpen}
+							onToggle={() => setUnstagedOpen((v) => !v)}
+							entries={data.unstaged}
+							group="unstaged"
+							workspaceRoot={root}
+							gitBusy={gitBusy}
+							runGit={runGit}
+							onBatchAll={stageAll}
+							batchDisabled={data.conflictCount > 0}
+							batchAriaLabel="Stage all changes"
+							BatchIcon={PlusIcon}
+							treeView={changesTreeView}
+							onToggleTreeView={() => setChangesTreeView((v) => !v)}
+							showViewToggle={false}
+							icon={
+								<LaptopIcon
+									className="size-3 shrink-0 text-muted-foreground"
+									strokeWidth={2}
+								/>
+							}
+							selectedPath={
+								selectedPreview?.group === "unstaged" ? selectedPreview.path : null
+							}
+							reviewCommentCounts={reviewCommentCounts}
+							onSelect={handleSelectPreview}
+						/>
+					) : null}
+					{activeScope === "working" && !hasAny ? (
+						<div className="flex min-h-36 flex-col items-center justify-center px-5 py-8 text-center text-[11px] leading-5 text-muted-foreground">
+							<div className="mb-2 flex size-8 items-center justify-center rounded-full bg-muted/60">
+								<GitCompareArrows className="size-4" strokeWidth={1.7} />
+							</div>
+							{t("inspector.changes.emptyWorking")}
+						</div>
+					) : null}
+					{activeScope === "branch" &&
+					!branchDiffQuery.isPending &&
+					branchChanges.length === 0 ? (
+						<div className="flex min-h-36 flex-col items-center justify-center px-5 py-8 text-center text-[11px] leading-5 text-muted-foreground">
+							<div className="mb-2 flex size-8 items-center justify-center rounded-full bg-muted/60">
+								<CloudIcon className="size-4" strokeWidth={1.7} />
+							</div>
+							{t("inspector.changes.emptyBranch")}
+						</div>
+					) : null}
+					{activeScope === "branch" && Boolean(root) ? (
+						<BranchDiffSection
+							workspaceRoot={root}
+							gitBusy={gitBusy}
+							treeView={changesTreeView}
+							selectedPath={
+								selectedPreview?.group === "committed"
+									? selectedPreview.path
+									: null
+							}
+							reviewCommentCounts={reviewCommentCounts}
+							onSelect={handleSelectPreview}
+						/>
+					) : null}
+					{codeRabbitEnabled &&
+					hasReviewableChanges &&
+					visibleChanges.length > 0 ? (
+						<CodeRabbitReviewSection
+							workspaceRoot={root}
+							staged={data.staged}
+							unstaged={data.unstaged}
+							baseBranch={branchDiffQuery.data?.baseBranch ?? null}
+							onSelectPreview={handleSelectPreview}
+							onPrefillComposer={onPrefillComposer}
+						/>
+					) : null}
+				</div>
 			</ScrollArea>
 			{isGitActionInProgress ? (
 				<div

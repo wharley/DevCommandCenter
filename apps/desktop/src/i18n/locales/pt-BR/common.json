@@ -1115,7 +1115,22 @@
     },
     "sessionFallback": "Nenhuma sessão ativa - inicie uma pelo composer.",
     "changes": {
-      "emptyOnBranch": "Nenhuma alteração neste branch.",
+      "title": "Mudanças",
+      "fileCount_one": "{{count}} arquivo",
+      "fileCount_other": "{{count}} arquivos",
+      "scopeLabel": "Escopo das mudanças",
+      "scopes": {
+        "working": "Workspace",
+        "branch": "Branch"
+      },
+      "groups": {
+        "staged": "Preparadas",
+        "unstaged": "Não preparadas"
+      },
+      "listView": "Mostrar como lista",
+      "treeView": "Mostrar como árvore",
+      "emptyWorking": "O workspace não possui mudanças locais.",
+      "emptyBranch": "Este branch ainda não possui mudanças em relação à base.",
       "loadingGit": "Lendo arquivos alterados…",
       "updatingGit": "Atualizando arquivos alterados…"
     },

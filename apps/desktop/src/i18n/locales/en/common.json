@@ -1115,7 +1115,22 @@
     },
     "sessionFallback": "No active session - start one from the composer.",
     "changes": {
-      "emptyOnBranch": "No changes on this branch.",
+      "title": "Changes",
+      "fileCount_one": "{{count}} file",
+      "fileCount_other": "{{count}} files",
+      "scopeLabel": "Changes scope",
+      "scopes": {
+        "working": "Workspace",
+        "branch": "Branch"
+      },
+      "groups": {
+        "staged": "Staged",
+        "unstaged": "Not staged"
+      },
+      "listView": "Show as list",
+      "treeView": "Show as tree",
+      "emptyWorking": "The workspace has no local changes.",
+      "emptyBranch": "This branch has no changes against its base yet.",
       "loadingGit": "Reading changed files…",
       "updatingGit": "Updating changed files…"
     },

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ExternalLink, FileDiff, RotateCcw } from "lucide-react";
+import { ExternalLink, FileDiff, GitBranch, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceCommitButton } from "@/features/commit";
@@ -30,6 +30,7 @@ function gitSectionHeaderHighlightClass(mode: CommitMode): string {
 }
 
 export type GitSectionHeaderProps = {
+  title?: string | null;
   commitMode: CommitMode;
   isRefreshing?: boolean;
   onCommit?: (message?: string, body?: string | null, stagedFingerprint?: string) => Promise<void> | void;
@@ -50,6 +51,7 @@ export type GitSectionHeaderProps = {
 };
 
 export function GitSectionHeader({
+  title = "Git",
   commitMode,
   isRefreshing = false,
   onCommit,
@@ -96,7 +98,10 @@ export function GitSectionHeader({
         />
       )}
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className={cn(INSPECTOR_SECTION_TITLE_CLASS, "translate-y-px")}>Git</span>
+        <GitBranch className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
+        <span className={cn(INSPECTOR_SECTION_TITLE_CLASS, "min-w-0 truncate translate-y-px")}>
+          {title || "Git"}
+        </span>
         {showPrLink ? (
           <Button
             type="button"

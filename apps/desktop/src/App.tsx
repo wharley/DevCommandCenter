@@ -4805,7 +4805,6 @@ export default function App() {
 							) : hasWorkspace && selectedWorkspace ? (
 								<SessionWorkbench
 									workspaceId={selectedWorkspace.id}
-									turnReviewWorkspaceId={activeWorkspace?.id ?? selectedWorkspace.id}
 									workspaceName={selectedWorkspace.name}
 									workspaceBranch={selectedWorkspace.branch}
 									workspacePath={selectedSessionWorkspacePath}
@@ -4978,7 +4977,6 @@ export default function App() {
 											: null
 									}
 									workspaceId={selectedWorkspace?.id ?? null}
-									turnReviewWorkspaceId={activeWorkspace?.id ?? selectedWorkspace?.id ?? null}
 									workspaceName={selectedWorkspace?.name ?? null}
 									workspaceBranch={selectedWorkspace?.branch ?? null}
 									workspacePath={selectedLocalWorkspacePath}

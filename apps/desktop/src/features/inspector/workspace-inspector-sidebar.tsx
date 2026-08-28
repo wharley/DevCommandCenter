@@ -63,7 +63,6 @@ import { GitlabPipelineSection } from "./gitlab-pipeline-section";
 import { WorkspaceDeliveryFailureSection } from "./workspace-delivery-failure-section";
 import { WorkspaceReviewStateSection } from "./workspace-review-state-section";
 import { projectWorkspacePlanMessages } from "@/features/panel/thread-projection";
-import { TurnReviewActionSummary } from "@/features/panel/turn-review-action-summary";
 import { derivePlanFollowUpState } from "@/features/panel/plan-follow-up";
 import {
 	buildMissionAcceptanceCriteriaCoverage,
@@ -188,7 +187,6 @@ type WorkspaceInspectorSidebarProps = {
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	currentRepository: Repository | null;
 	workspaceId: string | null;
-	turnReviewWorkspaceId?: string | null;
 	workspaceName: string | null;
 	workspaceBranch: string | null;
 	workspacePath: string | null;
@@ -1564,7 +1562,6 @@ export function WorkspaceInspectorSidebar({
 	sessionSnapshot,
 	currentRepository,
 	workspaceId,
-	turnReviewWorkspaceId = workspaceId,
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
@@ -3368,7 +3365,10 @@ export function WorkspaceInspectorSidebar({
 					onPinnedChange={onPinnedChange}
 					onRequestClose={onRequestClose}
 				/>
-				{workspacePath && gitStatusQuery.data ? (
+				{workspacePath &&
+				gitStatusQuery.data &&
+				(workspaceRecap.state === "needs_attention" ||
+					workspaceRecap.state === "blocked") ? (
 					<WorkspaceRecapStrip
 						recap={workspaceRecap}
 						action={visibleWorkspaceRecapAction}
@@ -3379,6 +3379,7 @@ export function WorkspaceInspectorSidebar({
 				{inspectorMode === "git" ? (
 					<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
 						<GitSectionHeader
+							title={gitBranch ?? workspaceBranch}
 							commitMode={commitMode}
 							isRefreshing={
 								isGitActionInProgress ||
@@ -3405,8 +3406,8 @@ export function WorkspaceInspectorSidebar({
 							retrySetupLabel={t("inspector.setupRetry.button")}
 							prUrl={prStatus?.url ?? null}
 							prNumber={prStatus?.number ?? null}
-									prProvider={prStatus?.provider ?? null}
-									prIsDraft={prStatus?.isDraft ?? false}
+							prProvider={prStatus?.provider ?? null}
+							prIsDraft={prStatus?.isDraft ?? false}
 							hideCommitAction={Boolean(activeDelegationReview) || isSessionWorktreeView}
 							suppressCommitButton={suppressEmptyCreatePr}
 							identitySlot={
@@ -3423,56 +3424,45 @@ export function WorkspaceInspectorSidebar({
 							}
 						/>
 
-						<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 pb-3 pt-2">
-							{sessionId && onOpenLastTurnReview ? (
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									className="h-8 w-full shrink-0 justify-start gap-2 text-[11px]"
-									onClick={() => onOpenLastTurnReview(sessionId)}
-								>
-									<FileDiff className="size-3.5" />
-									<span>{t("turnReview.action")}</span>
-									{turnReviewWorkspaceId ? (
-										<TurnReviewActionSummary
-											sessionId={sessionId}
-											workspaceId={turnReviewWorkspaceId}
-										/>
-									) : null}
-								</Button>
+						<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+							{(gitStatusQuery.data?.behindOfRemoteCount ?? 0) > 0 ||
+							isSyncingBase ? (
+								<div className="shrink-0 px-2 pt-2">
+									<BranchToolbar
+										branch={gitBranch ?? ""}
+										baseBranch={workspaceBranch}
+										workspacePath={changesWorkspaceRoot}
+										behindOfRemoteCount={
+											gitStatusQuery.data?.behindOfRemoteCount ?? 0
+										}
+										isSyncingBase={isSyncingBase}
+										onSyncBase={handleSyncBase}
+									/>
+								</div>
 							) : null}
-							<div className="shrink-0">
-								<BranchToolbar
-									branch={gitBranch ?? ""}
-									baseBranch={workspaceBranch}
-									workspacePath={changesWorkspaceRoot}
-									behindOfRemoteCount={gitStatusQuery.data?.behindOfRemoteCount ?? 0}
-									isSyncingBase={isSyncingBase}
-									onSyncBase={handleSyncBase}
+							<div className="grid shrink-0 gap-2 px-2 empty:hidden">
+								<WorkspaceDeliveryFailureSection
+									workspaceRoot={workspacePath}
+									branch={gitBranch}
+									forgeLogin={selectedForgeLogin}
+									enabled={Boolean(workspacePath)}
+									onPrefillComposer={onPrefillComposer}
+								/>
+								<WorkspaceReviewStateSection
+									workspaceRoot={workspacePath}
+									branch={gitBranch}
+									forgeLogin={selectedForgeLogin}
+									enabled={forgeConnected && Boolean(prStatus?.number)}
+								/>
+								<GitlabPipelineSection
+									workspaceRoot={workspacePath}
+									forgeLogin={selectedForgeLogin}
+									enabled={
+										workspaceForgeContext?.provider === "gitlab" &&
+										forgeConnected
+									}
 								/>
 							</div>
-							<WorkspaceDeliveryFailureSection
-								workspaceRoot={workspacePath}
-								branch={gitBranch}
-								forgeLogin={selectedForgeLogin}
-								enabled={Boolean(workspacePath)}
-								onPrefillComposer={onPrefillComposer}
-							/>
-							<WorkspaceReviewStateSection
-								workspaceRoot={workspacePath}
-								branch={gitBranch}
-								forgeLogin={selectedForgeLogin}
-								enabled={forgeConnected && Boolean(prStatus?.number)}
-							/>
-							<GitlabPipelineSection
-								workspaceRoot={workspacePath}
-								forgeLogin={selectedForgeLogin}
-								enabled={
-									workspaceForgeContext?.provider === "gitlab" &&
-									forgeConnected
-								}
-							/>
 							{configuredFixTaskIds.length > 0 ? (
 								<div className="flex shrink-0 items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-2">
 									<Wrench className="size-3.5 shrink-0 text-primary" />
@@ -3596,7 +3586,7 @@ export function WorkspaceInspectorSidebar({
 									detailsLabel={t("inspector.setupRetry.details")}
 								/>
 							) : null}
-							<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+							<div className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border/35">
 								<InspectorChangesSection
 									workspaceRoot={changesWorkspaceRoot}
 									selectedPreview={selectedPreview}
@@ -3607,6 +3597,27 @@ export function WorkspaceInspectorSidebar({
 									targetSessionId={
 										activeDelegationReview?.delegation.childSessionId ??
 										(isSessionWorktreeView ? sessionId : null)
+									}
+									headerAction={
+										sessionId && onOpenLastTurnReview ? (
+											<Tooltip>
+												<TooltipTrigger asChild>
+													<Button
+														type="button"
+														variant="ghost"
+														size="xs"
+														className="h-7 shrink-0 gap-1.5 px-2 text-[10.5px] text-muted-foreground hover:text-foreground"
+														onClick={() => onOpenLastTurnReview(sessionId)}
+													>
+														<FileDiff className="size-3.5" strokeWidth={1.8} />
+														<span>{t("turnReview.action")}</span>
+													</Button>
+												</TooltipTrigger>
+												<TooltipContent side="bottom">
+													{t("turnReview.action")}
+												</TooltipContent>
+											</Tooltip>
+										) : null
 									}
 								/>
 							</div>
