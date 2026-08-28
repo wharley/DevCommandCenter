@@ -2,6 +2,7 @@ pub mod commands;
 pub mod delivery_failure;
 pub mod events;
 pub mod git;
+pub mod process_runtime_registry;
 pub mod run;
 pub mod state;
 pub mod terminal_arbiter;

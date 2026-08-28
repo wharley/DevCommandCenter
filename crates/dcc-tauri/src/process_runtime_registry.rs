@@ -1,0 +1,597 @@
+//! Process-wide ownership of runtime coordination primitives.
+//!
+//! Scope keys contain only physical SQLite-file and app-data-directory
+//! identities. Paths are used transiently after the consumer creates/migrates
+//! those resources and are never retained or formatted by this module.
+//!
+//! Identity is not authorization. Owner/type/link/mode checks below are only
+//! minimal stability preconditions for process-runtime coalescing. This module
+//! does not inspect ACLs, xattrs, data privacy, or Guarded Undo storage policy;
+//! platform/store adapters remain responsible for those stronger guarantees.
+//! Concurrent or hostile same-user path replacement is explicitly outside
+//! this cooperative in-process contract; this registry is not a filesystem
+//! authorization or security boundary.
+
+use std::{
+    collections::HashMap,
+    fmt,
+    path::Path,
+    sync::{Arc, Mutex, OnceLock, Weak},
+};
+
+use crate::terminal_arbiter::TerminalArbiter;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct PhysicalIdentity {
+    device: u64,
+    inode: u64,
+}
+
+impl fmt::Debug for PhysicalIdentity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PhysicalIdentity([redacted])")
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct RuntimeScopeKey {
+    sqlite_file: PhysicalIdentity,
+    app_data_directory: PhysicalIdentity,
+}
+
+impl fmt::Debug for RuntimeScopeKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RuntimeScopeKey([redacted])")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessRuntimeRegistryError {
+    InvalidPath,
+    UnsafeTarget,
+    Io,
+    Poisoned,
+    UnsupportedPlatform,
+}
+
+impl fmt::Display for ProcessRuntimeRegistryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidPath => "invalid runtime scope path",
+            Self::UnsafeTarget => "runtime scope target failed safety validation",
+            Self::Io => "runtime scope inspection failed",
+            Self::Poisoned => "process runtime registry unavailable",
+            Self::UnsupportedPlatform => "process runtime registry unsupported on this platform",
+        })
+    }
+}
+
+impl std::error::Error for ProcessRuntimeRegistryError {}
+
+#[derive(PartialEq, Eq)]
+pub enum AcquireAfterOpenError<E> {
+    Scope(ProcessRuntimeRegistryError),
+    Consumer(E),
+}
+
+impl<E> fmt::Debug for AcquireAfterOpenError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Scope(error) => formatter.debug_tuple("Scope").field(error).finish(),
+            Self::Consumer(_) => formatter.write_str("Consumer([redacted])"),
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for AcquireAfterOpenError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Scope(error) => error.fmt(formatter),
+            Self::Consumer(_) => formatter.write_str("runtime consumer open failed"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for AcquireAfterOpenError<E> {}
+
+/// Shared process-level coordination for one physical SQLite/app-data scope.
+///
+/// Additional cooperative process-owned coordination may belong here so
+/// unrelated State instances never create parallel arbiters. Guarded Undo
+/// must retain its own stronger store/lease validation and must never inherit
+/// filesystem authorization from this registry.
+pub struct ProcessRuntime {
+    terminal_arbiter: Arc<TerminalArbiter>,
+}
+
+impl fmt::Debug for ProcessRuntime {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ProcessRuntime([redacted])")
+    }
+}
+
+impl ProcessRuntime {
+    fn new() -> Self {
+        Self {
+            terminal_arbiter: Arc::new(TerminalArbiter::default()),
+        }
+    }
+
+    pub fn terminal_arbiter(&self) -> Arc<TerminalArbiter> {
+        Arc::clone(&self.terminal_arbiter)
+    }
+}
+
+pub struct ProcessRuntimeRegistry {
+    runtimes: Mutex<HashMap<RuntimeScopeKey, Weak<ProcessRuntime>>>,
+}
+
+impl fmt::Debug for ProcessRuntimeRegistry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ProcessRuntimeRegistry([redacted])")
+    }
+}
+
+static PROCESS_RUNTIME_REGISTRY: OnceLock<ProcessRuntimeRegistry> = OnceLock::new();
+
+impl ProcessRuntimeRegistry {
+    /// Returns the sole production registry for this process.
+    pub fn global() -> &'static Self {
+        PROCESS_RUNTIME_REGISTRY.get_or_init(Self::isolated)
+    }
+
+    /// Opens/creates the consumer, then coalesces its resulting physical scope.
+    ///
+    /// `open_consumer` runs first so first-run callers may create app-data and
+    /// create/migrate SQLite. The registry mutex is never held during that work
+    /// or subsequent scope inspection. This cooperative ordering intentionally
+    /// does not protect against hostile swap-and-restore.
+    pub fn acquire_after_open<C, E, F>(
+        &self,
+        sqlite_path: &Path,
+        app_data_directory: &Path,
+        open_consumer: F,
+    ) -> Result<(C, Arc<ProcessRuntime>), AcquireAfterOpenError<E>>
+    where
+        F: FnOnce() -> Result<C, E>,
+    {
+        let consumer = open_consumer().map_err(AcquireAfterOpenError::Consumer)?;
+        let key =
+            resolve_scope(sqlite_path, app_data_directory).map_err(AcquireAfterOpenError::Scope)?;
+        let mut runtimes = self
+            .runtimes
+            .lock()
+            .map_err(|_| AcquireAfterOpenError::Scope(ProcessRuntimeRegistryError::Poisoned))?;
+        runtimes.retain(|_, runtime| runtime.strong_count() != 0);
+        if let Some(runtime) = runtimes.get(&key).and_then(Weak::upgrade) {
+            return Ok((consumer, runtime));
+        }
+        let runtime = Arc::new(ProcessRuntime::new());
+        runtimes.insert(key, Arc::downgrade(&runtime));
+        Ok((consumer, runtime))
+    }
+
+    // Kept private so production code cannot accidentally split process-wide
+    // ownership. Unit tests in this module use isolated registries.
+    fn isolated() -> Self {
+        Self {
+            runtimes: Mutex::new(HashMap::new()),
+        }
+    }
+
+    #[cfg(test)]
+    fn entry_count(&self) -> usize {
+        self.runtimes.lock().unwrap().len()
+    }
+
+    #[cfg(test)]
+    fn poison(&self) {
+        let _guard = self.runtimes.lock().unwrap();
+        panic!("intentional process runtime registry poison");
+    }
+}
+
+#[cfg(unix)]
+fn resolve_scope(
+    sqlite_path: &Path,
+    app_data_directory: &Path,
+) -> Result<RuntimeScopeKey, ProcessRuntimeRegistryError> {
+    let sqlite = unix::open_absolute(sqlite_path, unix::TargetKind::RegularFile)?;
+    let app_data = unix::open_absolute(app_data_directory, unix::TargetKind::Directory)?;
+    Ok(RuntimeScopeKey {
+        sqlite_file: unix::validated_identity(&sqlite, unix::TargetKind::RegularFile)?,
+        app_data_directory: unix::validated_identity(&app_data, unix::TargetKind::Directory)?,
+    })
+}
+
+#[cfg(not(unix))]
+fn resolve_scope(
+    _sqlite_path: &Path,
+    _app_data_directory: &Path,
+) -> Result<RuntimeScopeKey, ProcessRuntimeRegistryError> {
+    Err(ProcessRuntimeRegistryError::UnsupportedPlatform)
+}
+
+#[cfg(unix)]
+mod unix {
+    use super::{PhysicalIdentity, ProcessRuntimeRegistryError};
+    use std::{
+        ffi::{CString, OsStr},
+        fs::File,
+        os::{
+            fd::{AsRawFd, FromRawFd},
+            unix::ffi::OsStrExt,
+        },
+        path::{Component, Path},
+    };
+
+    #[derive(Clone, Copy)]
+    pub(super) enum TargetKind {
+        Directory,
+        RegularFile,
+    }
+
+    pub(super) fn open_absolute(
+        path: &Path,
+        target: TargetKind,
+    ) -> Result<File, ProcessRuntimeRegistryError> {
+        if !path.is_absolute() {
+            return Err(ProcessRuntimeRegistryError::InvalidPath);
+        }
+        let root = open_component(-1, OsStr::new("/"), TargetKind::Directory)?;
+        let components = path
+            .components()
+            .filter_map(|component| match component {
+                Component::RootDir | Component::CurDir => None,
+                Component::Normal(component) => Some(Ok(component)),
+                Component::ParentDir | Component::Prefix(_) => {
+                    Some(Err(ProcessRuntimeRegistryError::InvalidPath))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if components.is_empty() {
+            return match target {
+                TargetKind::Directory => Ok(root),
+                TargetKind::RegularFile => Err(ProcessRuntimeRegistryError::InvalidPath),
+            };
+        }
+        let mut current = root;
+        for (index, component) in components.iter().enumerate() {
+            let kind = if index + 1 == components.len() {
+                target
+            } else {
+                TargetKind::Directory
+            };
+            current = open_component(current.as_raw_fd(), component, kind)?;
+        }
+        Ok(current)
+    }
+
+    fn open_component(
+        parent: libc::c_int,
+        name: &OsStr,
+        target: TargetKind,
+    ) -> Result<File, ProcessRuntimeRegistryError> {
+        use std::os::fd::AsRawFd;
+
+        let name =
+            CString::new(name.as_bytes()).map_err(|_| ProcessRuntimeRegistryError::InvalidPath)?;
+        let directory_flag = match target {
+            TargetKind::Directory => libc::O_DIRECTORY,
+            TargetKind::RegularFile => 0,
+        };
+        // O_NONBLOCK prevents an attacker-controlled non-regular final entry
+        // (for example a FIFO) from blocking before fstat rejects its kind.
+        let flags =
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK | directory_flag;
+        let fd = if parent < 0 {
+            unsafe { libc::open(name.as_ptr(), flags) }
+        } else {
+            unsafe { libc::openat(parent, name.as_ptr(), flags) }
+        };
+        if fd < 0 {
+            let error = std::io::Error::last_os_error();
+            return Err(match error.raw_os_error() {
+                Some(libc::ELOOP) | Some(libc::ENOTDIR) => {
+                    ProcessRuntimeRegistryError::UnsafeTarget
+                }
+                _ => ProcessRuntimeRegistryError::Io,
+            });
+        }
+        let file = unsafe { File::from_raw_fd(fd) };
+        let descriptor_flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) };
+        if descriptor_flags < 0 || descriptor_flags & libc::FD_CLOEXEC == 0 {
+            return Err(ProcessRuntimeRegistryError::UnsafeTarget);
+        }
+        Ok(file)
+    }
+
+    pub(super) fn validated_identity(
+        file: &File,
+        target: TargetKind,
+    ) -> Result<PhysicalIdentity, ProcessRuntimeRegistryError> {
+        use std::os::fd::AsRawFd;
+
+        let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
+        if unsafe { libc::fstat(file.as_raw_fd(), &mut stat) } != 0 {
+            return Err(ProcessRuntimeRegistryError::Io);
+        }
+        let file_kind = stat.st_mode & libc::S_IFMT;
+        let expected_kind = match target {
+            TargetKind::Directory => libc::S_IFDIR,
+            TargetKind::RegularFile => libc::S_IFREG,
+        };
+        if file_kind != expected_kind
+            || stat.st_uid != unsafe { libc::geteuid() }
+            || stat.st_mode & (libc::S_IWGRP | libc::S_IWOTH) != 0
+            || matches!(target, TargetKind::RegularFile) && stat.st_nlink != 1
+        {
+            return Err(ProcessRuntimeRegistryError::UnsafeTarget);
+        }
+        Ok(PhysicalIdentity {
+            device: stat.st_dev as u64,
+            inode: stat.st_ino as u64,
+        })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::{
+        convert::Infallible,
+        ffi::CString,
+        fs,
+        os::unix::{ffi::OsStrExt, fs::symlink, fs::PermissionsExt},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    struct Scope {
+        _root: tempfile::TempDir,
+        physical_root: std::path::PathBuf,
+        db: std::path::PathBuf,
+        app_data: std::path::PathBuf,
+    }
+
+    impl Scope {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            // On macOS tempfile paths use the `/var` symlink alias. Resolve
+            // the fixture once; the registry itself still rejects every
+            // intermediate symlink.
+            let physical_root = fs::canonicalize(root.path()).unwrap();
+            let app_data = physical_root.join("app-data");
+            fs::create_dir(&app_data).unwrap();
+            let db = physical_root.join("sessions.sqlite");
+            fs::write(&db, b"sqlite-identity-fixture").unwrap();
+            Self {
+                _root: root,
+                physical_root,
+                db,
+                app_data,
+            }
+        }
+    }
+
+    fn acquire(
+        registry: &ProcessRuntimeRegistry,
+        sqlite: &Path,
+        app_data: &Path,
+    ) -> Result<Arc<ProcessRuntime>, ProcessRuntimeRegistryError> {
+        match registry.acquire_after_open(sqlite, app_data, || Ok::<_, Infallible>(())) {
+            Ok(((), runtime)) => Ok(runtime),
+            Err(AcquireAfterOpenError::Scope(error)) => Err(error),
+            Err(AcquireAfterOpenError::Consumer(never)) => match never {},
+        }
+    }
+
+    #[test]
+    fn safe_aliases_share_exact_runtime_and_arbiter() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let db_alias = scope.db.parent().unwrap().join(".").join("sessions.sqlite");
+        let app_alias = scope.app_data.join(".");
+        let first = acquire(&registry, &scope.db, &scope.app_data).unwrap();
+        let second = acquire(&registry, &db_alias, &app_alias).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(Arc::ptr_eq(
+            &first.terminal_arbiter(),
+            &second.terminal_arbiter()
+        ));
+        assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[test]
+    fn first_run_closure_creates_app_data_and_sqlite_before_scope_resolution() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let root = tempfile::tempdir().unwrap();
+        let physical_root = fs::canonicalize(root.path()).unwrap();
+        let app_data = physical_root.join("new-app-data");
+        let sqlite = app_data.join("sessions.sqlite");
+        assert!(!app_data.exists());
+        assert!(!sqlite.exists());
+
+        let (consumer, runtime) = registry
+            .acquire_after_open(&sqlite, &app_data, || {
+                fs::create_dir_all(&app_data).unwrap();
+                fs::write(&sqlite, b"new sqlite database").unwrap();
+                Ok::<_, Infallible>("first-run-consumer")
+            })
+            .unwrap();
+        assert_eq!(consumer, "first-run-consumer");
+        let (_, replay_runtime) = registry
+            .acquire_after_open(&sqlite, &app_data, || Ok::<_, Infallible>("reopened"))
+            .unwrap();
+        assert!(Arc::ptr_eq(&runtime, &replay_runtime));
+    }
+
+    #[test]
+    fn distinct_database_or_app_data_identity_is_isolated() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let first = Scope::new();
+        let second = Scope::new();
+        let first_runtime = acquire(&registry, &first.db, &first.app_data).unwrap();
+        let other_db = acquire(&registry, &second.db, &first.app_data).unwrap();
+        let other_app = acquire(&registry, &first.db, &second.app_data).unwrap();
+        assert!(!Arc::ptr_eq(&first_runtime, &other_db));
+        assert!(!Arc::ptr_eq(&first_runtime, &other_app));
+        assert!(!Arc::ptr_eq(&other_db, &other_app));
+    }
+
+    #[test]
+    fn dead_weak_entries_are_cleaned_without_retaining_runtime() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let first = Scope::new();
+        let weak = {
+            let runtime = acquire(&registry, &first.db, &first.app_data).unwrap();
+            Arc::downgrade(&runtime)
+        };
+        assert!(weak.upgrade().is_none());
+        assert_eq!(registry.entry_count(), 1);
+        let second = Scope::new();
+        let _ = acquire(&registry, &second.db, &second.app_data).unwrap();
+        assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[test]
+    fn symlink_targets_are_rejected() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let db_link = scope.db.parent().unwrap().join("db-link");
+        symlink(&scope.db, &db_link).unwrap();
+        assert_eq!(
+            acquire(&registry, &db_link, &scope.app_data).unwrap_err(),
+            ProcessRuntimeRegistryError::UnsafeTarget
+        );
+        let app_link = scope.db.parent().unwrap().join("app-link");
+        symlink(&scope.app_data, &app_link).unwrap();
+        assert_eq!(
+            acquire(&registry, &scope.db, &app_link).unwrap_err(),
+            ProcessRuntimeRegistryError::UnsafeTarget
+        );
+    }
+
+    #[test]
+    fn intermediate_symlink_is_rejected() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let real = scope.physical_root.join("real");
+        fs::create_dir(&real).unwrap();
+        let db = real.join("nested.sqlite");
+        fs::write(&db, b"nested").unwrap();
+        let link = scope.physical_root.join("linked-directory");
+        symlink(&real, &link).unwrap();
+        assert_eq!(
+            acquire(&registry, &link.join("nested.sqlite"), &scope.app_data).unwrap_err(),
+            ProcessRuntimeRegistryError::UnsafeTarget
+        );
+    }
+
+    #[test]
+    fn hardlink_fifo_and_writable_targets_are_rejected_without_blocking() {
+        let registry = ProcessRuntimeRegistry::isolated();
+
+        let hardlink_scope = Scope::new();
+        let hardlink = hardlink_scope.physical_root.join("hardlink.sqlite");
+        fs::hard_link(&hardlink_scope.db, &hardlink).unwrap();
+        assert_eq!(
+            acquire(&registry, &hardlink, &hardlink_scope.app_data).unwrap_err(),
+            ProcessRuntimeRegistryError::UnsafeTarget
+        );
+
+        let fifo_scope = Scope::new();
+        let fifo = fifo_scope.physical_root.join("fifo.sqlite");
+        let fifo_c = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
+        assert_eq!(
+            acquire(&registry, &fifo, &fifo_scope.app_data).unwrap_err(),
+            ProcessRuntimeRegistryError::UnsafeTarget
+        );
+
+        let writable_db = Scope::new();
+        fs::set_permissions(&writable_db.db, fs::Permissions::from_mode(0o666)).unwrap();
+        assert_eq!(
+            acquire(&registry, &writable_db.db, &writable_db.app_data).unwrap_err(),
+            ProcessRuntimeRegistryError::UnsafeTarget
+        );
+
+        let writable_app = Scope::new();
+        fs::set_permissions(&writable_app.app_data, fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(
+            acquire(&registry, &writable_app.db, &writable_app.app_data).unwrap_err(),
+            ProcessRuntimeRegistryError::UnsafeTarget
+        );
+    }
+
+    #[test]
+    fn poisoned_registry_fails_closed_after_cooperative_consumer_open() {
+        let registry = Arc::new(ProcessRuntimeRegistry::isolated());
+        let poisoner = {
+            let registry = Arc::clone(&registry);
+            std::thread::spawn(move || registry.poison())
+        };
+        assert!(poisoner.join().is_err());
+        let scope = Scope::new();
+        let opened = AtomicUsize::new(0);
+        let result = registry.acquire_after_open(&scope.db, &scope.app_data, || {
+            opened.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, Infallible>(())
+        });
+        assert!(matches!(
+            result,
+            Err(AcquireAfterOpenError::Scope(
+                ProcessRuntimeRegistryError::Poisoned
+            ))
+        ));
+        assert_eq!(opened.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn concurrent_acquire_coalesces_after_independent_consumer_open() {
+        let registry = Arc::new(ProcessRuntimeRegistry::isolated());
+        let scope = Scope::new();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let mut tasks = Vec::new();
+        for consumer in 0..2 {
+            let registry = Arc::clone(&registry);
+            let db = scope.db.clone();
+            let app_data = scope.app_data.clone();
+            let barrier = Arc::clone(&barrier);
+            tasks.push(std::thread::spawn(move || {
+                registry
+                    .acquire_after_open(&db, &app_data, || {
+                        barrier.wait();
+                        Ok::<_, Infallible>(consumer)
+                    })
+                    .unwrap()
+            }));
+        }
+        let (first_consumer, first_runtime) = tasks.remove(0).join().unwrap();
+        let (second_consumer, second_runtime) = tasks.remove(0).join().unwrap();
+        assert_ne!(first_consumer, second_consumer);
+        assert!(Arc::ptr_eq(&first_runtime, &second_runtime));
+        assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[test]
+    fn debug_output_is_fully_redacted() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let runtime = acquire(&registry, &scope.db, &scope.app_data).unwrap();
+        let scope_key = resolve_scope(&scope.db, &scope.app_data).unwrap();
+        for debug in [
+            format!("{registry:?}"),
+            format!("{runtime:?}"),
+            format!("{scope_key:?}"),
+            format!("{:?}", scope_key.sqlite_file),
+        ] {
+            assert!(debug.contains("[redacted]"));
+            assert!(!debug.contains("sessions.sqlite"));
+            assert!(!debug.contains(scope.db.to_string_lossy().as_ref()));
+        }
+        let consumer_error = AcquireAfterOpenError::Consumer("secret consumer error");
+        let debug = format!("{consumer_error:?}");
+        assert_eq!(debug, "Consumer([redacted])");
+        assert!(!debug.contains("secret"));
+    }
+}
