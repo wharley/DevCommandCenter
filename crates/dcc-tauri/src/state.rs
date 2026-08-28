@@ -24,6 +24,10 @@ use dcc_core::{
     },
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
+        delegation_worktree::{
+            DelegationWorktreeOperation, DelegationWorktreeOperationId,
+            DelegationWorktreeOperationState,
+        },
         mcp::{
             mcp_oauth_resource_fingerprint, McpDefinitionId, McpErrorCategory, McpOauthGrant,
             McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretReferenceId, McpTransport,
@@ -41,10 +45,10 @@ use dcc_core::{
         workspace_bundle::WorkspaceBundleState,
     },
     ports::{
-        AppendEventOutcome, CredentialStore, DelegationRepo, EventBus, Input, McpRepo, ProjectRepo,
-        Provider, ProviderMcpOauthStart, ProviderMcpServerConfig, ProviderRuntimeConfig,
-        RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo,
-        WorkspaceBundleRepo, WorkspaceRepo,
+        AppendEventOutcome, CredentialStore, DelegationRepo, DelegationWorktreeOperationRepo,
+        EventBus, Input, McpRepo, ProjectRepo, Provider, ProviderMcpOauthStart,
+        ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo, SessionConfig,
+        SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -4202,6 +4206,119 @@ impl DelegationRepo for SessionCommandState {
         updated_at: String,
     ) -> Result<Option<Delegation>> {
         DelegationRepo::update_delegation_status(&self.session_repo, id, status, updated_at).await
+    }
+}
+
+#[async_trait]
+impl DelegationWorktreeOperationRepo for SessionCommandState {
+    async fn create_delegation_worktree_operation(
+        &self,
+        operation: &DelegationWorktreeOperation,
+    ) -> Result<()> {
+        DelegationWorktreeOperationRepo::create_delegation_worktree_operation(
+            &self.session_repo,
+            operation,
+        )
+        .await
+    }
+
+    async fn get_delegation_worktree_operation(
+        &self,
+        id: &DelegationWorktreeOperationId,
+    ) -> Result<Option<DelegationWorktreeOperation>> {
+        DelegationWorktreeOperationRepo::get_delegation_worktree_operation(&self.session_repo, id)
+            .await
+    }
+
+    async fn get_delegation_worktree_operation_by_delegation_id(
+        &self,
+        delegation_id: &DelegationId,
+    ) -> Result<Option<DelegationWorktreeOperation>> {
+        DelegationWorktreeOperationRepo::get_delegation_worktree_operation_by_delegation_id(
+            &self.session_repo,
+            delegation_id,
+        )
+        .await
+    }
+
+    async fn list_delegation_worktree_operations_by_workspace(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<DelegationWorktreeOperation>> {
+        DelegationWorktreeOperationRepo::list_delegation_worktree_operations_by_workspace(
+            &self.session_repo,
+            workspace_id,
+        )
+        .await
+    }
+
+    async fn compare_and_swap_delegation_worktree_operation(
+        &self,
+        expected_state: DelegationWorktreeOperationState,
+        operation: &DelegationWorktreeOperation,
+    ) -> Result<bool> {
+        DelegationWorktreeOperationRepo::compare_and_swap_delegation_worktree_operation(
+            &self.session_repo,
+            expected_state,
+            operation,
+        )
+        .await
+    }
+
+    async fn list_delegation_worktree_operations_requiring_recovery(
+        &self,
+    ) -> Result<Vec<DelegationWorktreeOperation>> {
+        DelegationWorktreeOperationRepo::list_delegation_worktree_operations_requiring_recovery(
+            &self.session_repo,
+        )
+        .await
+    }
+
+    async fn claim_delegation_worktree_removal(
+        &self,
+        id: &DelegationWorktreeOperationId,
+        recovery_owner: &str,
+        now: &str,
+        lease_until: &str,
+    ) -> Result<Option<DelegationWorktreeOperation>> {
+        DelegationWorktreeOperationRepo::claim_delegation_worktree_removal(
+            &self.session_repo,
+            id,
+            recovery_owner,
+            now,
+            lease_until,
+        )
+        .await
+    }
+
+    async fn finalize_delegation_worktree_removal(
+        &self,
+        id: &DelegationWorktreeOperationId,
+        recovery_owner: &str,
+        final_state: DelegationWorktreeOperationState,
+        last_error: Option<String>,
+        updated_at: &str,
+    ) -> Result<Option<DelegationWorktreeOperation>> {
+        DelegationWorktreeOperationRepo::finalize_delegation_worktree_removal(
+            &self.session_repo,
+            id,
+            recovery_owner,
+            final_state,
+            last_error,
+            updated_at,
+        )
+        .await
+    }
+
+    async fn delete_removed_delegation_worktree_operation(
+        &self,
+        id: &DelegationWorktreeOperationId,
+    ) -> Result<bool> {
+        DelegationWorktreeOperationRepo::delete_removed_delegation_worktree_operation(
+            &self.session_repo,
+            id,
+        )
+        .await
     }
 }
 

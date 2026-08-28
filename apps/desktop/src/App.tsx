@@ -335,6 +335,8 @@ type DelegationChildBinding = {
 	childSessionId: string;
 	parentSessionId: string;
 	workspaceId: string;
+	/** Registered parent workspace root used for journaled cleanup. */
+	workspaceRoot?: string | null;
 	workspacePath: string | null;
 	cleanupWorkspacePath?: string | null;
 	reviewRequired: boolean;
@@ -1143,7 +1145,21 @@ export default function App() {
 					await failDelegation({
 						delegationId: binding.delegationId,
 						reason: reason ?? "Child session failed.",
+					}).catch((failure) => {
+						console.error("[dcc] delegation failure persistence failed:", failure);
 					});
+					if (binding.workspaceRoot?.trim()) {
+						await workspaceRemoveDelegationWorktree({
+							workspaceRoot: binding.workspaceRoot,
+							delegationId: binding.delegationId,
+							removeBranch: true,
+						}).catch((cleanupError) => {
+							console.error(
+								"[dcc] failed delegation worktree cleanup failed:",
+								cleanupError,
+							);
+						});
+					}
 					await queryClient.invalidateQueries({
 						queryKey: ["delegations", binding.workspaceId],
 					});
@@ -2621,6 +2637,7 @@ export default function App() {
 				let delegationId: string | null = null;
 				let childSessionId: string | null = null;
 				let implementationWorktreePath: string | null = null;
+				let implementationWorktreeOperationId: string | null = null;
 				try {
 					if (allowFileEdits) {
 						if (!selectedLocalWorkspacePath) {
@@ -2628,10 +2645,13 @@ export default function App() {
 						}
 						const preparedWorktree = await workspacePrepareDelegationWorktree({
 							workspaceRoot: selectedLocalWorkspacePath,
+							workspaceId: selectedWorkspace.id,
+							parentSessionId,
 							delegationKey:
 								selectedSessionSnapshot.activeTurnId ?? parentSessionId,
 						});
 						implementationWorktreePath = preparedWorktree.worktreePath;
+						implementationWorktreeOperationId = preparedWorktree.operationId;
 					}
 					const delegationWorkspacePath =
 						implementationWorktreePath ?? selectedLocalWorkspacePath;
@@ -2698,6 +2718,7 @@ export default function App() {
 						parentSessionId,
 						parentTurnId: selectedSessionSnapshot.activeTurnId,
 						childSessionId,
+						delegationWorktreeOperationId: implementationWorktreeOperationId,
 						workspaceId: selectedWorkspace.id,
 						targetProviderId: targetProvider.id,
 						targetModelId,
@@ -2716,6 +2737,7 @@ export default function App() {
 						childSessionId,
 						parentSessionId,
 						workspaceId: selectedWorkspace.id,
+						workspaceRoot: selectedLocalWorkspacePath,
 						workspacePath: delegationWorkspacePath,
 						cleanupWorkspacePath: implementationWorktreePath,
 						reviewRequired: allowFileEdits,
@@ -2757,10 +2779,10 @@ export default function App() {
 							binding.finalized = true;
 						}
 					}
-					if (implementationWorktreePath && selectedLocalWorkspacePath) {
+					if (implementationWorktreeOperationId && selectedLocalWorkspacePath) {
 						await workspaceRemoveDelegationWorktree({
 							workspaceRoot: selectedLocalWorkspacePath,
-							worktreePath: implementationWorktreePath,
+							operationId: implementationWorktreeOperationId,
 							removeBranch: true,
 						}).catch((cleanupError) => {
 							console.error(

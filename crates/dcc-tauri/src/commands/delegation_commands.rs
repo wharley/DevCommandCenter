@@ -10,12 +10,14 @@ use dcc_core::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
             DelegationStatus,
         },
+        delegation_worktree::{DelegationWorktreeOperationId, DelegationWorktreeOperationState},
         provider::ProviderId,
         session::{SessionEventKind, SessionEventRecord, SessionId, TurnId},
         workspace::WorkspaceId,
     },
     ports::{
-        AppendEventOutcome, CoreEvent, DelegationRepo, EventBus, SessionEventRepo, SessionRepo,
+        AppendEventOutcome, CoreEvent, DelegationRepo, DelegationWorktreeOperationRepo, EventBus,
+        SessionEventRepo, SessionRepo,
     },
 };
 
@@ -27,6 +29,8 @@ pub struct CreateDelegationInput {
     pub parent_session_id: SessionId,
     pub parent_turn_id: Option<TurnId>,
     pub child_session_id: Option<SessionId>,
+    #[serde(default)]
+    pub delegation_worktree_operation_id: Option<String>,
     pub workspace_id: WorkspaceId,
     pub target_provider_id: ProviderId,
     #[serde(default)]
@@ -212,14 +216,18 @@ pub async fn create_delegation(
     if parent_session.workspace_id != input.workspace_id {
         return Err("workspace_id must match the parent session workspace".to_string());
     }
-    if let Some(child_session_id) = input.child_session_id.as_ref() {
+    let child_session = if let Some(child_session_id) = input.child_session_id.as_ref() {
         let child_session = SessionRepo::get_session(&*state, child_session_id)
             .await
-            .map_err(|error| error.to_string())?;
-        if child_session.is_none() {
-            return Err(format!("child session not found: {}", child_session_id.0));
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("child session not found: {}", child_session_id.0))?;
+        if child_session.workspace_id != input.workspace_id {
+            return Err("child session must belong to workspace_id".to_string());
         }
-    }
+        Some(child_session)
+    } else {
+        None
+    };
 
     let now = now_iso();
     let delegation = Delegation {
@@ -243,10 +251,86 @@ pub async fn create_delegation(
         updated_at: now.clone(),
     };
 
-    DelegationRepo::save_delegation(&*state, &delegation)
+    let edit_capable =
+        matches!(delegation.mode, DelegationMode::Implement) || delegation.budget.allow_file_edits;
+    let mut bound_operation = if let Some(operation_id) = input
+        .delegation_worktree_operation_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let mut operation = DelegationWorktreeOperationRepo::get_delegation_worktree_operation(
+            &*state,
+            &DelegationWorktreeOperationId(operation_id.to_string()),
+        )
         .await
-        .map_err(|error| error.to_string())?;
-    append_and_publish_parent_event(
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "delegation worktree journal entry was not found".to_string())?;
+        if operation.state != DelegationWorktreeOperationState::Prepared {
+            return Err(format!(
+                "delegation worktree is {:?}, not prepared",
+                operation.state
+            ));
+        }
+        if operation.workspace_id != delegation.workspace_id
+            || operation.parent_session_id.as_ref() != Some(&delegation.parent_session_id)
+        {
+            return Err("delegation worktree scope does not match the delegation".to_string());
+        }
+        let child_session_id = delegation
+            .child_session_id
+            .as_ref()
+            .ok_or_else(|| "journaled implementation requires a child session".to_string())?;
+        let child_session = child_session
+            .as_ref()
+            .ok_or_else(|| "journaled implementation requires a child session".to_string())?;
+        if child_session.working_directory_override.as_deref()
+            != Some(operation.worktree_path.as_str())
+        {
+            return Err(
+                "child session working directory does not match the journaled worktree".to_string(),
+            );
+        }
+        operation.delegation_id = Some(delegation.id.clone());
+        operation.child_session_id = Some(child_session_id.clone());
+        operation.state = DelegationWorktreeOperationState::Bound;
+        operation.updated_at = now.clone();
+        if !DelegationWorktreeOperationRepo::compare_and_swap_delegation_worktree_operation(
+            &*state,
+            DelegationWorktreeOperationState::Prepared,
+            &operation,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        {
+            return Err("delegation worktree journal changed while binding".to_string());
+        }
+        Some(operation)
+    } else {
+        if edit_capable {
+            return Err(
+                "edit-capable delegation requires a prepared worktree operation".to_string(),
+            );
+        }
+        None
+    };
+
+    if let Err(error) = DelegationRepo::save_delegation(&*state, &delegation).await {
+        if let Some(operation) = bound_operation.as_mut() {
+            operation.state = DelegationWorktreeOperationState::CleanupRequired;
+            operation.last_error = Some("failed to persist the bound delegation".to_string());
+            operation.updated_at = now_iso();
+            let _ =
+                DelegationWorktreeOperationRepo::compare_and_swap_delegation_worktree_operation(
+                    &*state,
+                    DelegationWorktreeOperationState::Bound,
+                    operation,
+                )
+                .await;
+        }
+        return Err(error.to_string());
+    }
+    if let Err(error) = append_and_publish_parent_event(
         &state,
         &delegation.parent_session_id,
         SessionEventKind::DelegationRequested {
@@ -258,7 +342,16 @@ pub async fn create_delegation(
         },
         now,
     )
-    .await?;
+    .await
+    {
+        // The delegation and its Bound journal entry are already durable.
+        // Returning an error here would make the caller discard a valid
+        // worktree, so event delivery is best-effort after persistence wins.
+        eprintln!(
+            "[DCC] delegation {} was saved but its requested event was not delivered: {}",
+            delegation.id.0, error
+        );
+    }
 
     Ok(CreateDelegationOutput { delegation })
 }
@@ -306,10 +399,24 @@ pub async fn cancel_delegation(
             status_label(delegation.status)
         ));
     }
-    if matches!(delegation.status, DelegationStatus::ReviewPending) {
-        return Err(format!("delegation {} is awaiting review", delegation.id.0));
+    if matches!(delegation.status, DelegationStatus::ReviewPending)
+        && (delegation.budget.allow_file_edits
+            || matches!(delegation.mode, DelegationMode::Implement))
+    {
+        let operation =
+            DelegationWorktreeOperationRepo::get_delegation_worktree_operation_by_delegation_id(
+                &*state,
+                &delegation.id,
+            )
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "edit-capable delegation has no worktree journal entry".to_string())?;
+        if operation.state != DelegationWorktreeOperationState::Removed {
+            return Err(
+                "discard the isolated delegation worktree before cancelling review".to_string(),
+            );
+        }
     }
-
     let now = now_iso();
     let updated = DelegationRepo::update_delegation_status(
         &*state,
@@ -424,6 +531,42 @@ pub async fn complete_delegation(
     DelegationRepo::save_delegation(&*state, &updated)
         .await
         .map_err(|error| error.to_string())?;
+    if review_required
+        && (updated.budget.allow_file_edits || matches!(updated.mode, DelegationMode::Implement))
+    {
+        let mut operation =
+            DelegationWorktreeOperationRepo::get_delegation_worktree_operation_by_delegation_id(
+                &*state,
+                &updated.id,
+            )
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "edit-capable delegation has no worktree journal entry".to_string())?;
+        match operation.state {
+            DelegationWorktreeOperationState::Bound => {
+                operation.state = DelegationWorktreeOperationState::ReviewPending;
+                operation.updated_at = now.clone();
+                if !DelegationWorktreeOperationRepo::compare_and_swap_delegation_worktree_operation(
+                    &*state,
+                    DelegationWorktreeOperationState::Bound,
+                    &operation,
+                )
+                .await
+                .map_err(|error| error.to_string())?
+                {
+                    return Err(
+                        "delegation worktree journal changed while entering review".to_string()
+                    );
+                }
+            }
+            DelegationWorktreeOperationState::ReviewPending => {}
+            ref state => {
+                return Err(format!(
+                    "delegation worktree is {state:?}, not ready for review"
+                ))
+            }
+        }
+    }
     let summary = input.summary;
     if review_required {
         let content = "Delegated implementation finished and is awaiting human review.".to_string();
@@ -484,6 +627,23 @@ pub async fn approve_delegation(
             delegation.id.0,
             status_label(delegation.status)
         ));
+    }
+
+    if delegation.budget.allow_file_edits || matches!(delegation.mode, DelegationMode::Implement) {
+        let operation =
+            DelegationWorktreeOperationRepo::get_delegation_worktree_operation_by_delegation_id(
+                &*state,
+                &delegation.id,
+            )
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "edit-capable delegation has no worktree journal entry".to_string())?;
+        if operation.state != DelegationWorktreeOperationState::Applied {
+            return Err(format!(
+                "delegation worktree is {:?}, not applied",
+                operation.state
+            ));
+        }
     }
 
     let now = now_iso();

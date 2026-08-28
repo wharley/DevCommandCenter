@@ -11,6 +11,7 @@ mod skills_commands;
 mod workspace_commands;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
+use dcc_tauri::commands::workspace_commands::reconcile_delegation_worktree_operations;
 use dcc_tauri::{
     commands::coderabbit::CodeRabbitReviewJobsState,
     state::{SessionCommandState, WorkspaceCommandState},
@@ -7148,6 +7149,18 @@ pub fn run() {
                 SessionCommandState::new(app.handle().clone(), db_path.clone());
             let workspace_command_state =
                 WorkspaceCommandState::from_session(&session_command_state);
+            match tauri::async_runtime::block_on(reconcile_delegation_worktree_operations(
+                &workspace_command_state,
+            )) {
+                Ok(warnings) => {
+                    for warning in warnings {
+                        eprintln!("[DCC][delegation-recovery] {warning}");
+                    }
+                }
+                Err(error) => {
+                    eprintln!("[DCC][delegation-recovery] journal unavailable: {error}");
+                }
+            }
             app.manage(workspace_command_state);
             app.manage(CodeRabbitReviewJobsState::default());
             app.manage(session_command_state);

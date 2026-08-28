@@ -99,8 +99,24 @@ path, and that worktree is removed once the delegation is applied or discarded.
 
 After a delegation is applied or discarded, DCC removes the child worktree and
 returns the review surface to the parent context. When a workspace is deleted,
-DCC also cleans up delegation worktrees associated with child sessions so stale
-worktrees are not left behind.
+DCC also cleans up its journaled delegation worktrees before changing remote
+state or removing the primary workspace.
+
+Each implementation worktree has an opaque durable operation ID. The journal
+binds that ID to the workspace, parent and child sessions, delegation, source
+root, worktree path, branch, baseline commit, and expected branch OID. Apply and
+discard resolve this record by ID; `workingDirectoryOverride` remains provider
+context and preview data, but is not deletion authority.
+
+Lifecycle updates use compare-and-swap transitions. If DCC stops during
+prepare, bind, apply, or removal, startup reconciliation resumes only cleanup
+whose destructive intent is already durable. A missing ref is an idempotent
+success, while a branch that advanced to another OID is preserved and reported
+for recovery. Removal also uses a durable expiring lease, so only one DCC
+process may mutate a journaled worktree at a time and a later process can take
+over after a crash. Terminal delegations are cleaned immediately when possible
+and reconciled on startup. Interrupted or potentially partial apply is never
+reported as success.
 
 ## Notes
 

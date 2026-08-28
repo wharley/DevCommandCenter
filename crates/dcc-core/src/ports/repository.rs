@@ -3,6 +3,10 @@ use async_trait::async_trait;
 use crate::{
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
+        delegation_worktree::{
+            DelegationWorktreeOperation, DelegationWorktreeOperationId,
+            DelegationWorktreeOperationState,
+        },
         mcp::{
             McpBinding, McpBindingId, McpDefinition, McpDefinitionId, McpOauthGrant, McpToolPolicy,
         },
@@ -218,6 +222,58 @@ pub trait DelegationRepo: Send + Sync {
         status: DelegationStatus,
         updated_at: String,
     ) -> Result<Option<Delegation>>;
+}
+
+/// Durable lifecycle journal for delegation worktree creation, binding,
+/// application, and cleanup. CAS is the only update operation so stale
+/// workers cannot overwrite a successor state.
+#[async_trait]
+pub trait DelegationWorktreeOperationRepo: Send + Sync {
+    async fn create_delegation_worktree_operation(
+        &self,
+        operation: &DelegationWorktreeOperation,
+    ) -> Result<()>;
+    async fn get_delegation_worktree_operation(
+        &self,
+        id: &DelegationWorktreeOperationId,
+    ) -> Result<Option<DelegationWorktreeOperation>>;
+    async fn get_delegation_worktree_operation_by_delegation_id(
+        &self,
+        delegation_id: &DelegationId,
+    ) -> Result<Option<DelegationWorktreeOperation>>;
+    async fn list_delegation_worktree_operations_by_workspace(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<DelegationWorktreeOperation>>;
+    async fn compare_and_swap_delegation_worktree_operation(
+        &self,
+        expected_state: DelegationWorktreeOperationState,
+        operation: &DelegationWorktreeOperation,
+    ) -> Result<bool>;
+    async fn list_delegation_worktree_operations_requiring_recovery(
+        &self,
+    ) -> Result<Vec<DelegationWorktreeOperation>>;
+    async fn claim_delegation_worktree_removal(
+        &self,
+        id: &DelegationWorktreeOperationId,
+        recovery_owner: &str,
+        now: &str,
+        lease_until: &str,
+    ) -> Result<Option<DelegationWorktreeOperation>>;
+    async fn finalize_delegation_worktree_removal(
+        &self,
+        id: &DelegationWorktreeOperationId,
+        recovery_owner: &str,
+        final_state: DelegationWorktreeOperationState,
+        last_error: Option<String>,
+        updated_at: &str,
+    ) -> Result<Option<DelegationWorktreeOperation>>;
+    /// Purges only a terminal `Removed` journal row. Returns false for a
+    /// missing or still-live operation.
+    async fn delete_removed_delegation_worktree_operation(
+        &self,
+        id: &DelegationWorktreeOperationId,
+    ) -> Result<bool>;
 }
 
 #[async_trait]

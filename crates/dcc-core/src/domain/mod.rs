@@ -1,4 +1,5 @@
 pub mod delegation;
+pub mod delegation_worktree;
 pub mod guarded_undo;
 pub mod mcp;
 pub mod mcp_conformance;
@@ -15,6 +16,9 @@ pub mod workspace_bundle;
 pub use delegation::{
     Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
     DelegationStatus,
+};
+pub use delegation_worktree::{
+    DelegationWorktreeOperation, DelegationWorktreeOperationId, DelegationWorktreeOperationState,
 };
 pub use guarded_undo::{
     account_restore_files, canonical_restore_manifest_digest, classify_capture_version,

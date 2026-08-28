@@ -1718,11 +1718,9 @@ export function WorkspaceInspectorSidebar({
 			}
 
 			try {
-				const worktreePath = await resolveDelegationWorktreePath(delegation);
-
 				const result = await workspaceApplyDelegationWorktree({
 					workspaceRoot: root,
-					worktreePath,
+					delegationId: delegation.id,
 				});
 				await approveDelegation({
 					delegationId: delegation.id,
@@ -1742,7 +1740,7 @@ export function WorkspaceInspectorSidebar({
 				options?.onApplied?.();
 				await workspaceRemoveDelegationWorktree({
 					workspaceRoot: root,
-					worktreePath,
+					delegationId: delegation.id,
 					removeBranch: true,
 				}).catch((cleanupError) => {
 					console.error("[inspector] delegation worktree cleanup failed", cleanupError);
@@ -1769,7 +1767,6 @@ export function WorkspaceInspectorSidebar({
 		[
 			onContextualActionComplete,
 			queryClient,
-			resolveDelegationWorktreePath,
 			t,
 			workspaceId,
 			workspacePath,
@@ -1788,11 +1785,10 @@ export function WorkspaceInspectorSidebar({
 			}
 
 			try {
-				const worktreePath = await resolveDelegationWorktreePath(delegation);
 				options?.onDiscarded?.();
 				await workspaceRemoveDelegationWorktree({
 					workspaceRoot: root,
-					worktreePath,
+					delegationId: delegation.id,
 					removeBranch: true,
 				});
 				await cancelDelegation({
@@ -1822,7 +1818,6 @@ export function WorkspaceInspectorSidebar({
 		[
 			onContextualActionComplete,
 			queryClient,
-			resolveDelegationWorktreePath,
 			t,
 			workspaceId,
 			workspacePath,

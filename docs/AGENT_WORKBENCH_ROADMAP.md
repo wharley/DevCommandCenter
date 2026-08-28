@@ -1,7 +1,7 @@
 # Agent Workbench Roadmap
 
 Status: proposed public roadmap  
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 ## Vision
 
@@ -118,12 +118,20 @@ none of it is marked shipped.
   remote, branch, local HEAD OID, and redacted push URL, revalidates the live
   remote OID, and uses an exact `force-with-lease`; remotes with multiple push
   destinations fail closed. Workspace listing is read-only, preserves broken
-  records, and reports their recovery reason. Capture v1 remains review evidence
-  only and is a NO-GO for Undo. Until the durable lifecycle journal, delegation
-  ownership binding, transactional apply/rollback, repository/workspace
-  create-delete recovery, remaining remote ownership/materialization actions,
-  externally reported setup mutations, creation-time generated-context writes,
-  and capture/common-dir admission are complete, completed captures finalize
+  records, and reports their recovery reason. Delegation worktrees now have a
+  durable SQLite lifecycle journal with CAS state transitions, explicit
+  workspace/session/delegation ownership, exact path/branch/OID binding,
+  idempotent compare-and-delete cleanup, cross-process removal claims with
+  expiring leases, startup reconciliation, terminal-delegation cleanup, and
+  journal-driven workspace/project deletion. Apply/discard commands resolve
+  authority from the journal instead of trusting a child session's working
+  directory override. Interrupted apply remains fail-closed and preserves an
+  explicit recovery state; transactional destination rollback is still a
+  separate slice. Capture v1 remains review evidence only and is a NO-GO for
+  Undo. Until transactional apply/rollback, repository/workspace create-delete
+  recovery, remaining remote ownership/materialization actions, externally
+  reported setup mutations, creation-time generated-context writes, and
+  capture/common-dir admission are complete, completed captures finalize
   explicitly ineligible and cannot create an `Eligible` restore set. Recovery
   is lazy but gates the first feature-enabled begin. The Undo button remains
   disabled.
@@ -131,10 +139,10 @@ none of it is marked shipped.
   archive path, is implemented locally and static-review approved. It remains
   pending macOS CI that has the required Apple signing and notarization secrets.
 
-The current validation baseline is 95 frontend test files / 511 tests, 84
-feature-off and 178 feature-on `dcc-infra` Rust tests, 216 feature-off
-`dcc-tauri` tests (210 passed and 6 ignored), and 218 feature-on `dcc-tauri`
-tests (212 passed and 6 ignored).
+The current validation baseline is 95 frontend test files / 511 tests, 91
+feature-off and 185 feature-on `dcc-infra` Rust tests, 218 feature-off
+`dcc-tauri` tests (212 passed and 6 ignored), and 220 feature-on `dcc-tauri`
+tests (214 passed and 6 ignored).
 
 ### M3 Last Turn Review local implementation
 

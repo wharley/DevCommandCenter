@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -23,7 +23,13 @@ use dcc_core::{
         CreateWorkspaceFromUrlInput,
     },
     domain::{
+        delegation::{DelegationId, DelegationStatus},
+        delegation_worktree::{
+            DelegationWorktreeOperation, DelegationWorktreeOperationId,
+            DelegationWorktreeOperationState,
+        },
         repository::{Repository, RepositoryId},
+        session::SessionId,
         workspace::{
             Workspace, WorkspaceId, WorkspacePushTarget, WorkspaceSetupReport,
             WorkspaceSetupStatus, WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind,
@@ -32,8 +38,8 @@ use dcc_core::{
         workspace_bundle::{WorkspaceBundleId, WorkspaceBundleState, WorkspaceBundleSummary},
     },
     ports::{
-        DelegationRepo, ProviderRuntimeConfig, RepositoryRepo, SessionRepo, WorkspaceBundleRepo,
-        WorkspaceRepo,
+        DelegationRepo, DelegationWorktreeOperationRepo, ProviderRuntimeConfig, RepositoryRepo,
+        SessionRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
 };
 #[cfg(test)]
@@ -41,7 +47,7 @@ use dcc_infra::git::read_workspace_validation_config;
 use dcc_infra::{
     db::{SqliteSessionRepo, SqliteWorkspaceRepo},
     git::{
-        create_worktree_branch_from_ref, detect_workspace_setup_suggestions, is_git_repo,
+        create_worktree_branch_from_ref, detect_workspace_setup_suggestions,
         list_local_branch_names, read_workspace_automation_config, remove_worktree,
         validate_workspace_automation_config, CommandGitOps, RepoAutomationConfig,
         RepoAutomationTask, RepoDeliveryPolicy, RepoTaskKind,
@@ -567,12 +573,15 @@ pub struct WorkspaceGitCommitSuggestionOutput {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePrepareDelegationWorktreeInput {
     pub workspace_root: String,
+    pub workspace_id: WorkspaceId,
+    pub parent_session_id: SessionId,
     pub delegation_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePrepareDelegationWorktreeOutput {
+    pub operation_id: String,
     pub worktree_path: String,
     pub branch: String,
     pub base_commit: String,
@@ -582,7 +591,10 @@ pub struct WorkspacePrepareDelegationWorktreeOutput {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceRemoveDelegationWorktreeInput {
     pub workspace_root: String,
-    pub worktree_path: String,
+    #[serde(default)]
+    pub delegation_id: Option<DelegationId>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
     #[serde(default)]
     pub remove_branch: bool,
 }
@@ -591,7 +603,7 @@ pub struct WorkspaceRemoveDelegationWorktreeInput {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceApplyDelegationWorktreeInput {
     pub workspace_root: String,
-    pub worktree_path: String,
+    pub delegation_id: DelegationId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -4586,8 +4598,28 @@ pub async fn workspace_prepare_delegation_worktree(
     if requested_root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
+    let workspace_repo =
+        SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let workspace = workspace_repo
+        .get_workspace(&input.workspace_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", input.workspace_id.0))?;
+    if resolve_workspace_active_root(&workspace).trim() != requested_root {
+        return Err("workspace_id does not own workspace_root".to_string());
+    }
+    let journal_repo =
+        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let parent_session = SessionRepo::get_session(&journal_repo, &input.parent_session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("parent session not found: {}", input.parent_session_id.0))?;
+    if parent_session.workspace_id != input.workspace_id {
+        return Err("parent session does not belong to workspace_id".to_string());
+    }
+
     let suffix = delegation_key_suffix(input.delegation_key.as_deref());
-    state
+    let (trusted_root, worktree_path, branch, base_commit) = state
         .run_git_workspace_mutation_blocking(&requested_root, move |trusted_root| {
             let root = trusted_root
                 .to_str()
@@ -4615,17 +4647,92 @@ pub async fn workspace_prepare_delegation_worktree(
             let branch = next_available_branch_name(root, &raw_branch);
             let worktree_root = delegation_worktrees_root(trusted_root);
             let worktree_path = worktree_root.join(branch.replace('/', "-"));
-            create_worktree_branch_from_ref(trusted_root, &worktree_path, &branch, &base_commit)
-                .map_err(|error| error.to_string())?;
-
-            Ok(WorkspacePrepareDelegationWorktreeOutput {
-                worktree_path: worktree_path.to_string_lossy().to_string(),
+            Ok((
+                trusted_root.to_path_buf(),
+                worktree_path,
                 branch,
                 base_commit,
-            })
+            ))
         })
         .await
-        .map_err(workspace_mutation_error)
+        .map_err(workspace_mutation_error)?;
+
+    let operation_id = DelegationWorktreeOperationId(Uuid::new_v4().to_string());
+    let now = Utc::now().to_rfc3339();
+    let mut operation = DelegationWorktreeOperation {
+        operation_id: operation_id.clone(),
+        delegation_key: input.delegation_key,
+        delegation_id: None,
+        workspace_id: input.workspace_id,
+        parent_session_id: Some(input.parent_session_id),
+        child_session_id: None,
+        source_root: trusted_root.to_string_lossy().to_string(),
+        worktree_path: worktree_path.to_string_lossy().to_string(),
+        branch: branch.clone(),
+        base_commit: base_commit.clone(),
+        expected_branch_oid: Some(base_commit.clone()),
+        source_root_id: None,
+        worktree_root_id: None,
+        common_dir_id: None,
+        state: DelegationWorktreeOperationState::Preparing,
+        last_error: None,
+        recovery_owner: None,
+        recovery_lease_until: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    journal_repo
+        .create_delegation_worktree_operation(&operation)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let create_result = state
+        .run_git_workspace_mutation_blocking(&requested_root, {
+            let worktree_path = worktree_path.clone();
+            let branch = branch.clone();
+            let base_commit = base_commit.clone();
+            move |trusted_root| {
+                create_worktree_branch_from_ref(trusted_root, &worktree_path, &branch, &base_commit)
+                    .map_err(|error| error.to_string())
+            }
+        })
+        .await
+        .map_err(workspace_mutation_error);
+    if let Err(error) = create_result {
+        operation.state = DelegationWorktreeOperationState::CleanupRequired;
+        operation.last_error = Some(error.clone());
+        operation.updated_at = Utc::now().to_rfc3339();
+        let _ = journal_repo
+            .compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &operation,
+            )
+            .await;
+        return Err(error);
+    }
+
+    operation.state = DelegationWorktreeOperationState::Prepared;
+    operation.updated_at = Utc::now().to_rfc3339();
+    if !journal_repo
+        .compare_and_swap_delegation_worktree_operation(
+            DelegationWorktreeOperationState::Preparing,
+            &operation,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Err(format!(
+            "delegation worktree {} was created but its journal state changed; recovery is required",
+            operation_id.0
+        ));
+    }
+
+    Ok(WorkspacePrepareDelegationWorktreeOutput {
+        operation_id: operation_id.0,
+        worktree_path: operation.worktree_path,
+        branch,
+        base_commit,
+    })
 }
 
 #[tauri::command]
@@ -4638,26 +4745,288 @@ pub async fn workspace_remove_delegation_worktree(
     if requested_root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    let worktree_path = validate_delegation_worktree_path(&requested_root, &input.worktree_path)?;
-    if !worktree_path.exists() {
-        // Idempotent filesystem cleanup. Without the child worktree there is
-        // no trustworthy branch/OID observation, so branch cleanup is left to
-        // the future durable lifecycle journal instead of being guessed.
-        return Ok(());
+    if !input.remove_branch {
+        return Err("journaled delegation cleanup must remove its owned branch".to_string());
     }
-    let remove_branch = input.remove_branch;
-    state
-        .run_git_workspace_pair_mutation_blocking(
-            &requested_root,
-            worktree_path,
-            move |trusted_root, trusted_worktree| {
-                remove_delegation_worktree_inner(trusted_root, trusted_worktree, remove_branch)
-            },
-        )
-        .await
-        .map_err(workspace_mutation_error)
+    let journal_repo =
+        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let operation = match (&input.delegation_id, &input.operation_id) {
+        (Some(_), Some(_)) => {
+            return Err("provide delegation_id or operation_id, not both".to_string())
+        }
+        (Some(delegation_id), None) => journal_repo
+            .get_delegation_worktree_operation_by_delegation_id(delegation_id)
+            .await
+            .map_err(|error| error.to_string())?,
+        (None, Some(operation_id)) if !operation_id.trim().is_empty() => journal_repo
+            .get_delegation_worktree_operation(&DelegationWorktreeOperationId(
+                operation_id.trim().to_string(),
+            ))
+            .await
+            .map_err(|error| error.to_string())?,
+        _ => return Err("delegation_id or operation_id is required".to_string()),
+    }
+    .ok_or_else(|| "delegation worktree journal entry was not found".to_string())?;
+    remove_journaled_delegation_worktree(&state, &journal_repo, &requested_root, operation).await
 }
 
+async fn remove_journaled_delegation_worktree(
+    state: &WorkspaceCommandState,
+    journal_repo: &SqliteSessionRepo,
+    requested_root: &str,
+    mut operation: DelegationWorktreeOperation,
+) -> Result<(), String> {
+    validate_delegation_operation_workspace_scope(state, requested_root, &operation).await?;
+    if matches!(operation.state, DelegationWorktreeOperationState::Removed) {
+        return Ok(());
+    }
+    // Validate immutable ownership before recording destructive intent. A bad
+    // journal row must not get stuck in Removing without touching the worktree.
+    let worktree_path =
+        validate_delegation_worktree_path(requested_root, &operation.worktree_path)?;
+    let expected_branch = operation.branch.clone();
+    let expected_oid = operation
+        .expected_branch_oid
+        .clone()
+        .ok_or_else(|| "delegation worktree journal has no expected branch OID".to_string())?;
+    if matches!(operation.state, DelegationWorktreeOperationState::Preparing) {
+        operation.state = DelegationWorktreeOperationState::CleanupRequired;
+        operation.last_error = Some("delegation worktree preparation was interrupted".to_string());
+        operation.updated_at = Utc::now().to_rfc3339();
+        if !journal_repo
+            .compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &operation,
+            )
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            return Err("delegation worktree journal changed; retry cleanup".to_string());
+        }
+    }
+    if !matches!(
+        operation.state,
+        DelegationWorktreeOperationState::Prepared
+            | DelegationWorktreeOperationState::Bound
+            | DelegationWorktreeOperationState::ReviewPending
+            | DelegationWorktreeOperationState::Applied
+            | DelegationWorktreeOperationState::Removing
+            | DelegationWorktreeOperationState::CleanupRequired
+    ) {
+        return Err(format!(
+            "delegation worktree cannot be removed while it is {:?}",
+            operation.state
+        ));
+    }
+
+    let recovery_owner = Uuid::new_v4().to_string();
+    let claimed_at = Utc::now();
+    let lease_until = claimed_at + Duration::minutes(2);
+    operation = match journal_repo
+        .claim_delegation_worktree_removal(
+            &operation.operation_id,
+            &recovery_owner,
+            &claimed_at.to_rfc3339(),
+            &lease_until.to_rfc3339(),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Some(operation) => operation,
+        None => {
+            let current = journal_repo
+                .get_delegation_worktree_operation(&operation.operation_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            if current
+                .as_ref()
+                .is_some_and(|current| current.state == DelegationWorktreeOperationState::Removed)
+            {
+                return Ok(());
+            }
+            if current
+                .as_ref()
+                .is_some_and(|current| current.state == DelegationWorktreeOperationState::Removing)
+            {
+                return Err(
+                    "delegation worktree cleanup is already running in another process".to_string(),
+                );
+            }
+            return Err("delegation worktree journal changed; retry cleanup".to_string());
+        }
+    };
+
+    let removal = if worktree_path.exists() {
+        state
+            .run_git_workspace_pair_mutation_blocking(
+                requested_root,
+                worktree_path,
+                move |trusted_root, trusted_worktree| {
+                    remove_journaled_delegation_worktree_inner(
+                        trusted_root,
+                        trusted_worktree,
+                        &expected_branch,
+                        &expected_oid,
+                    )
+                },
+            )
+            .await
+            .map_err(workspace_mutation_error)
+    } else {
+        state
+            .run_git_workspace_mutation_blocking(requested_root, move |trusted_root| {
+                delete_delegation_branch_ref(trusted_root, &expected_branch, &expected_oid)
+            })
+            .await
+            .map_err(workspace_mutation_error)
+    };
+
+    if let Err(error) = removal {
+        let _ = journal_repo
+            .finalize_delegation_worktree_removal(
+                &operation.operation_id,
+                &recovery_owner,
+                DelegationWorktreeOperationState::CleanupRequired,
+                Some(error.clone()),
+                &Utc::now().to_rfc3339(),
+            )
+            .await;
+        return Err(error);
+    }
+    if journal_repo
+        .finalize_delegation_worktree_removal(
+            &operation.operation_id,
+            &recovery_owner,
+            DelegationWorktreeOperationState::Removed,
+            None,
+            &Utc::now().to_rfc3339(),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        if journal_repo
+            .get_delegation_worktree_operation(&operation.operation_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_some_and(|current| current.state == DelegationWorktreeOperationState::Removed)
+        {
+            return Ok(());
+        }
+        return Err("delegation worktree was removed but its journal needs recovery".to_string());
+    }
+    Ok(())
+}
+
+async fn validate_delegation_operation_workspace_scope(
+    state: &WorkspaceCommandState,
+    requested_root: &str,
+    operation: &DelegationWorktreeOperation,
+) -> Result<(), String> {
+    if operation.source_root.trim() != requested_root.trim() {
+        return Err("delegation worktree journal does not belong to workspace_root".to_string());
+    }
+    let workspace_repo =
+        SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let workspace = workspace_repo
+        .get_workspace(&operation.workspace_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            format!(
+                "delegation worktree workspace no longer exists: {}",
+                operation.workspace_id.0
+            )
+        })?;
+    if resolve_workspace_active_root(&workspace).trim() != requested_root.trim() {
+        return Err("delegation worktree workspace mapping changed; refusing cleanup".to_string());
+    }
+    Ok(())
+}
+
+fn delete_delegation_branch_ref(
+    root: &Path,
+    branch: &str,
+    expected_oid: &str,
+) -> Result<(), String> {
+    if !branch.starts_with("dcc/delegation/") {
+        return Err("refusing to remove a non-DCC delegation branch".to_string());
+    }
+    let root = root
+        .to_str()
+        .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
+    validate_branch_for_fetch(root, branch)?;
+    let reference = format!("refs/heads/{branch}");
+    let observed = run_git_output(root, &["rev-parse", "--verify", "--quiet", &reference])?;
+    if !observed.status.success() {
+        if observed.status.code() == Some(1) {
+            return Ok(());
+        }
+        return Err(git_output_err("git rev-parse --verify", &observed.stderr));
+    }
+    let observed_oid = String::from_utf8_lossy(&observed.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if observed_oid != expected_oid.trim().to_ascii_lowercase() {
+        return Err(
+            "delegation branch advanced after its journal identity was captured".to_string(),
+        );
+    }
+    let output = run_git_output(root, &["update-ref", "-d", &reference, expected_oid])?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        // Another process may have completed the same compare-delete between
+        // rev-parse and update-ref. Absence is success; a successor remains
+        // protected and must never be deleted.
+        let after = run_git_output(root, &["rev-parse", "--verify", "--quiet", &reference])?;
+        if !after.status.success() && after.status.code() == Some(1) {
+            return Ok(());
+        }
+        if after.status.success()
+            && String::from_utf8_lossy(&after.stdout)
+                .trim()
+                .eq_ignore_ascii_case(expected_oid.trim())
+        {
+            return Err(git_output_err("git update-ref -d", &output.stderr));
+        }
+        Err("delegation branch advanced while its journaled ref was being removed".to_string())
+    }
+}
+
+fn remove_journaled_delegation_worktree_inner(
+    root: &Path,
+    worktree_path: &Path,
+    expected_branch: &str,
+    expected_oid: &str,
+) -> Result<(), String> {
+    let worktree = worktree_path
+        .to_str()
+        .ok_or_else(|| "delegation worktree path is not valid UTF-8".to_string())?;
+    let observed_branch = resolve_current_branch_name(worktree)?;
+    let observed_oid = resolve_current_commit_sha(worktree)?
+        .filter(|oid| !oid.trim().is_empty())
+        .ok_or_else(|| "failed to resolve delegation branch OID".to_string())?;
+    if observed_branch != expected_branch || observed_oid != expected_oid {
+        return Err(
+            "delegation worktree branch identity changed after it was journaled".to_string(),
+        );
+    }
+    let expected_name = expected_branch.replace('/', "-");
+    if worktree_path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str()) {
+        return Err("delegation worktree path does not match its journaled branch".to_string());
+    }
+    remove_worktree(root, worktree_path).map_err(|error| error.to_string())?;
+    if worktree_path.exists() {
+        return Err(format!(
+            "git removed delegation metadata but the worktree path still exists: {}",
+            worktree_path.display()
+        ));
+    }
+    delete_delegation_branch_ref(root, expected_branch, expected_oid)
+}
+
+#[cfg(test)]
 fn remove_delegation_worktree_inner(
     root: &Path,
     worktree_path: &Path,
@@ -4820,84 +5189,193 @@ pub async fn workspace_apply_delegation_worktree(
     if requested_root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    let worktree_path = validate_delegation_worktree_path(&requested_root, &input.worktree_path)?;
-    state
+    let journal_repo =
+        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let mut operation = journal_repo
+        .get_delegation_worktree_operation_by_delegation_id(&input.delegation_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "delegation worktree journal entry was not found".to_string())?;
+    validate_delegation_operation_workspace_scope(&state, &requested_root, &operation).await?;
+    if !matches!(
+        operation.state,
+        DelegationWorktreeOperationState::ReviewPending
+    ) {
+        return Err(format!(
+            "delegation worktree is {:?}, not review_pending",
+            operation.state
+        ));
+    }
+    // Path ownership is a pure preflight check. Keep the journal in
+    // ReviewPending when it fails because no mutation has started.
+    let worktree_path =
+        validate_delegation_worktree_path(&requested_root, &operation.worktree_path)?;
+    operation.state = DelegationWorktreeOperationState::Applying;
+    operation.updated_at = Utc::now().to_rfc3339();
+    if !journal_repo
+        .compare_and_swap_delegation_worktree_operation(
+            DelegationWorktreeOperationState::ReviewPending,
+            &operation,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Err("delegation worktree journal changed; retry apply".to_string());
+    }
+
+    let apply_result = state
         .run_git_workspace_pair_mutation_blocking(
             &requested_root,
             worktree_path,
-            apply_delegation_worktree_inner,
+            apply_delegation_worktree_inner_classified,
         )
-        .await
-        .map_err(workspace_mutation_error)
+        .await;
+    match apply_result {
+        Ok(output) => {
+            operation.state = DelegationWorktreeOperationState::Applied;
+            operation.updated_at = Utc::now().to_rfc3339();
+            if !journal_repo
+                .compare_and_swap_delegation_worktree_operation(
+                    DelegationWorktreeOperationState::Applying,
+                    &operation,
+                )
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                return Err(
+                    "delegation changes were applied but the journal needs recovery".to_string(),
+                );
+            }
+            Ok(output)
+        }
+        Err(error) => {
+            let (error, retryable) = match error {
+                WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+                    DelegationApplyFailure::BeforeMutation(error),
+                )) => (error, true),
+                WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+                    DelegationApplyFailure::MutationUncertain(error),
+                )) => (error, false),
+                _ => ("workspace mutation is unavailable".to_string(), true),
+            };
+            operation.state = if retryable {
+                DelegationWorktreeOperationState::ReviewPending
+            } else {
+                DelegationWorktreeOperationState::CleanupRequired
+            };
+            operation.last_error = Some(error.clone());
+            operation.updated_at = Utc::now().to_rfc3339();
+            let _ = journal_repo
+                .compare_and_swap_delegation_worktree_operation(
+                    DelegationWorktreeOperationState::Applying,
+                    &operation,
+                )
+                .await;
+            Err(error)
+        }
+    }
 }
 
+#[derive(Debug)]
+enum DelegationApplyFailure {
+    BeforeMutation(String),
+    MutationUncertain(String),
+}
+
+#[cfg(test)]
 fn apply_delegation_worktree_inner(
     destination_root: &Path,
     delegation_root: &Path,
 ) -> Result<WorkspaceApplyDelegationWorktreeOutput, String> {
+    apply_delegation_worktree_inner_classified(destination_root, delegation_root).map_err(|error| {
+        match error {
+            DelegationApplyFailure::BeforeMutation(error)
+            | DelegationApplyFailure::MutationUncertain(error) => error,
+        }
+    })
+}
+
+fn apply_delegation_worktree_inner_classified(
+    destination_root: &Path,
+    delegation_root: &Path,
+) -> Result<WorkspaceApplyDelegationWorktreeOutput, DelegationApplyFailure> {
+    let before_mutation = DelegationApplyFailure::BeforeMutation;
     let root = destination_root
         .to_str()
-        .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
-    let worktree_root = delegation_root
-        .to_str()
-        .ok_or_else(|| "delegation worktree path is not valid UTF-8".to_string())?;
+        .ok_or_else(|| before_mutation("workspace root is not valid UTF-8".to_string()))?;
+    let worktree_root = delegation_root.to_str().ok_or_else(|| {
+        before_mutation("delegation worktree path is not valid UTF-8".to_string())
+    })?;
 
-    let status = workspace_git_status_inner(root)?;
+    let status = workspace_git_status_inner(root).map_err(&before_mutation)?;
     let changed_count = status.staged.len() + status.unstaged.len();
     if status.conflict_count > 0 || changed_count > 0 {
-        return Err(
+        return Err(before_mutation(
             "apply requires a clean destination worktree; commit, stash, or discard local changes first"
                 .to_string(),
-        );
+        ));
     }
 
-    let destination_head = resolve_current_commit_sha(root)?
+    let destination_head = resolve_current_commit_sha(root)
+        .map_err(&before_mutation)?
         .filter(|commit| !commit.trim().is_empty())
-        .ok_or_else(|| "failed to resolve destination HEAD".to_string())?;
-    let delegation_head = resolve_current_commit_sha(worktree_root)?
+        .ok_or_else(|| before_mutation("failed to resolve destination HEAD".to_string()))?;
+    let delegation_head = resolve_current_commit_sha(worktree_root)
+        .map_err(&before_mutation)?
         .filter(|commit| !commit.trim().is_empty())
-        .ok_or_else(|| "failed to resolve delegation worktree HEAD".to_string())?;
+        .ok_or_else(|| before_mutation("failed to resolve delegation worktree HEAD".to_string()))?;
     if destination_head != delegation_head {
-        return Err(
+        return Err(before_mutation(
             "destination worktree HEAD differs from delegation baseline; rebase or recreate the delegation before applying"
                 .to_string(),
-        );
+        ));
     }
 
     let changed_output = run_git_output(
         worktree_root,
         &["diff", "HEAD", "--name-only", "-z", "--", "."],
-    )?;
+    )
+    .map_err(&before_mutation)?;
     if !changed_output.status.success() {
-        return Err(git_output_err(
+        return Err(before_mutation(git_output_err(
             "git diff HEAD --name-only",
             &changed_output.stderr,
-        ));
+        )));
     }
-    let untracked_files = list_untracked_files(worktree_root)?;
+    let untracked_files = list_untracked_files(worktree_root).map_err(&before_mutation)?;
     let mut changed_files_set: BTreeSet<String> =
         split_null_terminated_fields(&changed_output.stdout)
             .into_iter()
             .map(|path| validate_git_relative_path(&path))
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<_, _>>()
+            .map_err(&before_mutation)?;
     changed_files_set.extend(untracked_files.iter().cloned());
     let changed_files = changed_files_set.into_iter().collect::<Vec<_>>();
     if changed_files.is_empty() {
-        return Err("delegation worktree has no changes to apply".to_string());
+        return Err(before_mutation(
+            "delegation worktree has no changes to apply".to_string(),
+        ));
     }
-    preflight_untracked_delegation_files(delegation_root, destination_root, &untracked_files)?;
+    preflight_untracked_delegation_files(delegation_root, destination_root, &untracked_files)
+        .map_err(&before_mutation)?;
 
     let diff_output = run_git_output(
         worktree_root,
         &["diff", "HEAD", "--binary", "--full-index", "--", "."],
-    )?;
+    )
+    .map_err(&before_mutation)?;
     if !diff_output.status.success() {
-        return Err(git_output_err("git diff HEAD", &diff_output.stderr));
+        return Err(before_mutation(git_output_err(
+            "git diff HEAD",
+            &diff_output.stderr,
+        )));
     }
     if !diff_output.stdout.is_empty() {
-        apply_patch_to_worktree(root, &diff_output.stdout)?;
+        apply_patch_to_worktree(root, &diff_output.stdout)
+            .map_err(DelegationApplyFailure::MutationUncertain)?;
     }
-    copy_untracked_delegation_files(delegation_root, destination_root, &untracked_files)?;
+    copy_untracked_delegation_files(delegation_root, destination_root, &untracked_files)
+        .map_err(DelegationApplyFailure::MutationUncertain)?;
 
     Ok(WorkspaceApplyDelegationWorktreeOutput { changed_files })
 }
@@ -7204,6 +7682,19 @@ pub async fn delete_workspace_bundle(
         created_workspaces.push(workspace);
     }
 
+    let mut delegation_cleanup_errors = Vec::new();
+    for workspace in created_workspaces.iter().rev() {
+        if let Err(error) = cleanup_delegation_worktrees(&state, &session_repo, workspace).await {
+            delegation_cleanup_errors.push(format!("{} delegations: {error}", workspace.id.0));
+        }
+    }
+    if !delegation_cleanup_errors.is_empty() {
+        return Err(format!(
+            "multi-workspace delegation cleanup was incomplete: {}",
+            delegation_cleanup_errors.join("; ")
+        ));
+    }
+
     if input.delete_remote_branches {
         let mut targets = Vec::new();
         for workspace in &created_workspaces {
@@ -7274,10 +7765,6 @@ pub async fn delete_workspace_bundle(
 
     let mut cleanup_errors = Vec::new();
     for workspace in created_workspaces.iter().rev() {
-        if let Err(error) = cleanup_delegation_worktrees(&session_repo, workspace).await {
-            cleanup_errors.push(format!("{} delegations: {error}", workspace.id.0));
-            continue;
-        }
         if let Err(error) = cleanup_workspace_files(workspace) {
             cleanup_errors.push(format!("{}: {error}", workspace.id.0));
         }
@@ -7478,11 +7965,17 @@ mod editor_workspace_file_tests {
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
             DelegationStatus,
         },
+        delegation_worktree::{
+            DelegationWorktreeOperation, DelegationWorktreeOperationId,
+            DelegationWorktreeOperationState,
+        },
         provider::ProviderId,
         session::{Session, SessionEventRecord, SessionId, SessionState},
         thread::{Thread, ThreadId},
     };
-    use dcc_core::ports::{DelegationRepo, SessionEventRepo, SessionRepo, ThreadRepo};
+    use dcc_core::ports::{
+        DelegationRepo, DelegationWorktreeOperationRepo, SessionEventRepo, SessionRepo, ThreadRepo,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestDir {
@@ -7818,7 +8311,23 @@ mod editor_workspace_file_tests {
         }))
         .expect("save delegation");
 
+        let lifecycle_root = fs::canonicalize(&dir.path).expect("canonical lifecycle root");
+        let lifecycle_app_data = lifecycle_root.join("lifecycle-app-data");
+        fs::create_dir_all(&lifecycle_app_data).expect("create lifecycle app data");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&lifecycle_app_data, fs::Permissions::from_mode(0o700))
+                .expect("protect lifecycle app data");
+        }
+        let lifecycle_session_state = SessionCommandState::new_headless(
+            lifecycle_root.join("lifecycle.sqlite"),
+            lifecycle_app_data,
+        );
+        let lifecycle_state = WorkspaceCommandState::from_session(&lifecycle_session_state);
+
         let removed = futures::executor::block_on(delete_repository_with_workspaces(
+            &lifecycle_state,
             &repo,
             &session_repo,
             &repository.id,
@@ -9527,6 +10036,151 @@ mod editor_workspace_file_tests {
     }
 
     #[test]
+    fn delegation_branch_compare_delete_is_idempotent_and_preserves_successors() {
+        let repo = TestDir::new("delegation-ref-cas");
+        initialize_branch_test_repository(repo.as_str(), "work");
+        let observed = resolve_current_commit_sha(repo.as_str())
+            .expect("read observed head")
+            .expect("observed head");
+        let branch = "dcc/delegation/ref-cas";
+        let create = run_git_output(repo.as_str(), &["branch", branch, &observed])
+            .expect("create delegation branch");
+        assert!(create.status.success());
+
+        delete_delegation_branch_ref(&repo.path, branch, &observed).expect("delete observed ref");
+        delete_delegation_branch_ref(&repo.path, branch, &observed)
+            .expect("retry after crash is idempotent");
+
+        let successor = run_git_output(
+            repo.as_str(),
+            &["commit", "--allow-empty", "-m", "successor"],
+        )
+        .expect("create successor");
+        assert!(successor.status.success());
+        let successor_oid = resolve_current_commit_sha(repo.as_str())
+            .expect("read successor")
+            .expect("successor head");
+        let recreate = run_git_output(repo.as_str(), &["branch", branch, &successor_oid])
+            .expect("recreate delegation branch at successor");
+        assert!(recreate.status.success());
+
+        assert!(delete_delegation_branch_ref(&repo.path, branch, &observed).is_err());
+        assert_eq!(
+            resolve_current_commit_sha_for_ref(repo.as_str(), &format!("refs/heads/{branch}"))
+                .expect("successor ref remains"),
+            successor_oid
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_removes_a_bound_worktree_without_a_persisted_delegation() {
+        let dir = TestDir::new("delegation-bound-recovery");
+        let physical_dir = fs::canonicalize(&dir.path).expect("canonical test root");
+        let parent = physical_dir.join("repository");
+        fs::create_dir_all(&parent).expect("create parent repository");
+        let parent = parent.to_string_lossy().into_owned();
+        initialize_branch_test_repository(&parent, "work");
+        let base_commit = resolve_current_commit_sha(&parent)
+            .expect("read base head")
+            .expect("base head");
+        let branch = "dcc/delegation/interrupted-bind".to_string();
+        let child = delegation_worktrees_root(Path::new(&parent)).join(branch.replace('/', "-"));
+        create_worktree_branch_from_ref(Path::new(&parent), &child, &branch, &base_commit)
+            .expect("create child worktree");
+
+        let db_path = physical_dir.join("lifecycle.sqlite");
+        let app_data = physical_dir.join("lifecycle-app-data");
+        fs::create_dir_all(&app_data).expect("create lifecycle app data");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&app_data, fs::Permissions::from_mode(0o700))
+                .expect("protect lifecycle app data");
+        }
+        let session_state = SessionCommandState::new_headless(db_path.clone(), app_data);
+        let state = WorkspaceCommandState::from_session(&session_state);
+        let workspace_repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let workspace = Workspace {
+            id: WorkspaceId("recovery-workspace".to_string()),
+            project_id: dcc_core::domain::project::ProjectId("recovery-project".to_string()),
+            name: Some("Recovery".to_string()),
+            root_path: parent.clone(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            created_at: "2026-08-28T00:00:00Z".to_string(),
+            updated_at: "2026-08-28T00:00:00Z".to_string(),
+        };
+        workspace_repo
+            .save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+        let journal = SqliteSessionRepo::open(&db_path).expect("open lifecycle journal");
+        let mut operation = DelegationWorktreeOperation {
+            operation_id: DelegationWorktreeOperationId("interrupted-bind".to_string()),
+            delegation_key: Some("turn".to_string()),
+            delegation_id: None,
+            workspace_id: workspace.id.clone(),
+            parent_session_id: Some(SessionId("parent".to_string())),
+            child_session_id: None,
+            source_root: parent.clone(),
+            worktree_path: child.to_string_lossy().into_owned(),
+            branch: branch.clone(),
+            base_commit: base_commit.clone(),
+            expected_branch_oid: Some(base_commit),
+            source_root_id: None,
+            worktree_root_id: None,
+            common_dir_id: None,
+            state: DelegationWorktreeOperationState::Preparing,
+            last_error: None,
+            recovery_owner: None,
+            recovery_lease_until: None,
+            created_at: "2026-08-28T00:00:00Z".to_string(),
+            updated_at: "2026-08-28T00:00:00Z".to_string(),
+        };
+        journal
+            .create_delegation_worktree_operation(&operation)
+            .await
+            .expect("create journal");
+        operation.state = DelegationWorktreeOperationState::Prepared;
+        assert!(journal
+            .compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &operation,
+            )
+            .await
+            .expect("prepare journal"));
+        operation.delegation_id = Some(DelegationId("missing-delegation".to_string()));
+        operation.child_session_id = Some(SessionId("child".to_string()));
+        operation.state = DelegationWorktreeOperationState::Bound;
+        assert!(journal
+            .compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Prepared,
+                &operation,
+            )
+            .await
+            .expect("bind journal"));
+
+        assert!(reconcile_delegation_worktree_operations(&state)
+            .await
+            .expect("reconcile journal")
+            .is_empty());
+        let recovered = journal
+            .get_delegation_worktree_operation(&operation.operation_id)
+            .await
+            .expect("read recovered journal")
+            .expect("journal remains");
+        assert_eq!(recovered.state, DelegationWorktreeOperationState::Removed);
+        assert!(!child.exists());
+        assert!(
+            resolve_current_commit_sha_for_ref(&parent, &format!("refs/heads/{branch}")).is_err()
+        );
+    }
+
+    #[test]
     fn copy_untracked_delegation_files_copies_nested_files() {
         let parent = TestDir::new("delegation-parent");
         let child = TestDir::new("delegation-child");
@@ -10772,6 +11426,7 @@ pub async fn delete_workspace(
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    cleanup_delegation_worktrees(&state, &session_repo, &workspace).await?;
     if input.delete_remote_branch {
         let expected_target = input.expected_remote_target.ok_or_else(|| {
             "The remote branch was not confirmed. Reopen the deletion dialog and try again."
@@ -10789,7 +11444,6 @@ pub async fn delete_workspace(
             .await
             .map_err(workspace_mutation_error)?;
     }
-    cleanup_delegation_worktrees(&session_repo, &workspace).await?;
     cleanup_unused_workspace_push_target(&state, &repo, &workspace, &BTreeSet::new()).await?;
     cleanup_workspace_files(&workspace)?;
     cleanup_workspace_session_records(
@@ -10809,57 +11463,189 @@ pub async fn delete_workspace(
 }
 
 async fn cleanup_delegation_worktrees(
+    state: &WorkspaceCommandState,
     session_repo: &SqliteSessionRepo,
     workspace: &Workspace,
 ) -> Result<(), String> {
-    let delegations = DelegationRepo::list_delegations(session_repo, Some(&workspace.id), None)
+    let operations = session_repo
+        .list_delegation_worktree_operations_by_workspace(&workspace.id)
         .await
         .map_err(|e| e.to_string())?;
     let active_root = resolve_workspace_active_root(workspace);
-    let workspace_worktree = workspace
-        .worktree_path
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("");
-
-    for delegation in delegations {
-        let Some(child_session_id) = delegation.child_session_id.as_ref() else {
-            continue;
-        };
-        let Some(child_session) = SessionRepo::get_session(session_repo, child_session_id)
-            .await
-            .map_err(|e| e.to_string())?
-        else {
-            continue;
-        };
-        let Some(worktree_root) = child_session
-            .working_directory_override
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        if worktree_root == workspace.root_path.trim() || worktree_root == workspace_worktree {
-            continue;
-        }
-
-        let worktree_path = validate_delegation_worktree_path(active_root, worktree_root)?;
-        if !worktree_path.exists() {
-            continue;
-        }
-
-        if !is_git_repo(Path::new(active_root)) || !worktree_path.join(".git").exists() {
-            return Err(format!(
-                "refusing to remove an unverified delegation worktree: {}",
-                worktree_path.display()
-            ));
-        }
-        remove_worktree(Path::new(active_root), &worktree_path)
-            .map_err(|error| error.to_string())?;
+    for operation in operations {
+        remove_journaled_delegation_worktree(state, session_repo, active_root, operation).await?;
     }
 
     Ok(())
+}
+
+/// Conservatively reconciles interrupted destructive intent, orphaned setup,
+/// and terminal delegations. Active review/bound operations stay untouched.
+pub async fn reconcile_delegation_worktree_operations(
+    state: &WorkspaceCommandState,
+) -> Result<Vec<String>, String> {
+    let journal_repo =
+        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let operations = journal_repo
+        .list_delegation_worktree_operations_requiring_recovery()
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut warnings = Vec::new();
+    for mut operation in operations {
+        let terminal_delegation = match operation.delegation_id.as_ref() {
+            Some(delegation_id) => DelegationRepo::get_delegation(&journal_repo, delegation_id)
+                .await
+                .map_err(|error| error.to_string())?
+                .is_some_and(|delegation| {
+                    delegation.workspace_id == operation.workspace_id
+                        && matches!(
+                            delegation.status,
+                            DelegationStatus::Completed
+                                | DelegationStatus::Failed
+                                | DelegationStatus::Cancelled
+                        )
+                }),
+            None => false,
+        };
+        let mut orphaned_bound = false;
+        let mut repair_bound_review = false;
+        if matches!(operation.state, DelegationWorktreeOperationState::Bound) {
+            orphaned_bound = match operation.delegation_id.as_ref() {
+                None => true,
+                Some(delegation_id) => {
+                    match DelegationRepo::get_delegation(&journal_repo, delegation_id)
+                        .await
+                        .map_err(|error| error.to_string())?
+                    {
+                        None => true,
+                        Some(delegation) => {
+                            let durable_binding_matches = delegation.workspace_id
+                                == operation.workspace_id
+                                && operation.parent_session_id.as_ref()
+                                    == Some(&delegation.parent_session_id)
+                                && operation.child_session_id.as_ref()
+                                    == delegation.child_session_id.as_ref();
+                            let child_binding_matches = match operation.child_session_id.as_ref() {
+                                Some(child_session_id) => {
+                                    SessionRepo::get_session(&journal_repo, child_session_id)
+                                        .await
+                                        .map_err(|error| error.to_string())?
+                                        .is_some_and(|session| {
+                                            session.workspace_id == operation.workspace_id
+                                                && session.working_directory_override.as_deref()
+                                                    == Some(operation.worktree_path.as_str())
+                                        })
+                                }
+                                None => false,
+                            };
+                            let binding_matches = durable_binding_matches && child_binding_matches;
+                            if !binding_matches {
+                                warnings.push(format!(
+                                    "delegation worktree {} has an inconsistent durable binding",
+                                    operation.operation_id.0
+                                ));
+                            } else if delegation.status == DelegationStatus::ReviewPending {
+                                repair_bound_review = true;
+                            }
+                            false
+                        }
+                    }
+                }
+            };
+            if orphaned_bound {
+                operation.state = DelegationWorktreeOperationState::CleanupRequired;
+                operation.last_error = Some(
+                    "delegation binding was interrupted before the delegation was persisted"
+                        .to_string(),
+                );
+                operation.updated_at = Utc::now().to_rfc3339();
+                if !journal_repo
+                    .compare_and_swap_delegation_worktree_operation(
+                        DelegationWorktreeOperationState::Bound,
+                        &operation,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    warnings.push(format!(
+                        "delegation worktree {} changed during binding recovery",
+                        operation.operation_id.0
+                    ));
+                    continue;
+                }
+            }
+        }
+        if repair_bound_review {
+            operation.state = DelegationWorktreeOperationState::ReviewPending;
+            operation.last_error = None;
+            operation.updated_at = Utc::now().to_rfc3339();
+            if !journal_repo
+                .compare_and_swap_delegation_worktree_operation(
+                    DelegationWorktreeOperationState::Bound,
+                    &operation,
+                )
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                warnings.push(format!(
+                    "delegation worktree {} changed during review recovery",
+                    operation.operation_id.0
+                ));
+                continue;
+            }
+        }
+        let should_remove = orphaned_bound
+            || (terminal_delegation
+                && matches!(
+                    operation.state,
+                    DelegationWorktreeOperationState::Bound
+                        | DelegationWorktreeOperationState::ReviewPending
+                        | DelegationWorktreeOperationState::Applied
+                        | DelegationWorktreeOperationState::CleanupRequired
+                ))
+            || matches!(
+                operation.state,
+                DelegationWorktreeOperationState::Preparing
+                    | DelegationWorktreeOperationState::Removing
+            )
+            || (matches!(
+                operation.state,
+                DelegationWorktreeOperationState::Prepared
+                    | DelegationWorktreeOperationState::CleanupRequired
+            ) && operation.delegation_id.is_none());
+        if should_remove {
+            let source_root = operation.source_root.clone();
+            if let Err(error) =
+                remove_journaled_delegation_worktree(state, &journal_repo, &source_root, operation)
+                    .await
+            {
+                warnings.push(error);
+            }
+            continue;
+        }
+        if matches!(operation.state, DelegationWorktreeOperationState::Applying) {
+            operation.state = DelegationWorktreeOperationState::CleanupRequired;
+            operation.last_error = Some(
+                "application was interrupted; inspect the destination before retrying or discarding"
+                    .to_string(),
+            );
+            operation.updated_at = Utc::now().to_rfc3339();
+            if !journal_repo
+                .compare_and_swap_delegation_worktree_operation(
+                    DelegationWorktreeOperationState::Applying,
+                    &operation,
+                )
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                warnings.push(format!(
+                    "delegation worktree {} changed during startup reconciliation",
+                    operation.operation_id.0
+                ));
+            }
+        }
+    }
+    Ok(warnings)
 }
 
 #[tauri::command]
@@ -10871,7 +11657,8 @@ pub async fn delete_repository(
     let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = RepositoryId(input.repository_id);
     let removed_workspaces =
-        delete_repository_with_workspaces(&repo, &session_repo, &id, &state.db_path).await?;
+        delete_repository_with_workspaces(&state, &repo, &session_repo, &id, &state.db_path)
+            .await?;
     for workspace in removed_workspaces {
         state.clear_delivery_failures(&workspace.root_path);
         if let Some(worktree_path) = workspace.worktree_path.as_deref() {
@@ -10882,6 +11669,7 @@ pub async fn delete_repository(
 }
 
 async fn delete_repository_with_workspaces(
+    state: &WorkspaceCommandState,
     repo: &SqliteWorkspaceRepo,
     session_repo: &SqliteSessionRepo,
     id: &RepositoryId,
@@ -10918,7 +11706,7 @@ async fn delete_repository_with_workspaces(
     });
 
     for workspace in &workspaces {
-        cleanup_delegation_worktrees(session_repo, workspace).await?;
+        cleanup_delegation_worktrees(state, session_repo, workspace).await?;
         cleanup_workspace_files(workspace)?;
     }
 

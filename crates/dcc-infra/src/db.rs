@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::{fmt, path::Path};
 
 use async_trait::async_trait;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Row};
 use serde::de::DeserializeOwned;
 use serde_json::{from_str, to_string};
@@ -16,6 +16,10 @@ use dcc_core::{
         delegation::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
             DelegationStatus,
+        },
+        delegation_worktree::{
+            DelegationWorktreeOperation, DelegationWorktreeOperationId,
+            DelegationWorktreeOperationState,
         },
         guarded_undo::{
             validate_restore_set_manifest, ArtifactKey, GitIdentityV1, GuardedUndoReasonCode,
@@ -44,8 +48,8 @@ use dcc_core::{
         },
     },
     ports::{
-        AppendEventOutcome, DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo,
-        ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
+        AppendEventOutcome, DelegationRepo, DelegationWorktreeOperationRepo, RepositoryRepo,
+        SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -433,6 +437,79 @@ CREATE INDEX IF NOT EXISTS idx_dcc_delegations_child_session_id
 
 CREATE INDEX IF NOT EXISTS idx_dcc_delegations_status
 	ON dcc_delegations(status);
+"#;
+
+const DELEGATION_WORKTREE_OPERATION_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_delegation_worktree_operations (
+    operation_id TEXT PRIMARY KEY NOT NULL,
+    delegation_key TEXT NULL,
+    delegation_id TEXT NULL,
+    workspace_id TEXT NOT NULL,
+    parent_session_id TEXT NULL,
+    child_session_id TEXT NULL,
+    source_root TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    base_commit TEXT NOT NULL,
+    expected_branch_oid TEXT NULL,
+    source_root_id BLOB NULL
+        CHECK(source_root_id IS NULL OR (typeof(source_root_id) = 'blob' AND length(source_root_id) BETWEEN 3 AND 1024)),
+    worktree_root_id BLOB NULL
+        CHECK(worktree_root_id IS NULL OR (typeof(worktree_root_id) = 'blob' AND length(worktree_root_id) BETWEEN 3 AND 1024)),
+    common_dir_id BLOB NULL
+        CHECK(common_dir_id IS NULL OR (typeof(common_dir_id) = 'blob' AND length(common_dir_id) BETWEEN 3 AND 1024)),
+    state TEXT NOT NULL CHECK(state IN (
+        'preparing', 'prepared', 'bound', 'review_pending', 'applying',
+        'applied', 'removing', 'removed', 'cleanup_required'
+    )),
+    last_error TEXT NULL,
+    recovery_owner TEXT NULL,
+    recovery_lease_until TEXT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK(last_error IS NULL OR length(trim(last_error)) > 0),
+    CHECK(state <> 'cleanup_required' OR last_error IS NOT NULL),
+    CHECK((recovery_owner IS NULL AND recovery_lease_until IS NULL)
+       OR (state = 'removing' AND recovery_owner IS NOT NULL AND recovery_lease_until IS NOT NULL))
+);
+
+-- These identifiers deliberately have no destructive foreign keys. The
+-- journal must survive partially completed workspace/session row deletion.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_delegation_worktree_active_path
+    ON dcc_delegation_worktree_operations(worktree_path)
+    WHERE state <> 'removed';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_delegation_worktree_active_branch
+    ON dcc_delegation_worktree_operations(source_root, branch)
+    WHERE state <> 'removed';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_delegation_worktree_active_physical_root
+    ON dcc_delegation_worktree_operations(worktree_root_id)
+    WHERE state <> 'removed' AND worktree_root_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_delegation_worktree_active_physical_branch
+    ON dcc_delegation_worktree_operations(common_dir_id, branch)
+    WHERE state <> 'removed' AND common_dir_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_delegation_worktree_delegation
+    ON dcc_delegation_worktree_operations(delegation_id)
+    WHERE delegation_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_dcc_delegation_worktree_recovery
+    ON dcc_delegation_worktree_operations(state, updated_at, created_at)
+    WHERE state <> 'removed';
+
+CREATE INDEX IF NOT EXISTS idx_dcc_delegation_worktree_workspace
+    ON dcc_delegation_worktree_operations(workspace_id, updated_at DESC);
+"#;
+
+const DELEGATION_WORKTREE_OPERATION_SELECT: &str = r#"
+SELECT operation_id, delegation_key, delegation_id, workspace_id,
+       parent_session_id, child_session_id, source_root, worktree_path,
+       branch, base_commit, expected_branch_oid, source_root_id,
+       worktree_root_id, common_dir_id, state, last_error,
+       recovery_owner, recovery_lease_until, created_at, updated_at
+  FROM dcc_delegation_worktree_operations
 "#;
 
 #[derive(Clone)]
@@ -1033,7 +1110,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
@@ -1042,6 +1119,44 @@ impl SqliteSessionRepo {
             "target_model_id",
             "TEXT NULL",
         )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_delegation_worktree_operations",
+            "recovery_owner",
+            "TEXT NULL",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_delegation_worktree_operations",
+            "recovery_lease_until",
+            "TEXT NULL",
+        )?;
+        // A pre-lease prototype could have crashed after recording `removing`.
+        // Convert that unowned state into an explicitly recoverable failure so
+        // the new claim protocol can take ownership without guessing.
+        conn.execute(
+            r#"
+            UPDATE dcc_delegation_worktree_operations
+               SET state = 'cleanup_required',
+                   last_error = COALESCE(
+                       NULLIF(TRIM(last_error), ''),
+                       'legacy removing operation requires recovery ownership'
+                   )
+             WHERE state = 'removing'
+               AND (recovery_owner IS NULL OR recovery_lease_until IS NULL)
+            "#,
+            [],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_dcc_delegation_worktree_removal_claim
+                ON dcc_delegation_worktree_operations(
+                    operation_id, state, recovery_lease_until
+                );
+            "#,
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_delegations",
@@ -2671,6 +2786,111 @@ impl SqliteSessionRepo {
             created_at: row.get::<_, String>(16)?,
             updated_at: row.get::<_, String>(17)?,
         })
+    }
+
+    fn delegation_worktree_state_as_str(state: &DelegationWorktreeOperationState) -> &'static str {
+        match state {
+            DelegationWorktreeOperationState::Preparing => "preparing",
+            DelegationWorktreeOperationState::Prepared => "prepared",
+            DelegationWorktreeOperationState::Bound => "bound",
+            DelegationWorktreeOperationState::ReviewPending => "review_pending",
+            DelegationWorktreeOperationState::Applying => "applying",
+            DelegationWorktreeOperationState::Applied => "applied",
+            DelegationWorktreeOperationState::Removing => "removing",
+            DelegationWorktreeOperationState::Removed => "removed",
+            DelegationWorktreeOperationState::CleanupRequired => "cleanup_required",
+        }
+    }
+
+    fn delegation_worktree_state_from_str(
+        state: &str,
+        column: usize,
+    ) -> rusqlite::Result<DelegationWorktreeOperationState> {
+        match state {
+            "preparing" => Ok(DelegationWorktreeOperationState::Preparing),
+            "prepared" => Ok(DelegationWorktreeOperationState::Prepared),
+            "bound" => Ok(DelegationWorktreeOperationState::Bound),
+            "review_pending" => Ok(DelegationWorktreeOperationState::ReviewPending),
+            "applying" => Ok(DelegationWorktreeOperationState::Applying),
+            "applied" => Ok(DelegationWorktreeOperationState::Applied),
+            "removing" => Ok(DelegationWorktreeOperationState::Removing),
+            "removed" => Ok(DelegationWorktreeOperationState::Removed),
+            "cleanup_required" => Ok(DelegationWorktreeOperationState::CleanupRequired),
+            other => Err(rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown delegation worktree operation state: {other}"),
+                )),
+            )),
+        }
+    }
+
+    fn normalize_delegation_recovery_timestamp(value: &str, field: &str) -> Result<String> {
+        let parsed = DateTime::parse_from_rfc3339(value).map_err(|_| {
+            dcc_core::CoreError::InvalidInput(format!(
+                "delegation worktree {field} must be RFC3339"
+            ))
+        })?;
+        Ok(parsed
+            .with_timezone(&Utc)
+            .to_rfc3339_opts(SecondsFormat::Nanos, true))
+    }
+
+    fn delegation_worktree_operation_from_row(
+        row: &Row<'_>,
+    ) -> rusqlite::Result<DelegationWorktreeOperation> {
+        let source_root_id = row.get::<_, Option<Vec<u8>>>(11)?.map(PhysicalRootId);
+        let worktree_root_id = row.get::<_, Option<Vec<u8>>>(12)?.map(PhysicalRootId);
+        let common_dir_id = row.get::<_, Option<Vec<u8>>>(13)?.map(PhysicalRootId);
+        for root_id in [
+            source_root_id.as_ref(),
+            worktree_root_id.as_ref(),
+            common_dir_id.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            root_id.validate().map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    11,
+                    rusqlite::types::Type::Blob,
+                    Box::new(error),
+                )
+            })?;
+        }
+
+        let operation = DelegationWorktreeOperation {
+            operation_id: DelegationWorktreeOperationId(row.get::<_, String>(0)?),
+            delegation_key: row.get::<_, Option<String>>(1)?,
+            delegation_id: row.get::<_, Option<String>>(2)?.map(DelegationId),
+            workspace_id: WorkspaceId(row.get::<_, String>(3)?),
+            parent_session_id: row.get::<_, Option<String>>(4)?.map(SessionId),
+            child_session_id: row.get::<_, Option<String>>(5)?.map(SessionId),
+            source_root: row.get::<_, String>(6)?,
+            worktree_path: row.get::<_, String>(7)?,
+            branch: row.get::<_, String>(8)?,
+            base_commit: row.get::<_, String>(9)?,
+            expected_branch_oid: row.get::<_, Option<String>>(10)?,
+            source_root_id,
+            worktree_root_id,
+            common_dir_id,
+            state: Self::delegation_worktree_state_from_str(&row.get::<_, String>(14)?, 14)?,
+            last_error: row.get::<_, Option<String>>(15)?,
+            recovery_owner: row.get::<_, Option<String>>(16)?,
+            recovery_lease_until: row.get::<_, Option<String>>(17)?,
+            created_at: row.get::<_, String>(18)?,
+            updated_at: row.get::<_, String>(19)?,
+        };
+        operation.validate().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+            )
+        })?;
+        Ok(operation)
     }
 
     fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
@@ -5697,6 +5917,404 @@ impl DelegationRepo for SqliteSessionRepo {
     }
 }
 
+#[async_trait]
+impl DelegationWorktreeOperationRepo for SqliteSessionRepo {
+    async fn create_delegation_worktree_operation(
+        &self,
+        operation: &DelegationWorktreeOperation,
+    ) -> Result<()> {
+        operation
+            .validate()
+            .map_err(dcc_core::CoreError::InvalidInput)?;
+        if operation.state != DelegationWorktreeOperationState::Preparing {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation worktree journal must be created in preparing state".to_string(),
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_delegation_worktree_operations (
+                operation_id, delegation_key, delegation_id, workspace_id,
+                parent_session_id, child_session_id, source_root, worktree_path,
+                branch, base_commit, expected_branch_oid, source_root_id,
+                worktree_root_id, common_dir_id, state, last_error,
+                recovery_owner, recovery_lease_until, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
+            )
+            "#,
+            params![
+                operation.operation_id.0,
+                operation.delegation_key,
+                operation.delegation_id.as_ref().map(|id| id.0.as_str()),
+                operation.workspace_id.0,
+                operation.parent_session_id.as_ref().map(|id| id.0.as_str()),
+                operation.child_session_id.as_ref().map(|id| id.0.as_str()),
+                operation.source_root,
+                operation.worktree_path,
+                operation.branch,
+                operation.base_commit,
+                operation.expected_branch_oid,
+                operation.source_root_id.as_ref().map(|id| id.0.as_slice()),
+                operation
+                    .worktree_root_id
+                    .as_ref()
+                    .map(|id| id.0.as_slice()),
+                operation.common_dir_id.as_ref().map(|id| id.0.as_slice()),
+                Self::delegation_worktree_state_as_str(&operation.state),
+                operation.last_error,
+                operation.recovery_owner,
+                operation.recovery_lease_until,
+                operation.created_at,
+                operation.updated_at,
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn get_delegation_worktree_operation(
+        &self,
+        id: &DelegationWorktreeOperationId,
+    ) -> Result<Option<DelegationWorktreeOperation>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            &format!("{DELEGATION_WORKTREE_OPERATION_SELECT} WHERE operation_id = ?1"),
+            params![id.0],
+            Self::delegation_worktree_operation_from_row,
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    async fn get_delegation_worktree_operation_by_delegation_id(
+        &self,
+        delegation_id: &DelegationId,
+    ) -> Result<Option<DelegationWorktreeOperation>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            &format!("{DELEGATION_WORKTREE_OPERATION_SELECT} WHERE delegation_id = ?1"),
+            params![delegation_id.0],
+            Self::delegation_worktree_operation_from_row,
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    async fn list_delegation_worktree_operations_by_workspace(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<DelegationWorktreeOperation>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(&format!(
+                "{DELEGATION_WORKTREE_OPERATION_SELECT} \
+                 WHERE workspace_id = ?1 ORDER BY created_at ASC, operation_id ASC"
+            ))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let operations = statement
+            .query_map(
+                params![workspace_id.0],
+                Self::delegation_worktree_operation_from_row,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(operations)
+    }
+
+    async fn compare_and_swap_delegation_worktree_operation(
+        &self,
+        expected_state: DelegationWorktreeOperationState,
+        operation: &DelegationWorktreeOperation,
+    ) -> Result<bool> {
+        operation
+            .validate()
+            .map_err(dcc_core::CoreError::InvalidInput)?;
+        if expected_state == DelegationWorktreeOperationState::Removing
+            || operation.state == DelegationWorktreeOperationState::Removing
+        {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "removing transitions require the recovery claim API".to_string(),
+            ));
+        }
+        if !expected_state.can_transition_to(&operation.state) {
+            return Err(dcc_core::CoreError::InvalidInput(format!(
+                "invalid delegation worktree transition from {} to {}",
+                Self::delegation_worktree_state_as_str(&expected_state),
+                Self::delegation_worktree_state_as_str(&operation.state),
+            )));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                r#"
+                UPDATE dcc_delegation_worktree_operations
+                   SET delegation_key = ?1,
+                       delegation_id = ?2,
+                       parent_session_id = ?3,
+                       child_session_id = ?4,
+                       expected_branch_oid = ?5,
+                       source_root_id = ?6,
+                       worktree_root_id = ?7,
+                       common_dir_id = ?8,
+                       state = ?9,
+                       last_error = ?10,
+                       updated_at = ?11
+                 WHERE operation_id = ?12
+                   AND state = ?13
+                   AND workspace_id = ?14
+                   AND source_root = ?15
+                   AND worktree_path = ?16
+                   AND branch = ?17
+                   AND base_commit = ?18
+                   AND created_at = ?19
+                "#,
+                params![
+                    operation.delegation_key,
+                    operation.delegation_id.as_ref().map(|id| id.0.as_str()),
+                    operation.parent_session_id.as_ref().map(|id| id.0.as_str()),
+                    operation.child_session_id.as_ref().map(|id| id.0.as_str()),
+                    operation.expected_branch_oid,
+                    operation.source_root_id.as_ref().map(|id| id.0.as_slice()),
+                    operation
+                        .worktree_root_id
+                        .as_ref()
+                        .map(|id| id.0.as_slice()),
+                    operation.common_dir_id.as_ref().map(|id| id.0.as_slice()),
+                    Self::delegation_worktree_state_as_str(&operation.state),
+                    operation.last_error,
+                    operation.updated_at,
+                    operation.operation_id.0,
+                    Self::delegation_worktree_state_as_str(&expected_state),
+                    operation.workspace_id.0,
+                    operation.source_root,
+                    operation.worktree_path,
+                    operation.branch,
+                    operation.base_commit,
+                    operation.created_at,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed == 1)
+    }
+
+    async fn list_delegation_worktree_operations_requiring_recovery(
+        &self,
+    ) -> Result<Vec<DelegationWorktreeOperation>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(&format!(
+                "{DELEGATION_WORKTREE_OPERATION_SELECT} \
+                 WHERE state <> 'removed' ORDER BY updated_at ASC, created_at ASC, operation_id ASC"
+            ))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let operations = statement
+            .query_map([], Self::delegation_worktree_operation_from_row)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(operations)
+    }
+
+    async fn claim_delegation_worktree_removal(
+        &self,
+        id: &DelegationWorktreeOperationId,
+        recovery_owner: &str,
+        now: &str,
+        lease_until: &str,
+    ) -> Result<Option<DelegationWorktreeOperation>> {
+        let recovery_owner = recovery_owner.trim();
+        if recovery_owner.is_empty() || recovery_owner.len() > 256 {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation worktree recovery owner is invalid".to_string(),
+            ));
+        }
+        let now = Self::normalize_delegation_recovery_timestamp(now, "recovery claim time")?;
+        let lease_until =
+            Self::normalize_delegation_recovery_timestamp(lease_until, "recovery lease")?;
+        if lease_until <= now {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation worktree recovery lease must end after claim time".to_string(),
+            ));
+        }
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = transaction
+            .execute(
+                r#"
+                UPDATE dcc_delegation_worktree_operations
+                   SET state = 'removing',
+                       recovery_owner = ?1,
+                       recovery_lease_until = ?2,
+                       updated_at = ?3
+                 WHERE operation_id = ?4
+                   AND (
+                       state IN (
+                           'prepared', 'bound', 'review_pending', 'applied',
+                           'cleanup_required'
+                       )
+                       OR (
+                           state = 'removing'
+                           AND recovery_lease_until IS NOT NULL
+                           AND recovery_lease_until <= ?3
+                       )
+                   )
+                "#,
+                params![recovery_owner, lease_until, now, id.0],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let operation = if changed == 1 {
+            Some(
+                transaction
+                    .query_row(
+                        &format!("{DELEGATION_WORKTREE_OPERATION_SELECT} WHERE operation_id = ?1"),
+                        params![id.0],
+                        Self::delegation_worktree_operation_from_row,
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+            )
+        } else {
+            None
+        };
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(operation)
+    }
+
+    async fn finalize_delegation_worktree_removal(
+        &self,
+        id: &DelegationWorktreeOperationId,
+        recovery_owner: &str,
+        final_state: DelegationWorktreeOperationState,
+        last_error: Option<String>,
+        updated_at: &str,
+    ) -> Result<Option<DelegationWorktreeOperation>> {
+        let recovery_owner = recovery_owner.trim();
+        if recovery_owner.is_empty() || recovery_owner.len() > 256 {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation worktree recovery owner is invalid".to_string(),
+            ));
+        }
+        match (&final_state, last_error.as_deref()) {
+            (DelegationWorktreeOperationState::Removed, None) => {}
+            (DelegationWorktreeOperationState::CleanupRequired, Some(error))
+                if !error.trim().is_empty() => {}
+            (DelegationWorktreeOperationState::Removed, Some(_)) => {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "removed delegation worktree cannot retain a recovery error".to_string(),
+                ));
+            }
+            (DelegationWorktreeOperationState::CleanupRequired, _) => {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "cleanup-required delegation worktree must retain its recovery error"
+                        .to_string(),
+                ));
+            }
+            _ => {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "removal finalization must select removed or cleanup_required".to_string(),
+                ));
+            }
+        }
+        let updated_at =
+            Self::normalize_delegation_recovery_timestamp(updated_at, "recovery update time")?;
+        let final_state_value = Self::delegation_worktree_state_as_str(&final_state);
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = transaction
+            .execute(
+                r#"
+                UPDATE dcc_delegation_worktree_operations
+                   SET state = ?1,
+                       last_error = ?2,
+                       recovery_owner = NULL,
+                       recovery_lease_until = NULL,
+                       updated_at = ?3
+                 WHERE operation_id = ?4
+                   AND state = 'removing'
+                   AND recovery_owner = ?5
+                "#,
+                params![
+                    final_state_value,
+                    last_error,
+                    updated_at,
+                    id.0,
+                    recovery_owner,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let operation = if changed == 1 {
+            Some(
+                transaction
+                    .query_row(
+                        &format!("{DELEGATION_WORKTREE_OPERATION_SELECT} WHERE operation_id = ?1"),
+                        params![id.0],
+                        Self::delegation_worktree_operation_from_row,
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+            )
+        } else {
+            None
+        };
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(operation)
+    }
+
+    async fn delete_removed_delegation_worktree_operation(
+        &self,
+        id: &DelegationWorktreeOperationId,
+    ) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "DELETE FROM dcc_delegation_worktree_operations \
+                 WHERE operation_id = ?1 AND state = 'removed'",
+                params![id.0],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed == 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5705,6 +6323,10 @@ mod tests {
             delegation::{
                 Delegation, DelegationBudget, DelegationContextPolicy, DelegationId,
                 DelegationMode, DelegationStatus,
+            },
+            delegation_worktree::{
+                DelegationWorktreeOperation, DelegationWorktreeOperationId,
+                DelegationWorktreeOperationState,
             },
             guarded_undo::{
                 canonical_restore_manifest_digest, ArtifactKey, CheckoutRefV1,
@@ -5725,8 +6347,8 @@ mod tests {
             },
         },
         ports::{
-            DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo,
-            WorkspaceBundleRepo, WorkspaceRepo,
+            DelegationRepo, DelegationWorktreeOperationRepo, RepositoryRepo, SessionEventRepo,
+            SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
         },
     };
 
@@ -5734,6 +6356,52 @@ mod tests {
         Arc::new(Mutex::new(
             Connection::open_in_memory().expect("open in-memory sqlite"),
         ))
+    }
+
+    fn delegation_worktree_operation(id: &str) -> DelegationWorktreeOperation {
+        DelegationWorktreeOperation {
+            operation_id: DelegationWorktreeOperationId(id.to_string()),
+            delegation_key: Some(format!("key-{id}")),
+            delegation_id: None,
+            workspace_id: WorkspaceId("journal-workspace".to_string()),
+            parent_session_id: Some(SessionId("journal-parent".to_string())),
+            child_session_id: None,
+            source_root: "/tmp/journal-source".to_string(),
+            worktree_path: format!("/tmp/journal-source/.dcc-worktrees/{id}"),
+            branch: format!("dcc/delegation/{id}"),
+            base_commit: "1111111111111111111111111111111111111111".to_string(),
+            expected_branch_oid: None,
+            source_root_id: None,
+            worktree_root_id: None,
+            common_dir_id: None,
+            state: DelegationWorktreeOperationState::Preparing,
+            last_error: None,
+            recovery_owner: None,
+            recovery_lease_until: None,
+            created_at: "2026-08-28T10:00:00Z".to_string(),
+            updated_at: "2026-08-28T10:00:00Z".to_string(),
+        }
+    }
+
+    fn prepared_delegation_worktree_operation(
+        repo: &SqliteSessionRepo,
+        id: &str,
+    ) -> DelegationWorktreeOperation {
+        let operation = delegation_worktree_operation(id);
+        futures::executor::block_on(repo.create_delegation_worktree_operation(&operation))
+            .expect("create delegation worktree operation");
+        let mut prepared = operation;
+        prepared.expected_branch_oid = Some("5555555555555555555555555555555555555555".to_string());
+        prepared.state = DelegationWorktreeOperationState::Prepared;
+        prepared.updated_at = "2026-08-28T10:00:01Z".to_string();
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &prepared,
+            ))
+            .expect("prepare delegation worktree operation")
+        );
+        prepared
     }
 
     fn guarded_git_identity() -> GitIdentityV1 {
@@ -6481,6 +7149,411 @@ mod tests {
         .expect("delegation exists after update");
         assert_eq!(cancelled.status, DelegationStatus::Cancelled);
         assert_eq!(cancelled.updated_at, "2026-01-01T00:01:00Z");
+    }
+
+    #[test]
+    fn delegation_worktree_journal_migrates_and_roundtrips_physical_identity() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).expect("create session repo");
+        let schema_objects = conn
+            .lock()
+            .expect("lock database")
+            .prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE tbl_name = 'dcc_delegation_worktree_operations' ORDER BY name",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .expect("inspect journal migration");
+        assert!(schema_objects
+            .iter()
+            .any(|name| name == "dcc_delegation_worktree_operations"));
+        assert!(schema_objects
+            .iter()
+            .any(|name| name == "idx_dcc_delegation_worktree_recovery"));
+
+        let operation = delegation_worktree_operation("operation-roundtrip");
+        futures::executor::block_on(repo.create_delegation_worktree_operation(&operation))
+            .expect("create journal operation");
+
+        let mut prepared = operation.clone();
+        prepared.delegation_id = Some(DelegationId("delegation-roundtrip".to_string()));
+        prepared.child_session_id = Some(SessionId("journal-child".to_string()));
+        prepared.expected_branch_oid = Some("2222222222222222222222222222222222222222".to_string());
+        prepared.source_root_id = Some(PhysicalRootId(vec![1, 1, 7, 1]));
+        prepared.worktree_root_id = Some(PhysicalRootId(vec![1, 1, 7, 2]));
+        prepared.common_dir_id = Some(PhysicalRootId(vec![1, 1, 7, 3]));
+        prepared.state = DelegationWorktreeOperationState::Prepared;
+        prepared.updated_at = "2026-08-28T10:00:01Z".to_string();
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &prepared,
+            ))
+            .expect("prepare with CAS")
+        );
+
+        let loaded = futures::executor::block_on(
+            repo.get_delegation_worktree_operation(&operation.operation_id),
+        )
+        .expect("read journal operation")
+        .expect("journal operation exists");
+        assert_eq!(loaded, prepared);
+        assert_eq!(
+            futures::executor::block_on(repo.get_delegation_worktree_operation_by_delegation_id(
+                prepared.delegation_id.as_ref().expect("delegation id"),
+            ),)
+            .expect("lookup by delegation"),
+            Some(prepared.clone())
+        );
+        assert_eq!(
+            futures::executor::block_on(
+                repo.list_delegation_worktree_operations_by_workspace(&prepared.workspace_id),
+            )
+            .expect("list by workspace"),
+            vec![prepared]
+        );
+    }
+
+    #[test]
+    fn delegation_worktree_journal_cas_is_stale_safe_and_recovery_is_deterministic() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let first = delegation_worktree_operation("operation-first");
+        let mut second = delegation_worktree_operation("operation-second");
+        second.updated_at = "2026-08-28T10:00:02Z".to_string();
+        futures::executor::block_on(repo.create_delegation_worktree_operation(&first))
+            .expect("create first operation");
+        futures::executor::block_on(repo.create_delegation_worktree_operation(&second))
+            .expect("create second operation");
+
+        let mut prepared = first.clone();
+        prepared.expected_branch_oid = Some("3333333333333333333333333333333333333333".to_string());
+        prepared.state = DelegationWorktreeOperationState::Prepared;
+        prepared.updated_at = "2026-08-28T10:00:01Z".to_string();
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &prepared,
+            ))
+            .expect("winning CAS")
+        );
+
+        let mut stale = prepared.clone();
+        stale.state = DelegationWorktreeOperationState::CleanupRequired;
+        stale.last_error = Some("stale worker".to_string());
+        assert!(
+            !futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &stale,
+            ))
+            .expect("stale CAS is a normal miss")
+        );
+
+        let mut wrong_scope = prepared.clone();
+        wrong_scope.worktree_path = "/tmp/replaced-by-stale-worker".to_string();
+        wrong_scope.state = DelegationWorktreeOperationState::Bound;
+        assert!(
+            !futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Prepared,
+                &wrong_scope,
+            ))
+            .expect("immutable scope mismatch is rejected")
+        );
+
+        let recovery = futures::executor::block_on(
+            repo.list_delegation_worktree_operations_requiring_recovery(),
+        )
+        .expect("list recovery");
+        assert_eq!(
+            recovery
+                .iter()
+                .map(|operation| operation.operation_id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["operation-first", "operation-second"]
+        );
+        assert!(!futures::executor::block_on(
+            repo.delete_removed_delegation_worktree_operation(&first.operation_id),
+        )
+        .expect("live journal cannot be purged"));
+    }
+
+    #[test]
+    fn delegation_worktree_apply_can_return_to_review_before_mutation() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let operation = delegation_worktree_operation("operation-retry");
+        futures::executor::block_on(repo.create_delegation_worktree_operation(&operation))
+            .expect("create operation");
+
+        let mut prepared = operation.clone();
+        prepared.expected_branch_oid = Some("4444444444444444444444444444444444444444".to_string());
+        prepared.state = DelegationWorktreeOperationState::Prepared;
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &prepared,
+            ))
+            .unwrap()
+        );
+        let mut review = prepared.clone();
+        review.state = DelegationWorktreeOperationState::ReviewPending;
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Prepared,
+                &review,
+            ))
+            .unwrap()
+        );
+        let mut applying = review.clone();
+        applying.state = DelegationWorktreeOperationState::Applying;
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::ReviewPending,
+                &applying,
+            ))
+            .unwrap()
+        );
+        let mut retryable = applying.clone();
+        retryable.state = DelegationWorktreeOperationState::ReviewPending;
+        retryable.last_error = Some("destination changed before apply".to_string());
+        retryable.updated_at = "2026-08-28T10:00:03Z".to_string();
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Applying,
+                &retryable,
+            ))
+            .expect("retryable pre-mutation failure returns to review")
+        );
+        assert_eq!(
+            futures::executor::block_on(
+                repo.get_delegation_worktree_operation(&operation.operation_id),
+            )
+            .unwrap()
+            .unwrap()
+            .last_error
+            .as_deref(),
+            Some("destination changed before apply")
+        );
+    }
+
+    #[test]
+    fn delegation_worktree_journal_enforces_one_operation_per_delegation() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let mut first = delegation_worktree_operation("operation-owner-one");
+        first.delegation_id = Some(DelegationId("delegation-owner".to_string()));
+        let mut second = delegation_worktree_operation("operation-owner-two");
+        second.delegation_id = first.delegation_id.clone();
+        futures::executor::block_on(repo.create_delegation_worktree_operation(&first))
+            .expect("create first owner");
+        let error = futures::executor::block_on(repo.create_delegation_worktree_operation(&second))
+            .expect_err("delegation id must have one journal owner");
+        assert!(error.to_string().contains("UNIQUE constraint failed"));
+    }
+
+    #[test]
+    fn delegation_worktree_removal_claim_has_one_cross_connection_owner() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("delegation-claim.sqlite");
+        let first_repo = SqliteSessionRepo::open(&path).expect("open first repo");
+        let operation = prepared_delegation_worktree_operation(&first_repo, "operation-claim-race");
+        let second_repo = SqliteSessionRepo::open(&path).expect("open second repo");
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+
+        let first_barrier = Arc::clone(&barrier);
+        let first_id = operation.operation_id.clone();
+        let first = std::thread::spawn(move || {
+            first_barrier.wait();
+            futures::executor::block_on(first_repo.claim_delegation_worktree_removal(
+                &first_id,
+                "owner-one-secret",
+                "2026-08-28T11:00:00Z",
+                "2026-08-28T11:05:00Z",
+            ))
+            .expect("first claim")
+        });
+        let second_barrier = Arc::clone(&barrier);
+        let second_id = operation.operation_id.clone();
+        let second = std::thread::spawn(move || {
+            second_barrier.wait();
+            futures::executor::block_on(second_repo.claim_delegation_worktree_removal(
+                &second_id,
+                "owner-two-secret",
+                "2026-08-28T11:00:00Z",
+                "2026-08-28T11:05:00Z",
+            ))
+            .expect("second claim")
+        });
+        let first = first.join().expect("first claim thread");
+        let second = second.join().expect("second claim thread");
+        assert_eq!(
+            usize::from(first.is_some()) + usize::from(second.is_some()),
+            1
+        );
+        let claimed = first.or(second).expect("one claim winner");
+        let winning_owner = claimed.recovery_owner.clone().expect("winning owner");
+        assert_eq!(claimed.state, DelegationWorktreeOperationState::Removing);
+        assert_eq!(
+            claimed.recovery_lease_until.as_deref(),
+            Some("2026-08-28T11:05:00.000000000Z")
+        );
+        assert!(!format!("{claimed:?}").contains(&winning_owner));
+
+        let verifier = SqliteSessionRepo::open(&path).expect("open verifier");
+        assert!(
+            futures::executor::block_on(verifier.finalize_delegation_worktree_removal(
+                &operation.operation_id,
+                "wrong-owner",
+                DelegationWorktreeOperationState::Removed,
+                None,
+                "2026-08-28T11:01:00Z",
+            ))
+            .expect("wrong owner finalize is a normal miss")
+            .is_none()
+        );
+        let removed = futures::executor::block_on(verifier.finalize_delegation_worktree_removal(
+            &operation.operation_id,
+            &winning_owner,
+            DelegationWorktreeOperationState::Removed,
+            None,
+            "2026-08-28T11:01:00Z",
+        ))
+        .expect("winning owner finalizes")
+        .expect("removed operation");
+        assert_eq!(removed.state, DelegationWorktreeOperationState::Removed);
+        assert!(removed.recovery_owner.is_none());
+        assert!(removed.recovery_lease_until.is_none());
+    }
+
+    #[test]
+    fn delegation_worktree_expired_removal_lease_allows_takeover() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("delegation-takeover.sqlite");
+        let first_repo = SqliteSessionRepo::open(&path).expect("open first repo");
+        let operation = prepared_delegation_worktree_operation(&first_repo, "operation-takeover");
+        let claimed = futures::executor::block_on(first_repo.claim_delegation_worktree_removal(
+            &operation.operation_id,
+            "expired-owner",
+            "2026-08-28T12:00:00Z",
+            "2026-08-28T12:01:00Z",
+        ))
+        .expect("initial claim")
+        .expect("initial owner");
+        assert_eq!(claimed.recovery_owner.as_deref(), Some("expired-owner"));
+
+        let second_repo = SqliteSessionRepo::open(&path).expect("open takeover repo");
+        assert!(
+            futures::executor::block_on(second_repo.claim_delegation_worktree_removal(
+                &operation.operation_id,
+                "too-early-owner",
+                "2026-08-28T12:00:59Z",
+                "2026-08-28T12:02:00Z",
+            ))
+            .expect("unexpired claim is a normal miss")
+            .is_none()
+        );
+        let takeover = futures::executor::block_on(second_repo.claim_delegation_worktree_removal(
+            &operation.operation_id,
+            "takeover-owner",
+            "2026-08-28T12:01:00Z",
+            "2026-08-28T12:06:00Z",
+        ))
+        .expect("expired lease takeover")
+        .expect("takeover owner");
+        assert_eq!(takeover.recovery_owner.as_deref(), Some("takeover-owner"));
+
+        assert!(
+            futures::executor::block_on(first_repo.finalize_delegation_worktree_removal(
+                &operation.operation_id,
+                "expired-owner",
+                DelegationWorktreeOperationState::Removed,
+                None,
+                "2026-08-28T12:01:01Z",
+            ))
+            .expect("expired owner finalize is a normal miss")
+            .is_none()
+        );
+        let failed = futures::executor::block_on(second_repo.finalize_delegation_worktree_removal(
+            &operation.operation_id,
+            "takeover-owner",
+            DelegationWorktreeOperationState::CleanupRequired,
+            Some("filesystem removal was partial".to_string()),
+            "2026-08-28T12:01:01Z",
+        ))
+        .expect("takeover failure finalize")
+        .expect("cleanup-required operation");
+        assert_eq!(
+            failed.state,
+            DelegationWorktreeOperationState::CleanupRequired
+        );
+        assert_eq!(
+            failed.last_error.as_deref(),
+            Some("filesystem removal was partial")
+        );
+        assert!(failed.recovery_owner.is_none());
+        assert!(failed.recovery_lease_until.is_none());
+    }
+
+    #[test]
+    fn delegation_worktree_recovery_lease_migration_is_idempotent() {
+        let conn = in_memory_conn();
+        conn.lock()
+            .expect("lock old database")
+            .execute_batch(
+                r#"
+                CREATE TABLE dcc_delegation_worktree_operations (
+                    operation_id TEXT PRIMARY KEY NOT NULL,
+                    delegation_key TEXT NULL,
+                    delegation_id TEXT NULL,
+                    workspace_id TEXT NOT NULL,
+                    parent_session_id TEXT NULL,
+                    child_session_id TEXT NULL,
+                    source_root TEXT NOT NULL,
+                    worktree_path TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    base_commit TEXT NOT NULL,
+                    expected_branch_oid TEXT NULL,
+                    source_root_id BLOB NULL,
+                    worktree_root_id BLOB NULL,
+                    common_dir_id BLOB NULL,
+                    state TEXT NOT NULL,
+                    last_error TEXT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO dcc_delegation_worktree_operations (
+                    operation_id, workspace_id, source_root, worktree_path,
+                    branch, base_commit, state, created_at, updated_at
+                ) VALUES (
+                    'legacy-removing', 'legacy-workspace', '/tmp/legacy-source',
+                    '/tmp/legacy-child', 'dcc/delegation/legacy',
+                    '6666666666666666666666666666666666666666', 'removing',
+                    '2026-08-28T09:00:00Z', '2026-08-28T09:01:00Z'
+                );
+                "#,
+            )
+            .expect("create pre-lease journal schema");
+
+        let first = SqliteSessionRepo::from_connection(Arc::clone(&conn))
+            .expect("apply first lease migration");
+        let second = SqliteSessionRepo::from_connection(conn).expect("reapply lease migration");
+        let migrated = futures::executor::block_on(second.get_delegation_worktree_operation(
+            &DelegationWorktreeOperationId("legacy-removing".to_string()),
+        ))
+        .expect("read migrated operation")
+        .expect("legacy operation remains");
+        assert_eq!(
+            migrated.state,
+            DelegationWorktreeOperationState::CleanupRequired
+        );
+        assert_eq!(
+            migrated.last_error.as_deref(),
+            Some("legacy removing operation requires recovery ownership")
+        );
+        assert!(migrated.recovery_owner.is_none());
+        assert!(migrated.recovery_lease_until.is_none());
+        drop(first);
     }
 
     #[test]

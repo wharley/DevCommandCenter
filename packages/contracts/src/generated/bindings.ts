@@ -449,6 +449,7 @@ export type CreateDelegationInput = {
 	parentSessionId: SessionId,
 	parentTurnId: TurnId | null,
 	childSessionId: SessionId | null,
+	delegationWorktreeOperationId?: string | null,
 	workspaceId: WorkspaceId,
 	targetProviderId: ProviderId,
 	targetModelId?: string | null,
@@ -1873,7 +1874,7 @@ export type Workspace = {
 
 export type WorkspaceApplyDelegationWorktreeInput = {
 	workspaceRoot: string,
-	worktreePath: string,
+	delegationId: DelegationId,
 };
 
 export type WorkspaceApplyDelegationWorktreeOutput = {
@@ -2511,10 +2512,13 @@ export type WorkspacePrStatusOutput = {
 
 export type WorkspacePrepareDelegationWorktreeInput = {
 	workspaceRoot: string,
+	workspaceId: WorkspaceId,
+	parentSessionId: SessionId,
 	delegationKey: string | null,
 };
 
 export type WorkspacePrepareDelegationWorktreeOutput = {
+	operationId: string,
 	worktreePath: string,
 	branch: string,
 	baseCommit: string,
@@ -2572,7 +2576,8 @@ export type WorkspaceRemoteBranchDeletionTarget = {
 
 export type WorkspaceRemoveDelegationWorktreeInput = {
 	workspaceRoot: string,
-	worktreePath: string,
+	delegationId?: DelegationId | null,
+	operationId?: string | null,
 	removeBranch?: boolean,
 };
 
