@@ -7,9 +7,11 @@ import {
 	type ReactNode,
 } from "react";
 import type { WorkspaceChangesDiffProps } from "./WorkspaceChangesDiff";
+import type { WorkspacePatchDiffProps } from "./WorkspacePatchDiff";
 import { workspaceDiffContentHash } from "./workspace-changes-diff.logic";
 
 const WorkspaceChangesDiff = lazy(() => import("./WorkspaceChangesDiff"));
+const WorkspacePatchDiff = lazy(() => import("./WorkspacePatchDiff"));
 
 class DiffSurfaceErrorBoundary extends Component<
 	{ children: ReactNode; resetKey: string },
@@ -61,6 +63,26 @@ export function WorkspaceChangesDiffLoader(props: WorkspaceChangesDiffProps) {
 				}
 			>
 				<WorkspaceChangesDiff {...props} />
+			</Suspense>
+		</DiffSurfaceErrorBoundary>
+	);
+}
+
+export function WorkspacePatchDiffLoader(props: WorkspacePatchDiffProps) {
+	const resetKey = `${props.path}:${workspaceDiffContentHash(props.patch)}`;
+	return (
+		<DiffSurfaceErrorBoundary resetKey={resetKey}>
+			<Suspense
+				fallback={
+					<div className="flex min-h-[180px] flex-1 items-center justify-center bg-background px-4 py-6 text-[11px] text-muted-foreground">
+						<span className="inline-flex items-center gap-2">
+							<LoaderCircle className="size-3.5 animate-spin" />
+							Loading file diff...
+						</span>
+					</div>
+				}
+			>
+				<WorkspacePatchDiff {...props} />
 			</Suspense>
 		</DiffSurfaceErrorBoundary>
 	);

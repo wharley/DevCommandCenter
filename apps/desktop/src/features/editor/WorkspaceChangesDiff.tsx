@@ -20,6 +20,7 @@ import {
 	workspaceDiffAnnotationCss,
 	workspaceDiffContentHash,
 } from "./workspace-changes-diff.logic";
+import { workspaceDiffViewOptions } from "./workspace-diff-view-options";
 
 export type WorkspaceChangesDiffProps = {
 	path: string;
@@ -205,26 +206,10 @@ export default function WorkspaceChangesDiff({
 				onSelectedLinesChange={setSelectedLines}
 				disableWorkerPool
 				options={{
-					disableFileHeader: true,
-					diffStyle: inline ? "unified" : "split",
-					diffIndicators: "classic",
-					lineDiffType: "word",
-					overflow: "scroll",
-					theme: theme === "dark" ? "pierre-dark" : "pierre-light",
-					themeType: theme,
-					disableBackground: false,
+					...workspaceDiffViewOptions<AnnotationMetadata>(theme, inline),
 					unsafeCSS: annotationCss,
-					expandUnchanged: false,
-					collapsedContextThreshold: 8,
-					expansionLineCount: 20,
-					hunkSeparators: "line-info",
-					lineHoverHighlight: "both",
-					tokenizeMaxLineLength: 2_000,
-					maxLineDiffLength: 2_000,
 					enableGutterUtility: Boolean(onAnnotate),
 					enableLineSelection: Boolean(onAnnotate),
-					disableErrorHandling: false,
-					stickyHeaders: false,
 					onGutterUtilityClick: (range) => handleAnnotate(range),
 				}}
 				renderAnnotation={(annotation) => (

@@ -20,6 +20,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { WorkspacePatchDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
 import {
 	executeGuardedUndo,
 	loadLastTurnReview,
@@ -367,8 +368,8 @@ export function TurnReviewSurface({
 								</button>
 							))}
 						</div>
-						<div className="min-h-0 overflow-auto bg-muted/15">
-							{previewState === "loading" ? <div className="flex h-full items-center justify-center"><Loader2 className="size-4 animate-spin" /></div> : previewState === "error" ? <div className="flex h-full items-center justify-center p-4 text-center text-xs text-destructive">{t("turnReview.diffFailed")}</div> : previewState === "diff" ? <pre className="min-w-max p-3 font-mono text-[10.5px] leading-5"><code>{diffQuery.data!.diff}</code></pre> : <div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">{previewState === "unavailable" ? t("turnReview.previewUnavailable") : review.state === "collecting" ? t("turnReview.collectingHint") : review.state === "no_changes" ? t("turnReview.noChanges") : t("turnReview.selectFile")}</div>}
+						<div className="min-h-0 overflow-hidden bg-muted/15">
+							{previewState === "loading" ? <div className="flex h-full items-center justify-center"><Loader2 className="size-4 animate-spin" /></div> : previewState === "error" ? <div className="flex h-full items-center justify-center p-4 text-center text-xs text-destructive">{t("turnReview.diffFailed")}</div> : previewState === "diff" ? <WorkspacePatchDiffLoader key={`${review.snapshotId}:${selectedPath}`} path={selectedPath!} patch={diffQuery.data!.diff!} className="h-full" /> : <div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">{previewState === "unavailable" ? t("turnReview.previewUnavailable") : review.state === "collecting" ? t("turnReview.collectingHint") : review.state === "no_changes" ? t("turnReview.noChanges") : t("turnReview.selectFile")}</div>}
 						</div>
 					</div>
 				</>
