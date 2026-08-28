@@ -5,6 +5,10 @@ edition = "2021"
 license.workspace = true
 publish = false
 
+[features]
+default = []
+guarded-undo-capture-v2 = ["dcc-infra/guarded-undo-capture-v2"]
+
 [dependencies]
 async-trait = "0.1"
 dcc-core = { path = "../dcc-core" }

@@ -63,6 +63,7 @@ path = "src/bin/dccd-http.rs"
 
 [features]
 default = []
+guarded-undo-capture-v2 = ["dcc-tauri/guarded-undo-capture-v2"]
 
 [dev-dependencies]
 tempfile = "3"

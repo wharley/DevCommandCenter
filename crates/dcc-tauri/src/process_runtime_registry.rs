@@ -19,6 +19,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
+use crate::guarded_undo_runtime::GuardedUndoRuntime;
 use crate::terminal_arbiter::TerminalArbiter;
 use dcc_core::ports::{events::CoreEvent, EventBus};
 use dcc_core::Result as CoreResult;
@@ -131,6 +132,8 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for AcquireAfterOpenError<E
 /// filesystem authorization from this registry.
 pub struct ProcessRuntime {
     terminal_arbiter: Arc<TerminalArbiter>,
+    #[allow(dead_code)] // Wired by the guarded-undo lifecycle integration.
+    guarded_undo_runtime: Arc<GuardedUndoRuntime>,
     session_store: Arc<Mutex<crate::state::SessionStore>>,
     event_buses: Mutex<Vec<Weak<dyn EventBus>>>,
 }
@@ -145,6 +148,7 @@ impl ProcessRuntime {
     fn new() -> Self {
         Self {
             terminal_arbiter: Arc::new(TerminalArbiter::default()),
+            guarded_undo_runtime: Arc::new(GuardedUndoRuntime::new()),
             session_store: Arc::new(Mutex::new(crate::state::SessionStore::default())),
             event_buses: Mutex::new(Vec::new()),
         }
@@ -152,6 +156,11 @@ impl ProcessRuntime {
 
     pub fn terminal_arbiter(&self) -> Arc<TerminalArbiter> {
         Arc::clone(&self.terminal_arbiter)
+    }
+
+    #[allow(dead_code)] // Wired by the guarded-undo lifecycle integration.
+    pub(crate) fn guarded_undo_runtime(&self) -> Arc<GuardedUndoRuntime> {
+        Arc::clone(&self.guarded_undo_runtime)
     }
 
     pub(crate) fn register_event_bus(&self, bus: &Arc<dyn EventBus>) -> CoreResult<()> {
@@ -529,6 +538,10 @@ mod tests {
         assert!(Arc::ptr_eq(
             &first.terminal_arbiter(),
             &second.terminal_arbiter()
+        ));
+        assert!(Arc::ptr_eq(
+            &first.guarded_undo_runtime(),
+            &second.guarded_undo_runtime()
         ));
         assert_eq!(registry.entry_count(), 1);
     }

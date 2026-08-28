@@ -193,14 +193,49 @@ impl CaptureV2Service {
         &self,
         workspace_absolute: &Path,
     ) -> Result<OrphanRecoveryReport, CaptureV2Error> {
-        let root = MacWorkspaceRoot::open_absolute(workspace_absolute)
-            .map_err(|error| capture_error(error.reason_code()))?;
-        let store = self
-            .store_lease
-            .bind_workspace(&root)
-            .map_err(|error| capture_error(error.reason_code()))?;
+        self.recover_startup_all(std::iter::once(workspace_absolute))
+    }
+
+    /// Performs global capture-v2 recovery only after every authorized
+    /// workspace root has been opened and bound to the lifetime lease.
+    ///
+    /// Artifact cleanup is global to app-data, so validating just the first
+    /// root would permit cleanup after a later root failed validation. Keep all
+    /// root handles and stores alive through recovery: an empty input or any
+    /// invalid root fails closed before either DB maintenance or orphan cleanup
+    /// begins.
+    pub fn recover_startup_all<I, P>(
+        &self,
+        workspace_absolutes: I,
+    ) -> Result<OrphanRecoveryReport, CaptureV2Error>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let mut roots = Vec::new();
+        for workspace_absolute in workspace_absolutes {
+            roots.push(
+                MacWorkspaceRoot::open_absolute(workspace_absolute.as_ref())
+                    .map_err(|error| capture_error(error.reason_code()))?,
+            );
+        }
+        if roots.is_empty() {
+            return Err(capture_error(GuardedUndoReasonCode::ArtifactStoreUnsafe));
+        }
+
+        let mut stores = Vec::with_capacity(roots.len());
+        for root in &roots {
+            stores.push(
+                self.store_lease
+                    .bind_workspace(root)
+                    .map_err(|error| capture_error(error.reason_code()))?,
+            );
+        }
+        let store = stores
+            .first()
+            .ok_or_else(|| capture_error(GuardedUndoReasonCode::ArtifactStoreUnsafe))?;
         self.repo
-            .recover_capture_v2_startup(&store, &now())
+            .recover_capture_v2_startup(store, &now())
             .map_err(|_| capture_error(GuardedUndoReasonCode::IoError))
     }
 
@@ -1171,6 +1206,7 @@ fn expires_at() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::guarded_undo::macos_root::CapturedBytes;
     use rusqlite::{params, Connection};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::{ffi::CString, fs, os::unix::ffi::OsStrExt, process::Command, sync::Mutex};
@@ -1543,6 +1579,94 @@ mod tests {
                 .objects_removed,
             0
         );
+    }
+
+    #[test]
+    fn multi_root_recovery_rejects_an_invalid_root_before_any_cleanup() {
+        let fixture = Fixture::new();
+        let root = MacWorkspaceRoot::open_absolute(&fixture.request.workspace_absolute).unwrap();
+        let store = fixture.service.store_lease.bind_workspace(&root).unwrap();
+        let staged = store
+            .stage(&CapturedBytes::from_slice(b"unreferenced-orphan"), 1024)
+            .unwrap();
+        let orphan = match store.publish(&staged).unwrap() {
+            PublishState::Published(artifact) => artifact,
+            _ => panic!("expected published orphan"),
+        };
+        let handle = fixture.service.begin(fixture.request.clone()).unwrap();
+        let restore_set_id = handle.collecting.restore_set_id.clone();
+        let missing = fixture
+            .request
+            .workspace_absolute
+            .join("missing-recovery-root");
+
+        assert_eq!(
+            fixture
+                .service
+                .recover_startup_all([
+                    fixture.request.workspace_absolute.as_path(),
+                    missing.as_path(),
+                ])
+                .unwrap_err()
+                .reason_code,
+            GuardedUndoReasonCode::IoError
+        );
+        store
+            .verify(orphan.key, orphan.size, orphan.sha256)
+            .expect("orphan must remain when a later root is invalid");
+        let (set, _) = fixture
+            .repo
+            .get_turn_restore_set(&restore_set_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(set.state, RestoreSetState::Collecting);
+
+        drop(handle);
+    }
+
+    #[test]
+    fn multi_root_recovery_is_idempotent_across_restart_after_all_roots_validate() {
+        let workspace_one_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace_two_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let app_data_dir = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace_one = fs::canonicalize(workspace_one_dir.path()).unwrap();
+        let workspace_two = fs::canonicalize(workspace_two_dir.path()).unwrap();
+        let app_data = fs::canonicalize(app_data_dir.path()).unwrap();
+        let repo = SqliteSessionRepo::open(&app_data.join("sessions.sqlite")).unwrap();
+        let service = CaptureV2Service::with_system_git(
+            app_data.clone(),
+            repo.clone(),
+            Arc::new(WorkspaceMutationCoordinator::new()),
+        )
+        .unwrap();
+        let root = MacWorkspaceRoot::open_absolute(&workspace_one).unwrap();
+        let store = service.store_lease.bind_workspace(&root).unwrap();
+        let staged = store
+            .stage(&CapturedBytes::from_slice(b"restart-orphan"), 1024)
+            .unwrap();
+        let _orphan = match store.publish(&staged).unwrap() {
+            PublishState::Published(artifact) => artifact,
+            _ => panic!("expected published orphan"),
+        };
+
+        let first = service
+            .recover_startup_all([workspace_one.as_path(), workspace_two.as_path()])
+            .unwrap();
+        assert_eq!((first.staging_removed, first.objects_removed), (0, 1));
+        drop(store);
+        drop(root);
+        drop(service);
+
+        let restarted = CaptureV2Service::with_system_git(
+            app_data,
+            repo,
+            Arc::new(WorkspaceMutationCoordinator::new()),
+        )
+        .unwrap();
+        let second = restarted
+            .recover_startup_all([workspace_one.as_path(), workspace_two.as_path()])
+            .unwrap();
+        assert_eq!((second.staging_removed, second.objects_removed), (0, 0));
     }
 
     #[test]
