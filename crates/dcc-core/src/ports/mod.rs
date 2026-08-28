@@ -23,6 +23,6 @@ pub use provider::{
     ProviderRuntimeConfig, ProviderTurnInput, SessionConfig,
 };
 pub use repository::{
-    DelegationRepo, McpRepo, ProjectRepo, RepositoryRepo, SessionEventRepo, SessionRepo,
-    ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
+    AppendEventOutcome, DelegationRepo, McpRepo, ProjectRepo, RepositoryRepo, SessionEventRepo,
+    SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
 };

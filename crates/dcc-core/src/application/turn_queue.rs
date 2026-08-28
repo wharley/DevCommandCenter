@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::{
     application::SendTurnInput,
     domain::session::{QueuedTurn, SessionEventKind, SessionEventRecord, SessionId, TurnId},
-    ports::{CoreEvent, EventBus, SessionEventRepo},
+    ports::{AppendEventOutcome, CoreEvent, EventBus, SessionEventRepo},
     Result,
 };
 
@@ -58,7 +58,7 @@ async fn append<E: SessionEventRepo + Sync>(
     session_id: &SessionId,
     history: &[SessionEventRecord],
     kind: SessionEventKind,
-) -> Result<SessionEventRecord> {
+) -> Result<(SessionEventRecord, bool)> {
     let event = SessionEventRecord {
         event_id: Uuid::new_v4().to_string(),
         session_id: session_id.clone(),
@@ -66,8 +66,12 @@ async fn append<E: SessionEventRepo + Sync>(
         occurred_at: chrono::Utc::now().to_rfc3339(),
         kind,
     };
-    events.append_event(&event).await?;
-    Ok(event)
+    let outcome = events.append_event(&event).await?;
+    let inserted = matches!(&outcome, AppendEventOutcome::Inserted(_));
+    let event = match outcome {
+        AppendEventOutcome::Inserted(event) | AppendEventOutcome::Existing(event) => event,
+    };
+    Ok((event, inserted))
 }
 
 pub async fn queue_turn<E, B>(events: &E, bus: &B, input: QueueTurnInput) -> Result<QueuedTurn>
@@ -99,7 +103,7 @@ where
         approval_policy: input.turn.approval_policy,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
-    append(
+    let (_event, inserted) = append(
         events,
         &queued_turn.session_id,
         &history,
@@ -108,11 +112,13 @@ where
         },
     )
     .await?;
-    bus.publish(CoreEvent::SessionTurnQueued {
-        session_id: queued_turn.session_id.0.clone(),
-        queued_turn: queued_turn.clone(),
-    })
-    .await?;
+    if inserted {
+        bus.publish(CoreEvent::SessionTurnQueued {
+            session_id: queued_turn.session_id.0.clone(),
+            queued_turn: queued_turn.clone(),
+        })
+        .await?;
+    }
     Ok(queued_turn)
 }
 
@@ -142,7 +148,7 @@ where
             "queued turn was not found".to_string(),
         ));
     }
-    let event = append(
+    let (event, inserted) = append(
         events,
         &input.session_id,
         &history,
@@ -152,11 +158,13 @@ where
     )
     .await?;
     history.push(event);
-    bus.publish(CoreEvent::SessionQueuedTurnRemoved {
-        session_id: input.session_id.0.clone(),
-        queued_turn_id: input.queued_turn_id,
-    })
-    .await?;
+    if inserted {
+        bus.publish(CoreEvent::SessionQueuedTurnRemoved {
+            session_id: input.session_id.0.clone(),
+            queued_turn_id: input.queued_turn_id,
+        })
+        .await?;
+    }
     Ok(project_turn_queue(&history))
 }
 
@@ -183,7 +191,7 @@ where
             "queue order must contain every queued turn exactly once".to_string(),
         ));
     }
-    let event = append(
+    let (event, inserted) = append(
         events,
         &input.session_id,
         &history,
@@ -193,11 +201,13 @@ where
     )
     .await?;
     history.push(event);
-    bus.publish(CoreEvent::SessionTurnQueueReordered {
-        session_id: input.session_id.0.clone(),
-        queued_turn_ids: input.queued_turn_ids,
-    })
-    .await?;
+    if inserted {
+        bus.publish(CoreEvent::SessionTurnQueueReordered {
+            session_id: input.session_id.0.clone(),
+            queued_turn_ids: input.queued_turn_ids,
+        })
+        .await?;
+    }
     Ok(project_turn_queue(&history))
 }
 
@@ -213,7 +223,7 @@ where
     B: EventBus + Sync,
 {
     let history = events.list_events_by_session(session_id).await?;
-    append(
+    let (_event, inserted) = append(
         events,
         session_id,
         &history,
@@ -223,18 +233,56 @@ where
         },
     )
     .await?;
-    bus.publish(CoreEvent::SessionQueuedTurnDispatched {
-        session_id: session_id.0.clone(),
-        queued_turn_id,
-        turn_id: turn_id.0,
-    })
-    .await
+    if inserted {
+        bus.publish(CoreEvent::SessionQueuedTurnDispatched {
+            session_id: session_id.0.clone(),
+            queued_turn_id,
+            turn_id: turn_id.0,
+        })
+        .await
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{project::ProjectId, workspace::WorkspaceId};
+    use async_trait::async_trait;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct ExistingRepo {
+        history: Vec<SessionEventRecord>,
+        canonical: SessionEventRecord,
+    }
+
+    #[async_trait]
+    impl SessionEventRepo for ExistingRepo {
+        async fn append_event(&self, _: &SessionEventRecord) -> Result<AppendEventOutcome> {
+            Ok(AppendEventOutcome::Existing(self.canonical.clone()))
+        }
+
+        async fn list_events_by_session(&self, _: &SessionId) -> Result<Vec<SessionEventRecord>> {
+            Ok(self.history.clone())
+        }
+
+        async fn delete_events_by_session(&self, _: &SessionId) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingBus(Arc<Mutex<Vec<CoreEvent>>>);
+
+    #[async_trait]
+    impl EventBus for RecordingBus {
+        async fn publish(&self, event: CoreEvent) -> Result<()> {
+            self.0.lock().expect("bus lock").push(event);
+            Ok(())
+        }
+    }
 
     fn event(sequence: u64, kind: SessionEventKind) -> SessionEventRecord {
         SessionEventRecord {
@@ -301,5 +349,44 @@ mod tests {
         let queue = project_turn_queue(&history);
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].id, "a");
+    }
+
+    #[test]
+    fn queue_existing_append_does_not_publish_duplicate() {
+        let session_id = SessionId("session-1".to_owned());
+        let history = vec![event(
+            1,
+            SessionEventKind::SessionStarted {
+                workspace_id: WorkspaceId("workspace-1".into()),
+                project_id: ProjectId("project-1".into()),
+                provider_id: "codex".into(),
+                model: None,
+            },
+        )];
+        let canonical = event(
+            2,
+            SessionEventKind::TurnQueued {
+                queued_turn: queued("canonical"),
+            },
+        );
+        let repo = ExistingRepo { history, canonical };
+        let bus = RecordingBus::default();
+        let input = QueueTurnInput {
+            turn: SendTurnInput {
+                session_id,
+                prompt: "retry".to_owned(),
+                tool_instructions: None,
+                provider_id: None,
+                model: None,
+                provider_runtime: None,
+                plan_mode: None,
+                effort: None,
+                fast_mode: None,
+                approval_policy: None,
+            },
+        };
+        let _ = futures::executor::block_on(queue_turn(&repo, &bus, input))
+            .expect("existing append remains successful");
+        assert!(bus.0.lock().expect("bus lock").is_empty());
     }
 }

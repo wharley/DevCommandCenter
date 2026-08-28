@@ -38,10 +38,10 @@ use dcc_core::{
         workspace_bundle::WorkspaceBundleState,
     },
     ports::{
-        CredentialStore, DelegationRepo, EventBus, Input, McpRepo, ProjectRepo, Provider,
-        ProviderMcpOauthStart, ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo,
-        SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo,
-        WorkspaceRepo,
+        AppendEventOutcome, CredentialStore, DelegationRepo, EventBus, Input, McpRepo, ProjectRepo,
+        Provider, ProviderMcpOauthStart, ProviderMcpServerConfig, ProviderRuntimeConfig,
+        RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo,
+        WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -515,7 +515,7 @@ impl SessionCommandState {
         &self,
         session_id: &SessionId,
         kind: SessionEventKind,
-    ) -> Result<SessionEventRecord> {
+    ) -> Result<AppendEventOutcome> {
         let events =
             SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await?;
         let sequence = events.last().map(|event| event.sequence + 1).unwrap_or(1);
@@ -526,8 +526,7 @@ impl SessionCommandState {
             occurred_at: Utc::now().to_rfc3339(),
             kind,
         };
-        SessionEventRepo::append_event(&self.session_repo, &record).await?;
-        Ok(record)
+        SessionEventRepo::append_event(&self.session_repo, &record).await
     }
 
     fn turn_review_snapshot_root(&self, snapshot_id: &str) -> PathBuf {
@@ -869,8 +868,10 @@ impl SessionCommandState {
         kind: SessionEventKind,
         core_event: dcc_core::ports::events::CoreEvent,
     ) -> Result<()> {
-        self.append_session_event(session_id, kind).await?;
-        self.publish(core_event).await?;
+        let outcome = self.append_session_event(session_id, kind).await?;
+        if matches!(outcome, AppendEventOutcome::Inserted(_)) {
+            self.publish(core_event).await?;
+        }
         Ok(())
     }
 
@@ -903,18 +904,24 @@ impl SessionCommandState {
         }
         self.capture_turn_review_result(session_id, turn_id, "completed", None, false)
             .await?;
-        self.append_and_publish_session_event(
-            session_id,
-            SessionEventKind::TurnCompleted {
-                turn_id: turn_id.clone(),
-            },
-            dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
+        let outcome = self
+            .append_session_event(
+                session_id,
+                SessionEventKind::TurnCompleted {
+                    turn_id: turn_id.clone(),
+                },
+            )
+            .await?;
+        if matches!(outcome, AppendEventOutcome::Inserted(_)) {
+            self.publish(dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
                 session_id: session_id.0.clone(),
                 turn_id: turn_id.0.clone(),
-            },
-        )
-        .await?;
-        Ok(true)
+            })
+            .await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     pub async fn emit_turn_completed(
@@ -984,19 +991,24 @@ impl SessionCommandState {
         {
             eprintln!("[DCC] aborted turn review capture failed: {error}");
         }
-        self.append_and_publish_session_event(
-            session_id,
-            SessionEventKind::TurnAborted {
-                turn_id: turn_id.clone(),
-                reason: reason.clone(),
-            },
-            dcc_core::ports::events::CoreEvent::SessionTurnAborted {
+        let outcome = self
+            .append_session_event(
+                session_id,
+                SessionEventKind::TurnAborted {
+                    turn_id: turn_id.clone(),
+                    reason: reason.clone(),
+                },
+            )
+            .await?;
+        if matches!(outcome, AppendEventOutcome::Inserted(_)) {
+            self.publish(dcc_core::ports::events::CoreEvent::SessionTurnAborted {
                 session_id: session_id.0.clone(),
                 turn_id: turn_id.0.clone(),
                 reason,
-            },
-        )
-        .await
+            })
+            .await?;
+        }
+        Ok(())
     }
 
     /// Claims the turn under the terminal transition lock, cancels the
@@ -2752,7 +2764,10 @@ impl ThreadRepo for SessionCommandState {
 
 #[async_trait]
 impl SessionEventRepo for SessionCommandState {
-    async fn append_event(&self, event: &SessionEventRecord) -> Result<()> {
+    async fn append_event(
+        &self,
+        event: &SessionEventRecord,
+    ) -> Result<dcc_core::ports::AppendEventOutcome> {
         SessionEventRepo::append_event(&self.session_repo, event).await
     }
 

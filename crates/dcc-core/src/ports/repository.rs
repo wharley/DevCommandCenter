@@ -20,6 +20,17 @@ use crate::{
     Result,
 };
 
+/// Result of an idempotent durable event append.
+///
+/// `Existing` returns the canonical record already stored by another caller.
+/// Repositories may therefore safely retry an append after a transport or
+/// process failure without creating a second durable event.
+#[derive(Clone, Debug)]
+pub enum AppendEventOutcome {
+    Inserted(SessionEventRecord),
+    Existing(SessionEventRecord),
+}
+
 #[async_trait]
 pub trait WorkspaceRepo: Send + Sync {
     async fn save_workspace(&self, workspace: &Workspace) -> Result<()>;
@@ -136,7 +147,7 @@ pub trait SessionRepo: Send + Sync {
 
 #[async_trait]
 pub trait SessionEventRepo: Send + Sync {
-    async fn append_event(&self, event: &SessionEventRecord) -> Result<()>;
+    async fn append_event(&self, event: &SessionEventRecord) -> Result<AppendEventOutcome>;
     async fn list_events_by_session(
         &self,
         session_id: &SessionId,

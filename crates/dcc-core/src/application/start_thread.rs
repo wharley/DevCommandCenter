@@ -13,7 +13,8 @@ use crate::{
         workspace::WorkspaceId,
     },
     ports::{
-        CoreEvent, EventBus, ProviderRuntimeConfig, SessionEventRepo, SessionRepo, ThreadRepo,
+        AppendEventOutcome, CoreEvent, EventBus, ProviderRuntimeConfig, SessionEventRepo,
+        SessionRepo, ThreadRepo,
     },
     Result,
 };
@@ -129,16 +130,22 @@ where
             model: input.model.clone(),
         },
     };
-    session_events.append_event(&started_event).await?;
-    events
-        .publish(CoreEvent::SessionStarted {
-            session_id: session_id.0.clone(),
-            workspace_id: input.workspace_id.0.clone(),
-            project_id: input.project_id.0.clone(),
-            provider_id: input.provider_id.clone(),
-            model: input.model,
-        })
-        .await?;
+    let outcome = session_events.append_event(&started_event).await?;
+    let created = matches!(&outcome, AppendEventOutcome::Inserted(_));
+    let started_event = match outcome {
+        AppendEventOutcome::Inserted(event) | AppendEventOutcome::Existing(event) => event,
+    };
+    if created {
+        events
+            .publish(CoreEvent::SessionStarted {
+                session_id: session_id.0.clone(),
+                workspace_id: input.workspace_id.0.clone(),
+                project_id: input.project_id.0.clone(),
+                provider_id: input.provider_id.clone(),
+                model: input.model,
+            })
+            .await?;
+    }
 
     let projection = SessionProjection::fold(&[started_event]).expect("session projection exists");
 
@@ -258,12 +265,15 @@ mod tests {
 
     #[async_trait]
     impl SessionEventRepo for FakeEventBus {
-        async fn append_event(&self, event: &SessionEventRecord) -> Result<()> {
+        async fn append_event(
+            &self,
+            event: &SessionEventRecord,
+        ) -> Result<crate::ports::AppendEventOutcome> {
             self.session_events
                 .lock()
                 .expect("session events lock poisoned")
                 .push(event.clone());
-            Ok(())
+            Ok(crate::ports::AppendEventOutcome::Inserted(event.clone()))
         }
 
         async fn list_events_by_session(

@@ -6,7 +6,7 @@ use crate::{
     domain::session::{
         Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection, SessionState,
     },
-    ports::{CoreEvent, EventBus, SessionEventRepo, SessionRepo},
+    ports::{AppendEventOutcome, CoreEvent, EventBus, SessionEventRepo, SessionRepo},
     Result,
 };
 
@@ -66,15 +66,21 @@ where
         kind: SessionEventKind::SessionResumed,
     };
 
-    session_events.append_event(&resumed).await?;
+    let outcome = session_events.append_event(&resumed).await?;
+    let created = matches!(&outcome, AppendEventOutcome::Inserted(_));
+    let resumed = match outcome {
+        AppendEventOutcome::Inserted(event) | AppendEventOutcome::Existing(event) => event,
+    };
     session.state = SessionState::Active;
     session.updated_at = now.clone();
     sessions.save_session(&session).await?;
-    events
-        .publish(CoreEvent::SessionResumed {
-            session_id: input.session_id.0.clone(),
-        })
-        .await?;
+    if created {
+        events
+            .publish(CoreEvent::SessionResumed {
+                session_id: input.session_id.0.clone(),
+            })
+            .await?;
+    }
 
     let mut replay = history;
     replay.push(resumed);

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{
     domain::session::{SessionEventKind, SessionEventRecord, SessionId},
-    ports::{CoreEvent, EventBus, SessionEventRepo},
+    ports::{AppendEventOutcome, CoreEvent, EventBus, SessionEventRepo},
     CoreError, Result,
 };
 
@@ -86,20 +86,23 @@ where
             plan_hash: plan_hash.to_string(),
         },
     };
-    session_events.append_event(&event).await?;
-    events
-        .publish(CoreEvent::SessionPlanApproved {
-            session_id: input.session_id.0,
-            plan_message_id: plan_message_id.to_string(),
-            plan_version: input.plan_version,
-            plan_hash: plan_hash.to_string(),
-        })
-        .await?;
+    let outcome = session_events.append_event(&event).await?;
+    let created = matches!(&outcome, AppendEventOutcome::Inserted(_));
+    let event = match outcome {
+        AppendEventOutcome::Inserted(event) | AppendEventOutcome::Existing(event) => event,
+    };
+    if created {
+        events
+            .publish(CoreEvent::SessionPlanApproved {
+                session_id: input.session_id.0,
+                plan_message_id: plan_message_id.to_string(),
+                plan_version: input.plan_version,
+                plan_hash: plan_hash.to_string(),
+            })
+            .await?;
+    }
 
-    Ok(ApprovePlanOutput {
-        event,
-        created: true,
-    })
+    Ok(ApprovePlanOutput { event, created })
 }
 
 #[cfg(test)]
@@ -116,12 +119,15 @@ mod tests {
 
     #[async_trait]
     impl SessionEventRepo for FakeStore {
-        async fn append_event(&self, event: &SessionEventRecord) -> Result<()> {
+        async fn append_event(
+            &self,
+            event: &SessionEventRecord,
+        ) -> Result<crate::ports::AppendEventOutcome> {
             self.records
                 .lock()
                 .expect("records lock poisoned")
                 .push(event.clone());
-            Ok(())
+            Ok(crate::ports::AppendEventOutcome::Inserted(event.clone()))
         }
 
         async fn list_events_by_session(

@@ -6,7 +6,7 @@ use crate::{
     domain::session::{
         Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection, TurnId,
     },
-    ports::{CoreEvent, EventBus, SessionEventRepo, SessionRepo},
+    ports::{AppendEventOutcome, CoreEvent, EventBus, SessionEventRepo, SessionRepo},
     Result,
 };
 
@@ -89,16 +89,22 @@ where
             prompt: input.prompt.clone(),
         },
     };
-    session_events.append_event(&event).await?;
-    events
-        .publish(CoreEvent::SessionTurnSteered {
-            session_id: input.session_id.0.clone(),
-            turn_id: turn_id.0.clone(),
-            prompt: input.prompt,
-        })
-        .await?;
+    let outcome = session_events.append_event(&event).await?;
+    let inserted = matches!(&outcome, AppendEventOutcome::Inserted(_));
+    let canonical = match outcome {
+        AppendEventOutcome::Inserted(event) | AppendEventOutcome::Existing(event) => event,
+    };
+    if inserted {
+        events
+            .publish(CoreEvent::SessionTurnSteered {
+                session_id: input.session_id.0.clone(),
+                turn_id: turn_id.0.clone(),
+                prompt: input.prompt,
+            })
+            .await?;
+    }
 
-    history.push(event);
+    history.push(canonical);
     let projection = SessionProjection::fold(&history).expect("session projection exists");
     Ok(SteerTurnOutput {
         session,

@@ -44,8 +44,8 @@ use dcc_core::{
         },
     },
     ports::{
-        DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo,
-        WorkspaceBundleRepo, WorkspaceRepo,
+        AppendEventOutcome, DelegationRepo, RepositoryRepo, SessionEventRepo, SessionRepo,
+        ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -177,7 +177,11 @@ CREATE TABLE IF NOT EXISTS dcc_session_events (
 	sequence INTEGER NOT NULL,
 	occurred_at TEXT NOT NULL,
 	kind_json TEXT NOT NULL,
+	terminal_turn_id TEXT NULL,
+	terminal_kind TEXT NULL,
 	UNIQUE(session_id, sequence),
+	CHECK((terminal_turn_id IS NULL AND terminal_kind IS NULL)
+	      OR (terminal_turn_id IS NOT NULL AND terminal_kind IN ('completed', 'aborted'))),
 	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
 );
 
@@ -969,6 +973,8 @@ impl SqliteSessionRepo {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path.as_ref())
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let repo = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -993,7 +999,7 @@ impl SqliteSessionRepo {
     }
 
     fn ensure_schema(&self) -> Result<()> {
-        let conn = self
+        let mut conn = self
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -1050,6 +1056,34 @@ impl SqliteSessionRepo {
             "outcome_reason",
             "TEXT NULL",
         )?;
+        // Keep the terminal-key migration atomic: ALTER/backfill/duplicate
+        // validation/index creation must all roll back together on failure.
+        let migration = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        SqliteWorkspaceRepo::ensure_column(
+            &migration,
+            "dcc_session_events",
+            "terminal_turn_id",
+            "TEXT NULL",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &migration,
+            "dcc_session_events",
+            "terminal_kind",
+            "TEXT NULL",
+        )?;
+        Self::backfill_terminal_event_keys(&migration)?;
+        migration
+            .execute_batch(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_session_events_terminal_turn\n\
+                 ON dcc_session_events(session_id, terminal_turn_id)\n\
+                 WHERE terminal_turn_id IS NOT NULL;",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        migration
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         // Compatibility cleanup for bundles removed before their sessions were
         // deleted explicitly. Keep orphaned single-workspace history unchanged;
         // only multi-root sessions can be identified safely here.
@@ -1067,6 +1101,111 @@ impl SqliteSessionRepo {
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::rebuild_search_index_sync(&conn)?;
+        Ok(())
+    }
+
+    fn backfill_terminal_event_keys(conn: &Connection) -> Result<()> {
+        let mut statement = conn
+            .prepare(
+                "SELECT event_id, kind_json, terminal_turn_id, terminal_kind FROM dcc_session_events",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        drop(statement);
+        for (event_id, kind_json, existing_turn_id, existing_kind) in rows {
+            let value = serde_json::from_str::<serde_json::Value>(&kind_json)
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let kind_name = value.get("type").and_then(serde_json::Value::as_str);
+            let parsed = if matches!(kind_name, Some("turn_completed" | "turn_aborted")) {
+                Some(from_str::<SessionEventKind>(&kind_json).map_err(|_| {
+                    dcc_core::CoreError::Repository(
+                        "known terminal event kind is invalid".to_string(),
+                    )
+                })?)
+            } else {
+                None
+            };
+            let terminal = match parsed {
+                Some(SessionEventKind::TurnCompleted { turn_id }) => {
+                    if turn_id.0.trim().is_empty() {
+                        return Err(dcc_core::CoreError::Repository(
+                            "known terminal event has invalid turnId".to_string(),
+                        ));
+                    }
+                    Some((turn_id.0, "completed"))
+                }
+                Some(SessionEventKind::TurnAborted { turn_id, .. }) => {
+                    if turn_id.0.trim().is_empty() {
+                        return Err(dcc_core::CoreError::Repository(
+                            "known terminal event has invalid turnId".to_string(),
+                        ));
+                    }
+                    Some((turn_id.0, "aborted"))
+                }
+                _ => None,
+            };
+            match terminal {
+                Some((turn_id, terminal_kind)) => {
+                    if existing_turn_id
+                        .as_deref()
+                        .is_some_and(|existing| existing != turn_id)
+                        || existing_kind
+                            .as_deref()
+                            .is_some_and(|existing| existing != terminal_kind)
+                        || (existing_turn_id.is_some() != existing_kind.is_some())
+                    {
+                        return Err(dcc_core::CoreError::Repository(
+                            "terminal event metadata disagrees with kind_json".to_string(),
+                        ));
+                    }
+                    conn.execute(
+                        "UPDATE dcc_session_events SET terminal_turn_id = ?1, terminal_kind = ?2 WHERE event_id = ?3",
+                        params![turn_id, terminal_kind, event_id],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                }
+                None => {
+                    // Unknown/future and non-terminal events remain opaque,
+                    // but can never carry terminal classification metadata.
+                    if existing_turn_id.is_some() || existing_kind.is_some() {
+                        return Err(dcc_core::CoreError::Repository(
+                            "non-terminal event has terminal metadata".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+        let duplicate = conn
+            .query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1
+                      FROM dcc_session_events
+                     WHERE terminal_turn_id IS NOT NULL
+                     GROUP BY session_id, terminal_turn_id
+                    HAVING COUNT(*) > 1
+                )
+                "#,
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if duplicate != 0 {
+            return Err(dcc_core::CoreError::Repository(
+                "duplicate terminal event for session turn".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -3005,7 +3144,8 @@ impl SqliteSessionRepo {
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT event_id, session_id, sequence, kind_json, occurred_at
+                SELECT event_id, session_id, sequence, kind_json, occurred_at,
+                       terminal_turn_id, terminal_kind
                   FROM dcc_session_events
                  WHERE session_id = ?1
                  ORDER BY sequence ASC
@@ -3071,6 +3211,39 @@ impl SqliteSessionRepo {
             occurred_at: row.get::<_, String>(4)?,
             kind,
         })
+    }
+
+    fn event_with_metadata_from_row(
+        row: &Row<'_>,
+    ) -> rusqlite::Result<(SessionEventRecord, Option<String>, Option<String>)> {
+        Ok((
+            Self::event_from_row(row)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+        ))
+    }
+
+    fn validate_event_metadata(
+        event: &SessionEventRecord,
+        terminal_turn_id: Option<&str>,
+        terminal_kind: Option<&str>,
+    ) -> Result<()> {
+        let expected = match &event.kind {
+            SessionEventKind::TurnCompleted { turn_id } => Some((turn_id.0.as_str(), "completed")),
+            SessionEventKind::TurnAborted { turn_id, .. } => Some((turn_id.0.as_str(), "aborted")),
+            _ => None,
+        };
+        match expected {
+            Some((turn_id, kind))
+                if terminal_turn_id == Some(turn_id) && terminal_kind == Some(kind) =>
+            {
+                Ok(())
+            }
+            None if terminal_turn_id.is_none() && terminal_kind.is_none() => Ok(()),
+            _ => Err(dcc_core::CoreError::Repository(
+                "durable event terminal metadata is inconsistent".to_string(),
+            )),
+        }
     }
 
     pub fn list_events_by_session_sync(
@@ -4655,30 +4828,129 @@ impl ThreadRepo for SqliteSessionRepo {
 
 #[async_trait]
 impl SessionEventRepo for SqliteSessionRepo {
-    async fn append_event(&self, event: &SessionEventRecord) -> Result<()> {
-        let conn = self
+    async fn append_event(&self, event: &SessionEventRecord) -> Result<AppendEventOutcome> {
+        let mut conn = self
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let kind_json = to_string(&event.kind)
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        conn.execute(
-            r#"
+        let terminal = match &event.kind {
+            SessionEventKind::TurnCompleted { turn_id } => Some((turn_id.0.as_str(), "completed")),
+            SessionEventKind::TurnAborted { turn_id, .. } => Some((turn_id.0.as_str(), "aborted")),
+            _ => None,
+        };
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        let existing_by_id = transaction
+            .query_row(
+                r#"
+                SELECT event_id, session_id, sequence, kind_json, occurred_at,
+                       terminal_turn_id, terminal_kind
+                  FROM dcc_session_events
+                 WHERE event_id = ?1
+                "#,
+                params![event.event_id.clone()],
+                Self::event_with_metadata_from_row,
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if let Some((existing, terminal_turn_id, terminal_kind)) = existing_by_id {
+            Self::validate_event_metadata(
+                &existing,
+                terminal_turn_id.as_deref(),
+                terminal_kind.as_deref(),
+            )?;
+            let existing_kind_json = to_string(&existing.kind)
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            if existing.session_id != event.session_id
+                || existing.occurred_at != event.occurred_at
+                || existing_kind_json != kind_json
+            {
+                return Err(dcc_core::CoreError::Repository(
+                    "event identity conflicts with existing event".to_string(),
+                ));
+            }
+            transaction
+                .commit()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            return Ok(AppendEventOutcome::Existing(existing));
+        }
+
+        if let Some((terminal_turn_id, _terminal_kind)) = terminal {
+            let existing_terminal = transaction
+                .query_row(
+                    r#"
+                    SELECT event_id, session_id, sequence, kind_json, occurred_at,
+                           terminal_turn_id, terminal_kind
+                      FROM dcc_session_events
+                     WHERE session_id = ?1 AND terminal_turn_id = ?2
+                     ORDER BY sequence ASC
+                     LIMIT 1
+                    "#,
+                    params![event.session_id.0.clone(), terminal_turn_id],
+                    Self::event_with_metadata_from_row,
+                )
+                .optional()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            if let Some((existing, existing_turn_id, existing_kind)) = existing_terminal {
+                Self::validate_event_metadata(
+                    &existing,
+                    existing_turn_id.as_deref(),
+                    existing_kind.as_deref(),
+                )?;
+                transaction
+                    .commit()
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                return Ok(AppendEventOutcome::Existing(existing));
+            }
+        }
+
+        let next_sequence = transaction
+            .query_row(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM dcc_session_events WHERE session_id = ?1",
+                params![event.session_id.0.clone()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let sequence = u64::try_from(next_sequence).map_err(|_| {
+            dcc_core::CoreError::Repository("session event sequence overflow".to_string())
+        })?;
+        let (terminal_turn_id, terminal_kind): (Option<&str>, Option<&str>) = terminal
+            .map(|(turn_id, kind)| (Some(turn_id), Some(kind)))
+            .unwrap_or((None, None));
+        transaction
+            .execute(
+                r#"
 			INSERT INTO dcc_session_events (
-				event_id, session_id, sequence, occurred_at, kind_json
-			) VALUES (?1, ?2, ?3, ?4, ?5)
+				event_id, session_id, sequence, occurred_at, kind_json,
+                terminal_turn_id, terminal_kind
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
 			"#,
-            params![
-                event.event_id.clone(),
-                event.session_id.0.clone(),
-                event.sequence,
-                event.occurred_at.clone(),
-                kind_json,
-            ],
-        )
-        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        Self::reindex_session_sync(&conn, &event.session_id)?;
-        Ok(())
+                params![
+                    event.event_id.clone(),
+                    event.session_id.0.clone(),
+                    i64::try_from(sequence).map_err(|_| {
+                        dcc_core::CoreError::Repository(
+                            "session event sequence overflow".to_string(),
+                        )
+                    })?,
+                    event.occurred_at.clone(),
+                    kind_json,
+                    terminal_turn_id,
+                    terminal_kind,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Self::reindex_session_sync(&transaction, &event.session_id)?;
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut canonical = event.clone();
+        canonical.sequence = sequence;
+        Ok(AppendEventOutcome::Inserted(canonical))
     }
 
     async fn list_events_by_session(
@@ -7243,5 +7515,335 @@ mod tests {
         assert!(repo
             .list_referenced_artifact_keys(&authority, &[RestoreSetId("missing".to_owned())],)
             .is_err());
+    }
+
+    fn event_session(repo: &SqliteSessionRepo, session_id: &str) {
+        futures::executor::block_on(repo.save_session(&Session {
+            id: SessionId(session_id.to_owned()),
+            project_id: ProjectId("project-events".to_owned()),
+            workspace_id: WorkspaceId("workspace-events".to_owned()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "fixture".to_owned(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "t0".to_owned(),
+            updated_at: "t0".to_owned(),
+        }))
+        .expect("persist event test session");
+    }
+
+    fn event_record(
+        event_id: &str,
+        session_id: &str,
+        sequence: u64,
+        kind: SessionEventKind,
+    ) -> SessionEventRecord {
+        SessionEventRecord {
+            event_id: event_id.to_owned(),
+            session_id: SessionId(session_id.to_owned()),
+            sequence,
+            occurred_at: "2026-01-01T00:00:00Z".to_owned(),
+            kind,
+        }
+    }
+
+    #[test]
+    fn append_event_returns_canonical_record_for_duplicate_event_id() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        event_session(&repo, "event-id-session");
+        let first = event_record(
+            "same-event-id",
+            "event-id-session",
+            99,
+            SessionEventKind::TurnDelta {
+                turn_id: TurnId("turn-1".to_owned()),
+                content: "first".to_owned(),
+            },
+        );
+        let mismatched = event_record(
+            "same-event-id",
+            "event-id-session",
+            1,
+            SessionEventKind::TurnDelta {
+                turn_id: TurnId("turn-1".to_owned()),
+                content: "different retry payload".to_owned(),
+            },
+        );
+        let second = event_record(
+            "same-event-id",
+            "event-id-session",
+            1,
+            SessionEventKind::TurnDelta {
+                turn_id: TurnId("turn-1".to_owned()),
+                content: "first".to_owned(),
+            },
+        );
+        let inserted = futures::executor::block_on(repo.append_event(&first)).expect("insert");
+        let mismatch = futures::executor::block_on(repo.append_event(&mismatched))
+            .expect_err("semantic mismatch must be rejected");
+        assert!(mismatch
+            .to_string()
+            .contains("event identity conflicts with existing event"));
+        let existing = futures::executor::block_on(repo.append_event(&second)).expect("retry");
+        assert!(matches!(inserted, AppendEventOutcome::Inserted(ref event) if event.sequence == 1));
+        match existing {
+            AppendEventOutcome::Existing(event) => {
+                assert_eq!(event.event_id, "same-event-id");
+                assert_eq!(event.sequence, 1);
+                assert!(
+                    matches!(event.kind, SessionEventKind::TurnDelta { content, .. } if content == "first")
+                );
+            }
+            AppendEventOutcome::Inserted(_) => panic!("retry must return existing canonical event"),
+        }
+    }
+
+    #[test]
+    fn concurrent_terminal_appends_have_one_durable_winner() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("events.sqlite");
+        let first_repo = SqliteSessionRepo::open(&path).expect("open first repo");
+        event_session(&first_repo, "terminal-race-session");
+        let second_repo = SqliteSessionRepo::open(&path).expect("open second repo");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let completed = event_record(
+            "completed-race",
+            "terminal-race-session",
+            10,
+            SessionEventKind::TurnCompleted {
+                turn_id: TurnId("terminal-race-turn".to_owned()),
+            },
+        );
+        let aborted = event_record(
+            "aborted-race",
+            "terminal-race-session",
+            10,
+            SessionEventKind::TurnAborted {
+                turn_id: TurnId("terminal-race-turn".to_owned()),
+                reason: Some("race".to_owned()),
+            },
+        );
+        let first_barrier = barrier.clone();
+        let first_repo_for_thread = first_repo.clone();
+        let first_thread = std::thread::spawn(move || {
+            first_barrier.wait();
+            futures::executor::block_on(first_repo_for_thread.append_event(&completed))
+                .expect("complete")
+        });
+        let second_barrier = barrier;
+        let second_thread = std::thread::spawn(move || {
+            second_barrier.wait();
+            futures::executor::block_on(second_repo.append_event(&aborted)).expect("abort")
+        });
+        let outcomes = [
+            first_thread.join().expect("complete thread"),
+            second_thread.join().expect("abort thread"),
+        ];
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, AppendEventOutcome::Inserted(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, AppendEventOutcome::Existing(_)))
+                .count(),
+            1
+        );
+        let events = futures::executor::block_on(SessionEventRepo::list_events_by_session(
+            &first_repo,
+            &SessionId("terminal-race-session".to_owned()),
+        ))
+        .expect("list terminal events");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0].kind,
+            SessionEventKind::TurnCompleted { .. } | SessionEventKind::TurnAborted { .. }
+        ));
+    }
+
+    #[test]
+    fn concurrent_nonterminal_appends_allocate_unique_monotonic_sequences() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("events.sqlite");
+        let first_repo = SqliteSessionRepo::open(&path).expect("open first repo");
+        event_session(&first_repo, "sequence-race-session");
+        let second_repo = SqliteSessionRepo::open(&path).expect("open second repo");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let first = event_record(
+            "delta-one",
+            "sequence-race-session",
+            100,
+            SessionEventKind::TurnDelta {
+                turn_id: TurnId("sequence-turn".to_owned()),
+                content: "one".to_owned(),
+            },
+        );
+        let second = event_record(
+            "delta-two",
+            "sequence-race-session",
+            100,
+            SessionEventKind::TurnDelta {
+                turn_id: TurnId("sequence-turn".to_owned()),
+                content: "two".to_owned(),
+            },
+        );
+        let first_barrier = barrier.clone();
+        let first_repo_for_thread = first_repo.clone();
+        let first_thread = std::thread::spawn(move || {
+            first_barrier.wait();
+            futures::executor::block_on(first_repo_for_thread.append_event(&first))
+                .expect("first delta")
+        });
+        let second_barrier = barrier;
+        let second_thread = std::thread::spawn(move || {
+            second_barrier.wait();
+            futures::executor::block_on(second_repo.append_event(&second)).expect("second delta")
+        });
+        let _ = first_thread.join().expect("first thread");
+        let _ = second_thread.join().expect("second thread");
+        let events = futures::executor::block_on(SessionEventRepo::list_events_by_session(
+            &first_repo,
+            &SessionId("sequence-race-session".to_owned()),
+        ))
+        .expect("list sequence events");
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    fn create_legacy_event_table(path: &std::path::Path, rows: &[(&str, &str, &str)]) {
+        let conn = Connection::open(path).expect("open legacy database");
+        conn.execute_batch(
+            "CREATE TABLE dcc_session_events (event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, sequence INTEGER NOT NULL, occurred_at TEXT NOT NULL, kind_json TEXT NOT NULL);",
+        )
+        .expect("create legacy event table");
+        for (event_id, kind_json, sequence) in rows {
+            conn.execute(
+                "INSERT INTO dcc_session_events(event_id, session_id, sequence, occurred_at, kind_json) VALUES (?1, 'legacy-session', ?2, 't0', ?3)",
+                params![event_id, sequence.parse::<i64>().expect("sequence"), kind_json],
+            )
+            .expect("insert legacy event");
+        }
+    }
+
+    #[test]
+    fn migration_backfills_known_terminal_keys_without_deleting_history() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("legacy.sqlite");
+        create_legacy_event_table(
+            &path,
+            &[(
+                "legacy-complete",
+                r#"{"type":"turn_completed","turnId":"legacy-turn"}"#,
+                "4",
+            )],
+        );
+        let repo = SqliteSessionRepo::open(&path).expect("migrate legacy database");
+        drop(repo);
+        let conn = Connection::open(&path).expect("reopen migrated database");
+        let row = conn
+            .query_row(
+                "SELECT terminal_turn_id, terminal_kind FROM dcc_session_events WHERE event_id = 'legacy-complete'",
+                [],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .expect("read migrated terminal key");
+        assert_eq!(row.0.as_deref(), Some("legacy-turn"));
+        assert_eq!(row.1.as_deref(), Some("completed"));
+    }
+
+    #[test]
+    fn migration_rejects_duplicate_known_terminal_keys_without_deleting_rows() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("duplicate.sqlite");
+        create_legacy_event_table(
+            &path,
+            &[
+                (
+                    "legacy-complete",
+                    r#"{"type":"turn_completed","turnId":"same-turn"}"#,
+                    "1",
+                ),
+                (
+                    "legacy-abort",
+                    r#"{"type":"turn_aborted","turnId":"same-turn","reason":null}"#,
+                    "2",
+                ),
+            ],
+        );
+        assert!(SqliteSessionRepo::open(&path).is_err());
+        let conn = Connection::open(&path).expect("reopen duplicate database");
+        let count = conn
+            .query_row("SELECT COUNT(*) FROM dcc_session_events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count preserved rows");
+        assert_eq!(count, 2);
+        let columns = conn
+            .prepare("PRAGMA table_info(dcc_session_events)")
+            .expect("inspect legacy columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("list legacy columns")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect legacy columns");
+        assert!(!columns.iter().any(|column| column == "terminal_turn_id"));
+        assert!(!columns.iter().any(|column| column == "terminal_kind"));
+        let indexes = conn
+            .prepare("PRAGMA index_list(dcc_session_events)")
+            .expect("inspect legacy indexes")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("list legacy indexes")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect legacy indexes");
+        assert!(!indexes
+            .iter()
+            .any(|index| index == "idx_dcc_session_events_terminal_turn"));
+        let kinds = conn
+            .prepare("SELECT kind_json FROM dcc_session_events ORDER BY sequence")
+            .expect("inspect legacy rows")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("read legacy rows")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("collect legacy rows");
+        assert_eq!(kinds.len(), 2);
+        assert!(kinds[0].contains("turn_completed"));
+        assert!(kinds[1].contains("turn_aborted"));
+    }
+
+    #[test]
+    fn migration_leaves_unknown_future_event_unclassified() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("future.sqlite");
+        create_legacy_event_table(
+            &path,
+            &[(
+                "future-event",
+                r#"{"type":"future_terminal","turnId":"future-turn"}"#,
+                "1",
+            )],
+        );
+        let repo = SqliteSessionRepo::open(&path).expect("migrate future database");
+        drop(repo);
+        let conn = Connection::open(&path).expect("reopen future database");
+        let row = conn
+            .query_row(
+                "SELECT terminal_turn_id, terminal_kind, kind_json FROM dcc_session_events WHERE event_id = 'future-event'",
+                [],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?)),
+            )
+            .expect("read future event");
+        assert!(row.0.is_none());
+        assert!(row.1.is_none());
+        assert!(row.2.contains("future_terminal"));
     }
 }

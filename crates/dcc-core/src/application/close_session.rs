@@ -184,12 +184,15 @@ mod tests {
 
     #[async_trait]
     impl SessionEventRepo for FakeSessionEventRepo {
-        async fn append_event(&self, event: &SessionEventRecord) -> Result<()> {
+        async fn append_event(
+            &self,
+            event: &SessionEventRecord,
+        ) -> Result<crate::ports::AppendEventOutcome> {
             self.events
                 .lock()
                 .expect("events lock poisoned")
                 .push(event.clone());
-            Ok(())
+            Ok(crate::ports::AppendEventOutcome::Inserted(event.clone()))
         }
 
         async fn list_events_by_session(

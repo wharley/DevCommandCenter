@@ -14,7 +14,9 @@ use dcc_core::{
         session::{SessionEventKind, SessionEventRecord, SessionId, TurnId},
         workspace::WorkspaceId,
     },
-    ports::{CoreEvent, DelegationRepo, EventBus, SessionEventRepo, SessionRepo},
+    ports::{
+        AppendEventOutcome, CoreEvent, DelegationRepo, EventBus, SessionEventRepo, SessionRepo,
+    },
 };
 
 use crate::state::SessionCommandState;
@@ -160,12 +162,15 @@ async fn append_and_publish_parent_event(
         occurred_at,
         kind,
     };
-    SessionEventRepo::append_event(state, &event)
+    let outcome = SessionEventRepo::append_event(state, &event)
         .await
         .map_err(|error| error.to_string())?;
-    EventBus::publish(state, core_event)
-        .await
-        .map_err(|error| error.to_string())
+    if matches!(outcome, AppendEventOutcome::Inserted(_)) {
+        EventBus::publish(state, core_event)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn is_terminal_status(status: &DelegationStatus) -> bool {
