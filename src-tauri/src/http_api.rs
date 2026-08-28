@@ -2169,11 +2169,7 @@ async fn abort_session_handler(
         .and_then(|projection| projection.active_turn_id);
     if let Some(turn_id) = active_turn_id.as_ref() {
         state
-            .quiesce_turn_for_abort(
-                &session_id,
-                turn_id,
-                Some("Stopped from remote HTTP"),
-            )
+            .quiesce_turn_for_abort(&session_id, turn_id, Some("Stopped from remote HTTP"))
             .await
             .map_err(|error| classify_session_error(error.to_string()))?;
     }

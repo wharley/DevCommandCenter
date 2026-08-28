@@ -596,15 +596,13 @@ pub(crate) fn validate_delivery_recovery_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::{
         classify_delivery_failure, delivery_recovery_actions, sanitize_delivery_failure_output,
         WorkspaceDeliveryFailureClassification, WorkspaceDeliveryFailureOperation,
         WorkspaceDeliveryFailureSnapshot, WorkspaceDeliveryRecoveryAction,
         FAILURE_OUTPUT_MAX_BYTES, TRUNCATION_MARKER,
     };
-    use crate::state::WorkspaceCommandState;
+    use crate::state::{SessionCommandState, WorkspaceCommandState};
 
     #[test]
     fn sanitizes_controls_credentials_and_authenticated_urls() {
@@ -653,7 +651,14 @@ mod tests {
 
     #[test]
     fn deduplicates_failures_and_rejects_stale_branch_or_sha() {
-        let state = WorkspaceCommandState::new(PathBuf::from("/tmp/dcc-delivery-test.sqlite"));
+        let temporary = tempfile::tempdir().expect("delivery state root");
+        let physical_temporary =
+            std::fs::canonicalize(temporary.path()).expect("physical delivery state root");
+        let app_data = physical_temporary.join("app-data");
+        std::fs::create_dir_all(&app_data).expect("delivery app data");
+        let session =
+            SessionCommandState::new_headless(physical_temporary.join("sessions.sqlite"), app_data);
+        let state = WorkspaceCommandState::from_session(&session);
         let first = state.record_delivery_failure(snapshot("1", "feature/a", "abc"));
         let duplicate = state.record_delivery_failure(snapshot("2", "feature/a", "abc"));
 

@@ -11,7 +11,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
     panic::{catch_unwind, AssertUnwindSafe},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -28,6 +28,12 @@ use dcc_infra::db::SqliteSessionRepo;
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+use dcc_infra::guarded_undo::{
+    coordinator::{CoordinatorError, MutationGuard, WorkspaceMutationCoordinator},
+    macos_root::MacWorkspaceRoot,
+};
+
 use crate::terminal_arbiter::TerminalKey;
 
 const MAX_TRACKED_TURNS: usize = 1_024;
@@ -38,6 +44,110 @@ const MAX_CAPTURE_ROOTS_PER_TURN: usize = 1;
 // turn. Keep its bounded admission independent from the stricter per-turn
 // capture fan-out limit.
 const MAX_RECOVERY_ROOTS: usize = 1_024;
+
+/// A fail-closed result from the process-local workspace mutation gate.
+///
+/// The operation payload is intentionally never rendered by `Debug` or
+/// `Display`; callers that need to surface their own domain error must
+/// destructure `Operation` explicitly.
+pub(crate) enum WorkspaceMutationRunError<E> {
+    Busy,
+    PhysicalRootUnavailable,
+    CoordinatorUnavailable,
+    WorkerUnavailable,
+    Operation(E),
+}
+
+impl<E> fmt::Debug for WorkspaceMutationRunError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Busy => "WorkspaceMutationRunError::Busy",
+            Self::PhysicalRootUnavailable => "WorkspaceMutationRunError::PhysicalRootUnavailable",
+            Self::CoordinatorUnavailable => "WorkspaceMutationRunError::CoordinatorUnavailable",
+            Self::WorkerUnavailable => "WorkspaceMutationRunError::WorkerUnavailable",
+            Self::Operation(_) => "WorkspaceMutationRunError::Operation([redacted])",
+        })
+    }
+}
+
+impl<E> fmt::Display for WorkspaceMutationRunError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Busy => "workspace mutation is busy",
+            Self::PhysicalRootUnavailable => "workspace physical root is unavailable",
+            Self::CoordinatorUnavailable => "workspace mutation coordination is unavailable",
+            Self::WorkerUnavailable => "workspace mutation worker is unavailable",
+            Self::Operation(_) => "workspace mutation operation failed",
+        })
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for WorkspaceMutationRunError<E> {}
+
+/// Retains both the descriptor-rooted identity and the mutation guard for the
+/// complete synchronous operation. This type never crosses the public API and
+/// cannot be held across an async suspension point by command handlers.
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+struct PhysicalMutationLease {
+    // Field drop order is declaration order: release coordinator admission
+    // before closing the retained root descriptor.
+    guard: MutationGuard,
+    root: MacWorkspaceRoot,
+    workspace_absolute: PathBuf,
+}
+
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+impl fmt::Debug for PhysicalMutationLease {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PhysicalMutationLease([redacted])")
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+impl PhysicalMutationLease {
+    fn acquire(
+        coordinator: &Arc<WorkspaceMutationCoordinator>,
+        workspace_absolute: PathBuf,
+    ) -> Result<Self, WorkspaceMutationRunError<std::convert::Infallible>> {
+        let root = MacWorkspaceRoot::open_absolute(&workspace_absolute)
+            .map_err(|_| WorkspaceMutationRunError::PhysicalRootUnavailable)?;
+        let root_id = root.physical_root_id();
+        let guard = coordinator
+            .try_acquire_mutation(&root_id)
+            .map_err(map_coordinator_error)?;
+
+        // Close the ordinary rename/replacement window between the first
+        // physical observation and admission. The retained root remains alive
+        // with the guard for the whole operation.
+        let reopened = MacWorkspaceRoot::open_absolute(&workspace_absolute)
+            .map_err(|_| WorkspaceMutationRunError::PhysicalRootUnavailable)?;
+        if reopened.physical_root_id() != root_id {
+            return Err(WorkspaceMutationRunError::PhysicalRootUnavailable);
+        }
+
+        Ok(Self {
+            guard,
+            root,
+            workspace_absolute,
+        })
+    }
+
+    fn path(&self) -> &Path {
+        &self.workspace_absolute
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+fn map_coordinator_error(
+    error: CoordinatorError,
+) -> WorkspaceMutationRunError<std::convert::Infallible> {
+    match error {
+        CoordinatorError::MutationInProgress | CoordinatorError::CaptureEdgeActive => {
+            WorkspaceMutationRunError::Busy
+        }
+        _ => WorkspaceMutationRunError::CoordinatorUnavailable,
+    }
+}
 
 /// Ephemeral binding between one durable M3 snapshot and its physical
 /// workspace path. The path is consumed by the platform adapter and is never
@@ -538,6 +648,17 @@ impl fmt::Debug for GuardedUndoRuntime {
 
 impl GuardedUndoRuntime {
     pub(crate) fn new() -> Self {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        {
+            return Self::new_with_coordinator(Arc::new(WorkspaceMutationCoordinator::new()));
+        }
+
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        Self::new_without_coordinator()
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) fn new_with_coordinator(coordinator: Arc<WorkspaceMutationCoordinator>) -> Self {
         Self {
             inner: Arc::new(Inner {
                 driver: Mutex::new(None),
@@ -546,12 +667,74 @@ impl GuardedUndoRuntime {
                 registry: Mutex::new(TurnRegistry::default()),
                 next_generation: AtomicU64::new(0),
                 next_attempt: AtomicU64::new(0),
-                #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
-                coordinator: Arc::new(
-                    dcc_infra::guarded_undo::coordinator::WorkspaceMutationCoordinator::new(),
-                ),
+                coordinator,
             }),
         }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    fn new_without_coordinator() -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                driver: Mutex::new(None),
+                configuration: Mutex::new(ConfigurationState::Unconfigured),
+                recovery: Mutex::new(RecoveryState::Unrecovered),
+                registry: Mutex::new(TurnRegistry::default()),
+                next_generation: AtomicU64::new(0),
+                next_attempt: AtomicU64::new(0),
+            }),
+        }
+    }
+
+    /// Executes one synchronous workspace mutation while the descriptor-rooted
+    /// identity and coordinator guard have the same lifetime as the operation.
+    /// Cancelling the async waiter never cancels a running blocking worker.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) async fn run_workspace_mutation<T, E, F>(
+        &self,
+        workspace_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        let coordinator = Arc::clone(&self.inner.coordinator);
+        tokio::task::spawn_blocking(move || {
+            let lease = PhysicalMutationLease::acquire(&coordinator, workspace_absolute).map_err(
+                |error| match error {
+                    WorkspaceMutationRunError::Busy => WorkspaceMutationRunError::Busy,
+                    WorkspaceMutationRunError::PhysicalRootUnavailable => {
+                        WorkspaceMutationRunError::PhysicalRootUnavailable
+                    }
+                    WorkspaceMutationRunError::CoordinatorUnavailable => {
+                        WorkspaceMutationRunError::CoordinatorUnavailable
+                    }
+                    WorkspaceMutationRunError::WorkerUnavailable
+                    | WorkspaceMutationRunError::Operation(_) => {
+                        WorkspaceMutationRunError::CoordinatorUnavailable
+                    }
+                },
+            )?;
+            operation(lease.path()).map_err(WorkspaceMutationRunError::Operation)
+        })
+        .await
+        .map_err(|_| WorkspaceMutationRunError::WorkerUnavailable)?
+    }
+
+    /// Feature-off is deliberately a direct call: no platform inspection,
+    /// coordinator allocation, blocking worker, or filesystem I/O is added.
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    pub(crate) async fn run_workspace_mutation<T, E, F>(
+        &self,
+        workspace_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        F: FnOnce(&Path) -> Result<T, E>,
+    {
+        operation(&workspace_absolute).map_err(WorkspaceMutationRunError::Operation)
     }
 
     /// Lazily creates the one capture-v2 service (and therefore the one
@@ -1750,6 +1933,118 @@ mod tests {
             assert_send::<dcc_infra::guarded_undo::capture_v2_service::CaptureHandle>();
         }
         let _ = assert_send::<GuardedUndoRuntime>;
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn feature_off_workspace_mutation_does_no_io() {
+        let runtime = GuardedUndoRuntime::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let nonexistent = PathBuf::from("relative/path/that/must/not/be-opened");
+        let result = runtime
+            .run_workspace_mutation(nonexistent.clone(), move |path| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(path, nonexistent);
+                Ok::<_, ()>(41_u8)
+            })
+            .await;
+        assert_eq!(result.unwrap(), 41);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn shared_capture_edge_blocks_mutation_and_physical_aliases_contend() {
+        let temporary = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace = std::fs::canonicalize(temporary.path()).unwrap();
+        let alias = PathBuf::from(format!("{}/", workspace.display()));
+        let coordinator = Arc::new(WorkspaceMutationCoordinator::new());
+        let runtime = GuardedUndoRuntime::new_with_coordinator(Arc::clone(&coordinator));
+        let physical = MacWorkspaceRoot::open_absolute(&workspace).unwrap();
+        let root_id = physical.physical_root_id();
+
+        let edge = coordinator.try_acquire_capture_edge(&root_id).unwrap();
+        assert!(matches!(
+            runtime
+                .run_workspace_mutation(workspace.clone(), |_| Ok::<_, ()>(()))
+                .await,
+            Err(WorkspaceMutationRunError::Busy)
+        ));
+        drop(edge);
+
+        let gate = Arc::new(Gate::closed());
+        let started = Arc::new(AtomicBool::new(false));
+        let first_runtime = runtime.clone();
+        let first_gate = Arc::clone(&gate);
+        let first_started = Arc::clone(&started);
+        let first = tokio::spawn(async move {
+            first_runtime
+                .run_workspace_mutation(workspace, move |_| {
+                    first_started.store(true, Ordering::SeqCst);
+                    first_gate.wait();
+                    Ok::<_, ()>(())
+                })
+                .await
+        });
+        wait_until(|| started.load(Ordering::SeqCst)).await;
+        assert_eq!(coordinator.generation(&root_id).unwrap(), 1);
+        assert!(matches!(
+            runtime
+                .run_workspace_mutation(alias.clone(), |_| Ok::<_, ()>(()))
+                .await,
+            Err(WorkspaceMutationRunError::Busy)
+        ));
+        gate.release();
+        first.await.unwrap().unwrap();
+        runtime
+            .run_workspace_mutation(alias, |_| Ok::<_, ()>(()))
+            .await
+            .unwrap();
+        assert_eq!(coordinator.generation(&root_id).unwrap(), 2);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelled_waiter_does_not_release_running_mutation() {
+        let temporary = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace = std::fs::canonicalize(temporary.path()).unwrap();
+        let coordinator = Arc::new(WorkspaceMutationCoordinator::new());
+        let runtime = GuardedUndoRuntime::new_with_coordinator(Arc::clone(&coordinator));
+        let gate = Arc::new(Gate::closed());
+        let started = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+
+        let worker_runtime = runtime.clone();
+        let worker_workspace = workspace.clone();
+        let worker_gate = Arc::clone(&gate);
+        let worker_started = Arc::clone(&started);
+        let worker_finished = Arc::clone(&finished);
+        let waiter = tokio::spawn(async move {
+            worker_runtime
+                .run_workspace_mutation(worker_workspace, move |_| {
+                    worker_started.store(true, Ordering::SeqCst);
+                    worker_gate.wait();
+                    worker_finished.store(true, Ordering::SeqCst);
+                    Ok::<_, ()>(())
+                })
+                .await
+        });
+        wait_until(|| started.load(Ordering::SeqCst)).await;
+        waiter.abort();
+
+        assert!(matches!(
+            runtime
+                .run_workspace_mutation(workspace.clone(), |_| Ok::<_, ()>(()))
+                .await,
+            Err(WorkspaceMutationRunError::Busy)
+        ));
+        gate.release();
+        wait_until(|| finished.load(Ordering::SeqCst)).await;
+        runtime
+            .run_workspace_mutation(workspace, |_| Ok::<_, ()>(()))
+            .await
+            .unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]

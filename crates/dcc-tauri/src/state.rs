@@ -69,7 +69,9 @@ use crate::events::TauriEventBus;
 use crate::guarded_undo_runtime::{
     BeginDisposition, ConfigureOutcome, GuardedUndoCaptureRequest, RecoveryOutcome,
 };
-use crate::guarded_undo_runtime::{CaptureTerminalMode, FinalizeTurnOutcome};
+use crate::guarded_undo_runtime::{
+    CaptureTerminalMode, FinalizeTurnOutcome, WorkspaceMutationRunError,
+};
 use crate::process_runtime_registry::{ProcessRuntime, ProcessRuntimeRegistry};
 use crate::terminal_arbiter::{
     PersistThenCommitError, TerminalArbiterError, TerminalClaimResult, TerminalIntent, TerminalKey,
@@ -159,18 +161,139 @@ impl M3SnapshotRef {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WorkspaceCommandState {
     pub db_path: PathBuf,
+    runtime: Arc<ProcessRuntime>,
     delivery_failures: Arc<Mutex<DeliveryFailureStore>>,
 }
 
+impl std::fmt::Debug for WorkspaceCommandState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("WorkspaceCommandState([redacted])")
+    }
+}
+
+/// One-shot binding resolved from the SQLite workspace registry owned by this
+/// state. Its fields are private so a command cannot turn a caller-supplied
+/// path into mutation authority.
+pub(crate) struct AuthorizedWorkspaceMutation {
+    workspace_absolute: PathBuf,
+}
+
+impl std::fmt::Debug for AuthorizedWorkspaceMutation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("AuthorizedWorkspaceMutation([redacted])")
+    }
+}
+
+impl AuthorizedWorkspaceMutation {
+    pub(crate) fn into_workspace_absolute(self) -> PathBuf {
+        self.workspace_absolute
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkspaceMutationAuthorizationError {
+    InvalidRequest,
+    RepositoryUnavailable,
+    UnknownMapping,
+    AmbiguousMapping,
+}
+
+impl std::fmt::Display for WorkspaceMutationAuthorizationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidRequest => "workspace mutation request is invalid",
+            Self::RepositoryUnavailable => "workspace registry is unavailable",
+            Self::UnknownMapping => "workspace mutation mapping is unknown",
+            Self::AmbiguousMapping => "workspace mutation mapping is ambiguous",
+        })
+    }
+}
+
+impl std::error::Error for WorkspaceMutationAuthorizationError {}
+
+pub(crate) enum WorkspaceMutationRequestError<E> {
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    Authorization(WorkspaceMutationAuthorizationError),
+    Runtime(WorkspaceMutationRunError<E>),
+}
+
+impl<E> std::fmt::Debug for WorkspaceMutationRequestError<E> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+            Self::Authorization(error) => {
+                formatter.debug_tuple("Authorization").field(error).finish()
+            }
+            Self::Runtime(error) => formatter.debug_tuple("Runtime").field(error).finish(),
+        }
+    }
+}
+
+impl<E> std::fmt::Display for WorkspaceMutationRequestError<E> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+            Self::Authorization(error) => error.fmt(formatter),
+            Self::Runtime(error) => error.fmt(formatter),
+        }
+    }
+}
+
 impl WorkspaceCommandState {
-    pub fn new(db_path: PathBuf) -> Self {
+    /// Builds workspace command state from the already coalesced session
+    /// runtime. This is the production constructor; it cannot accidentally
+    /// create a second mutation coordinator for the same physical scope.
+    pub fn from_session(session: &SessionCommandState) -> Self {
         Self {
-            db_path,
+            db_path: session.db_path.clone(),
+            runtime: Arc::clone(&session.runtime),
             delivery_failures: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    #[allow(dead_code)] // Foundation API; handlers are integrated separately.
+    pub(crate) async fn authorize_workspace_mutation(
+        &self,
+        requested_root: &str,
+    ) -> std::result::Result<AuthorizedWorkspaceMutation, WorkspaceMutationAuthorizationError> {
+        let db_path = self.db_path.clone();
+        let requested_root = requested_root.to_owned();
+        tokio::task::spawn_blocking(move || {
+            resolve_authorized_workspace_mutation(&db_path, &requested_root)
+        })
+        .await
+        .map_err(|_| WorkspaceMutationAuthorizationError::RepositoryUnavailable)?
+    }
+
+    /// Resolves durable authority first, then delegates physical admission and
+    /// the complete synchronous operation to the process runtime.
+    #[allow(dead_code)] // Foundation API; handlers are integrated separately.
+    pub(crate) async fn run_workspace_mutation<T, E, F>(
+        &self,
+        requested_root: &str,
+        operation: F,
+    ) -> std::result::Result<T, WorkspaceMutationRequestError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let binding = self
+            .authorize_workspace_mutation(requested_root)
+            .await
+            .map_err(WorkspaceMutationRequestError::Authorization)?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let binding = AuthorizedWorkspaceMutation {
+            workspace_absolute: PathBuf::from(requested_root),
+        };
+        self.runtime
+            .run_workspace_mutation(binding, operation)
+            .await
+            .map_err(WorkspaceMutationRequestError::Runtime)
     }
 
     pub(crate) fn record_delivery_failure(
@@ -280,6 +403,43 @@ impl WorkspaceCommandState {
             .max_by(|left, right| left.created_at.cmp(&right.created_at))
             .cloned()
     }
+}
+
+fn resolve_authorized_workspace_mutation(
+    db_path: &Path,
+    requested_root: &str,
+) -> std::result::Result<AuthorizedWorkspaceMutation, WorkspaceMutationAuthorizationError> {
+    let requested_root = requested_root.trim();
+    if requested_root.is_empty() || !Path::new(requested_root).is_absolute() {
+        return Err(WorkspaceMutationAuthorizationError::InvalidRequest);
+    }
+    let repo = SqliteWorkspaceRepo::open(db_path)
+        .map_err(|_| WorkspaceMutationAuthorizationError::RepositoryUnavailable)?;
+    let workspaces = futures::executor::block_on(repo.list_workspaces())
+        .map_err(|_| WorkspaceMutationAuthorizationError::RepositoryUnavailable)?;
+
+    let mut selected: Option<PathBuf> = None;
+    for workspace in workspaces {
+        let stored_root = if workspace.root_path == requested_root {
+            Some(workspace.root_path.as_str())
+        } else if workspace.worktree_path.as_deref() == Some(requested_root) {
+            workspace.worktree_path.as_deref()
+        } else {
+            None
+        };
+        let Some(stored_root) = stored_root else {
+            continue;
+        };
+        if selected.is_some() {
+            return Err(WorkspaceMutationAuthorizationError::AmbiguousMapping);
+        }
+        selected = Some(PathBuf::from(stored_root));
+    }
+
+    let Some(workspace_absolute) = selected else {
+        return Err(WorkspaceMutationAuthorizationError::UnknownMapping);
+    };
+    Ok(AuthorizedWorkspaceMutation { workspace_absolute })
 }
 
 #[derive(Clone)]
@@ -4010,6 +4170,83 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn workspace_mutation_authority_requires_exact_durable_mapping_and_is_redacted() {
+        let temporary = tempfile::tempdir().expect("mutation authority root");
+        let physical_temporary =
+            std::fs::canonicalize(temporary.path()).expect("physical mutation authority root");
+        let db_path = physical_temporary.join("sessions.sqlite");
+        let app_data = physical_temporary.join("app-data");
+        let session_state = SessionCommandState::new_headless(db_path.clone(), app_data);
+        let workspace_state = WorkspaceCommandState::from_session(&session_state);
+        assert!(Arc::ptr_eq(
+            &workspace_state.runtime,
+            &session_state.process_runtime()
+        ));
+
+        let durable_worktree = physical_temporary.join("worktree");
+        std::fs::create_dir(&durable_worktree).expect("durable worktree");
+        let durable_worktree = durable_worktree.to_string_lossy().into_owned();
+        let workspace = sample_workspace("mutation-authority", &durable_worktree);
+        let repo = SqliteWorkspaceRepo::open(&db_path).expect("workspace repo");
+        WorkspaceRepo::save_workspace(&repo, &workspace)
+            .await
+            .expect("save workspace");
+
+        let root_binding = workspace_state
+            .authorize_workspace_mutation(&workspace.root_path)
+            .await
+            .expect("root_path mapping");
+        let root_debug = format!("{root_binding:?}");
+        assert_eq!(
+            root_binding.into_workspace_absolute(),
+            PathBuf::from(&workspace.root_path)
+        );
+        assert!(root_debug.contains("[redacted]"));
+        assert!(!root_debug.contains(&workspace.root_path));
+
+        let worktree_binding = workspace_state
+            .authorize_workspace_mutation(&durable_worktree)
+            .await
+            .expect("worktree_path mapping");
+        assert_eq!(
+            worktree_binding.into_workspace_absolute(),
+            PathBuf::from(&durable_worktree)
+        );
+
+        assert!(matches!(
+            workspace_state
+                .authorize_workspace_mutation("/unknown/dcc-workspace")
+                .await,
+            Err(WorkspaceMutationAuthorizationError::UnknownMapping)
+        ));
+        assert!(matches!(
+            workspace_state.authorize_workspace_mutation("").await,
+            Err(WorkspaceMutationAuthorizationError::InvalidRequest)
+        ));
+        assert!(matches!(
+            workspace_state
+                .authorize_workspace_mutation("relative/workspace")
+                .await,
+            Err(WorkspaceMutationAuthorizationError::InvalidRequest)
+        ));
+
+        let duplicate = sample_workspace("mutation-authority-duplicate", &durable_worktree);
+        WorkspaceRepo::save_workspace(&repo, &duplicate)
+            .await
+            .expect("save duplicate mapping");
+        let ambiguous = workspace_state
+            .authorize_workspace_mutation(&durable_worktree)
+            .await;
+        assert!(matches!(
+            ambiguous,
+            Err(WorkspaceMutationAuthorizationError::AmbiguousMapping)
+        ));
+        let debug = format!("{ambiguous:?}");
+        assert!(!debug.contains(&durable_worktree));
+        assert!(!format!("{workspace_state:?}").contains(db_path.to_string_lossy().as_ref()));
     }
 
     fn physical_db_path(path: PathBuf) -> PathBuf {

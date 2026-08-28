@@ -221,6 +221,114 @@ impl WorkspaceMutationCoordinator {
         })
     }
 
+    /// Atomically acquires mutation ownership for all requested roots.
+    ///
+    /// Roots are validated, deduplicated, and sorted before taking the state
+    /// lock. While holding that one lock, every edge/mutation conflict,
+    /// generation capacity/overflow, and existing receipt lock is checked
+    /// before any generation or receipt is changed. The returned guard drops
+    /// all mutation ownership together, so a failed preflight cannot leave a
+    /// partially acquired multi-root operation.
+    pub fn try_acquire_mutations(
+        self: &Arc<Self>,
+        mut root_ids: Vec<PhysicalRootId>,
+    ) -> Result<MultiMutationGuard, CoordinatorError> {
+        if root_ids.is_empty() {
+            return Err(CoordinatorError::InvalidPhysicalRoot);
+        }
+        for root_id in &root_ids {
+            validate_root(root_id)?;
+        }
+        root_ids.sort_by(|left, right| left.0.cmp(&right.0));
+        root_ids.dedup();
+
+        let mut state = lock(&self.state)?;
+        let mut plans = Vec::with_capacity(root_ids.len());
+        for root_id in &root_ids {
+            let current = state.generations.get(root_id).copied().unwrap_or(0);
+            let next = current
+                .checked_add(1)
+                .ok_or(CoordinatorError::GenerationExhausted)?;
+            if let Some(entry) = state.roots.get(root_id) {
+                if entry.mutation_active {
+                    return Err(CoordinatorError::MutationInProgress);
+                }
+                if entry.active_capture_edges != 0 {
+                    return Err(CoordinatorError::CaptureEdgeActive);
+                }
+            }
+            plans.push((root_id.clone(), next));
+        }
+        let new_generations = plans
+            .iter()
+            .filter(|(root_id, _)| !state.generations.contains_key(root_id))
+            .count();
+        if state.generations.len().saturating_add(new_generations) > MAX_RETAINED_ROOT_GENERATIONS {
+            return Err(CoordinatorError::RootGenerationCapacityExhausted);
+        }
+
+        // Retain every receipt lock, in deterministic root/owner order, before
+        // changing any receipt, generation, or mutation flag. In particular,
+        // do not preflight with a temporary lock: another thread could poison
+        // a later receipt between that check and the commit phase.
+        let mut receipt_states = Vec::new();
+        for root_id in &root_ids {
+            if let Some(entry) = state.roots.get(root_id) {
+                let mut owners = entry.active_turns.iter().collect::<Vec<_>>();
+                owners.sort_by(|(left, _), (right, _)| {
+                    left.session_id
+                        .0
+                        .as_bytes()
+                        .cmp(right.session_id.0.as_bytes())
+                        .then_with(|| left.turn_id.0.as_bytes().cmp(right.turn_id.0.as_bytes()))
+                });
+                receipt_states.extend(owners.into_iter().map(|(_, turn)| Arc::clone(&turn.state)));
+            }
+        }
+        let mut receipt_guards = Vec::with_capacity(receipt_states.len());
+        for receipt_state in &receipt_states {
+            receipt_guards.push(
+                receipt_state
+                    .lock()
+                    .map_err(|_| CoordinatorError::Unavailable)?,
+            );
+        }
+
+        // All fallible checks are complete and all receipt guards remain held.
+        // Mutations below are bounded map updates under the same mutex and
+        // therefore become visible together.
+        for receipt_guard in &mut receipt_guards {
+            **receipt_guard = TurnReceiptState::Ineligible {
+                reason_code: GuardedUndoReasonCode::ConcurrentWorkspaceMutation,
+            };
+        }
+        let mut acquired = Vec::with_capacity(plans.len());
+        for (root_id, generation) in plans {
+            let entry = state.roots.entry(root_id.clone()).or_default();
+            entry.mutation_active = true;
+            if !state.generations.contains_key(&root_id) {
+                state.generations.insert(root_id.clone(), 0);
+                state.generation_order.push_back(root_id.clone());
+            }
+            if let Some(generation_slot) = state.generations.get_mut(&root_id) {
+                *generation_slot = generation;
+            } else {
+                // The generation map was checked/updated above while holding
+                // the state mutex. This branch is unreachable unless the
+                // invariant is violated; never turn it into a fallible tail
+                // after earlier roots have been mutated.
+                unreachable!("generation plan missing during multi-root commit");
+            }
+            acquired.push((root_id, generation));
+        }
+        drop(state);
+        Ok(MultiMutationGuard {
+            coordinator: Arc::clone(self),
+            roots: acquired,
+            active: true,
+        })
+    }
+
     pub fn generation(&self, root_id: &PhysicalRootId) -> Result<u64, CoordinatorError> {
         validate_root(root_id)?;
         Ok(*lock(&self.state)?.generations.get(root_id).unwrap_or(&0))
@@ -247,6 +355,7 @@ impl WorkspaceMutationCoordinator {
         remove_idle_root(&mut state, root_id);
         Ok(())
     }
+
     fn release_mutation(&self, root_id: &PhysicalRootId) {
         let Ok(mut state) = lock(&self.state) else {
             return;
@@ -255,6 +364,18 @@ impl WorkspaceMutationCoordinator {
             entry.mutation_active = false;
         }
         remove_idle_root(&mut state, root_id);
+    }
+    fn release_mutations(&self, roots: &[(PhysicalRootId, u64)]) -> Result<(), CoordinatorError> {
+        let mut state = lock(&self.state)?;
+        for (root_id, _) in roots {
+            if let Some(entry) = state.roots.get_mut(root_id) {
+                entry.mutation_active = false;
+            }
+        }
+        for (root_id, _) in roots {
+            remove_idle_root(&mut state, root_id);
+        }
+        Ok(())
     }
     fn release_capture_edge(&self, root_id: &PhysicalRootId) {
         let Ok(mut state) = lock(&self.state) else {
@@ -373,6 +494,53 @@ pub struct MutationGuard {
     generation: u64,
     active: bool,
 }
+
+/// RAII owner for one atomic multi-root mutation acquisition.
+pub struct MultiMutationGuard {
+    coordinator: Arc<WorkspaceMutationCoordinator>,
+    roots: Vec<(PhysicalRootId, u64)>,
+    active: bool,
+}
+
+impl MultiMutationGuard {
+    pub fn generations(&self) -> Vec<u64> {
+        self.roots
+            .iter()
+            .map(|(_, generation)| *generation)
+            .collect()
+    }
+
+    pub fn finish(mut self) -> Result<Vec<u64>, CoordinatorError> {
+        let generations = self.generations();
+        match self.coordinator.release_mutations(&self.roots) {
+            Ok(()) => {
+                self.active = false;
+                Ok(generations)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl fmt::Debug for MultiMutationGuard {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MultiMutationGuard")
+            .field("count", &self.roots.len())
+            .field("generations", &self.generations())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for MultiMutationGuard {
+    fn drop(&mut self) {
+        if self.active {
+            self.coordinator.release_mutations(&self.roots).ok();
+            self.active = false;
+        }
+    }
+}
+
 impl MutationGuard {
     pub fn generation(&self) -> u64 {
         self.generation
@@ -399,6 +567,7 @@ mod tests {
     use super::*;
     use std::{
         panic::{catch_unwind, AssertUnwindSafe},
+        sync::Barrier,
         thread,
     };
     fn root(id: u8) -> PhysicalRootId {
@@ -554,10 +723,16 @@ mod tests {
     #[test]
     fn concurrent_intervals_do_not_panic() {
         let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let ready = Arc::new(Barrier::new(16));
         let joins: Vec<_> = (0..16)
             .map(|id| {
                 let c = Arc::clone(&c);
-                thread::spawn(move || c.begin_turn_interval(root(5), owner(id)))
+                let ready = Arc::clone(&ready);
+                thread::spawn(move || {
+                    let interval = c.begin_turn_interval(root(5), owner(id));
+                    ready.wait();
+                    interval
+                })
             })
             .collect();
         for join in joins {
@@ -567,5 +742,159 @@ mod tests {
                 Ok(TurnReceiptState::Ineligible { .. })
             ));
         }
+    }
+
+    #[test]
+    fn multi_mutation_rejects_empty_and_deduplicates_roots() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        assert!(matches!(
+            c.try_acquire_mutations(Vec::new()),
+            Err(CoordinatorError::InvalidPhysicalRoot)
+        ));
+        let guard = c
+            .try_acquire_mutations(vec![root(20), root(20), root(19)])
+            .unwrap();
+        assert_eq!(guard.generations(), vec![1, 1]);
+        assert!(format!("{guard:?}").contains("count: 2"));
+        let state = lock(&c.state).unwrap();
+        assert_eq!(
+            state.generation_order.back(),
+            Some(&root(20)),
+            "roots are committed in deterministic byte order"
+        );
+        drop(state);
+        assert_eq!(guard.finish().unwrap(), vec![1, 1]);
+        assert!(lock(&c.state).unwrap().roots.is_empty());
+    }
+
+    #[test]
+    fn multi_mutation_second_edge_failure_is_all_or_none() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let edge = c.try_acquire_capture_edge(&root(22)).unwrap();
+        assert!(matches!(
+            c.try_acquire_mutations(vec![root(21), root(22)]),
+            Err(CoordinatorError::CaptureEdgeActive)
+        ));
+        assert_eq!(c.generation(&root(21)), Ok(0));
+        assert_eq!(c.generation(&root(22)), Ok(0));
+        assert!(lock(&c.state).unwrap().roots.get(&root(21)).is_none());
+        drop(edge);
+    }
+
+    #[test]
+    fn multi_mutation_existing_turns_are_dirtied_only_after_all_checks() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let first = c.begin_turn_interval(root(23), owner(1)).unwrap();
+        let first_receipt = first.receipt();
+        let edge = c.try_acquire_capture_edge(&root(24)).unwrap();
+        assert!(matches!(
+            c.try_acquire_mutations(vec![root(23), root(24)]),
+            Err(CoordinatorError::CaptureEdgeActive)
+        ));
+        assert!(matches!(
+            first_receipt.state(),
+            Ok(TurnReceiptState::Clean { generation: 0 })
+        ));
+        drop(edge);
+        drop(first);
+    }
+
+    #[test]
+    fn multi_mutation_poisoned_later_receipt_is_non_destructive() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let first_root = root(30);
+        let second_root = root(31);
+        let first = c.begin_turn_interval(first_root.clone(), owner(1)).unwrap();
+        let second_owner = owner(2);
+        let second = c
+            .begin_turn_interval(second_root.clone(), second_owner.clone())
+            .unwrap();
+        let first_receipt = first.receipt();
+        let second_state = {
+            let state = lock(&c.state).unwrap();
+            Arc::clone(
+                &state
+                    .roots
+                    .get(&second_root)
+                    .unwrap()
+                    .active_turns
+                    .get(&second_owner)
+                    .unwrap()
+                    .state,
+            )
+        };
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = second_state.lock().unwrap();
+            panic!("poison receipt");
+        }));
+
+        assert!(matches!(
+            c.try_acquire_mutations(vec![first_root.clone(), second_root.clone()]),
+            Err(CoordinatorError::Unavailable)
+        ));
+        assert_eq!(
+            first_receipt.state(),
+            Ok(TurnReceiptState::Clean { generation: 0 })
+        );
+        assert_eq!(c.generation(&first_root), Ok(0));
+        assert_eq!(c.generation(&second_root), Ok(0));
+        let state = lock(&c.state).unwrap();
+        assert!(!state.roots.get(&first_root).unwrap().mutation_active);
+        drop(state);
+        drop(second);
+        drop(first);
+    }
+
+    #[test]
+    fn multi_mutation_drop_and_unwind_release_all_roots() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let result = catch_unwind(AssertUnwindSafe({
+            let c = Arc::clone(&c);
+            move || {
+                let _guard = c.try_acquire_mutations(vec![root(25), root(26)]).unwrap();
+                panic!("test unwind");
+            }
+        }));
+        assert!(result.is_err());
+        assert!(lock(&c.state).unwrap().roots.is_empty());
+        let guard = c.try_acquire_mutations(vec![root(26), root(25)]).unwrap();
+        assert_eq!(guard.generations(), vec![2, 2]);
+    }
+
+    #[test]
+    fn multi_mutation_generation_overflow_is_non_destructive() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        lock(&c.state)
+            .unwrap()
+            .generations
+            .insert(root(27), u64::MAX);
+        assert!(matches!(
+            c.try_acquire_mutations(vec![root(28), root(27)]),
+            Err(CoordinatorError::GenerationExhausted)
+        ));
+        assert_eq!(c.generation(&root(28)), Ok(0));
+        assert!(lock(&c.state).unwrap().roots.get(&root(28)).is_none());
+        assert!(!lock(&c.state).unwrap().roots.contains_key(&root(27)));
+    }
+
+    #[test]
+    fn multi_mutation_generation_capacity_is_non_destructive() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        {
+            let mut state = lock(&c.state).unwrap();
+            for index in 0..MAX_RETAINED_ROOT_GENERATIONS {
+                let mut bytes = vec![1, 1];
+                bytes.extend_from_slice(&(index as u64).to_be_bytes());
+                let root_id = PhysicalRootId(bytes);
+                state.generations.insert(root_id.clone(), 0);
+                state.generation_order.push_back(root_id);
+            }
+        }
+        assert!(matches!(
+            c.try_acquire_mutations(vec![root(29)]),
+            Err(CoordinatorError::RootGenerationCapacityExhausted)
+        ));
+        assert_eq!(c.generation(&root(29)), Ok(0));
+        assert!(lock(&c.state).unwrap().roots.get(&root(29)).is_none());
     }
 }

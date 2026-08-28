@@ -465,6 +465,16 @@ the operation.
   M4 v1 itself accepts only one root.
 - The coordinator is cancellation-safe and releases leases on unwind.
 
+Implementation status: the process runtime and workspace command state share
+one coordinator, and mutation authority is resolved from the durable SQLite
+workspace mapping before physical admission. Editor writes, automation/spec
+writes, conflict actions, and stage/unstage/discard are covered. Multi-root
+mutation admission is atomic and ordered, but its deletion/delegation callers
+and the remaining setup, task, commit, sync, delivery, worktree, and removal
+mutators are not yet integrated. Until that inventory is complete, the DCC
+capture driver deliberately finalizes completed turns through the
+known-mutation-coverage fail-closed path and cannot emit an eligible set.
+
 The process MUST acquire a single-instance lifetime lock in the DCC app-data
 directory before startup recovery, retention, artifact purge, or interval
 registry initialization. Phase 1 selects this lock as the minimum ownership

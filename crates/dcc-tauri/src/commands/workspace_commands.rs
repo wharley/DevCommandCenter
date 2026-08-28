@@ -85,7 +85,8 @@ use crate::{
         parse_numstat_z, run_git_network_output, run_git_output, run_git_output_owned,
         split_null_terminated_fields,
     },
-    state::{SessionCommandState, WorkspaceCommandState},
+    guarded_undo_runtime::WorkspaceMutationRunError,
+    state::{SessionCommandState, WorkspaceCommandState, WorkspaceMutationRequestError},
     workspace_setup::{
         run_detected_workspace_setup, run_workspace_task_command, WORKSPACE_VALIDATION_TIMEOUT,
     },
@@ -94,6 +95,15 @@ use crate::{
 const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
 const DCC_SPEC_CONTEXT_END: &str = "<!-- dcc:spec:end -->";
 const DCC_SPEC_CONTEXT_MANIFEST_PATH: &str = ".devcommandcenter/context.json";
+
+fn workspace_mutation_error(error: WorkspaceMutationRequestError<String>) -> String {
+    match error {
+        WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(error)) => {
+            error
+        }
+        _ => "workspace mutation is unavailable".to_string(),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MissionSpecContextTargetKind {
@@ -1527,7 +1537,17 @@ pub async fn workspace_git_accept_conflict(
         return Err("workspace_root is empty".to_string());
     }
     let path = validate_git_relative_path(&input.relative_path)?;
-    workspace_git_accept_conflict_inner(root, &path, input.side)
+    let side = input.side;
+    state
+        .run_workspace_mutation(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            workspace_git_accept_conflict_inner(root, &path, side)
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
+    Ok(())
 }
 
 fn workspace_git_accept_conflict_inner(
@@ -1576,7 +1596,17 @@ pub async fn workspace_git_mark_conflict_resolved(
         return Err("workspace_root is empty".to_string());
     }
     let path = validate_git_relative_path(&input.relative_path)?;
-    workspace_git_mark_conflict_resolved_inner(root, &path, input.delete)
+    let delete = input.delete;
+    state
+        .run_workspace_mutation(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            workspace_git_mark_conflict_resolved_inner(root, &path, delete)
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
+    Ok(())
 }
 
 fn workspace_git_mark_conflict_resolved_inner(
@@ -1614,7 +1644,16 @@ pub async fn workspace_git_abort_merge(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    workspace_git_abort_merge_inner(root)
+    state
+        .run_workspace_mutation(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            workspace_git_abort_merge_inner(root)
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
+    Ok(())
 }
 
 fn workspace_git_abort_merge_inner(root: &str) -> Result<(), String> {
@@ -1860,9 +1899,6 @@ pub async fn workspace_save_project_automation(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    if workspace_validation_config_hash(root)? != input.expected_config_hash {
-        return Err("The .dcc.toml configuration changed. Reload it before saving.".to_string());
-    }
     let source_path = Path::new(root).join(".dcc.toml");
     let tasks = input
         .tasks
@@ -1883,79 +1919,92 @@ pub async fn workspace_save_project_automation(
         source_path: source_path.to_string_lossy().to_string(),
     };
     validate_workspace_automation_config(&normalized)?;
-
-    let raw = match fs::read_to_string(&source_path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => return Err(format!("failed to read .dcc.toml: {error}")),
-    };
-    let mut document = if raw.trim().is_empty() {
-        TomlDocument::new()
-    } else {
-        raw.parse::<TomlDocument>()
-            .map_err(|error| format!("invalid .dcc.toml: {error}"))?
-    };
-    document.remove("setup_command");
-    document.remove("validation_commands");
-    if !document.contains_key("scripts") {
-        document["scripts"] = TomlItem::Table(TomlTable::new());
-    }
-    if let Some(scripts) = document["scripts"].as_table_mut() {
-        scripts.remove("validate");
-        match normalized.setup_command.as_deref() {
-            Some(command) => scripts["setup"] = toml_value(command),
-            None => {
-                scripts.remove("setup");
+    let expected_config_hash = input.expected_config_hash;
+    state
+        .run_workspace_mutation(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            if workspace_validation_config_hash(root)? != expected_config_hash {
+                return Err(
+                    "The .dcc.toml configuration changed. Reload it before saving.".to_string(),
+                );
             }
-        }
-    }
-
-    if normalized.tasks.is_empty() {
-        document.remove("tasks");
-    } else {
-        let mut table = TomlTable::new();
-        for task in &normalized.tasks {
-            let mut item = TomlTable::new();
-            item["command"] = toml_value(&task.command);
-            item["kind"] = toml_value(match task.kind {
-                RepoTaskKind::Check => "check",
-                RepoTaskKind::Fix => "fix",
-            });
-            if let Some(label) = task.label.as_deref() {
-                item["label"] = toml_value(label);
+            let source_path = Path::new(root).join(".dcc.toml");
+            let raw = match fs::read_to_string(&source_path) {
+                Ok(raw) => raw,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(error) => return Err(format!("failed to read .dcc.toml: {error}")),
+            };
+            let mut document = if raw.trim().is_empty() {
+                TomlDocument::new()
+            } else {
+                raw.parse::<TomlDocument>()
+                    .map_err(|error| format!("invalid .dcc.toml: {error}"))?
+            };
+            document.remove("setup_command");
+            document.remove("validation_commands");
+            if !document.contains_key("scripts") {
+                document["scripts"] = TomlItem::Table(TomlTable::new());
             }
-            if let Some(cwd) = task.cwd.as_deref() {
-                item["cwd"] = toml_value(cwd);
+            if let Some(scripts) = document["scripts"].as_table_mut() {
+                scripts.remove("validate");
+                match normalized.setup_command.as_deref() {
+                    Some(command) => scripts["setup"] = toml_value(command),
+                    None => {
+                        scripts.remove("setup");
+                    }
+                }
             }
-            if task.timeout_seconds != WORKSPACE_VALIDATION_TIMEOUT.as_secs() {
-                item["timeout_seconds"] = toml_value(task.timeout_seconds as i64);
+
+            if normalized.tasks.is_empty() {
+                document.remove("tasks");
+            } else {
+                let mut table = TomlTable::new();
+                for task in &normalized.tasks {
+                    let mut item = TomlTable::new();
+                    item["command"] = toml_value(&task.command);
+                    item["kind"] = toml_value(match task.kind {
+                        RepoTaskKind::Check => "check",
+                        RepoTaskKind::Fix => "fix",
+                    });
+                    if let Some(label) = task.label.as_deref() {
+                        item["label"] = toml_value(label);
+                    }
+                    if let Some(cwd) = task.cwd.as_deref() {
+                        item["cwd"] = toml_value(cwd);
+                    }
+                    if task.timeout_seconds != WORKSPACE_VALIDATION_TIMEOUT.as_secs() {
+                        item["timeout_seconds"] = toml_value(task.timeout_seconds as i64);
+                    }
+                    table[&task.id] = TomlItem::Table(item);
+                }
+                document["tasks"] = TomlItem::Table(table);
             }
-            table[&task.id] = TomlItem::Table(item);
-        }
-        document["tasks"] = TomlItem::Table(table);
-    }
 
-    if normalized.before_merge.is_empty() && normalized.before_push.is_empty() {
-        document.remove("hooks");
-    } else {
-        let mut hooks = TomlTable::new();
-        for (name, ids) in [
-            ("before_merge", &normalized.before_merge),
-            ("before_push", &normalized.before_push),
-        ] {
-            let mut values = TomlArray::new();
-            for id in ids {
-                values.push(id.as_str());
+            if normalized.before_merge.is_empty() && normalized.before_push.is_empty() {
+                document.remove("hooks");
+            } else {
+                let mut hooks = TomlTable::new();
+                for (name, ids) in [
+                    ("before_merge", &normalized.before_merge),
+                    ("before_push", &normalized.before_push),
+                ] {
+                    let mut values = TomlArray::new();
+                    for id in ids {
+                        values.push(id.as_str());
+                    }
+                    hooks[name] = toml_value(values);
+                }
+                document["hooks"] = TomlItem::Table(hooks);
             }
-            hooks[name] = toml_value(values);
-        }
-        document["hooks"] = TomlItem::Table(hooks);
-    }
 
-    write_delivery_policy(&mut document, &normalized.delivery_policy);
-
-    fs::write(&source_path, document.to_string())
-        .map_err(|error| format!("failed to write .dcc.toml: {error}"))?;
+            write_delivery_policy(&mut document, &normalized.delivery_policy);
+            fs::write(&source_path, document.to_string())
+                .map_err(|error| format!("failed to write .dcc.toml: {error}"))
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
     workspace_project_automation_config(
         state,
         WorkspaceGitConflictStateInput {
@@ -2696,7 +2745,15 @@ pub async fn workspace_git_stage_all(
         return Err("workspace_root is empty".to_string());
     }
 
-    let output = run_git_output(root, &["add", "-A"])?;
+    let output = state
+        .run_workspace_mutation(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            run_git_output(root, &["add", "-A"])
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
     if output.status.success() {
         return Ok(());
     }
@@ -2824,7 +2881,15 @@ pub async fn workspace_git_stage_file(
         return Err("workspace_root is empty".to_string());
     }
     let path = validate_git_relative_path(&input.relative_path)?;
-    let output = run_git_output(root, &["add", "--", &path])?;
+    let output = state
+        .run_workspace_mutation(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            run_git_output(root, &["add", "--", &path])
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
     if output.status.success() {
         return Ok(());
     }
@@ -2843,15 +2908,23 @@ pub async fn workspace_git_unstage_file(
         return Err("workspace_root is empty".to_string());
     }
     let path = validate_git_relative_path(&input.relative_path)?;
-    let output = run_git_output(root, &["restore", "--staged", "--", &path])?;
+    let output = state
+        .run_workspace_mutation(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            let output = run_git_output(root, &["restore", "--staged", "--", &path])?;
+            if output.status.success() {
+                return Ok(output);
+            }
+            run_git_output(root, &["reset", "HEAD", "--", &path])
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
     if output.status.success() {
         return Ok(());
     }
-    let fallback = run_git_output(root, &["reset", "HEAD", "--", &path])?;
-    if fallback.status.success() {
-        return Ok(());
-    }
-    Err(git_output_err("git reset", &fallback.stderr))
+    Err(git_output_err("git reset", &output.stderr))
 }
 
 /// Tracked: `git checkout HEAD -- path`; untracked file: remove.
@@ -2866,22 +2939,28 @@ pub async fn workspace_git_discard_file(
         return Err("workspace_root is empty".to_string());
     }
     let path = validate_git_relative_path(&input.relative_path)?;
-    let absolute = PathBuf::from(root).join(&path);
-
-    if path_is_tracked(root, &path) {
-        let output = run_git_output(root, &["checkout", "HEAD", "--", &path])?;
-        if output.status.success() {
-            return Ok(());
-        }
-        return Err(git_output_err("git checkout", &output.stderr));
-    }
-
-    if absolute.is_file() {
-        fs::remove_file(&absolute).map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    Err("cannot discard: path is not a tracked file or a single untracked file".to_string())
+    state
+        .run_workspace_mutation(root, move |root| {
+            let root_string = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            let absolute = root.join(&path);
+            if path_is_tracked(root_string, &path) {
+                let output = run_git_output(root_string, &["checkout", "HEAD", "--", &path])?;
+                if output.status.success() {
+                    return Ok(());
+                }
+                return Err(git_output_err("git checkout", &output.stderr));
+            }
+            if absolute.is_file() {
+                fs::remove_file(&absolute).map_err(|error| error.to_string())?;
+                return Ok(());
+            }
+            Err("cannot discard: path is not a tracked file or a single untracked file".to_string())
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
+    Ok(())
 }
 
 fn parse_git_numstat_maps(root: &str, cached: bool) -> Result<HashMap<String, (u32, u32)>, String> {
@@ -6217,31 +6296,41 @@ pub async fn write_workspace_file(
     }
 
     let rel = validate_git_relative_path(&input.relative_path)?;
-    let path = resolve_worktree_write_path(root, &rel)?;
+    let expected_previous = input.expected_previous;
+    let content = input.content;
+    state
+        .run_workspace_mutation(root, move |root| {
+            let root_string = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            let path = resolve_worktree_write_path(root_string, &rel)?;
 
-    // Compare-and-swap: verify the disk still matches what the caller last saw
-    // before overwriting. Doing the read+compare+write in one command shrinks the
-    // window where a concurrent agent edit could be clobbered.
-    if let Some(expected) = &input.expected_previous {
-        let current = read_worktree_file_text(root, &rel)?.unwrap_or_default();
-        if &current != expected {
-            return Ok(WriteWorkspaceFileOutput {
-                bytes_written: 0,
-                conflicted: true,
-                disk_content: Some(current),
-            });
-        }
-    }
+            // Compare-and-swap: verify the disk still matches what the caller last saw
+            // before overwriting. Doing the read+compare+write in one command shrinks the
+            // window where a concurrent agent edit could be clobbered.
+            if let Some(expected) = &expected_previous {
+                let current = read_worktree_file_text(root_string, &rel)?.unwrap_or_default();
+                if &current != expected {
+                    return Ok(WriteWorkspaceFileOutput {
+                        bytes_written: 0,
+                        conflicted: true,
+                        disk_content: Some(current),
+                    });
+                }
+            }
 
-    let bytes = input.content.into_bytes();
-    let bytes_written = bytes.len() as u32;
-    fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+            let bytes = content.into_bytes();
+            let bytes_written = bytes.len() as u32;
+            fs::write(&path, &bytes).map_err(|error| error.to_string())?;
 
-    Ok(WriteWorkspaceFileOutput {
-        bytes_written,
-        conflicted: false,
-        disk_content: None,
-    })
+            Ok(WriteWorkspaceFileOutput {
+                bytes_written,
+                conflicted: false,
+                disk_content: None,
+            })
+        })
+        .await
+        .map_err(workspace_mutation_error)
 }
 
 const SEARCH_WORKSPACE_MAX_RESULTS: usize = 200;
@@ -8169,7 +8258,21 @@ pub async fn save_mission_validation(
         return Err("validation report missing dccMissionValidation=true".to_string());
     }
 
-    let root_canonical = PathBuf::from(root)
+    state
+        .run_workspace_mutation(root, move |root| {
+            save_mission_validation_inner(root, &spec_relative_path, &report)
+        })
+        .await
+        .map_err(workspace_mutation_error)
+}
+
+fn save_mission_validation_inner(
+    root: &Path,
+    spec_relative_path: &str,
+    report: &Value,
+) -> Result<SaveMissionValidationOutput, String> {
+    let root_canonical = root
+        .to_path_buf()
         .canonicalize()
         .map_err(|error| error.to_string())?;
     let specs_dir = root_canonical.join(".devcommandcenter").join("specs");
@@ -8205,9 +8308,9 @@ pub async fn save_mission_validation(
     fs::write(&target, format!("{pretty}\n")).map_err(|error| error.to_string())?;
     append_mission_validation_history_entry(
         &history_target,
-        &spec_relative_path,
+        spec_relative_path,
         &validation_name,
-        &report,
+        report,
     )?;
 
     Ok(SaveMissionValidationOutput {
@@ -8277,7 +8380,20 @@ pub async fn compile_mission_spec_context(
 ) -> Result<CompileMissionSpecContextOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
 
-    compile_mission_spec_context_for_path(&input.workspace_root, &input.spec_relative_path)
+    let root = input.workspace_root.trim();
+    if root.is_empty() {
+        return Err("workspace_root is empty".to_string());
+    }
+    let spec_relative_path = input.spec_relative_path;
+    state
+        .run_workspace_mutation(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            compile_mission_spec_context_for_path(root, &spec_relative_path)
+        })
+        .await
+        .map_err(workspace_mutation_error)
 }
 
 fn compile_mission_spec_context_for_path(

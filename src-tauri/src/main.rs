@@ -7144,12 +7144,13 @@ pub fn run() {
             sync_existing_repo_configs(&conn)
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
-            app.manage(WorkspaceCommandState::new(db_path.clone()));
+            let session_command_state =
+                SessionCommandState::new(app.handle().clone(), db_path.clone());
+            let workspace_command_state =
+                WorkspaceCommandState::from_session(&session_command_state);
+            app.manage(workspace_command_state);
             app.manage(CodeRabbitReviewJobsState::default());
-            app.manage(SessionCommandState::new(
-                app.handle().clone(),
-                db_path.clone(),
-            ));
+            app.manage(session_command_state);
             let state = AppState {
                 db_path: Arc::new(db_path.clone()),
                 app_data_dir: Arc::new(app_data_dir.clone()),

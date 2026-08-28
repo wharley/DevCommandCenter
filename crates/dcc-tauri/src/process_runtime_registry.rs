@@ -23,9 +23,10 @@ use std::{
 use std::path::PathBuf;
 
 use crate::guarded_undo_runtime::ConfigureOutcome;
-use crate::guarded_undo_runtime::GuardedUndoRuntime;
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo_runtime::GuardedUndoRuntimeError;
+use crate::guarded_undo_runtime::{GuardedUndoRuntime, WorkspaceMutationRunError};
+use crate::state::AuthorizedWorkspaceMutation;
 use crate::terminal_arbiter::TerminalArbiter;
 use dcc_core::ports::{events::CoreEvent, EventBus};
 use dcc_core::Result as CoreResult;
@@ -142,6 +143,9 @@ pub struct ProcessRuntime {
     terminal_arbiter: Arc<TerminalArbiter>,
     #[allow(dead_code)] // Wired by the guarded-undo lifecycle integration.
     guarded_undo_runtime: Arc<GuardedUndoRuntime>,
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[allow(dead_code)] // Explicit ownership proof; runtime receives this same Arc.
+    workspace_mutations: Arc<dcc_infra::guarded_undo::coordinator::WorkspaceMutationCoordinator>,
     session_store: Arc<Mutex<crate::state::SessionStore>>,
     event_buses: Mutex<Vec<Weak<dyn EventBus>>>,
 }
@@ -154,10 +158,22 @@ impl fmt::Debug for ProcessRuntime {
 
 impl ProcessRuntime {
     fn new(scope: RuntimeScopeKey) -> Self {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let workspace_mutations =
+            Arc::new(dcc_infra::guarded_undo::coordinator::WorkspaceMutationCoordinator::new());
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let guarded_undo_runtime = Arc::new(GuardedUndoRuntime::new_with_coordinator(Arc::clone(
+            &workspace_mutations,
+        )));
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let guarded_undo_runtime = Arc::new(GuardedUndoRuntime::new());
+
         Self {
             scope,
             terminal_arbiter: Arc::new(TerminalArbiter::default()),
-            guarded_undo_runtime: Arc::new(GuardedUndoRuntime::new()),
+            guarded_undo_runtime,
+            #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+            workspace_mutations,
             session_store: Arc::new(Mutex::new(crate::state::SessionStore::default())),
             event_buses: Mutex::new(Vec::new()),
         }
@@ -170,6 +186,24 @@ impl ProcessRuntime {
     #[allow(dead_code)] // Wired by the guarded-undo lifecycle integration.
     pub(crate) fn guarded_undo_runtime(&self) -> Arc<GuardedUndoRuntime> {
         Arc::clone(&self.guarded_undo_runtime)
+    }
+
+    /// Delegates a durably authorized root to the one coordinator shared with
+    /// capture-v2. The binding type cannot be constructed from a raw command
+    /// path outside `WorkspaceCommandState`.
+    pub(crate) async fn run_workspace_mutation<T, E, F>(
+        &self,
+        binding: AuthorizedWorkspaceMutation,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        self.guarded_undo_runtime
+            .run_workspace_mutation(binding.into_workspace_absolute(), operation)
+            .await
     }
 
     /// Configures guarded undo only for the physical scope from which this
