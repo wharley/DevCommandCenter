@@ -7,7 +7,6 @@
 //! Logical Git output is never authority by itself.
 
 #![cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
-#![cfg_attr(not(test), allow(dead_code))]
 
 use std::{
     ffi::OsString,
@@ -17,14 +16,17 @@ use std::{
     sync::Arc,
 };
 
-use dcc_core::domain::guarded_undo::{OpaqueRepoPath, PhysicalRootId, RegularFileMetadataV1};
+use dcc_core::domain::guarded_undo::RegularFileMetadataV1;
+use dcc_core::domain::guarded_undo::{OpaqueRepoPath, PhysicalRootId};
 
+#[cfg(test)]
+use super::macos_root::StableDigestObservation;
 use super::{
     git_inspector::{
         GitMutationLayout, IndexFileReader, IndexObservation, IndexReadError, TrustedGitBinary,
         UntrustedGitLayout, UntrustedGitPath,
     },
-    macos_root::{MacWorkspaceRoot, MacWorkspaceRootError, StableDigestObservation},
+    macos_root::{MacWorkspaceRoot, MacWorkspaceRootError},
 };
 
 const MAX_GITDIR_FILE_BYTES: u64 = 4 * 1024;
@@ -400,6 +402,7 @@ impl fmt::Display for MacGitBridgeError {
 impl std::error::Error for MacGitBridgeError {}
 
 /// A physically bound active-index reader for one inspected Git layout.
+#[cfg(test)]
 pub(crate) struct MacGitBridge {
     root: Arc<MacWorkspaceRoot>,
     layout: UntrustedGitLayout,
@@ -410,6 +413,7 @@ pub(crate) struct MacGitBridge {
     common_dir_id: PhysicalRootId,
 }
 
+#[cfg(test)]
 impl fmt::Debug for MacGitBridge {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -420,6 +424,7 @@ impl fmt::Debug for MacGitBridge {
     }
 }
 
+#[cfg(test)]
 impl MacGitBridge {
     pub(crate) fn bind(
         root: Arc<MacWorkspaceRoot>,
@@ -477,6 +482,7 @@ impl MacGitBridge {
     }
 }
 
+#[cfg(test)]
 impl IndexFileReader for MacGitBridge {
     fn observe(
         &self,
@@ -507,11 +513,13 @@ impl IndexFileReader for MacGitBridge {
 /// It owns only the retained workspace handle and its canonical raw absolute
 /// name. Every observation binds and revalidates the complete logical layout,
 /// so the inspector's second observation cannot reuse stale physical proof.
+#[cfg(test)]
 pub(crate) struct MacIndexFileReader {
     root: Arc<MacWorkspaceRoot>,
     workspace_absolute: Vec<u8>,
 }
 
+#[cfg(test)]
 impl fmt::Debug for MacIndexFileReader {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -521,6 +529,7 @@ impl fmt::Debug for MacIndexFileReader {
     }
 }
 
+#[cfg(test)]
 impl MacIndexFileReader {
     pub(crate) fn new(
         root: Arc<MacWorkspaceRoot>,
@@ -541,6 +550,7 @@ impl MacIndexFileReader {
     }
 }
 
+#[cfg(test)]
 impl IndexFileReader for MacIndexFileReader {
     fn observe(
         &self,
@@ -559,6 +569,7 @@ impl IndexFileReader for MacIndexFileReader {
     }
 }
 
+#[cfg(test)]
 fn validate_git_dir(
     root: &MacWorkspaceRoot,
     workspace_absolute: &[u8],
@@ -622,6 +633,7 @@ fn validate_gitdir_file_metadata(
     Ok(())
 }
 
+#[cfg(test)]
 fn parse_gitdir_file(bytes: &[u8]) -> Result<&[u8], MacGitBridgeError> {
     let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
     let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
@@ -639,6 +651,7 @@ fn parse_gitdir_file(bytes: &[u8]) -> Result<&[u8], MacGitBridgeError> {
     Ok(target)
 }
 
+#[cfg(test)]
 fn internal_path(
     workspace_absolute: &[u8],
     candidate_absolute: &[u8],
@@ -690,6 +703,7 @@ fn append_path(directory: &[u8], basename: &[u8]) -> Option<Vec<u8>> {
     Some(path)
 }
 
+#[cfg(test)]
 fn map_index_error(error: MacWorkspaceRootError) -> MacGitBridgeError {
     match error {
         MacWorkspaceRootError::FileTooLarge => MacGitBridgeError::IndexTooLarge,
@@ -711,6 +725,7 @@ fn map_reader_error(error: MacWorkspaceRootError) -> IndexReadError {
     }
 }
 
+#[cfg(test)]
 fn map_bridge_reader_error(error: MacGitBridgeError) -> IndexReadError {
     match error {
         MacGitBridgeError::IndexTooLarge => IndexReadError::TooLarge,

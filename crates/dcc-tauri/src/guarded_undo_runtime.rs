@@ -1,10 +1,15 @@
 //! Process-wide, cancellation-safe ownership of guarded-undo capture handles.
 //!
-//! This module deliberately does not start or terminalize provider turns. It
-//! only provides the lifecycle primitive that those flows will call after a
-//! separately reviewed integration.
+//! This module deliberately does not start provider turns. It owns the
+//! lifecycle primitives used by the integrated provider flows to capture and
+//! terminalize guarded-undo state.
 
-#![allow(dead_code)] // Foundation APIs are wired by the next lifecycle slice.
+// Feature-off builds retain the compatibility/no-op facade, while the active
+// macOS implementation remains fully checked for dead production code.
+#![cfg_attr(
+    not(all(target_os = "macos", feature = "guarded-undo-capture-v2")),
+    allow(dead_code)
+)]
 
 use std::{
     any::Any,
@@ -94,8 +99,8 @@ impl<E: std::error::Error + 'static> std::error::Error for WorkspaceMutationRunE
 struct PhysicalMutationLease {
     // Field drop order is declaration order: release coordinator admission
     // before closing the retained root descriptor.
-    guard: MutationGuard,
-    root: MacWorkspaceRoot,
+    _guard: MutationGuard,
+    _root: MacWorkspaceRoot,
     workspace_absolute: PathBuf,
 }
 
@@ -129,8 +134,8 @@ impl PhysicalMutationLease {
         }
 
         Ok(Self {
-            guard,
-            root,
+            _guard: guard,
+            _root: root,
             workspace_absolute,
         })
     }
@@ -145,7 +150,7 @@ impl PhysicalMutationLease {
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 struct PhysicalGitMutationLease {
     // Drop the guard before closing authority descriptors.
-    guard: MultiMutationGuard,
+    _guard: MultiMutationGuard,
     authority: MacGitMutationAuthority,
 }
 
@@ -157,7 +162,7 @@ struct PhysicalGitMutationLease {
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 struct PhysicalGitPairMutationLease {
     // Drop the guard before closing either authority's descriptors.
-    guard: MultiMutationGuard,
+    _guard: MultiMutationGuard,
     primary: MacGitMutationAuthority,
     secondary: MacGitMutationAuthority,
 }
@@ -207,7 +212,7 @@ impl PhysicalGitPairMutationLease {
         }
 
         Ok(Self {
-            guard,
+            _guard: guard,
             primary,
             secondary,
         })
@@ -245,7 +250,10 @@ impl PhysicalGitMutationLease {
         authority
             .revalidate()
             .map_err(|_| WorkspaceMutationRunError::PhysicalRootUnavailable)?;
-        Ok(Self { guard, authority })
+        Ok(Self {
+            _guard: guard,
+            authority,
+        })
     }
 
     fn path(&self) -> &Path {
@@ -521,6 +529,7 @@ pub(crate) enum GuardedUndoRuntimeError {
     ConfigurationMismatch,
     RecoveryRootsMismatch,
     ReplayRequestMismatch,
+    #[cfg(test)]
     AlreadyConfigured,
 }
 
@@ -541,6 +550,7 @@ impl fmt::Display for GuardedUndoRuntimeError {
             Self::ConfigurationMismatch => "guarded undo runtime configuration does not match",
             Self::RecoveryRootsMismatch => "guarded undo recovery roots do not match",
             Self::ReplayRequestMismatch => "guarded undo capture replay does not match",
+            #[cfg(test)]
             Self::AlreadyConfigured => "guarded undo runtime already configured",
         })
     }
@@ -550,6 +560,7 @@ impl std::error::Error for GuardedUndoRuntimeError {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConfigureOutcome {
+    #[allow(dead_code)] // Constructed by the feature-off implementation.
     Disabled,
     Configured,
     AlreadyConfigured,
@@ -558,6 +569,7 @@ pub(crate) enum ConfigureOutcome {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecoveryOutcome {
+    #[allow(dead_code)] // Constructed by the feature-off implementation.
     Disabled,
     Recovered,
     AlreadyRecovered,
@@ -1437,6 +1449,7 @@ impl GuardedUndoRuntime {
         })
     }
 
+    #[cfg(test)]
     fn install_driver(
         &self,
         driver: Arc<dyn CaptureDriver>,
