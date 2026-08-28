@@ -4,7 +4,7 @@ Status: Phase 0 implemented and approved (`f1cded2`); Phase 1 in progress
 
 Milestone: M4
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 ## Decision
 
@@ -433,18 +433,22 @@ displaced by the operation. Repeated calls with a consumed token return
 
 ## Workspace mutation coordinator
 
-DCC MUST provide one coordinator keyed exclusively by the OS-derived physical
-`root_id`. `workspace_id` supplies application context but is not part of the
-lock key. Turn baseline/result capture, Guarded Undo, editor writes, Git
-index/checkout mutations, delivery operations, and workspace removal MUST
-participate.
+DCC MUST provide one coordinator keyed exclusively by OS-derived physical
+root identities. `workspace_id` supplies application context but is not part
+of a lock key. A file-only workspace mutation holds its worktree `root_id`; a
+Git-capable mutation atomically holds both the worktree `root_id` and the
+descriptor-proven shared Git `common-dir` identity. Turn baseline/result
+capture, Guarded Undo, editor writes, Git index/checkout mutations, delivery
+operations, and workspace removal MUST participate.
 
-The lock key MUST use the OS-derived physical `root_id`, not
+Every lock key MUST use an OS-derived physical identity, not
 `workspace_id`, a canonicalized string path, or a Git ref. Multiple workspace
 records and path aliases that resolve to the same physical directory MUST
-contend on the same lock. The coordinator MUST retain or revalidate the root
-directory handle for the lease lifetime; physical identity drift invalidates
-the operation.
+contend on the same lock. Linked worktrees that share a Git common directory
+MUST also contend on that common-dir identity. The platform adapter MUST
+retain or revalidate the relevant worktree, Git-dir, and common-dir handles
+for the lease lifetime; physical identity or layout drift invalidates the
+operation.
 
 - Read-only preparation and capture use shared leases where safe.
 - Execute and other workspace mutations use an exclusive lease.
@@ -467,26 +471,28 @@ the operation.
 
 Implementation status: the process runtime and workspace command state share
 one coordinator, and mutation authority is resolved from the durable SQLite
-workspace mapping before physical admission. Covered mutators include editor,
-automation/spec and conflict writes; stage/unstage/discard/stage-all; DCC-run
-setup and project tasks; `before_merge`; commit, commit-and-push,
-complete-merge and push; sync/fetch/merge and delivery recovery; and
-continue-from-base with identity-checked rollback. Compound commit/push paths
-deliver the observed commit OID while retaining one physical lease. Multi-root
-mutation admission is atomic and ordered, but its deletion/delegation callers
-remain unintegrated. External-terminal setup reports, remaining delivery and
-remote-lifecycle actions, workspace/repository creation and remote
-materialization, creation-time generated-context writes,
-delegation/worktree lifecycle, and workspace/repository deletion also remain
-outside known coverage. Until that inventory is complete, the DCC capture
-driver deliberately finalizes completed turns through the
-known-mutation-coverage fail-closed path and cannot emit an eligible set.
+workspace mapping before physical admission. On macOS, the Git mutation
+runner discovers layout through the verified system Git, proves `.git` and
+`commondir` relationships using no-follow descriptor walks, retains worktree,
+Git-dir, and common-dir authority, atomically admits both physical lock keys,
+then repeats layout and identity validation under the lease. Git-capable
+setup, project tasks, conflict/index actions, validation, commit, push, sync,
+delivery recovery, and continue/rollback paths use that runner. File-only
+editor, automation/spec, mission-context, and generated-context writes retain
+the single-worktree runner. Compound commit/push paths deliver the observed
+commit OID while retaining one lease.
 
-This coverage does not yet bind linked worktrees by their shared Git
-`common-dir`. Separate worktree roots can therefore still contend on shared
-refs, configuration, hooks, and administrative metadata. The feature remains
-default-off and globally fail-closed until common-dir authority and the
-remaining mutator inventory are complete.
+Multi-root mutation, turn-interval, and capture-edge admission is atomic and
+ordered, with one shared receipt and per-root generations. Capture itself does
+not yet admit the worktree/common-dir pair, so this foundation does not by
+itself permit an eligible set. External-terminal setup reports, remaining
+delivery and remote-lifecycle actions, workspace/repository creation and
+remote materialization, creation-time generated-context writes,
+delegation/worktree lifecycle, and workspace/repository deletion remain
+outside known coverage. Until capture consumes common-dir authority and that
+inventory is complete, the driver deliberately finalizes completed turns
+through the known-mutation-coverage fail-closed path. The feature remains
+default-off and cannot emit an eligible set.
 
 The process MUST acquire a single-instance lifetime lock in the DCC app-data
 directory before startup recovery, retention, artifact purge, or interval
@@ -502,6 +508,13 @@ external programs can still race. Consequently, execute repeats on-disk checks
 immediately before each exchange and relies on the exact displaced files and
 journal for recovery. The UI MUST NOT describe the operation as globally
 atomic.
+
+The current command runner revalidates retained identities immediately before
+passing the authorized path to existing Git helpers; those helpers are not yet
+dirfd-relative. A same-user process can still replace a path after that check,
+which remains inside the external-race limitation above. Capture stays
+globally ineligible until the capture/common-dir integration and the eventual
+dirfd-bound mutation path close that gap.
 
 ## Durable journal, displaced files, and recovery
 

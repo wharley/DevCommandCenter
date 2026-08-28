@@ -974,7 +974,7 @@ async fn execute_workspace_setup_report(
     let setup_suggestions = collect_workspace_setup_suggestions(workspace);
     let setup_root = resolve_workspace_setup_root(workspace).to_string();
     match state
-        .run_workspace_mutation_blocking(&setup_root, move |root| {
+        .run_git_workspace_mutation_blocking(&setup_root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -1037,7 +1037,7 @@ fn compile_active_mission_spec_context_for_workspace(
 }
 
 /// Compiles setup context using the descriptor-rooted workspace path supplied
-/// by `run_workspace_mutation`. Callers must not pass a raw command path here.
+/// by the authorized mutation runner. Callers must not pass a raw command path here.
 fn compile_active_mission_spec_context_for_trusted_root(
     workspace: &Workspace,
     trusted_root: &Path,
@@ -1563,7 +1563,7 @@ pub async fn workspace_git_accept_conflict(
     let path = validate_git_relative_path(&input.relative_path)?;
     let side = input.side;
     state
-        .run_workspace_mutation(root, move |root| {
+        .run_git_workspace_mutation(root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -1622,7 +1622,7 @@ pub async fn workspace_git_mark_conflict_resolved(
     let path = validate_git_relative_path(&input.relative_path)?;
     let delete = input.delete;
     state
-        .run_workspace_mutation(root, move |root| {
+        .run_git_workspace_mutation(root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -1669,7 +1669,7 @@ pub async fn workspace_git_abort_merge(
         return Err("workspace_root is empty".to_string());
     }
     state
-        .run_workspace_mutation(root, move |root| {
+        .run_git_workspace_mutation(root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -2067,7 +2067,7 @@ pub async fn workspace_run_project_tasks(
     let expected_config_hash = input.expected_config_hash;
     let task_ids = input.task_ids;
     let (report, changed_files) = state
-        .run_workspace_mutation_blocking(&root, move |root| {
+        .run_git_workspace_mutation_blocking(&root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -2190,7 +2190,7 @@ pub async fn workspace_git_complete_merge(
     let expected_config_hash = input.validation_config_hash.clone();
     let expected_commands = input.validation_commands.clone();
     let (mut validation, validated_fingerprint) = state
-        .run_workspace_mutation_blocking(&root, move |root| {
+        .run_git_workspace_mutation_blocking(&root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -2214,7 +2214,7 @@ pub async fn workspace_git_complete_merge(
     let db_path = state.db_path.clone();
     let forge_login = input.forge_login.clone();
     let completed = state
-        .run_workspace_mutation_blocking(&root, move |root| {
+        .run_git_workspace_mutation_blocking(&root, move |root| {
             let root = root.to_str().ok_or_else(|| {
                 CompleteMergePushFailure::PrePush("workspace path is not valid UTF-8".to_string())
             })?;
@@ -3001,7 +3001,7 @@ pub(crate) async fn push_current_branch(
     let protected_branch = protected_branch.map(str::to_string);
     let forge_login = forge_login.map(str::to_string);
     let result = state
-        .run_workspace_mutation_blocking(root, move |root| {
+        .run_git_workspace_mutation_blocking(root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -3046,7 +3046,7 @@ async fn retry_push_current_branch(
     let db_path = state.db_path.clone();
     let forge_login = forge_login.map(str::to_string);
     let guarded = state
-        .run_workspace_mutation_blocking(root, move |root| {
+        .run_git_workspace_mutation_blocking(root, move |root| {
             let result = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())
@@ -3102,7 +3102,7 @@ pub async fn workspace_git_stage_all(
     }
 
     let output = state
-        .run_workspace_mutation(root, move |root| {
+        .run_git_workspace_mutation(root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -3238,7 +3238,7 @@ pub async fn workspace_git_stage_file(
     }
     let path = validate_git_relative_path(&input.relative_path)?;
     let output = state
-        .run_workspace_mutation(root, move |root| {
+        .run_git_workspace_mutation(root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -3265,7 +3265,7 @@ pub async fn workspace_git_unstage_file(
     }
     let path = validate_git_relative_path(&input.relative_path)?;
     let output = state
-        .run_workspace_mutation(root, move |root| {
+        .run_git_workspace_mutation(root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -3296,7 +3296,7 @@ pub async fn workspace_git_discard_file(
     }
     let path = validate_git_relative_path(&input.relative_path)?;
     state
-        .run_workspace_mutation(root, move |root| {
+        .run_git_workspace_mutation(root, move |root| {
             let root_string = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -3796,7 +3796,7 @@ pub async fn workspace_git_commit(
     let body = input.body;
     let staged_fingerprint = input.staged_fingerprint;
     state
-        .run_workspace_mutation_blocking(&root, move |root| {
+        .run_git_workspace_mutation_blocking(&root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
@@ -3824,7 +3824,7 @@ pub async fn workspace_git_commit_push(
     let db_path = state.db_path.clone();
     let forge_login = input.forge_login;
     let local = state
-        .run_workspace_mutation_blocking(&root, move |root| {
+        .run_git_workspace_mutation_blocking(&root, move |root| {
             let root = root.to_str().ok_or_else(|| {
                 CommitPushFailure::Commit("workspace path is not valid UTF-8".to_string())
             })?;
@@ -4000,7 +4000,7 @@ async fn sync_workspace_branch(
     let target_remote = target_remote.map(str::to_string);
     let forge_login = forge_login.map(str::to_string);
     let local = state
-        .run_workspace_mutation_blocking(&root, move |root| {
+        .run_git_workspace_mutation_blocking(&root, move |root| {
             let result = match root.to_str() {
                 Some(root) => sync_workspace_branch_inner(
                     &db_path,
@@ -4875,7 +4875,7 @@ pub async fn workspace_continue_from_base_branch(
                 .unwrap_or_else(|| "workspace".to_string())
         });
     let mutation = state
-        .run_workspace_mutation_blocking(&active_root, move |root| {
+        .run_git_workspace_mutation_blocking(&active_root, move |root| {
             let root = root.to_str().ok_or_else(|| {
                 ContinueBranchFailure::Other("workspace path is not valid UTF-8".to_string())
             })?;
@@ -4940,7 +4940,7 @@ pub async fn workspace_continue_from_base_branch(
         let new_branch = mutation.new_branch.clone();
         let new_head = mutation.new_head.clone();
         let rollback = state
-            .run_workspace_mutation_blocking(&active_root, move |root| {
+            .run_git_workspace_mutation_blocking(&active_root, move |root| {
                 let root = root
                     .to_str()
                     .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;

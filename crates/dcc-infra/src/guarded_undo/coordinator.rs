@@ -1,7 +1,7 @@
 //! Fail-closed in-process coordination keyed only by physical root ID.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -123,39 +123,112 @@ impl WorkspaceMutationCoordinator {
         root_id: PhysicalRootId,
         owner: TurnOwner,
     ) -> Result<TurnIntervalGuard, CoordinatorError> {
-        validate_root(&root_id)?;
+        self.begin_turn_intervals(vec![root_id], owner)
+    }
+
+    /// Atomically begins one turn interval across all requested physical roots.
+    ///
+    /// The returned guard owns one shared receipt registered under every root.
+    /// Validation, conflict checks, receipt locking, and root registration are
+    /// completed as one transaction under the coordinator lock. A failure on a
+    /// later root therefore cannot register or dirty an earlier root.
+    pub fn begin_turn_intervals(
+        self: &Arc<Self>,
+        root_ids: Vec<PhysicalRootId>,
+        owner: TurnOwner,
+    ) -> Result<TurnIntervalGuard, CoordinatorError> {
+        // Preserve the caller's first root as the logical workspace root. The
+        // scalar generation in TurnReceiptState predates multi-root admission;
+        // it remains the primary root generation for single-root compatibility.
+        // Multi-root callers must use TurnIntervalGuard::generation_for for
+        // every admitted root instead of applying that scalar to sibling roots.
+        let primary_root = root_ids
+            .first()
+            .cloned()
+            .ok_or(CoordinatorError::InvalidPhysicalRoot)?;
+        let root_ids = normalize_roots(root_ids)?;
         let mut state = lock(&self.state)?;
-        // Reserve the root before an ID allocation or any observable state
-        // change. A known provider turn cannot begin during capture.
-        if let Some(entry) = state.roots.get(&root_id) {
-            if entry.active_capture_edges != 0 {
-                return Err(CoordinatorError::CaptureEdgeActive);
-            }
-            if entry.active_turns.contains_key(&owner) {
-                return Err(CoordinatorError::DuplicateOwner);
+
+        for root_id in &root_ids {
+            if let Some(entry) = state.roots.get(root_id) {
+                if entry.active_capture_edges != 0 {
+                    return Err(CoordinatorError::CaptureEdgeActive);
+                }
+                if entry.active_turns.contains_key(&owner) {
+                    return Err(CoordinatorError::DuplicateOwner);
+                }
             }
         }
+        ensure_generation_capacity(&state, &root_ids)?;
+
         let receipt_id = self.allocate_receipt_id()?;
-        let generation = generation_for(&mut state, &root_id)?;
-        let entry = state.roots.entry(root_id.clone()).or_default();
-        let conflict = !entry.active_turns.is_empty() || entry.mutation_active;
-        if conflict {
-            mark_all_dirty(entry)?;
+        let primary_generation = state.generations.get(&primary_root).copied().unwrap_or(0);
+        let generations = root_ids
+            .iter()
+            .map(|root_id| {
+                (
+                    root_id.clone(),
+                    state.generations.get(root_id).copied().unwrap_or(0),
+                )
+            })
+            .collect::<Vec<_>>();
+        let conflict = root_ids.iter().any(|root_id| {
+            state
+                .roots
+                .get(root_id)
+                .is_some_and(|entry| !entry.active_turns.is_empty() || entry.mutation_active)
+        });
+
+        // A receipt can already be shared by several roots. Deduplicate its
+        // Arc before retaining every lock or a multi-root overlap would try to
+        // lock the same non-reentrant mutex twice.
+        let receipt_states = active_receipt_states(&state, &root_ids);
+        let mut receipt_guards = Vec::with_capacity(receipt_states.len());
+        for receipt_state in &receipt_states {
+            receipt_guards.push(
+                receipt_state
+                    .lock()
+                    .map_err(|_| CoordinatorError::Unavailable)?,
+            );
         }
-        let receipt_state = Arc::new(Mutex::new(TurnReceiptState::Clean { generation }));
+
         if conflict {
-            mark_dirty(&receipt_state)?;
+            for receipt_guard in &mut receipt_guards {
+                **receipt_guard = TurnReceiptState::Ineligible {
+                    reason_code: GuardedUndoReasonCode::ConcurrentWorkspaceMutation,
+                };
+            }
         }
-        entry.active_turns.insert(
-            owner.clone(),
-            ActiveTurn {
-                state: Arc::clone(&receipt_state),
-            },
-        );
+        let receipt_state = Arc::new(Mutex::new(if conflict {
+            TurnReceiptState::Ineligible {
+                reason_code: GuardedUndoReasonCode::ConcurrentWorkspaceMutation,
+            }
+        } else {
+            TurnReceiptState::Clean {
+                generation: primary_generation,
+            }
+        }));
+        for root_id in &root_ids {
+            if !state.generations.contains_key(root_id) {
+                state.generations.insert(root_id.clone(), 0);
+                state.generation_order.push_back(root_id.clone());
+            }
+            state
+                .roots
+                .entry(root_id.clone())
+                .or_default()
+                .active_turns
+                .insert(
+                    owner.clone(),
+                    ActiveTurn {
+                        state: Arc::clone(&receipt_state),
+                    },
+                );
+        }
         drop(state);
         Ok(TurnIntervalGuard {
             coordinator: Arc::clone(self),
-            root_id,
+            roots: generations,
             owner,
             receipt: TurnReceipt {
                 id: receipt_id,
@@ -170,21 +243,40 @@ impl WorkspaceMutationCoordinator {
         self: &Arc<Self>,
         root_id: &PhysicalRootId,
     ) -> Result<CaptureEdgeGuard, CoordinatorError> {
-        validate_root(root_id)?;
+        self.try_acquire_capture_edges(vec![root_id.clone()])
+    }
+
+    /// Atomically acquires shared capture admission for all requested roots.
+    pub fn try_acquire_capture_edges(
+        self: &Arc<Self>,
+        root_ids: Vec<PhysicalRootId>,
+    ) -> Result<CaptureEdgeGuard, CoordinatorError> {
+        let root_ids = normalize_roots(root_ids)?;
         let mut state = lock(&self.state)?;
-        generation_for(&mut state, root_id)?;
-        let entry = state.roots.entry(root_id.clone()).or_default();
-        if entry.mutation_active {
-            return Err(CoordinatorError::MutationInProgress);
+        ensure_generation_capacity(&state, &root_ids)?;
+        for root_id in &root_ids {
+            if let Some(entry) = state.roots.get(root_id) {
+                if entry.mutation_active {
+                    return Err(CoordinatorError::MutationInProgress);
+                }
+                entry
+                    .active_capture_edges
+                    .checked_add(1)
+                    .ok_or(CoordinatorError::GenerationExhausted)?;
+            }
         }
-        entry.active_capture_edges = entry
-            .active_capture_edges
-            .checked_add(1)
-            .ok_or(CoordinatorError::GenerationExhausted)?;
+        for root_id in &root_ids {
+            if !state.generations.contains_key(root_id) {
+                state.generations.insert(root_id.clone(), 0);
+                state.generation_order.push_back(root_id.clone());
+            }
+            let entry = state.roots.entry(root_id.clone()).or_default();
+            entry.active_capture_edges += 1;
+        }
         drop(state);
         Ok(CaptureEdgeGuard {
             coordinator: Arc::clone(self),
-            root_id: root_id.clone(),
+            root_ids,
             active: true,
         })
     }
@@ -233,14 +325,7 @@ impl WorkspaceMutationCoordinator {
         self: &Arc<Self>,
         mut root_ids: Vec<PhysicalRootId>,
     ) -> Result<MultiMutationGuard, CoordinatorError> {
-        if root_ids.is_empty() {
-            return Err(CoordinatorError::InvalidPhysicalRoot);
-        }
-        for root_id in &root_ids {
-            validate_root(root_id)?;
-        }
-        root_ids.sort_by(|left, right| left.0.cmp(&right.0));
-        root_ids.dedup();
+        root_ids = normalize_roots(root_ids)?;
 
         let mut state = lock(&self.state)?;
         let mut plans = Vec::with_capacity(root_ids.len());
@@ -271,20 +356,7 @@ impl WorkspaceMutationCoordinator {
         // changing any receipt, generation, or mutation flag. In particular,
         // do not preflight with a temporary lock: another thread could poison
         // a later receipt between that check and the commit phase.
-        let mut receipt_states = Vec::new();
-        for root_id in &root_ids {
-            if let Some(entry) = state.roots.get(root_id) {
-                let mut owners = entry.active_turns.iter().collect::<Vec<_>>();
-                owners.sort_by(|(left, _), (right, _)| {
-                    left.session_id
-                        .0
-                        .as_bytes()
-                        .cmp(right.session_id.0.as_bytes())
-                        .then_with(|| left.turn_id.0.as_bytes().cmp(right.turn_id.0.as_bytes()))
-                });
-                receipt_states.extend(owners.into_iter().map(|(_, turn)| Arc::clone(&turn.state)));
-            }
-        }
+        let receipt_states = active_receipt_states(&state, &root_ids);
         let mut receipt_guards = Vec::with_capacity(receipt_states.len());
         for receipt_state in &receipt_states {
             receipt_guards.push(
@@ -343,16 +415,20 @@ impl WorkspaceMutationCoordinator {
             .map_err(|_| CoordinatorError::ReceiptIdExhausted)
     }
 
-    fn end_turn_interval(
+    fn end_turn_intervals(
         &self,
-        root_id: &PhysicalRootId,
+        roots: &[(PhysicalRootId, u64)],
         owner: &TurnOwner,
     ) -> Result<(), CoordinatorError> {
         let mut state = lock(&self.state)?;
-        if let Some(entry) = state.roots.get_mut(root_id) {
-            entry.active_turns.remove(owner);
+        for (root_id, _) in roots {
+            if let Some(entry) = state.roots.get_mut(root_id) {
+                entry.active_turns.remove(owner);
+            }
         }
-        remove_idle_root(&mut state, root_id);
+        for (root_id, _) in roots {
+            remove_idle_root(&mut state, root_id);
+        }
         Ok(())
     }
 
@@ -377,17 +453,76 @@ impl WorkspaceMutationCoordinator {
         }
         Ok(())
     }
-    fn release_capture_edge(&self, root_id: &PhysicalRootId) {
+    fn release_capture_edges(&self, root_ids: &[PhysicalRootId]) {
         let Ok(mut state) = lock(&self.state) else {
             return;
         };
-        if let Some(entry) = state.roots.get_mut(root_id) {
-            if let Some(next) = entry.active_capture_edges.checked_sub(1) {
-                entry.active_capture_edges = next;
+        for root_id in root_ids {
+            if let Some(entry) = state.roots.get_mut(root_id) {
+                if let Some(next) = entry.active_capture_edges.checked_sub(1) {
+                    entry.active_capture_edges = next;
+                }
             }
         }
-        remove_idle_root(&mut state, root_id);
+        for root_id in root_ids {
+            remove_idle_root(&mut state, root_id);
+        }
     }
+}
+
+fn normalize_roots(
+    mut root_ids: Vec<PhysicalRootId>,
+) -> Result<Vec<PhysicalRootId>, CoordinatorError> {
+    if root_ids.is_empty() {
+        return Err(CoordinatorError::InvalidPhysicalRoot);
+    }
+    for root_id in &root_ids {
+        validate_root(root_id)?;
+    }
+    root_ids.sort_by(|left, right| left.0.cmp(&right.0));
+    root_ids.dedup();
+    Ok(root_ids)
+}
+
+fn ensure_generation_capacity(
+    state: &CoordinatorState,
+    root_ids: &[PhysicalRootId],
+) -> Result<(), CoordinatorError> {
+    let new_generations = root_ids
+        .iter()
+        .filter(|root_id| !state.generations.contains_key(*root_id))
+        .count();
+    if state.generations.len().saturating_add(new_generations) > MAX_RETAINED_ROOT_GENERATIONS {
+        return Err(CoordinatorError::RootGenerationCapacityExhausted);
+    }
+    Ok(())
+}
+
+fn active_receipt_states(
+    state: &CoordinatorState,
+    root_ids: &[PhysicalRootId],
+) -> Vec<Arc<Mutex<TurnReceiptState>>> {
+    let mut receipt_states = Vec::new();
+    let mut seen = HashSet::new();
+    for root_id in root_ids {
+        if let Some(entry) = state.roots.get(root_id) {
+            let mut owners = entry.active_turns.iter().collect::<Vec<_>>();
+            owners.sort_by(|(left, _), (right, _)| {
+                left.session_id
+                    .0
+                    .as_bytes()
+                    .cmp(right.session_id.0.as_bytes())
+                    .then_with(|| left.turn_id.0.as_bytes().cmp(right.turn_id.0.as_bytes()))
+            });
+            for (_, turn) in owners {
+                let identity = Arc::as_ptr(&turn.state) as usize;
+                if seen.insert(identity) {
+                    receipt_states.push(Arc::clone(&turn.state));
+                }
+            }
+        }
+    }
+    receipt_states
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CoordinatorError> {
@@ -421,9 +556,13 @@ fn remove_idle_root(state: &mut CoordinatorState, root_id: &PhysicalRootId) {
     }
 }
 fn mark_dirty(state: &Arc<Mutex<TurnReceiptState>>) -> Result<(), CoordinatorError> {
-    *lock(state)? = TurnReceiptState::Ineligible {
+    let mut receipt = lock(state)?;
+    *receipt = TurnReceiptState::Ineligible {
         reason_code: GuardedUndoReasonCode::ConcurrentWorkspaceMutation,
     };
+    // Receipt and coordinator locks are never held together in this order.
+    // Turn guard Drop calls end_turn_intervals only after this guard is gone.
+    drop(receipt);
     Ok(())
 }
 fn mark_all_dirty(entry: &RootEntry) -> Result<(), CoordinatorError> {
@@ -435,7 +574,7 @@ fn mark_all_dirty(entry: &RootEntry) -> Result<(), CoordinatorError> {
 
 pub struct TurnIntervalGuard {
     coordinator: Arc<WorkspaceMutationCoordinator>,
-    root_id: PhysicalRootId,
+    roots: Vec<(PhysicalRootId, u64)>,
     owner: TurnOwner,
     receipt: TurnReceipt,
     active: bool,
@@ -445,12 +584,29 @@ impl TurnIntervalGuard {
         self.receipt.clone()
     }
 
+    pub fn generations(&self) -> Vec<u64> {
+        self.roots
+            .iter()
+            .map(|(_, generation)| *generation)
+            .collect()
+    }
+
+    /// Returns the baseline generation for one exact admitted root.
+    ///
+    /// Multi-root callers should use this accessor. The scalar generation in
+    /// the shared receipt belongs only to the first root supplied at begin.
+    pub fn generation_for(&self, root_id: &PhysicalRootId) -> Option<u64> {
+        self.roots
+            .iter()
+            .find_map(|(candidate, generation)| (candidate == root_id).then_some(*generation))
+    }
+
     /// The explicit normal boundary. Cancellation and unwinding use `Drop` and
     /// are intentionally ineligible instead of silently preserving `Clean`.
     pub fn finish(mut self) -> Result<TurnReceipt, CoordinatorError> {
         match self
             .coordinator
-            .end_turn_interval(&self.root_id, &self.owner)
+            .end_turn_intervals(&self.roots, &self.owner)
         {
             Ok(()) => {
                 self.active = false;
@@ -470,20 +626,20 @@ impl Drop for TurnIntervalGuard {
             let _ = mark_dirty(&self.receipt.state);
             let _ = self
                 .coordinator
-                .end_turn_interval(&self.root_id, &self.owner);
+                .end_turn_intervals(&self.roots, &self.owner);
             self.active = false;
         }
     }
 }
 pub struct CaptureEdgeGuard {
     coordinator: Arc<WorkspaceMutationCoordinator>,
-    root_id: PhysicalRootId,
+    root_ids: Vec<PhysicalRootId>,
     active: bool,
 }
 impl Drop for CaptureEdgeGuard {
     fn drop(&mut self) {
         if self.active {
-            self.coordinator.release_capture_edge(&self.root_id);
+            self.coordinator.release_capture_edges(&self.root_ids);
             self.active = false;
         }
     }
@@ -896,5 +1052,191 @@ mod tests {
         ));
         assert_eq!(c.generation(&root(29)), Ok(0));
         assert!(lock(&c.state).unwrap().roots.get(&root(29)).is_none());
+    }
+
+    #[test]
+    fn multi_turn_sorts_deduplicates_and_finishes_all_roots() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        drop(c.try_acquire_mutation(&root(43)).unwrap());
+        let interval = c
+            .begin_turn_intervals(vec![root(43), root(41), root(43), root(42)], owner(1))
+            .unwrap();
+        assert_eq!(interval.generations(), vec![0, 0, 1]);
+        assert_eq!(interval.generation_for(&root(41)), Some(0));
+        assert_eq!(interval.generation_for(&root(42)), Some(0));
+        assert_eq!(interval.generation_for(&root(43)), Some(1));
+        assert_eq!(interval.generation_for(&root(40)), None);
+        let receipt = interval.receipt();
+        {
+            let state = lock(&c.state).unwrap();
+            assert_eq!(state.roots.len(), 3);
+            assert_eq!(
+                state.generation_order.iter().cloned().collect::<Vec<_>>(),
+                vec![root(43), root(41), root(42)]
+            );
+            for root_id in [root(41), root(42), root(43)] {
+                let active = state
+                    .roots
+                    .get(&root_id)
+                    .unwrap()
+                    .active_turns
+                    .get(&owner(1))
+                    .unwrap();
+                assert!(Arc::ptr_eq(&active.state, &receipt.state));
+            }
+        }
+        let finished = interval.finish().unwrap();
+        assert!(matches!(
+            finished.state(),
+            Ok(TurnReceiptState::Clean { generation: 1 })
+        ));
+        assert!(lock(&c.state).unwrap().roots.is_empty());
+    }
+
+    #[test]
+    fn multi_turn_later_capture_failure_is_all_or_none() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let edge = c.try_acquire_capture_edge(&root(45)).unwrap();
+        assert!(matches!(
+            c.begin_turn_intervals(vec![root(44), root(45)], owner(1)),
+            Err(CoordinatorError::CaptureEdgeActive)
+        ));
+        assert_eq!(c.generation(&root(44)), Ok(0));
+        assert!(lock(&c.state).unwrap().roots.get(&root(44)).is_none());
+        assert_eq!(c.next_receipt_id.load(Ordering::Acquire), 0);
+        drop(edge);
+    }
+
+    #[test]
+    fn multi_turn_duplicate_owner_on_shared_root_is_non_destructive() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let common = root(48);
+        let first = c
+            .begin_turn_intervals(vec![root(46), common.clone()], owner(1))
+            .unwrap();
+        let receipt = first.receipt();
+        assert!(matches!(
+            c.begin_turn_intervals(vec![root(47), common], owner(1)),
+            Err(CoordinatorError::DuplicateOwner)
+        ));
+        assert!(matches!(
+            receipt.state(),
+            Ok(TurnReceiptState::Clean { generation: 0 })
+        ));
+        assert!(lock(&c.state).unwrap().roots.get(&root(47)).is_none());
+        first.finish().unwrap();
+    }
+
+    #[test]
+    fn sibling_turns_overlap_through_one_shared_common_root() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let common = root(51);
+        let first = c
+            .begin_turn_intervals(vec![root(49), common.clone()], owner(1))
+            .unwrap();
+        let second = c
+            .begin_turn_intervals(vec![root(50), common], owner(2))
+            .unwrap();
+        assert!(matches!(
+            first.receipt().state(),
+            Ok(TurnReceiptState::Ineligible { .. })
+        ));
+        assert!(matches!(
+            second.receipt().state(),
+            Ok(TurnReceiptState::Ineligible { .. })
+        ));
+        first.finish().unwrap();
+        second.finish().unwrap();
+        assert!(lock(&c.state).unwrap().roots.is_empty());
+    }
+
+    #[test]
+    fn multi_turn_drop_dirties_receipt_and_releases_every_root() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let interval = c
+            .begin_turn_intervals(vec![root(52), root(53)], owner(1))
+            .unwrap();
+        let receipt = interval.receipt();
+        let result = catch_unwind(AssertUnwindSafe(move || {
+            let _interval = interval;
+            panic!("test unwind");
+        }));
+        assert!(result.is_err());
+        assert!(matches!(
+            receipt.state(),
+            Ok(TurnReceiptState::Ineligible {
+                reason_code: GuardedUndoReasonCode::ConcurrentWorkspaceMutation
+            })
+        ));
+        assert!(lock(&c.state).unwrap().roots.is_empty());
+    }
+
+    #[test]
+    fn multi_capture_sorts_deduplicates_and_drop_releases_all_roots() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let edge = c
+            .try_acquire_capture_edges(vec![root(56), root(54), root(55), root(54)])
+            .unwrap();
+        {
+            let state = lock(&c.state).unwrap();
+            assert_eq!(state.roots.len(), 3);
+            assert_eq!(state.generation_order.back(), Some(&root(56)));
+            for root_id in [root(54), root(55), root(56)] {
+                assert_eq!(state.roots.get(&root_id).unwrap().active_capture_edges, 1);
+            }
+        }
+        let result = catch_unwind(AssertUnwindSafe(move || {
+            let _edge = edge;
+            panic!("test unwind");
+        }));
+        assert!(result.is_err());
+        assert!(lock(&c.state).unwrap().roots.is_empty());
+    }
+
+    #[test]
+    fn multi_capture_later_mutation_failure_is_all_or_none() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let mutation = c.try_acquire_mutation(&root(58)).unwrap();
+        assert!(matches!(
+            c.try_acquire_capture_edges(vec![root(57), root(58)]),
+            Err(CoordinatorError::MutationInProgress)
+        ));
+        assert_eq!(c.generation(&root(57)), Ok(0));
+        assert!(lock(&c.state).unwrap().roots.get(&root(57)).is_none());
+        drop(mutation);
+    }
+
+    #[test]
+    fn shared_common_capture_blocks_sibling_mutation_without_partial_admission() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let common = root(61);
+        let edge = c
+            .try_acquire_capture_edges(vec![root(59), common.clone()])
+            .unwrap();
+        assert!(matches!(
+            c.try_acquire_mutations(vec![root(60), common]),
+            Err(CoordinatorError::CaptureEdgeActive)
+        ));
+        assert_eq!(c.generation(&root(60)), Ok(0));
+        assert!(lock(&c.state).unwrap().roots.get(&root(60)).is_none());
+        drop(edge);
+    }
+
+    #[test]
+    fn multi_mutation_deduplicates_one_receipt_shared_across_roots() {
+        let c = Arc::new(WorkspaceMutationCoordinator::new());
+        let interval = c
+            .begin_turn_intervals(vec![root(62), root(63)], owner(1))
+            .unwrap();
+        let receipt = interval.receipt();
+        let mutation = c
+            .try_acquire_mutations(vec![root(63), root(62)])
+            .expect("shared receipt must be locked once");
+        assert!(matches!(
+            receipt.state(),
+            Ok(TurnReceiptState::Ineligible { .. })
+        ));
+        drop(mutation);
+        interval.finish().unwrap();
     }
 }

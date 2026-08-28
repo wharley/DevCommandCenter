@@ -30,7 +30,10 @@ use tokio::sync::Notify;
 
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use dcc_infra::guarded_undo::{
-    coordinator::{CoordinatorError, MutationGuard, WorkspaceMutationCoordinator},
+    coordinator::{
+        CoordinatorError, MultiMutationGuard, MutationGuard, WorkspaceMutationCoordinator,
+    },
+    macos_git_bridge::MacGitMutationAuthority,
     macos_root::MacWorkspaceRoot,
 };
 
@@ -134,6 +137,47 @@ impl PhysicalMutationLease {
 
     fn path(&self) -> &Path {
         &self.workspace_absolute
+    }
+}
+
+/// Retains the descriptor-proven worktree/common-dir authority and their
+/// atomic coordinator guard for the complete synchronous Git operation.
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+struct PhysicalGitMutationLease {
+    // Drop the guard before closing authority descriptors.
+    guard: MultiMutationGuard,
+    authority: MacGitMutationAuthority,
+}
+
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+impl fmt::Debug for PhysicalGitMutationLease {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("PhysicalGitMutationLease([redacted])")
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+impl PhysicalGitMutationLease {
+    fn acquire(
+        coordinator: &Arc<WorkspaceMutationCoordinator>,
+        workspace_absolute: PathBuf,
+    ) -> Result<Self, WorkspaceMutationRunError<std::convert::Infallible>> {
+        let authority = MacGitMutationAuthority::open(&workspace_absolute)
+            .map_err(|_| WorkspaceMutationRunError::PhysicalRootUnavailable)?;
+        let guard = coordinator
+            .try_acquire_mutations(vec![
+                authority.worktree_root_id(),
+                authority.common_dir_id(),
+            ])
+            .map_err(map_coordinator_error)?;
+        authority
+            .revalidate()
+            .map_err(|_| WorkspaceMutationRunError::PhysicalRootUnavailable)?;
+        Ok(Self { guard, authority })
+    }
+
+    fn path(&self) -> &Path {
+        self.authority.workspace_path()
     }
 }
 
@@ -742,6 +786,58 @@ impl GuardedUndoRuntime {
             .await
     }
 
+    /// Runs a Git mutation while atomically holding both the authorized
+    /// worktree root and its descriptor-proven shared common directory.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) async fn run_git_workspace_mutation<T, E, F>(
+        &self,
+        workspace_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        let coordinator = Arc::clone(&self.inner.coordinator);
+        tokio::task::spawn_blocking(move || {
+            let lease = PhysicalGitMutationLease::acquire(&coordinator, workspace_absolute)
+                .map_err(|error| match error {
+                    WorkspaceMutationRunError::Busy => WorkspaceMutationRunError::Busy,
+                    WorkspaceMutationRunError::PhysicalRootUnavailable => {
+                        WorkspaceMutationRunError::PhysicalRootUnavailable
+                    }
+                    WorkspaceMutationRunError::CoordinatorUnavailable => {
+                        WorkspaceMutationRunError::CoordinatorUnavailable
+                    }
+                    WorkspaceMutationRunError::WorkerUnavailable
+                    | WorkspaceMutationRunError::Operation(_) => {
+                        WorkspaceMutationRunError::CoordinatorUnavailable
+                    }
+                })?;
+            operation(lease.path()).map_err(WorkspaceMutationRunError::Operation)
+        })
+        .await
+        .map_err(|_| WorkspaceMutationRunError::WorkerUnavailable)?
+    }
+
+    /// Child-process-capable Git operations use the same blocking worker and
+    /// two-root lease; cancelling the async waiter cannot release either root.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) async fn run_git_workspace_mutation_blocking<T, E, F>(
+        &self,
+        workspace_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        self.run_git_workspace_mutation(workspace_absolute, operation)
+            .await
+    }
+
     /// Feature-off is deliberately a direct call: no platform inspection,
     /// coordinator allocation, blocking worker, or filesystem I/O is added.
     #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
@@ -775,6 +871,38 @@ impl GuardedUndoRuntime {
         })
         .await
         .map_err(|_| WorkspaceMutationRunError::WorkerUnavailable)?
+    }
+
+    /// Feature-off preserves the ordinary direct mutation runner exactly: the
+    /// path is neither opened nor inspected as a Git repository.
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    pub(crate) async fn run_git_workspace_mutation<T, E, F>(
+        &self,
+        workspace_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        F: FnOnce(&Path) -> Result<T, E>,
+    {
+        self.run_workspace_mutation(workspace_absolute, operation)
+            .await
+    }
+
+    /// Feature-off preserves the existing blocking executor boundary and does
+    /// no SQLite, Git-layout, descriptor, or coordinator work of its own.
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    pub(crate) async fn run_git_workspace_mutation_blocking<T, E, F>(
+        &self,
+        workspace_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        self.run_workspace_mutation_blocking(workspace_absolute, operation)
+            .await
     }
 
     /// Lazily creates the one capture-v2 service (and therefore the one
@@ -1788,6 +1916,8 @@ impl CaptureDriver for CaptureV2Driver {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    use std::process::Command;
     use std::sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Condvar,
@@ -1956,9 +2086,65 @@ mod tests {
             if predicate() {
                 return;
             }
-            tokio::task::yield_now().await;
+            // `spawn_blocking` startup is not guaranteed to be scheduled by a
+            // bounded number of async yields on a current-thread runtime.
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
         panic!("condition did not become true");
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    fn linked_git_fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        fn git(root: &Path, args: &[&str]) {
+            let output = Command::new("/usr/bin/git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .output()
+                .expect("run fixture git");
+            assert!(
+                output.status.success(),
+                "fixture git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let temporary = tempfile::tempdir_in("/private/tmp").expect("git fixture");
+        let main = temporary.path().join("main");
+        let linked = temporary.path().join("linked");
+        std::fs::create_dir(&main).expect("main worktree");
+        git(&main, &["init", "--initial-branch=main"]);
+        git(&main, &["config", "user.name", "DCC Test"]);
+        git(&main, &["config", "user.email", "dcc-test@example.invalid"]);
+        std::fs::write(main.join("tracked.txt"), b"baseline\n").expect("tracked fixture");
+        git(&main, &["add", "tracked.txt"]);
+        git(&main, &["commit", "-m", "baseline"]);
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "linked-worktree",
+                linked.to_str().expect("utf-8 linked path"),
+            ],
+        );
+        let main = std::fs::canonicalize(main).expect("physical main");
+        let linked = std::fs::canonicalize(linked).expect("physical linked");
+        let main_authority = MacGitMutationAuthority::open(&main).expect("main Git authority");
+        let linked_authority =
+            MacGitMutationAuthority::open(&linked).expect("linked Git authority");
+        assert_ne!(
+            main_authority.worktree_root_id(),
+            linked_authority.worktree_root_id()
+        );
+        assert_eq!(
+            main_authority.common_dir_id(),
+            linked_authority.common_dir_id()
+        );
+        (temporary, main, linked)
     }
 
     #[test]
@@ -2005,6 +2191,144 @@ mod tests {
             })
             .await;
         assert!(result.is_ok());
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn feature_off_git_mutations_preserve_no_io_and_executor_contracts() {
+        let runtime = GuardedUndoRuntime::new();
+        let nonexistent = PathBuf::from("relative/non-git/path/that-must-not-be-opened");
+        let observed = nonexistent.clone();
+        let direct = runtime
+            .run_git_workspace_mutation(nonexistent.clone(), move |path| {
+                assert_eq!(path, observed);
+                Ok::<_, ()>(17_u8)
+            })
+            .await;
+        assert_eq!(direct.unwrap(), 17);
+
+        let caller = std::thread::current().id();
+        let observed = nonexistent.clone();
+        let blocking = runtime
+            .run_git_workspace_mutation_blocking(nonexistent, move |path| {
+                assert_eq!(path, observed);
+                assert_ne!(std::thread::current().id(), caller);
+                Ok::<_, ()>(23_u8)
+            })
+            .await;
+        assert_eq!(blocking.unwrap(), 23);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn git_mutation_fails_closed_for_a_non_git_workspace() {
+        let temporary = tempfile::tempdir_in("/private/tmp").unwrap();
+        let workspace = std::fs::canonicalize(temporary.path()).unwrap();
+        let runtime = GuardedUndoRuntime::new();
+        let called = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&called);
+        let result = runtime
+            .run_git_workspace_mutation(workspace, move |_| {
+                observed.store(true, Ordering::SeqCst);
+                Ok::<_, ()>(())
+            })
+            .await;
+        assert!(matches!(
+            result,
+            Err(WorkspaceMutationRunError::PhysicalRootUnavailable)
+        ));
+        assert!(!called.load(Ordering::SeqCst));
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn linked_worktree_git_mutations_contend_on_the_common_directory() {
+        let (_temporary, main, linked) = linked_git_fixture();
+        let coordinator = Arc::new(WorkspaceMutationCoordinator::new());
+        let runtime = GuardedUndoRuntime::new_with_coordinator(coordinator);
+        let gate = Arc::new(Gate::closed());
+        let started = Arc::new(AtomicBool::new(false));
+
+        let first_runtime = runtime.clone();
+        let first_gate = Arc::clone(&gate);
+        let first_started = Arc::clone(&started);
+        let first = tokio::spawn(async move {
+            first_runtime
+                .run_git_workspace_mutation(main, move |_| {
+                    first_started.store(true, Ordering::SeqCst);
+                    first_gate.wait();
+                    Ok::<_, ()>(())
+                })
+                .await
+        });
+        wait_until(|| started.load(Ordering::SeqCst)).await;
+        assert!(matches!(
+            runtime
+                .run_git_workspace_mutation(linked.clone(), |_| Ok::<_, ()>(()))
+                .await,
+            Err(WorkspaceMutationRunError::Busy)
+        ));
+        gate.release();
+        first.await.unwrap().unwrap();
+        runtime
+            .run_git_workspace_mutation(linked, |_| Ok::<_, ()>(()))
+            .await
+            .unwrap();
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelled_git_waiter_retains_worktree_and_common_directory_leases() {
+        let (_temporary, main, linked) = linked_git_fixture();
+        let coordinator = Arc::new(WorkspaceMutationCoordinator::new());
+        let runtime = GuardedUndoRuntime::new_with_coordinator(coordinator);
+        let gate = Arc::new(Gate::closed());
+        let started = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+
+        let worker_runtime = runtime.clone();
+        let worker_main = main.clone();
+        let worker_gate = Arc::clone(&gate);
+        let worker_started = Arc::clone(&started);
+        let worker_finished = Arc::clone(&finished);
+        let waiter = tokio::spawn(async move {
+            worker_runtime
+                .run_git_workspace_mutation(worker_main, move |_| {
+                    worker_started.store(true, Ordering::SeqCst);
+                    worker_gate.wait();
+                    worker_finished.store(true, Ordering::SeqCst);
+                    Ok::<_, ()>(())
+                })
+                .await
+        });
+        wait_until(|| started.load(Ordering::SeqCst)).await;
+        waiter.abort();
+
+        // The ordinary runner observes the retained worktree root, while the
+        // linked Git runner proves that the shared common-dir is also retained.
+        assert!(matches!(
+            runtime
+                .run_workspace_mutation(main.clone(), |_| Ok::<_, ()>(()))
+                .await,
+            Err(WorkspaceMutationRunError::Busy)
+        ));
+        assert!(matches!(
+            runtime
+                .run_git_workspace_mutation(linked.clone(), |_| Ok::<_, ()>(()))
+                .await,
+            Err(WorkspaceMutationRunError::Busy)
+        ));
+
+        gate.release();
+        wait_until(|| finished.load(Ordering::SeqCst)).await;
+        runtime
+            .run_workspace_mutation(main, |_| Ok::<_, ()>(()))
+            .await
+            .unwrap();
+        runtime
+            .run_git_workspace_mutation(linked, |_| Ok::<_, ()>(()))
+            .await
+            .unwrap();
     }
 
     #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]

@@ -1,16 +1,18 @@
 //! Physical macOS validation for logical paths emitted by Git.
 //!
-//! This bridge deliberately accepts only layouts that can be proven to live
-//! below the retained workspace descriptor. Logical paths are never used for
-//! filesystem access before conversion to a validated repository-relative
-//! byte path.
+//! Capture index reads accept only layouts proven below the retained workspace
+//! descriptor. Mutation authority additionally supports external linked-
+//! worktree metadata by opening every absolute directory no-follow, proving
+//! the `.git`/`commondir` relationship, and retaining all physical handles.
+//! Logical Git output is never authority by itself.
 
 #![cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 
 use std::{
+    ffi::OsString,
     fmt,
-    os::unix::ffi::OsStringExt,
-    path::{Path, PathBuf},
+    os::unix::ffi::{OsStrExt, OsStringExt},
+    path::{Component, Path, PathBuf},
     sync::Arc,
 };
 
@@ -18,7 +20,8 @@ use dcc_core::domain::guarded_undo::{OpaqueRepoPath, PhysicalRootId, RegularFile
 
 use super::{
     git_inspector::{
-        IndexFileReader, IndexObservation, IndexReadError, UntrustedGitLayout, UntrustedGitPath,
+        GitMutationLayout, IndexFileReader, IndexObservation, IndexReadError, TrustedGitBinary,
+        UntrustedGitLayout, UntrustedGitPath,
     },
     macos_root::{MacWorkspaceRoot, MacWorkspaceRootError, StableDigestObservation},
 };
@@ -26,7 +29,7 @@ use super::{
 const MAX_GITDIR_FILE_BYTES: u64 = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MacGitBridgeError {
+pub enum MacGitBridgeError {
     InvalidWorkspace,
     LayoutMismatch,
     LayoutEscape,
@@ -35,6 +38,290 @@ pub(crate) enum MacGitBridgeError {
     IndexUnreadable,
     IndexTooLarge,
     IndexChanged,
+}
+
+/// Descriptor-retained physical authority for one authorized Git worktree.
+///
+/// Logical paths emitted by Git are treated only as discovery hints. Opening
+/// validates every path component with `O_NOFOLLOW`, proves the workspace's
+/// `.git` binding and linked-worktree `commondir` relationship, and retains
+/// all three directory objects for the complete mutation lease lifetime.
+pub struct MacGitMutationAuthority {
+    workspace_absolute: PathBuf,
+    workspace: Arc<MacWorkspaceRoot>,
+    git_dir: Arc<MacWorkspaceRoot>,
+    common_dir: Arc<MacWorkspaceRoot>,
+    layout: GitMutationLayout,
+    git: TrustedGitBinary,
+}
+
+impl fmt::Debug for MacGitMutationAuthority {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MacGitMutationAuthority([redacted])")
+    }
+}
+
+impl MacGitMutationAuthority {
+    pub fn open(workspace_absolute: &Path) -> Result<Self, MacGitBridgeError> {
+        let git = TrustedGitBinary::verify_absolute(Path::new("/usr/bin/git"))
+            .map_err(|_| MacGitBridgeError::UnsupportedLayout)?;
+        let layout = git
+            .discover_mutation_layout(workspace_absolute)
+            .map_err(|_| MacGitBridgeError::UnsupportedLayout)?;
+        let bound = bind_mutation_authority(workspace_absolute, &layout)?;
+        Ok(Self {
+            workspace_absolute: workspace_absolute.to_path_buf(),
+            workspace: bound.workspace,
+            git_dir: bound.git_dir,
+            common_dir: bound.common_dir,
+            layout,
+            git,
+        })
+    }
+
+    pub fn worktree_root_id(&self) -> PhysicalRootId {
+        self.workspace.physical_root_id()
+    }
+
+    pub fn common_dir_id(&self) -> PhysicalRootId {
+        self.common_dir.physical_root_id()
+    }
+
+    pub fn workspace_path(&self) -> &Path {
+        &self.workspace_absolute
+    }
+
+    /// Repeats hardened Git discovery and physical binding after coordinator
+    /// admission. Exact logical layout and every retained directory identity
+    /// must still match; otherwise the mutation fails closed.
+    pub fn revalidate(&self) -> Result<(), MacGitBridgeError> {
+        let layout = self
+            .git
+            .discover_mutation_layout(&self.workspace_absolute)
+            .map_err(|_| MacGitBridgeError::UnsupportedLayout)?;
+        if layout != self.layout {
+            return Err(MacGitBridgeError::LayoutMismatch);
+        }
+        let rebound = bind_mutation_authority(&self.workspace_absolute, &layout)?;
+        if rebound.workspace.physical_root_id() != self.workspace.physical_root_id()
+            || rebound.git_dir.physical_root_id() != self.git_dir.physical_root_id()
+            || rebound.common_dir.physical_root_id() != self.common_dir.physical_root_id()
+        {
+            return Err(MacGitBridgeError::LayoutMismatch);
+        }
+        Ok(())
+    }
+}
+
+struct BoundMutationAuthority {
+    workspace: Arc<MacWorkspaceRoot>,
+    git_dir: Arc<MacWorkspaceRoot>,
+    common_dir: Arc<MacWorkspaceRoot>,
+}
+
+fn bind_mutation_authority(
+    workspace_absolute: &Path,
+    layout: &GitMutationLayout,
+) -> Result<BoundMutationAuthority, MacGitBridgeError> {
+    if !workspace_absolute.is_absolute() {
+        return Err(MacGitBridgeError::InvalidWorkspace);
+    }
+    let workspace = Arc::new(
+        MacWorkspaceRoot::open_absolute(workspace_absolute)
+            .map_err(|_| MacGitBridgeError::InvalidWorkspace)?,
+    );
+    workspace
+        .validate_root_directory()
+        .map_err(|_| MacGitBridgeError::InvalidWorkspace)?;
+    let layout_worktree = open_layout_directory(&layout.worktree)?;
+    if layout_worktree.physical_root_id() != workspace.physical_root_id() {
+        return Err(MacGitBridgeError::LayoutMismatch);
+    }
+
+    let git_dir_path = untrusted_absolute_path(&layout.git_dir)?;
+    let common_dir_path = untrusted_absolute_path(&layout.common_dir)?;
+    let git_dir = Arc::new(
+        MacWorkspaceRoot::open_absolute(&git_dir_path)
+            .map_err(|_| MacGitBridgeError::UnsafeGitMetadata)?,
+    );
+    let common_dir = Arc::new(
+        MacWorkspaceRoot::open_absolute(&common_dir_path)
+            .map_err(|_| MacGitBridgeError::UnsafeGitMetadata)?,
+    );
+    git_dir
+        .validate_root_directory()
+        .map_err(|_| MacGitBridgeError::UnsafeGitMetadata)?;
+    common_dir
+        .validate_root_directory()
+        .map_err(|_| MacGitBridgeError::UnsafeGitMetadata)?;
+
+    validate_workspace_git_binding(
+        &workspace,
+        workspace_absolute,
+        &git_dir_path,
+        &git_dir.physical_root_id(),
+    )?;
+    validate_common_dir_binding(
+        &git_dir,
+        &git_dir_path,
+        &common_dir_path,
+        &common_dir.physical_root_id(),
+    )?;
+
+    if git_dir.physical_root_id() != common_dir.physical_root_id()
+        && !git_dir
+            .ancestry_ids()
+            .iter()
+            .any(|identity| identity == &common_dir.physical_root_id())
+    {
+        return Err(MacGitBridgeError::LayoutMismatch);
+    }
+
+    Ok(BoundMutationAuthority {
+        workspace,
+        git_dir,
+        common_dir,
+    })
+}
+
+fn open_layout_directory(path: &UntrustedGitPath) -> Result<MacWorkspaceRoot, MacGitBridgeError> {
+    let path = untrusted_absolute_path(path)?;
+    MacWorkspaceRoot::open_absolute(&path).map_err(|_| MacGitBridgeError::UnsafeGitMetadata)
+}
+
+fn untrusted_absolute_path(path: &UntrustedGitPath) -> Result<PathBuf, MacGitBridgeError> {
+    validate_absolute(path.as_bytes()).map_err(|_| MacGitBridgeError::LayoutEscape)?;
+    let path = PathBuf::from(OsString::from_vec(path.as_bytes().to_vec()));
+    if path
+        .components()
+        .any(|component| !matches!(component, Component::RootDir | Component::Normal(_)))
+    {
+        return Err(MacGitBridgeError::LayoutEscape);
+    }
+    Ok(path)
+}
+
+fn validate_workspace_git_binding(
+    workspace: &MacWorkspaceRoot,
+    workspace_absolute: &Path,
+    git_dir_absolute: &Path,
+    expected_git_dir_id: &PhysicalRootId,
+) -> Result<(), MacGitBridgeError> {
+    let dot_git = opaque(b".git")?;
+    if let Ok(dot_git_id) = workspace.validate_relative_directory(&dot_git) {
+        return if &dot_git_id == expected_git_dir_id {
+            Ok(())
+        } else {
+            Err(MacGitBridgeError::LayoutMismatch)
+        };
+    }
+
+    let capture = workspace
+        .read_stable_twice(&dot_git, MAX_GITDIR_FILE_BYTES, None)
+        .map_err(|_| MacGitBridgeError::UnsafeGitMetadata)?;
+    validate_gitdir_file_metadata(&capture.metadata)?;
+    let target = parse_gitdir_target(capture.bytes.as_slice())?;
+    let resolved = resolve_reference_path(workspace_absolute, target)?;
+    let target_root = MacWorkspaceRoot::open_absolute(&resolved)
+        .map_err(|_| MacGitBridgeError::UnsafeGitMetadata)?;
+    if target_root.physical_root_id() != *expected_git_dir_id
+        || !same_raw_path(&resolved, git_dir_absolute)
+    {
+        return Err(MacGitBridgeError::LayoutMismatch);
+    }
+    Ok(())
+}
+
+fn validate_common_dir_binding(
+    git_dir: &MacWorkspaceRoot,
+    git_dir_absolute: &Path,
+    common_dir_absolute: &Path,
+    expected_common_dir_id: &PhysicalRootId,
+) -> Result<(), MacGitBridgeError> {
+    if git_dir.physical_root_id() == *expected_common_dir_id {
+        return if same_raw_path(git_dir_absolute, common_dir_absolute) {
+            Ok(())
+        } else {
+            Err(MacGitBridgeError::LayoutMismatch)
+        };
+    }
+
+    let commondir = opaque(b"commondir")?;
+    let capture = git_dir
+        .read_stable_twice(&commondir, MAX_GITDIR_FILE_BYTES, None)
+        .map_err(|_| MacGitBridgeError::UnsafeGitMetadata)?;
+    validate_gitdir_file_metadata(&capture.metadata)?;
+    let target = parse_plain_path(capture.bytes.as_slice())?;
+    let resolved = resolve_reference_path(git_dir_absolute, target)?;
+    let target_root = MacWorkspaceRoot::open_absolute(&resolved)
+        .map_err(|_| MacGitBridgeError::UnsafeGitMetadata)?;
+    if target_root.physical_root_id() != *expected_common_dir_id
+        || !same_raw_path(&resolved, common_dir_absolute)
+    {
+        return Err(MacGitBridgeError::LayoutMismatch);
+    }
+    Ok(())
+}
+
+fn parse_gitdir_target(bytes: &[u8]) -> Result<&[u8], MacGitBridgeError> {
+    parse_plain_path(bytes)?
+        .strip_prefix(b"gitdir: ")
+        .ok_or(MacGitBridgeError::UnsupportedLayout)
+        .and_then(|target| {
+            if target.is_empty() {
+                Err(MacGitBridgeError::UnsupportedLayout)
+            } else {
+                Ok(target)
+            }
+        })
+}
+
+fn parse_plain_path(bytes: &[u8]) -> Result<&[u8], MacGitBridgeError> {
+    let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+    if bytes.is_empty() || bytes.iter().any(|byte| matches!(byte, 0 | b'\r' | b'\n')) {
+        return Err(MacGitBridgeError::UnsupportedLayout);
+    }
+    Ok(bytes)
+}
+
+/// Lexically resolves a Git metadata reference without consulting the
+/// filesystem. The normalized result is subsequently opened component by
+/// component with `O_NOFOLLOW`.
+fn resolve_reference_path(
+    base_directory: &Path,
+    target: &[u8],
+) -> Result<PathBuf, MacGitBridgeError> {
+    let target = PathBuf::from(OsString::from_vec(target.to_vec()));
+    let combined = if target.is_absolute() {
+        target
+    } else {
+        base_directory.join(target)
+    };
+    let mut components = Vec::<OsString>::new();
+    for component in combined.components() {
+        match component {
+            Component::RootDir => components.clear(),
+            Component::CurDir => {}
+            Component::Normal(name) => components.push(name.to_os_string()),
+            Component::ParentDir => {
+                components.pop().ok_or(MacGitBridgeError::LayoutEscape)?;
+            }
+            Component::Prefix(_) => return Err(MacGitBridgeError::LayoutEscape),
+        }
+    }
+    if components.is_empty() {
+        return Err(MacGitBridgeError::LayoutEscape);
+    }
+    let mut normalized = PathBuf::from("/");
+    for component in components {
+        normalized.push(component);
+    }
+    Ok(normalized)
+}
+
+fn same_raw_path(left: &Path, right: &Path) -> bool {
+    left.as_os_str().as_bytes() == right.as_os_str().as_bytes()
 }
 
 impl fmt::Display for MacGitBridgeError {
@@ -518,6 +805,109 @@ mod tests {
             let name = CString::new(name).unwrap();
             unsafe { libc::removexattr(path.as_ptr(), name.as_ptr(), 0) };
         }
+    }
+
+    fn linked_worktree_fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let directory = tempfile::tempdir_in("/private/tmp").unwrap();
+        let main = directory.path().join("main");
+        let linked = directory.path().join("linked");
+        fs::create_dir(&main).unwrap();
+        run_git(&main, &["init", "-q"]);
+        fs::write(main.join("tracked.txt"), b"tracked\n").unwrap();
+        run_git(&main, &["add", "--", "tracked.txt"]);
+        run_git(
+            &main,
+            &[
+                "-c",
+                "user.name=DCC Test",
+                "-c",
+                "user.email=dcc@example.invalid",
+                "commit",
+                "--no-gpg-sign",
+                "--no-verify",
+                "-qm",
+                "initial",
+            ],
+        );
+        let linked_text = linked.to_str().unwrap();
+        run_git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "dcc-linked-test",
+                linked_text,
+            ],
+        );
+        (directory, main, linked)
+    }
+
+    #[test]
+    fn mutation_authority_coalesces_real_linked_worktrees_by_common_dir() {
+        let (_directory, main, linked) = linked_worktree_fixture();
+        let main_authority = MacGitMutationAuthority::open(&main).unwrap();
+        let linked_authority = MacGitMutationAuthority::open(&linked).unwrap();
+
+        assert_ne!(
+            main_authority.worktree_root_id(),
+            linked_authority.worktree_root_id()
+        );
+        assert_eq!(
+            main_authority.common_dir_id(),
+            linked_authority.common_dir_id()
+        );
+        main_authority.revalidate().unwrap();
+        linked_authority.revalidate().unwrap();
+
+        let rendered = format!("{linked_authority:?}");
+        assert_eq!(rendered, "MacGitMutationAuthority([redacted])");
+        assert!(!rendered.contains(linked.to_str().unwrap()));
+    }
+
+    #[test]
+    fn mutation_authority_revalidation_rejects_gitdir_layout_change() {
+        let (_directory, main, linked) = linked_worktree_fixture();
+        let authority = MacGitMutationAuthority::open(&linked).unwrap();
+        let replacement = format!("gitdir: {}\n", main.join(".git").display());
+        fs::write(linked.join(".git"), replacement).unwrap();
+
+        assert!(authority.revalidate().is_err());
+    }
+
+    #[test]
+    fn mutation_authority_revalidation_rejects_workspace_path_replacement() {
+        let (_directory, _main, linked) = linked_worktree_fixture();
+        let authority = MacGitMutationAuthority::open(&linked).unwrap();
+        let retained = linked.with_extension("retained");
+        fs::rename(&linked, &retained).unwrap();
+        fs::create_dir(&linked).unwrap();
+        fs::copy(retained.join(".git"), linked.join(".git")).unwrap();
+
+        assert!(authority.revalidate().is_err());
+    }
+
+    #[test]
+    fn mutation_authority_rejects_symlinked_gitdir_binding() {
+        let (_directory, _main, linked) = linked_worktree_fixture();
+        let dot_git = linked.join(".git");
+        let retained = linked.join("gitdir-retained");
+        fs::rename(&dot_git, &retained).unwrap();
+        symlink(&retained, &dot_git).unwrap();
+
+        assert!(MacGitMutationAuthority::open(&linked).is_err());
+    }
+
+    #[test]
+    fn mutation_authority_rejects_unsafe_common_dir_metadata() {
+        let (_directory, main, linked) = linked_worktree_fixture();
+        let common_dir = main.join(".git");
+        let mut permissions = fs::metadata(&common_dir).unwrap().permissions();
+        permissions.set_mode(0o775);
+        fs::set_permissions(&common_dir, permissions).unwrap();
+
+        assert!(MacGitMutationAuthority::open(&linked).is_err());
     }
 
     #[test]

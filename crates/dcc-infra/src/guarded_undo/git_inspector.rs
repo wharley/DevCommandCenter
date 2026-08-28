@@ -252,6 +252,62 @@ impl TrustedGitBinary {
         }
     }
 
+    /// Discovers only the Git directories needed to coordinate a mutation.
+    ///
+    /// This deliberately uses the same verified binary, scrubbed environment,
+    /// bounded output, process-group timeout, and closed read-only builtin set
+    /// as the full capture inspector. Returned paths remain untrusted until a
+    /// platform adapter binds them to retained physical directory handles.
+    pub(crate) fn discover_mutation_layout(
+        &self,
+        workspace: &Path,
+    ) -> Result<GitMutationLayout, GitInspectorError> {
+        let started = Instant::now();
+        let bare = mutation_discovery_text(
+            self,
+            workspace,
+            GitInspectionStep::BareRepository,
+            &["--is-bare-repository"],
+            started,
+        )?;
+        match bare.as_slice() {
+            b"false" => {}
+            b"true" => return Err(GitInspectorError::BareRepository),
+            _ => {
+                return Err(GitInspectorError::InvalidOutput {
+                    step: GitInspectionStep::BareRepository,
+                })
+            }
+        }
+
+        let git_dir = mutation_discovery_path(
+            self,
+            workspace,
+            GitInspectionStep::GitDirectory,
+            &["--path-format=absolute", "--git-dir"],
+            started,
+        )?;
+        let common_dir = mutation_discovery_path(
+            self,
+            workspace,
+            GitInspectionStep::CommonDirectory,
+            &["--path-format=absolute", "--git-common-dir"],
+            started,
+        )?;
+        let worktree = mutation_discovery_path(
+            self,
+            workspace,
+            GitInspectionStep::Worktree,
+            &["--path-format=absolute", "--show-toplevel"],
+            started,
+        )?;
+        Ok(GitMutationLayout {
+            git_dir,
+            common_dir,
+            worktree,
+        })
+    }
+
     #[cfg(target_os = "linux")]
     fn revalidate(&self) -> Result<(), GitInspectorError> {
         let metadata = self
@@ -278,6 +334,21 @@ impl TrustedGitBinary {
     fn executable_fd_path(&self) -> PathBuf {
         use std::os::fd::AsRawFd;
         Path::new("/proc/self/fd").join(self.executable.as_raw_fd().to_string())
+    }
+}
+
+/// Logical Git authority paths used only as input to a physical platform
+/// binding. No caller may treat these path strings as mutation authority.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct GitMutationLayout {
+    pub(crate) git_dir: UntrustedGitPath,
+    pub(crate) common_dir: UntrustedGitPath,
+    pub(crate) worktree: UntrustedGitPath,
+}
+
+impl fmt::Debug for GitMutationLayout {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("GitMutationLayout([redacted])")
     }
 }
 
@@ -1073,6 +1144,44 @@ fn run_bounded_git(
         }
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+fn mutation_discovery_text(
+    git_binary: &TrustedGitBinary,
+    workspace: &Path,
+    step: GitInspectionStep,
+    args: &[&str],
+    started: Instant,
+) -> Result<Vec<u8>, GitInspectorError> {
+    let remaining = Duration::from_secs(10)
+        .checked_sub(started.elapsed())
+        .ok_or(GitInspectorError::Timeout)?;
+    let output = run_bounded_git(
+        git_binary,
+        workspace,
+        GitBuiltin::RevParse,
+        args,
+        &[],
+        remaining,
+        MAX_LAYOUT_PATH_BYTES.saturating_add(2),
+        step,
+    )?;
+    if !output.status.success() {
+        return Err(GitInspectorError::CommandFailed { step });
+    }
+    single_line(&output.stdout, step)
+}
+
+fn mutation_discovery_path(
+    git_binary: &TrustedGitBinary,
+    workspace: &Path,
+    step: GitInspectionStep,
+    args: &[&str],
+    started: Instant,
+) -> Result<UntrustedGitPath, GitInspectorError> {
+    let raw = mutation_discovery_text(git_binary, workspace, step, args, started)?;
+    validate_layout_path(&raw, step)?;
+    Ok(UntrustedGitPath(raw))
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -400,6 +400,63 @@ impl WorkspaceCommandState {
             .map_err(WorkspaceMutationRequestError::Runtime)
     }
 
+    /// Resolves the requested root from the durable workspace registry before
+    /// admitting a mutation of both its worktree and shared Git common-dir.
+    /// With capture v2 disabled this intentionally follows the existing direct
+    /// runner without consulting SQLite or Git.
+    pub(crate) async fn run_git_workspace_mutation<T, E, F>(
+        &self,
+        requested_root: &str,
+        operation: F,
+    ) -> std::result::Result<T, WorkspaceMutationRequestError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let binding = self
+            .authorize_workspace_mutation(requested_root)
+            .await
+            .map_err(WorkspaceMutationRequestError::Authorization)?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let binding = AuthorizedWorkspaceMutation {
+            workspace_absolute: PathBuf::from(requested_root),
+        };
+        self.runtime
+            .run_git_workspace_mutation(binding, operation)
+            .await
+            .map_err(WorkspaceMutationRequestError::Runtime)
+    }
+
+    /// Blocking-executor variant for child-process-capable Git mutations. The
+    /// feature-off path preserves the command layer's existing executor and
+    /// performs no durable authorization or common-dir inspection.
+    pub(crate) async fn run_git_workspace_mutation_blocking<T, E, F>(
+        &self,
+        requested_root: &str,
+        operation: F,
+    ) -> std::result::Result<T, WorkspaceMutationRequestError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let binding = self
+            .authorize_workspace_mutation(requested_root)
+            .await
+            .map_err(WorkspaceMutationRequestError::Authorization)?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let binding = AuthorizedWorkspaceMutation {
+            workspace_absolute: PathBuf::from(requested_root),
+        };
+        self.runtime
+            .run_git_workspace_mutation_blocking(binding, operation)
+            .await
+            .map_err(WorkspaceMutationRequestError::Runtime)
+    }
+
     /// Claims one in-memory delivery recovery attempt after its workspace
     /// mutation lease has been acquired. The snapshot remains present until
     /// the caller explicitly clears it through the returned RAII claim.
@@ -4406,6 +4463,39 @@ mod tests {
         let debug = format!("{ambiguous:?}");
         assert!(!debug.contains(&durable_worktree));
         assert!(!format!("{workspace_state:?}").contains(db_path.to_string_lossy().as_ref()));
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn feature_off_git_runner_needs_neither_sqlite_nor_an_existing_root() {
+        let temporary = tempfile::tempdir().expect("runtime scope");
+        let physical = std::fs::canonicalize(temporary.path()).expect("physical runtime scope");
+        let session_state = SessionCommandState::new_headless(
+            physical.join("sessions.sqlite"),
+            physical.join("app-data"),
+        );
+        let mut workspace_state = WorkspaceCommandState::from_session(&session_state);
+        workspace_state.db_path = physical.join("missing-registry.sqlite");
+
+        let nonexistent = "relative/non-git/workspace";
+        let direct = workspace_state
+            .run_git_workspace_mutation(nonexistent, |path| {
+                assert_eq!(path, Path::new(nonexistent));
+                Ok::<_, ()>(31_u8)
+            })
+            .await;
+        assert_eq!(direct.unwrap(), 31);
+
+        let caller = std::thread::current().id();
+        let blocking = workspace_state
+            .run_git_workspace_mutation_blocking(nonexistent, move |path| {
+                assert_eq!(path, Path::new(nonexistent));
+                assert_ne!(std::thread::current().id(), caller);
+                Ok::<_, ()>(37_u8)
+            })
+            .await;
+        assert_eq!(blocking.unwrap(), 37);
+        assert!(!workspace_state.db_path.exists());
     }
 
     fn physical_db_path(path: PathBuf) -> PathBuf {

@@ -105,23 +105,27 @@ none of it is marked shipped.
   commit-and-push, complete-merge, push, sync/fetch/merge, delivery recovery,
   and continue-from-base now participate in the physical-root coordinator.
   Compound commit-and-push paths keep commit preparation and OID-addressed
-  delivery inside one lease. Atomic multi-root mutation admission is
-  implemented for the later delegation/removal slice. Capture v1 remains
+  delivery inside one lease. Git-capable mutations now use descriptor-proven
+  worktree, Git-dir, and shared common-dir authority; linked worktrees contend
+  atomically on the same common-dir lease. Atomic multi-root mutation, turn,
+  and capture-edge admission is implemented as the foundation for the later
+  capture/delegation/removal slices. Capture v1 remains
   review evidence only and is a NO-GO for Undo. Until remaining delivery and
   remote-lifecycle actions, externally reported setup mutations,
   delegation/worktree creation, workspace/repository creation and remote
   materialization, creation-time generated-context writes, and
   workspace/repository removal are also covered, completed captures finalize
-  explicitly ineligible and cannot create an `Eligible` restore set. Recovery
-  is lazy but gates the first feature-enabled begin. The Undo button remains
-  disabled.
+  explicitly ineligible and cannot create an `Eligible` restore set. Capture
+  intervals do not yet consume the common-dir identity, so mutation
+  serialization alone does not relax that fail-closed gate. Recovery is lazy
+  but gates the first feature-enabled begin. The Undo button remains disabled.
 - **M5:** DMG support for Apple Silicon and Intel, while retaining the updater
   archive path, is implemented locally and static-review approved. It remains
   pending macOS CI that has the required Apple signing and notarization secrets.
 
 The current validation baseline is 95 frontend test files / 511 tests, 84
-feature-off and 164 feature-on `dcc-infra` Rust tests, and 204 feature-off / 203
-feature-on `dcc-tauri` Rust tests (6 ignored in either mode).
+feature-off and 178 feature-on `dcc-infra` Rust tests, and 212 `dcc-tauri` Rust
+tests in either mode (206 passed and 6 ignored).
 
 ### M3 Last Turn Review local implementation
 

@@ -206,6 +206,10 @@ impl MacWorkspaceRoot {
         self.root_id.clone()
     }
 
+    pub(crate) fn validate_root_directory(&self) -> Result<(), MacWorkspaceRootError> {
+        validate_directory_fd(self.root.as_raw_fd())
+    }
+
     pub(crate) fn ancestry_ids(&self) -> Vec<PhysicalRootId> {
         self.ancestry.clone()
     }
@@ -673,17 +677,16 @@ fn reject_xattrs(fd: RawFd) -> Result<(), MacWorkspaceRootError> {
         let actual = unsafe {
             libc::flistxattr(fd, names.as_mut_ptr() as *mut libc::c_char, names.len(), 0)
         };
-        #[cfg(not(test))]
-        let _ = actual;
-        #[cfg(test)]
         if actual > 0
             && names[..actual as usize]
                 .split(|byte| *byte == 0)
                 .filter(|name| !name.is_empty())
                 .eq([b"com.apple.provenance".as_slice()].into_iter())
         {
-            // The macOS test sandbox reattaches this provenance marker after
-            // removexattr; it is not part of the fixture under test.
+            // macOS may attach this protected system provenance marker to
+            // files created by sandboxed processes. It is not repository
+            // payload and cannot redirect descriptor-rooted filesystem I/O.
+            // Every other xattr remains unsupported and fails closed.
             return Ok(());
         }
         return Err(MacWorkspaceRootError::AdapterUnsupported);

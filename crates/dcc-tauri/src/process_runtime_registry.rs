@@ -224,6 +224,41 @@ impl ProcessRuntime {
             .await
     }
 
+    /// Coordinates mutations which may touch both one worktree and the Git
+    /// common directory shared by every linked worktree. The durable binding
+    /// remains the only path authority accepted by this layer.
+    pub(crate) async fn run_git_workspace_mutation<T, E, F>(
+        &self,
+        binding: AuthorizedWorkspaceMutation,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        self.guarded_undo_runtime
+            .run_git_workspace_mutation(binding.into_workspace_absolute(), operation)
+            .await
+    }
+
+    /// Blocking-executor variant for Git operations which launch child
+    /// processes while retaining both physical mutation authorities.
+    pub(crate) async fn run_git_workspace_mutation_blocking<T, E, F>(
+        &self,
+        binding: AuthorizedWorkspaceMutation,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        self.guarded_undo_runtime
+            .run_git_workspace_mutation_blocking(binding.into_workspace_absolute(), operation)
+            .await
+    }
+
     /// Configures guarded undo only for the physical scope from which this
     /// process runtime was acquired. The SQLite repository is opened here so
     /// callers cannot inject a repository from another runtime scope.
