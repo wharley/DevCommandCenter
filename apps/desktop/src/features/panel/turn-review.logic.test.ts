@@ -2,10 +2,13 @@ import type { CoreEvent, TurnReviewFile } from "@dcc/contracts";
 import { describe, expect, it } from "vitest";
 import {
 	isTurnReviewIdentityActive,
+	canPrepareGuardedUndo,
+	isGuardedUndoPreviewExpired,
 	latestTurnReviewTerminalEvent,
 	reconcileTurnReviewSelection,
 	resolveTurnReviewOutcome,
 	resolveGuardedUndoCapture,
+	resolveGuardedUndoFailureReason,
 	resolveTurnReviewPreviewState,
 	shouldInvalidateTurnReview,
 } from "./turn-review.logic";
@@ -148,6 +151,47 @@ describe("turn review presentation", () => {
 				expiresAt: null,
 			}),
 		).toEqual({ state: "failed", reason: "ineligible" });
+	});
+
+	it("enables prepare only for an eligible capture without an active operation", () => {
+		const eligible = {
+			state: "eligible",
+			reasonCode: null,
+			fileCount: 2,
+			artifactBytes: 12,
+			completedAt: "t1",
+			expiresAt: "t2",
+		};
+		expect(canPrepareGuardedUndo(eligible, null)).toBe(true);
+		expect(
+			canPrepareGuardedUndo(eligible, {
+				status: "recovery_required",
+				operationId: "operation-1",
+				reasonCode: "manual_recovery_required",
+			}),
+		).toBe(false);
+		expect(canPrepareGuardedUndo({ ...eligible, state: "consumed" }, null)).toBe(
+			false,
+		);
+	});
+
+	it.each([
+		["preview_expired", "expired"],
+		["head_changed", "changed"],
+		["artifact_corrupt", "corrupt"],
+		["manual_recovery_required", "recovery"],
+		["mutation_in_progress", "busy"],
+		["filesystem_unsupported", "unsupported"],
+		["future_reason", "unavailable"],
+	] as const)("maps guarded undo reason %s to %s", (reason, expected) => {
+		expect(resolveGuardedUndoFailureReason(reason)).toBe(expected);
+	});
+
+	it("fails closed for invalid or expired preview timestamps", () => {
+		const now = Date.parse("2026-08-28T12:00:00Z");
+		expect(isGuardedUndoPreviewExpired("2026-08-28T12:00:01Z", now)).toBe(false);
+		expect(isGuardedUndoPreviewExpired("2026-08-28T12:00:00Z", now)).toBe(true);
+		expect(isGuardedUndoPreviewExpired("invalid", now)).toBe(true);
 	});
 });
 

@@ -2787,7 +2787,53 @@
         "storage": "O armazenamento privado de artefatos de segurança não pôde ser usado com segurança.",
         "ineligible": "Este turno não atende às condições atuais de segurança do Guarded Undo."
       },
-      "validUntil": " (válido até {{expiresAt}})"
+      "validUntil": " (válido até {{expiresAt}})",
+      "action": "Desfazer último turno",
+      "confirmTitle": "Confirmar Guarded Undo",
+      "confirmSummary_one": "Revise o preview inverso antes de restaurar {{count}} arquivo ({{bytes}}).",
+      "confirmSummary_other": "Revise os previews inversos antes de restaurar {{count}} arquivos ({{bytes}}).",
+      "scopeWarning": "Alterações posteriores fora destes arquivos não fazem parte do Undo. Mudanças nestes arquivos, no HEAD, branch ou index do Git bloqueiam o Undo automático quando detectadas. Programas externos ainda podem concorrer com esta operação.",
+      "previewExpires": "Esta confirmação expira em {{expiresAt}}. Fechá-la não altera nenhum arquivo.",
+      "previewExpired": "Esta confirmação expirou. Feche-a e prepare o Guarded Undo novamente.",
+      "binary": "Binário",
+      "text": "Texto",
+      "cancel": "Cancelar",
+      "closeResult": "Fechar",
+      "confirmAction_one": "Restaurar {{count}} arquivo",
+      "confirmAction_other": "Restaurar {{count}} arquivos",
+      "prepareFailed": "O Guarded Undo não conseguiu verificar este workspace. Nenhum arquivo foi alterado.",
+      "executeFailed": "O comando Guarded Undo não pôde ser concluído. Atualize o status antes de iniciar outra mutação neste workspace.",
+      "executing": "Guarded Undo em andamento",
+      "executingSteps": "Verificando o workspace, preparando arquivos de recuperação, restaurando e verificando o resultado.",
+      "operationId": "Operação {{operationId}}",
+      "refreshRecovery": "Atualizar status da recuperação",
+      "operationStates": {
+        "preparing": "Preparando Guarded Undo",
+        "prepared": "Guarded Undo pronto",
+        "applying": "Restaurando arquivos",
+        "verifying": "Verificando arquivos restaurados",
+        "rolling_back": "Revertendo a restauração interrompida",
+        "recovery_required": "Recuperação manual necessária"
+      },
+      "prepareResults": {
+        "blocked": "O Guarded Undo foi bloqueado antes de alterar arquivos.",
+        "unavailable": "O Guarded Undo não está disponível para este turno."
+      },
+      "results": {
+        "completed": "O último turno foi desfeito com segurança.",
+        "blocked": "O Guarded Undo foi bloqueado antes de alterar arquivos.",
+        "rolled_back": "O Guarded Undo não conseguiu terminar, mas todos os arquivos afetados foram revertidos com segurança.",
+        "recovery_required": "O Guarded Undo parou para proteger conteúdo inesperado. Não inicie outra restauração neste workspace."
+      },
+      "failureReasons": {
+        "expired": "A captura protegida ou o token de confirmação expirou.",
+        "changed": "Um arquivo alvo ou o repositório Git mudou depois do turno. Revise o diff atual antes de decidir o que manter.",
+        "corrupt": "Um artefato privado de recuperação está ausente ou falhou na verificação de integridade.",
+        "recovery": "O DCC preservou o journal de recuperação porque continuar automaticamente poderia sobrescrever conteúdo inesperado.",
+        "busy": "Outro processo do DCC ou mutação do workspace está usando este projeto.",
+        "unsupported": "Este filesystem ou layout do repositório está fora do contrato de segurança revisado do Guarded Undo.",
+        "unavailable": "O Guarded Undo está indisponível para este workspace. Nenhum arquivo foi alterado."
+      }
     }
   },
   "workspaceSearch": {

@@ -76,7 +76,7 @@ labels show planning state, not a delivery date.
 | **M1 — Workspace Split View v1** | Committed locally (`9ee3625`) — pending release | Keep conversation as the fixed primary pane and allow exactly one secondary surface: Changes, Terminal, Files/Editor, or Preview. Add resizing, persistence per project, keyboard focus, and responsive fallback. This is a frontend layout milestone: no new backend orchestration model. | Conversation plus each secondary surface works without losing session state. A compact layout remains usable. The selected surface and ratio restore safely. Keyboard navigation and focus restoration work. Existing terminal and Inspector workflows do not regress. |
 | **M2 — Unified Palette** | Committed locally (`9ee3625`) — pending release | Deliver the first palette slice: `Cmd/Ctrl+K` alias, local debounced project/session/file discovery, explicit `@` session FTS search, and a capped recent-items list (40). Continue evolving it toward projects, workspaces, threads, and contextual actions such as last diff, terminal, and active review. | The v1 results navigate to the correct entity and respect project/workspace context. Search is local, session FTS is explicit through `@` plus at least two local characters and debounced, and recent items are capped at 40. Prompt content is not indexed by default. Commands show a clear target before mutation. |
 | **M3 — Last Turn Review** | Committed locally (`754d751`) — pending release | Capture a bounded, attributable change snapshot for a completed agent turn and expose `Changes from last turn` in Split View, the Inspector, and review cards. Snapshots preserve base/result evidence, changed-file manifests, immutable historical previews, relevant validation evidence, and a clear distinction from accumulated workspace changes. | A user reaches the last-turn diff in one action. DCC does not attribute pre-existing or subsequent manual changes to the agent turn. No-change, unavailable Git data, compatibility, and failed collection are distinct states. Relevant tests cover normal, concurrent, multi-root, and changed-workspace cases. |
-| **M4 — Guarded Undo** | Phase 0 implemented and approved (`f1cded2`); Phase 1 in progress | Implement the strict capture v2 and fingerprint-guarded restoration contract in the [Guarded Undo design](GUARDED_UNDO_DESIGN.md). Phase 1 is capture-only (behind a feature flag), with a physical-root coordinator, active turn intervals, private raw preimages, retention, and startup recovery; the Undo button remains disabled. | Capture v1, Git trees, and snapshot quarantine remain NO-GO restoration sources. Known overlapping DCC turns/mutations on one physical root make capture ineligible. Capture failure never blocks terminal turn events. A single-instance app-data lock gates startup/retention, and Windows remains adapter-unsupported until handle-relative tests pass. |
+| **M4 — Guarded Undo** | Implemented locally as a macOS beta — pending manual crash QA and release | Capture v2 records bounded private preimages, shows an inverse preview, and performs a token-bound, fingerprint-guarded restore from Last Turn Review. Execute uses descriptor-rooted physical authority, atomic same-directory exchange, durable per-file journaling, exact rollback, terminal cleanup, and startup recovery. | Capture v1, Git trees, and snapshot quarantine remain NO-GO restoration sources. Worktree, Git-dir, and common-dir generations plus HEAD/ref/index and target identities are revalidated before mutation. Crashes resolve to completed, rolled back, or explicit recovery-required state. Windows remains adapter-unsupported until handle-relative tests pass. |
 | **M5 — Release-grade macOS distribution** | Implemented locally and statically reviewed — pending macOS CI with Apple signing/notarization secrets | Add signed, notarized, stapled DMGs for supported macOS architectures while retaining the existing signed `.app.tar.gz` updater path during a verified migration. Publish checksums and installation guidance. | A clean macOS installation works from the DMG without avoidable Gatekeeper warnings. Updates preserve data. DMG, updater archive, architecture selection, checksums, and fallback behavior are validated in release checks. Release secrets stay isolated. |
 | **M6 — Delivery integration** | Proposed | Connect turn review, validation evidence, and safe recovery to the existing Delivery Status / delivery-workflow model. Add only reviewable automations that land in a queue. | A workspace can answer what changed, what was validated, what blocks delivery, and which human action is next. Delivery actions revalidate captured branch, workspace, remote, and push target before mutation. Automations never merge, force-push, or discard work silently. |
 
@@ -94,10 +94,9 @@ none of it is marked shipped.
   debounced, `Cmd/Ctrl+K` is an alias, and recents are capped at 40.
 - **M3:** Last Turn Review is committed locally in `754d751`, pending release.
   See the implementation scope and deliberate limitations below.
-- **M4:** Phase 0 schema/fixtures are implemented and approved in `f1cded2`;
-  Phase 1 now has cancellation-safe single-root START/terminal integration,
+- **M4:** the macOS beta implementation now has cancellation-safe single-root START/terminal integration,
   physical M3→M4 binding, process-scoped recovery, and the app-data lifetime
-  lock behind a default-off feature flag. Workspace commands now share the
+  lock. The desktop enables the feature by default on macOS. Workspace commands now share the
   capture runtime and authorize mutation roots against the durable SQLite
   mapping. Editor writes, automation/spec writes, conflict actions,
   stage/unstage/discard/stage-all, DCC-run setup and post-setup context
@@ -141,16 +140,21 @@ none of it is marked shipped.
   NO-GO for Undo. Repository/workspace create-delete recovery, remaining remote
   ownership/materialization actions, externally
   reported setup mutations, creation-time generated-context writes, and
-  capture/common-dir admission are complete, completed captures finalize
-  explicitly ineligible and cannot create an `Eligible` restore set. Recovery
-  is lazy but gates the first feature-enabled begin. The Undo button remains
-  disabled.
+  capture/common-dir admission are complete. Eligible capture v2 sets now
+  expose prepare/confirm/execute in Last Turn Review. Preview tokens expire,
+  are single-use, and are invalidated by a second prepare. Execute revalidates
+  physical root, worktree/Git-dir/common-dir generations, HEAD/ref/index,
+  target bytes and security metadata before any exchange. The durable journal
+  is written before staging, exact displaced targets support rollback, and
+  terminal cleanup is idempotently resumed after a crash. Startup recovery is
+  lazy but fail-closed before prepare/execute. The desktop enables the feature
+  by default on macOS; other platforms remain safely unsupported.
 - **M5:** DMG support for Apple Silicon and Intel, while retaining the updater
   archive path, is implemented locally and static-review approved. It remains
   pending macOS CI that has the required Apple signing and notarization secrets.
 
-The current validation baseline is 95 frontend test files / 511 tests, 91
-`dcc-core` Rust tests, 97 feature-off and 191 feature-on `dcc-infra` tests, 234
+The current validation baseline is 95 frontend test files / 520 tests, 91
+`dcc-core` Rust tests, 97 feature-off and 202 feature-on `dcc-infra` tests, 234
 feature-off `dcc-tauri` tests (228 passed and 6 ignored), and 236 feature-on
 `dcc-tauri` tests (230 passed and 6 ignored).
 
@@ -197,9 +201,9 @@ M0 trust/measurement
 
 M1 deliberately precedes snapshots: it makes the existing conversation,
 terminal, changes, editor, and preview surfaces feel like one workbench without
-introducing a new data model. M3 establishes review provenance locally. M4 now
-has Phase 0 implemented and approved (`f1cded2`) and Phase 1 in progress under
-the [safe restoration design](GUARDED_UNDO_DESIGN.md). Capture v1, Git trees,
+introducing a new data model. M3 establishes review provenance locally. M4 is
+implemented locally as a macOS beta under the
+[safe restoration design](GUARDED_UNDO_DESIGN.md). Capture v1, Git trees,
 and M3's isolated quarantine are not restoration sources. M5 may progress
 alongside the product work, but its signing and release controls remain
 independently gated.

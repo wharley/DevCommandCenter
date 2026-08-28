@@ -13,12 +13,16 @@ pub mod git_inspector;
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 pub mod macos_git_bridge;
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+pub(crate) mod macos_restore_adapter;
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 pub mod macos_root;
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 pub mod macos_store;
+#[cfg(feature = "guarded-undo-capture-v2")]
+pub mod restore_service;
 
-// Phase 1A deliberately exports no operational filesystem adapter. Every
-// current platform fails closed until a reviewed implementation exists.
+// The legacy public placeholder remains fail-closed for unsupported platforms;
+// operational restore authority is private to the reviewed macOS adapter.
 pub mod unsupported;
 
 pub use unsupported::{

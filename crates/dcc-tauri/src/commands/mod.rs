@@ -40,11 +40,11 @@ pub use mcp_commands::{
 };
 pub use provider_commands::{list_providers, provider_account_usage};
 pub use session_commands::{
-    abort_run, apply_task_title, approve_plan, interrupt_native_subagent, last_turn_review,
-    list_mcp_runtime_statuses, list_thread_events, prepare_turn, record_plan_handoff,
-    respond_to_permission_request, respond_to_user_input, resume_session,
-    run_pull_request_review_agent, send_turn, start_mcp_oauth, start_thread, steer_native_subagent,
-    turn_review_file_diff, wait_mcp_oauth,
+    abort_run, apply_task_title, approve_plan, execute_guarded_undo, interrupt_native_subagent,
+    last_turn_review, list_mcp_runtime_statuses, list_thread_events, prepare_guarded_undo,
+    prepare_turn, record_plan_handoff, respond_to_permission_request, respond_to_user_input,
+    resume_session, run_pull_request_review_agent, send_turn, start_mcp_oauth, start_thread,
+    steer_native_subagent, turn_review_file_diff, wait_mcp_oauth,
 };
 pub use workspace_commands::{
     archive_workspace, archive_workspace_bundle, compile_mission_spec_context, complete_workspace,

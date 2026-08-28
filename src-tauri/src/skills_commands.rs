@@ -7,9 +7,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::command;
+use tauri::{command, State};
 
 use crate::{db_error, ApiResult};
+use dcc_tauri::state::WorkspaceCommandState;
 
 /// Target agent the source skill compiles to.
 pub const TARGET_CLAUDE: &str = "claude";
@@ -611,27 +612,20 @@ fn compile_cursor(target: &Path, cursor_skills: &[SkillRecord]) -> ApiResult<()>
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-#[command]
-pub fn skills_list(project_root: String) -> ApiResult<Vec<SkillRecord>> {
-    Ok(load_skills(&project_root))
-}
-
-#[command]
-pub fn skills_save(project_root: String, skill: SkillRecord) -> ApiResult<()> {
+fn save_skill(project_root: &str, skill: SkillRecord) -> ApiResult<()> {
     if !is_valid_skill_name(&skill.name) {
         return Err(db_error(format!(
             "invalid skill name '{}': use lower-case letters, digits and hyphens",
             skill.name
         )));
     }
-
-    let dir = skills_root(&project_root).join(&skill.name);
+    let dir = skills_root(project_root).join(&skill.name);
     fs::create_dir_all(&dir).map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
     let content = render_skill_md(&skill.name, &skill.description, &skill.body);
     fs::write(dir.join("SKILL.md"), content)
         .map_err(|e| db_error(format!("write SKILL.md: {e}")))?;
 
-    let mut manifest = read_manifest(&project_root);
+    let mut manifest = read_manifest(project_root);
     let entry = ManifestEntry {
         name: skill.name.clone(),
         description: skill.description,
@@ -639,27 +633,87 @@ pub fn skills_save(project_root: String, skill: SkillRecord) -> ApiResult<()> {
         disable_model_invocation: skill.disable_model_invocation,
         scope: skill.scope,
     };
-    match manifest.skills.iter_mut().find(|e| e.name == skill.name) {
+    match manifest
+        .skills
+        .iter_mut()
+        .find(|entry| entry.name == skill.name)
+    {
         Some(existing) => *existing = entry,
         None => manifest.skills.push(entry),
     }
-    write_manifest(&project_root, &manifest)
+    write_manifest(project_root, &manifest)
 }
 
 #[command]
-pub fn skills_delete(project_root: String, name: String) -> ApiResult<()> {
-    let dir = skills_root(&project_root).join(&name);
-    if dir.exists() {
-        fs::remove_dir_all(&dir).map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
+pub fn skills_list(project_root: String) -> ApiResult<Vec<SkillRecord>> {
+    Ok(load_skills(&project_root))
+}
+
+#[command]
+pub async fn skills_save(
+    state: State<'_, WorkspaceCommandState>,
+    project_root: String,
+    skill: SkillRecord,
+) -> ApiResult<()> {
+    match state
+        .run_registered_workspace_mutation(&project_root, move |authorized| {
+            let authorized = authorized
+                .to_str()
+                .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+            save_skill(authorized, skill)
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(db_error("workspace mutation is unavailable")),
     }
-    let mut manifest = read_manifest(&project_root);
-    manifest.skills.retain(|e| e.name != name);
-    write_manifest(&project_root, &manifest)
 }
 
 #[command]
-pub fn skills_compile(project_root: String, target_root: String) -> ApiResult<()> {
-    compile_skills(&project_root, &target_root)
+pub async fn skills_delete(
+    state: State<'_, WorkspaceCommandState>,
+    project_root: String,
+    name: String,
+) -> ApiResult<()> {
+    match state
+        .run_registered_workspace_mutation(&project_root, move |authorized| {
+            let authorized = authorized
+                .to_str()
+                .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+            let dir = skills_root(authorized).join(&name);
+            if dir.exists() {
+                fs::remove_dir_all(&dir)
+                    .map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
+            }
+            let mut manifest = read_manifest(authorized);
+            manifest.skills.retain(|entry| entry.name != name);
+            write_manifest(authorized, &manifest)
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(db_error("workspace mutation is unavailable")),
+    }
+}
+
+#[command]
+pub async fn skills_compile(
+    state: State<'_, WorkspaceCommandState>,
+    project_root: String,
+    target_root: String,
+) -> ApiResult<()> {
+    match state
+        .run_registered_workspace_mutation(&target_root, move |authorized| {
+            let authorized = authorized
+                .to_str()
+                .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+            compile_skills(&project_root, authorized)
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(db_error("workspace mutation is unavailable")),
+    }
 }
 
 #[command]
@@ -823,7 +877,7 @@ mod tests {
         orchestration.description = "Delegate suitable work".to_string();
         orchestration.disable_model_invocation = false;
 
-        skills_save(source.path().to_string_lossy().into_owned(), orchestration).unwrap();
+        save_skill(source.path().to_string_lossy().as_ref(), orchestration).unwrap();
         compile_skills(
             &source.path().to_string_lossy(),
             &target.path().to_string_lossy(),

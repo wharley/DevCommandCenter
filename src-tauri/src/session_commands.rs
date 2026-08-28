@@ -14,16 +14,33 @@ use dcc_core::domain::usage::{UsageDashboard, UsageDashboardInput};
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, ApplyTaskTitleInput, ApplyTaskTitleOutput,
-        InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
-        ListMcpRuntimeStatusesOutput, NativeSubagentControlOutput, PrepareTurnOutput,
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
-        SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
-        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
-        WaitMcpOauthOutput,
+        ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput, InterruptNativeSubagentInput,
+        LastTurnReviewInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
+        NativeSubagentControlOutput, PrepareGuardedUndoInput, PrepareGuardedUndoOutput,
+        PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
+        RespondToUserInputInput, RespondToUserInputOutput, RunPullRequestReviewAgentInput,
+        RunPullRequestReviewAgentOutput, SearchSessionsInput, StartMcpOauthInput,
+        StartMcpOauthOutput, SteerNativeSubagentInput, TurnReviewFileDiffInput,
+        TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     state::SessionCommandState,
 };
+
+#[tauri::command]
+pub async fn prepare_guarded_undo(
+    state: State<'_, SessionCommandState>,
+    input: PrepareGuardedUndoInput,
+) -> Result<PrepareGuardedUndoOutput, String> {
+    session_command_impl::prepare_guarded_undo(state, input).await
+}
+
+#[tauri::command]
+pub async fn execute_guarded_undo(
+    state: State<'_, SessionCommandState>,
+    input: ExecuteGuardedUndoInput,
+) -> Result<ExecuteGuardedUndoOutput, String> {
+    session_command_impl::execute_guarded_undo(state, input).await
+}
 
 #[tauri::command]
 pub async fn start_thread(

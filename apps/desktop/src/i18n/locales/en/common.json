@@ -2787,7 +2787,53 @@
         "storage": "The private safety artifact store could not be used safely.",
         "ineligible": "This turn does not meet the current Guarded Undo safety conditions."
       },
-      "validUntil": " (valid until {{expiresAt}})"
+      "validUntil": " (valid until {{expiresAt}})",
+      "action": "Undo last turn",
+      "confirmTitle": "Confirm Guarded Undo",
+      "confirmSummary_one": "Review the inverse preview before restoring {{count}} file ({{bytes}}).",
+      "confirmSummary_other": "Review the inverse previews before restoring {{count}} files ({{bytes}}).",
+      "scopeWarning": "Later changes outside these files are not Undo targets. Changes to these files, Git HEAD, branch, or index block automatic Undo when detected. External programs can still race with this operation.",
+      "previewExpires": "This confirmation expires at {{expiresAt}}. Closing it makes no changes.",
+      "previewExpired": "This confirmation expired. Close it and prepare Guarded Undo again.",
+      "binary": "Binary",
+      "text": "Text",
+      "cancel": "Cancel",
+      "closeResult": "Close",
+      "confirmAction_one": "Restore {{count}} file",
+      "confirmAction_other": "Restore {{count}} files",
+      "prepareFailed": "Guarded Undo could not verify this workspace. No files were changed.",
+      "executeFailed": "The Guarded Undo command could not be completed. Refresh the status before trying another workspace mutation.",
+      "executing": "Guarded Undo is running",
+      "executingSteps": "Verifying the workspace, staging recovery exchange files, restoring, and verifying the result.",
+      "operationId": "Operation {{operationId}}",
+      "refreshRecovery": "Refresh recovery status",
+      "operationStates": {
+        "preparing": "Preparing Guarded Undo",
+        "prepared": "Guarded Undo is ready",
+        "applying": "Restoring files",
+        "verifying": "Verifying restored files",
+        "rolling_back": "Rolling back the interrupted restore",
+        "recovery_required": "Manual recovery required"
+      },
+      "prepareResults": {
+        "blocked": "Guarded Undo was blocked before changing files.",
+        "unavailable": "Guarded Undo is not available for this turn."
+      },
+      "results": {
+        "completed": "The last turn was safely undone.",
+        "blocked": "Guarded Undo was blocked before changing files.",
+        "rolled_back": "Guarded Undo could not finish, but every affected file was safely rolled back.",
+        "recovery_required": "Guarded Undo stopped to protect unexpected file content. Do not start another restore for this workspace."
+      },
+      "failureReasons": {
+        "expired": "The protected capture or confirmation token expired.",
+        "changed": "A target file or the Git repository changed after the turn. Review the current diff before deciding what to keep.",
+        "corrupt": "A required private recovery artifact is missing or failed integrity verification.",
+        "recovery": "DCC preserved the recovery journal because continuing automatically could overwrite unexpected content.",
+        "busy": "Another DCC process or workspace mutation currently owns this project.",
+        "unsupported": "This filesystem or repository layout is outside the reviewed Guarded Undo safety contract.",
+        "unavailable": "Guarded Undo is unavailable for this workspace. No files were changed."
+      }
     }
   },
   "workspaceSearch": {

@@ -81,7 +81,8 @@ use crate::guarded_undo_runtime::{
     BeginDisposition, ConfigureOutcome, GuardedUndoCaptureRequest, RecoveryOutcome,
 };
 use crate::guarded_undo_runtime::{
-    CaptureTerminalMode, FinalizeTurnOutcome, WorkspaceMutationRunError,
+    CaptureTerminalMode, FinalizeTurnOutcome, GuardedUndoExecuteResult, GuardedUndoPrepareResult,
+    WorkspaceMutationRunError,
 };
 use crate::process_runtime_registry::{ProcessRuntime, ProcessRuntimeRegistry};
 use crate::terminal_arbiter::{
@@ -381,6 +382,28 @@ impl WorkspaceCommandState {
             .run_workspace_mutation(binding, operation)
             .await
             .map_err(WorkspaceMutationRequestError::Runtime)
+    }
+
+    /// Public command-shell bridge for legacy desktop handlers that live in
+    /// the binary crate. It preserves operation errors without exposing the
+    /// private authorization binding or coordinator error types.
+    pub async fn run_registered_workspace_mutation<T, E, F>(
+        &self,
+        requested_root: &str,
+        operation: F,
+    ) -> std::result::Result<std::result::Result<T, E>, ()>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        match self.run_workspace_mutation(requested_root, operation).await {
+            Ok(value) => Ok(Ok(value)),
+            Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+                error,
+            ))) => Ok(Err(error)),
+            Err(_) => Err(()),
+        }
     }
 
     /// Runs a synchronous child-process-capable operation under the same
@@ -932,6 +955,112 @@ impl SessionCommandState {
 
     pub(crate) fn db_path(&self) -> &std::path::Path {
         &self.db_path
+    }
+
+    pub(crate) async fn prepare_guarded_undo(
+        &self,
+        snapshot_id: String,
+    ) -> GuardedUndoPrepareResult {
+        let unavailable = |reason_code: &str| GuardedUndoPrepareResult::Unavailable {
+            snapshot_id: snapshot_id.clone(),
+            reason_code: reason_code.to_owned(),
+        };
+        let Some((restore, _)) = self
+            .session_repo
+            .get_turn_restore_set_by_snapshot(&snapshot_id)
+            .ok()
+            .flatten()
+        else {
+            return unavailable("capture_v2_missing");
+        };
+        let workspace_repo = match SqliteWorkspaceRepo::open(&self.db_path) {
+            Ok(repo) => repo,
+            Err(_) => return unavailable("workspace_missing"),
+        };
+        let Some(workspace) = WorkspaceRepo::get_workspace(&workspace_repo, &restore.workspace_id)
+            .await
+            .ok()
+            .flatten()
+        else {
+            return unavailable("workspace_missing");
+        };
+        let durable_path = workspace
+            .worktree_path
+            .as_deref()
+            .unwrap_or(workspace.root_path.as_str());
+        let Some(workspace_absolute) = Self::lexical_absolute_root(Path::new(durable_path)) else {
+            return unavailable("workspace_missing");
+        };
+
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        {
+            let configured = self
+                .runtime
+                .configure_guarded_undo_capture(&self.db_path, &self.app_data_dir)
+                .await;
+            if !matches!(
+                configured,
+                Ok(ConfigureOutcome::Configured | ConfigureOutcome::AlreadyConfigured)
+            ) {
+                return unavailable("adapter_unsupported");
+            }
+            let Some(roots) = self.guarded_undo_recovery_roots().await else {
+                return unavailable("operation_interrupted");
+            };
+            if !matches!(
+                self.runtime
+                    .guarded_undo_runtime()
+                    .recovery_all(roots)
+                    .await,
+                Ok(RecoveryOutcome::Recovered | RecoveryOutcome::AlreadyRecovered)
+            ) {
+                return unavailable("operation_interrupted");
+            }
+        }
+
+        self.runtime
+            .guarded_undo_runtime()
+            .prepare_guarded_undo(snapshot_id, workspace_absolute)
+            .await
+    }
+
+    pub(crate) async fn execute_guarded_undo(
+        &self,
+        preview_token: String,
+        confirmed: bool,
+    ) -> GuardedUndoExecuteResult {
+        self.runtime
+            .guarded_undo_runtime()
+            .execute_guarded_undo(preview_token, confirmed)
+            .await
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    async fn guarded_undo_recovery_roots(&self) -> Option<Vec<PathBuf>> {
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let workspace_repo = SqliteWorkspaceRepo::open(&db_path).ok()?;
+            let workspaces = futures::executor::block_on(workspace_repo.list_workspaces()).ok()?;
+            let mut roots = Vec::new();
+            for workspace in workspaces {
+                let path = workspace
+                    .worktree_path
+                    .as_deref()
+                    .unwrap_or(workspace.root_path.as_str());
+                let root = Self::lexical_absolute_root(Path::new(path))?;
+                match std::fs::metadata(&root) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    _ => {}
+                }
+                if !roots.iter().any(|existing| existing == &root) {
+                    roots.push(root);
+                }
+            }
+            (!roots.is_empty()).then_some(roots)
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     fn lock_store(&self) -> Result<std::sync::MutexGuard<'_, SessionStore>> {

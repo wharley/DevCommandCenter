@@ -7,6 +7,7 @@
 //! Logical Git output is never authority by itself.
 
 #![cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::{
     ffi::OsString,
@@ -87,6 +88,21 @@ impl MacGitMutationAuthority {
         self.common_dir.physical_root_id()
     }
 
+    pub fn git_dir_id(&self) -> PhysicalRootId {
+        self.git_dir.physical_root_id()
+    }
+
+    /// Builds the bounded index reader used by capture/prepare revalidation.
+    /// Unlike the original workspace-relative bridge, this reader also
+    /// supports linked worktrees whose Git directory lives outside the
+    /// worktree while retaining descriptor-proven authority over both roots.
+    pub(crate) fn index_reader(&self) -> MacGitAuthorityIndexReader {
+        MacGitAuthorityIndexReader {
+            git_dir: Arc::clone(&self.git_dir),
+            layout: self.layout.clone(),
+        }
+    }
+
     pub fn workspace_path(&self) -> &Path {
         &self.workspace_absolute
     }
@@ -110,6 +126,48 @@ impl MacGitMutationAuthority {
             return Err(MacGitBridgeError::LayoutMismatch);
         }
         Ok(())
+    }
+}
+
+pub(crate) struct MacGitAuthorityIndexReader {
+    git_dir: Arc<MacWorkspaceRoot>,
+    layout: GitMutationLayout,
+}
+
+impl fmt::Debug for MacGitAuthorityIndexReader {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MacGitAuthorityIndexReader([redacted])")
+    }
+}
+
+impl IndexFileReader for MacGitAuthorityIndexReader {
+    fn observe(
+        &self,
+        path: &UntrustedGitPath,
+        layout: &UntrustedGitLayout,
+        maximum_bytes: u64,
+    ) -> Result<IndexObservation, IndexReadError> {
+        if layout.git_dir != self.layout.git_dir
+            || layout.common_dir != self.layout.common_dir
+            || layout.worktree != self.layout.worktree
+        {
+            return Err(IndexReadError::Unsupported);
+        }
+        let expected_index = append_path(self.layout.git_dir.as_bytes(), b"index")
+            .ok_or(IndexReadError::Unsupported)?;
+        if path.as_bytes() != expected_index.as_slice() {
+            return Err(IndexReadError::Unsupported);
+        }
+        let index = opaque(b"index").map_err(|_| IndexReadError::Unsupported)?;
+        let current = self
+            .git_dir
+            .observe_index_stable(&index, maximum_bytes)
+            .map_err(map_reader_error)?;
+        Ok(IndexObservation {
+            sha256: current.sha256,
+            size: current.size,
+            stat_identity: current.stat_identity,
+        })
     }
 }
 

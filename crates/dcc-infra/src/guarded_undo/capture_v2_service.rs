@@ -3,6 +3,7 @@
 #![cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 
 use std::{
+    collections::HashMap,
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -34,13 +35,17 @@ use super::{
     git_inspector::{
         CheckoutRef, GitInspection, GitInspector, GitInspectorLimits, TrustedGitBinary,
     },
-    macos_git_bridge::{MacGitBridgeError, MacIndexFileReader},
+    macos_git_bridge::{MacGitBridgeError, MacGitMutationAuthority},
+    macos_restore_adapter::MacRestoreAuthorityAdapter,
     macos_root::{
         CapturePathClassification, IoErrorCategory, MacWorkspaceRoot, MacWorkspaceRootError,
     },
     macos_store::{
         MacArtifactStore, MacArtifactStoreError, MacArtifactStoreLease, OrphanRecoveryReport,
         PublishState, StagedArtifact, VerifiedArtifact,
+    },
+    restore_service::{
+        ExecuteGuardedUndoResult, PrepareGuardedUndoResult, RecoveryReport, RestoreService,
     },
 };
 
@@ -87,6 +92,7 @@ pub struct CaptureV2Service {
     repo: SqliteSessionRepo,
     coordinator: Arc<WorkspaceMutationCoordinator>,
     git: TrustedGitBinary,
+    restore: Arc<RestoreService>,
     clock: Arc<dyn EdgeClock>,
 }
 
@@ -126,6 +132,7 @@ pub struct CaptureHandle {
     baseline: GitInspection,
     baseline_git: GitIdentityV1,
     generation: u64,
+    coordinated_generations: Vec<(PhysicalRootId, u64)>,
     files: Vec<BaselineFile>,
     baseline_reason: Option<GuardedUndoReasonCode>,
     terminalized: bool,
@@ -171,11 +178,20 @@ impl CaptureV2Service {
             MacArtifactStoreLease::acquire(&app_data_absolute)
                 .map_err(|error| capture_error(error.reason_code()))?,
         );
+        let restore = Arc::new(RestoreService::new(
+            repo.clone(),
+            Arc::new(MacRestoreAuthorityAdapter::new(
+                Arc::clone(&store_lease),
+                Arc::clone(&coordinator),
+                git.clone(),
+            )),
+        ));
         Ok(Self {
             store_lease,
             repo,
             coordinator,
             git,
+            restore,
             clock: Arc::new(SystemEdgeClock),
         })
     }
@@ -195,6 +211,76 @@ impl CaptureV2Service {
         workspace_absolute: &Path,
     ) -> Result<OrphanRecoveryReport, CaptureV2Error> {
         self.recover_startup_all(std::iter::once(workspace_absolute))
+    }
+
+    pub fn prepare_guarded_undo(
+        &self,
+        snapshot_id: &str,
+        workspace_absolute: &Path,
+    ) -> PrepareGuardedUndoResult {
+        self.restore.prepare(snapshot_id, workspace_absolute)
+    }
+
+    pub fn execute_guarded_undo(
+        &self,
+        preview_token: &str,
+        confirmed: bool,
+    ) -> ExecuteGuardedUndoResult {
+        self.restore.execute(preview_token, confirmed)
+    }
+
+    pub fn recover_guarded_undo_startup<F>(&self, resolve: F) -> RecoveryReport
+    where
+        F: FnMut(&WorkspaceId) -> Option<PathBuf>,
+    {
+        self.restore.recover_startup(resolve)
+    }
+
+    /// Resolves active journals only through descriptor-observed physical root
+    /// identities from the authorized startup root set. Workspace IDs select a
+    /// durable record; they never become filesystem path authority.
+    pub fn recover_guarded_undo_startup_all<I, P>(&self, roots: I) -> RecoveryReport
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let candidates = roots
+            .into_iter()
+            .filter_map(|path| {
+                let path = path.as_ref().to_path_buf();
+                MacWorkspaceRoot::open_absolute(&path)
+                    .ok()
+                    .map(|root| (root.physical_root_id(), path))
+            })
+            .collect::<Vec<_>>();
+        let mut expected = HashMap::<WorkspaceId, Option<PhysicalRootId>>::new();
+        if let Ok(operations) = self.repo.list_active_undo_operations() {
+            for (operation, _) in operations {
+                let Some((restore, _)) = self
+                    .repo
+                    .get_turn_restore_set(&operation.restore_set_id)
+                    .ok()
+                    .flatten()
+                else {
+                    continue;
+                };
+                let root_id = operation.prepared_identity.root_id;
+                expected
+                    .entry(restore.workspace_id)
+                    .and_modify(|current| {
+                        if current.as_ref() != Some(&root_id) {
+                            *current = None;
+                        }
+                    })
+                    .or_insert(Some(root_id));
+            }
+        }
+        self.restore.recover_startup(|workspace_id| {
+            let root_id = expected.get(workspace_id)?.as_ref()?;
+            candidates
+                .iter()
+                .find_map(|(candidate, path)| (candidate == root_id).then(|| path.clone()))
+        })
     }
 
     /// Performs global capture-v2 recovery only after every authorized
@@ -286,8 +372,43 @@ impl CaptureV2Service {
                 )
             }
         };
-        let interval = match self.coordinator.begin_turn_interval(
+        let git_authority = match MacGitMutationAuthority::open(&request.workspace_absolute) {
+            Ok(authority) if authority.worktree_root_id() == root_id => authority,
+            Ok(_) => {
+                return self.preflight_error(
+                    &request,
+                    Some(root_id),
+                    None,
+                    RestoreSetState::Failed,
+                    GuardedUndoReasonCode::RepositoryIdentityChanged,
+                )
+            }
+            Err(error) => {
+                return self.preflight_error(
+                    &request,
+                    Some(root_id),
+                    None,
+                    RestoreSetState::Failed,
+                    bridge_reason(error),
+                )
+            }
+        };
+        if let Err(error) = git_authority.revalidate() {
+            return self.preflight_error(
+                &request,
+                Some(root_id),
+                None,
+                RestoreSetState::Failed,
+                bridge_reason(error),
+            );
+        }
+        let coordinated_roots = vec![
             root_id.clone(),
+            git_authority.git_dir_id(),
+            git_authority.common_dir_id(),
+        ];
+        let interval = match self.coordinator.begin_turn_intervals(
+            coordinated_roots.clone(),
             TurnOwner::new(request.session_id.clone(), request.turn_id.clone()),
         ) {
             Ok(interval) => interval,
@@ -323,7 +444,30 @@ impl CaptureV2Service {
                 )
             }
         };
-        let edge = match self.coordinator.try_acquire_capture_edge(&root_id) {
+        let coordinated_generations = match coordinated_roots
+            .iter()
+            .map(|root| {
+                interval
+                    .generation_for(root)
+                    .map(|generation| (root.clone(), generation))
+            })
+            .collect::<Option<Vec<_>>>()
+        {
+            Some(generations) => generations,
+            None => {
+                return self.preflight_error(
+                    &request,
+                    Some(root_id),
+                    None,
+                    RestoreSetState::Failed,
+                    GuardedUndoReasonCode::ConcurrentWorkspaceMutation,
+                )
+            }
+        };
+        let edge = match self
+            .coordinator
+            .try_acquire_capture_edges(coordinated_roots)
+        {
             Ok(edge) => edge,
             Err(error) => {
                 return self.preflight_error(
@@ -368,7 +512,7 @@ impl CaptureV2Service {
                 GuardedUndoReasonCode::CaptureTimeout,
             );
         }
-        let git_identity = match git_identity(&root_id, &inspection) {
+        let git_identity = match git_identity(&root_id, &inspection, &request.workspace_absolute) {
             Ok(identity) => identity,
             Err(error) => {
                 return self.preflight_error(
@@ -556,6 +700,7 @@ impl CaptureV2Service {
             baseline: inspection,
             baseline_git: git_identity,
             generation,
+            coordinated_generations,
             files,
             baseline_reason,
             terminalized: false,
@@ -644,6 +789,17 @@ impl CaptureV2Service {
                 );
             }
         };
+        let result_git_identity =
+            match git_identity(&root_id, &result, &handle.request.workspace_absolute) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    return self.finalize_noneligible(
+                        &mut handle,
+                        RestoreSetState::Failed,
+                        error.reason_code,
+                    );
+                }
+            };
         let Some(interval) = handle.interval.as_ref() else {
             return self.finalize_noneligible(
                 &mut handle,
@@ -669,21 +825,30 @@ impl CaptureV2Service {
                 reason_code,
             );
         }
-        let generation = match self.coordinator.generation(&root_id) {
-            Ok(generation) => generation,
-            Err(error) => {
-                return self.finalize_noneligible(
-                    &mut handle,
-                    RestoreSetState::Failed,
-                    coordinator_error(error).reason_code,
-                )
-            }
-        };
-        if generation != handle.generation {
+        let generations_clean =
+            handle
+                .coordinated_generations
+                .iter()
+                .all(|(coordinated_root, baseline)| {
+                    self.coordinator
+                        .generation(coordinated_root)
+                        .is_ok_and(|current| current == *baseline)
+                });
+        if !generations_clean {
             return self.finalize_noneligible(
                 &mut handle,
                 RestoreSetState::Ineligible,
                 GuardedUndoReasonCode::ConcurrentWorkspaceMutation,
+            );
+        }
+        if result_git_identity.worktree_identity != handle.baseline_git.worktree_identity
+            || result_git_identity.git_dir_identity != handle.baseline_git.git_dir_identity
+            || result_git_identity.common_dir_identity != handle.baseline_git.common_dir_identity
+        {
+            return self.finalize_noneligible(
+                &mut handle,
+                RestoreSetState::Ineligible,
+                GuardedUndoReasonCode::RepositoryIdentityChanged,
             );
         }
         if let Some(reason) = compare_edges(&handle.baseline, &result)
@@ -853,11 +1018,16 @@ impl CaptureV2Service {
             receipt.state(),
             Ok(TurnReceiptState::Clean { generation }) if generation == handle.generation
         );
-        let generation_clean = self
-            .coordinator
-            .generation(&root_id)
-            .is_ok_and(|generation| generation == handle.generation);
-        if !receipt_clean || !generation_clean {
+        let generations_clean =
+            handle
+                .coordinated_generations
+                .iter()
+                .all(|(coordinated_root, baseline)| {
+                    self.coordinator
+                        .generation(coordinated_root)
+                        .is_ok_and(|current| current == *baseline)
+                });
+        if !receipt_clean || !generations_clean {
             return self.finalize_noneligible(
                 &mut handle,
                 RestoreSetState::Ineligible,
@@ -919,11 +1089,20 @@ impl CaptureV2Service {
     fn inspect(
         &self,
         root: Arc<MacWorkspaceRoot>,
-        workspace_bytes: Vec<u8>,
+        _workspace_bytes: Vec<u8>,
         request: &CaptureV2Request,
     ) -> Result<GitInspection, CaptureV2Error> {
-        let reader = MacIndexFileReader::new(root, workspace_bytes)
+        let authority = MacGitMutationAuthority::open(&request.workspace_absolute)
             .map_err(|error| capture_error(bridge_reason(error)))?;
+        if authority.worktree_root_id() != root.physical_root_id() {
+            return Err(capture_error(
+                GuardedUndoReasonCode::RepositoryIdentityChanged,
+            ));
+        }
+        authority
+            .revalidate()
+            .map_err(|error| capture_error(bridge_reason(error)))?;
+        let reader = authority.index_reader();
         let inspector = GitInspector::with_index_reader(
             GitInspectorLimits::default(),
             self.git.clone(),
@@ -1056,6 +1235,7 @@ fn security_metadata_matches(
 fn git_identity(
     root_id: &PhysicalRootId,
     inspection: &GitInspection,
+    workspace_absolute: &Path,
 ) -> Result<GitIdentityV1, CaptureV2Error> {
     let checkout_ref = match &inspection.checkout_ref {
         CheckoutRef::Symbolic { full_name } => CheckoutRefV1::Symbolic {
@@ -1065,9 +1245,21 @@ fn git_identity(
         },
         CheckoutRef::Detached => CheckoutRefV1::Detached,
     };
+    let authority = MacGitMutationAuthority::open(workspace_absolute)
+        .map_err(|error| capture_error(bridge_reason(error)))?;
+    if authority.worktree_root_id() != *root_id {
+        return Err(capture_error(
+            GuardedUndoReasonCode::RepositoryIdentityChanged,
+        ));
+    }
+    authority
+        .revalidate()
+        .map_err(|error| capture_error(bridge_reason(error)))?;
     let identity = GitIdentityV1 {
         schema_version: GIT_IDENTITY_SCHEMA_VERSION,
         worktree_identity: root_id.0.clone(),
+        git_dir_identity: authority.git_dir_id().0,
+        common_dir_identity: authority.common_dir_id().0,
         head_oid: inspection.head_oid.clone(),
         checkout_ref,
         index: IndexIdentityV1 {
@@ -1464,6 +1656,55 @@ mod tests {
                 files[0].pre_sha256,
             )
             .unwrap();
+    }
+
+    #[test]
+    fn real_capture_prepare_execute_restores_bytes_and_cleans_exchange_file() {
+        use crate::guarded_undo::restore_service::{
+            ExecuteGuardedUndoResult, PrepareGuardedUndoResult,
+        };
+
+        let fixture = Fixture::new();
+        let handle = fixture.service.begin(fixture.request.clone()).unwrap();
+        fixture.write_tracked(b"after\n");
+        let summary = fixture.service.finish(handle).unwrap();
+        assert_eq!(summary.state, RestoreSetState::Eligible);
+
+        let ready = match fixture.service.prepare_guarded_undo(
+            &fixture.request.snapshot_id,
+            &fixture.request.workspace_absolute,
+        ) {
+            PrepareGuardedUndoResult::Ready(ready) => ready,
+            other => panic!("expected a real restore preview, got {other:?}"),
+        };
+        assert_eq!(ready.file_count, 1);
+        assert_eq!(ready.files[0].display_path, "tracked.txt");
+        assert!(ready.files[0]
+            .preview
+            .as_deref()
+            .is_some_and(|preview| preview.contains("-after") && preview.contains("+before")));
+
+        assert!(matches!(
+            fixture
+                .service
+                .execute_guarded_undo(&ready.preview_token, true),
+            ExecuteGuardedUndoResult::Completed { .. }
+        ));
+        assert_eq!(
+            fs::read(fixture.request.workspace_absolute.join("tracked.txt")).unwrap(),
+            b"before\n"
+        );
+        assert!(!fixture
+            .repo
+            .has_guarded_undo_cleanup_pending(&fixture.request.snapshot_id)
+            .unwrap());
+        assert!(fs::read_dir(&fixture.request.workspace_absolute)
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".dcc-undo-")));
     }
 
     #[test]

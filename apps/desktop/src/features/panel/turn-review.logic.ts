@@ -103,6 +103,103 @@ export type GuardedUndoCapturePresentation = {
 		| "ineligible";
 };
 
+export type GuardedUndoFailurePresentation =
+	| "expired"
+	| "changed"
+	| "corrupt"
+	| "recovery"
+	| "busy"
+	| "unsupported"
+	| "unavailable";
+
+export function canPrepareGuardedUndo(
+	capture: TurnReviewSummary["guardedUndo"],
+	activeUndo: TurnReviewSummary["activeUndo"],
+): boolean {
+	return capture?.state === "eligible" && !activeUndo;
+}
+
+export function resolveGuardedUndoFailureReason(
+	reasonCode: string | null | undefined,
+): GuardedUndoFailurePresentation {
+	if (
+		["retention_expired", "preview_expired", "preview_consumed"].includes(
+			reasonCode ?? "",
+		)
+	) {
+		return "expired";
+	}
+	if (
+		[
+			"head_changed",
+			"ref_changed",
+			"index_changed",
+			"repository_identity_changed",
+			"target_missing",
+			"target_result_mismatch",
+			"metadata_changed",
+			"git_attributes_changed",
+			"tracked_manifest_changed",
+			"preview_context_changed",
+		].includes(reasonCode ?? "")
+	) {
+		return "changed";
+	}
+	if (
+		[
+			"artifact_missing",
+			"artifact_corrupt",
+			"displaced_file_missing",
+			"displaced_file_corrupt",
+		].includes(reasonCode ?? "")
+	) {
+		return "corrupt";
+	}
+	if (
+		[
+			"displaced_target_mismatch",
+			"recovery_target_changed",
+			"exchange_rollback_failed",
+			"manual_recovery_required",
+			"operation_interrupted",
+		].includes(reasonCode ?? "")
+	) {
+		return "recovery";
+	}
+	if (
+		[
+			"mutation_in_progress",
+			"concurrent_workspace_mutation",
+			"app_instance_conflict",
+		].includes(reasonCode ?? "")
+	) {
+		return "busy";
+	}
+	if (
+		[
+			"adapter_unsupported",
+			"filesystem_unsupported",
+			"extended_metadata_unsupported",
+			"symlink_or_reparse_point",
+			"hardlink_unsupported",
+			"non_regular_file",
+			"submodule",
+			"sparse_or_skip_worktree",
+		].includes(reasonCode ?? "")
+	) {
+		return "unsupported";
+	}
+	return "unavailable";
+}
+
+export function isGuardedUndoPreviewExpired(
+	expiresAt: string,
+	now = Date.now(),
+): boolean {
+	const expiresAtMs = Date.parse(expiresAt);
+	return !Number.isFinite(expiresAtMs) || expiresAtMs <= now;
+}
+
 export function resolveGuardedUndoCapture(
 	capture: TurnReviewSummary["guardedUndo"],
 ): GuardedUndoCapturePresentation {

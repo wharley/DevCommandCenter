@@ -17,9 +17,9 @@ use super::{session::SessionId, session::TurnId, workspace::WorkspaceId};
 
 pub const RESTORE_CAPTURE_VERSION: u32 = 2;
 pub const RESTORE_MANIFEST_SCHEMA_VERSION: u32 = 1;
-pub const GIT_IDENTITY_SCHEMA_VERSION: u32 = 1;
+pub const GIT_IDENTITY_SCHEMA_VERSION: u32 = 2;
 pub const FILE_METADATA_SCHEMA_VERSION: u32 = 1;
-pub const PREPARED_IDENTITY_SCHEMA_VERSION: u32 = 1;
+pub const PREPARED_IDENTITY_SCHEMA_VERSION: u32 = 2;
 pub const RECOVERY_DETAILS_SCHEMA_VERSION: u32 = 1;
 pub const UNDO_JOURNAL_SCHEMA_VERSION: u32 = 1;
 pub const MAX_RESTORE_FILES: u32 = 256;
@@ -259,10 +259,10 @@ impl UndoOperationState {
                 (self, next),
                 (
                     Self::Preparing,
-                    Self::Prepared | Self::Blocked | Self::RecoveryRequired
+                    Self::Prepared | Self::RollingBack | Self::Blocked | Self::RecoveryRequired
                 ) | (
                     Self::Prepared,
-                    Self::Applying | Self::Blocked | Self::RecoveryRequired
+                    Self::Applying | Self::RollingBack | Self::Blocked | Self::RecoveryRequired
                 ) | (
                     Self::Applying,
                     Self::Verifying | Self::RollingBack | Self::RecoveryRequired
@@ -275,7 +275,7 @@ impl UndoOperationState {
 }
 
 extensible_string_enum!(UndoOperationFileState {
-    Staged => "staged", Applied => "applied", Verified => "verified",
+    Planned => "planned", Staged => "staged", Applied => "applied", Verified => "verified",
     RolledBack => "rolled_back", RecoveryRequired => "recovery_required",
 });
 
@@ -284,12 +284,16 @@ impl UndoOperationFileState {
         self == next
             || matches!(
                 (self, next),
-                (Self::Staged, Self::Applied | Self::RecoveryRequired)
-                    | (
-                        Self::Applied,
-                        Self::Verified | Self::RolledBack | Self::RecoveryRequired
-                    )
-                    | (Self::Verified, Self::RolledBack | Self::RecoveryRequired)
+                (
+                    Self::Planned,
+                    Self::Staged | Self::RolledBack | Self::RecoveryRequired
+                ) | (
+                    Self::Staged,
+                    Self::Applied | Self::RolledBack | Self::RecoveryRequired
+                ) | (
+                    Self::Applied,
+                    Self::Verified | Self::RolledBack | Self::RecoveryRequired
+                ) | (Self::Verified, Self::RolledBack | Self::RecoveryRequired)
             )
     }
 }
@@ -378,6 +382,8 @@ pub struct IndexIdentityV1 {
 pub struct GitIdentityV1 {
     pub schema_version: u32,
     pub worktree_identity: Vec<u8>,
+    pub git_dir_identity: Vec<u8>,
+    pub common_dir_identity: Vec<u8>,
     pub head_oid: Vec<u8>,
     pub checkout_ref: CheckoutRefV1,
     pub index: IndexIdentityV1,
@@ -403,6 +409,16 @@ impl GitIdentityV1 {
         require_bounded_bytes(
             "worktree_identity",
             &self.worktree_identity,
+            MAX_IDENTITY_BYTES,
+        )?;
+        require_bounded_bytes(
+            "git_dir_identity",
+            &self.git_dir_identity,
+            MAX_IDENTITY_BYTES,
+        )?;
+        require_bounded_bytes(
+            "common_dir_identity",
+            &self.common_dir_identity,
             MAX_IDENTITY_BYTES,
         )?;
         if !matches!(self.head_oid.len(), 20 | 32) {
@@ -524,6 +540,8 @@ pub struct PreparedIdentityV1 {
     pub git: GitIdentityV1,
     pub manifest_digest: Sha256Digest,
     pub coordinator_generation: u64,
+    pub git_dir_generation: u64,
+    pub common_dir_generation: u64,
 }
 
 impl PreparedIdentityV1 {
@@ -744,6 +762,7 @@ impl UndoOperation {
             | UndoOperationState::Prepared
             | UndoOperationState::Applying
             | UndoOperationState::Verifying
+            | UndoOperationState::RollingBack
                 if self.active
                     && self.completed_at.is_none()
                     && self.reason_code.is_none()
@@ -786,6 +805,11 @@ pub struct UndoOperationFile {
     pub expected_metadata: RegularFileMetadataV1,
     pub pre_size: u64,
     pub pre_sha256: Sha256Digest,
+    /// Physical identity and supported metadata of the same-directory staged
+    /// preimage before the first exchange. After a successful exchange this
+    /// exact identity must be observed at the target path. A content digest
+    /// alone cannot prove that the target was installed by this operation.
+    pub staged_metadata: Option<RegularFileMetadataV1>,
     pub displaced_size: Option<u64>,
     pub displaced_sha256: Option<Sha256Digest>,
     pub displaced_metadata: Option<RegularFileMetadataV1>,
@@ -818,6 +842,9 @@ impl UndoOperationFile {
             return Err(GuardedUndoSchemaError::UnknownPersistedValue);
         }
         self.expected_metadata.validate()?;
+        if let Some(metadata) = &self.staged_metadata {
+            metadata.validate()?;
+        }
         match (
             &self.displaced_size,
             &self.displaced_sha256,
@@ -838,17 +865,29 @@ impl UndoOperationFile {
         }
         let displaced_present = self.displaced_size.is_some();
         match self.state {
+            UndoOperationFileState::Planned
+                if self.staged_metadata.is_none()
+                    && !displaced_present
+                    && self.verification_outcome == VerificationOutcome::Pending
+                    && self.recovery_details.is_none() => {}
             UndoOperationFileState::Staged
-                if !displaced_present
+                if self.staged_metadata.is_some()
+                    && !displaced_present
                     && self.verification_outcome == VerificationOutcome::Pending
                     && self.recovery_details.is_none() => {}
             UndoOperationFileState::Applied
-                if displaced_present
+                if self.staged_metadata.is_some()
+                    && displaced_present
                     && self.verification_outcome == VerificationOutcome::Pending => {}
-            UndoOperationFileState::Verified | UndoOperationFileState::RolledBack
-                if displaced_present
+            UndoOperationFileState::Verified
+                if self.staged_metadata.is_some()
+                    && displaced_present
                     && self.verification_outcome == VerificationOutcome::Verified
                     && self.recovery_details.is_none() => {}
+            UndoOperationFileState::RolledBack
+                if self.verification_outcome == VerificationOutcome::Verified
+                    && self.recovery_details.is_none()
+                    && (self.staged_metadata.is_some() || !displaced_present) => {}
             UndoOperationFileState::RecoveryRequired
                 if self.verification_outcome == VerificationOutcome::Failed
                     && self.recovery_details.is_some() => {}

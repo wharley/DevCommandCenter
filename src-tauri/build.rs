@@ -103,9 +103,11 @@ use dcc_tauri::commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
     },
     session_commands::{
-        ApplyTaskTitleInput, ApplyTaskTitleOutput, InterruptNativeSubagentInput,
-        LastTurnReviewInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
-        McpTurnPreflightState, NativeSubagentControlOutput, PrepareTurnOutput,
+        ApplyTaskTitleInput, ApplyTaskTitleOutput, ExecuteGuardedUndoInput,
+        ExecuteGuardedUndoOutput, GuardedUndoOperationSummary, GuardedUndoPreviewFile,
+        InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
+        ListMcpRuntimeStatusesOutput, McpTurnPreflightState, NativeSubagentControlOutput,
+        PrepareGuardedUndoInput, PrepareGuardedUndoOutput, PrepareTurnOutput,
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
         RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
         SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
@@ -294,6 +296,8 @@ struct SessionMethods {
     list_thread_events: String,
     last_turn_review: String,
     turn_review_file_diff: String,
+    prepare_guarded_undo: String,
+    execute_guarded_undo: String,
     list_mcp_runtime_statuses: String,
     start_mcp_oauth: String,
     wait_mcp_oauth: String,
@@ -662,8 +666,14 @@ fn main() {
         .typ::<RestoreSessionOutput>()
         .typ::<LastTurnReviewInput>()
         .typ::<TurnReviewSummary>()
+        .typ::<GuardedUndoOperationSummary>()
         .typ::<TurnReviewFileDiffInput>()
         .typ::<TurnReviewFileDiffOutput>()
+        .typ::<PrepareGuardedUndoInput>()
+        .typ::<GuardedUndoPreviewFile>()
+        .typ::<PrepareGuardedUndoOutput>()
+        .typ::<ExecuteGuardedUndoInput>()
+        .typ::<ExecuteGuardedUndoOutput>()
         .typ::<ListMcpRuntimeStatusesInput>()
         .typ::<ListMcpRuntimeStatusesOutput>()
         .typ::<StartMcpOauthInput>()
@@ -847,6 +857,8 @@ fn main() {
             list_thread_events: "list_thread_events".to_string(),
             last_turn_review: "last_turn_review".to_string(),
             turn_review_file_diff: "turn_review_file_diff".to_string(),
+            prepare_guarded_undo: "prepare_guarded_undo".to_string(),
+            execute_guarded_undo: "execute_guarded_undo".to_string(),
             list_mcp_runtime_statuses: "list_mcp_runtime_statuses".to_string(),
             start_mcp_oauth: "start_mcp_oauth".to_string(),
             wait_mcp_oauth: "wait_mcp_oauth".to_string(),

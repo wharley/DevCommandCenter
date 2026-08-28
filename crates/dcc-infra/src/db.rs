@@ -325,6 +325,7 @@ CREATE TABLE IF NOT EXISTS dcc_undo_operations (
     journal_version INTEGER NOT NULL CHECK(journal_version > 0),
     state TEXT NOT NULL CHECK(length(state) BETWEEN 1 AND 64),
     active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
+    cleanup_pending INTEGER NOT NULL DEFAULT 1 CHECK(cleanup_pending IN (0, 1)),
     preview_token_digest BLOB NULL CHECK(preview_token_digest IS NULL OR (typeof(preview_token_digest) = 'blob' AND length(preview_token_digest) = 32)),
     prepared_identity_json TEXT NOT NULL CHECK(length(prepared_identity_json) BETWEEN 1 AND 131072),
     reason_code TEXT NULL CHECK(reason_code IS NULL OR length(reason_code) BETWEEN 1 AND 64),
@@ -358,6 +359,7 @@ CREATE TABLE IF NOT EXISTS dcc_undo_operation_files (
     expected_metadata_json TEXT NOT NULL CHECK(length(expected_metadata_json) BETWEEN 1 AND 4096),
     pre_size INTEGER NOT NULL CHECK(pre_size >= 0),
     pre_sha256 BLOB NOT NULL CHECK(typeof(pre_sha256) = 'blob' AND length(pre_sha256) = 32),
+    staged_metadata_json TEXT NULL CHECK(staged_metadata_json IS NULL OR length(staged_metadata_json) BETWEEN 1 AND 4096),
     displaced_size INTEGER NULL CHECK(displaced_size IS NULL OR displaced_size >= 0),
     displaced_sha256 BLOB NULL CHECK(displaced_sha256 IS NULL OR (typeof(displaced_sha256) = 'blob' AND length(displaced_sha256) = 32)),
     displaced_metadata_json TEXT NULL CHECK(displaced_metadata_json IS NULL OR length(displaced_metadata_json) BETWEEN 1 AND 4096),
@@ -1100,6 +1102,16 @@ pub struct GuardedUndoCaptureSummary {
     pub expires_at: Option<String>,
 }
 
+/// Content-free active-operation projection for persistent recovery UI.
+/// It excludes token digests, paths, Git identities and file fingerprints.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GuardedUndoActiveOperationSummary {
+    pub operation_id: String,
+    pub state: String,
+    pub reason_code: Option<String>,
+    pub updated_at: String,
+}
+
 /// Capability proving that the caller owns the process-wide maintenance
 /// lease.  The lease acquisition bridge is deliberately outside this Phase
 /// 1B DB surface; keeping the constructor private makes startup/retention
@@ -1182,6 +1194,21 @@ impl SqliteSessionRepo {
             "dcc_delegation_worktree_operations",
             "recovery_owner",
             "TEXT NULL",
+        )?;
+        // Pre-release Guarded Undo journals did not persist the physical
+        // identity of the staged preimage. Such rows deliberately fail schema
+        // validation instead of being guessed as recoverable authority.
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_undo_operation_files",
+            "staged_metadata_json",
+            "TEXT NULL",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_undo_operations",
+            "cleanup_pending",
+            "INTEGER NOT NULL DEFAULT 1 CHECK(cleanup_pending IN (0, 1))",
         )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
@@ -1850,6 +1877,87 @@ impl SqliteSessionRepo {
         load_turn_restore_set(&conn, restore_set_id)
     }
 
+    /// Loads the opaque restoration manifest owned by one immutable M3
+    /// snapshot. Mutation callers must still revalidate its workspace and
+    /// physical authority; the snapshot id is attribution, not authority.
+    pub fn get_turn_restore_set_by_snapshot(
+        &self,
+        snapshot_id: &str,
+    ) -> Result<Option<(TurnRestoreSet, Vec<TurnRestoreFile>)>> {
+        if snapshot_id.trim().is_empty() {
+            return Err(guarded_undo_error("snapshot id is empty"));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let restore_set_id = conn
+            .query_row(
+                "SELECT restore_set_id FROM dcc_turn_restore_sets WHERE snapshot_id = ?1",
+                params![snapshot_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(guarded_undo_error)?;
+        restore_set_id
+            .map(|id| load_turn_restore_set(&conn, &RestoreSetId(id)))
+            .transpose()
+            .map(Option::flatten)
+    }
+
+    pub fn get_active_guarded_undo_summary(
+        &self,
+        snapshot_id: &str,
+    ) -> Result<Option<GuardedUndoActiveOperationSummary>> {
+        if snapshot_id.trim().is_empty() {
+            return Err(guarded_undo_error("snapshot id is empty"));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            r#"SELECT operation.operation_id, operation.state, operation.reason_code, operation.updated_at
+                 FROM dcc_undo_operations operation
+                 JOIN dcc_turn_restore_sets restore
+                   ON restore.restore_set_id = operation.restore_set_id
+                WHERE restore.snapshot_id = ?1 AND operation.active = 1
+                LIMIT 1"#,
+            params![snapshot_id],
+            |row| {
+                Ok(GuardedUndoActiveOperationSummary {
+                    operation_id: row.get(0)?,
+                    state: row.get(1)?,
+                    reason_code: row.get(2)?,
+                    updated_at: row.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(guarded_undo_error)
+    }
+
+    pub fn has_guarded_undo_cleanup_pending(&self, snapshot_id: &str) -> Result<bool> {
+        if snapshot_id.trim().is_empty() {
+            return Err(guarded_undo_error("snapshot id is empty"));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            r#"SELECT EXISTS(
+                    SELECT 1 FROM dcc_undo_operations operation
+                    JOIN dcc_turn_restore_sets restore
+                      ON restore.restore_set_id = operation.restore_set_id
+                    WHERE restore.snapshot_id = ?1 AND operation.cleanup_pending = 1
+                )"#,
+            params![snapshot_id],
+            |row| row.get(0),
+        )
+        .map_err(guarded_undo_error)
+    }
+
     /// Loads the one restoration record attributed to an M3 snapshot without
     /// exposing raw restoration metadata. The unique snapshot relationship is
     /// verified explicitly so a damaged database fails closed.
@@ -2290,13 +2398,13 @@ impl SqliteSessionRepo {
                     "operation file ownership or ordinal is invalid",
                 ));
             }
-            if file.state != UndoOperationFileState::Staged
+            if file.state != UndoOperationFileState::Planned
                 || file.verification_outcome != VerificationOutcome::Pending
                 || file.displaced_size.is_some()
                 || file.recovery_details.is_some()
             {
                 return Err(guarded_undo_error(
-                    "new undo journal files must be staged and unmodified",
+                    "new undo journal files must be planned and unmodified",
                 ));
             }
         }
@@ -2394,6 +2502,82 @@ impl SqliteSessionRepo {
         Ok(Some(operation))
     }
 
+    /// Returns every journal that can still own same-directory recovery
+    /// files. Callers must hold the app-data lifetime lock before using this
+    /// startup-recovery inventory.
+    pub fn list_active_undo_operations(
+        &self,
+    ) -> Result<Vec<(UndoOperation, Vec<UndoOperationFile>)>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let ids = {
+            let mut statement = conn
+                .prepare(
+                    "SELECT operation_id FROM dcc_undo_operations WHERE active = 1 ORDER BY created_at, operation_id",
+                )
+                .map_err(guarded_undo_error)?;
+            let ids = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(guarded_undo_error)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(guarded_undo_error)?;
+            ids
+        };
+        ids.into_iter()
+            .map(|id| {
+                load_undo_operation(&conn, &UndoOperationId(id))?
+                    .ok_or_else(|| guarded_undo_error("active undo operation disappeared"))
+            })
+            .collect()
+    }
+
+    pub fn list_undo_operations_pending_cleanup(
+        &self,
+    ) -> Result<Vec<(UndoOperation, Vec<UndoOperationFile>)>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let ids = {
+            let mut statement = conn
+                .prepare(
+                    r#"SELECT operation_id FROM dcc_undo_operations
+                        WHERE active = 0 AND cleanup_pending = 1
+                        ORDER BY completed_at, operation_id"#,
+                )
+                .map_err(guarded_undo_error)?;
+            let ids = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(guarded_undo_error)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(guarded_undo_error)?;
+            ids
+        };
+        ids.into_iter()
+            .map(|id| {
+                load_undo_operation(&conn, &UndoOperationId(id))?
+                    .ok_or_else(|| guarded_undo_error("cleanup undo operation disappeared"))
+            })
+            .collect()
+    }
+
+    pub fn finish_undo_operation_cleanup(&self, operation_id: &UndoOperationId) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                r#"UPDATE dcc_undo_operations SET cleanup_pending = 0
+                    WHERE operation_id = ?1 AND active = 0 AND cleanup_pending = 1"#,
+                params![operation_id.0],
+            )
+            .map_err(guarded_undo_error)?;
+        Ok(changed == 1)
+    }
+
     pub fn transition_undo_operation_file(
         &self,
         expected: &UndoOperationFileState,
@@ -2451,18 +2635,24 @@ impl SqliteSessionRepo {
             || current.expected_metadata != next_file.expected_metadata
             || current.pre_size != next_file.pre_size
             || current.pre_sha256 != next_file.pre_sha256
+            || (current.staged_metadata != next_file.staged_metadata
+                && !(current.state == UndoOperationFileState::Planned
+                    && next_file.state == UndoOperationFileState::Staged
+                    && current.staged_metadata.is_none()
+                    && next_file.staged_metadata.is_some()))
         {
             return Err(guarded_undo_error("immutable undo file identity changed"));
         }
         let changed = transaction
             .execute(
                 r#"UPDATE dcc_undo_operation_files
-                      SET displaced_size = ?1, displaced_sha256 = ?2,
-                          displaced_metadata_json = ?3, state = ?4,
-                          verification_outcome = ?5, recovery_details_json = ?6,
-                          updated_at = ?7
-                    WHERE operation_id = ?8 AND ordinal = ?9 AND state = ?10"#,
+                      SET staged_metadata_json = ?1, displaced_size = ?2,
+                          displaced_sha256 = ?3, displaced_metadata_json = ?4,
+                          state = ?5, verification_outcome = ?6,
+                          recovery_details_json = ?7, updated_at = ?8
+                    WHERE operation_id = ?9 AND ordinal = ?10 AND state = ?11"#,
                 params![
+                    optional_json(&next_file.staged_metadata)?,
                     next_file
                         .displaced_size
                         .map(i64::try_from)
@@ -4765,10 +4955,10 @@ fn insert_undo_operation_file(conn: &Connection, file: &UndoOperationFile) -> Re
         r#"INSERT INTO dcc_undo_operation_files (
             operation_id, restore_set_id, ordinal, path_bytes, exchange_artifact_key,
             expected_result_size, expected_result_sha256, expected_metadata_json,
-            pre_size, pre_sha256, displaced_size, displaced_sha256,
+            pre_size, pre_sha256, staged_metadata_json, displaced_size, displaced_sha256,
             displaced_metadata_json, state, verification_outcome,
             recovery_details_json, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"#,
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"#,
         params![
             file.operation_id.0,
             file.restore_set_id.0,
@@ -4782,6 +4972,7 @@ fn insert_undo_operation_file(conn: &Connection, file: &UndoOperationFile) -> Re
             i64::try_from(file.pre_size)
                 .map_err(|_| guarded_undo_error("pre_size exceeds SQLite"))?,
             file.pre_sha256.0.to_vec(),
+            optional_json(&file.staged_metadata)?,
             file.displaced_size
                 .map(i64::try_from)
                 .transpose()
@@ -4809,6 +5000,7 @@ fn load_undo_operation(
                       (SELECT COUNT(*) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
                       (SELECT COALESCE(MAX(length(path_bytes)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
                       (SELECT COALESCE(MAX(length(expected_metadata_json)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
+                      (SELECT COALESCE(MAX(length(staged_metadata_json)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
                       (SELECT COALESCE(MAX(length(displaced_metadata_json)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id),
                       (SELECT COALESCE(MAX(length(recovery_details_json)), 0) FROM dcc_undo_operation_files files WHERE files.operation_id = operations.operation_id)
                  FROM dcc_undo_operations operations WHERE operation_id = ?1"#,
@@ -4822,6 +5014,7 @@ fn load_undo_operation(
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
                 ))
             },
         )
@@ -4833,6 +5026,7 @@ fn load_undo_operation(
         child_count,
         max_path,
         max_expected,
+        max_staged,
         max_displaced,
         max_recovery,
     )) = bounds
@@ -4844,6 +5038,7 @@ fn load_undo_operation(
         || child_count > i64::from(MAX_RESTORE_FILES)
         || max_path > 4_096
         || max_expected > 4_096
+        || max_staged > 4_096
         || max_displaced > 4_096
         || max_recovery > 1_024
     {
@@ -4925,7 +5120,7 @@ fn load_undo_operation(
         .prepare(
             r#"SELECT ordinal, restore_set_id, path_bytes, exchange_artifact_key, expected_result_size,
                   expected_result_sha256, expected_metadata_json, pre_size,
-                  pre_sha256, displaced_size, displaced_sha256,
+                  pre_sha256, staged_metadata_json, displaced_size, displaced_sha256,
                   displaced_metadata_json, state, verification_outcome,
                   recovery_details_json, updated_at
              FROM dcc_undo_operation_files WHERE operation_id = ?1 ORDER BY ordinal"#,
@@ -4943,13 +5138,14 @@ fn load_undo_operation(
                 row.get::<_, String>(6)?,
                 row.get::<_, i64>(7)?,
                 row.get::<_, Vec<u8>>(8)?,
-                row.get::<_, Option<i64>>(9)?,
-                row.get::<_, Option<Vec<u8>>>(10)?,
-                row.get::<_, Option<String>>(11)?,
-                row.get::<_, String>(12)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<i64>>(10)?,
+                row.get::<_, Option<Vec<u8>>>(11)?,
+                row.get::<_, Option<String>>(12)?,
                 row.get::<_, String>(13)?,
-                row.get::<_, Option<String>>(14)?,
-                row.get::<_, String>(15)?,
+                row.get::<_, String>(14)?,
+                row.get::<_, Option<String>>(15)?,
+                row.get::<_, String>(16)?,
             ))
         })
         .map_err(guarded_undo_error)?
@@ -4966,6 +5162,7 @@ fn load_undo_operation(
         expected_meta,
         pre_size,
         pre_digest,
+        staged_meta,
         displaced_size,
         displaced_digest,
         displaced_meta,
@@ -4986,6 +5183,10 @@ fn load_undo_operation(
             expected_metadata: parse_guarded_json(&expected_meta, "expected metadata")?,
             pre_size: checked_u64(pre_size, "pre_size")?,
             pre_sha256: digest_from_blob(pre_digest)?,
+            staged_metadata: staged_meta
+                .as_deref()
+                .map(|json| parse_guarded_json(json, "staged metadata"))
+                .transpose()?,
             displaced_size: displaced_size
                 .map(|value| checked_u64(value, "displaced_size"))
                 .transpose()?,
@@ -7042,8 +7243,10 @@ mod tests {
 
     fn guarded_git_identity() -> GitIdentityV1 {
         GitIdentityV1 {
-            schema_version: 1,
+            schema_version: dcc_core::domain::guarded_undo::GIT_IDENTITY_SCHEMA_VERSION,
             worktree_identity: b"fixture-worktree".to_vec(),
+            git_dir_identity: b"fixture-git-dir".to_vec(),
+            common_dir_identity: b"fixture-common-dir".to_vec(),
             head_oid: vec![0x42; 20],
             checkout_ref: CheckoutRefV1::Symbolic {
                 full_name: "refs/heads/main".to_owned(),
@@ -9156,11 +9359,13 @@ mod tests {
             active: true,
             preview_token_digest: Some(Sha256Digest([0x44; 32])),
             prepared_identity: PreparedIdentityV1 {
-                schema_version: 1,
+                schema_version: dcc_core::domain::guarded_undo::PREPARED_IDENTITY_SCHEMA_VERSION,
                 root_id: eligible.root_id.clone().unwrap(),
                 git: eligible.git_identity.clone().unwrap(),
                 manifest_digest: eligible.manifest_digest.unwrap(),
                 coordinator_generation: 7,
+                git_dir_generation: 8,
+                common_dir_generation: 9,
             },
             reason_code: None,
             recovery_details: None,
@@ -9179,10 +9384,11 @@ mod tests {
             expected_metadata: restore_file.metadata_fingerprint.clone(),
             pre_size: restore_file.pre_size,
             pre_sha256: restore_file.pre_sha256,
+            staged_metadata: None,
             displaced_size: None,
             displaced_sha256: None,
             displaced_metadata: None,
-            state: UndoOperationFileState::Staged,
+            state: UndoOperationFileState::Planned,
             verification_outcome: VerificationOutcome::Pending,
             recovery_details: None,
             updated_at: "t3".to_owned(),
@@ -9243,6 +9449,12 @@ mod tests {
                 [],
             )
             .is_err());
+        operation_file.staged_metadata = Some(guarded_metadata());
+        operation_file.state = UndoOperationFileState::Staged;
+        operation_file.updated_at = "t4".to_owned();
+        assert!(repo
+            .transition_undo_operation_file(&UndoOperationFileState::Planned, &operation_file,)
+            .unwrap());
         assert!(repo
             .transition_undo_operation(
                 &operation.operation_id,

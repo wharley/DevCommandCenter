@@ -1,6 +1,6 @@
 # Guarded Undo: Capture v2 and Restoration Contract
 
-Status: Phase 0 implemented and approved (`f1cded2`); Phase 1 in progress
+Status: implemented locally as a macOS beta; pending manual crash QA and release
 
 Milestone: M4
 
@@ -708,7 +708,7 @@ gate succeeds, it performs neither capture nor global cleanup.
 - Keep capture v1 read-only and explicitly map it to
   `capture_v1_evidence_only`.
 
-### Phase 1 — Capture v2, no Undo button
+### Phase 1 — Capture v2 (implemented locally)
 
 - Implement platform inspection and private raw-preimage storage behind a
   feature flag.
@@ -735,14 +735,14 @@ Undo. Phase 1 MUST include a sentinel filter test proving that no capture,
 preview, or restoration path can consume M3 trees, rendered diffs, or the M3
 quarantine as restoration content.
 
-### Phase 2 — Read-only prepare and preview
+### Phase 2 — Read-only prepare and preview (implemented locally)
 
 - Add only the read-only prepare API, bounded inverse previews, and expiring
   single-use tokens bound to the Phase 1 manifest and coordinator generation.
 - Exercise later unrelated edits, target edits, Git/index/ref changes, and
   external-race fixtures.
 
-### Phase 3 — Execute and recovery
+### Phase 3 — Execute and recovery (implemented locally on macOS)
 
 - Add exclusive coordination, verified exchange files, durable journaling,
   exchange/replace-with-backup adapters, displaced-file validation,
@@ -750,7 +750,7 @@ quarantine as restoration content.
 - Ship disabled by default until crash/fault-injection tests pass on every
   enabled platform/filesystem combination.
 
-### Phase 4 — Product rollout
+### Phase 4 — Product rollout (beta UI implemented; release controls pending)
 
 - Enable for the minimum `M`-only scope, add EN/PT-BR copy, accessibility, and
   content-free local metrics.

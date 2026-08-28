@@ -7,12 +7,16 @@ import type {
 	ListMcpRuntimeStatusesOutput,
 	McpRuntimeStatus,
 	NativeSubagentControlOutput,
+	PrepareGuardedUndoInput,
+	PrepareGuardedUndoOutput,
 	PrepareTurnOutput,
 	SessionEventRecord,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
 	TurnReviewSummary,
 	TurnReviewFileDiffOutput,
+	ExecuteGuardedUndoInput,
+	ExecuteGuardedUndoOutput,
 } from "@dcc/contracts";
 import type {
 	AbortRunInput,
@@ -181,6 +185,20 @@ export function loadLastTurnReview(sessionId: string, workspaceId: string) {
 export function loadTurnReviewFileDiff(snapshotId: string, path: string) {
 	return invoke<TurnReviewFileDiffOutput>(SESSION_METHODS.turnReviewFileDiff, {
 		input: { snapshotId, path },
+	});
+}
+
+export function prepareGuardedUndo(snapshotId: string) {
+	const input = { snapshotId } satisfies PrepareGuardedUndoInput;
+	return invoke<PrepareGuardedUndoOutput>(SESSION_METHODS.prepareGuardedUndo, {
+		input,
+	});
+}
+
+export function executeGuardedUndo(previewToken: string) {
+	const input = { previewToken, confirmed: true } satisfies ExecuteGuardedUndoInput;
+	return invoke<ExecuteGuardedUndoOutput>(SESSION_METHODS.executeGuardedUndo, {
+		input,
 	});
 }
 

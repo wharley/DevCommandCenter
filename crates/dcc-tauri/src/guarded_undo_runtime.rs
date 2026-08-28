@@ -564,6 +564,52 @@ pub(crate) enum RecoveryOutcome {
     Unavailable,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GuardedUndoPreview {
+    pub display_path: String,
+    pub size: u64,
+    pub binary: bool,
+    pub preview: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum GuardedUndoPrepareResult {
+    Ready {
+        snapshot_id: String,
+        preview_token: String,
+        expires_at: String,
+        file_count: u32,
+        total_bytes: u64,
+        files: Vec<GuardedUndoPreview>,
+        unrelated_paths_are_not_targets: bool,
+    },
+    Blocked {
+        snapshot_id: String,
+        reason_code: String,
+    },
+    Unavailable {
+        snapshot_id: String,
+        reason_code: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum GuardedUndoExecuteResult {
+    Completed {
+        operation_id: String,
+    },
+    Blocked {
+        reason_code: String,
+    },
+    RolledBack {
+        operation_id: String,
+    },
+    RecoveryRequired {
+        operation_id: String,
+        reason_code: String,
+    },
+}
+
 trait CaptureLease: Send {
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 }
@@ -597,6 +643,27 @@ trait CaptureDriver: Send + Sync {
     ) -> Result<GuardedUndoCaptureSummary, DriverFailure>;
 
     fn recover_all(&self, roots: Vec<PathBuf>) -> Result<(), DriverFailure>;
+
+    fn prepare_guarded_undo(
+        &self,
+        snapshot_id: String,
+        _workspace_absolute: PathBuf,
+    ) -> GuardedUndoPrepareResult {
+        GuardedUndoPrepareResult::Unavailable {
+            snapshot_id,
+            reason_code: "adapter_unsupported".to_owned(),
+        }
+    }
+
+    fn execute_guarded_undo(
+        &self,
+        _preview_token: String,
+        _confirmed: bool,
+    ) -> GuardedUndoExecuteResult {
+        GuardedUndoExecuteResult::Blocked {
+            reason_code: "adapter_unsupported".to_owned(),
+        }
+    }
 }
 
 struct ActiveTurn {
@@ -1135,6 +1202,80 @@ impl GuardedUndoRuntime {
         _roots: Vec<PathBuf>,
     ) -> Result<RecoveryOutcome, GuardedUndoRuntimeError> {
         Ok(RecoveryOutcome::Disabled)
+    }
+
+    pub(crate) async fn prepare_guarded_undo(
+        &self,
+        snapshot_id: String,
+        workspace_absolute: PathBuf,
+    ) -> GuardedUndoPrepareResult {
+        if snapshot_id.trim().is_empty() || !workspace_absolute.is_absolute() {
+            return GuardedUndoPrepareResult::Unavailable {
+                snapshot_id,
+                reason_code: "invalid_persisted_record".to_owned(),
+            };
+        }
+        let Ok(Some(driver)) = self.driver() else {
+            return GuardedUndoPrepareResult::Unavailable {
+                snapshot_id,
+                reason_code: "adapter_unsupported".to_owned(),
+            };
+        };
+        if !self.recovery_admits_capture().unwrap_or(false) {
+            return GuardedUndoPrepareResult::Unavailable {
+                snapshot_id,
+                reason_code: "operation_interrupted".to_owned(),
+            };
+        }
+        let fallback_snapshot = snapshot_id.clone();
+        tokio::task::spawn_blocking(move || {
+            catch_unwind(AssertUnwindSafe(|| {
+                driver.prepare_guarded_undo(snapshot_id, workspace_absolute)
+            }))
+            .unwrap_or(GuardedUndoPrepareResult::Unavailable {
+                snapshot_id: fallback_snapshot,
+                reason_code: "operation_interrupted".to_owned(),
+            })
+        })
+        .await
+        .unwrap_or(GuardedUndoPrepareResult::Unavailable {
+            snapshot_id: String::new(),
+            reason_code: "operation_interrupted".to_owned(),
+        })
+    }
+
+    pub(crate) async fn execute_guarded_undo(
+        &self,
+        preview_token: String,
+        confirmed: bool,
+    ) -> GuardedUndoExecuteResult {
+        if !confirmed || preview_token.len() != 64 || !preview_token.is_ascii() {
+            return GuardedUndoExecuteResult::Blocked {
+                reason_code: "preview_consumed".to_owned(),
+            };
+        }
+        let Ok(Some(driver)) = self.driver() else {
+            return GuardedUndoExecuteResult::Blocked {
+                reason_code: "adapter_unsupported".to_owned(),
+            };
+        };
+        if !self.recovery_admits_capture().unwrap_or(false) {
+            return GuardedUndoExecuteResult::Blocked {
+                reason_code: "operation_interrupted".to_owned(),
+            };
+        }
+        tokio::task::spawn_blocking(move || {
+            catch_unwind(AssertUnwindSafe(|| {
+                driver.execute_guarded_undo(preview_token, confirmed)
+            }))
+            .unwrap_or(GuardedUndoExecuteResult::Blocked {
+                reason_code: "operation_interrupted".to_owned(),
+            })
+        })
+        .await
+        .unwrap_or(GuardedUndoExecuteResult::Blocked {
+            reason_code: "operation_interrupted".to_owned(),
+        })
     }
 
     async fn configure_with_factory(
@@ -2061,12 +2202,11 @@ impl CaptureDriver for CaptureV2Driver {
             .downcast::<CaptureHandle>()
             .map_err(|_| DriverFailure)?;
         let summary = match mode {
-            // DCC has not yet routed every editor/Git/delivery mutator through
-            // the physical-root coordinator. Keep Phase 1 capture fail-closed
-            // until that coverage is complete; no set may become Eligible.
-            CaptureTerminalMode::Completed => {
-                self.service.finish_without_known_mutation_coverage(*handle)
-            }
+            // Workspace, editor, Git, delegation, and delivery mutations now
+            // share this runtime's physical-root coordinator. The capture
+            // service still performs its complete result-edge revalidation;
+            // only that reviewed path may persist an Eligible restore set.
+            CaptureTerminalMode::Completed => self.service.finish(*handle),
             CaptureTerminalMode::Cancelled => self.service.cancel(*handle),
             CaptureTerminalMode::ProviderFailed => self.service.provider_failed(*handle),
         }
@@ -2082,8 +2222,82 @@ impl CaptureDriver for CaptureV2Driver {
     fn recover_all(&self, roots: Vec<PathBuf>) -> Result<(), DriverFailure> {
         self.service
             .recover_startup_all(roots.iter())
-            .map(|_| ())
-            .map_err(|_| DriverFailure)
+            .map_err(|_| DriverFailure)?;
+        let _ = self.service.recover_guarded_undo_startup_all(roots.iter());
+        Ok(())
+    }
+
+    fn prepare_guarded_undo(
+        &self,
+        snapshot_id: String,
+        workspace_absolute: PathBuf,
+    ) -> GuardedUndoPrepareResult {
+        use dcc_infra::guarded_undo::restore_service::PrepareGuardedUndoResult;
+
+        match self
+            .service
+            .prepare_guarded_undo(&snapshot_id, &workspace_absolute)
+        {
+            PrepareGuardedUndoResult::Ready(ready) => GuardedUndoPrepareResult::Ready {
+                snapshot_id: ready.snapshot_id,
+                preview_token: ready.preview_token,
+                expires_at: ready.expires_at,
+                file_count: ready.file_count,
+                total_bytes: ready.total_bytes,
+                files: ready
+                    .files
+                    .into_iter()
+                    .map(|file| GuardedUndoPreview {
+                        display_path: file.display_path,
+                        size: file.size,
+                        binary: file.binary,
+                        preview: file.preview,
+                    })
+                    .collect(),
+                unrelated_paths_are_not_targets: ready.unrelated_paths_are_not_targets,
+            },
+            PrepareGuardedUndoResult::Blocked {
+                snapshot_id,
+                reason_code,
+            } => GuardedUndoPrepareResult::Blocked {
+                snapshot_id,
+                reason_code: reason_code.as_str().to_owned(),
+            },
+            PrepareGuardedUndoResult::Unavailable {
+                snapshot_id,
+                reason_code,
+            } => GuardedUndoPrepareResult::Unavailable {
+                snapshot_id,
+                reason_code: reason_code.as_str().to_owned(),
+            },
+        }
+    }
+
+    fn execute_guarded_undo(
+        &self,
+        preview_token: String,
+        confirmed: bool,
+    ) -> GuardedUndoExecuteResult {
+        use dcc_infra::guarded_undo::restore_service::ExecuteGuardedUndoResult;
+
+        match self.service.execute_guarded_undo(&preview_token, confirmed) {
+            ExecuteGuardedUndoResult::Completed { operation_id } => {
+                GuardedUndoExecuteResult::Completed { operation_id }
+            }
+            ExecuteGuardedUndoResult::Blocked(reason_code) => GuardedUndoExecuteResult::Blocked {
+                reason_code: reason_code.as_str().to_owned(),
+            },
+            ExecuteGuardedUndoResult::RolledBack { operation_id } => {
+                GuardedUndoExecuteResult::RolledBack { operation_id }
+            }
+            ExecuteGuardedUndoResult::RecoveryRequired {
+                operation_id,
+                reason_code,
+            } => GuardedUndoExecuteResult::RecoveryRequired {
+                operation_id,
+                reason_code: reason_code.as_str().to_owned(),
+            },
+        }
     }
 }
 

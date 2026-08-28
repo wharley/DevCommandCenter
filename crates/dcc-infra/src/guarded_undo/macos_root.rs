@@ -10,7 +10,7 @@ use std::{
     ffi::{CStr, CString, OsStr},
     fmt,
     fs::File,
-    io::{self, Read},
+    io::{self, Read, Write},
     os::{
         fd::{AsRawFd, FromRawFd, RawFd},
         unix::ffi::OsStrExt,
@@ -19,8 +19,8 @@ use std::{
 };
 
 use dcc_core::domain::guarded_undo::{
-    GuardedUndoReasonCode, OpaqueRepoPath, PhysicalRootId, RegularFileMetadataV1, Sha256Digest,
-    MAX_INDEX_BYTES, MAX_PREIMAGE_BYTES_PER_FILE,
+    ArtifactKey, GuardedUndoReasonCode, OpaqueRepoPath, PhysicalRootId, RegularFileMetadataV1,
+    Sha256Digest, MAX_INDEX_BYTES, MAX_PREIMAGE_BYTES_PER_FILE,
 };
 use sha2::{Digest, Sha256};
 
@@ -107,6 +107,10 @@ impl CapturedBytes {
     pub fn as_slice(&self) -> &[u8] {
         &self.0
     }
+
+    pub(crate) fn from_vec(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
 }
 
 impl fmt::Debug for CapturedBytes {
@@ -127,6 +131,29 @@ pub struct StableFileCapture {
     pub bytes: CapturedBytes,
     pub sha256: Sha256Digest,
     pub metadata: RegularFileMetadataV1,
+}
+
+/// Complete identity used by the restore engine before and after a per-file
+/// exchange. It is never constructed from frontend input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerifiedRegularFile {
+    pub size: u64,
+    pub sha256: Sha256Digest,
+    pub metadata: RegularFileMetadataV1,
+}
+
+/// Identity of a durable same-directory preimage staged for one journal file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedExchangeFile {
+    pub exchange_artifact_key: ArtifactKey,
+    pub identity: VerifiedRegularFile,
+}
+
+/// Identities observed after an atomic target/exchange swap.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExchangeResult {
+    pub target: VerifiedRegularFile,
+    pub displaced: VerifiedRegularFile,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -399,6 +426,225 @@ impl MacWorkspaceRoot {
         })
     }
 
+    /// Reads and verifies the complete current target identity. The persisted
+    /// opaque repository path is the sole path authority.
+    pub fn verify_regular_file(
+        &self,
+        path: &OpaqueRepoPath,
+        expected: &VerifiedRegularFile,
+    ) -> Result<VerifiedRegularFile, MacWorkspaceRootError> {
+        let observed = self.observe_regular_file(path, expected.size)?;
+        if &observed != expected {
+            return Err(MacWorkspaceRootError::FileChanged);
+        }
+        Ok(observed)
+    }
+
+    /// Observes a regular single-link file twice through no-follow descriptor
+    /// walks and returns a content plus physical-metadata fingerprint.
+    pub fn observe_regular_file(
+        &self,
+        path: &OpaqueRepoPath,
+        maximum_bytes: u64,
+    ) -> Result<VerifiedRegularFile, MacWorkspaceRootError> {
+        let (parent, name) = self.open_parent_directory(path)?;
+        inspect_named_regular(&parent, &name, maximum_bytes)
+    }
+
+    /// Creates a durable, opaque, same-directory sibling containing a verified
+    /// preimage. Existing names, aliases, hardlinks and unsupported metadata
+    /// fail closed; the target itself is not mutated by this call.
+    pub fn stage_exchange_file(
+        &self,
+        target_path: &OpaqueRepoPath,
+        exchange_artifact_key: ArtifactKey,
+        preimage: &CapturedBytes,
+        expected_pre_sha256: Sha256Digest,
+        expected_target_metadata: &RegularFileMetadataV1,
+    ) -> Result<PreparedExchangeFile, MacWorkspaceRootError> {
+        if preimage.as_slice().len() as u64 > MAX_PREIMAGE_BYTES_PER_FILE
+            || Sha256Digest::of(preimage.as_slice()) != expected_pre_sha256
+        {
+            return Err(MacWorkspaceRootError::FileChanged);
+        }
+        let metadata = expected_security_metadata(expected_target_metadata)?;
+        let (parent, _target_name) = self.open_parent_directory(target_path)?;
+        let exchange_name = exchange_name(exchange_artifact_key);
+        let fd = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                exchange_name.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        let mut exchange = unsafe { File::from_raw_fd(fd) };
+        let staged = (|| {
+            exchange.write_all(preimage.as_slice())?;
+            if unsafe { libc::fchown(exchange.as_raw_fd(), metadata.uid, metadata.gid) } != 0 {
+                return Err(MacWorkspaceRootError::from(io::Error::last_os_error()));
+            }
+            if unsafe { libc::fchmod(exchange.as_raw_fd(), metadata.mode & 0o777) } != 0 {
+                return Err(MacWorkspaceRootError::from(io::Error::last_os_error()));
+            }
+            full_sync_file(&exchange)?;
+            let identity =
+                inspect_named_regular(&parent, &exchange_name, preimage.as_slice().len() as u64)?;
+            if identity.sha256 != expected_pre_sha256
+                || identity.size != preimage.as_slice().len() as u64
+                || !security_metadata_matches(&identity.metadata, expected_target_metadata)
+            {
+                return Err(MacWorkspaceRootError::FileChanged);
+            }
+            fsync_directory(&parent)?;
+            Ok(PreparedExchangeFile {
+                exchange_artifact_key,
+                identity,
+            })
+        })();
+        if staged.is_err() {
+            drop(exchange);
+            if unlink_named(&parent, &exchange_name).is_err() || fsync_directory(&parent).is_err() {
+                return Err(MacWorkspaceRootError::AdapterUnsupported);
+            }
+        }
+        staged
+    }
+
+    /// Verifies the exact staged/displaced sibling recorded by the journal.
+    pub fn verify_exchange_file(
+        &self,
+        target_path: &OpaqueRepoPath,
+        exchange_artifact_key: ArtifactKey,
+        expected: &VerifiedRegularFile,
+    ) -> Result<VerifiedRegularFile, MacWorkspaceRootError> {
+        let (parent, _) = self.open_parent_directory(target_path)?;
+        let observed = inspect_named_regular(
+            &parent,
+            &exchange_name(exchange_artifact_key),
+            expected.size,
+        )?;
+        if &observed != expected {
+            return Err(MacWorkspaceRootError::FileChanged);
+        }
+        Ok(observed)
+    }
+
+    /// Observes a journal-declared sibling whose staging CAS may not have
+    /// completed before a crash. The name is still derived exclusively from
+    /// the durable opaque key and all regular-file/no-follow invariants apply.
+    pub fn observe_exchange_file(
+        &self,
+        target_path: &OpaqueRepoPath,
+        exchange_artifact_key: ArtifactKey,
+        maximum_bytes: u64,
+    ) -> Result<VerifiedRegularFile, MacWorkspaceRootError> {
+        let (parent, _) = self.open_parent_directory(target_path)?;
+        inspect_named_regular(
+            &parent,
+            &exchange_name(exchange_artifact_key),
+            maximum_bytes,
+        )
+    }
+
+    /// Atomically swaps a target with its predeclared same-directory sibling.
+    /// Both sides are checked immediately before the primitive and again after
+    /// it. A post-swap mismatch is returned to the journal/recovery layer and is
+    /// never hidden by an automatic overwrite.
+    pub fn exchange_target_with_sibling(
+        &self,
+        target_path: &OpaqueRepoPath,
+        exchange_artifact_key: ArtifactKey,
+        expected_target: &VerifiedRegularFile,
+        expected_exchange: &VerifiedRegularFile,
+    ) -> Result<ExchangeResult, MacWorkspaceRootError> {
+        let (parent, target_name) = self.open_parent_directory(target_path)?;
+        let exchange_name = exchange_name(exchange_artifact_key);
+        let target = inspect_named_regular(&parent, &target_name, expected_target.size)?;
+        let exchange = inspect_named_regular(&parent, &exchange_name, expected_exchange.size)?;
+        if &target != expected_target || &exchange != expected_exchange {
+            return Err(MacWorkspaceRootError::FileChanged);
+        }
+        if unsafe {
+            libc::renameatx_np(
+                parent.as_raw_fd(),
+                target_name.as_ptr(),
+                parent.as_raw_fd(),
+                exchange_name.as_ptr(),
+                libc::RENAME_SWAP,
+            )
+        } != 0
+        {
+            return Err(io::Error::last_os_error().into());
+        }
+        fsync_directory(&parent)?;
+        let installed = inspect_named_regular(&parent, &target_name, expected_exchange.size)?;
+        let displaced = inspect_named_regular(&parent, &exchange_name, expected_target.size)?;
+        if installed != *expected_exchange || displaced != *expected_target {
+            return Err(MacWorkspaceRootError::FileChanged);
+        }
+        Ok(ExchangeResult {
+            target: installed,
+            displaced,
+        })
+    }
+
+    /// Re-exchanges a verified installed preimage with the exact displaced file.
+    /// This is intentionally the same checked atomic primitive as forward apply.
+    pub fn rollback_exchange(
+        &self,
+        target_path: &OpaqueRepoPath,
+        exchange_artifact_key: ArtifactKey,
+        expected_installed_preimage: &VerifiedRegularFile,
+        expected_displaced: &VerifiedRegularFile,
+    ) -> Result<ExchangeResult, MacWorkspaceRootError> {
+        self.exchange_target_with_sibling(
+            target_path,
+            exchange_artifact_key,
+            expected_installed_preimage,
+            expected_displaced,
+        )
+    }
+
+    /// Removes a terminal operation's sibling only when its full identity still
+    /// matches the journal. Active or divergent recovery artifacts are retained.
+    pub fn cleanup_exchange_file(
+        &self,
+        target_path: &OpaqueRepoPath,
+        exchange_artifact_key: ArtifactKey,
+        expected: &VerifiedRegularFile,
+    ) -> Result<(), MacWorkspaceRootError> {
+        let (parent, _) = self.open_parent_directory(target_path)?;
+        let name = exchange_name(exchange_artifact_key);
+        let observed = inspect_named_regular(&parent, &name, expected.size)?;
+        if &observed != expected {
+            return Err(MacWorkspaceRootError::FileChanged);
+        }
+        unlink_named(&parent, &name)?;
+        fsync_directory(&parent)
+    }
+
+    fn open_parent_directory(
+        &self,
+        path: &OpaqueRepoPath,
+    ) -> Result<(File, CString), MacWorkspaceRootError> {
+        let components = decode_relative_path(path)?;
+        let (name, parents) = components
+            .split_last()
+            .ok_or(MacWorkspaceRootError::InvalidPath)?;
+        let mut current = self.root.try_clone()?;
+        validate_directory_fd(current.as_raw_fd())?;
+        for component in parents {
+            current = open_directory(current.as_raw_fd(), component)?;
+            validate_directory_fd(current.as_raw_fd())?;
+        }
+        let name = CString::new(name.as_bytes()).map_err(|_| MacWorkspaceRootError::InvalidPath)?;
+        Ok((current, name))
+    }
+
     fn read_once(
         &self,
         path: &OpaqueRepoPath,
@@ -486,6 +732,155 @@ struct IndexFdSnapshot {
 struct IndexReadOnce {
     sha256: Sha256Digest,
     snapshot: IndexFdSnapshot,
+}
+
+#[derive(Clone, Copy)]
+struct ExpectedSecurityMetadata {
+    mode: libc::mode_t,
+    uid: libc::uid_t,
+    gid: libc::gid_t,
+}
+
+fn expected_security_metadata(
+    metadata: &RegularFileMetadataV1,
+) -> Result<ExpectedSecurityMetadata, MacWorkspaceRootError> {
+    metadata
+        .validate()
+        .map_err(|_| MacWorkspaceRootError::AdapterUnsupported)?;
+    if metadata.adapter != "macos" || metadata.link_count != 1 {
+        return Err(MacWorkspaceRootError::AdapterUnsupported);
+    }
+    let mode = metadata_u32(metadata, "mode")? as libc::mode_t;
+    let uid = metadata_u32(metadata, "uid")? as libc::uid_t;
+    let gid = metadata_u32(metadata, "gid")? as libc::gid_t;
+    if !is_regular(mode) || mode & (libc::S_ISUID | libc::S_ISGID) != 0 {
+        return Err(MacWorkspaceRootError::AdapterUnsupported);
+    }
+    Ok(ExpectedSecurityMetadata { mode, uid, gid })
+}
+
+fn metadata_u32(metadata: &RegularFileMetadataV1, key: &str) -> Result<u32, MacWorkspaceRootError> {
+    let value = metadata
+        .fields
+        .get(key)
+        .ok_or(MacWorkspaceRootError::AdapterUnsupported)?;
+    let bytes: [u8; 4] = value
+        .as_slice()
+        .try_into()
+        .map_err(|_| MacWorkspaceRootError::AdapterUnsupported)?;
+    Ok(u32::from_le_bytes(bytes))
+}
+
+fn security_metadata_matches(
+    actual: &RegularFileMetadataV1,
+    expected: &RegularFileMetadataV1,
+) -> bool {
+    match (
+        expected_security_metadata(actual),
+        expected_security_metadata(expected),
+    ) {
+        (Ok(actual), Ok(expected)) => {
+            actual.mode == expected.mode && actual.uid == expected.uid && actual.gid == expected.gid
+        }
+        _ => false,
+    }
+}
+
+fn exchange_name(key: ArtifactKey) -> CString {
+    let mut name = String::with_capacity(10 + key.0.len() * 2);
+    name.push_str(".dcc-undo-");
+    for byte in key.0 {
+        use fmt::Write as _;
+        let _ = write!(name, "{byte:02x}");
+    }
+    // The fixed ASCII prefix plus hexadecimal encoding can never contain NUL.
+    CString::new(name).expect("opaque exchange name is valid")
+}
+
+fn inspect_named_regular(
+    parent: &File,
+    name: &CString,
+    maximum_bytes: u64,
+) -> Result<VerifiedRegularFile, MacWorkspaceRootError> {
+    if maximum_bytes > MAX_PREIMAGE_BYTES_PER_FILE {
+        return Err(MacWorkspaceRootError::FileTooLarge);
+    }
+    let first = read_named_regular_once(parent, name, maximum_bytes)?;
+    let second = read_named_regular_once(parent, name, maximum_bytes)?;
+    if first != second {
+        return Err(MacWorkspaceRootError::FileChanged);
+    }
+    Ok(first)
+}
+
+fn read_named_regular_once(
+    parent: &File,
+    name: &CString,
+    maximum_bytes: u64,
+) -> Result<VerifiedRegularFile, MacWorkspaceRootError> {
+    validate_directory_fd(parent.as_raw_fd())?;
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    let file = unsafe { File::from_raw_fd(fd) };
+    let before = inspect_fd(file.as_raw_fd())?;
+    if before.size > maximum_bytes {
+        return Err(MacWorkspaceRootError::FileTooLarge);
+    }
+    let mut reader = (&file).take(maximum_bytes.saturating_add(1));
+    let mut hasher = Sha256::new();
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        total = total
+            .checked_add(count as u64)
+            .ok_or(MacWorkspaceRootError::FileTooLarge)?;
+        if total > maximum_bytes {
+            return Err(MacWorkspaceRootError::FileTooLarge);
+        }
+        hasher.update(&buffer[..count]);
+    }
+    let after = inspect_fd(file.as_raw_fd())?;
+    if before != after || total != after.size {
+        return Err(MacWorkspaceRootError::FileChanged);
+    }
+    Ok(VerifiedRegularFile {
+        size: total,
+        sha256: Sha256Digest(hasher.finalize().into()),
+        metadata: after.metadata,
+    })
+}
+
+fn unlink_named(parent: &File, name: &CString) -> Result<(), MacWorkspaceRootError> {
+    if unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(())
+}
+
+fn full_sync_file(file: &File) -> Result<(), MacWorkspaceRootError> {
+    if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_FULLFSYNC) } != 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(())
+}
+
+fn fsync_directory(directory: &File) -> Result<(), MacWorkspaceRootError> {
+    if unsafe { libc::fsync(directory.as_raw_fd()) } != 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(())
 }
 
 fn decode_relative_path(path: &OpaqueRepoPath) -> Result<Vec<&OsStr>, MacWorkspaceRootError> {
@@ -897,6 +1292,166 @@ mod tests {
             root.read_stable_twice(&path(b"src/file"), 16, Some(&hook)),
             Err(MacWorkspaceRootError::FileChanged)
         ));
+    }
+
+    #[test]
+    fn stages_swaps_verifies_rolls_back_and_cleans_same_directory_exchange() {
+        let (directory, root) = root();
+        let target_path = path(b"src/file");
+        remove_fixture_xattrs(&directory.path().join("src/file"));
+        let original = root.observe_regular_file(&target_path, 16).unwrap();
+        let preimage = CapturedBytes::from_slice(b"before");
+        let pre_sha256 = Sha256Digest::of(preimage.as_slice());
+        let key = ArtifactKey([7; 16]);
+
+        let prepared = root
+            .stage_exchange_file(&target_path, key, &preimage, pre_sha256, &original.metadata)
+            .unwrap();
+        assert_eq!(prepared.exchange_artifact_key, key);
+        assert_eq!(prepared.identity.size, 6);
+        assert_eq!(prepared.identity.sha256, pre_sha256);
+        assert!(security_metadata_matches(
+            &prepared.identity.metadata,
+            &original.metadata
+        ));
+        assert_ne!(prepared.identity.metadata, original.metadata);
+        assert_eq!(
+            root.verify_exchange_file(&target_path, key, &prepared.identity),
+            Ok(prepared.identity.clone())
+        );
+
+        let applied = root
+            .exchange_target_with_sibling(&target_path, key, &original, &prepared.identity)
+            .unwrap();
+        assert_eq!(applied.target, prepared.identity);
+        assert_eq!(applied.displaced, original);
+        assert_eq!(
+            fs::read(directory.path().join("src/file")).unwrap(),
+            b"before"
+        );
+        assert_eq!(
+            fs::read(
+                directory
+                    .path()
+                    .join("src/.dcc-undo-07070707070707070707070707070707")
+            )
+            .unwrap(),
+            b"hello"
+        );
+
+        let rolled_back = root
+            .rollback_exchange(&target_path, key, &prepared.identity, &original)
+            .unwrap();
+        assert_eq!(rolled_back.target, original);
+        assert_eq!(rolled_back.displaced, prepared.identity);
+        assert_eq!(
+            fs::read(directory.path().join("src/file")).unwrap(),
+            b"hello"
+        );
+        root.cleanup_exchange_file(&target_path, key, &prepared.identity)
+            .unwrap();
+        assert!(!directory
+            .path()
+            .join("src/.dcc-undo-07070707070707070707070707070707")
+            .exists());
+    }
+
+    #[test]
+    fn exchange_fails_closed_on_collision_target_drift_and_hardlink() {
+        let (directory, root) = root();
+        let target_path = path(b"src/file");
+        let target = root.observe_regular_file(&target_path, 16).unwrap();
+        let preimage = CapturedBytes::from_slice(b"before");
+        let key = ArtifactKey([8; 16]);
+        let prepared = root
+            .stage_exchange_file(
+                &target_path,
+                key,
+                &preimage,
+                Sha256Digest::of(preimage.as_slice()),
+                &target.metadata,
+            )
+            .unwrap();
+        assert!(root
+            .stage_exchange_file(
+                &target_path,
+                key,
+                &preimage,
+                Sha256Digest::of(preimage.as_slice()),
+                &target.metadata,
+            )
+            .is_err());
+
+        fs::write(directory.path().join("src/file"), b"later").unwrap();
+        assert!(root
+            .exchange_target_with_sibling(&target_path, key, &target, &prepared.identity)
+            .is_err());
+        assert_eq!(
+            fs::read(directory.path().join("src/file")).unwrap(),
+            b"later"
+        );
+
+        let sibling = directory
+            .path()
+            .join("src/.dcc-undo-08080808080808080808080808080808");
+        fs::write(&sibling, b"evil!!").unwrap();
+        assert!(root
+            .exchange_target_with_sibling(&target_path, key, &target, &prepared.identity)
+            .is_err());
+        assert!(root
+            .cleanup_exchange_file(&target_path, key, &prepared.identity)
+            .is_err());
+        fs::write(&sibling, b"before").unwrap();
+
+        fs::hard_link(&sibling, directory.path().join("src/alias")).unwrap();
+        assert!(root
+            .verify_exchange_file(&target_path, key, &prepared.identity)
+            .is_err());
+        fs::remove_file(directory.path().join("src/alias")).unwrap();
+        root.cleanup_exchange_file(&target_path, key, &prepared.identity)
+            .unwrap();
+
+        symlink("file", &sibling).unwrap();
+        assert!(root
+            .verify_exchange_file(&target_path, key, &prepared.identity)
+            .is_err());
+        assert!(root
+            .cleanup_exchange_file(&target_path, key, &prepared.identity)
+            .is_err());
+        fs::remove_file(&sibling).unwrap();
+    }
+
+    #[test]
+    fn exchange_rejects_symlink_target_without_touching_verified_sibling() {
+        let (directory, root) = root();
+        let target_path = path(b"src/file");
+        let target = root.observe_regular_file(&target_path, 16).unwrap();
+        let preimage = CapturedBytes::from_slice(b"before");
+        let key = ArtifactKey([9; 16]);
+        let prepared = root
+            .stage_exchange_file(
+                &target_path,
+                key,
+                &preimage,
+                Sha256Digest::of(preimage.as_slice()),
+                &target.metadata,
+            )
+            .unwrap();
+        fs::rename(
+            directory.path().join("src/file"),
+            directory.path().join("src/real-file"),
+        )
+        .unwrap();
+        symlink("real-file", directory.path().join("src/file")).unwrap();
+        assert!(root
+            .exchange_target_with_sibling(&target_path, key, &target, &prepared.identity)
+            .is_err());
+        assert_eq!(
+            root.verify_exchange_file(&target_path, key, &prepared.identity),
+            Ok(prepared.identity.clone())
+        );
+        root.cleanup_exchange_file(&target_path, key, &prepared.identity)
+            .unwrap();
     }
 
     #[test]

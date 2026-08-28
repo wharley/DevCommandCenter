@@ -42,6 +42,7 @@ use dcc_infra::db::{
     SqliteWorkspaceRepo,
 };
 
+use crate::guarded_undo_runtime::{GuardedUndoExecuteResult, GuardedUndoPrepareResult};
 use crate::state::SessionCommandState;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -179,6 +180,7 @@ pub struct TurnReviewSummary {
     pub error: Option<String>,
     pub completed_at: Option<String>,
     pub guarded_undo: Option<GuardedUndoCaptureSummary>,
+    pub active_undo: Option<GuardedUndoOperationSummary>,
 }
 
 /// Content-free capture-v2 status associated with this review snapshot.
@@ -193,6 +195,195 @@ pub struct GuardedUndoCaptureSummary {
     pub artifact_bytes: u64,
     pub completed_at: Option<String>,
     pub expires_at: Option<String>,
+}
+
+/// Content-free status for a nonterminal Guarded Undo operation. The opaque
+/// operation id is safe to display/use for diagnostics; recovery artifacts and
+/// target identities remain backend-only.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardedUndoOperationSummary {
+    pub status: String,
+    pub operation_id: String,
+    pub reason_code: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareGuardedUndoInput {
+    pub snapshot_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardedUndoPreviewFile {
+    /// Display-only path. Execute accepts only the opaque preview token and
+    /// never trusts paths, hashes, or replacement bytes sent by the UI.
+    pub display_path: String,
+    pub size: u64,
+    pub binary: bool,
+    pub preview: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum PrepareGuardedUndoOutput {
+    Ready {
+        snapshot_id: String,
+        preview_token: String,
+        expires_at: String,
+        file_count: u32,
+        total_bytes: u64,
+        files: Vec<GuardedUndoPreviewFile>,
+        unrelated_paths_are_not_targets: bool,
+    },
+    Blocked {
+        snapshot_id: String,
+        reason_code: String,
+        details_available: bool,
+    },
+    Unavailable {
+        snapshot_id: String,
+        reason_code: String,
+    },
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecuteGuardedUndoInput {
+    pub preview_token: String,
+    pub confirmed: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ExecuteGuardedUndoOutput {
+    Completed {
+        operation_id: Option<String>,
+        reason_code: Option<String>,
+    },
+    Blocked {
+        operation_id: Option<String>,
+        reason_code: Option<String>,
+    },
+    RolledBack {
+        operation_id: Option<String>,
+        reason_code: Option<String>,
+    },
+    RecoveryRequired {
+        operation_id: Option<String>,
+        reason_code: Option<String>,
+    },
+}
+
+#[tauri::command]
+pub async fn prepare_guarded_undo(
+    state: State<'_, SessionCommandState>,
+    input: PrepareGuardedUndoInput,
+) -> Result<PrepareGuardedUndoOutput, String> {
+    let snapshot_id = input.snapshot_id.trim().to_owned();
+    if snapshot_id.is_empty() || snapshot_id.len() > 256 {
+        return Err("Guarded Undo snapshot id is invalid.".to_owned());
+    }
+    Ok(match state.prepare_guarded_undo(snapshot_id).await {
+        GuardedUndoPrepareResult::Ready {
+            snapshot_id,
+            preview_token,
+            expires_at,
+            file_count,
+            total_bytes,
+            files,
+            unrelated_paths_are_not_targets,
+        } => PrepareGuardedUndoOutput::Ready {
+            snapshot_id,
+            preview_token,
+            expires_at,
+            file_count,
+            total_bytes,
+            files: files
+                .into_iter()
+                .map(|file| GuardedUndoPreviewFile {
+                    display_path: file.display_path,
+                    size: file.size,
+                    binary: file.binary,
+                    preview: file.preview,
+                })
+                .collect(),
+            unrelated_paths_are_not_targets,
+        },
+        GuardedUndoPrepareResult::Blocked {
+            snapshot_id,
+            reason_code,
+        } => PrepareGuardedUndoOutput::Blocked {
+            snapshot_id,
+            reason_code,
+            details_available: false,
+        },
+        GuardedUndoPrepareResult::Unavailable {
+            snapshot_id,
+            reason_code,
+        } => PrepareGuardedUndoOutput::Unavailable {
+            snapshot_id,
+            reason_code,
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn execute_guarded_undo(
+    state: State<'_, SessionCommandState>,
+    input: ExecuteGuardedUndoInput,
+) -> Result<ExecuteGuardedUndoOutput, String> {
+    let preview_token = input.preview_token.trim().to_owned();
+    if preview_token.len() != 64 || !preview_token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Ok(ExecuteGuardedUndoOutput::Blocked {
+            operation_id: None,
+            reason_code: Some("preview_consumed".to_owned()),
+        });
+    }
+    if !input.confirmed {
+        return Ok(ExecuteGuardedUndoOutput::Blocked {
+            operation_id: None,
+            reason_code: Some("preview_consumed".to_owned()),
+        });
+    }
+    Ok(
+        match state.execute_guarded_undo(preview_token, true).await {
+            GuardedUndoExecuteResult::Completed { operation_id } => {
+                ExecuteGuardedUndoOutput::Completed {
+                    operation_id: Some(operation_id),
+                    reason_code: None,
+                }
+            }
+            GuardedUndoExecuteResult::Blocked { reason_code } => {
+                ExecuteGuardedUndoOutput::Blocked {
+                    operation_id: None,
+                    reason_code: Some(reason_code),
+                }
+            }
+            GuardedUndoExecuteResult::RolledBack { operation_id } => {
+                ExecuteGuardedUndoOutput::RolledBack {
+                    operation_id: Some(operation_id),
+                    reason_code: None,
+                }
+            }
+            GuardedUndoExecuteResult::RecoveryRequired {
+                operation_id,
+                reason_code,
+            } => ExecuteGuardedUndoOutput::RecoveryRequired {
+                operation_id: Some(operation_id),
+                reason_code: Some(reason_code),
+            },
+        },
+    )
 }
 
 impl From<InfraGuardedUndoCaptureSummary> for GuardedUndoCaptureSummary {
@@ -247,11 +438,20 @@ pub async fn last_turn_review(
         .await
         .map_err(|error| error.to_string())?;
     let compatibility = state.turn_change_set_compatibility(&change_set).await;
-    let guarded_undo = SqliteSessionRepo::open_read_only(state.db_path())
-        .map_err(|error| error.to_string())?
+    let guarded_repo =
+        SqliteSessionRepo::open_read_only(state.db_path()).map_err(|error| error.to_string())?;
+    let guarded_undo = guarded_repo
         .get_guarded_undo_capture_summary(&change_set.snapshot_id)
         .map_err(|error| error.to_string())?
         .map(GuardedUndoCaptureSummary::from);
+    let active_undo = guarded_repo
+        .get_active_guarded_undo_summary(&change_set.snapshot_id)
+        .map_err(|error| error.to_string())?
+        .map(|operation| GuardedUndoOperationSummary {
+            status: operation.state,
+            operation_id: operation.operation_id,
+            reason_code: operation.reason_code,
+        });
     let (insertions, deletions) = crate::turn_review::file_totals(&change_set.files);
     Ok(Some(TurnReviewSummary {
         snapshot_id: change_set.snapshot_id,
@@ -273,6 +473,7 @@ pub async fn last_turn_review(
         error: change_set.error,
         completed_at: change_set.completed_at,
         guarded_undo,
+        active_undo,
     }))
 }
 

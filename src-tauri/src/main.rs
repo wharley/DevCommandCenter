@@ -4776,8 +4776,9 @@ fn db_projects_get_repo_config_toml(state: State<'_, AppState>, id: String) -> A
 }
 
 #[tauri::command]
-fn db_projects_save_repo_config_toml(
+async fn db_projects_save_repo_config_toml(
     state: State<'_, AppState>,
+    workspace_state: State<'_, WorkspaceCommandState>,
     id: String,
     content: String,
 ) -> ApiResult<Value> {
@@ -4811,29 +4812,37 @@ fn db_projects_save_repo_config_toml(
     let payload = repo_config_payload_from_toml(parsed);
     let normalized = repo_config_value_from_payload(&payload).map_err(db_error)?;
 
-    let file_path = repo_config_file_path(&project_path);
-    if let Some(parent) = file_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| db_error(format!("{}: {}", parent.display(), e)))?;
-    }
-    fs::write(&file_path, content)
-        .map_err(|e| db_error(format!("{}: {}", file_path.display(), e)))?;
+    let conn = Arc::clone(&state.conn);
+    match workspace_state
+        .run_registered_workspace_mutation(&project_path, move |authorized| {
+            let authorized = authorized
+                .to_str()
+                .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+            let file_path = repo_config_file_path(authorized);
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| db_error(format!("{}: {}", parent.display(), e)))?;
+            }
+            fs::write(&file_path, content)
+                .map_err(|e| db_error(format!("{}: {}", file_path.display(), e)))?;
 
+            let conn = conn.lock().map_err(|_| db_error("db lock poisoned"))?;
+            conn.execute(
+                "UPDATE projects SET repo_config = ?1 WHERE id = ?2",
+                params![normalized.to_string(), id],
+            )
+            .map_err(|e| db_error(e.to_string()))?;
+
+            Ok(serde_json::json!({
+                "success": true,
+                "path": file_path.to_string_lossy().to_string()
+            }))
+        })
+        .await
     {
-        let conn = state
-            .conn
-            .lock()
-            .map_err(|_| db_error("db lock poisoned"))?;
-        conn.execute(
-            "UPDATE projects SET repo_config = ?1 WHERE id = ?2",
-            params![normalized.to_string(), id],
-        )
-        .map_err(|e| db_error(e.to_string()))?;
+        Ok(result) => result,
+        Err(_) => Err(db_error("workspace mutation is unavailable")),
     }
-
-    Ok(serde_json::json!({
-        "success": true,
-        "path": file_path.to_string_lossy().to_string()
-    }))
 }
 
 #[tauri::command]
@@ -4917,7 +4926,12 @@ fn db_projects_create(state: State<'_, AppState>, data: Value) -> ApiResult<Valu
     db_projects_find_by_id(state, id)
 }
 #[tauri::command]
-fn db_projects_update(state: State<'_, AppState>, id: String, data: Value) -> ApiResult<Value> {
+async fn db_projects_update(
+    state: State<'_, AppState>,
+    workspace_state: State<'_, WorkspaceCommandState>,
+    id: String,
+    data: Value,
+) -> ApiResult<Value> {
     let obj = data
         .as_object()
         .ok_or_else(|| db_error("invalid project payload"))?;
@@ -4955,6 +4969,7 @@ fn db_projects_update(state: State<'_, AppState>, id: String, data: Value) -> Ap
                 .to_string(),
         );
     }
+    let mut repo_config_disk_write = None;
     if obj.get("repoConfig").is_some() {
         if let Some(project_path) = {
             let conn = state
@@ -4970,13 +4985,8 @@ fn db_projects_update(state: State<'_, AppState>, id: String, data: Value) -> Ap
             .map_err(|e| db_error(e.to_string()))?
         } {
             let repo_config = obj.get("repoConfig").cloned();
-            if let Some(ref config) = repo_config {
-                if !config.is_null() {
-                    write_repo_config_to_disk(&project_path, Some(config)).map_err(db_error)?;
-                } else {
-                    write_repo_config_to_disk(&project_path, Some(&Value::Null))
-                        .map_err(db_error)?;
-                }
+            if let Some(config) = repo_config {
+                repo_config_disk_write = Some((project_path, config));
             }
         }
         sets.push("repo_config = ?");
@@ -4994,6 +5004,21 @@ fn db_projects_update(state: State<'_, AppState>, id: String, data: Value) -> Ap
     }
     if sets.is_empty() {
         return db_projects_find_by_id(state, id);
+    }
+
+    if let Some((project_path, config)) = repo_config_disk_write {
+        match workspace_state
+            .run_registered_workspace_mutation(&project_path, move |authorized| {
+                let authorized = authorized
+                    .to_str()
+                    .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+                write_repo_config_to_disk(authorized, Some(&config)).map_err(db_error)
+            })
+            .await
+        {
+            Ok(result) => result?,
+            Err(_) => return Err(db_error("workspace mutation is unavailable")),
+        }
     }
 
     let mut sql = format!("UPDATE projects SET {} WHERE id = ?", sets.join(", "));
@@ -7108,6 +7133,8 @@ pub fn run() {
             session_commands::list_thread_events,
             session_commands::last_turn_review,
             session_commands::turn_review_file_diff,
+            session_commands::prepare_guarded_undo,
+            session_commands::execute_guarded_undo,
             session_commands::list_mcp_runtime_statuses,
             session_commands::start_mcp_oauth,
             session_commands::wait_mcp_oauth,

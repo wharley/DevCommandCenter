@@ -62,7 +62,7 @@ name = "dccd-http"
 path = "src/bin/dccd-http.rs"
 
 [features]
-default = []
+default = ["guarded-undo-capture-v2"]
 guarded-undo-capture-v2 = ["dcc-tauri/guarded-undo-capture-v2"]
 
 [dev-dependencies]

@@ -513,6 +513,55 @@ impl MacArtifactStore {
         self.verify_fd(key, expected_size, expected_sha256, false)
     }
 
+    /// Reads one published preimage only after verifying its opaque locator,
+    /// private-file invariants, length and digest. The object is inspected both
+    /// before and after the bounded read so replacement or mutation is never
+    /// returned as trusted restoration input.
+    pub fn read_verified(
+        &self,
+        key: ArtifactKey,
+        expected_size: u64,
+        expected_sha256: Sha256Digest,
+    ) -> Result<CapturedBytes, MacArtifactStoreError> {
+        if expected_size > MAX_PREIMAGE_BYTES_PER_FILE {
+            return Err(MacArtifactStoreError::LimitExceeded);
+        }
+        let file = self.open_named(&self.objects, key_name(key).as_bytes())?;
+        let before = inspect_artifact(&file, 1)?;
+        if before.size != expected_size || before.sha256 != expected_sha256 {
+            return Err(MacArtifactStoreError::Integrity);
+        }
+
+        let mut reader = file.try_clone().map_err(MacArtifactStoreError::from)?;
+        reader
+            .seek(SeekFrom::Start(0))
+            .map_err(MacArtifactStoreError::from)?;
+        let capacity =
+            usize::try_from(expected_size).map_err(|_| MacArtifactStoreError::LimitExceeded)?;
+        let mut bytes = Vec::with_capacity(capacity);
+        (&mut reader)
+            .take(expected_size.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(MacArtifactStoreError::from)?;
+        if bytes.len() as u64 != expected_size || Sha256Digest::of(&bytes) != expected_sha256 {
+            return Err(MacArtifactStoreError::Integrity);
+        }
+
+        let after = inspect_artifact(&file, 1)?;
+        let rebound = self.open_named(&self.objects, key_name(key).as_bytes())?;
+        let rebound = inspect_artifact(&rebound, 1)?;
+        if after.size != before.size
+            || after.sha256 != before.sha256
+            || after.metadata != before.metadata
+            || rebound.size != before.size
+            || rebound.sha256 != before.sha256
+            || rebound.metadata != before.metadata
+        {
+            return Err(MacArtifactStoreError::FileChanged);
+        }
+        Ok(CapturedBytes::from_vec(bytes))
+    }
+
     pub fn cleanup_verified(
         &self,
         artifact: &VerifiedArtifact,
@@ -1334,6 +1383,13 @@ mod tests {
         assert_eq!(published.size, bytes.as_slice().len() as u64);
         assert_eq!(
             store
+                .read_verified(published.key, published.size, published.sha256)
+                .unwrap()
+                .as_slice(),
+            b"fixture-secret"
+        );
+        assert_eq!(
+            store
                 .verify(published.key, published.size, published.sha256)
                 .unwrap(),
             published
@@ -1712,6 +1768,10 @@ mod tests {
         file.sync_all().unwrap();
         assert_eq!(
             store.verify(published.key, published.size, published.sha256),
+            Err(MacArtifactStoreError::Integrity)
+        );
+        assert_eq!(
+            store.read_verified(published.key, published.size, published.sha256),
             Err(MacArtifactStoreError::Integrity)
         );
         unsafe { libc::unlinkat(store.objects.as_raw_fd(), name.as_ptr(), 0) };
