@@ -786,6 +786,11 @@ export type ListWorkspaceBundlesOutput = {
 export type ListWorkspacesOutput = {
 	workspaces: Workspace[],
 	/**
+	 *  Broken workspaces remain durable and visible for explicit repair or
+	 *  deletion. Reasons are keyed by workspace id and contain no file data.
+	 */
+	brokenWorkspaceReasons: { [key in string]: string },
+	/**
 	 *  Remote branches that the delete-workspace action would target, keyed by
 	 *  workspace id. Workspaces without a safely identifiable branch are
 	 *  intentionally omitted.
@@ -2552,6 +2557,17 @@ export type WorkspaceRecordSetupOutcomeInput = {
 export type WorkspaceRemoteBranchDeletionTarget = {
 	remote: string,
 	branch: string,
+	/**
+	 *  The local worktree HEAD observed when the destructive action was offered.
+	 *  Older clients do not send this field, which intentionally makes deletion
+	 *  fail closed until the confirmation dialog is reopened.
+	 */
+	expectedOid?: string,
+	/**
+	 *  The effective push URL observed when the destructive action was offered.
+	 *  This is always redacted before it can leave the backend.
+	 */
+	pushUrl?: string,
 };
 
 export type WorkspaceRemoveDelegationWorktreeInput = {

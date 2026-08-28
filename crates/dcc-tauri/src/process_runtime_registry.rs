@@ -15,12 +15,9 @@
 use std::{
     collections::HashMap,
     fmt,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, Weak},
 };
-
-#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
-use std::path::PathBuf;
 
 use crate::guarded_undo_runtime::ConfigureOutcome;
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
@@ -256,6 +253,54 @@ impl ProcessRuntime {
     {
         self.guarded_undo_runtime
             .run_git_workspace_mutation_blocking(binding.into_workspace_absolute(), operation)
+            .await
+    }
+
+    /// Coordinates an operation that reads or mutates two linked worktrees.
+    /// The primary path has already been authorized against this runtime's
+    /// SQLite registry; the command layer scopes the secondary path and the
+    /// guarded-undo runtime physically proves it before the closure runs. A
+    /// durable delegation binding remains a lifecycle-journal responsibility.
+    pub(crate) async fn run_git_workspace_pair_mutation<T, E, F>(
+        &self,
+        binding: AuthorizedWorkspaceMutation,
+        secondary_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path, &Path) -> Result<T, E> + Send + 'static,
+    {
+        self.guarded_undo_runtime
+            .run_git_workspace_pair_mutation(
+                binding.into_workspace_absolute(),
+                secondary_absolute,
+                operation,
+            )
+            .await
+    }
+
+    /// Blocking-executor variant for pair operations which launch child
+    /// processes. Cancellation of the async waiter cannot release either
+    /// worktree or the shared common-directory admission.
+    pub(crate) async fn run_git_workspace_pair_mutation_blocking<T, E, F>(
+        &self,
+        binding: AuthorizedWorkspaceMutation,
+        secondary_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path, &Path) -> Result<T, E> + Send + 'static,
+    {
+        self.guarded_undo_runtime
+            .run_git_workspace_pair_mutation_blocking(
+                binding.into_workspace_absolute(),
+                secondary_absolute,
+                operation,
+            )
             .await
     }
 

@@ -480,19 +480,36 @@ setup, project tasks, conflict/index actions, validation, commit, push, sync,
 delivery recovery, and continue/rollback paths use that runner. File-only
 editor, automation/spec, mission-context, and generated-context writes retain
 the single-worktree runner. Compound commit/push paths deliver the observed
-commit OID while retaining one lease.
+commit OID while retaining one lease. Delegation prepare uses the Git runner;
+delegation apply and explicit remove use a paired runner that retains both
+worktree authorities and atomically admits both worktree IDs plus their shared
+common-dir. The paired runner rejects a foreign repository and retains all
+three admissions after async-waiter cancellation until its blocking operation
+actually finishes.
+
+This foundation does not yet claim a durable delegation binding or a
+transactional apply. Explicit removal scopes the child to DCC's delegation
+directory, proves the shared physical common-dir, observes its branch and OID,
+and deletes only a matching `dcc/delegation/*` ref through `update-ref` CAS.
+If the child is already absent, DCC does not guess a branch name. Implicit
+repository-wide `worktree prune` was removed from creation and cleanup paths.
+Remote-branch deletion similarly binds the confirmation to remote, branch,
+local HEAD OID, and redacted effective push URL; it observes the exact live
+remote OID and uses `force-with-lease`, so a successor ref is preserved.
+Multiple push destinations fail closed. Listing workspaces is read-only and
+retains broken rows with an explicit reason for repair or explicit deletion.
 
 Multi-root mutation, turn-interval, and capture-edge admission is atomic and
 ordered, with one shared receipt and per-root generations. Capture itself does
 not yet admit the worktree/common-dir pair, so this foundation does not by
 itself permit an eligible set. External-terminal setup reports, remaining
-delivery and remote-lifecycle actions, workspace/repository creation and
-remote materialization, creation-time generated-context writes,
-delegation/worktree lifecycle, and workspace/repository deletion remain
-outside known coverage. Until capture consumes common-dir authority and that
-inventory is complete, the driver deliberately finalizes completed turns
-through the known-mutation-coverage fail-closed path. The feature remains
-default-off and cannot emit an eligible set.
+delivery and remote ownership/materialization actions, workspace/repository
+creation, creation-time generated-context writes, deletion-triggered delegation
+cleanup, workspace/repository deletion, and every partial lifecycle without a
+durable saga remain outside known coverage. Until capture consumes common-dir
+authority and that inventory is complete, the driver deliberately finalizes
+completed turns through the known-mutation-coverage fail-closed path. The
+feature remains default-off and cannot emit an eligible set.
 
 The process MUST acquire a single-instance lifetime lock in the DCC app-data
 directory before startup recovery, retention, artifact purge, or interval

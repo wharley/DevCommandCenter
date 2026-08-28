@@ -76,8 +76,8 @@ pub(crate) fn cleanup_workspace_files(workspace: &Workspace) -> Result<(), Strin
                 return Err(error.to_string());
             }
             Err(_) => {
-                // Fall back to removing the directory directly when the worktree metadata
-                // is already broken. A later `git worktree prune` clears stale metadata.
+                // Fall back to the exact broken directory only. Repository-wide
+                // metadata cleanup is never an implicit side effect of deletion.
             }
         }
     }
@@ -89,10 +89,6 @@ pub(crate) fn cleanup_workspace_files(workspace: &Workspace) -> Result<(), Strin
             error
         )
     })?;
-
-    if !root_path.is_empty() && is_git_repo(repo_root) {
-        let _ = run_git_output(root_path, &["worktree", "prune"]);
-    }
 
     Ok(())
 }
@@ -173,7 +169,7 @@ pub(crate) async fn broken_workspace_reason_by_root(
 
 pub(crate) fn broken_workspace_message(reason: &str) -> String {
     format!(
-        "workspace became unavailable; refresh the workspace list to remove it from DCC: {reason}"
+        "workspace became unavailable; repair it or use explicit workspace deletion to remove its DCC record: {reason}"
     )
 }
 

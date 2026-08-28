@@ -457,6 +457,71 @@ impl WorkspaceCommandState {
             .map_err(WorkspaceMutationRequestError::Runtime)
     }
 
+    /// Runs a closure with an authorized primary worktree and a secondary
+    /// absolute worktree. On macOS with capture-v2 enabled, the runtime opens
+    /// both Git layouts, proves that they share the same physical common-dir,
+    /// acquires all three roots atomically, and retains both authorities until
+    /// the closure finishes. The command layer remains responsible for
+    /// scoping the secondary path to DCC's delegation directory before calling
+    /// this foundation API. Durable delegation ownership is intentionally left
+    /// to the lifecycle-journal slice.
+    #[allow(dead_code)] // Wired by the delegation apply/remove lifecycle.
+    pub(crate) async fn run_git_workspace_pair_mutation<T, E, F>(
+        &self,
+        requested_root: &str,
+        secondary_absolute: PathBuf,
+        operation: F,
+    ) -> std::result::Result<T, WorkspaceMutationRequestError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path, &Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let binding = self
+            .authorize_workspace_mutation(requested_root)
+            .await
+            .map_err(WorkspaceMutationRequestError::Authorization)?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let binding = AuthorizedWorkspaceMutation {
+            workspace_absolute: PathBuf::from(requested_root),
+        };
+        self.runtime
+            .run_git_workspace_pair_mutation(binding, secondary_absolute, operation)
+            .await
+            .map_err(WorkspaceMutationRequestError::Runtime)
+    }
+
+    /// Blocking-executor variant for delegation operations that may invoke
+    /// Git child processes. Feature-off retains the existing direct path and
+    /// blocking worker semantics without SQLite or filesystem inspection.
+    #[allow(dead_code)] // Wired by the delegation apply/remove lifecycle.
+    pub(crate) async fn run_git_workspace_pair_mutation_blocking<T, E, F>(
+        &self,
+        requested_root: &str,
+        secondary_absolute: PathBuf,
+        operation: F,
+    ) -> std::result::Result<T, WorkspaceMutationRequestError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path, &Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let binding = self
+            .authorize_workspace_mutation(requested_root)
+            .await
+            .map_err(WorkspaceMutationRequestError::Authorization)?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let binding = AuthorizedWorkspaceMutation {
+            workspace_absolute: PathBuf::from(requested_root),
+        };
+        self.runtime
+            .run_git_workspace_pair_mutation_blocking(binding, secondary_absolute, operation)
+            .await
+            .map_err(WorkspaceMutationRequestError::Runtime)
+    }
+
     /// Claims one in-memory delivery recovery attempt after its workspace
     /// mutation lease has been acquired. The snapshot remains present until
     /// the caller explicitly clears it through the returned RAII claim.

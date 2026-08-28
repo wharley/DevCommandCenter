@@ -189,13 +189,8 @@ pub fn create_worktree_branch_from_ref(
         std::fs::create_dir_all(parent).map_err(|error| CoreError::Git(error.to_string()))?;
     }
 
-    run_git_stdout(
-        ["worktree", "prune"],
-        Some(repo_root),
-        GIT_LOCAL_TIMEOUT,
-        "git worktree prune failed",
-    )?;
-
+    // Do not prune here: `worktree prune` mutates repository-wide metadata
+    // unrelated to the exact destination this creation owns.
     let args = vec![
         OsString::from("worktree"),
         OsString::from("add"),
@@ -351,12 +346,8 @@ impl GitOps for CommandGitOps {
         }
 
         if is_git_repo(workspace_root) {
-            run_git_stdout(
-                ["worktree", "prune"],
-                Some(workspace_root),
-                GIT_LOCAL_TIMEOUT,
-                "git worktree prune failed",
-            )?;
+            // Creation owns only its generated destination. Repository-wide
+            // stale metadata cleanup is a separate explicit maintenance task.
             let worktree_add_args = vec![
                 OsString::from("worktree"),
                 OsString::from("add"),

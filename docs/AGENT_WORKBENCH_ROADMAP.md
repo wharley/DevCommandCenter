@@ -109,23 +109,32 @@ none of it is marked shipped.
   worktree, Git-dir, and shared common-dir authority; linked worktrees contend
   atomically on the same common-dir lease. Atomic multi-root mutation, turn,
   and capture-edge admission is implemented as the foundation for the later
-  capture/delegation/removal slices. Capture v1 remains
-  review evidence only and is a NO-GO for Undo. Until remaining delivery and
-  remote-lifecycle actions, externally reported setup mutations,
-  delegation/worktree creation, workspace/repository creation and remote
-  materialization, creation-time generated-context writes, and
-  workspace/repository removal are also covered, completed captures finalize
-  explicitly ineligible and cannot create an `Eligible` restore set. Capture
-  intervals do not yet consume the common-dir identity, so mutation
-  serialization alone does not relax that fail-closed gate. Recovery is lazy
-  but gates the first feature-enabled begin. The Undo button remains disabled.
+  capture/delegation/removal slices. Delegation prepare now holds its parent
+  worktree and common-dir; apply and explicit remove atomically hold the parent,
+  child, and shared common-dir. Local delegation branch cleanup observes the
+  child branch/OID and uses `update-ref` compare-and-delete instead of inferring
+  a branch name and forcing deletion. Automatic repository-wide `worktree
+  prune` side effects were removed. Confirmed remote-branch deletion now binds
+  remote, branch, local HEAD OID, and redacted push URL, revalidates the live
+  remote OID, and uses an exact `force-with-lease`; remotes with multiple push
+  destinations fail closed. Workspace listing is read-only, preserves broken
+  records, and reports their recovery reason. Capture v1 remains review evidence
+  only and is a NO-GO for Undo. Until the durable lifecycle journal, delegation
+  ownership binding, transactional apply/rollback, repository/workspace
+  create-delete recovery, remaining remote ownership/materialization actions,
+  externally reported setup mutations, creation-time generated-context writes,
+  and capture/common-dir admission are complete, completed captures finalize
+  explicitly ineligible and cannot create an `Eligible` restore set. Recovery
+  is lazy but gates the first feature-enabled begin. The Undo button remains
+  disabled.
 - **M5:** DMG support for Apple Silicon and Intel, while retaining the updater
   archive path, is implemented locally and static-review approved. It remains
   pending macOS CI that has the required Apple signing and notarization secrets.
 
 The current validation baseline is 95 frontend test files / 511 tests, 84
-feature-off and 178 feature-on `dcc-infra` Rust tests, and 212 `dcc-tauri` Rust
-tests in either mode (206 passed and 6 ignored).
+feature-off and 178 feature-on `dcc-infra` Rust tests, 216 feature-off
+`dcc-tauri` tests (210 passed and 6 ignored), and 218 feature-on `dcc-tauri`
+tests (212 passed and 6 ignored).
 
 ### M3 Last Turn Review local implementation
 
