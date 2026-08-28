@@ -125,11 +125,21 @@ none of it is marked shipped.
   expiring leases, startup reconciliation, terminal-delegation cleanup, and
   journal-driven workspace/project deletion. Apply/discard commands resolve
   authority from the journal instead of trusting a child session's working
-  directory override. Interrupted apply remains fail-closed and preserves an
-  explicit recovery state; transactional destination rollback is still a
-  separate slice. Capture v1 remains review evidence only and is a NO-GO for
-  Undo. Until transactional apply/rollback, repository/workspace create-delete
-  recovery, remaining remote ownership/materialization actions, externally
+  directory override. Delegation apply now freezes regular-file pre/post
+  artifacts before the first destination mutation, publishes their SHA-256
+  manifest through a separate SQLite transaction journal, atomically couples
+  apply ownership to the worktree lifecycle, and recovers all-pre, all-post,
+  and mixed-known crash states on startup. A process-held operation lock covers
+  preparation and mutation so an expired SQLite lease cannot overlap a live
+  DCC process; Git inspection is hardened and time-bounded. Renames retain both
+  paths and Unix permission modes are restored. Divergent paths, pre-existing
+  symlink ancestors, hardlinks, submodules, special files, case-colliding path
+  sets, corrupt artifacts, changed Git identities, and unknown transaction
+  temporaries fail closed and preserve an explicit recovery state. This path
+  is independent of Guarded Undo and the macOS DMG capture feature. Capture v1
+  remains review evidence only and is a
+  NO-GO for Undo. Repository/workspace create-delete recovery, remaining remote
+  ownership/materialization actions, externally
   reported setup mutations, creation-time generated-context writes, and
   capture/common-dir admission are complete, completed captures finalize
   explicitly ineligible and cannot create an `Eligible` restore set. Recovery
@@ -140,9 +150,9 @@ none of it is marked shipped.
   pending macOS CI that has the required Apple signing and notarization secrets.
 
 The current validation baseline is 95 frontend test files / 511 tests, 91
-feature-off and 185 feature-on `dcc-infra` Rust tests, 218 feature-off
-`dcc-tauri` tests (212 passed and 6 ignored), and 220 feature-on `dcc-tauri`
-tests (214 passed and 6 ignored).
+`dcc-core` Rust tests, 97 feature-off and 191 feature-on `dcc-infra` tests, 234
+feature-off `dcc-tauri` tests (228 passed and 6 ignored), and 236 feature-on
+`dcc-tauri` tests (230 passed and 6 ignored).
 
 ### M3 Last Turn Review local implementation
 

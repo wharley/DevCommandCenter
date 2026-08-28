@@ -3,6 +3,10 @@ use async_trait::async_trait;
 use crate::{
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
+        delegation_apply::{
+            DelegationApplyTransaction, DelegationApplyTransactionId,
+            DelegationApplyTransactionState,
+        },
         delegation_worktree::{
             DelegationWorktreeOperation, DelegationWorktreeOperationId,
             DelegationWorktreeOperationState,
@@ -273,6 +277,54 @@ pub trait DelegationWorktreeOperationRepo: Send + Sync {
     async fn delete_removed_delegation_worktree_operation(
         &self,
         id: &DelegationWorktreeOperationId,
+    ) -> Result<bool>;
+}
+
+#[async_trait]
+pub trait DelegationApplyTransactionRepo: Send + Sync {
+    async fn create_delegation_apply_transaction(
+        &self,
+        transaction: &DelegationApplyTransaction,
+    ) -> Result<()>;
+    async fn get_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+    ) -> Result<Option<DelegationApplyTransaction>>;
+    async fn get_delegation_apply_transaction_by_operation_id(
+        &self,
+        operation_id: &DelegationWorktreeOperationId,
+    ) -> Result<Option<DelegationApplyTransaction>>;
+    async fn compare_and_swap_delegation_apply_transaction(
+        &self,
+        expected_state: DelegationApplyTransactionState,
+        transaction: &DelegationApplyTransaction,
+    ) -> Result<bool>;
+    /// Claims a prepared transaction or takes over an applying transaction.
+    /// `operation_lock_held` may bypass an unexpired lease only while the
+    /// caller retains DCC's cross-process operation file lock for this exact
+    /// operation through finalization.
+    async fn claim_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+        recovery_owner: &str,
+        now: &str,
+        lease_until: &str,
+        operation_lock_held: bool,
+    ) -> Result<Option<DelegationApplyTransaction>>;
+    async fn finalize_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+        recovery_owner: &str,
+        final_state: DelegationApplyTransactionState,
+        last_error: Option<String>,
+        updated_at: &str,
+    ) -> Result<Option<DelegationApplyTransaction>>;
+    async fn list_delegation_apply_transactions_requiring_recovery(
+        &self,
+    ) -> Result<Vec<DelegationApplyTransaction>>;
+    async fn delete_terminal_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
     ) -> Result<bool>;
 }
 

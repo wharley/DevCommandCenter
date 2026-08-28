@@ -81,10 +81,36 @@ Implementation delegations are reviewed from the Inspector. During review, the
 Inspector points at the child worktree, not the parent worktree. This makes the
 changed-file tree and diffs show exactly what the child agent changed.
 
-When you apply the delegation, DCC copies tracked, staged, unstaged, and new
-untracked files back into the parent worktree. This includes newly created
-files such as database migrations. The parent worktree must be clean before
-applying so DCC does not overwrite local work.
+When you apply the delegation, DCC freezes tracked, staged, unstaged, and new
+untracked regular files into a private pre/post manifest before the first
+parent-worktree write. This includes newly created files such as database
+migrations. The parent worktree must be clean before applying so DCC does not
+overwrite local work. Pre-existing symlink ancestors, hardlinks, submodules,
+special files, non-UTF-8 paths, and case-colliding path sets fail closed instead
+of being copied with ambiguous semantics. Renames are frozen as an explicit
+delete plus add so both names participate in apply and rollback.
+
+Apply is transactionally journaled in SQLite and does not depend on Guarded
+Undo or on the macOS DMG capture path. The journal binds the delegation
+operation, Git HEAD/ref/index identity, manifest digest, artifact accounting,
+owner, and expiring recovery lease. A process-held operation lock prevents an
+expired lease from being taken over while its original DCC process is still
+alive. Git inspection is non-interactive and time-bounded. File replacement
+uses same-directory atomic installation and preserves Unix permission bits;
+the Git index is not modified.
+
+If DCC stops while applying, startup classifies every destination path against
+the frozen manifest. An all-post destination completes as applied, an all-pre
+destination returns to review, and a known partial destination is restored to
+its complete preimage. Any external divergence, corrupt artifact, unexpected
+temporary file, or changed Git identity is preserved and reported as requiring
+manual recovery. DCC will not remove the child worktree while that recovery
+authority is active.
+
+The artifact contract covers regular-file contents, absence/presence, and Unix
+permission bits. Filesystem-specific ACLs, extended attributes, and directory
+metadata are outside this content-apply contract; paths that need unsupported
+link or special-file semantics are rejected instead of approximated.
 
 ## Rerunning a Delegation
 
@@ -109,14 +135,16 @@ discard resolve this record by ID; `workingDirectoryOverride` remains provider
 context and preview data, but is not deletion authority.
 
 Lifecycle updates use compare-and-swap transitions. If DCC stops during
-prepare, bind, apply, or removal, startup reconciliation resumes only cleanup
-whose destructive intent is already durable. A missing ref is an idempotent
+prepare, bind, apply, or removal, startup reconciliation resumes only work
+whose mutation intent is already durable. A missing ref is an idempotent
 success, while a branch that advanced to another OID is preserved and reported
-for recovery. Removal also uses a durable expiring lease, so only one DCC
-process may mutate a journaled worktree at a time and a later process can take
-over after a crash. Terminal delegations are cleaned immediately when possible
-and reconciled on startup. Interrupted or potentially partial apply is never
-reported as success.
+for recovery. Apply and removal use separate durable expiring leases, so only
+one DCC process may own each lifecycle mutation and a later process can take
+over after a crash. The apply operation lock also protects long-running
+preparation and filesystem I/O from lease-expiry overlap. Terminal delegations
+and private apply artifacts are
+cleaned immediately when possible and reconciled on startup. Interrupted or
+potentially partial apply is never reported as success.
 
 ## Notes
 

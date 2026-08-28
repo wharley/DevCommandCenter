@@ -978,6 +978,7 @@ dependencies = [
  "toml_edit 0.20.2",
  "url",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

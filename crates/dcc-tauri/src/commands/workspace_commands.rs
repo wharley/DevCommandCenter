@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -24,6 +22,10 @@ use dcc_core::{
     },
     domain::{
         delegation::{DelegationId, DelegationStatus},
+        delegation_apply::{
+            DelegationApplyTransaction, DelegationApplyTransactionId,
+            DelegationApplyTransactionState,
+        },
         delegation_worktree::{
             DelegationWorktreeOperation, DelegationWorktreeOperationId,
             DelegationWorktreeOperationState,
@@ -38,8 +40,8 @@ use dcc_core::{
         workspace_bundle::{WorkspaceBundleId, WorkspaceBundleState, WorkspaceBundleSummary},
     },
     ports::{
-        DelegationRepo, DelegationWorktreeOperationRepo, ProviderRuntimeConfig, RepositoryRepo,
-        SessionRepo, WorkspaceBundleRepo, WorkspaceRepo,
+        DelegationApplyTransactionRepo, DelegationRepo, DelegationWorktreeOperationRepo,
+        ProviderRuntimeConfig, RepositoryRepo, SessionRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
 };
 #[cfg(test)]
@@ -77,6 +79,11 @@ use crate::{
         resolve_workspace_broken_reason, resolve_workspace_setup_root,
         resolve_workspace_target_branch, run_git_network_output_with_workspace_auth,
     },
+    delegation_apply::{
+        apply_prepared_artifacts, classify_apply_artifacts, cleanup_apply_artifacts,
+        prepare_apply_artifacts, rollback_apply_artifacts, try_lock_apply_operation,
+        ApplyClassification,
+    },
     delivery_failure::{
         capture_workspace_delivery_failure, clear_workspace_delivery_failure,
         resolve_delivery_push_target, validate_delivery_recovery_snapshot,
@@ -86,9 +93,8 @@ use crate::{
     },
     events::TauriEventBus,
     git::{
-        configure_git_command, git_command_succeeds, git_output_err, parse_name_status_z,
-        parse_numstat_z, run_git_network_output, run_git_output, run_git_output_owned,
-        split_null_terminated_fields,
+        git_command_succeeds, git_output_err, parse_name_status_z, parse_numstat_z,
+        run_git_network_output, run_git_output, run_git_output_owned, split_null_terminated_fields,
     },
     guarded_undo_runtime::WorkspaceMutationRunError,
     state::{
@@ -4780,6 +4786,33 @@ async fn remove_journaled_delegation_worktree(
     if matches!(operation.state, DelegationWorktreeOperationState::Removed) {
         return Ok(());
     }
+    let artifact_root = state
+        .app_data_dir
+        .join("delegation-apply")
+        .join("transactions");
+    let _operation_lock = try_lock_apply_operation(&artifact_root, &operation.operation_id.0)?
+        .ok_or_else(|| "delegation operation is owned by another live process".to_string())?;
+    if let Some(apply) = journal_repo
+        .get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        match apply.state {
+            DelegationApplyTransactionState::Preparing
+            | DelegationApplyTransactionState::Prepared
+            | DelegationApplyTransactionState::Applying => {
+                return Err("delegation apply is still active; retry cleanup after recovery".to_string())
+            }
+            DelegationApplyTransactionState::RecoveryRequired => {
+                return Err(
+                    "delegation apply changed the destination ambiguously; recover it before removing the worktree"
+                        .to_string(),
+                )
+            }
+            DelegationApplyTransactionState::Applied
+            | DelegationApplyTransactionState::RolledBack => {}
+        }
+    }
     // Validate immutable ownership before recording destructive intent. A bad
     // journal row must not get stuck in Removing without touching the worktree.
     let worktree_path =
@@ -5077,108 +5110,6 @@ fn remove_delegation_worktree_inner(
     Ok(())
 }
 
-fn apply_patch_to_worktree(root: &str, patch: &[u8]) -> Result<(), String> {
-    let mut command = Command::new("git");
-    configure_git_command(&mut command);
-    command
-        .current_dir(root)
-        .arg("apply")
-        .arg("--whitespace=nowarn")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("failed to run git apply: {error}"))?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or_else(|| "failed to open git apply stdin".to_string())?
-        .write_all(patch)
-        .map_err(|error| format!("failed to write git apply patch: {error}"))?;
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("git apply failed: {error}"))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(git_output_err("git apply", &output.stderr))
-}
-
-fn list_untracked_files(root: &str) -> Result<Vec<String>, String> {
-    let output = run_git_output(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
-    if !output.status.success() {
-        return Err(git_output_err("git ls-files --others", &output.stderr));
-    }
-    split_null_terminated_fields(&output.stdout)
-        .into_iter()
-        .map(|path| validate_git_relative_path(&path))
-        .collect()
-}
-
-fn preflight_untracked_delegation_files(
-    source_root: &Path,
-    destination_root: &Path,
-    paths: &[String],
-) -> Result<(), String> {
-    for path in paths {
-        let rel = validate_git_relative_path(path)?;
-        let source_path = source_root.join(&rel);
-        let destination_path = destination_root.join(&rel);
-        let source_metadata = fs::symlink_metadata(&source_path).map_err(|error| {
-            format!(
-                "failed to read delegation file {}: {}",
-                source_path.display(),
-                error
-            )
-        })?;
-        if !source_metadata.is_file() {
-            return Err(format!(
-                "delegation untracked path is not a regular file: {}",
-                source_path.display()
-            ));
-        }
-        if fs::symlink_metadata(&destination_path).is_ok() {
-            return Err(format!(
-                "destination already contains untracked delegation file: {}",
-                destination_path.display()
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn copy_untracked_delegation_files(
-    source_root: &Path,
-    destination_root: &Path,
-    paths: &[String],
-) -> Result<(), String> {
-    preflight_untracked_delegation_files(source_root, destination_root, paths)?;
-    for path in paths {
-        let rel = validate_git_relative_path(path)?;
-        let source_path = source_root.join(&rel);
-        let destination_path = destination_root.join(&rel);
-        if let Some(parent) = destination_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| {
-                format!(
-                    "failed to create destination directory {}: {}",
-                    parent.display(),
-                    error
-                )
-            })?;
-        }
-        fs::copy(&source_path, &destination_path).map_err(|error| {
-            format!(
-                "failed to copy delegation file {} to {}: {}",
-                source_path.display(),
-                destination_path.display(),
-                error
-            )
-        })?;
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn workspace_apply_delegation_worktree(
     state: State<'_, WorkspaceCommandState>,
@@ -5191,7 +5122,7 @@ pub async fn workspace_apply_delegation_worktree(
     }
     let journal_repo =
         SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let mut operation = journal_repo
+    let operation = journal_repo
         .get_delegation_worktree_operation_by_delegation_id(&input.delegation_id)
         .await
         .map_err(|error| error.to_string())?
@@ -5210,174 +5141,311 @@ pub async fn workspace_apply_delegation_worktree(
     // ReviewPending when it fails because no mutation has started.
     let worktree_path =
         validate_delegation_worktree_path(&requested_root, &operation.worktree_path)?;
-    operation.state = DelegationWorktreeOperationState::Applying;
-    operation.updated_at = Utc::now().to_rfc3339();
+    let artifact_root = state
+        .app_data_dir
+        .join("delegation-apply")
+        .join("transactions");
+    let _operation_lock = try_lock_apply_operation(&artifact_root, &operation.operation_id.0)?
+        .ok_or_else(|| "delegation apply is owned by another live process".to_string())?;
+    if let Some(existing) = journal_repo
+        .get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        if !existing.state.is_terminal() {
+            return Err(format!(
+                "delegation apply recovery is {:?}: {}",
+                existing.state,
+                existing
+                    .last_error
+                    .as_deref()
+                    .unwrap_or("retry after recovery completes")
+            ));
+        }
+    }
+
+    let transaction_id = DelegationApplyTransactionId(Uuid::new_v4().to_string());
+    let now = Utc::now().to_rfc3339();
+    let mut transaction = DelegationApplyTransaction {
+        transaction_id: transaction_id.clone(),
+        operation_id: operation.operation_id.clone(),
+        delegation_id: input.delegation_id.clone(),
+        workspace_id: operation.workspace_id.clone(),
+        source_head_oid: None,
+        destination_head_oid: None,
+        destination_ref: None,
+        destination_index_tree_oid: None,
+        manifest_digest: None,
+        file_count: 0,
+        artifact_bytes: 0,
+        state: DelegationApplyTransactionState::Preparing,
+        recovery_owner: None,
+        recovery_lease_until: None,
+        last_error: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    journal_repo
+        .create_delegation_apply_transaction(&transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let prepared = state
+        .run_git_workspace_pair_mutation_blocking(&requested_root, worktree_path.clone(), {
+            let transaction_id = transaction_id.0.clone();
+            let artifact_root = artifact_root.clone();
+            move |destination_root, source_root| {
+                prepare_apply_artifacts(
+                    &transaction_id,
+                    destination_root,
+                    source_root,
+                    &artifact_root,
+                )
+            }
+        })
+        .await;
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let error = workspace_mutation_error(error);
+            transaction.state = DelegationApplyTransactionState::RolledBack;
+            transaction.last_error = Some(error.clone());
+            transaction.updated_at = Utc::now().to_rfc3339();
+            let _ = journal_repo
+                .compare_and_swap_delegation_apply_transaction(
+                    DelegationApplyTransactionState::Preparing,
+                    &transaction,
+                )
+                .await;
+            let _ = cleanup_terminal_delegation_apply_transaction(
+                &journal_repo,
+                &transaction_id,
+                &artifact_root,
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    let journal_identity_error =
+        if prepared.source_identity.branch.as_deref() != Some(operation.branch.as_str()) {
+            Some("delegation worktree branch changed after it was journaled".to_string())
+        } else if operation
+            .expected_branch_oid
+            .as_deref()
+            .is_none_or(|expected| !prepared.source_identity.head.eq_ignore_ascii_case(expected))
+        {
+            Some("delegation worktree HEAD changed after it was journaled".to_string())
+        } else if !prepared
+            .destination_identity
+            .head
+            .eq_ignore_ascii_case(&operation.base_commit)
+        {
+            Some("destination HEAD no longer matches the delegation baseline".to_string())
+        } else {
+            None
+        };
+    if let Some(error) = journal_identity_error {
+        transaction.state = DelegationApplyTransactionState::RolledBack;
+        transaction.last_error = Some(error.clone());
+        transaction.updated_at = Utc::now().to_rfc3339();
+        let _ = journal_repo
+            .compare_and_swap_delegation_apply_transaction(
+                DelegationApplyTransactionState::Preparing,
+                &transaction,
+            )
+            .await;
+        let _ = cleanup_terminal_delegation_apply_transaction(
+            &journal_repo,
+            &transaction_id,
+            &artifact_root,
+        )
+        .await;
+        return Err(error);
+    }
+    transaction.source_head_oid = Some(prepared.source_identity.head);
+    transaction.destination_head_oid = Some(prepared.destination_identity.head);
+    transaction.destination_ref = prepared.destination_identity.branch;
+    transaction.destination_index_tree_oid = Some(prepared.destination_identity.index_tree);
+    transaction.manifest_digest = Some(prepared.manifest_digest);
+    transaction.file_count = u32::try_from(prepared.file_count)
+        .map_err(|_| "delegation apply file count exceeds the journal".to_string())?;
+    transaction.artifact_bytes = prepared.artifact_bytes;
+    transaction.state = DelegationApplyTransactionState::Prepared;
+    transaction.updated_at = Utc::now().to_rfc3339();
     if !journal_repo
-        .compare_and_swap_delegation_worktree_operation(
-            DelegationWorktreeOperationState::ReviewPending,
-            &operation,
+        .compare_and_swap_delegation_apply_transaction(
+            DelegationApplyTransactionState::Preparing,
+            &transaction,
         )
         .await
         .map_err(|error| error.to_string())?
     {
-        return Err("delegation worktree journal changed; retry apply".to_string());
+        return Err("delegation apply manifest was prepared but its journal changed".to_string());
     }
 
-    let apply_result = state
-        .run_git_workspace_pair_mutation_blocking(
-            &requested_root,
-            worktree_path,
-            apply_delegation_worktree_inner_classified,
+    let recovery_owner = Uuid::new_v4().to_string();
+    let claimed_at = Utc::now();
+    let lease_until = claimed_at + Duration::minutes(15);
+    transaction = journal_repo
+        .claim_delegation_apply_transaction(
+            &transaction_id,
+            &recovery_owner,
+            &claimed_at.to_rfc3339(),
+            &lease_until.to_rfc3339(),
+            true,
         )
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "delegation apply journal changed before mutation".to_string())?;
+    let manifest_digest = transaction
+        .manifest_digest
+        .clone()
+        .ok_or_else(|| "claimed delegation apply has no manifest digest".to_string())?;
+
+    let apply_result = state
+        .run_git_workspace_pair_mutation_blocking(&requested_root, worktree_path, {
+            let transaction_id = transaction_id.0.clone();
+            let artifact_root = artifact_root.clone();
+            let manifest_digest = manifest_digest.clone();
+            move |destination_root, source_root| match apply_prepared_artifacts(
+                &transaction_id,
+                destination_root,
+                source_root,
+                &artifact_root,
+                &manifest_digest,
+            ) {
+                Ok(output) => Ok(output),
+                Err(apply_error) => match rollback_apply_artifacts(
+                    &transaction_id,
+                    destination_root,
+                    &artifact_root,
+                    &manifest_digest,
+                ) {
+                    Ok(()) => Err(TransactionalApplyFailure::RolledBack(apply_error)),
+                    Err(rollback_error) => Err(TransactionalApplyFailure::RecoveryRequired(
+                        format!("{apply_error}; rollback failed: {rollback_error}"),
+                    )),
+                },
+            }
+        })
         .await;
     match apply_result {
         Ok(output) => {
-            operation.state = DelegationWorktreeOperationState::Applied;
-            operation.updated_at = Utc::now().to_rfc3339();
-            if !journal_repo
-                .compare_and_swap_delegation_worktree_operation(
-                    DelegationWorktreeOperationState::Applying,
-                    &operation,
+            if journal_repo
+                .finalize_delegation_apply_transaction(
+                    &transaction_id,
+                    &recovery_owner,
+                    DelegationApplyTransactionState::Applied,
+                    None,
+                    &Utc::now().to_rfc3339(),
                 )
                 .await
                 .map_err(|error| error.to_string())?
+                .is_none()
             {
                 return Err(
-                    "delegation changes were applied but the journal needs recovery".to_string(),
+                    "delegation changes match the postimage but the journal needs recovery"
+                        .to_string(),
                 );
             }
-            Ok(output)
+            if let Err(error) = cleanup_terminal_delegation_apply_transaction(
+                &journal_repo,
+                &transaction_id,
+                &artifact_root,
+            )
+            .await
+            {
+                eprintln!("[DCC][delegation-apply] artifact cleanup failed: {error}");
+            }
+            Ok(WorkspaceApplyDelegationWorktreeOutput {
+                changed_files: output.changed_files,
+            })
         }
         Err(error) => {
-            let (error, retryable) = match error {
+            let (final_state, error) = match error {
                 WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
-                    DelegationApplyFailure::BeforeMutation(error),
-                )) => (error, true),
+                    TransactionalApplyFailure::RolledBack(error),
+                )) => (DelegationApplyTransactionState::RolledBack, error),
                 WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
-                    DelegationApplyFailure::MutationUncertain(error),
-                )) => (error, false),
-                _ => ("workspace mutation is unavailable".to_string(), true),
+                    TransactionalApplyFailure::RecoveryRequired(error),
+                )) => (DelegationApplyTransactionState::RecoveryRequired, error),
+                coordination_error => {
+                    let coordination_error = coordination_error.to_string();
+                    let rollback = state
+                        .run_git_workspace_mutation_blocking(&requested_root, {
+                            let transaction_id = transaction_id.0.clone();
+                            let artifact_root = artifact_root.clone();
+                            let manifest_digest = manifest_digest.clone();
+                            move |destination_root| {
+                                rollback_apply_artifacts(
+                                    &transaction_id,
+                                    destination_root,
+                                    &artifact_root,
+                                    &manifest_digest,
+                                )
+                            }
+                        })
+                        .await;
+                    match rollback {
+                        Ok(()) => (
+                            DelegationApplyTransactionState::RolledBack,
+                            coordination_error,
+                        ),
+                        Err(rollback_error) => (
+                            DelegationApplyTransactionState::RecoveryRequired,
+                            format!(
+                                "{coordination_error}; rollback after coordination failure failed: {}",
+                                workspace_mutation_error(rollback_error)
+                            ),
+                        ),
+                    }
+                }
             };
-            operation.state = if retryable {
-                DelegationWorktreeOperationState::ReviewPending
-            } else {
-                DelegationWorktreeOperationState::CleanupRequired
-            };
-            operation.last_error = Some(error.clone());
-            operation.updated_at = Utc::now().to_rfc3339();
-            let _ = journal_repo
-                .compare_and_swap_delegation_worktree_operation(
-                    DelegationWorktreeOperationState::Applying,
-                    &operation,
+            let finalized = journal_repo
+                .finalize_delegation_apply_transaction(
+                    &transaction_id,
+                    &recovery_owner,
+                    final_state.clone(),
+                    Some(error.clone()),
+                    &Utc::now().to_rfc3339(),
+                )
+                .await
+                .map_err(|repo_error| repo_error.to_string())?;
+            if finalized.is_none() {
+                return Err(format!(
+                    "{error}; the transactional journal also needs recovery"
+                ));
+            }
+            if final_state == DelegationApplyTransactionState::RolledBack {
+                let _ = cleanup_terminal_delegation_apply_transaction(
+                    &journal_repo,
+                    &transaction_id,
+                    &artifact_root,
                 )
                 .await;
+            }
             Err(error)
         }
     }
 }
 
 #[derive(Debug)]
-enum DelegationApplyFailure {
-    BeforeMutation(String),
-    MutationUncertain(String),
+enum TransactionalApplyFailure {
+    RolledBack(String),
+    RecoveryRequired(String),
 }
 
-#[cfg(test)]
-fn apply_delegation_worktree_inner(
-    destination_root: &Path,
-    delegation_root: &Path,
-) -> Result<WorkspaceApplyDelegationWorktreeOutput, String> {
-    apply_delegation_worktree_inner_classified(destination_root, delegation_root).map_err(|error| {
-        match error {
-            DelegationApplyFailure::BeforeMutation(error)
-            | DelegationApplyFailure::MutationUncertain(error) => error,
-        }
-    })
-}
-
-fn apply_delegation_worktree_inner_classified(
-    destination_root: &Path,
-    delegation_root: &Path,
-) -> Result<WorkspaceApplyDelegationWorktreeOutput, DelegationApplyFailure> {
-    let before_mutation = DelegationApplyFailure::BeforeMutation;
-    let root = destination_root
-        .to_str()
-        .ok_or_else(|| before_mutation("workspace root is not valid UTF-8".to_string()))?;
-    let worktree_root = delegation_root.to_str().ok_or_else(|| {
-        before_mutation("delegation worktree path is not valid UTF-8".to_string())
-    })?;
-
-    let status = workspace_git_status_inner(root).map_err(&before_mutation)?;
-    let changed_count = status.staged.len() + status.unstaged.len();
-    if status.conflict_count > 0 || changed_count > 0 {
-        return Err(before_mutation(
-            "apply requires a clean destination worktree; commit, stash, or discard local changes first"
-                .to_string(),
-        ));
-    }
-
-    let destination_head = resolve_current_commit_sha(root)
-        .map_err(&before_mutation)?
-        .filter(|commit| !commit.trim().is_empty())
-        .ok_or_else(|| before_mutation("failed to resolve destination HEAD".to_string()))?;
-    let delegation_head = resolve_current_commit_sha(worktree_root)
-        .map_err(&before_mutation)?
-        .filter(|commit| !commit.trim().is_empty())
-        .ok_or_else(|| before_mutation("failed to resolve delegation worktree HEAD".to_string()))?;
-    if destination_head != delegation_head {
-        return Err(before_mutation(
-            "destination worktree HEAD differs from delegation baseline; rebase or recreate the delegation before applying"
-                .to_string(),
-        ));
-    }
-
-    let changed_output = run_git_output(
-        worktree_root,
-        &["diff", "HEAD", "--name-only", "-z", "--", "."],
-    )
-    .map_err(&before_mutation)?;
-    if !changed_output.status.success() {
-        return Err(before_mutation(git_output_err(
-            "git diff HEAD --name-only",
-            &changed_output.stderr,
-        )));
-    }
-    let untracked_files = list_untracked_files(worktree_root).map_err(&before_mutation)?;
-    let mut changed_files_set: BTreeSet<String> =
-        split_null_terminated_fields(&changed_output.stdout)
-            .into_iter()
-            .map(|path| validate_git_relative_path(&path))
-            .collect::<Result<_, _>>()
-            .map_err(&before_mutation)?;
-    changed_files_set.extend(untracked_files.iter().cloned());
-    let changed_files = changed_files_set.into_iter().collect::<Vec<_>>();
-    if changed_files.is_empty() {
-        return Err(before_mutation(
-            "delegation worktree has no changes to apply".to_string(),
-        ));
-    }
-    preflight_untracked_delegation_files(delegation_root, destination_root, &untracked_files)
-        .map_err(&before_mutation)?;
-
-    let diff_output = run_git_output(
-        worktree_root,
-        &["diff", "HEAD", "--binary", "--full-index", "--", "."],
-    )
-    .map_err(&before_mutation)?;
-    if !diff_output.status.success() {
-        return Err(before_mutation(git_output_err(
-            "git diff HEAD",
-            &diff_output.stderr,
-        )));
-    }
-    if !diff_output.stdout.is_empty() {
-        apply_patch_to_worktree(root, &diff_output.stdout)
-            .map_err(DelegationApplyFailure::MutationUncertain)?;
-    }
-    copy_untracked_delegation_files(delegation_root, destination_root, &untracked_files)
-        .map_err(DelegationApplyFailure::MutationUncertain)?;
-
-    Ok(WorkspaceApplyDelegationWorktreeOutput { changed_files })
+async fn cleanup_terminal_delegation_apply_transaction(
+    journal_repo: &SqliteSessionRepo,
+    transaction_id: &DelegationApplyTransactionId,
+    artifact_root: &Path,
+) -> Result<(), String> {
+    cleanup_apply_artifacts(&transaction_id.0, artifact_root)?;
+    journal_repo
+        .delete_terminal_delegation_apply_transaction(transaction_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -7965,6 +8033,10 @@ mod editor_workspace_file_tests {
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
             DelegationStatus,
         },
+        delegation_apply::{
+            DelegationApplyTransaction, DelegationApplyTransactionId,
+            DelegationApplyTransactionState,
+        },
         delegation_worktree::{
             DelegationWorktreeOperation, DelegationWorktreeOperationId,
             DelegationWorktreeOperationState,
@@ -7974,7 +8046,8 @@ mod editor_workspace_file_tests {
         thread::{Thread, ThreadId},
     };
     use dcc_core::ports::{
-        DelegationRepo, DelegationWorktreeOperationRepo, SessionEventRepo, SessionRepo, ThreadRepo,
+        DelegationApplyTransactionRepo, DelegationRepo, DelegationWorktreeOperationRepo,
+        SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8002,6 +8075,187 @@ mod editor_workspace_file_tests {
     impl Drop for TestDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    struct ApplyRecoveryFixture {
+        _dir: TestDir,
+        state: WorkspaceCommandState,
+        journal: SqliteSessionRepo,
+        transaction: DelegationApplyTransaction,
+        operation_id: DelegationWorktreeOperationId,
+        parent: PathBuf,
+        child: PathBuf,
+        artifact_root: PathBuf,
+    }
+
+    async fn applying_recovery_fixture(name: &str) -> ApplyRecoveryFixture {
+        let dir = TestDir::new(name);
+        let physical_dir = fs::canonicalize(&dir.path).expect("canonical test root");
+        let parent = physical_dir.join("repository");
+        fs::create_dir_all(&parent).expect("create parent repository");
+        let parent_string = parent.to_string_lossy().into_owned();
+        initialize_branch_test_repository(&parent_string, "feature/review");
+        let base_commit = resolve_current_commit_sha(&parent_string)
+            .expect("read parent HEAD")
+            .expect("parent HEAD");
+        let branch = format!("dcc/delegation/{name}");
+        let child = delegation_worktrees_root(&parent).join(branch.replace('/', "-"));
+        create_worktree_branch_from_ref(&parent, &child, &branch, &base_commit)
+            .expect("create delegation worktree");
+        fs::write(child.join("one.txt"), "delegated one\n").expect("write first delegation file");
+        fs::write(child.join("two.txt"), "delegated two\n").expect("write second delegation file");
+
+        let db_path = physical_dir.join("lifecycle.sqlite");
+        let app_data = physical_dir.join("lifecycle-app-data");
+        fs::create_dir_all(&app_data).expect("create lifecycle app data");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&app_data, fs::Permissions::from_mode(0o700))
+                .expect("protect lifecycle app data");
+        }
+        let session_state = SessionCommandState::new_headless(db_path.clone(), app_data.clone());
+        let state = WorkspaceCommandState::from_session(&session_state);
+        let workspace_repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let workspace = Workspace {
+            id: WorkspaceId(format!("{name}-workspace")),
+            project_id: dcc_core::domain::project::ProjectId(format!("{name}-project")),
+            name: Some("Apply recovery".to_string()),
+            root_path: parent_string.clone(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+        workspace_repo
+            .save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+
+        let journal = SqliteSessionRepo::open(&db_path).expect("open lifecycle journal");
+        let operation_id = DelegationWorktreeOperationId(Uuid::new_v4().to_string());
+        let delegation_id = DelegationId(format!("{name}-delegation"));
+        let now = Utc::now().to_rfc3339();
+        let mut operation = DelegationWorktreeOperation {
+            operation_id: operation_id.clone(),
+            delegation_key: Some("apply-recovery".to_string()),
+            delegation_id: Some(delegation_id.clone()),
+            workspace_id: workspace.id.clone(),
+            parent_session_id: None,
+            child_session_id: None,
+            source_root: parent_string,
+            worktree_path: child.to_string_lossy().into_owned(),
+            branch,
+            base_commit,
+            expected_branch_oid: None,
+            source_root_id: None,
+            worktree_root_id: None,
+            common_dir_id: None,
+            state: DelegationWorktreeOperationState::Preparing,
+            last_error: None,
+            recovery_owner: None,
+            recovery_lease_until: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        journal
+            .create_delegation_worktree_operation(&operation)
+            .await
+            .expect("create worktree operation");
+        operation.state = DelegationWorktreeOperationState::Prepared;
+        operation.updated_at = Utc::now().to_rfc3339();
+        assert!(journal
+            .compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &operation,
+            )
+            .await
+            .expect("mark operation prepared"));
+        operation.state = DelegationWorktreeOperationState::ReviewPending;
+        operation.updated_at = Utc::now().to_rfc3339();
+        assert!(journal
+            .compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Prepared,
+                &operation,
+            )
+            .await
+            .expect("mark operation review pending"));
+
+        let transaction_id = DelegationApplyTransactionId(Uuid::new_v4().to_string());
+        let now = Utc::now().to_rfc3339();
+        let mut transaction = DelegationApplyTransaction {
+            transaction_id: transaction_id.clone(),
+            operation_id: operation_id.clone(),
+            delegation_id,
+            workspace_id: workspace.id,
+            source_head_oid: None,
+            destination_head_oid: None,
+            destination_ref: None,
+            destination_index_tree_oid: None,
+            manifest_digest: None,
+            file_count: 0,
+            artifact_bytes: 0,
+            state: DelegationApplyTransactionState::Preparing,
+            recovery_owner: None,
+            recovery_lease_until: None,
+            last_error: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        journal
+            .create_delegation_apply_transaction(&transaction)
+            .await
+            .expect("create apply transaction");
+
+        let artifact_root = app_data.join("delegation-apply").join("transactions");
+        let prepared = prepare_apply_artifacts(&transaction_id.0, &parent, &child, &artifact_root)
+            .expect("prepare frozen apply artifacts");
+        transaction.source_head_oid = Some(prepared.source_identity.head);
+        transaction.destination_head_oid = Some(prepared.destination_identity.head);
+        transaction.destination_ref = prepared.destination_identity.branch;
+        transaction.destination_index_tree_oid = Some(prepared.destination_identity.index_tree);
+        transaction.manifest_digest = Some(prepared.manifest_digest);
+        transaction.file_count =
+            u32::try_from(prepared.file_count).expect("file count fits sqlite");
+        transaction.artifact_bytes = prepared.artifact_bytes;
+        transaction.state = DelegationApplyTransactionState::Prepared;
+        transaction.updated_at = Utc::now().to_rfc3339();
+        assert!(journal
+            .compare_and_swap_delegation_apply_transaction(
+                DelegationApplyTransactionState::Preparing,
+                &transaction,
+            )
+            .await
+            .expect("publish apply manifest"));
+
+        let claimed_at = Utc::now() - Duration::minutes(30);
+        let claimed = journal
+            .claim_delegation_apply_transaction(
+                &transaction_id,
+                "interrupted-apply-owner",
+                &claimed_at.to_rfc3339(),
+                &(claimed_at + Duration::minutes(1)).to_rfc3339(),
+                false,
+            )
+            .await
+            .expect("claim interrupted apply")
+            .expect("claimed apply transaction");
+        assert_eq!(claimed.state, DelegationApplyTransactionState::Applying);
+
+        ApplyRecoveryFixture {
+            _dir: dir,
+            state,
+            journal,
+            transaction: claimed,
+            operation_id,
+            parent,
+            child,
+            artifact_root,
         }
     }
 
@@ -10011,8 +10265,19 @@ mod editor_workspace_file_tests {
         fs::write(child.path.join("tracked.txt"), "delegated\n").expect("modify tracked file");
         fs::write(child.path.join("new.txt"), "new delegation file\n")
             .expect("write untracked file");
-        let applied = apply_delegation_worktree_inner(&parent.path, &child.path)
-            .expect("apply delegation changes");
+        let artifacts = tempfile::tempdir().expect("delegation apply artifacts");
+        let transaction_id = Uuid::new_v4().to_string();
+        let prepared =
+            prepare_apply_artifacts(&transaction_id, &parent.path, &child.path, artifacts.path())
+                .expect("prepare delegation changes");
+        let applied = apply_prepared_artifacts(
+            &transaction_id,
+            &parent.path,
+            &child.path,
+            artifacts.path(),
+            &prepared.manifest_digest,
+        )
+        .expect("apply delegation changes");
         assert_eq!(applied.changed_files, vec!["new.txt", "tracked.txt"]);
         assert_eq!(
             fs::read_to_string(parent.path.join("tracked.txt")).expect("read applied file"),
@@ -10180,48 +10445,238 @@ mod editor_workspace_file_tests {
         );
     }
 
-    #[test]
-    fn copy_untracked_delegation_files_copies_nested_files() {
-        let parent = TestDir::new("delegation-parent");
-        let child = TestDir::new("delegation-child");
-        let migration = "apps/api/prisma/migrations/20260703120000_add_flag/migration.sql";
-        let source_path = child.path.join(migration);
-        fs::create_dir_all(source_path.parent().expect("migration parent"))
-            .expect("create migration dir");
-        fs::write(&source_path, "alter table users add column flag boolean;\n")
-            .expect("write migration");
+    #[tokio::test]
+    async fn transactional_apply_recovery_all_post_finalizes_applied_and_cleans_artifacts() {
+        let fixture = applying_recovery_fixture("apply-recovery-all-post").await;
+        let digest = fixture
+            .transaction
+            .manifest_digest
+            .as_deref()
+            .expect("prepared transaction digest");
+        apply_prepared_artifacts(
+            &fixture.transaction.transaction_id.0,
+            &fixture.parent,
+            &fixture.child,
+            &fixture.artifact_root,
+            digest,
+        )
+        .expect("simulate crash after all destination writes");
 
-        copy_untracked_delegation_files(&child.path, &parent.path, &[migration.to_string()])
-            .expect("copy untracked migration");
-
+        let warnings = reconcile_delegation_worktree_operations(&fixture.state)
+            .await
+            .expect("reconcile all-post transaction");
+        assert!(
+            warnings.is_empty(),
+            "unexpected recovery warnings: {warnings:?}"
+        );
+        assert!(
+            fixture
+                .journal
+                .get_delegation_apply_transaction(&fixture.transaction.transaction_id)
+                .await
+                .expect("read finalized transaction")
+                .is_none(),
+            "terminal transaction must be removed after artifact cleanup"
+        );
+        let operation = fixture
+            .journal
+            .get_delegation_worktree_operation(&fixture.operation_id)
+            .await
+            .expect("read finalized operation")
+            .expect("operation remains");
+        assert_eq!(operation.state, DelegationWorktreeOperationState::Applied);
         assert_eq!(
-            fs::read_to_string(parent.path.join(migration)).expect("read copied migration"),
-            "alter table users add column flag boolean;\n",
+            fs::read_to_string(fixture.parent.join("one.txt")).expect("read first postimage"),
+            "delegated one\n"
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.parent.join("two.txt")).expect("read second postimage"),
+            "delegated two\n"
+        );
+        assert!(
+            !fixture
+                .artifact_root
+                .join(&fixture.transaction.transaction_id.0)
+                .exists(),
+            "terminal all-post recovery must clean frozen artifacts"
         );
     }
 
-    #[test]
-    fn copy_untracked_delegation_files_refuses_existing_destination() {
-        let parent = TestDir::new("delegation-parent-existing");
-        let child = TestDir::new("delegation-child-existing");
-        let relative_path = "db/migrations/001.sql";
-        let source_path = child.path.join(relative_path);
-        let destination_path = parent.path.join(relative_path);
-        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source dir");
-        fs::create_dir_all(destination_path.parent().expect("destination parent"))
-            .expect("destination dir");
-        fs::write(&source_path, "select 1;\n").expect("write source");
-        fs::write(&destination_path, "select 0;\n").expect("write destination");
-
-        assert!(copy_untracked_delegation_files(
-            &child.path,
-            &parent.path,
-            &[relative_path.to_string()],
+    #[tokio::test]
+    async fn transactional_apply_recovery_mixed_known_rolls_back_and_cleans_artifacts() {
+        let fixture = applying_recovery_fixture("apply-recovery-mixed-known").await;
+        let digest = fixture
+            .transaction
+            .manifest_digest
+            .as_deref()
+            .expect("prepared transaction digest");
+        apply_prepared_artifacts(
+            &fixture.transaction.transaction_id.0,
+            &fixture.parent,
+            &fixture.child,
+            &fixture.artifact_root,
+            digest,
         )
-        .is_err());
+        .expect("install frozen postimages");
+        fs::remove_file(fixture.parent.join("one.txt"))
+            .expect("simulate crash after only the second file persisted");
+
+        let warnings = reconcile_delegation_worktree_operations(&fixture.state)
+            .await
+            .expect("reconcile mixed-known transaction");
+        assert!(
+            warnings.is_empty(),
+            "unexpected recovery warnings: {warnings:?}"
+        );
+        assert!(
+            fixture
+                .journal
+                .get_delegation_apply_transaction(&fixture.transaction.transaction_id)
+                .await
+                .expect("read rolled-back transaction")
+                .is_none(),
+            "rolled-back transaction must be removed after artifact cleanup"
+        );
+        let operation = fixture
+            .journal
+            .get_delegation_worktree_operation(&fixture.operation_id)
+            .await
+            .expect("read returned operation")
+            .expect("operation remains");
         assert_eq!(
-            fs::read_to_string(destination_path).expect("read destination"),
-            "select 0;\n",
+            operation.state,
+            DelegationWorktreeOperationState::ReviewPending
+        );
+        assert!(!fixture.parent.join("one.txt").exists());
+        assert!(!fixture.parent.join("two.txt").exists());
+        assert!(
+            !fixture
+                .artifact_root
+                .join(&fixture.transaction.transaction_id.0)
+                .exists(),
+            "rolled-back recovery must clean frozen artifacts"
+        );
+    }
+
+    #[tokio::test]
+    async fn transactional_apply_recovery_respects_a_live_cross_process_operation_lock() {
+        let fixture = applying_recovery_fixture("apply-recovery-live-lock").await;
+        let artifact_dir = fixture
+            .artifact_root
+            .join(&fixture.transaction.transaction_id.0);
+        let operation_lock =
+            try_lock_apply_operation(&fixture.artifact_root, &fixture.operation_id.0)
+                .expect("acquire operation lock")
+                .expect("test owns operation lock");
+
+        let warnings = reconcile_delegation_worktree_operations(&fixture.state)
+            .await
+            .expect("reconcile while another process owns operation");
+        assert!(
+            warnings.iter().any(|warning| {
+                warning.contains(&fixture.transaction.transaction_id.0)
+                    && warning.contains("owned by another live process")
+            }),
+            "live lock must prevent reconciliation: {warnings:?}"
+        );
+        let unchanged = fixture
+            .journal
+            .get_delegation_apply_transaction(&fixture.transaction.transaction_id)
+            .await
+            .expect("read transaction while locked")
+            .expect("locked transaction remains");
+        assert_eq!(unchanged.state, DelegationApplyTransactionState::Applying);
+        assert!(
+            artifact_dir.exists(),
+            "live lock must preserve frozen artifacts"
+        );
+
+        drop(operation_lock);
+        let warnings = reconcile_delegation_worktree_operations(&fixture.state)
+            .await
+            .expect("reconcile after operation lock release");
+        assert!(
+            warnings.is_empty(),
+            "unexpected recovery warnings: {warnings:?}"
+        );
+        assert!(
+            fixture
+                .journal
+                .get_delegation_apply_transaction(&fixture.transaction.transaction_id)
+                .await
+                .expect("read finalized transaction")
+                .is_none(),
+            "released operation lock must allow terminal journal cleanup"
+        );
+        assert!(
+            !artifact_dir.exists(),
+            "released operation lock must allow frozen artifact cleanup"
+        );
+    }
+
+    #[tokio::test]
+    async fn transactional_apply_recovery_divergent_preserves_content_and_artifacts() {
+        let fixture = applying_recovery_fixture("apply-recovery-divergent").await;
+        let digest = fixture
+            .transaction
+            .manifest_digest
+            .as_deref()
+            .expect("prepared transaction digest");
+        apply_prepared_artifacts(
+            &fixture.transaction.transaction_id.0,
+            &fixture.parent,
+            &fixture.child,
+            &fixture.artifact_root,
+            digest,
+        )
+        .expect("install frozen postimages");
+        fs::write(fixture.parent.join("one.txt"), "external divergent edit\n")
+            .expect("simulate external divergent edit");
+
+        let warnings = reconcile_delegation_worktree_operations(&fixture.state)
+            .await
+            .expect("reconcile divergent transaction");
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("destination diverged")),
+            "divergent apply must be surfaced for manual recovery: {warnings:?}"
+        );
+        let transaction = fixture
+            .journal
+            .get_delegation_apply_transaction(&fixture.transaction.transaction_id)
+            .await
+            .expect("read recovery-required transaction")
+            .expect("transaction remains for manual recovery");
+        assert_eq!(
+            transaction.state,
+            DelegationApplyTransactionState::RecoveryRequired
+        );
+        let operation = fixture
+            .journal
+            .get_delegation_worktree_operation(&fixture.operation_id)
+            .await
+            .expect("read cleanup-required operation")
+            .expect("operation remains for manual recovery");
+        assert_eq!(
+            operation.state,
+            DelegationWorktreeOperationState::CleanupRequired
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.parent.join("one.txt"))
+                .expect("read preserved divergent file"),
+            "external divergent edit\n"
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.parent.join("two.txt")).expect("read untouched postimage"),
+            "delegated two\n"
+        );
+        assert!(
+            fixture
+                .artifact_root
+                .join(&fixture.transaction.transaction_id.0)
+                .exists(),
+            "divergent recovery must retain artifacts for manual inspection"
         );
     }
 
@@ -11479,6 +11934,196 @@ async fn cleanup_delegation_worktrees(
     Ok(())
 }
 
+async fn reconcile_delegation_apply_transactions(
+    state: &WorkspaceCommandState,
+    journal_repo: &SqliteSessionRepo,
+    warnings: &mut Vec<String>,
+) -> Result<(), String> {
+    let transactions = journal_repo
+        .list_delegation_apply_transactions_requiring_recovery()
+        .await
+        .map_err(|error| error.to_string())?;
+    let artifact_root = state
+        .app_data_dir
+        .join("delegation-apply")
+        .join("transactions");
+    for mut transaction in transactions {
+        let Some(_operation_lock) =
+            try_lock_apply_operation(&artifact_root, &transaction.operation_id.0)?
+        else {
+            warnings.push(format!(
+                "delegation apply {} is owned by another live process",
+                transaction.transaction_id.0
+            ));
+            continue;
+        };
+        match transaction.state {
+            DelegationApplyTransactionState::Preparing
+            | DelegationApplyTransactionState::Prepared => {
+                let expected_state = transaction.state.clone();
+                transaction.state = DelegationApplyTransactionState::RolledBack;
+                transaction.last_error = Some(
+                    "delegation apply preparation was interrupted before mutation".to_string(),
+                );
+                transaction.updated_at = Utc::now().to_rfc3339();
+                if journal_repo
+                    .compare_and_swap_delegation_apply_transaction(expected_state, &transaction)
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    if let Err(error) = cleanup_terminal_delegation_apply_transaction(
+                        journal_repo,
+                        &transaction.transaction_id,
+                        &artifact_root,
+                    )
+                    .await
+                    {
+                        warnings.push(error);
+                    }
+                }
+            }
+            DelegationApplyTransactionState::Applying => {
+                let recovery_owner = Uuid::new_v4().to_string();
+                let claimed_at = Utc::now();
+                let lease_until = claimed_at + Duration::minutes(15);
+                let Some(claimed) = journal_repo
+                    .claim_delegation_apply_transaction(
+                        &transaction.transaction_id,
+                        &recovery_owner,
+                        &claimed_at.to_rfc3339(),
+                        &lease_until.to_rfc3339(),
+                        true,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?
+                else {
+                    warnings.push(format!(
+                        "delegation apply {} is owned by another live process",
+                        transaction.transaction_id.0
+                    ));
+                    continue;
+                };
+                let Some(operation) = journal_repo
+                    .get_delegation_worktree_operation(&claimed.operation_id)
+                    .await
+                    .map_err(|error| error.to_string())?
+                else {
+                    warnings.push(format!(
+                        "delegation apply {} has no worktree operation",
+                        claimed.transaction_id.0
+                    ));
+                    continue;
+                };
+                let root = operation.source_root.clone();
+                let digest = claimed
+                    .manifest_digest
+                    .clone()
+                    .ok_or_else(|| "applying transaction has no manifest digest".to_string())?;
+                let transaction_id = claimed.transaction_id.0.clone();
+                let artifacts = artifact_root.clone();
+                let recovery =
+                    match validate_delegation_operation_workspace_scope(state, &root, &operation)
+                        .await
+                    {
+                        Ok(()) => state
+                            .run_git_workspace_mutation_blocking(&root, move |destination_root| {
+                                match classify_apply_artifacts(
+                                    &transaction_id,
+                                    destination_root,
+                                    &artifacts,
+                                    &digest,
+                                )? {
+                                    ApplyClassification::AllPost => {
+                                        Ok(DelegationApplyTransactionState::Applied)
+                                    }
+                                    ApplyClassification::AllPre => {
+                                        Ok(DelegationApplyTransactionState::RolledBack)
+                                    }
+                                    ApplyClassification::MixedKnown => {
+                                        rollback_apply_artifacts(
+                                            &transaction_id,
+                                            destination_root,
+                                            &artifacts,
+                                            &digest,
+                                        )?;
+                                        Ok(DelegationApplyTransactionState::RolledBack)
+                                    }
+                                    ApplyClassification::Divergent => {
+                                        Err("destination diverged during delegation apply recovery"
+                                            .to_string())
+                                    }
+                                }
+                            })
+                            .await
+                            .map_err(workspace_mutation_error),
+                        Err(error) => Err(error),
+                    };
+                let (final_state, last_error) = match recovery {
+                    Ok(final_state) => (final_state, None),
+                    Err(error) => (
+                        DelegationApplyTransactionState::RecoveryRequired,
+                        Some(error),
+                    ),
+                };
+                if journal_repo
+                    .finalize_delegation_apply_transaction(
+                        &claimed.transaction_id,
+                        &recovery_owner,
+                        final_state.clone(),
+                        last_error.clone(),
+                        &Utc::now().to_rfc3339(),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .is_none()
+                {
+                    warnings.push(format!(
+                        "delegation apply {} changed during recovery",
+                        claimed.transaction_id.0
+                    ));
+                    continue;
+                }
+                if final_state.is_terminal() {
+                    if let Err(error) = cleanup_terminal_delegation_apply_transaction(
+                        journal_repo,
+                        &claimed.transaction_id,
+                        &artifact_root,
+                    )
+                    .await
+                    {
+                        warnings.push(error);
+                    }
+                } else if let Some(error) = last_error {
+                    warnings.push(error);
+                }
+            }
+            DelegationApplyTransactionState::RecoveryRequired => {
+                warnings.push(format!(
+                    "delegation apply {} requires manual recovery: {}",
+                    transaction.transaction_id.0,
+                    transaction
+                        .last_error
+                        .as_deref()
+                        .unwrap_or("destination state is divergent")
+                ));
+            }
+            DelegationApplyTransactionState::Applied
+            | DelegationApplyTransactionState::RolledBack => {
+                if let Err(error) = cleanup_terminal_delegation_apply_transaction(
+                    journal_repo,
+                    &transaction.transaction_id,
+                    &artifact_root,
+                )
+                .await
+                {
+                    warnings.push(error);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Conservatively reconciles interrupted destructive intent, orphaned setup,
 /// and terminal delegations. Active review/bound operations stay untouched.
 pub async fn reconcile_delegation_worktree_operations(
@@ -11486,11 +12131,12 @@ pub async fn reconcile_delegation_worktree_operations(
 ) -> Result<Vec<String>, String> {
     let journal_repo =
         SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let mut warnings = Vec::new();
+    reconcile_delegation_apply_transactions(state, &journal_repo, &mut warnings).await?;
     let operations = journal_repo
         .list_delegation_worktree_operations_requiring_recovery()
         .await
         .map_err(|error| error.to_string())?;
-    let mut warnings = Vec::new();
     for mut operation in operations {
         let terminal_delegation = match operation.delegation_id.as_ref() {
             Some(delegation_id) => DelegationRepo::get_delegation(&journal_repo, delegation_id)
@@ -11624,6 +12270,16 @@ pub async fn reconcile_delegation_worktree_operations(
             continue;
         }
         if matches!(operation.state, DelegationWorktreeOperationState::Applying) {
+            if journal_repo
+                .get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
+                .await
+                .map_err(|error| error.to_string())?
+                .is_some_and(|transaction| {
+                    transaction.state == DelegationApplyTransactionState::Applying
+                })
+            {
+                continue;
+            }
             operation.state = DelegationWorktreeOperationState::CleanupRequired;
             operation.last_error = Some(
                 "application was interrupted; inspect the destination before retrying or discarding"

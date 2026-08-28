@@ -1,4 +1,5 @@
 pub mod commands;
+pub(crate) mod delegation_apply;
 pub mod delivery_failure;
 pub mod events;
 pub mod git;

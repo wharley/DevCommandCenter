@@ -24,6 +24,10 @@ use dcc_core::{
     },
     domain::{
         delegation::{Delegation, DelegationId, DelegationStatus},
+        delegation_apply::{
+            DelegationApplyTransaction, DelegationApplyTransactionId,
+            DelegationApplyTransactionState,
+        },
         delegation_worktree::{
             DelegationWorktreeOperation, DelegationWorktreeOperationId,
             DelegationWorktreeOperationState,
@@ -45,10 +49,11 @@ use dcc_core::{
         workspace_bundle::WorkspaceBundleState,
     },
     ports::{
-        AppendEventOutcome, CredentialStore, DelegationRepo, DelegationWorktreeOperationRepo,
-        EventBus, Input, McpRepo, ProjectRepo, Provider, ProviderMcpOauthStart,
-        ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo, SessionConfig,
-        SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
+        AppendEventOutcome, CredentialStore, DelegationApplyTransactionRepo, DelegationRepo,
+        DelegationWorktreeOperationRepo, EventBus, Input, McpRepo, ProjectRepo, Provider,
+        ProviderMcpOauthStart, ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo,
+        SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo,
+        WorkspaceRepo,
     },
     Result,
 };
@@ -244,6 +249,7 @@ impl M3SnapshotRef {
 #[derive(Clone)]
 pub struct WorkspaceCommandState {
     pub db_path: PathBuf,
+    pub(crate) app_data_dir: PathBuf,
     runtime: Arc<ProcessRuntime>,
     delivery_failures: Arc<Mutex<DeliveryFailureStore>>,
 }
@@ -329,6 +335,7 @@ impl WorkspaceCommandState {
     pub fn from_session(session: &SessionCommandState) -> Self {
         Self {
             db_path: session.db_path.clone(),
+            app_data_dir: session.app_data_dir.clone(),
             runtime: Arc::clone(&session.runtime),
             delivery_failures: Arc::new(Mutex::new(DeliveryFailureStore::default())),
         }
@@ -4315,6 +4322,110 @@ impl DelegationWorktreeOperationRepo for SessionCommandState {
         id: &DelegationWorktreeOperationId,
     ) -> Result<bool> {
         DelegationWorktreeOperationRepo::delete_removed_delegation_worktree_operation(
+            &self.session_repo,
+            id,
+        )
+        .await
+    }
+}
+
+#[async_trait]
+impl DelegationApplyTransactionRepo for SessionCommandState {
+    async fn create_delegation_apply_transaction(
+        &self,
+        transaction: &DelegationApplyTransaction,
+    ) -> Result<()> {
+        DelegationApplyTransactionRepo::create_delegation_apply_transaction(
+            &self.session_repo,
+            transaction,
+        )
+        .await
+    }
+
+    async fn get_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+    ) -> Result<Option<DelegationApplyTransaction>> {
+        DelegationApplyTransactionRepo::get_delegation_apply_transaction(&self.session_repo, id)
+            .await
+    }
+
+    async fn get_delegation_apply_transaction_by_operation_id(
+        &self,
+        operation_id: &DelegationWorktreeOperationId,
+    ) -> Result<Option<DelegationApplyTransaction>> {
+        DelegationApplyTransactionRepo::get_delegation_apply_transaction_by_operation_id(
+            &self.session_repo,
+            operation_id,
+        )
+        .await
+    }
+
+    async fn compare_and_swap_delegation_apply_transaction(
+        &self,
+        expected_state: DelegationApplyTransactionState,
+        transaction: &DelegationApplyTransaction,
+    ) -> Result<bool> {
+        DelegationApplyTransactionRepo::compare_and_swap_delegation_apply_transaction(
+            &self.session_repo,
+            expected_state,
+            transaction,
+        )
+        .await
+    }
+
+    async fn claim_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+        recovery_owner: &str,
+        now: &str,
+        lease_until: &str,
+        operation_lock_held: bool,
+    ) -> Result<Option<DelegationApplyTransaction>> {
+        DelegationApplyTransactionRepo::claim_delegation_apply_transaction(
+            &self.session_repo,
+            id,
+            recovery_owner,
+            now,
+            lease_until,
+            operation_lock_held,
+        )
+        .await
+    }
+
+    async fn finalize_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+        recovery_owner: &str,
+        final_state: DelegationApplyTransactionState,
+        last_error: Option<String>,
+        updated_at: &str,
+    ) -> Result<Option<DelegationApplyTransaction>> {
+        DelegationApplyTransactionRepo::finalize_delegation_apply_transaction(
+            &self.session_repo,
+            id,
+            recovery_owner,
+            final_state,
+            last_error,
+            updated_at,
+        )
+        .await
+    }
+
+    async fn list_delegation_apply_transactions_requiring_recovery(
+        &self,
+    ) -> Result<Vec<DelegationApplyTransaction>> {
+        DelegationApplyTransactionRepo::list_delegation_apply_transactions_requiring_recovery(
+            &self.session_repo,
+        )
+        .await
+    }
+
+    async fn delete_terminal_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+    ) -> Result<bool> {
+        DelegationApplyTransactionRepo::delete_terminal_delegation_apply_transaction(
             &self.session_repo,
             id,
         )

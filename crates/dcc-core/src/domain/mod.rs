@@ -1,4 +1,5 @@
 pub mod delegation;
+pub mod delegation_apply;
 pub mod delegation_worktree;
 pub mod guarded_undo;
 pub mod mcp;
@@ -16,6 +17,9 @@ pub mod workspace_bundle;
 pub use delegation::{
     Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
     DelegationStatus,
+};
+pub use delegation_apply::{
+    DelegationApplyTransaction, DelegationApplyTransactionId, DelegationApplyTransactionState,
 };
 pub use delegation_worktree::{
     DelegationWorktreeOperation, DelegationWorktreeOperationId, DelegationWorktreeOperationState,

@@ -16,6 +16,15 @@ pub const GIT_HARDENED_CONFIG_ARGS: [&str; 4] = [
     "-c",
     "core.untrackedCache=false",
 ];
+const GIT_REPOSITORY_STEERING_ENV: [&str; 7] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES",
+];
 
 pub fn configure_git_command(command: &mut Command) {
     command.args(GIT_HARDENED_CONFIG_ARGS);
@@ -23,6 +32,13 @@ pub fn configure_git_command(command: &mut Command) {
     command.env("GCM_INTERACTIVE", "Never");
     command.env_remove("GIT_ASKPASS");
     command.env_remove("SSH_ASKPASS");
+    // `git -C <root>` does not override repository-steering environment
+    // variables inherited from the shell that launched DCC. Every caller must
+    // start from the requested root; specialized shadow-index callers can add
+    // their explicit, validated environment after this shared hardening step.
+    for key in GIT_REPOSITORY_STEERING_ENV {
+        command.env_remove(key);
+    }
 
     let base_ssh = std::env::var("GIT_SSH_COMMAND").unwrap_or_else(|_| "ssh".to_string());
     command.env(
@@ -312,4 +328,26 @@ pub fn git_command_succeeds(root: &str, args: &[&str]) -> bool {
     run_git_output(root, args)
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configure_removes_inherited_repository_steering_environment() {
+        let mut command = Command::new("git");
+        for key in GIT_REPOSITORY_STEERING_ENV {
+            command.env(key, "/tmp/poisoned-git-scope");
+        }
+
+        configure_git_command(&mut command);
+
+        let configured: Vec<_> = command.get_envs().collect();
+        for key in GIT_REPOSITORY_STEERING_ENV {
+            assert!(configured
+                .iter()
+                .any(|(name, value)| { *name == OsStr::new(key) && value.is_none() }));
+        }
+    }
 }

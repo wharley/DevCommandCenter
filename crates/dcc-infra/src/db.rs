@@ -17,6 +17,10 @@ use dcc_core::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
             DelegationStatus,
         },
+        delegation_apply::{
+            DelegationApplyTransaction, DelegationApplyTransactionId,
+            DelegationApplyTransactionState,
+        },
         delegation_worktree::{
             DelegationWorktreeOperation, DelegationWorktreeOperationId,
             DelegationWorktreeOperationState,
@@ -48,8 +52,9 @@ use dcc_core::{
         },
     },
     ports::{
-        AppendEventOutcome, DelegationRepo, DelegationWorktreeOperationRepo, RepositoryRepo,
-        SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
+        AppendEventOutcome, DelegationApplyTransactionRepo, DelegationRepo,
+        DelegationWorktreeOperationRepo, RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo,
+        UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -510,6 +515,59 @@ SELECT operation_id, delegation_key, delegation_id, workspace_id,
        worktree_root_id, common_dir_id, state, last_error,
        recovery_owner, recovery_lease_until, created_at, updated_at
   FROM dcc_delegation_worktree_operations
+"#;
+
+const DELEGATION_APPLY_TRANSACTION_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_delegation_apply_transactions (
+    transaction_id TEXT PRIMARY KEY NOT NULL,
+    operation_id TEXT NOT NULL,
+    delegation_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    source_head_oid TEXT NULL,
+    destination_head_oid TEXT NULL,
+    destination_ref TEXT NULL,
+    destination_index_tree_oid TEXT NULL,
+    manifest_digest TEXT NULL,
+    file_count INTEGER NOT NULL DEFAULT 0 CHECK(file_count >= 0),
+    artifact_bytes INTEGER NOT NULL DEFAULT 0 CHECK(artifact_bytes >= 0),
+    state TEXT NOT NULL CHECK(state IN (
+        'preparing', 'prepared', 'applying', 'applied', 'rolled_back',
+        'recovery_required'
+    )),
+    recovery_owner TEXT NULL,
+    recovery_lease_until TEXT NULL,
+    last_error TEXT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK(source_head_oid IS NULL OR length(source_head_oid) IN (40, 64)),
+    CHECK(destination_head_oid IS NULL OR length(destination_head_oid) IN (40, 64)),
+    CHECK(destination_index_tree_oid IS NULL OR length(destination_index_tree_oid) IN (40, 64)),
+    CHECK(manifest_digest IS NULL OR length(manifest_digest) = 64),
+    CHECK(destination_ref IS NULL OR length(destination_ref) BETWEEN 1 AND 1024),
+    CHECK(last_error IS NULL OR length(trim(last_error)) > 0),
+    CHECK((recovery_owner IS NULL AND recovery_lease_until IS NULL)
+       OR (state = 'applying' AND recovery_owner IS NOT NULL AND recovery_lease_until IS NOT NULL))
+);
+
+-- Logical links deliberately have no destructive foreign keys. A recovery
+-- transaction must survive deletion of workspace/session/delegation rows.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_delegation_apply_one_active_operation
+    ON dcc_delegation_apply_transactions(operation_id)
+    WHERE state IN ('preparing', 'prepared', 'applying', 'recovery_required');
+
+CREATE INDEX IF NOT EXISTS idx_dcc_delegation_apply_recovery
+    ON dcc_delegation_apply_transactions(state, recovery_lease_until, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_delegation_apply_operation_history
+    ON dcc_delegation_apply_transactions(operation_id, created_at DESC, transaction_id DESC);
+"#;
+
+const DELEGATION_APPLY_TRANSACTION_SELECT: &str = r#"
+SELECT transaction_id, operation_id, delegation_id, workspace_id,
+       source_head_oid, destination_head_oid, destination_ref,
+       destination_index_tree_oid, manifest_digest, file_count, artifact_bytes,
+       state, recovery_owner, recovery_lease_until, last_error, created_at, updated_at
+  FROM dcc_delegation_apply_transactions
 "#;
 
 #[derive(Clone)]
@@ -1110,7 +1168,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
@@ -2891,6 +2949,75 @@ impl SqliteSessionRepo {
             )
         })?;
         Ok(operation)
+    }
+
+    fn delegation_apply_state_as_str(state: &DelegationApplyTransactionState) -> &'static str {
+        match state {
+            DelegationApplyTransactionState::Preparing => "preparing",
+            DelegationApplyTransactionState::Prepared => "prepared",
+            DelegationApplyTransactionState::Applying => "applying",
+            DelegationApplyTransactionState::Applied => "applied",
+            DelegationApplyTransactionState::RolledBack => "rolled_back",
+            DelegationApplyTransactionState::RecoveryRequired => "recovery_required",
+        }
+    }
+
+    fn delegation_apply_state_from_str(
+        state: &str,
+        column: usize,
+    ) -> rusqlite::Result<DelegationApplyTransactionState> {
+        match state {
+            "preparing" => Ok(DelegationApplyTransactionState::Preparing),
+            "prepared" => Ok(DelegationApplyTransactionState::Prepared),
+            "applying" => Ok(DelegationApplyTransactionState::Applying),
+            "applied" => Ok(DelegationApplyTransactionState::Applied),
+            "rolled_back" => Ok(DelegationApplyTransactionState::RolledBack),
+            "recovery_required" => Ok(DelegationApplyTransactionState::RecoveryRequired),
+            other => Err(rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown delegation apply transaction state: {other}"),
+                )),
+            )),
+        }
+    }
+
+    fn delegation_apply_transaction_from_row(
+        row: &Row<'_>,
+    ) -> rusqlite::Result<DelegationApplyTransaction> {
+        let file_count = row.get::<_, i64>(9)?;
+        let artifact_bytes = row.get::<_, i64>(10)?;
+        let transaction = DelegationApplyTransaction {
+            transaction_id: DelegationApplyTransactionId(row.get(0)?),
+            operation_id: DelegationWorktreeOperationId(row.get(1)?),
+            delegation_id: DelegationId(row.get(2)?),
+            workspace_id: WorkspaceId(row.get(3)?),
+            source_head_oid: row.get(4)?,
+            destination_head_oid: row.get(5)?,
+            destination_ref: row.get(6)?,
+            destination_index_tree_oid: row.get(7)?,
+            manifest_digest: row.get(8)?,
+            file_count: u32::try_from(file_count)
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(9, file_count))?,
+            artifact_bytes: u64::try_from(artifact_bytes)
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(10, artifact_bytes))?,
+            state: Self::delegation_apply_state_from_str(&row.get::<_, String>(11)?, 11)?,
+            recovery_owner: row.get(12)?,
+            recovery_lease_until: row.get(13)?,
+            last_error: row.get(14)?,
+            created_at: row.get(15)?,
+            updated_at: row.get(16)?,
+        };
+        transaction.validate().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+            )
+        })?;
+        Ok(transaction)
     }
 
     fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
@@ -6052,6 +6179,14 @@ impl DelegationWorktreeOperationRepo for SqliteSessionRepo {
                 "removing transitions require the recovery claim API".to_string(),
             ));
         }
+        if operation.state == DelegationWorktreeOperationState::Applying
+            || (expected_state == DelegationWorktreeOperationState::Applying
+                && operation.state != DelegationWorktreeOperationState::CleanupRequired)
+        {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "applying transitions require the delegation apply transaction API".to_string(),
+            ));
+        }
         if !expected_state.can_transition_to(&operation.state) {
             return Err(dcc_core::CoreError::InvalidInput(format!(
                 "invalid delegation worktree transition from {} to {}",
@@ -6315,6 +6450,435 @@ impl DelegationWorktreeOperationRepo for SqliteSessionRepo {
     }
 }
 
+#[async_trait]
+impl DelegationApplyTransactionRepo for SqliteSessionRepo {
+    async fn create_delegation_apply_transaction(
+        &self,
+        apply: &DelegationApplyTransaction,
+    ) -> Result<()> {
+        apply
+            .validate()
+            .map_err(dcc_core::CoreError::InvalidInput)?;
+        if apply.state != DelegationApplyTransactionState::Preparing {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation apply transaction must be created in preparing state".to_string(),
+            ));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let scope_matches = transaction
+            .query_row(
+                r#"SELECT COUNT(*) FROM dcc_delegation_worktree_operations
+                    WHERE operation_id = ?1 AND delegation_id = ?2 AND workspace_id = ?3
+                      AND state = 'review_pending'"#,
+                params![
+                    apply.operation_id.0,
+                    apply.delegation_id.0,
+                    apply.workspace_id.0
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            == 1;
+        if !scope_matches {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation apply transaction scope is not review-pending".to_string(),
+            ));
+        }
+        transaction
+            .execute(
+                r#"INSERT INTO dcc_delegation_apply_transactions (
+                       transaction_id, operation_id, delegation_id, workspace_id,
+                       source_head_oid, destination_head_oid, destination_ref,
+                       destination_index_tree_oid, manifest_digest, file_count,
+                       artifact_bytes, state, recovery_owner, recovery_lease_until,
+                       last_error, created_at, updated_at
+                   ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, NULL, NULL, NULL, 0, 0,
+                             'preparing', NULL, NULL, NULL, ?5, ?6)"#,
+                params![
+                    apply.transaction_id.0,
+                    apply.operation_id.0,
+                    apply.delegation_id.0,
+                    apply.workspace_id.0,
+                    apply.created_at,
+                    apply.updated_at,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    async fn get_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+    ) -> Result<Option<DelegationApplyTransaction>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            &format!("{DELEGATION_APPLY_TRANSACTION_SELECT} WHERE transaction_id = ?1"),
+            params![id.0],
+            Self::delegation_apply_transaction_from_row,
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    async fn get_delegation_apply_transaction_by_operation_id(
+        &self,
+        operation_id: &DelegationWorktreeOperationId,
+    ) -> Result<Option<DelegationApplyTransaction>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            &format!(
+                "{DELEGATION_APPLY_TRANSACTION_SELECT} WHERE operation_id = ?1 \
+                 ORDER BY CASE WHEN state IN ('preparing','prepared','applying','recovery_required') \
+                               THEN 0 ELSE 1 END, created_at DESC, transaction_id DESC LIMIT 1"
+            ),
+            params![operation_id.0],
+            Self::delegation_apply_transaction_from_row,
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    async fn compare_and_swap_delegation_apply_transaction(
+        &self,
+        expected_state: DelegationApplyTransactionState,
+        apply: &DelegationApplyTransaction,
+    ) -> Result<bool> {
+        apply
+            .validate()
+            .map_err(dcc_core::CoreError::InvalidInput)?;
+        if !expected_state.can_pre_apply_transition_to(&apply.state) {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "invalid pre-apply transaction transition".to_string(),
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                r#"UPDATE dcc_delegation_apply_transactions
+                      SET source_head_oid = ?1, destination_head_oid = ?2,
+                          destination_ref = ?3, destination_index_tree_oid = ?4,
+                          manifest_digest = ?5, file_count = ?6, artifact_bytes = ?7,
+                          state = ?8, last_error = ?9, updated_at = ?10
+                    WHERE transaction_id = ?11 AND state = ?12
+                      AND operation_id = ?13 AND delegation_id = ?14
+                      AND workspace_id = ?15 AND created_at = ?16
+                      AND recovery_owner IS NULL AND recovery_lease_until IS NULL"#,
+                params![
+                    apply.source_head_oid,
+                    apply.destination_head_oid,
+                    apply.destination_ref,
+                    apply.destination_index_tree_oid,
+                    apply.manifest_digest,
+                    i64::from(apply.file_count),
+                    i64::try_from(apply.artifact_bytes).map_err(|_| {
+                        dcc_core::CoreError::InvalidInput(
+                            "delegation apply artifact_bytes exceeds SQLite".to_string(),
+                        )
+                    })?,
+                    Self::delegation_apply_state_as_str(&apply.state),
+                    apply.last_error,
+                    apply.updated_at,
+                    apply.transaction_id.0,
+                    Self::delegation_apply_state_as_str(&expected_state),
+                    apply.operation_id.0,
+                    apply.delegation_id.0,
+                    apply.workspace_id.0,
+                    apply.created_at,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed == 1)
+    }
+
+    async fn claim_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+        recovery_owner: &str,
+        now: &str,
+        lease_until: &str,
+        operation_lock_held: bool,
+    ) -> Result<Option<DelegationApplyTransaction>> {
+        let recovery_owner = recovery_owner.trim();
+        if recovery_owner.is_empty() || recovery_owner.len() > 256 {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation apply recovery owner is invalid".to_string(),
+            ));
+        }
+        let now = Self::normalize_delegation_recovery_timestamp(now, "apply claim time")?;
+        let lease_until =
+            Self::normalize_delegation_recovery_timestamp(lease_until, "apply lease")?;
+        if lease_until <= now {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation apply recovery lease must end after claim time".to_string(),
+            ));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let current = transaction
+            .query_row(
+                &format!("{DELEGATION_APPLY_TRANSACTION_SELECT} WHERE transaction_id = ?1"),
+                params![id.0],
+                Self::delegation_apply_transaction_from_row,
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some(current) = current else {
+            transaction
+                .commit()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            return Ok(None);
+        };
+        let claimed = match current.state {
+            DelegationApplyTransactionState::Prepared => {
+                let operation_changed = transaction
+                    .execute(
+                        r#"UPDATE dcc_delegation_worktree_operations
+                              SET state = 'applying', last_error = NULL, updated_at = ?1
+                            WHERE operation_id = ?2 AND delegation_id = ?3
+                              AND workspace_id = ?4 AND state = 'review_pending'"#,
+                        params![
+                            now,
+                            current.operation_id.0,
+                            current.delegation_id.0,
+                            current.workspace_id.0,
+                        ],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                if operation_changed != 1 {
+                    false
+                } else {
+                    transaction
+                        .execute(
+                            r#"UPDATE dcc_delegation_apply_transactions
+                                  SET state = 'applying', recovery_owner = ?1,
+                                      recovery_lease_until = ?2, updated_at = ?3
+                                WHERE transaction_id = ?4 AND state = 'prepared'"#,
+                            params![recovery_owner, lease_until, now, id.0],
+                        )
+                        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+                        == 1
+                }
+            }
+            DelegationApplyTransactionState::Applying
+                if operation_lock_held
+                    || current
+                        .recovery_lease_until
+                        .as_deref()
+                        .is_some_and(|lease| lease <= now.as_str()) =>
+            {
+                transaction
+                    .execute(
+                        r#"UPDATE dcc_delegation_apply_transactions
+                              SET recovery_owner = ?1, recovery_lease_until = ?2, updated_at = ?3
+                            WHERE transaction_id = ?4 AND state = 'applying'
+                              AND recovery_lease_until IS NOT NULL
+                              AND (?5 = 1 OR recovery_lease_until <= ?3)
+                              AND EXISTS (
+                                  SELECT 1 FROM dcc_delegation_worktree_operations op
+                                   WHERE op.operation_id = dcc_delegation_apply_transactions.operation_id
+                                     AND op.state = 'applying'
+                              )"#,
+                        params![recovery_owner, lease_until, now, id.0, operation_lock_held],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+                    == 1
+            }
+            _ => false,
+        };
+        if !claimed {
+            // Any earlier operation update is part of this transaction and is
+            // therefore rolled back with the failed claim.
+            return Ok(None);
+        }
+        let claimed = transaction
+            .query_row(
+                &format!("{DELEGATION_APPLY_TRANSACTION_SELECT} WHERE transaction_id = ?1"),
+                params![id.0],
+                Self::delegation_apply_transaction_from_row,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(Some(claimed))
+    }
+
+    async fn finalize_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+        recovery_owner: &str,
+        final_state: DelegationApplyTransactionState,
+        last_error: Option<String>,
+        updated_at: &str,
+    ) -> Result<Option<DelegationApplyTransaction>> {
+        let recovery_owner = recovery_owner.trim();
+        if recovery_owner.is_empty() || recovery_owner.len() > 256 {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "delegation apply recovery owner is invalid".to_string(),
+            ));
+        }
+        match (&final_state, last_error.as_deref()) {
+            (DelegationApplyTransactionState::Applied, None) => {}
+            (DelegationApplyTransactionState::RolledBack, _) => {}
+            (DelegationApplyTransactionState::RecoveryRequired, Some(error))
+                if !error.trim().is_empty() => {}
+            _ => {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "invalid delegation apply finalization state or error".to_string(),
+                ))
+            }
+        }
+        let updated_at =
+            Self::normalize_delegation_recovery_timestamp(updated_at, "apply update time")?;
+        let operation_state = match final_state {
+            DelegationApplyTransactionState::Applied => "applied",
+            DelegationApplyTransactionState::RolledBack => "review_pending",
+            DelegationApplyTransactionState::RecoveryRequired => "cleanup_required",
+            _ => unreachable!(),
+        };
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let current = transaction
+            .query_row(
+                &format!("{DELEGATION_APPLY_TRANSACTION_SELECT} WHERE transaction_id = ?1"),
+                params![id.0],
+                Self::delegation_apply_transaction_from_row,
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some(mut current) = current else {
+            return Ok(None);
+        };
+        if current.state != DelegationApplyTransactionState::Applying
+            || current.recovery_owner.as_deref() != Some(recovery_owner)
+        {
+            return Ok(None);
+        }
+        let operation_error = if final_state == DelegationApplyTransactionState::RecoveryRequired {
+            last_error.as_deref()
+        } else {
+            None
+        };
+        let operation_changed = transaction
+            .execute(
+                r#"UPDATE dcc_delegation_worktree_operations
+                      SET state = ?1, last_error = ?2, updated_at = ?3
+                    WHERE operation_id = ?4 AND state = 'applying'"#,
+                params![
+                    operation_state,
+                    operation_error,
+                    updated_at,
+                    current.operation_id.0
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if operation_changed != 1 {
+            return Ok(None);
+        }
+        let changed = transaction
+            .execute(
+                r#"UPDATE dcc_delegation_apply_transactions
+                      SET state = ?1, recovery_owner = NULL, recovery_lease_until = NULL,
+                          last_error = ?2, updated_at = ?3
+                    WHERE transaction_id = ?4 AND state = 'applying'
+                      AND recovery_owner = ?5"#,
+                params![
+                    Self::delegation_apply_state_as_str(&final_state),
+                    last_error,
+                    updated_at,
+                    id.0,
+                    recovery_owner,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if changed != 1 {
+            return Ok(None);
+        }
+        current.state = final_state;
+        current.recovery_owner = None;
+        current.recovery_lease_until = None;
+        current.last_error = last_error;
+        current.updated_at = updated_at;
+        current
+            .validate()
+            .map_err(dcc_core::CoreError::InvalidInput)?;
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(Some(current))
+    }
+
+    async fn list_delegation_apply_transactions_requiring_recovery(
+        &self,
+    ) -> Result<Vec<DelegationApplyTransaction>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(&format!(
+                "{DELEGATION_APPLY_TRANSACTION_SELECT} \
+                 ORDER BY CASE WHEN state IN ('preparing','prepared','applying','recovery_required') \
+                                   THEN 0 ELSE 1 END, \
+                          updated_at ASC, created_at ASC, transaction_id ASC"
+            ))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transactions = statement
+            .query_map([], Self::delegation_apply_transaction_from_row)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(transactions)
+    }
+
+    async fn delete_terminal_delegation_apply_transaction(
+        &self,
+        id: &DelegationApplyTransactionId,
+    ) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "DELETE FROM dcc_delegation_apply_transactions \
+                 WHERE transaction_id = ?1 AND state IN ('applied','rolled_back')",
+                params![id.0],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed == 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6323,6 +6887,10 @@ mod tests {
             delegation::{
                 Delegation, DelegationBudget, DelegationContextPolicy, DelegationId,
                 DelegationMode, DelegationStatus,
+            },
+            delegation_apply::{
+                DelegationApplyTransaction, DelegationApplyTransactionId,
+                DelegationApplyTransactionState,
             },
             delegation_worktree::{
                 DelegationWorktreeOperation, DelegationWorktreeOperationId,
@@ -6347,8 +6915,9 @@ mod tests {
             },
         },
         ports::{
-            DelegationRepo, DelegationWorktreeOperationRepo, RepositoryRepo, SessionEventRepo,
-            SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
+            DelegationApplyTransactionRepo, DelegationRepo, DelegationWorktreeOperationRepo,
+            RepositoryRepo, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo,
+            WorkspaceBundleRepo, WorkspaceRepo,
         },
     };
 
@@ -6381,6 +6950,73 @@ mod tests {
             created_at: "2026-08-28T10:00:00Z".to_string(),
             updated_at: "2026-08-28T10:00:00Z".to_string(),
         }
+    }
+
+    fn review_pending_delegation_operation(
+        repo: &SqliteSessionRepo,
+        id: &str,
+    ) -> DelegationWorktreeOperation {
+        let operation = delegation_worktree_operation(id);
+        futures::executor::block_on(repo.create_delegation_worktree_operation(&operation))
+            .expect("create apply operation");
+        let mut prepared = operation;
+        prepared.delegation_id = Some(DelegationId(format!("delegation-{id}")));
+        prepared.state = DelegationWorktreeOperationState::Prepared;
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Preparing,
+                &prepared,
+            ))
+            .expect("prepare apply operation")
+        );
+        let mut review = prepared;
+        review.state = DelegationWorktreeOperationState::ReviewPending;
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::Prepared,
+                &review,
+            ))
+            .expect("review apply operation")
+        );
+        review
+    }
+
+    fn preparing_apply(
+        operation: &DelegationWorktreeOperation,
+        id: &str,
+    ) -> DelegationApplyTransaction {
+        DelegationApplyTransaction {
+            transaction_id: DelegationApplyTransactionId(id.to_string()),
+            operation_id: operation.operation_id.clone(),
+            delegation_id: operation.delegation_id.clone().expect("delegation id"),
+            workspace_id: operation.workspace_id.clone(),
+            source_head_oid: None,
+            destination_head_oid: None,
+            destination_ref: None,
+            destination_index_tree_oid: None,
+            manifest_digest: None,
+            file_count: 0,
+            artifact_bytes: 0,
+            state: DelegationApplyTransactionState::Preparing,
+            recovery_owner: None,
+            recovery_lease_until: None,
+            last_error: None,
+            created_at: "2026-08-28T11:00:00Z".to_string(),
+            updated_at: "2026-08-28T11:00:00Z".to_string(),
+        }
+    }
+
+    fn prepared_apply(mut apply: DelegationApplyTransaction) -> DelegationApplyTransaction {
+        apply.source_head_oid = Some("a".repeat(40));
+        apply.destination_head_oid = Some("b".repeat(40));
+        apply.destination_ref = Some("refs/heads/main".to_string());
+        apply.destination_index_tree_oid = Some("c".repeat(40));
+        apply.manifest_digest = Some("d".repeat(64));
+        apply.file_count = 2;
+        apply.artifact_bytes = 42;
+        apply.state = DelegationApplyTransactionState::Prepared;
+        apply.updated_at = "2026-08-28T11:00:01Z".to_string();
+        apply
     }
 
     fn prepared_delegation_worktree_operation(
@@ -7281,7 +7917,7 @@ mod tests {
     }
 
     #[test]
-    fn delegation_worktree_apply_can_return_to_review_before_mutation() {
+    fn delegation_worktree_generic_cas_cannot_enter_or_leave_applying() {
         let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
         let operation = delegation_worktree_operation("operation-retry");
         futures::executor::block_on(repo.create_delegation_worktree_operation(&operation))
@@ -7313,18 +7949,7 @@ mod tests {
                 DelegationWorktreeOperationState::ReviewPending,
                 &applying,
             ))
-            .unwrap()
-        );
-        let mut retryable = applying.clone();
-        retryable.state = DelegationWorktreeOperationState::ReviewPending;
-        retryable.last_error = Some("destination changed before apply".to_string());
-        retryable.updated_at = "2026-08-28T10:00:03Z".to_string();
-        assert!(
-            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
-                DelegationWorktreeOperationState::Applying,
-                &retryable,
-            ))
-            .expect("retryable pre-mutation failure returns to review")
+            .is_err()
         );
         assert_eq!(
             futures::executor::block_on(
@@ -7332,10 +7957,347 @@ mod tests {
             )
             .unwrap()
             .unwrap()
-            .last_error
-            .as_deref(),
-            Some("destination changed before apply")
+            .state,
+            DelegationWorktreeOperationState::ReviewPending
         );
+    }
+
+    #[test]
+    fn delegation_apply_roundtrip_rollback_allows_a_new_active_attempt() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let operation = review_pending_delegation_operation(&repo, "apply-roundtrip");
+        let preparing = preparing_apply(&operation, "apply-tx-one");
+        futures::executor::block_on(repo.create_delegation_apply_transaction(&preparing))
+            .expect("create preparing apply");
+
+        let mut invalid = prepared_apply(preparing.clone());
+        invalid.manifest_digest = Some("not-a-digest".to_string());
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_apply_transaction(
+                DelegationApplyTransactionState::Preparing,
+                &invalid,
+            ))
+            .is_err()
+        );
+
+        let prepared = prepared_apply(preparing);
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_apply_transaction(
+                DelegationApplyTransactionState::Preparing,
+                &prepared,
+            ))
+            .expect("prepare transaction")
+        );
+        let claimed = futures::executor::block_on(repo.claim_delegation_apply_transaction(
+            &prepared.transaction_id,
+            "worker-one",
+            "2026-08-28T11:00:02Z",
+            "2026-08-28T11:01:02Z",
+            false,
+        ))
+        .expect("claim transaction")
+        .expect("claim won");
+        assert_eq!(claimed.state, DelegationApplyTransactionState::Applying);
+        assert_eq!(
+            futures::executor::block_on(
+                repo.get_delegation_worktree_operation(&operation.operation_id)
+            )
+            .unwrap()
+            .unwrap()
+            .state,
+            DelegationWorktreeOperationState::Applying
+        );
+
+        assert!(
+            futures::executor::block_on(repo.finalize_delegation_apply_transaction(
+                &prepared.transaction_id,
+                "wrong-worker",
+                DelegationApplyTransactionState::RolledBack,
+                Some("pre-mutation rollback".to_string()),
+                "2026-08-28T11:00:03Z",
+            ))
+            .unwrap()
+            .is_none()
+        );
+        let rolled_back = futures::executor::block_on(repo.finalize_delegation_apply_transaction(
+            &prepared.transaction_id,
+            "worker-one",
+            DelegationApplyTransactionState::RolledBack,
+            Some("pre-mutation rollback".to_string()),
+            "2026-08-28T11:00:03Z",
+        ))
+        .expect("finalize rollback")
+        .expect("owner finalized");
+        assert_eq!(
+            rolled_back.state,
+            DelegationApplyTransactionState::RolledBack
+        );
+        assert_eq!(
+            futures::executor::block_on(
+                repo.get_delegation_worktree_operation(&operation.operation_id)
+            )
+            .unwrap()
+            .unwrap()
+            .state,
+            DelegationWorktreeOperationState::ReviewPending
+        );
+
+        let mut retry = preparing_apply(&operation, "apply-tx-two");
+        retry.created_at = "2026-08-28T11:00:04Z".to_string();
+        retry.updated_at = retry.created_at.clone();
+        futures::executor::block_on(repo.create_delegation_apply_transaction(&retry))
+            .expect("terminal history permits retry");
+        assert_eq!(
+            futures::executor::block_on(
+                repo.get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
+            )
+            .unwrap()
+            .unwrap()
+            .transaction_id,
+            retry.transaction_id
+        );
+    }
+
+    #[test]
+    fn delegation_apply_claim_has_one_owner_and_expired_lease_allows_takeover() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("apply-claim.sqlite");
+        let first_repo = SqliteSessionRepo::open(&path).expect("open first repo");
+        let operation = review_pending_delegation_operation(&first_repo, "apply-claim");
+        let prepared = prepared_apply(preparing_apply(&operation, "apply-claim-tx"));
+        futures::executor::block_on(
+            first_repo.create_delegation_apply_transaction(&preparing_apply(
+                &operation,
+                "apply-claim-tx",
+            )),
+        )
+        .expect("create transaction");
+        assert!(futures::executor::block_on(
+            first_repo.compare_and_swap_delegation_apply_transaction(
+                DelegationApplyTransactionState::Preparing,
+                &prepared,
+            )
+        )
+        .unwrap());
+        let second_repo = SqliteSessionRepo::open(&path).expect("open second repo");
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let first_barrier = Arc::clone(&barrier);
+        let first_id = prepared.transaction_id.clone();
+        let first_thread = std::thread::spawn(move || {
+            first_barrier.wait();
+            futures::executor::block_on(first_repo.claim_delegation_apply_transaction(
+                &first_id,
+                "owner-one",
+                "2026-08-28T12:00:00Z",
+                "2026-08-28T12:01:00Z",
+                false,
+            ))
+            .expect("first claim")
+        });
+        let second_barrier = barrier;
+        let second_id = prepared.transaction_id.clone();
+        let second_for_thread = second_repo.clone();
+        let second_thread = std::thread::spawn(move || {
+            second_barrier.wait();
+            futures::executor::block_on(second_for_thread.claim_delegation_apply_transaction(
+                &second_id,
+                "owner-two",
+                "2026-08-28T12:00:00Z",
+                "2026-08-28T12:01:00Z",
+                false,
+            ))
+            .expect("second claim")
+        });
+        let claims = [first_thread.join().unwrap(), second_thread.join().unwrap()];
+        assert_eq!(claims.iter().filter(|claim| claim.is_some()).count(), 1);
+        let winner = claims
+            .iter()
+            .find_map(|claim| claim.as_ref())
+            .unwrap()
+            .recovery_owner
+            .clone()
+            .unwrap();
+
+        let takeover = futures::executor::block_on(second_repo.claim_delegation_apply_transaction(
+            &prepared.transaction_id,
+            "takeover-owner",
+            "2026-08-28T12:01:00Z",
+            "2026-08-28T12:02:00Z",
+            false,
+        ))
+        .expect("takeover claim")
+        .expect("expired lease permits takeover");
+        assert_eq!(takeover.recovery_owner.as_deref(), Some("takeover-owner"));
+        assert_ne!(winner, "takeover-owner");
+        assert!(
+            futures::executor::block_on(second_repo.finalize_delegation_apply_transaction(
+                &prepared.transaction_id,
+                &winner,
+                DelegationApplyTransactionState::Applied,
+                None,
+                "2026-08-28T12:01:01Z",
+            ))
+            .unwrap()
+            .is_none()
+        );
+        let applied =
+            futures::executor::block_on(second_repo.finalize_delegation_apply_transaction(
+                &prepared.transaction_id,
+                "takeover-owner",
+                DelegationApplyTransactionState::Applied,
+                None,
+                "2026-08-28T12:01:01Z",
+            ))
+            .unwrap()
+            .unwrap();
+        assert_eq!(applied.state, DelegationApplyTransactionState::Applied);
+        assert_eq!(
+            futures::executor::block_on(
+                second_repo.get_delegation_worktree_operation(&operation.operation_id)
+            )
+            .unwrap()
+            .unwrap()
+            .state,
+            DelegationWorktreeOperationState::Applied
+        );
+    }
+
+    #[test]
+    fn delegation_apply_future_lease_takeover_requires_operation_lock() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let operation = review_pending_delegation_operation(&repo, "apply-locked-takeover");
+        let preparing = preparing_apply(&operation, "apply-locked-takeover-tx");
+        futures::executor::block_on(repo.create_delegation_apply_transaction(&preparing))
+            .expect("create transaction");
+        let prepared = prepared_apply(preparing);
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_apply_transaction(
+                DelegationApplyTransactionState::Preparing,
+                &prepared,
+            ))
+            .expect("prepare transaction")
+        );
+
+        let first = futures::executor::block_on(repo.claim_delegation_apply_transaction(
+            &prepared.transaction_id,
+            "first-owner",
+            "2026-08-28T14:00:00Z",
+            "2026-08-28T14:15:00Z",
+            false,
+        ))
+        .expect("initial claim")
+        .expect("initial owner wins");
+        assert_eq!(first.recovery_owner.as_deref(), Some("first-owner"));
+
+        assert!(
+            futures::executor::block_on(repo.claim_delegation_apply_transaction(
+                &prepared.transaction_id,
+                "unlocked-takeover",
+                "2026-08-28T14:01:00Z",
+                "2026-08-28T14:16:00Z",
+                false,
+            ))
+            .expect("normal claim respects future lease")
+            .is_none()
+        );
+
+        let takeover = futures::executor::block_on(repo.claim_delegation_apply_transaction(
+            &prepared.transaction_id,
+            "locked-takeover",
+            "2026-08-28T14:01:00Z",
+            "2026-08-28T14:16:00Z",
+            true,
+        ))
+        .expect("operation-lock claim")
+        .expect("operation lock permits immediate takeover");
+        assert_eq!(takeover.recovery_owner.as_deref(), Some("locked-takeover"));
+        assert_eq!(
+            takeover.recovery_lease_until.as_deref(),
+            Some("2026-08-28T14:16:00.000000000Z")
+        );
+    }
+
+    #[test]
+    fn delegation_apply_claim_is_atomic_with_operation_scope() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let operation = review_pending_delegation_operation(&repo, "apply-atomic");
+        let preparing = preparing_apply(&operation, "apply-atomic-tx");
+        futures::executor::block_on(repo.create_delegation_apply_transaction(&preparing)).unwrap();
+        let prepared = prepared_apply(preparing);
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_apply_transaction(
+                DelegationApplyTransactionState::Preparing,
+                &prepared,
+            ))
+            .unwrap()
+        );
+
+        let mut cleanup = operation.clone();
+        cleanup.state = DelegationWorktreeOperationState::CleanupRequired;
+        cleanup.last_error = Some("independent lifecycle failure".to_string());
+        assert!(
+            futures::executor::block_on(repo.compare_and_swap_delegation_worktree_operation(
+                DelegationWorktreeOperationState::ReviewPending,
+                &cleanup,
+            ))
+            .unwrap()
+        );
+        assert!(
+            futures::executor::block_on(repo.claim_delegation_apply_transaction(
+                &prepared.transaction_id,
+                "worker",
+                "2026-08-28T13:00:00Z",
+                "2026-08-28T13:01:00Z",
+                false,
+            ))
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(
+            futures::executor::block_on(
+                repo.get_delegation_apply_transaction(&prepared.transaction_id)
+            )
+            .unwrap()
+            .unwrap()
+            .state,
+            DelegationApplyTransactionState::Prepared
+        );
+    }
+
+    #[test]
+    fn delegation_apply_schema_migrates_idempotently_without_rewriting_legacy_applying() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("apply-migration.sqlite");
+        let repo = SqliteSessionRepo::open(&path).expect("create legacy-shaped database");
+        let operation = review_pending_delegation_operation(&repo, "legacy-apply");
+        drop(repo);
+        let connection = Connection::open(&path).expect("open legacy database directly");
+        connection
+            .execute(
+                "UPDATE dcc_delegation_worktree_operations SET state = 'applying' \
+                 WHERE operation_id = ?1",
+                params![operation.operation_id.0],
+            )
+            .expect("seed legacy applying state");
+        connection
+            .execute_batch("DROP TABLE dcc_delegation_apply_transactions;")
+            .expect("remove new table to model legacy schema");
+        drop(connection);
+
+        let migrated = SqliteSessionRepo::open(&path).expect("migrate apply transaction schema");
+        let legacy = futures::executor::block_on(
+            migrated.get_delegation_worktree_operation(&operation.operation_id),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(legacy.state, DelegationWorktreeOperationState::Applying);
+        assert!(futures::executor::block_on(
+            migrated.get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
+        )
+        .unwrap()
+        .is_none());
+        drop(migrated);
+        SqliteSessionRepo::open(&path).expect("migration is idempotent");
     }
 
     #[test]
