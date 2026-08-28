@@ -63,14 +63,13 @@ use crate::{
         },
     },
     commands::workspace_support::{
-        broken_workspace_message, cleanup_workspace_files, directory_logical_size,
-        ensure_pushable_branch, find_workspace_by_root, next_available_branch_name,
-        preferred_workspace_branch_name, preflight_workspace_root, purge_broken_workspace_by_root,
-        push_branch_refspec, push_branch_refspec_to_remote, resolve_branch_diff_base,
-        resolve_current_branch_name, resolve_current_commit_sha, resolve_default_remote_name,
-        resolve_workspace_active_root, resolve_workspace_broken_reason,
-        resolve_workspace_setup_root, resolve_workspace_target_branch,
-        run_git_network_output_with_workspace_auth,
+        broken_workspace_message, broken_workspace_reason_by_root, cleanup_workspace_files,
+        directory_logical_size, ensure_pushable_branch, find_workspace_by_root,
+        next_available_branch_name, preferred_workspace_branch_name, preflight_workspace_root,
+        resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
+        resolve_default_remote_name, resolve_workspace_active_root,
+        resolve_workspace_broken_reason, resolve_workspace_setup_root,
+        resolve_workspace_target_branch, run_git_network_output_with_workspace_auth,
     },
     delivery_failure::{
         capture_workspace_delivery_failure, clear_workspace_delivery_failure,
@@ -86,9 +85,13 @@ use crate::{
         split_null_terminated_fields,
     },
     guarded_undo_runtime::WorkspaceMutationRunError,
-    state::{SessionCommandState, WorkspaceCommandState, WorkspaceMutationRequestError},
+    state::{
+        DeliveryRecoveryClaim, SessionCommandState, WorkspaceCommandState,
+        WorkspaceMutationRequestError,
+    },
     workspace_setup::{
-        run_detected_workspace_setup, run_workspace_task_command, WORKSPACE_VALIDATION_TIMEOUT,
+        run_workspace_setup_with_options_blocking, run_workspace_task_command,
+        WorkspaceSetupFailurePolicy, WORKSPACE_VALIDATION_TIMEOUT,
     },
 };
 
@@ -964,13 +967,26 @@ fn recommended_workspace_setup_report(workspace: &Workspace) -> WorkspaceSetupRe
     }
 }
 
-async fn execute_workspace_setup_report(workspace: &Workspace) -> WorkspaceSetupReport {
+async fn execute_workspace_setup_report(
+    state: &WorkspaceCommandState,
+    workspace: &Workspace,
+) -> WorkspaceSetupReport {
     let setup_suggestions = collect_workspace_setup_suggestions(workspace);
-    match run_detected_workspace_setup(
-        resolve_workspace_setup_root(workspace).to_string(),
-        setup_suggestions,
-    )
-    .await
+    let setup_root = resolve_workspace_setup_root(workspace).to_string();
+    match state
+        .run_workspace_mutation_blocking(&setup_root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            run_workspace_setup_with_options_blocking(
+                root,
+                &setup_suggestions,
+                WorkspaceSetupFailurePolicy::ContinueOnFailure,
+            )
+            .map(|outcome| outcome.report)
+        })
+        .await
+        .map_err(workspace_mutation_error)
     {
         Ok(report) => report,
         Err(error) => WorkspaceSetupReport {
@@ -1014,20 +1030,28 @@ fn workspace_state_for_setup_report(report: &WorkspaceSetupReport) -> WorkspaceS
 fn compile_active_mission_spec_context_for_workspace(
     workspace: &Workspace,
 ) -> Result<Option<String>, String> {
-    match select_active_mission_spec_relative_path(
-        resolve_workspace_active_root(workspace),
-        &workspace.base_branch,
+    compile_active_mission_spec_context_for_trusted_root(
+        workspace,
+        Path::new(resolve_workspace_active_root(workspace)),
     )
-    .and_then(|spec_relative_path| {
-        spec_relative_path
-            .map(|path| {
-                compile_mission_spec_context_for_path(
-                    resolve_workspace_active_root(workspace),
-                    &path,
-                )
-            })
-            .transpose()
-    }) {
+}
+
+/// Compiles setup context using the descriptor-rooted workspace path supplied
+/// by `run_workspace_mutation`. Callers must not pass a raw command path here.
+fn compile_active_mission_spec_context_for_trusted_root(
+    workspace: &Workspace,
+    trusted_root: &Path,
+) -> Result<Option<String>, String> {
+    let root = trusted_root
+        .to_str()
+        .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+    match select_active_mission_spec_relative_path(root, &workspace.base_branch).and_then(
+        |spec_relative_path| {
+            spec_relative_path
+                .map(|path| compile_mission_spec_context_for_path(root, &path))
+                .transpose()
+        },
+    ) {
         Ok(_) => Ok(None),
         Err(error) => {
             eprintln!("[dcc] mission spec setup compile failed: {error}");
@@ -2040,12 +2064,34 @@ pub async fn workspace_run_project_tasks(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    if workspace_validation_config_hash(&root)? != input.expected_config_hash {
+    let expected_config_hash = input.expected_config_hash;
+    let task_ids = input.task_ids;
+    let (report, changed_files) = state
+        .run_workspace_mutation_blocking(&root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            run_workspace_project_tasks_inner(root, expected_config_hash, task_ids)
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
+    Ok(WorkspaceRunProjectTasksOutput {
+        report,
+        changed_files,
+    })
+}
+
+fn run_workspace_project_tasks_inner(
+    root: &str,
+    expected_config_hash: Option<String>,
+    task_ids: Vec<String>,
+) -> Result<(WorkspaceGitValidationReport, bool), String> {
+    if workspace_validation_config_hash(root)? != expected_config_hash {
         return Err(
             "The .dcc.toml configuration changed. Review the tasks and try again.".to_string(),
         );
     }
-    let config = read_workspace_automation_config(Path::new(&root))?
+    let config = read_workspace_automation_config(Path::new(root))?
         .ok_or_else(|| "No project automation is configured.".to_string())?;
     let by_id = config
         .tasks
@@ -2054,7 +2100,7 @@ pub async fn workspace_run_project_tasks(
         .collect::<BTreeMap<_, _>>();
     let mut requested = Vec::new();
     let mut seen = BTreeSet::new();
-    for id in input.task_ids {
+    for id in task_ids {
         if seen.insert(id.clone()) {
             requested.push(
                 by_id
@@ -2071,78 +2117,64 @@ pub async fn workspace_run_project_tasks(
         return Err("At most 20 project tasks can run at once.".to_string());
     }
     let source_path = Some(config.source_path);
-    let root_for_run = root.clone();
-    let (report, changed_files) = tauri::async_runtime::spawn_blocking(
-        move || -> Result<(WorkspaceGitValidationReport, bool), String> {
-            let mut steps = Vec::new();
-            let mut changed_files = false;
-            for task in requested {
-                let before_task = workspace_validation_fingerprint(&root_for_run)?;
-                let execution_root = resolve_task_execution_root(&root_for_run, &task)?;
-                let execution = run_workspace_task_command(
-                    &execution_root,
-                    &task.command,
-                    task.timeout_seconds,
-                )?;
-                let success = execution.success;
-                steps.push(WorkspaceGitValidationStep {
-                    command: task.command,
-                    success,
-                    exit_code: execution.exit_code,
-                    output: execution.output,
-                    timed_out: execution.timed_out,
-                    duration_ms: execution.duration_ms,
-                    truncated: execution.truncated,
-                });
-                let after_task = workspace_validation_fingerprint(&root_for_run)?;
-                let task_changed_files = before_task != after_task;
-                changed_files |= task_changed_files;
-                if task_changed_files && task.kind == RepoTaskKind::Check {
-                    steps.push(WorkspaceGitValidationStep {
-                        command: "DCC workspace consistency check".to_string(),
-                        success: false,
-                        exit_code: None,
-                        output: "A check task changed tracked files or the index. Review the changes before continuing.".to_string(),
-                        timed_out: false,
-                        duration_ms: 0,
-                        truncated: false,
-                    });
-                    return Ok((
-                        WorkspaceGitValidationReport {
-                            status: WorkspaceGitValidationStatus::Failed,
-                            source_path,
-                            steps,
-                        },
-                        changed_files,
-                    ));
-                }
-                if !success {
-                    return Ok((
-                        WorkspaceGitValidationReport {
-                            status: WorkspaceGitValidationStatus::Failed,
-                            source_path,
-                            steps,
-                        },
-                        changed_files,
-                    ));
-                }
-            }
-            Ok((
+    let mut steps = Vec::new();
+    let mut changed_files = false;
+    for task in requested {
+        let before_task = workspace_validation_fingerprint(root)?;
+        let execution_root = resolve_task_execution_root(root, &task)?;
+        let execution =
+            run_workspace_task_command(&execution_root, &task.command, task.timeout_seconds)?;
+        let success = execution.success;
+        steps.push(WorkspaceGitValidationStep {
+            command: task.command,
+            success,
+            exit_code: execution.exit_code,
+            output: execution.output,
+            timed_out: execution.timed_out,
+            duration_ms: execution.duration_ms,
+            truncated: execution.truncated,
+        });
+        let after_task = workspace_validation_fingerprint(root)?;
+        let task_changed_files = before_task != after_task;
+        changed_files |= task_changed_files;
+        if task_changed_files && task.kind == RepoTaskKind::Check {
+            steps.push(WorkspaceGitValidationStep {
+                command: "DCC workspace consistency check".to_string(),
+                success: false,
+                exit_code: None,
+                output: "A check task changed tracked files or the index. Review the changes before continuing.".to_string(),
+                timed_out: false,
+                duration_ms: 0,
+                truncated: false,
+            });
+            return Ok((
                 WorkspaceGitValidationReport {
-                    status: WorkspaceGitValidationStatus::Passed,
+                    status: WorkspaceGitValidationStatus::Failed,
                     source_path,
                     steps,
                 },
                 changed_files,
-            ))
+            ));
+        }
+        if !success {
+            return Ok((
+                WorkspaceGitValidationReport {
+                    status: WorkspaceGitValidationStatus::Failed,
+                    source_path,
+                    steps,
+                },
+                changed_files,
+            ));
+        }
+    }
+    Ok((
+        WorkspaceGitValidationReport {
+            status: WorkspaceGitValidationStatus::Passed,
+            source_path,
+            steps,
         },
-    )
-    .await
-    .map_err(|error| error.to_string())??;
-    Ok(WorkspaceRunProjectTasksOutput {
-        report,
         changed_files,
-    })
+    ))
 }
 
 #[tauri::command]
@@ -2151,10 +2183,127 @@ pub async fn workspace_git_complete_merge(
     input: WorkspaceGitCompleteMergeInput,
 ) -> Result<WorkspaceGitCompleteMergeOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
+    let root = input.workspace_root.trim().to_string();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
+    let expected_config_hash = input.validation_config_hash.clone();
+    let expected_commands = input.validation_commands.clone();
+    let (mut validation, validated_fingerprint) = state
+        .run_workspace_mutation_blocking(&root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            workspace_git_run_confirmed_automation_validations(
+                root,
+                expected_config_hash,
+                expected_commands,
+            )
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
+    if validation.status == WorkspaceGitValidationStatus::Failed {
+        return Ok(WorkspaceGitCompleteMergeOutput {
+            completed: false,
+            validation,
+        });
+    }
+
+    let expected_config_hash = input.validation_config_hash.clone();
+    let protected_branch = resolve_workspace_target_branch(&state, &root).await;
+    let db_path = state.db_path.clone();
+    let forge_login = input.forge_login.clone();
+    let completed = state
+        .run_workspace_mutation_blocking(&root, move |root| {
+            let root = root.to_str().ok_or_else(|| {
+                CompleteMergePushFailure::PrePush("workspace path is not valid UTF-8".to_string())
+            })?;
+            let committed = workspace_git_complete_merge_commit_validated_inner(
+                root,
+                expected_config_hash.as_deref(),
+                validated_fingerprint.as_deref(),
+            )
+            .map_err(CompleteMergePushFailure::PrePush)?;
+            if !committed {
+                return Ok(CompleteMergePushOutcome::StaleValidation);
+            }
+            let merge_commit =
+                observe_push_identity(root).map_err(CompleteMergePushFailure::PrePush)?;
+            push_current_branch_inner(
+                &db_path,
+                root,
+                protected_branch.as_deref(),
+                forge_login.as_deref(),
+                Some(&merge_commit),
+                None,
+            )
+            .map_err(CompleteMergePushFailure::Push)?;
+            Ok(CompleteMergePushOutcome::Pushed)
+        })
+        .await;
+    match completed {
+        Ok(CompleteMergePushOutcome::StaleValidation) => {
+            validation.status = WorkspaceGitValidationStatus::Failed;
+            validation.steps.push(WorkspaceGitValidationStep {
+                command: "DCC workspace consistency check".to_string(),
+                success: false,
+                exit_code: None,
+                output: "The staged result or tracked working-tree changes changed while validations were running. Run validations again.".to_string(),
+                timed_out: false,
+                duration_ms: 0,
+                truncated: false,
+            });
+            Ok(WorkspaceGitCompleteMergeOutput {
+                completed: false,
+                validation,
+            })
+        }
+        Ok(CompleteMergePushOutcome::Pushed) => {
+            clear_workspace_delivery_failure(
+                &state,
+                &root,
+                WorkspaceDeliveryFailureOperation::Push,
+            );
+            Ok(WorkspaceGitCompleteMergeOutput {
+                completed: true,
+                validation,
+            })
+        }
+        Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+            CompleteMergePushFailure::PrePush(error),
+        ))) => Err(error),
+        Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+            CompleteMergePushFailure::Push(error),
+        ))) => {
+            capture_workspace_delivery_failure(
+                &state,
+                &root,
+                WorkspaceDeliveryFailureOperation::Push,
+                &error,
+                CaptureDeliveryFailureOptions::default(),
+            )
+            .await;
+            Err(error)
+        }
+        Err(_) => Err("workspace mutation is unavailable".to_string()),
+    }
+}
+
+enum CompleteMergePushOutcome {
+    StaleValidation,
+    Pushed,
+}
+
+enum CompleteMergePushFailure {
+    PrePush(String),
+    Push(String),
+}
+
+fn workspace_git_run_confirmed_automation_validations(
+    root: &str,
+    expected_config_hash: Option<String>,
+    expected_commands: Vec<String>,
+) -> Result<(WorkspaceGitValidationReport, Option<String>), String> {
     require_merge_ready_to_complete(root)?;
     let configured_automation = read_workspace_automation_config(Path::new(root))?;
     let configured_tasks = configured_automation
@@ -2183,73 +2332,16 @@ pub async fn workspace_git_complete_merge(
         .iter()
         .map(|task| task.command.clone())
         .collect::<Vec<_>>();
-    if workspace_validation_config_hash(root)? != input.validation_config_hash
-        || configured_commands != input.validation_commands
+    if workspace_validation_config_hash(root)? != expected_config_hash
+        || configured_commands != expected_commands
     {
         return Err(
             "The .dcc.toml validation configuration changed. Review the commands and confirm again."
                 .to_string(),
         );
     }
-
-    let validation_root = root.to_string();
-    let validation_source_path = configured_automation.map(|config| config.source_path);
-    let (mut validation, validated_fingerprint) = tauri::async_runtime::spawn_blocking(move || {
-        workspace_git_run_automation_validations_inner(
-            &validation_root,
-            configured_tasks,
-            validation_source_path,
-        )
-    })
-    .await
-    .map_err(|error| error.to_string())??;
-    if validation.status == WorkspaceGitValidationStatus::Failed {
-        return Ok(WorkspaceGitCompleteMergeOutput {
-            completed: false,
-            validation,
-        });
-    }
-
-    require_merge_ready_to_complete(root)?;
-    if workspace_validation_config_hash(root)? != input.validation_config_hash {
-        return Err(
-            "The .dcc.toml validation configuration changed while validations were running. Review the commands and confirm again."
-                .to_string(),
-        );
-    }
-    if let Some(validated_fingerprint) = validated_fingerprint {
-        let current_fingerprint = workspace_validation_fingerprint(root)?;
-        if current_fingerprint != validated_fingerprint {
-            validation.status = WorkspaceGitValidationStatus::Failed;
-            validation.steps.push(WorkspaceGitValidationStep {
-                command: "DCC workspace consistency check".to_string(),
-                success: false,
-                exit_code: None,
-                output: "The staged result or tracked working-tree changes changed while validations were running. Run validations again.".to_string(),
-                timed_out: false,
-                duration_ms: 0,
-                truncated: false,
-            });
-            return Ok(WorkspaceGitCompleteMergeOutput {
-                completed: false,
-                validation,
-            });
-        }
-    }
-    workspace_git_complete_merge_commit_inner(root)?;
-
-    let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    push_current_branch(
-        &state,
-        root,
-        protected_branch.as_deref(),
-        input.forge_login.as_deref(),
-    )
-    .await?;
-    Ok(WorkspaceGitCompleteMergeOutput {
-        completed: true,
-        validation,
-    })
+    let source_path = configured_automation.map(|config| config.source_path);
+    workspace_git_run_automation_validations_inner(root, configured_tasks, source_path)
 }
 
 fn workspace_git_run_automation_validations_inner(
@@ -2332,6 +2424,34 @@ fn workspace_git_complete_merge_commit_inner(root: &str) -> Result<(), String> {
         return Err(git_output_err("git commit --no-edit", &commit.stderr));
     }
     Ok(())
+}
+
+fn workspace_git_complete_merge_commit_validated_inner(
+    root: &str,
+    expected_config_hash: Option<&str>,
+    validated_fingerprint: Option<&str>,
+) -> Result<bool, String> {
+    require_merge_ready_to_complete(root)?;
+    if workspace_validation_config_hash(root)?.as_deref() != expected_config_hash {
+        return Err(
+            "The .dcc.toml validation configuration changed while validations were running. Review the commands and confirm again."
+                .to_string(),
+        );
+    }
+    if let Some(expected) = validated_fingerprint {
+        if workspace_validation_fingerprint(root)? != expected {
+            return Ok(false);
+        }
+    }
+    let expected_tree = resolve_index_tree(root)?;
+    workspace_git_complete_merge_commit_inner(root)?;
+    if resolve_head_tree(root)? != expected_tree {
+        return Err(
+            "a merge commit hook changed the validated tree; the merge commit was created but was not pushed"
+                .to_string(),
+        );
+    }
+    Ok(true)
 }
 
 fn require_merge_ready_to_complete(root: &str) -> Result<(), String> {
@@ -2644,14 +2764,143 @@ pub(crate) async fn complete_repository_forge_binding_retry(
     Ok(())
 }
 
-async fn push_current_branch_inner(
+#[derive(Clone, PartialEq, Eq)]
+struct PushIdentity {
+    head: String,
+    branch: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct PushRoute {
+    remote: String,
+    branch: String,
+    url: Option<String>,
+}
+
+fn redact_push_route_credentials(raw: &str) -> String {
+    let mut redacted = raw.to_string();
+    let mut cursor = 0usize;
+    while let Some(relative_scheme) = redacted[cursor..].find("://") {
+        let authority_start = cursor + relative_scheme + 3;
+        let authority_end = redacted[authority_start..]
+            .find(|character: char| {
+                character.is_whitespace() || matches!(character, '/' | '?' | '#')
+            })
+            .map(|relative| authority_start + relative)
+            .unwrap_or(redacted.len());
+        let Some(relative_at) = redacted[authority_start..authority_end].rfind('@') else {
+            cursor = authority_end;
+            continue;
+        };
+        let at = authority_start + relative_at;
+        redacted.replace_range(authority_start..at, "[redacted]");
+        cursor = authority_start + "[redacted]@".len();
+    }
+    redacted
+}
+
+fn observed_push_route_url(root: &str, remote: &str, configured: Option<String>) -> Option<String> {
+    configured
+        .map(|url| redact_push_route_credentials(url.trim()))
+        .filter(|url| !url.is_empty())
+        .or_else(|| {
+            let output = run_git_output(root, &["remote", "get-url", remote]).ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            (!raw.is_empty()).then(|| redact_push_route_credentials(&raw))
+        })
+}
+
+fn observe_push_identity(root: &str) -> Result<PushIdentity, String> {
+    let head = resolve_current_commit_sha(root)?
+        .filter(|head| !head.trim().is_empty())
+        .ok_or_else(|| "cannot push because the current commit is unavailable".to_string())?;
+    let branch = resolve_current_branch_name(root)?;
+    Ok(PushIdentity { head, branch })
+}
+
+fn push_observed_commit_to_remote(
+    db_path: &Path,
+    root: &str,
+    remote: &str,
+    remote_branch: &str,
+    identity: &PushIdentity,
+    forge_login: Option<&str>,
+) -> Result<(), String> {
+    validate_branch_for_fetch(root, remote_branch)?;
+    if observe_push_identity(root)? != *identity {
+        return Err("workspace changed before the push could start".to_string());
+    }
+    let remote_ref = format!("{}:refs/heads/{remote_branch}", identity.head);
+    let output = run_git_network_output_with_workspace_auth(
+        db_path,
+        root,
+        &["push", remote, &remote_ref],
+        forge_login,
+    )?;
+    if !output.status.success() {
+        return Err(git_output_err("git push", &output.stderr));
+    }
+    if observe_push_identity(root)? != *identity {
+        return Err(
+            "workspace changed during push; only the previously observed commit was delivered"
+                .to_string(),
+        );
+    }
+    if identity.branch != "HEAD" {
+        let upstream = format!("{remote}/{remote_branch}");
+        let configured = run_git_output(
+            root,
+            &[
+                "branch",
+                &format!("--set-upstream-to={upstream}"),
+                &identity.branch,
+            ],
+        )?;
+        if !configured.status.success() {
+            return Err(git_output_err(
+                "git branch --set-upstream-to",
+                &configured.stderr,
+            ));
+        }
+    }
+    if observe_push_identity(root)? != *identity {
+        return Err("workspace changed while recording the push target".to_string());
+    }
+    Ok(())
+}
+
+fn push_current_branch_inner(
     db_path: &Path,
     root: &str,
     protected_branch: Option<&str>,
     forge_login: Option<&str>,
+    expected_before_push: Option<&PushIdentity>,
+    expected_route: Option<&PushRoute>,
 ) -> Result<(), String> {
+    if let Some(expected) = expected_before_push {
+        if observe_push_identity(root)? != *expected {
+            return Err("workspace changed before push preparation".to_string());
+        }
+    }
     let repo = SqliteWorkspaceRepo::open(db_path).map_err(|error| error.to_string())?;
-    let workspace = find_workspace_by_root(&repo, root).await?;
+    // This helper runs on the blocking mutation worker. Resolve the durable
+    // workspace binding before starting any network command, then release the
+    // repository so no SQLite handle/transaction is carried across fetch,
+    // push, hooks, or branch materialization.
+    let workspace = futures::executor::block_on(find_workspace_by_root(&repo, root))?;
+    drop(repo);
+    let protected_branch = workspace
+        .as_ref()
+        .map(|workspace| workspace.base_branch.trim())
+        .filter(|branch| !branch.is_empty())
+        .or_else(|| {
+            protected_branch
+                .map(str::trim)
+                .filter(|branch| !branch.is_empty())
+        });
     if let Some(source) = workspace
         .as_ref()
         .and_then(|workspace| workspace.source.clone())
@@ -2687,11 +2936,24 @@ async fn push_current_branch_inner(
                 push_target.branch_name
             ));
         }
-        return push_branch_refspec_to_remote(
+        let identity = observe_push_identity(root)?;
+        if expected_before_push.is_some_and(|expected| identity != *expected) {
+            return Err("workspace changed while preparing the source-branch push".to_string());
+        }
+        let route = PushRoute {
+            url: observed_push_route_url(root, &push_target.remote_name, push_target.remote_url),
+            remote: push_target.remote_name,
+            branch: push_target.branch_name,
+        };
+        if expected_route.is_some_and(|expected| route != *expected) {
+            return Err("workspace push target changed before retry".to_string());
+        }
+        return push_observed_commit_to_remote(
             db_path,
             root,
-            &push_target.remote_name,
-            &push_target.branch_name,
+            &route.remote,
+            &route.branch,
+            &identity,
             forge_login,
         );
     }
@@ -2700,7 +2962,33 @@ async fn push_current_branch_inner(
         .as_ref()
         .and_then(|workspace| preferred_workspace_branch_name(workspace.name.as_deref()));
     let branch = ensure_pushable_branch(root, protected_branch, preferred_branch.as_deref())?;
-    push_branch_refspec(db_path, root, &branch, forge_login)
+    let identity = observe_push_identity(root)?;
+    if identity.branch != branch {
+        return Err("workspace branch changed while preparing the push".to_string());
+    }
+    if expected_before_push.is_some_and(|expected| identity.head != expected.head) {
+        return Err("workspace commit changed while preparing the push".to_string());
+    }
+    let route = PushRoute {
+        remote: resolve_default_remote_name(root)?,
+        branch,
+        url: None,
+    };
+    let route = PushRoute {
+        url: observed_push_route_url(root, &route.remote, None),
+        ..route
+    };
+    if expected_route.is_some_and(|expected| route != *expected) {
+        return Err("workspace push target changed before retry".to_string());
+    }
+    push_observed_commit_to_remote(
+        db_path,
+        root,
+        &route.remote,
+        &route.branch,
+        &identity,
+        forge_login,
+    )
 }
 
 pub(crate) async fn push_current_branch(
@@ -2709,11 +2997,79 @@ pub(crate) async fn push_current_branch(
     protected_branch: Option<&str>,
     forge_login: Option<&str>,
 ) -> Result<(), String> {
-    let result =
-        push_current_branch_inner(&state.db_path, root, protected_branch, forge_login).await;
+    let db_path = state.db_path.clone();
+    let protected_branch = protected_branch.map(str::to_string);
+    let forge_login = forge_login.map(str::to_string);
+    let result = state
+        .run_workspace_mutation_blocking(root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            push_current_branch_inner(
+                &db_path,
+                root,
+                protected_branch.as_deref(),
+                forge_login.as_deref(),
+                None,
+                None,
+            )
+        })
+        .await
+        .map_err(workspace_mutation_error);
     match result {
         Ok(()) => {
             clear_workspace_delivery_failure(state, root, WorkspaceDeliveryFailureOperation::Push);
+            Ok(())
+        }
+        Err(error) => {
+            capture_workspace_delivery_failure(
+                state,
+                root,
+                WorkspaceDeliveryFailureOperation::Push,
+                &error,
+                CaptureDeliveryFailureOptions::default(),
+            )
+            .await;
+            Err(error)
+        }
+    }
+}
+
+async fn retry_push_current_branch(
+    state: &WorkspaceCommandState,
+    root: &str,
+    recovery_claim: DeliveryRecoveryClaim,
+    expected_identity: PushIdentity,
+    expected_route: PushRoute,
+    forge_login: Option<&str>,
+) -> Result<(), String> {
+    let db_path = state.db_path.clone();
+    let forge_login = forge_login.map(str::to_string);
+    let guarded = state
+        .run_workspace_mutation_blocking(root, move |root| {
+            let result = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())
+                .and_then(|root| {
+                    push_current_branch_inner(
+                        &db_path,
+                        root,
+                        None,
+                        forge_login.as_deref(),
+                        Some(&expected_identity),
+                        Some(&expected_route),
+                    )
+                });
+            Ok::<_, std::convert::Infallible>((result, recovery_claim))
+        })
+        .await;
+    let (result, recovery_claim) = match guarded {
+        Ok(guarded) => guarded,
+        Err(_) => return Err("workspace mutation is unavailable".to_string()),
+    };
+    match result {
+        Ok(()) => {
+            recovery_claim.clear_current_snapshot()?;
             Ok(())
         }
         Err(error) => {
@@ -3177,6 +3533,51 @@ fn commit_staged_workspace_changes(
     Err(git_output_err("git commit", &commit.stderr))
 }
 
+fn resolve_index_tree(root: &str) -> Result<String, String> {
+    let output = run_git_output(root, &["write-tree"])?;
+    if !output.status.success() {
+        return Err(git_output_err("git write-tree", &output.stderr));
+    }
+    let tree = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if tree.is_empty() {
+        return Err("staged Git tree is unavailable".to_string());
+    }
+    Ok(tree)
+}
+
+fn resolve_head_tree(root: &str) -> Result<String, String> {
+    let output = run_git_output(root, &["rev-parse", "--verify", "HEAD^{tree}"])?;
+    if !output.status.success() {
+        return Err(git_output_err("git rev-parse HEAD^{tree}", &output.stderr));
+    }
+    let tree = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if tree.is_empty() {
+        return Err("committed Git tree is unavailable".to_string());
+    }
+    Ok(tree)
+}
+
+fn commit_staged_workspace_changes_for_push(
+    root: &str,
+    message: &str,
+    body: Option<&str>,
+    staged_fingerprint: &str,
+) -> Result<(), String> {
+    // Commit-and-push promises to deliver exactly the tree reviewed by the
+    // caller. The commit-only action intentionally retains normal Git hook
+    // semantics and therefore continues to call `commit_staged_workspace_changes` directly.
+    validate_staged_snapshot(root, staged_fingerprint)?;
+    let expected_tree = resolve_index_tree(root)?;
+    commit_staged_workspace_changes(root, message, body, staged_fingerprint)?;
+    if resolve_head_tree(root)? != expected_tree {
+        return Err(
+            "a commit hook changed the reviewed staged tree; the commit was created but was not pushed"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn commit_suggestion_humanize(path: &str) -> String {
     let file = path.rsplit('/').next().unwrap_or(path);
     let without_extension = file.rsplit_once('.').map(|(name, _)| name).unwrap_or(file);
@@ -3387,16 +3788,22 @@ pub async fn workspace_git_commit(
     input: WorkspaceGitCommitInput,
 ) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
+    let root = input.workspace_root.trim().to_string();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    commit_staged_workspace_changes(
-        root,
-        &input.message,
-        input.body.as_deref(),
-        &input.staged_fingerprint,
-    )
+    let message = input.message;
+    let body = input.body;
+    let staged_fingerprint = input.staged_fingerprint;
+    state
+        .run_workspace_mutation_blocking(&root, move |root| {
+            let root = root
+                .to_str()
+                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+            commit_staged_workspace_changes(root, &message, body.as_deref(), &staged_fingerprint)
+        })
+        .await
+        .map_err(workspace_mutation_error)
 }
 
 /// Commit staged changes and push (requires at least one staged path).
@@ -3406,35 +3813,72 @@ pub async fn workspace_git_commit_push(
     input: WorkspaceGitCommitPushInput,
 ) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
+    let root = input.workspace_root.trim().to_string();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    if let Err(error) = commit_staged_workspace_changes(
-        root,
-        &input.message,
-        input.body.as_deref(),
-        &input.staged_fingerprint,
-    ) {
-        capture_workspace_delivery_failure(
-            &state,
-            root,
-            WorkspaceDeliveryFailureOperation::Push,
-            &error,
-            CaptureDeliveryFailureOptions::default(),
-        )
+    let message = input.message;
+    let body = input.body;
+    let staged_fingerprint = input.staged_fingerprint;
+    let protected_branch = resolve_workspace_target_branch(&state, &root).await;
+    let db_path = state.db_path.clone();
+    let forge_login = input.forge_login;
+    let local = state
+        .run_workspace_mutation_blocking(&root, move |root| {
+            let root = root.to_str().ok_or_else(|| {
+                CommitPushFailure::Commit("workspace path is not valid UTF-8".to_string())
+            })?;
+            commit_staged_workspace_changes_for_push(
+                root,
+                &message,
+                body.as_deref(),
+                &staged_fingerprint,
+            )
+            .map_err(CommitPushFailure::Commit)?;
+            let committed = observe_push_identity(root).map_err(CommitPushFailure::Commit)?;
+            push_current_branch_inner(
+                &db_path,
+                root,
+                protected_branch.as_deref(),
+                forge_login.as_deref(),
+                Some(&committed),
+                None,
+            )
+            .map_err(CommitPushFailure::Push)
+        })
         .await;
-        return Err(error);
+    match local {
+        Ok(()) => {
+            clear_workspace_delivery_failure(
+                &state,
+                &root,
+                WorkspaceDeliveryFailureOperation::Push,
+            );
+            Ok(())
+        }
+        Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+            CommitPushFailure::Commit(error),
+        ))) => Err(error),
+        Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+            CommitPushFailure::Push(error),
+        ))) => {
+            capture_workspace_delivery_failure(
+                &state,
+                &root,
+                WorkspaceDeliveryFailureOperation::Push,
+                &error,
+                CaptureDeliveryFailureOptions::default(),
+            )
+            .await;
+            Err(error)
+        }
+        Err(_) => Err("workspace mutation is unavailable".to_string()),
     }
+}
 
-    let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    push_current_branch(
-        &state,
-        root,
-        protected_branch.as_deref(),
-        input.forge_login.as_deref(),
-    )
-    .await
+enum CommitPushFailure {
+    Commit(String),
+    Push(String),
 }
 
 #[tauri::command]
@@ -3508,17 +3952,13 @@ async fn persist_workspace_base_branch(
     base_branch: &str,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let Some(mut workspace) = find_workspace_by_root(&repo, workspace_root).await? else {
+    let Some(workspace) = find_workspace_by_root(&repo, workspace_root).await? else {
         return Ok(());
     };
     if workspace.base_branch.trim() == base_branch {
         return Ok(());
     }
-
-    workspace.base_branch = base_branch.to_string();
-    workspace.updated_at = Utc::now().to_rfc3339();
-    repo.save_workspace(&workspace)
-        .await
+    repo.update_workspace_base_branch(&workspace.id, base_branch, &Utc::now().to_rfc3339())
         .map_err(|error| error.to_string())
 }
 
@@ -3535,6 +3975,8 @@ pub async fn workspace_git_sync_base(
         None,
         true,
         input.forge_login.as_deref(),
+        None,
+        None,
     )
     .await
 }
@@ -3546,25 +3988,192 @@ async fn sync_workspace_branch(
     target_remote: Option<&str>,
     persist_target_as_base: bool,
     forge_login: Option<&str>,
+    expected_identity: Option<PushIdentity>,
+    recovery_claim: Option<DeliveryRecoveryClaim>,
 ) -> Result<WorkspaceGitSyncBaseOutput, String> {
-    let root = workspace_root.trim();
+    let root = workspace_root.trim().to_string();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
+    let db_path = state.db_path.clone();
+    let target_branch = target_branch.map(str::to_string);
+    let target_remote = target_remote.map(str::to_string);
+    let forge_login = forge_login.map(str::to_string);
+    let local = state
+        .run_workspace_mutation_blocking(&root, move |root| {
+            let result = match root.to_str() {
+                Some(root) => sync_workspace_branch_inner(
+                    &db_path,
+                    root,
+                    target_branch.as_deref(),
+                    target_remote.as_deref(),
+                    forge_login.as_deref(),
+                    expected_identity.as_ref(),
+                ),
+                None => Err(WorkspaceSyncFailure::preflight(
+                    "workspace path is not valid UTF-8",
+                )),
+            };
+            Ok::<_, std::convert::Infallible>((result, recovery_claim))
+        })
+        .await;
+    let (local, recovery_claim) = match local {
+        Ok(local) => local,
+        Err(_) => return Err("workspace mutation is unavailable".to_string()),
+    };
+    let local = match local {
+        Ok(local) => local,
+        Err(failure) => {
+            let options = CaptureDeliveryFailureOptions {
+                remote: failure.remote.clone(),
+                operation_target: failure.base_branch.clone(),
+                external_url: None,
+            };
+            match failure.phase {
+                WorkspaceSyncFailurePhase::Preflight => {}
+                WorkspaceSyncFailurePhase::Fetch => {
+                    capture_workspace_delivery_failure(
+                        state,
+                        &root,
+                        WorkspaceDeliveryFailureOperation::Fetch,
+                        &failure.detail,
+                        options,
+                    )
+                    .await;
+                    if let Some(claim) = recovery_claim.as_ref() {
+                        if claim.operation() != WorkspaceDeliveryFailureOperation::Fetch {
+                            claim.clear_current_snapshot()?;
+                        }
+                    }
+                }
+                WorkspaceSyncFailurePhase::Pull => {
+                    if recovery_claim.is_none() {
+                        clear_workspace_delivery_failure(
+                            state,
+                            &root,
+                            WorkspaceDeliveryFailureOperation::Fetch,
+                        );
+                    }
+                    capture_workspace_delivery_failure(
+                        state,
+                        &root,
+                        WorkspaceDeliveryFailureOperation::Pull,
+                        &failure.detail,
+                        options,
+                    )
+                    .await;
+                    if let Some(claim) = recovery_claim.as_ref() {
+                        if claim.operation() != WorkspaceDeliveryFailureOperation::Pull {
+                            claim.clear_current_snapshot()?;
+                        }
+                    }
+                }
+            }
+            return Err(failure.detail);
+        }
+    };
+    if persist_target_as_base {
+        persist_workspace_base_branch(state, &root, &local.base_branch).await?;
+    }
+    if let Some(claim) = recovery_claim.as_ref() {
+        claim.clear_current_snapshot()?;
+    } else {
+        clear_workspace_delivery_failure(state, &root, WorkspaceDeliveryFailureOperation::Fetch);
+        clear_workspace_delivery_failure(state, &root, WorkspaceDeliveryFailureOperation::Pull);
+    }
+    Ok(WorkspaceGitSyncBaseOutput {
+        branch: local.branch,
+        base_branch: local.base_branch,
+        remote: local.remote,
+        updated: local.before != local.after,
+        conflict_count: local.conflict_count,
+    })
+}
 
-    if git_command_succeeds(root, &["rev-parse", "--verify", "-q", "MERGE_HEAD"]) {
-        return Err(
-            "a merge is already in progress; resolve it before updating the base".to_string(),
-        );
+struct WorkspaceSyncLocalOutcome {
+    branch: String,
+    base_branch: String,
+    remote: String,
+    before: String,
+    after: String,
+    conflict_count: u32,
+}
+
+enum WorkspaceSyncFailurePhase {
+    Preflight,
+    Fetch,
+    Pull,
+}
+
+struct WorkspaceSyncFailure {
+    phase: WorkspaceSyncFailurePhase,
+    detail: String,
+    remote: Option<String>,
+    base_branch: Option<String>,
+}
+
+impl WorkspaceSyncFailure {
+    fn preflight(detail: impl Into<String>) -> Self {
+        Self {
+            phase: WorkspaceSyncFailurePhase::Preflight,
+            detail: detail.into(),
+            remote: None,
+            base_branch: None,
+        }
     }
 
+    fn delivery(
+        phase: WorkspaceSyncFailurePhase,
+        detail: impl Into<String>,
+        remote: &str,
+        base_branch: &str,
+    ) -> Self {
+        Self {
+            phase,
+            detail: detail.into(),
+            remote: Some(remote.to_string()),
+            base_branch: Some(base_branch.to_string()),
+        }
+    }
+}
+
+fn sync_workspace_branch_inner(
+    db_path: &Path,
+    root: &str,
+    target_branch: Option<&str>,
+    target_remote: Option<&str>,
+    forge_login: Option<&str>,
+    expected_identity: Option<&PushIdentity>,
+) -> Result<WorkspaceSyncLocalOutcome, WorkspaceSyncFailure> {
+    if expected_identity.is_some_and(|expected| {
+        observe_push_identity(root)
+            .map(|current| current != *expected)
+            .unwrap_or(true)
+    }) {
+        return Err(WorkspaceSyncFailure::preflight(
+            "workspace branch or commit changed after delivery failure was captured",
+        ));
+    }
+    if git_command_succeeds(root, &["rev-parse", "--verify", "-q", "MERGE_HEAD"]) {
+        return Err(WorkspaceSyncFailure::preflight(
+            "a merge is already in progress; resolve it before updating the base",
+        ));
+    }
     let remote = target_remote
         .map(str::trim)
         .filter(|remote| !remote.is_empty())
         .map(str::to_string)
         .map(Ok)
-        .unwrap_or_else(|| resolve_default_remote_name(root))?;
-    let workspace_target_branch = resolve_workspace_target_branch(state, root).await;
+        .unwrap_or_else(|| resolve_default_remote_name(root))
+        .map_err(WorkspaceSyncFailure::preflight)?;
+
+    let repo = SqliteWorkspaceRepo::open(db_path)
+        .map_err(|error| WorkspaceSyncFailure::preflight(error.to_string()))?;
+    let workspace_target_branch = futures::executor::block_on(find_workspace_by_root(&repo, root))
+        .map_err(WorkspaceSyncFailure::preflight)?
+        .map(|workspace| workspace.base_branch);
+    drop(repo);
+
     let default_branch = resolve_default_branch_name(root).ok();
     let base_branch = target_branch
         .and_then(|branch| normalize_base_branch_for_sync(branch, &remote))
@@ -3579,71 +4188,45 @@ async fn sync_workspace_branch(
                 .and_then(|branch| normalize_base_branch_for_sync(branch, &remote))
         })
         .unwrap_or_else(|| "main".to_string());
+    validate_branch_for_fetch(root, &base_branch).map_err(WorkspaceSyncFailure::preflight)?;
 
-    validate_branch_for_fetch(root, &base_branch)?;
     let base_ref = remote_tracking_ref(&remote, &base_branch);
     let fetch_refspec = remote_branch_fetch_refspec(&remote, &base_branch);
-    let branch = resolve_current_branch_name(root)?;
-    let before = resolve_current_commit_sha(root)?.unwrap_or_default();
-    let fetch = match run_git_network_output_with_workspace_auth(
-        &state.db_path,
+    let branch = resolve_current_branch_name(root).map_err(WorkspaceSyncFailure::preflight)?;
+    let before = resolve_current_commit_sha(root)
+        .map_err(WorkspaceSyncFailure::preflight)?
+        .unwrap_or_default();
+    let fetch = run_git_network_output_with_workspace_auth(
+        db_path,
         root,
         &["fetch", &remote, &fetch_refspec],
         forge_login,
-    ) {
-        Ok(fetch) => fetch,
-        Err(error) => {
-            capture_workspace_delivery_failure(
-                state,
-                root,
-                WorkspaceDeliveryFailureOperation::Fetch,
-                &error,
-                CaptureDeliveryFailureOptions {
-                    remote: Some(remote.clone()),
-                    operation_target: Some(base_branch.clone()),
-                    external_url: None,
-                },
-            )
-            .await;
-            return Err(error);
-        }
-    };
-    if !fetch.status.success() {
-        let error = git_output_err("git fetch", &fetch.stderr);
-        capture_workspace_delivery_failure(
-            state,
-            root,
-            WorkspaceDeliveryFailureOperation::Fetch,
-            &error,
-            CaptureDeliveryFailureOptions {
-                remote: Some(remote.clone()),
-                operation_target: Some(base_branch.clone()),
-                external_url: None,
-            },
+    )
+    .map_err(|error| {
+        WorkspaceSyncFailure::delivery(
+            WorkspaceSyncFailurePhase::Fetch,
+            error,
+            &remote,
+            &base_branch,
         )
-        .await;
-        return Err(error);
+    })?;
+    if !fetch.status.success() {
+        return Err(WorkspaceSyncFailure::delivery(
+            WorkspaceSyncFailurePhase::Fetch,
+            git_output_err("git fetch", &fetch.stderr),
+            &remote,
+            &base_branch,
+        ));
     }
-    clear_workspace_delivery_failure(state, root, WorkspaceDeliveryFailureOperation::Fetch);
 
-    let merge = match run_git_output(root, &["merge", "--no-edit", &base_ref]) {
-        Ok(merge) => merge,
-        Err(error) => {
-            capture_workspace_delivery_failure(
-                state,
-                root,
-                WorkspaceDeliveryFailureOperation::Pull,
-                &error,
-                CaptureDeliveryFailureOptions {
-                    remote: Some(remote.clone()),
-                    operation_target: Some(base_branch.clone()),
-                    external_url: None,
-                },
-            )
-            .await;
-            return Err(error);
-        }
-    };
+    let merge = run_git_output(root, &["merge", "--no-edit", &base_ref]).map_err(|error| {
+        WorkspaceSyncFailure::delivery(
+            WorkspaceSyncFailurePhase::Pull,
+            error,
+            &remote,
+            &base_branch,
+        )
+    })?;
     let conflict_count = resolve_conflict_count(root).unwrap_or(0);
     if !merge.status.success() {
         let mut detail = git_output_err("git merge", &merge.stderr);
@@ -3652,31 +4235,29 @@ async fn sync_workspace_branch(
                 "{detail}\nMerge left {conflict_count} conflicting file(s) in the worktree."
             );
         }
-        capture_workspace_delivery_failure(
-            state,
-            root,
-            WorkspaceDeliveryFailureOperation::Pull,
-            &detail,
-            CaptureDeliveryFailureOptions {
-                remote: Some(remote.clone()),
-                operation_target: Some(base_branch.clone()),
-                external_url: None,
-            },
-        )
-        .await;
-        return Err(detail);
+        return Err(WorkspaceSyncFailure::delivery(
+            WorkspaceSyncFailurePhase::Pull,
+            detail,
+            &remote,
+            &base_branch,
+        ));
     }
-    clear_workspace_delivery_failure(state, root, WorkspaceDeliveryFailureOperation::Pull);
-
-    let after = resolve_current_commit_sha(root)?.unwrap_or_default();
-    if persist_target_as_base {
-        persist_workspace_base_branch(state, root, &base_branch).await?;
-    }
-    Ok(WorkspaceGitSyncBaseOutput {
+    let after = resolve_current_commit_sha(root)
+        .map_err(|error| {
+            WorkspaceSyncFailure::delivery(
+                WorkspaceSyncFailurePhase::Pull,
+                error,
+                &remote,
+                &base_branch,
+            )
+        })?
+        .unwrap_or_default();
+    Ok(WorkspaceSyncLocalOutcome {
         branch,
         base_branch,
         remote,
-        updated: before != after,
+        before,
+        after,
         conflict_count,
     })
 }
@@ -3699,19 +4280,32 @@ pub async fn workspace_delivery_recovery_execute(
     match input.action {
         WorkspaceDeliveryRecoveryAction::Retry => match snapshot.operation {
             WorkspaceDeliveryFailureOperation::Push => {
-                let current_target =
-                    resolve_delivery_push_target(&state, root, snapshot.branch.as_deref()).await;
-                if current_target.as_ref() != snapshot.push_target.as_ref() {
-                    return Err(
-                        "the workspace push target changed after this failure was captured; review the current target before retrying"
-                            .to_string(),
-                    );
-                }
-                let protected_branch = resolve_workspace_target_branch(&state, root).await;
-                push_current_branch(
+                let expected_identity = PushIdentity {
+                    branch: snapshot.branch.clone().ok_or_else(|| {
+                        "the captured branch is unavailable; refresh delivery recovery".to_string()
+                    })?,
+                    head: snapshot.head_sha.clone().ok_or_else(|| {
+                        "the captured commit is unavailable; refresh delivery recovery".to_string()
+                    })?,
+                };
+                let expected_target = snapshot.push_target.as_ref().ok_or_else(|| {
+                    "the captured push target is unavailable; refresh delivery recovery".to_string()
+                })?;
+                let recovery_claim = state.claim_delivery_recovery(
+                    root,
+                    snapshot.operation,
+                    &snapshot.attempt_token,
+                )?;
+                retry_push_current_branch(
                     &state,
                     root,
-                    protected_branch.as_deref(),
+                    recovery_claim,
+                    expected_identity,
+                    PushRoute {
+                        remote: expected_target.remote.clone(),
+                        branch: expected_target.branch.clone(),
+                        url: expected_target.url.clone(),
+                    },
                     input.forge_login.as_deref(),
                 )
                 .await?;
@@ -3721,6 +4315,11 @@ pub async fn workspace_delivery_recovery_execute(
                     "the captured update target is unavailable; retry from the branch toolbar"
                         .to_string()
                 })?;
+                let recovery_claim = state.claim_delivery_recovery(
+                    root,
+                    snapshot.operation,
+                    &snapshot.attempt_token,
+                )?;
                 sync_workspace_branch(
                     &state,
                     root,
@@ -3728,11 +4327,28 @@ pub async fn workspace_delivery_recovery_execute(
                     snapshot.remote.as_deref(),
                     true,
                     input.forge_login.as_deref(),
+                    Some(PushIdentity {
+                        branch: snapshot.branch.clone().ok_or_else(|| {
+                            "the captured branch is unavailable; refresh delivery recovery"
+                                .to_string()
+                        })?,
+                        head: snapshot.head_sha.clone().ok_or_else(|| {
+                            "the captured commit is unavailable; refresh delivery recovery"
+                                .to_string()
+                        })?,
+                    }),
+                    Some(recovery_claim),
                 )
                 .await?;
             }
             WorkspaceDeliveryFailureOperation::Pipeline => {
+                let recovery_claim = state.claim_delivery_recovery(
+                    root,
+                    snapshot.operation,
+                    &snapshot.attempt_token,
+                )?;
                 refresh_pipeline = true;
+                recovery_claim.clear_current_snapshot()?;
             }
         },
         WorkspaceDeliveryRecoveryAction::Synchronize => {
@@ -3756,6 +4372,8 @@ pub async fn workspace_delivery_recovery_execute(
                 .push_target
                 .as_ref()
                 .map(|target| target.remote.as_str());
+            let recovery_claim =
+                state.claim_delivery_recovery(root, snapshot.operation, &snapshot.attempt_token)?;
             sync_workspace_branch(
                 &state,
                 root,
@@ -3763,6 +4381,15 @@ pub async fn workspace_delivery_recovery_execute(
                 remote,
                 false,
                 input.forge_login.as_deref(),
+                Some(PushIdentity {
+                    branch: snapshot.branch.clone().ok_or_else(|| {
+                        "the captured branch is unavailable; refresh delivery recovery".to_string()
+                    })?,
+                    head: snapshot.head_sha.clone().ok_or_else(|| {
+                        "the captured commit is unavailable; refresh delivery recovery".to_string()
+                    })?,
+                }),
+                Some(recovery_claim),
             )
             .await?;
         }
@@ -4200,23 +4827,22 @@ pub async fn workspace_continue_from_base_branch(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceContinueFromBaseBranchInput,
 ) -> Result<WorkspaceContinueFromBaseBranchOutput, String> {
-    let root = input.workspace_root.trim();
+    let root = input.workspace_root.trim().to_string();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
 
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    if let Some(reason) = purge_broken_workspace_by_root(&repo, root).await? {
+    if let Some(reason) = broken_workspace_reason_by_root(&repo, &root).await? {
         return Err(broken_workspace_message(&reason));
     }
-    let Some(mut workspace) = find_workspace_by_root(&repo, root).await? else {
+    let Some(mut workspace) = find_workspace_by_root(&repo, &root).await? else {
         return Err(format!("workspace not found for path: {root}"));
     };
+    drop(repo);
 
     let active_root = resolve_workspace_active_root(&workspace).to_string();
-
-    // Resolve the target branch to branch off from (the PR's base branch, e.g. "main")
-    let target_branch = input
+    let requested_target_branch = input
         .target_branch
         .as_deref()
         .map(str::trim)
@@ -4228,17 +4854,8 @@ pub async fn workspace_continue_from_base_branch(
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
         })
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| {
-            resolve_default_branch_name(&workspace.root_path).unwrap_or_else(|_| "main".to_string())
-        });
-
-    // Fetch latest remote state for the target branch
-    let _ = run_git_network_output(&workspace.root_path, &["fetch", "origin", &target_branch]);
-    let start_point = resolve_continue_start_point(&workspace.root_path, &target_branch)?;
-
-    // Derive a sanitized base name for the new branch from the workspace name
-    let raw_name = input
+        .map(str::to_string);
+    let preferred_new_branch = input
         .new_branch_name
         .as_deref()
         .map(str::trim)
@@ -4257,46 +4874,220 @@ pub async fn workspace_continue_from_base_branch(
                 })
                 .unwrap_or_else(|| "workspace".to_string())
         });
-
-    // Find the first available branch name (raw_name, raw_name-2, raw_name-3, …)
-    let new_branch = next_available_branch_name(&workspace.root_path, &raw_name);
-    let old_branch = resolve_current_branch_name(&active_root)
-        .map_err(|error| format!("failed to resolve current workspace branch: {error}"))?;
-    let switch = run_git_output(&active_root, &["switch", "-c", &new_branch, &start_point])?;
-    if !switch.status.success() {
-        return Err(
-            "Continue could not move your local changes onto the target branch. Commit, stash, or discard the conflicting changes, then try again."
-                .to_string(),
-        );
-    }
-    let _ = run_git_output(&active_root, &["branch", "--unset-upstream", &new_branch]);
+    let mutation = state
+        .run_workspace_mutation_blocking(&active_root, move |root| {
+            let root = root.to_str().ok_or_else(|| {
+                ContinueBranchFailure::Other("workspace path is not valid UTF-8".to_string())
+            })?;
+            continue_from_base_branch_inner(
+                root,
+                requested_target_branch.as_deref(),
+                &preferred_new_branch,
+            )
+        })
+        .await;
+    let mutation = match mutation {
+        Ok(mutation) => {
+            clear_workspace_delivery_failure(
+                &state,
+                &active_root,
+                WorkspaceDeliveryFailureOperation::Fetch,
+            );
+            mutation
+        }
+        Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+            ContinueBranchFailure::Fetch { detail, target },
+        ))) => {
+            capture_workspace_delivery_failure(
+                &state,
+                &active_root,
+                WorkspaceDeliveryFailureOperation::Fetch,
+                &detail,
+                CaptureDeliveryFailureOptions {
+                    remote: Some("origin".to_string()),
+                    operation_target: Some(target),
+                    external_url: None,
+                },
+            )
+            .await;
+            return Err(detail);
+        }
+        Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
+            ContinueBranchFailure::Other(error),
+        ))) => return Err(error),
+        Err(_) => return Err("workspace mutation is unavailable".to_string()),
+    };
 
     // `base_branch` must stay the PR/diff target branch (e.g. `main`), not the
     // working branch. Storing `new_branch` here corrupts it: `gh pr create`
     // then uses the working branch as the PR base, and `ensure_pushable_branch`
     // sees the current branch as "protected" and materializes a spurious branch.
-    workspace.base_branch = target_branch.clone();
-    workspace.updated_at = Utc::now().to_rfc3339();
-    if let Err(error) = repo.save_workspace(&workspace).await {
-        rollback_continue_branch(&active_root, &old_branch, &new_branch);
-        return Err(error.to_string());
+    let update_repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string());
+    let update_result = update_repo
+        .as_ref()
+        .map_err(ToString::to_string)
+        .and_then(|repo| {
+            repo.update_workspace_base_branch(
+                &workspace.id,
+                &mutation.target_branch,
+                &Utc::now().to_rfc3339(),
+            )
+            .map_err(|error| error.to_string())
+        });
+    if let Err(error) = update_result {
+        let old_branch = mutation.old_branch.clone();
+        let old_head = mutation.old_head.clone();
+        let new_branch = mutation.new_branch.clone();
+        let new_head = mutation.new_head.clone();
+        let rollback = state
+            .run_workspace_mutation_blocking(&active_root, move |root| {
+                let root = root
+                    .to_str()
+                    .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
+                rollback_continue_branch_guarded(
+                    root,
+                    &old_branch,
+                    &old_head,
+                    &new_branch,
+                    &new_head,
+                )
+            })
+            .await
+            .map_err(workspace_mutation_error);
+        return match rollback {
+            Ok(()) => Err(error),
+            Err(_) => Err(format!(
+                "{error}; automatic branch rollback was skipped because the workspace changed"
+            )),
+        };
     }
+    let update_repo = update_repo.expect("workspace repo was validated before partial update");
+    workspace = update_repo
+        .get_workspace(&workspace.id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "workspace disappeared after branch update".to_string())?;
 
     Ok(WorkspaceContinueFromBaseBranchOutput {
         success: true,
-        branch: new_branch,
+        branch: mutation.new_branch,
         workspace_root: active_root.clone(),
         previous_workspace_root: active_root,
         workspace,
     })
 }
 
-fn rollback_continue_branch(root: &str, old_branch: &str, new_branch: &str) {
-    if let Ok(output) = run_git_output(root, &["switch", old_branch]) {
-        if output.status.success() {
-            let _ = run_git_output(root, &["branch", "-D", new_branch]);
-        }
+struct ContinueBranchLocalOutcome {
+    target_branch: String,
+    old_branch: String,
+    old_head: String,
+    new_branch: String,
+    new_head: String,
+}
+
+enum ContinueBranchFailure {
+    Fetch { detail: String, target: String },
+    Other(String),
+}
+
+impl From<String> for ContinueBranchFailure {
+    fn from(error: String) -> Self {
+        Self::Other(error)
     }
+}
+
+fn continue_from_base_branch_inner(
+    root: &str,
+    requested_target_branch: Option<&str>,
+    preferred_new_branch: &str,
+) -> Result<ContinueBranchLocalOutcome, ContinueBranchFailure> {
+    let target_branch = requested_target_branch
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            resolve_default_branch_name(root).unwrap_or_else(|_| "main".to_string())
+        });
+    validate_branch_for_fetch(root, &target_branch)?;
+    let fetch_refspec = remote_branch_fetch_refspec("origin", &target_branch);
+    let fetch =
+        run_git_network_output(root, &["fetch", "origin", &fetch_refspec]).map_err(|detail| {
+            ContinueBranchFailure::Fetch {
+                detail,
+                target: target_branch.clone(),
+            }
+        })?;
+    if !fetch.status.success() {
+        return Err(ContinueBranchFailure::Fetch {
+            detail: git_output_err("git fetch origin", &fetch.stderr),
+            target: target_branch,
+        });
+    }
+    let start_point = resolve_continue_start_point(root, &target_branch)?;
+    let start_commit = resolve_commitish_sha(root, &start_point)?;
+    let preferred_new_branch = if preferred_new_branch.trim().is_empty() {
+        "workspace"
+    } else {
+        preferred_new_branch
+    };
+    let new_branch = next_available_branch_name(root, preferred_new_branch);
+    let old_branch = resolve_current_branch_name(root)
+        .map_err(|error| format!("failed to resolve current workspace branch: {error}"))?;
+    let old_head = resolve_current_commit_sha(root)?
+        .filter(|head| !head.trim().is_empty())
+        .ok_or_else(|| "failed to resolve current workspace commit".to_string())?;
+    let switch = run_git_output(root, &["switch", "-c", &new_branch, &start_commit])?;
+    if !switch.status.success() {
+        return Err(ContinueBranchFailure::Other(
+            "Continue could not move your local changes onto the target branch. Commit, stash, or discard the conflicting changes, then try again."
+                .to_string(),
+        ));
+    }
+    let _ = run_git_output(root, &["branch", "--unset-upstream", &new_branch]);
+    let new_head = resolve_current_commit_sha(root)?
+        .filter(|head| !head.trim().is_empty())
+        .ok_or_else(|| "failed to resolve continued workspace commit".to_string())?;
+    if resolve_commitish_sha(root, &format!("refs/heads/{new_branch}"))? != new_head {
+        return Err(ContinueBranchFailure::Other(
+            "continued workspace branch identity changed unexpectedly".to_string(),
+        ));
+    }
+    Ok(ContinueBranchLocalOutcome {
+        target_branch,
+        old_branch,
+        old_head,
+        new_branch,
+        new_head,
+    })
+}
+
+fn rollback_continue_branch_guarded(
+    root: &str,
+    old_branch: &str,
+    old_head: &str,
+    new_branch: &str,
+    expected_new_head: &str,
+) -> Result<(), String> {
+    if resolve_current_branch_name(root)? != new_branch
+        || resolve_current_commit_sha(root)?.as_deref() != Some(expected_new_head)
+        || resolve_commitish_sha(root, &format!("refs/heads/{new_branch}"))? != expected_new_head
+    {
+        return Err("workspace changed after branch creation; rollback refused".to_string());
+    }
+    let switch = if old_branch == "HEAD" {
+        run_git_output(root, &["switch", "--detach", old_head])?
+    } else {
+        run_git_output(root, &["switch", old_branch])?
+    };
+    if !switch.status.success() {
+        return Err("could not restore the previous workspace branch".to_string());
+    }
+    if resolve_commitish_sha(root, &format!("refs/heads/{new_branch}"))? != expected_new_head {
+        return Err("continued branch changed during rollback; deletion refused".to_string());
+    }
+    let delete = run_git_output(root, &["branch", "-D", new_branch])?;
+    if !delete.status.success() {
+        return Err("could not remove the continued branch during rollback".to_string());
+    }
+    Ok(())
 }
 
 fn resolve_continue_start_point(root: &str, target_branch: &str) -> Result<String, String> {
@@ -4314,6 +5105,19 @@ fn resolve_continue_start_point(root: &str, target_branch: &str) -> Result<Strin
     Err(format!(
         "could not resolve base branch `{target_branch}` locally or on origin"
     ))
+}
+
+fn resolve_commitish_sha(root: &str, commitish: &str) -> Result<String, String> {
+    let revision = format!("{commitish}^{{commit}}");
+    let output = run_git_output(root, &["rev-parse", "--verify", &revision])?;
+    if !output.status.success() {
+        return Err("could not resolve the requested branch commit".to_string());
+    }
+    let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if commit.is_empty() {
+        return Err("resolved branch commit is empty".to_string());
+    }
+    Ok(commit)
 }
 
 fn sanitize_branch_name(name: &str) -> String {
@@ -5838,8 +6642,15 @@ pub async fn workspace_run_setup(
         .ok_or_else(|| format!("workspace not found for root {}", input.workspace_root))?;
 
     let setup_hints = collect_workspace_setup_hints(&workspace);
-    let setup_report = execute_workspace_setup_report(&workspace).await;
-    let compile_warning = compile_active_mission_spec_context_for_workspace(&workspace)?;
+    let setup_report = execute_workspace_setup_report(&state, &workspace).await;
+    let active_root = resolve_workspace_active_root(&workspace).to_string();
+    let compile_workspace = workspace.clone();
+    let compile_warning = state
+        .run_workspace_mutation_blocking(&active_root, move |root| {
+            compile_active_mission_spec_context_for_trusted_root(&compile_workspace, root)
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
 
@@ -5865,6 +6676,15 @@ pub async fn workspace_skip_setup(
         steps: Vec::new(),
         message: Some("Workspace setup was skipped by the user.".to_string()),
     };
+    let active_root = resolve_workspace_active_root(&workspace).to_string();
+    let compile_workspace = workspace.clone();
+    let compile_warning = state
+        .run_workspace_mutation_blocking(&active_root, move |root| {
+            compile_active_mission_spec_context_for_trusted_root(&compile_workspace, root)
+        })
+        .await
+        .map_err(workspace_mutation_error)?;
+    let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
     Ok(WorkspaceRunSetupOutput {
         workspace,
@@ -7238,6 +8058,68 @@ mod editor_workspace_file_tests {
         assert!(error.contains("staged Git snapshot changed"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn commit_push_rejects_a_tree_changed_by_hook_but_commit_only_keeps_git_semantics() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let prepare = |name: &str| {
+            let repo = TestDir::new(name);
+            let git = |args: &[&str]| {
+                let output = run_git_output(repo.as_str(), args).expect("run git");
+                assert!(output.status.success(), "git {:?} failed", args);
+            };
+            git(&["init", "-b", "work"]);
+            git(&["config", "user.name", "DCC Test"]);
+            git(&["config", "user.email", "dcc@example.invalid"]);
+            fs::write(repo.path.join("app.txt"), "base\n").expect("write base");
+            git(&["add", "app.txt"]);
+            git(&["commit", "-m", "base"]);
+            fs::write(repo.path.join("app.txt"), "reviewed\n").expect("write reviewed tree");
+            git(&["add", "app.txt"]);
+            let hook = repo.path.join(".git/hooks/pre-commit");
+            fs::write(
+                &hook,
+                "#!/bin/sh\nprintf 'hooked\\n' > app.txt\ngit add app.txt\n",
+            )
+            .expect("write mutating hook");
+            let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&hook, permissions).expect("make hook executable");
+            repo
+        };
+
+        let guarded = prepare("commit-push-mutating-hook");
+        let fingerprint = staged_snapshot_fingerprint(guarded.as_str()).expect("fingerprint");
+        let reviewed_tree = resolve_index_tree(guarded.as_str()).expect("reviewed tree");
+        let error = commit_staged_workspace_changes_for_push(
+            guarded.as_str(),
+            "guarded commit",
+            None,
+            &fingerprint,
+        )
+        .expect_err("mutating hook must prevent push continuation");
+        assert!(error.contains("commit hook changed"));
+        assert_ne!(
+            resolve_head_tree(guarded.as_str()).expect("committed hook tree"),
+            reviewed_tree
+        );
+
+        let commit_only = prepare("commit-only-mutating-hook");
+        let fingerprint = staged_snapshot_fingerprint(commit_only.as_str()).expect("fingerprint");
+        commit_staged_workspace_changes(
+            commit_only.as_str(),
+            "ordinary commit",
+            None,
+            &fingerprint,
+        )
+        .expect("commit-only preserves ordinary Git hook behavior");
+        assert_eq!(
+            fs::read_to_string(commit_only.path.join("app.txt")).expect("hooked content"),
+            "hooked\n"
+        );
+    }
+
     fn imported_fork_workspace(id: &str, root: &str, remote_name: &str) -> Workspace {
         Workspace {
             id: WorkspaceId(id.to_string()),
@@ -7625,6 +8507,154 @@ mod editor_workspace_file_tests {
     }
 
     #[test]
+    fn recovery_sync_identity_is_checked_before_db_or_network_work() {
+        let repo = TestDir::new("recovery-sync-identity");
+        initialize_branch_test_repository(repo.as_str(), "recovery-work");
+        let current = observe_push_identity(repo.as_str()).expect("current identity");
+        let stale = PushIdentity {
+            head: "0".repeat(current.head.len()),
+            branch: current.branch,
+        };
+        let error = match sync_workspace_branch_inner(
+            Path::new("/db-must-not-be-opened.sqlite"),
+            repo.as_str(),
+            Some("main"),
+            Some("origin"),
+            None,
+            Some(&stale),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("stale recovery identity must fail before sync"),
+        };
+        assert!(matches!(error.phase, WorkspaceSyncFailurePhase::Preflight));
+    }
+
+    #[test]
+    fn continue_does_not_create_a_branch_when_origin_fetch_fails() {
+        let repo = TestDir::new("continue-fetch-failure");
+        let git = |args: &[&str]| {
+            let output = run_git_output(repo.as_str(), args).expect("run git");
+            assert!(output.status.success(), "git {:?} failed", args);
+        };
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.name", "DCC Test"]);
+        git(&["config", "user.email", "dcc@example.invalid"]);
+        git(&["commit", "--allow-empty", "-m", "base"]);
+
+        let error = match continue_from_base_branch_inner(repo.as_str(), Some("main"), "continued")
+        {
+            Err(error) => error,
+            Ok(_) => panic!("missing origin must fail closed"),
+        };
+        assert!(matches!(error, ContinueBranchFailure::Fetch { .. }));
+        assert_eq!(
+            resolve_current_branch_name(repo.as_str()).expect("unchanged branch"),
+            "main"
+        );
+        assert!(resolve_commitish_sha(repo.as_str(), "refs/heads/continued").is_err());
+    }
+
+    #[test]
+    fn exact_push_refuses_a_successor_of_the_observed_commit() {
+        let repo = TestDir::new("exact-push-workspace");
+        let remote = TestDir::new("exact-push-remote");
+        let init_remote =
+            run_git_output(remote.as_str(), &["init", "--bare"]).expect("initialize bare remote");
+        assert!(init_remote.status.success());
+        let git = |args: &[&str]| {
+            let output = run_git_output(repo.as_str(), args).expect("run git");
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-b", "work"]);
+        git(&["config", "user.name", "DCC Test"]);
+        git(&["config", "user.email", "dcc@example.invalid"]);
+        git(&["commit", "--allow-empty", "-m", "observed"]);
+        git(&["remote", "add", "origin", remote.as_str()]);
+
+        let observed = observe_push_identity(repo.as_str()).expect("observe push identity");
+        push_observed_commit_to_remote(
+            Path::new("/unused-for-local-remote.sqlite"),
+            repo.as_str(),
+            "origin",
+            "work",
+            &observed,
+            None,
+        )
+        .expect("push observed commit");
+        assert_eq!(
+            resolve_commitish_sha(remote.as_str(), "refs/heads/work").expect("read remote commit"),
+            observed.head
+        );
+
+        git(&["commit", "--allow-empty", "-m", "successor"]);
+        assert!(push_observed_commit_to_remote(
+            Path::new("/unused-for-local-remote.sqlite"),
+            repo.as_str(),
+            "origin",
+            "work",
+            &observed,
+            None,
+        )
+        .is_err());
+        assert_eq!(
+            resolve_commitish_sha(remote.as_str(), "refs/heads/work")
+                .expect("remote remains at observed commit"),
+            observed.head
+        );
+    }
+
+    #[test]
+    fn continue_rollback_requires_exact_branch_and_head_identity() {
+        let repo = TestDir::new("continue-rollback-identity");
+        initialize_branch_test_repository(repo.as_str(), "previous-work");
+        let previous_head = resolve_current_commit_sha(repo.as_str())
+            .expect("read previous head")
+            .expect("previous head");
+        let switch = run_git_output(
+            repo.as_str(),
+            &["switch", "-c", "continued-work", &previous_head],
+        )
+        .expect("create continued branch");
+        assert!(switch.status.success());
+        let continued_head = resolve_current_commit_sha(repo.as_str())
+            .expect("read continued head")
+            .expect("continued head");
+
+        assert!(rollback_continue_branch_guarded(
+            repo.as_str(),
+            "previous-work",
+            &previous_head,
+            "continued-work",
+            &"0".repeat(40),
+        )
+        .is_err());
+        assert_eq!(
+            resolve_current_branch_name(repo.as_str()).expect("branch after refused rollback"),
+            "continued-work"
+        );
+        assert!(resolve_commitish_sha(repo.as_str(), "refs/heads/continued-work").is_ok());
+
+        rollback_continue_branch_guarded(
+            repo.as_str(),
+            "previous-work",
+            &previous_head,
+            "continued-work",
+            &continued_head,
+        )
+        .expect("rollback exact continued branch");
+        assert_eq!(
+            resolve_current_branch_name(repo.as_str()).expect("restored branch"),
+            "previous-work"
+        );
+        assert!(resolve_commitish_sha(repo.as_str(), "refs/heads/continued-work").is_err());
+    }
+
+    #[test]
     fn unmerged_index_parser_groups_stages_and_classifies_conflicts() {
         let oid1 = "1".repeat(40);
         let oid2 = "2".repeat(40);
@@ -7867,7 +8897,40 @@ mod editor_workspace_file_tests {
             .expect("read merge-ready conflict state");
         assert_eq!(ready.operation, WorkspaceGitConflictOperation::Merge);
         assert!(ready.conflicts.is_empty());
-        workspace_git_complete_merge_commit_inner(repo.as_str()).expect("complete merge commit");
+        let head_before = resolve_current_commit_sha(repo.as_str())
+            .expect("read pre-commit head")
+            .expect("pre-commit head");
+        assert!(!workspace_git_complete_merge_commit_validated_inner(
+            repo.as_str(),
+            None,
+            Some("stale-validation-fingerprint"),
+        )
+        .expect("reject stale validation fingerprint"));
+        assert_eq!(
+            resolve_current_commit_sha(repo.as_str())
+                .expect("read unchanged head")
+                .as_deref(),
+            Some(head_before.as_str()),
+            "stale validation must not create the merge commit"
+        );
+        assert_eq!(
+            resolve_conflict_operation(repo.as_str(), false),
+            WorkspaceGitConflictOperation::Merge
+        );
+        assert!(workspace_git_complete_merge_commit_validated_inner(
+            repo.as_str(),
+            Some("stale-config-hash"),
+            None,
+        )
+        .is_err());
+        let validated_fingerprint = workspace_validation_fingerprint(repo.as_str())
+            .expect("capture final validation fingerprint");
+        assert!(workspace_git_complete_merge_commit_validated_inner(
+            repo.as_str(),
+            None,
+            Some(&validated_fingerprint),
+        )
+        .expect("complete validated merge commit"));
         assert_eq!(
             resolve_conflict_operation(repo.as_str(), false),
             WorkspaceGitConflictOperation::None

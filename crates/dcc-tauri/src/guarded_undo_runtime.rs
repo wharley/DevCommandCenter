@@ -723,6 +723,25 @@ impl GuardedUndoRuntime {
         .map_err(|_| WorkspaceMutationRunError::WorkerUnavailable)?
     }
 
+    /// The blocking variant has the same physical-lease semantics as the
+    /// ordinary mutation runner.  Keep this separate from the feature-off
+    /// no-op gate so existing command handlers that launch child processes do
+    /// not start running those processes on Tokio's async workers.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    pub(crate) async fn run_workspace_mutation_blocking<T, E, F>(
+        &self,
+        workspace_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        self.run_workspace_mutation(workspace_absolute, operation)
+            .await
+    }
+
     /// Feature-off is deliberately a direct call: no platform inspection,
     /// coordinator allocation, blocking worker, or filesystem I/O is added.
     #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
@@ -735,6 +754,27 @@ impl GuardedUndoRuntime {
         F: FnOnce(&Path) -> Result<T, E>,
     {
         operation(&workspace_absolute).map_err(WorkspaceMutationRunError::Operation)
+    }
+
+    /// With capture v2 disabled, retain the old executor boundary for command
+    /// operations that may synchronously run a child process.  This adds no
+    /// filesystem/coordinator work before the user operation itself.
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    pub(crate) async fn run_workspace_mutation_blocking<T, E, F>(
+        &self,
+        workspace_absolute: PathBuf,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || {
+            operation(&workspace_absolute).map_err(WorkspaceMutationRunError::Operation)
+        })
+        .await
+        .map_err(|_| WorkspaceMutationRunError::WorkerUnavailable)?
     }
 
     /// Lazily creates the one capture-v2 service (and therefore the one
@@ -1951,6 +1991,20 @@ mod tests {
             .await;
         assert_eq!(result.unwrap(), 41);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn feature_off_blocking_mutation_uses_blocking_worker() {
+        let runtime = GuardedUndoRuntime::new();
+        let caller = std::thread::current().id();
+        let result = runtime
+            .run_workspace_mutation_blocking(PathBuf::from("relative/workspace"), move |_| {
+                assert_ne!(std::thread::current().id(), caller);
+                Ok::<_, ()>(())
+            })
+            .await;
+        assert!(result.is_ok());
     }
 
     #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]

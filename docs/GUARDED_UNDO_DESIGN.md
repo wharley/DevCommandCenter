@@ -467,13 +467,26 @@ the operation.
 
 Implementation status: the process runtime and workspace command state share
 one coordinator, and mutation authority is resolved from the durable SQLite
-workspace mapping before physical admission. Editor writes, automation/spec
-writes, conflict actions, and stage/unstage/discard are covered. Multi-root
+workspace mapping before physical admission. Covered mutators include editor,
+automation/spec and conflict writes; stage/unstage/discard/stage-all; DCC-run
+setup and project tasks; `before_merge`; commit, commit-and-push,
+complete-merge and push; sync/fetch/merge and delivery recovery; and
+continue-from-base with identity-checked rollback. Compound commit/push paths
+deliver the observed commit OID while retaining one physical lease. Multi-root
 mutation admission is atomic and ordered, but its deletion/delegation callers
-and the remaining setup, task, commit, sync, delivery, worktree, and removal
-mutators are not yet integrated. Until that inventory is complete, the DCC
-capture driver deliberately finalizes completed turns through the
+remain unintegrated. External-terminal setup reports, remaining delivery and
+remote-lifecycle actions, workspace/repository creation and remote
+materialization, creation-time generated-context writes,
+delegation/worktree lifecycle, and workspace/repository deletion also remain
+outside known coverage. Until that inventory is complete, the DCC capture
+driver deliberately finalizes completed turns through the
 known-mutation-coverage fail-closed path and cannot emit an eligible set.
+
+This coverage does not yet bind linked worktrees by their shared Git
+`common-dir`. Separate worktree roots can therefore still contend on shared
+refs, configuration, hooks, and administrative metadata. The feature remains
+default-off and globally fail-closed until common-dir authority and the
+remaining mutator inventory are complete.
 
 The process MUST acquire a single-instance lifetime lock in the DCC app-data
 directory before startup recovery, retention, artifact purge, or interval

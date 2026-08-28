@@ -206,6 +206,24 @@ impl ProcessRuntime {
             .await
     }
 
+    /// Variant for synchronous operations which can run child processes.  On
+    /// feature-on macOS it is the same physical mutation worker; feature-off
+    /// it retains the command layer's blocking executor boundary.
+    pub(crate) async fn run_workspace_mutation_blocking<T, E, F>(
+        &self,
+        binding: AuthorizedWorkspaceMutation,
+        operation: F,
+    ) -> Result<T, WorkspaceMutationRunError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
+    {
+        self.guarded_undo_runtime
+            .run_workspace_mutation_blocking(binding.into_workspace_absolute(), operation)
+            .await
+    }
+
     /// Configures guarded undo only for the physical scope from which this
     /// process runtime was acquired. The SQLite repository is opened here so
     /// callers cannot inject a repository from another runtime scope.

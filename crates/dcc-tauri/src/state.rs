@@ -60,6 +60,8 @@ use crate::turn_review::{
     TURN_REVIEW_CAPTURE_VERSION,
 };
 
+#[cfg(test)]
+use crate::delivery_failure::WorkspaceDeliveryFailureClassification;
 use crate::delivery_failure::{
     sanitize_delivery_failure_output, WorkspaceDeliveryFailureOperation,
     WorkspaceDeliveryFailureSnapshot,
@@ -80,8 +82,82 @@ use dcc_providers::provider_runtime;
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
 
-type DeliveryFailureStore =
-    HashMap<String, HashMap<WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureSnapshot>>;
+#[derive(Default)]
+struct DeliveryFailureStore {
+    failures: HashMap<
+        String,
+        HashMap<WorkspaceDeliveryFailureOperation, WorkspaceDeliveryFailureSnapshot>,
+    >,
+    active_recovery: HashMap<(String, WorkspaceDeliveryFailureOperation), u64>,
+    next_recovery_owner: u64,
+}
+
+/// An in-flight recovery claim. The claim is deliberately independent from
+/// the snapshot so a failed retry can replace the snapshot before this guard
+/// is dropped. Its owner identity is never exposed in formatting.
+pub(crate) struct DeliveryRecoveryClaim {
+    store: Arc<Mutex<DeliveryFailureStore>>,
+    root: String,
+    operation: WorkspaceDeliveryFailureOperation,
+    attempt_token: String,
+    owner: u64,
+}
+
+impl std::fmt::Debug for DeliveryRecoveryClaim {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("DeliveryRecoveryClaim([redacted])")
+    }
+}
+
+impl DeliveryRecoveryClaim {
+    pub(crate) fn operation(&self) -> WorkspaceDeliveryFailureOperation {
+        self.operation
+    }
+
+    /// Clears only the snapshot that was claimed. A newer snapshot produced
+    /// while this claim was active is preserved by the token comparison.
+    pub(crate) fn clear_current_snapshot(&self) -> std::result::Result<(), String> {
+        let mut store = self
+            .store
+            .lock()
+            .map_err(|_| "delivery recovery state is unavailable".to_string())?;
+        let key = (self.root.clone(), self.operation);
+        if store.active_recovery.get(&key) != Some(&self.owner) {
+            return Err("delivery recovery claim is no longer active".to_string());
+        }
+        let remove_root = store
+            .failures
+            .get_mut(&self.root)
+            .map(|operations| {
+                let matches = operations
+                    .get(&self.operation)
+                    .is_some_and(|snapshot| snapshot.attempt_token == self.attempt_token);
+                if matches {
+                    operations.remove(&self.operation);
+                }
+                operations.is_empty()
+            })
+            .unwrap_or(false);
+        if remove_root {
+            store.failures.remove(&self.root);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for DeliveryRecoveryClaim {
+    fn drop(&mut self) {
+        let key = (self.root.clone(), self.operation);
+        let Ok(mut store) = self.store.lock() else {
+            // A poisoned recovery mutex is fail-closed: do not attempt to
+            // reconstruct state or remove an unrelated owner.
+            return;
+        };
+        if store.active_recovery.get(&key) == Some(&self.owner) {
+            store.active_recovery.remove(&key);
+        }
+    }
+}
 
 /// Durable, content-free identity of an M3 turn-review snapshot.
 ///
@@ -250,7 +326,7 @@ impl WorkspaceCommandState {
         Self {
             db_path: session.db_path.clone(),
             runtime: Arc::clone(&session.runtime),
-            delivery_failures: Arc::new(Mutex::new(HashMap::new())),
+            delivery_failures: Arc::new(Mutex::new(DeliveryFailureStore::default())),
         }
     }
 
@@ -296,6 +372,81 @@ impl WorkspaceCommandState {
             .map_err(WorkspaceMutationRequestError::Runtime)
     }
 
+    /// Runs a synchronous child-process-capable operation under the same
+    /// durable authorization and physical mutation lease as other workspace
+    /// mutations.  Feature-off preserves the pre-M4 blocking executor.
+    pub(crate) async fn run_workspace_mutation_blocking<T, E, F>(
+        &self,
+        requested_root: &str,
+        operation: F,
+    ) -> std::result::Result<T, WorkspaceMutationRequestError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let binding = self
+            .authorize_workspace_mutation(requested_root)
+            .await
+            .map_err(WorkspaceMutationRequestError::Authorization)?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let binding = AuthorizedWorkspaceMutation {
+            workspace_absolute: PathBuf::from(requested_root),
+        };
+        self.runtime
+            .run_workspace_mutation_blocking(binding, operation)
+            .await
+            .map_err(WorkspaceMutationRequestError::Runtime)
+    }
+
+    /// Claims one in-memory delivery recovery attempt after its workspace
+    /// mutation lease has been acquired. The snapshot remains present until
+    /// the caller explicitly clears it through the returned RAII claim.
+    pub(crate) fn claim_delivery_recovery(
+        &self,
+        workspace_root: &str,
+        operation: WorkspaceDeliveryFailureOperation,
+        attempt_token: &str,
+    ) -> std::result::Result<DeliveryRecoveryClaim, String> {
+        let root = workspace_root.trim();
+        let token = attempt_token.trim();
+        if root.is_empty() || token.is_empty() {
+            return Err("delivery recovery context is stale".to_string());
+        }
+
+        let mut store = self
+            .delivery_failures
+            .lock()
+            .map_err(|_| "delivery recovery state is unavailable".to_string())?;
+        let key = (root.to_string(), operation);
+        let current_token = store
+            .failures
+            .get(root)
+            .and_then(|operations| operations.get(&operation))
+            .map(|snapshot| snapshot.attempt_token.as_str())
+            .ok_or_else(|| "delivery recovery context is stale".to_string())?;
+        if current_token != token {
+            return Err("delivery recovery context is stale".to_string());
+        }
+        if store.active_recovery.contains_key(&key) {
+            return Err("delivery recovery is already in progress".to_string());
+        }
+        let owner = store
+            .next_recovery_owner
+            .checked_add(1)
+            .ok_or_else(|| "delivery recovery state is unavailable".to_string())?;
+        store.next_recovery_owner = owner;
+        store.active_recovery.insert(key, owner);
+        Ok(DeliveryRecoveryClaim {
+            store: Arc::clone(&self.delivery_failures),
+            root: root.to_string(),
+            operation,
+            attempt_token: token.to_string(),
+            owner,
+        })
+    }
+
     pub(crate) fn record_delivery_failure(
         &self,
         snapshot: WorkspaceDeliveryFailureSnapshot,
@@ -305,6 +456,7 @@ impl WorkspaceCommandState {
         };
         let root = snapshot.workspace_root.clone();
         if let Some(existing) = store
+            .failures
             .get(&root)
             .and_then(|operations| operations.get(&snapshot.operation))
         {
@@ -323,8 +475,11 @@ impl WorkspaceCommandState {
             }
         }
 
-        if !store.contains_key(&root) && store.len() >= DELIVERY_FAILURE_WORKSPACE_LIMIT {
+        if !store.failures.contains_key(&root)
+            && store.failures.len() >= DELIVERY_FAILURE_WORKSPACE_LIMIT
+        {
             let oldest_root = store
+                .failures
                 .iter()
                 .filter_map(|(candidate_root, operations)| {
                     operations
@@ -336,11 +491,12 @@ impl WorkspaceCommandState {
                 .min_by(|left, right| left.1.cmp(&right.1))
                 .map(|(candidate_root, _)| candidate_root);
             if let Some(oldest_root) = oldest_root {
-                store.remove(&oldest_root);
+                store.failures.remove(&oldest_root);
             }
         }
 
         store
+            .failures
             .entry(root)
             .or_default()
             .insert(snapshot.operation, snapshot.clone());
@@ -357,6 +513,7 @@ impl WorkspaceCommandState {
         };
         let root = workspace_root.trim();
         let remove_root = store
+            .failures
             .get_mut(root)
             .map(|operations| {
                 operations.remove(&operation);
@@ -364,7 +521,7 @@ impl WorkspaceCommandState {
             })
             .unwrap_or(false);
         if remove_root {
-            store.remove(root);
+            store.failures.remove(root);
         }
     }
 
@@ -372,7 +529,7 @@ impl WorkspaceCommandState {
         let Ok(mut store) = self.delivery_failures.lock() else {
             return;
         };
-        store.remove(workspace_root.trim());
+        store.failures.remove(workspace_root.trim());
     }
 
     pub(crate) fn has_delivery_failure(&self, workspace_root: &str) -> bool {
@@ -381,6 +538,7 @@ impl WorkspaceCommandState {
             .ok()
             .and_then(|store| {
                 store
+                    .failures
                     .get(workspace_root.trim())
                     .map(|operations| !operations.is_empty())
             })
@@ -395,6 +553,7 @@ impl WorkspaceCommandState {
     ) -> Option<WorkspaceDeliveryFailureSnapshot> {
         let store = self.delivery_failures.lock().ok()?;
         store
+            .failures
             .get(workspace_root.trim())?
             .values()
             .filter(|failure| {
@@ -5192,5 +5351,126 @@ mod tests {
         let absolute = lexical_absolute_path(&relative);
         assert!(absolute.is_absolute());
         assert!(absolute.ends_with(relative));
+    }
+
+    fn delivery_recovery_test_state(name: &str) -> (WorkspaceCommandState, tempfile::TempDir) {
+        let root = tempfile::tempdir().expect("runtime test root");
+        let physical_root = std::fs::canonicalize(root.path()).expect("physical test root");
+        let db_path = physical_root.join(format!("{name}.sqlite"));
+        let app_data = physical_root.join("app-data");
+        let session = SessionCommandState::new_headless(db_path, app_data);
+        (WorkspaceCommandState::from_session(&session), root)
+    }
+
+    fn delivery_recovery_test_snapshot(token: &str) -> WorkspaceDeliveryFailureSnapshot {
+        WorkspaceDeliveryFailureSnapshot {
+            attempt_token: token.to_string(),
+            workspace_root: "/tmp/delivery-recovery-test".to_string(),
+            branch: Some("work".to_string()),
+            head_sha: Some("a".repeat(40)),
+            operation: WorkspaceDeliveryFailureOperation::Push,
+            classification: WorkspaceDeliveryFailureClassification::Transport,
+            remote: Some("origin".to_string()),
+            operation_target: None,
+            push_target: None,
+            output: "temporary failure".to_string(),
+            output_truncated: false,
+            changed_files: Vec::new(),
+            changed_files_truncated: false,
+            external_url: None,
+            available_actions: Vec::new(),
+            created_at: token.to_string(),
+        }
+    }
+
+    #[test]
+    fn delivery_recovery_claim_is_single_flight_for_same_token() {
+        let (state, _root) = delivery_recovery_test_state("single-flight");
+        state.record_delivery_failure(delivery_recovery_test_snapshot("attempt-1"));
+        let first = state
+            .claim_delivery_recovery(
+                "/tmp/delivery-recovery-test",
+                WorkspaceDeliveryFailureOperation::Push,
+                "attempt-1",
+            )
+            .expect("first recovery claim");
+
+        let state = Arc::new(state);
+        let concurrent = Arc::clone(&state);
+        let second = std::thread::spawn(move || {
+            concurrent.claim_delivery_recovery(
+                "/tmp/delivery-recovery-test",
+                WorkspaceDeliveryFailureOperation::Push,
+                "attempt-1",
+            )
+        })
+        .join()
+        .expect("recovery claimant thread");
+        assert!(second.is_err());
+        drop(first);
+        assert!(state
+            .claim_delivery_recovery(
+                "/tmp/delivery-recovery-test",
+                WorkspaceDeliveryFailureOperation::Push,
+                "attempt-1",
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn delivery_recovery_claim_clear_is_token_compare_and_swap() {
+        let (state, _root) = delivery_recovery_test_state("clear-cas");
+        state.record_delivery_failure(delivery_recovery_test_snapshot("attempt-old"));
+        let claim = state
+            .claim_delivery_recovery(
+                "/tmp/delivery-recovery-test",
+                WorkspaceDeliveryFailureOperation::Push,
+                "attempt-old",
+            )
+            .expect("old recovery claim");
+
+        let mut replacement = delivery_recovery_test_snapshot("attempt-new");
+        replacement.output = "different temporary failure".to_string();
+        state.record_delivery_failure(replacement);
+        claim
+            .clear_current_snapshot()
+            .expect("clear old snapshot only");
+        assert!(
+            state
+                .claim_delivery_recovery(
+                    "/tmp/delivery-recovery-test",
+                    WorkspaceDeliveryFailureOperation::Push,
+                    "attempt-new",
+                )
+                .is_err(),
+            "old claim must still serialize the replacement"
+        );
+        drop(claim);
+        assert!(state
+            .claim_delivery_recovery(
+                "/tmp/delivery-recovery-test",
+                WorkspaceDeliveryFailureOperation::Push,
+                "attempt-new",
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn poisoned_delivery_recovery_state_fails_closed() {
+        let (state, _root) = delivery_recovery_test_state("poisoned");
+        state.record_delivery_failure(delivery_recovery_test_snapshot("attempt-1"));
+        let poisoned = Arc::clone(&state.delivery_failures);
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.lock().expect("recovery state lock");
+            panic!("poison recovery state for fail-closed test");
+        })
+        .join();
+        assert!(state
+            .claim_delivery_recovery(
+                "/tmp/delivery-recovery-test",
+                WorkspaceDeliveryFailureOperation::Push,
+                "attempt-1",
+            )
+            .is_err());
     }
 }

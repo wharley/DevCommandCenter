@@ -158,26 +158,23 @@ pub(crate) async fn find_workspace_by_root(
     }))
 }
 
-pub(crate) async fn purge_broken_workspace_by_root(
+/// Checks whether a registered workspace is unavailable without changing its
+/// durable record. Mutation preflight must remain read-only: authorization
+/// needs that record before the physical mutation lease is acquired.
+pub(crate) async fn broken_workspace_reason_by_root(
     repo: &SqliteWorkspaceRepo,
     workspace_root: &str,
 ) -> Result<Option<String>, String> {
     let Some(workspace) = find_workspace_by_root(repo, workspace_root).await? else {
         return Ok(None);
     };
-
-    let Some(reason) = resolve_workspace_broken_reason(&workspace) else {
-        return Ok(None);
-    };
-
-    repo.delete_workspace(&workspace.id)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(Some(reason))
+    Ok(resolve_workspace_broken_reason(&workspace))
 }
 
 pub(crate) fn broken_workspace_message(reason: &str) -> String {
-    format!("workspace became unavailable and was removed from DCC: {reason}")
+    format!(
+        "workspace became unavailable; refresh the workspace list to remove it from DCC: {reason}"
+    )
 }
 
 pub(crate) async fn preflight_workspace_root(
@@ -185,7 +182,7 @@ pub(crate) async fn preflight_workspace_root(
     workspace_root: &str,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    if let Some(reason) = purge_broken_workspace_by_root(&repo, workspace_root).await? {
+    if let Some(reason) = broken_workspace_reason_by_root(&repo, workspace_root).await? {
         return Err(broken_workspace_message(&reason));
     }
     Ok(())
@@ -194,17 +191,21 @@ pub(crate) async fn preflight_workspace_root(
 #[cfg(test)]
 mod tests {
     use super::{
-        cleanup_workspace_files, directory_logical_size, ensure_pushable_branch,
-        preferred_workspace_branch_name, resolve_current_branch_name,
+        broken_workspace_reason_by_root, cleanup_workspace_files, directory_logical_size,
+        ensure_pushable_branch, find_workspace_by_root, preferred_workspace_branch_name,
+        resolve_current_branch_name,
     };
     use dcc_core::domain::{
         project::ProjectId,
         workspace::{Workspace, WorkspaceId, WorkspaceState},
     };
+    use dcc_core::ports::WorkspaceRepo;
+    use dcc_infra::db::SqliteWorkspaceRepo;
     use std::{
         fs,
         path::{Path, PathBuf},
         process::Command,
+        sync::{Arc, Mutex},
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -404,6 +405,36 @@ mod tests {
         );
         fs::remove_dir_all(root).expect("remove repository root");
     }
+
+    #[tokio::test]
+    async fn broken_workspace_check_preserves_durable_row() {
+        let connection = Arc::new(Mutex::new(
+            rusqlite::Connection::open_in_memory().expect("in-memory database"),
+        ));
+        let repo = SqliteWorkspaceRepo::from_connection(connection).expect("workspace repo");
+        let missing_root = temp_path("broken-workspace-row");
+        let workspace = test_workspace(&missing_root, None);
+        repo.save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+
+        assert!(broken_workspace_reason_by_root(&repo, &workspace.root_path)
+            .await
+            .expect("check broken workspace")
+            .is_some());
+        assert!(
+            find_workspace_by_root(&repo, &workspace.root_path)
+                .await
+                .expect("find workspace")
+                .is_some(),
+            "read-only preflight check must retain durable authorization"
+        );
+
+        assert!(find_workspace_by_root(&repo, &workspace.root_path)
+            .await
+            .expect("find retained workspace")
+            .is_some());
+    }
 }
 
 pub(crate) fn resolve_current_branch_name(root: &str) -> Result<String, String> {
@@ -531,48 +562,6 @@ fn base64_encode(input: &str) -> String {
         index += 3;
     }
     out
-}
-
-pub(crate) fn push_branch_refspec(
-    db_path: &Path,
-    root: &str,
-    branch: &str,
-    forge_login: Option<&str>,
-) -> Result<(), String> {
-    let remote = resolve_default_remote_name(root)?;
-    push_branch_refspec_to_remote(db_path, root, &remote, branch, forge_login)
-}
-
-pub(crate) fn push_branch_refspec_to_remote(
-    db_path: &Path,
-    root: &str,
-    remote: &str,
-    branch: &str,
-    forge_login: Option<&str>,
-) -> Result<(), String> {
-    let branch = branch.trim();
-    if branch.is_empty() || branch == "HEAD" {
-        return Err(
-            "cannot push from detached HEAD because no branch name could be resolved".to_string(),
-        );
-    }
-
-    let remote = remote.trim();
-    if remote.is_empty() {
-        return Err("cannot push because the source remote is empty".to_string());
-    }
-    let remote_ref = format!("HEAD:refs/heads/{branch}");
-    let output = run_git_network_output_with_workspace_auth(
-        db_path,
-        root,
-        &["push", "-u", remote, &remote_ref],
-        forge_login,
-    )?;
-    if output.status.success() {
-        return Ok(());
-    }
-
-    Err(git_output_err("git push -u", &output.stderr))
 }
 
 pub(crate) fn run_git_network_output_with_workspace_auth(

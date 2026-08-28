@@ -99,12 +99,18 @@ none of it is marked shipped.
   physical M3→M4 binding, process-scoped recovery, and the app-data lifetime
   lock behind a default-off feature flag. Workspace commands now share the
   capture runtime and authorize mutation roots against the durable SQLite
-  mapping. Editor writes, automation/spec writes, conflict actions, and basic
-  stage/unstage/discard actions participate in the physical-root coordinator;
-  atomic multi-root mutation admission is implemented for the later
-  delegation/removal slice. Capture v1 remains review evidence only and is a
-  NO-GO for Undo. Until setup/tasks, commit/push/sync/delivery,
-  delegation/worktree creation, implicit generated-context writes, and
+  mapping. Editor writes, automation/spec writes, conflict actions,
+  stage/unstage/discard/stage-all, DCC-run setup and post-setup context
+  compilation, project tasks, `before_merge` validation, commit,
+  commit-and-push, complete-merge, push, sync/fetch/merge, delivery recovery,
+  and continue-from-base now participate in the physical-root coordinator.
+  Compound commit-and-push paths keep commit preparation and OID-addressed
+  delivery inside one lease. Atomic multi-root mutation admission is
+  implemented for the later delegation/removal slice. Capture v1 remains
+  review evidence only and is a NO-GO for Undo. Until remaining delivery and
+  remote-lifecycle actions, externally reported setup mutations,
+  delegation/worktree creation, workspace/repository creation and remote
+  materialization, creation-time generated-context writes, and
   workspace/repository removal are also covered, completed captures finalize
   explicitly ineligible and cannot create an `Eligible` restore set. Recovery
   is lazy but gates the first feature-enabled begin. The Undo button remains
@@ -113,9 +119,9 @@ none of it is marked shipped.
   archive path, is implemented locally and static-review approved. It remains
   pending macOS CI that has the required Apple signing and notarization secrets.
 
-The current validation baseline is 95 frontend test files / 511 tests, 83
-feature-off and 163 feature-on `dcc-infra` Rust tests, and 194 `dcc-tauri`
-Rust tests in either feature mode (6 ignored).
+The current validation baseline is 95 frontend test files / 511 tests, 84
+feature-off and 164 feature-on `dcc-infra` Rust tests, and 204 feature-off / 203
+feature-on `dcc-tauri` Rust tests (6 ignored in either mode).
 
 ### M3 Last Turn Review local implementation
 

@@ -510,6 +510,35 @@ impl SqliteWorkspaceRepo {
         Ok(())
     }
 
+    /// Updates only the per-workspace comparison branch and timestamp.
+    ///
+    /// Callers which have performed filesystem work from a previously read
+    /// workspace must not write that stale aggregate back over concurrent
+    /// changes to source, state, worktree, setup, or pin metadata.
+    pub fn update_workspace_base_branch(
+        &self,
+        workspace_id: &WorkspaceId,
+        base_branch: &str,
+        updated_at: &str,
+    ) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "UPDATE dcc_workspaces SET base_branch = ?1, updated_at = ?2 WHERE id = ?3",
+                params![base_branch, updated_at, workspace_id.0],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if changed != 1 {
+            return Err(dcc_core::CoreError::Repository(
+                "workspace not found".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn get_forge_login_preference(&self, provider: &str, host: &str) -> Result<Option<String>> {
         let conn = self
             .conn
@@ -6679,6 +6708,119 @@ mod tests {
             .as_ref()
             .and_then(|source| source.push_target.as_ref())
             .is_none());
+    }
+
+    #[test]
+    fn workspace_base_branch_partial_update_preserves_concurrent_metadata() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let workspace = Workspace {
+            id: WorkspaceId("workspace-branch-update".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: Some("Initial task".to_string()),
+            root_path: "/tmp/repo".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: Some("/tmp/repo/.dcc-worktrees/initial".to_string()),
+            source: Some(WorkspaceSource {
+                kind: WorkspaceSourceKind::PullRequest,
+                url: "https://github.com/acme/widgets/pull/42".to_string(),
+                provider: "github".to_string(),
+                remote_name: "origin".to_string(),
+                head_branch: "feature/initial".to_string(),
+                head_sha: "initial-sha".to_string(),
+                base_branch: "main".to_string(),
+                change_request_number: Some(42),
+                title: Some("Initial title".to_string()),
+                author: Some("octocat".to_string()),
+                source_repository: Some("acme/widgets".to_string()),
+                push_target: Some(WorkspacePushTarget {
+                    remote_name: "origin".to_string(),
+                    branch_name: "feature/initial".to_string(),
+                    remote_url: Some("https://github.com/acme/widgets.git".to_string()),
+                    remote_created: false,
+                }),
+            }),
+            state: WorkspaceState::Ready,
+            setup_report: Some(WorkspaceSetupReport {
+                status: WorkspaceSetupStatus::Completed,
+                steps: vec![WorkspaceSetupStepReport {
+                    label: "Initial setup".to_string(),
+                    command: "initial-command".to_string(),
+                    source_path: ".dcc.toml".to_string(),
+                    status: WorkspaceSetupStatus::Completed,
+                    detail: None,
+                }],
+                message: Some("initial setup".to_string()),
+            }),
+            pinned_at: Some("2026-01-01T00:00:00Z".to_string()),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+
+        // Simulate a concurrent metadata update after a caller observed the
+        // original aggregate but before it persists its new base branch.
+        let mut concurrent = workspace.clone();
+        concurrent.name = Some("Concurrent task".to_string());
+        concurrent.worktree_path = Some("/tmp/repo/.dcc-worktrees/concurrent".to_string());
+        concurrent.state = WorkspaceState::Archived;
+        concurrent.setup_report = Some(WorkspaceSetupReport {
+            status: WorkspaceSetupStatus::Warning,
+            steps: vec![WorkspaceSetupStepReport {
+                label: "Concurrent setup".to_string(),
+                command: "concurrent-command".to_string(),
+                source_path: "concurrent.toml".to_string(),
+                status: WorkspaceSetupStatus::Warning,
+                detail: Some("concurrent detail".to_string()),
+            }],
+            message: Some("concurrent setup".to_string()),
+        });
+        concurrent.pinned_at = None;
+        concurrent.updated_at = "2026-01-01T00:01:00Z".to_string();
+        concurrent.source.as_mut().expect("source").head_branch = "feature/concurrent".to_string();
+        futures::executor::block_on(repo.save_workspace(&concurrent))
+            .expect("save concurrent metadata");
+
+        repo.update_workspace_base_branch(&workspace.id, "release/2026", "2026-01-01T00:02:00Z")
+            .expect("partial base branch update");
+
+        let restored = futures::executor::block_on(repo.get_workspace(&workspace.id))
+            .expect("read workspace")
+            .expect("workspace exists");
+        assert_eq!(restored.base_branch, "release/2026");
+        assert_eq!(restored.updated_at, "2026-01-01T00:02:00Z");
+        assert_eq!(restored.name.as_deref(), Some("Concurrent task"));
+        assert_eq!(
+            restored.worktree_path.as_deref(),
+            Some("/tmp/repo/.dcc-worktrees/concurrent")
+        );
+        assert_eq!(restored.state, WorkspaceState::Archived);
+        assert_eq!(restored.pinned_at, None);
+        assert_eq!(
+            restored
+                .source
+                .as_ref()
+                .map(|source| source.head_branch.as_str()),
+            Some("feature/concurrent")
+        );
+        assert_eq!(
+            restored
+                .setup_report
+                .as_ref()
+                .and_then(|report| report.message.as_deref()),
+            Some("concurrent setup")
+        );
+
+        let missing = repo
+            .update_workspace_base_branch(
+                &WorkspaceId("missing-workspace".to_string()),
+                "main",
+                "2026-01-01T00:03:00Z",
+            )
+            .expect_err("missing workspace must fail");
+        assert!(matches!(
+            missing,
+            dcc_core::CoreError::Repository(message) if message == "workspace not found"
+        ));
     }
 
     #[test]
