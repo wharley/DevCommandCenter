@@ -320,18 +320,41 @@ impl TerminalClaim {
     /// return the outcome inserted (or concurrently found). The returned
     /// canonical outcome, not necessarily the leader's intent, is tombstoned.
     pub async fn persist_then_commit<F, Fut, E>(
-        mut self,
+        self,
         persist: F,
     ) -> Result<TerminalOutcome, PersistThenCommitError<E>>
     where
         F: FnOnce(TerminalIntent) -> Fut,
         Fut: Future<Output = Result<TerminalOutcome, E>>,
     {
-        let canonical_outcome = persist(self.entry.intent)
+        self.persist_then_commit_with(move |intent| async move {
+            persist(intent).await.map(|outcome| (outcome, ()))
+        })
+        .await
+        .map(|(outcome, ())| outcome)
+    }
+
+    /// Payload-preserving form of [`TerminalClaim::persist_then_commit`].
+    ///
+    /// The persistence closure returns the canonical terminal outcome plus a
+    /// caller-owned payload such as an Inserted/Existing durable record. The
+    /// tombstone is committed only after `Ok`; only the outcome is retained by
+    /// the arbiter. The payload is never stored or formatted here and is
+    /// returned directly to the leader.
+    pub async fn persist_then_commit_with<T, F, Fut, E>(
+        mut self,
+        persist: F,
+    ) -> Result<(TerminalOutcome, T), PersistThenCommitError<E>>
+    where
+        F: FnOnce(TerminalIntent) -> Fut,
+        Fut: Future<Output = Result<(TerminalOutcome, T), E>>,
+    {
+        let (canonical_outcome, payload) = persist(self.entry.intent)
             .await
             .map_err(PersistThenCommitError::Persistence)?;
         self.commit_after_persistence(canonical_outcome)
-            .map_err(PersistThenCommitError::Arbiter)
+            .map_err(PersistThenCommitError::Arbiter)?;
+        Ok((canonical_outcome, payload))
     }
 
     fn commit_after_persistence(
@@ -657,6 +680,101 @@ mod tests {
         let retry = leader(
             arbiter
                 .claim(key("s", "persist-cancel"), TerminalIntent::ProviderFailed)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(persist_ok(retry).await, TerminalIntent::ProviderFailed);
+    }
+
+    #[tokio::test]
+    async fn canonical_payload_propagates_without_changing_failure_or_cancel_raii() {
+        #[derive(Debug, PartialEq, Eq)]
+        enum DurablePayload {
+            Inserted(u64),
+            Existing(u64),
+        }
+
+        let arbiter = Arc::new(TerminalArbiter::default());
+        let inserted = leader(
+            arbiter
+                .claim(key("payload", "inserted"), TerminalIntent::Completed)
+                .await
+                .unwrap(),
+        )
+        .persist_then_commit_with(|intent| async move {
+            Ok::<_, ()>((intent, DurablePayload::Inserted(7)))
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            inserted,
+            (TerminalIntent::Completed, DurablePayload::Inserted(7))
+        );
+
+        let existing = leader(
+            arbiter
+                .claim(key("payload", "existing"), TerminalIntent::Aborted)
+                .await
+                .unwrap(),
+        )
+        .persist_then_commit_with(|_| async {
+            Ok::<_, ()>((TerminalIntent::Completed, DurablePayload::Existing(7)))
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            existing,
+            (TerminalIntent::Completed, DurablePayload::Existing(7))
+        );
+        assert!(matches!(
+            arbiter
+                .claim(key("payload", "existing"), TerminalIntent::ProviderFailed)
+                .await
+                .unwrap(),
+            TerminalClaimResult::AlreadyCommitted(TerminalIntent::Completed)
+        ));
+
+        let failed = leader(
+            arbiter
+                .claim(key("payload", "failed"), TerminalIntent::Completed)
+                .await
+                .unwrap(),
+        )
+        .persist_then_commit_with(|_| async {
+            Err::<(TerminalOutcome, DurablePayload), _>("sensitive append failure")
+        })
+        .await;
+        assert_eq!(format!("{failed:?}"), "Err(Persistence([redacted]))");
+        assert!(!format!("{failed:?}").contains("sensitive"));
+        let retry = leader(
+            arbiter
+                .claim(key("payload", "failed"), TerminalIntent::Aborted)
+                .await
+                .unwrap(),
+        );
+        persist_ok(retry).await;
+
+        let cancelled = leader(
+            arbiter
+                .claim(key("payload", "cancelled"), TerminalIntent::Completed)
+                .await
+                .unwrap(),
+        );
+        let (started_tx, started_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            cancelled
+                .persist_then_commit_with(|_| async move {
+                    started_tx.send(()).unwrap();
+                    std::future::pending::<Result<(TerminalOutcome, DurablePayload), ()>>().await
+                })
+                .await
+        });
+        started_rx.await.unwrap();
+        task.abort();
+        let _ = task.await;
+        let retry = leader(
+            arbiter
+                .claim(key("payload", "cancelled"), TerminalIntent::ProviderFailed)
                 .await
                 .unwrap(),
         );
