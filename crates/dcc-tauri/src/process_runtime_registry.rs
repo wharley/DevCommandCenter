@@ -27,6 +27,33 @@ struct PhysicalIdentity {
     inode: u64,
 }
 
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::{convert::Infallible, fs};
+
+    #[test]
+    fn windows_path_fallback_coalesces_canonical_scope_without_exposing_paths() {
+        let root = tempfile::tempdir().expect("runtime test root");
+        let app_data = root.path().join("app-data");
+        let sqlite = root.path().join("sessions.sqlite");
+        let registry = ProcessRuntimeRegistry::isolated();
+        let (_, first) = registry
+            .acquire_after_open(&sqlite, &app_data, || {
+                fs::create_dir_all(&app_data).expect("app data");
+                fs::write(&sqlite, b"sqlite").expect("database");
+                Ok::<_, Infallible>(())
+            })
+            .expect("windows fallback scope");
+        let (_, second) = registry
+            .acquire_after_open(&sqlite, &app_data, || Ok::<_, Infallible>(()))
+            .expect("windows fallback replay");
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(format!("{first:?}").contains("[redacted]"));
+        assert!(!format!("{first:?}").contains("sessions.sqlite"));
+    }
+}
+
 impl fmt::Debug for PhysicalIdentity {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("PhysicalIdentity([redacted])")
@@ -204,12 +231,55 @@ fn resolve_scope(
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn resolve_scope(
+    sqlite_path: &Path,
+    app_data_directory: &Path,
+) -> Result<RuntimeScopeKey, ProcessRuntimeRegistryError> {
+    // Windows lacks the descriptor-relative, physical identity adapter used
+    // on Unix in this phase. This is deliberately only a cooperative
+    // path-based fallback: canonicalization follows aliases after the
+    // consumer has opened the resources, and is neither authorization nor a
+    // Guarded Undo filesystem boundary. Debug output still contains no paths.
+    let sqlite = std::fs::canonicalize(sqlite_path).map_err(|_| ProcessRuntimeRegistryError::Io)?;
+    let app_data =
+        std::fs::canonicalize(app_data_directory).map_err(|_| ProcessRuntimeRegistryError::Io)?;
+    if !sqlite.is_file() || !app_data.is_dir() {
+        return Err(ProcessRuntimeRegistryError::UnsafeTarget);
+    }
+    Ok(RuntimeScopeKey {
+        sqlite_file: windows_identity(&sqlite, b"sqlite-file"),
+        app_data_directory: windows_identity(&app_data, b"app-data-directory"),
+    })
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn resolve_scope(
     _sqlite_path: &Path,
     _app_data_directory: &Path,
 ) -> Result<RuntimeScopeKey, ProcessRuntimeRegistryError> {
     Err(ProcessRuntimeRegistryError::UnsupportedPlatform)
+}
+
+#[cfg(windows)]
+fn windows_identity(path: &Path, domain: &[u8]) -> PhysicalIdentity {
+    use sha2::{Digest, Sha256};
+    use std::os::windows::ffi::OsStrExt;
+
+    let wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    let mut hasher = Sha256::new();
+    hasher.update(b"dcc-process-runtime:v1:");
+    hasher.update((domain.len() as u64).to_be_bytes());
+    hasher.update(domain);
+    hasher.update((wide.len() as u64).to_be_bytes());
+    for unit in wide {
+        hasher.update(unit.to_le_bytes());
+    }
+    let digest = hasher.finalize();
+    PhysicalIdentity {
+        device: u64::from_le_bytes(digest[..8].try_into().expect("digest width")),
+        inode: u64::from_le_bytes(digest[8..16].try_into().expect("digest width")),
+    }
 }
 
 #[cfg(unix)]

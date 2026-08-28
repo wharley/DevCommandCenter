@@ -62,6 +62,7 @@ use crate::delivery_failure::{
     WorkspaceDeliveryFailureSnapshot,
 };
 use crate::events::TauriEventBus;
+use crate::process_runtime_registry::{ProcessRuntime, ProcessRuntimeRegistry};
 use dcc_providers::provider_runtime;
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
@@ -229,6 +230,7 @@ pub struct SessionCommandState {
     session_repo: SqliteSessionRepo,
     event_bus: Arc<dyn EventBus>,
     store: Arc<Mutex<SessionStore>>,
+    runtime: Arc<ProcessRuntime>,
 }
 
 #[derive(Clone, Debug)]
@@ -321,8 +323,16 @@ impl SessionCommandState {
         event_bus: Arc<dyn EventBus>,
         recover_interrupted: bool,
     ) -> Self {
-        let session_repo =
-            SqliteSessionRepo::open(&db_path).expect("failed to open sqlite session repo");
+        let registry_db_path = lexical_absolute_path(&db_path);
+        let registry_app_data_dir = lexical_absolute_path(&app_data_dir);
+        let (session_repo, runtime) = ProcessRuntimeRegistry::global()
+            .acquire_after_open(&registry_db_path, &registry_app_data_dir, || {
+                std::fs::create_dir_all(&app_data_dir).map_err(|_| {
+                    dcc_core::CoreError::Repository("failed to initialize app data".to_string())
+                })?;
+                SqliteSessionRepo::open(&db_path)
+            })
+            .unwrap_or_else(|_| panic!("failed to initialize session runtime"));
         if recover_interrupted {
             cleanup_all_snapshot_quarantines(&app_data_dir.join("turn-review").join("snapshots"));
             let _ = session_repo
@@ -335,7 +345,12 @@ impl SessionCommandState {
             db_path,
             event_bus,
             store: Arc::new(Mutex::new(SessionStore::default())),
+            runtime,
         }
+    }
+
+    pub fn process_runtime(&self) -> Arc<ProcessRuntime> {
+        Arc::clone(&self.runtime)
     }
 
     pub(crate) fn db_path(&self) -> &std::path::Path {
@@ -2671,6 +2686,15 @@ impl SessionCommandState {
     }
 }
 
+fn lexical_absolute_path(path: &std::path::Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|directory| directory.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
 #[async_trait]
 impl WorkspaceRepo for SessionCommandState {
     async fn save_workspace(&self, _workspace: &Workspace) -> Result<()> {
@@ -2869,6 +2893,12 @@ mod tests {
         }
     }
 
+    fn physical_db_path(path: PathBuf) -> PathBuf {
+        let parent = std::fs::canonicalize(path.parent().expect("database parent"))
+            .expect("canonical database parent");
+        parent.join(path.file_name().expect("database filename"))
+    }
+
     fn mcp_status(
         definition_id: &str,
         session_id: &SessionId,
@@ -2888,8 +2918,14 @@ mod tests {
 
     #[test]
     fn mcp_runtime_snapshots_are_ephemeral_sorted_and_identity_bound() {
-        let db_path = std::env::temp_dir().join(format!("dcc-mcp-{}.sqlite", Uuid::new_v4()));
-        let state = SessionCommandState::new_headless(db_path.clone(), std::env::temp_dir());
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-mcp-{}.sqlite", Uuid::new_v4())),
+        );
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
         let session_id = SessionId("session-1".to_string());
         let provider_version = "claude-agent-sdk@test+claude-code@test";
 
@@ -2946,7 +2982,9 @@ mod tests {
 
     #[test]
     fn multi_workspace_scope_resolves_only_bundle_worktrees_and_gates_provider() {
-        let db_path = std::env::temp_dir().join(format!("dcc-scope-{}.sqlite", Uuid::new_v4()));
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-scope-{}.sqlite", Uuid::new_v4())),
+        );
         let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
         let primary = sample_workspace("primary", "/tmp/dcc-primary-worktree");
         let mut secondary = sample_workspace("secondary", "/tmp/dcc-secondary-worktree");
@@ -2980,7 +3018,11 @@ mod tests {
         ))
         .expect("save bundle");
 
-        let state = SessionCommandState::new_headless(db_path.clone(), std::env::temp_dir());
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
         let session = Session {
             id: SessionId("session-1".to_string()),
             project_id: primary.project_id.clone(),
@@ -3057,12 +3099,16 @@ mod tests {
 
     #[test]
     fn baseline_capture_refs_match_the_durable_rows_without_cross_root_attribution() {
-        let db_path = std::env::temp_dir().join(format!("dcc-baseline-{}.sqlite", Uuid::new_v4()));
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-baseline-{}.sqlite", Uuid::new_v4())),
+        );
         let app_data = tempfile::tempdir().expect("app data directory");
         let primary_root = tempfile::tempdir().expect("primary root");
         let secondary_root = tempfile::tempdir().expect("secondary root");
-        let state =
-            SessionCommandState::new_headless(db_path.clone(), app_data.path().to_path_buf());
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
         let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
         let primary = sample_workspace(
             "primary",
@@ -3165,10 +3211,14 @@ mod tests {
 
     #[test]
     fn baseline_root_resolution_error_still_returns_a_persisted_unavailable_ref() {
-        let db_path = std::env::temp_dir().join(format!("dcc-baseline-{}.sqlite", Uuid::new_v4()));
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-baseline-{}.sqlite", Uuid::new_v4())),
+        );
         let app_data = tempfile::tempdir().expect("app data directory");
-        let state =
-            SessionCommandState::new_headless(db_path.clone(), app_data.path().to_path_buf());
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
         let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
         let primary = sample_workspace("missing-root-workspace", "/tmp/missing-root-workspace");
         futures::executor::block_on(repo.save_workspace(&primary)).expect("save primary");
@@ -3212,5 +3262,95 @@ mod tests {
         drop(repo);
         drop(state);
         let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn states_share_runtime_for_same_physical_scope() {
+        let root = tempfile::tempdir().expect("runtime test root");
+        let physical_root = std::fs::canonicalize(root.path()).expect("physical root");
+        let db_path = physical_root.join("state.sqlite");
+        let app_data = physical_root.join("app-data");
+        let first = SessionCommandState::new_headless(db_path.clone(), app_data.clone());
+        let second = SessionCommandState::new_headless(db_path, app_data);
+        assert!(Arc::ptr_eq(
+            &first.process_runtime(),
+            &second.process_runtime()
+        ));
+        assert!(Arc::ptr_eq(
+            &first.process_runtime().terminal_arbiter(),
+            &second.process_runtime().terminal_arbiter()
+        ));
+    }
+
+    #[test]
+    fn distinct_runtime_scopes_are_isolated_and_first_run_creates_app_data() {
+        let root = tempfile::tempdir().expect("runtime test root");
+        let physical_root = std::fs::canonicalize(root.path()).expect("physical root");
+        let first_app_data = physical_root.join("first").join("nested-app-data");
+        let second_app_data = physical_root.join("second").join("nested-app-data");
+        let first_db = physical_root.join("first.sqlite");
+        let second_db = physical_root.join("second.sqlite");
+        assert!(!first_app_data.exists());
+        let first = SessionCommandState::new_headless(first_db.clone(), first_app_data.clone());
+        let second = SessionCommandState::new_headless(second_db, second_app_data);
+        assert!(first_app_data.is_dir());
+        assert!(first_db.is_file());
+        assert!(!Arc::ptr_eq(
+            &first.process_runtime(),
+            &second.process_runtime()
+        ));
+        assert!(!Arc::ptr_eq(
+            &first.process_runtime().terminal_arbiter(),
+            &second.process_runtime().terminal_arbiter()
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn state_rejects_intermediate_and_final_symlink_inputs_without_paths() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().expect("runtime test root");
+        let physical_root = std::fs::canonicalize(root.path()).expect("physical root");
+        let real_app = physical_root.join("real-app");
+        std::fs::create_dir(&real_app).expect("real app data");
+        let app_alias = physical_root.join("app-alias");
+        symlink(&real_app, &app_alias).expect("app alias");
+        let real_parent = physical_root.join("real-parent");
+        std::fs::create_dir(&real_parent).expect("real parent");
+        let parent_alias = physical_root.join("parent-alias");
+        symlink(&real_parent, &parent_alias).expect("parent alias");
+
+        let intermediate_db = parent_alias.join("intermediate.sqlite");
+        let result = std::panic::catch_unwind(|| {
+            SessionCommandState::new_headless(intermediate_db, real_app.clone())
+        });
+        let payload = match result {
+            Ok(_) => panic!("intermediate symlink must fail"),
+            Err(payload) => payload,
+        };
+        assert_eq!(
+            payload.downcast_ref::<&str>(),
+            Some(&"failed to initialize session runtime")
+        );
+        let final_db = physical_root.join("final.sqlite");
+        let result =
+            std::panic::catch_unwind(|| SessionCommandState::new_headless(final_db, app_alias));
+        let payload = match result {
+            Ok(_) => panic!("final symlink must fail"),
+            Err(payload) => payload,
+        };
+        assert_eq!(
+            payload.downcast_ref::<&str>(),
+            Some(&"failed to initialize session runtime")
+        );
+    }
+
+    #[test]
+    fn relative_runtime_paths_are_made_absolute_without_canonicalization() {
+        let relative = PathBuf::from("relative/runtime.sqlite");
+        let absolute = lexical_absolute_path(&relative);
+        assert!(absolute.is_absolute());
+        assert!(absolute.ends_with(relative));
     }
 }

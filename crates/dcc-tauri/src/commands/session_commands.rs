@@ -1150,10 +1150,12 @@ mod tests {
 
     #[tokio::test]
     async fn automatic_title_persists_in_the_workspace_repository() {
-        let db_path = std::env::temp_dir().join(format!(
-            "dcc-automatic-task-title-{}.sqlite",
-            uuid::Uuid::new_v4()
-        ));
+        let db_path = std::fs::canonicalize(std::env::temp_dir())
+            .expect("physical temp directory")
+            .join(format!(
+                "dcc-automatic-task-title-{}.sqlite",
+                uuid::Uuid::new_v4()
+            ));
         let workspace_repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
         let workspace = Workspace {
             id: WorkspaceId("workspace-title-test".to_string()),
@@ -1173,7 +1175,11 @@ mod tests {
             .await
             .expect("save workspace");
 
-        let state = SessionCommandState::new_headless(db_path.clone(), std::env::temp_dir());
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
         let started = run_start_thread(
             &state,
             &state,
