@@ -2093,7 +2093,11 @@ async fn send_turn_handler(
     let turn_id = output.turn.id.clone();
     if let Err(error) = state.attach_provider_session(&output.session).await {
         let _ = state
-            .emit_turn_aborted(&output.session.id, &turn_id, Some(error.to_string()))
+            .emit_unbound_started_turn_aborted(
+                &output.session.id,
+                &turn_id,
+                Some(error.to_string()),
+            )
             .await;
         return Err(classify_session_error(error.to_string()));
     }
@@ -2102,7 +2106,11 @@ async fn send_turn_handler(
         .await
     {
         let _ = state
-            .emit_turn_aborted(&output.session.id, &turn_id, Some(error.to_string()))
+            .emit_unbound_started_turn_aborted(
+                &output.session.id,
+                &turn_id,
+                Some(error.to_string()),
+            )
             .await;
         return Err(classify_session_error(error.to_string()));
     }

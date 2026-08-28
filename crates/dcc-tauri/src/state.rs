@@ -1,7 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use async_trait::async_trait;
@@ -63,6 +66,9 @@ use crate::delivery_failure::{
 };
 use crate::events::TauriEventBus;
 use crate::process_runtime_registry::{ProcessRuntime, ProcessRuntimeRegistry};
+use crate::terminal_arbiter::{
+    PersistThenCommitError, TerminalArbiterError, TerminalClaimResult, TerminalIntent, TerminalKey,
+};
 use dcc_providers::provider_runtime;
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
@@ -228,7 +234,7 @@ pub struct SessionCommandState {
     app_data_dir: PathBuf,
     db_path: PathBuf,
     session_repo: SqliteSessionRepo,
-    event_bus: Arc<dyn EventBus>,
+    _event_bus: Arc<dyn EventBus>,
     store: Arc<Mutex<SessionStore>>,
     runtime: Arc<ProcessRuntime>,
 }
@@ -238,11 +244,71 @@ struct ProviderSessionBinding {
     provider_id: String,
     handle: SessionHandle,
     current_turn_id: Arc<AsyncMutex<Option<String>>>,
-    aborting_turn_id: Arc<AsyncMutex<Option<String>>>,
+    // Only coordinates the short binding transition/cleanup section. No
+    // provider, database, evidence, or MCP I/O runs while it is held.
     terminal_lock: Arc<AsyncMutex<()>>,
+    terminal_token: Arc<TerminalTokenState>,
     usage_turn_id: Arc<AsyncMutex<Option<String>>>,
     assistant_messages: Arc<AsyncMutex<AssistantMessageTracker>>,
     projected_mcp_definition_ids: Arc<HashSet<McpDefinitionId>>,
+}
+
+#[derive(Clone, Debug)]
+enum TerminalRequest {
+    Completed,
+    Aborted {
+        reason: Option<String>,
+        source: TerminalSource,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TerminalSource {
+    Passive,
+    Quiesce,
+    Cancel,
+}
+
+#[derive(Default)]
+struct TerminalTokenState {
+    active: Mutex<Option<(String, u64)>>,
+    generation: AtomicU64,
+}
+
+impl std::fmt::Debug for TerminalTokenState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("TerminalTokenState([redacted])")
+    }
+}
+
+struct TerminalTokenGuard {
+    state: Arc<TerminalTokenState>,
+    turn_id: String,
+    generation: u64,
+}
+
+impl Drop for TerminalTokenGuard {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.state.active.lock() {
+            if active.as_ref().is_some_and(|(turn, generation)| {
+                turn == &self.turn_id && *generation == self.generation
+            }) {
+                *active = None;
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CanonicalTerminalResult {
+    outcome: TerminalIntent,
+    inserted: bool,
+}
+
+#[derive(Clone, Debug)]
+struct TerminalPersistence {
+    record: SessionEventRecord,
+    inserted: bool,
 }
 
 #[derive(Default, Debug)]
@@ -276,7 +342,7 @@ impl AssistantMessageTracker {
 }
 
 #[derive(Default, Debug)]
-struct SessionStore {
+pub(crate) struct SessionStore {
     provider_sessions: HashMap<SessionId, ProviderSessionBinding>,
     mcp_runtime_statuses: HashMap<SessionId, Vec<McpRuntimeStatus>>,
 }
@@ -333,6 +399,9 @@ impl SessionCommandState {
                 SqliteSessionRepo::open(&db_path)
             })
             .unwrap_or_else(|_| panic!("failed to initialize session runtime"));
+        runtime
+            .register_event_bus(&event_bus)
+            .unwrap_or_else(|_| panic!("failed to initialize session runtime"));
         if recover_interrupted {
             cleanup_all_snapshot_quarantines(&app_data_dir.join("turn-review").join("snapshots"));
             let _ = session_repo
@@ -343,8 +412,8 @@ impl SessionCommandState {
             app_data_dir,
             session_repo,
             db_path,
-            event_bus,
-            store: Arc::new(Mutex::new(SessionStore::default())),
+            _event_bus: event_bus,
+            store: runtime.session_store(),
             runtime,
         }
     }
@@ -890,53 +959,436 @@ impl SessionCommandState {
         Ok(())
     }
 
-    async fn turn_has_terminal_event(
+    async fn find_terminal_event(
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
-    ) -> Result<bool> {
-        Ok(
-            SessionEventRepo::list_events_by_session(&self.session_repo, session_id)
-                .await?
-                .iter()
-                .any(|event| match &event.kind {
-                    SessionEventKind::TurnCompleted { turn_id: candidate }
-                    | SessionEventKind::TurnAborted {
-                        turn_id: candidate, ..
-                    } => candidate == turn_id,
-                    _ => false,
-                }),
-        )
+    ) -> Result<Option<SessionEventRecord>> {
+        SessionEventRepo::find_terminal_event(&self.session_repo, session_id, turn_id).await
     }
 
-    async fn emit_turn_completed_locked(
+    fn terminal_outcome(record: &SessionEventRecord) -> Result<TerminalIntent> {
+        match record.kind {
+            SessionEventKind::TurnCompleted { .. } => Ok(TerminalIntent::Completed),
+            SessionEventKind::TurnAborted { .. } => Ok(TerminalIntent::Aborted),
+            _ => Err(dcc_core::CoreError::Repository(
+                "durable terminal event has an invalid kind".to_string(),
+            )),
+        }
+    }
+
+    async fn acquire_terminal_token(
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
-    ) -> Result<bool> {
-        if self.turn_has_terminal_event(session_id, turn_id).await? {
-            return Ok(false);
+        expected: &ProviderSessionBinding,
+    ) -> Result<TerminalTokenGuard> {
+        let _terminal = expected.terminal_lock.lock().await;
+        let current = self.provider_binding(session_id)?.ok_or_else(|| {
+            dcc_core::CoreError::Repository("provider turn binding changed".to_string())
+        })?;
+        if !Arc::ptr_eq(&current.current_turn_id, &expected.current_turn_id)
+            || current.handle.handle_id != expected.handle.handle_id
+            || current.current_turn_id.lock().await.as_deref() != Some(turn_id.0.as_str())
+        {
+            return Err(dcc_core::CoreError::Repository(
+                "provider turn binding changed".to_string(),
+            ));
         }
-        self.capture_turn_review_result(session_id, turn_id, "completed", None, false)
-            .await?;
-        let outcome = self
-            .append_session_event(
+        let mut active = expected.terminal_token.active.lock().map_err(|_| {
+            dcc_core::CoreError::Repository("terminal token unavailable".to_string())
+        })?;
+        if active.is_some() {
+            return Err(dcc_core::CoreError::Repository(
+                "terminal turn transition already in progress".to_string(),
+            ));
+        }
+        let previous_generation = expected
+            .terminal_token
+            .generation
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| {
+                dcc_core::CoreError::Repository("terminal token generation exhausted".to_string())
+            })?;
+        let generation = previous_generation.checked_add(1).ok_or_else(|| {
+            dcc_core::CoreError::Repository("terminal token generation exhausted".to_string())
+        })?;
+        *active = Some((turn_id.0.clone(), generation));
+        Ok(TerminalTokenGuard {
+            state: Arc::clone(&expected.terminal_token),
+            turn_id: turn_id.0.clone(),
+            generation,
+        })
+    }
+
+    async fn acquire_idle_terminal_token(
+        &self,
+        session_id: &SessionId,
+        expected: &ProviderSessionBinding,
+    ) -> Result<Option<TerminalTokenGuard>> {
+        let _terminal = expected.terminal_lock.lock().await;
+        let Some(current) = self.provider_binding(session_id)? else {
+            return Ok(None);
+        };
+        if !Arc::ptr_eq(&current.current_turn_id, &expected.current_turn_id)
+            || current.handle.handle_id != expected.handle.handle_id
+            || current.current_turn_id.lock().await.is_some()
+        {
+            return Ok(None);
+        }
+        let mut active = expected.terminal_token.active.lock().map_err(|_| {
+            dcc_core::CoreError::Repository("terminal token unavailable".to_string())
+        })?;
+        if active.is_some() {
+            return Ok(None);
+        }
+        let previous_generation = expected
+            .terminal_token
+            .generation
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| {
+                dcc_core::CoreError::Repository("terminal token generation exhausted".to_string())
+            })?;
+        let generation = previous_generation.checked_add(1).ok_or_else(|| {
+            dcc_core::CoreError::Repository("terminal token generation exhausted".to_string())
+        })?;
+        *active = Some((String::new(), generation));
+        Ok(Some(TerminalTokenGuard {
+            state: Arc::clone(&expected.terminal_token),
+            turn_id: String::new(),
+            generation,
+        }))
+    }
+
+    async fn cleanup_terminal_binding(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        expected: Option<&ProviderSessionBinding>,
+        remove_binding: bool,
+    ) -> Result<()> {
+        let Some(expected) = expected else {
+            return Ok(());
+        };
+        let Some(current) = self.provider_binding(session_id)? else {
+            return Ok(());
+        };
+        if !Arc::ptr_eq(&current.current_turn_id, &expected.current_turn_id)
+            || current.handle.handle_id != expected.handle.handle_id
+        {
+            return Ok(());
+        }
+        let (removed, cleared) = {
+            let _terminal = current.terminal_lock.lock().await;
+            let mut current_turn = current.current_turn_id.lock().await;
+            if current_turn.as_deref() != Some(turn_id.0.as_str()) {
+                return Ok(());
+            }
+            let Ok(mut store) = self.store.lock() else {
+                return Ok(());
+            };
+            let same = store
+                .provider_sessions
+                .get(session_id)
+                .is_some_and(|binding| {
+                    Arc::ptr_eq(&binding.current_turn_id, &expected.current_turn_id)
+                });
+            if !same {
+                return Ok(());
+            }
+            if remove_binding {
+                (store.provider_sessions.remove(session_id).is_some(), false)
+            } else {
+                *current_turn = None;
+                (false, true)
+            }
+        };
+        if removed {
+            let _ = self
+                .clear_mcp_runtime_statuses_if_binding_absent(session_id, expected)
+                .await;
+        }
+        if cleared {
+            *current.usage_turn_id.lock().await = None;
+        }
+        Ok(())
+    }
+
+    async fn remove_binding_if_same(
+        &self,
+        session_id: &SessionId,
+        expected: &ProviderSessionBinding,
+    ) -> Result<()> {
+        let removed = {
+            let _terminal = expected.terminal_lock.lock().await;
+            if expected.current_turn_id.lock().await.is_some() {
+                return Ok(());
+            }
+            if let Ok(mut store) = self.store.lock() {
+                let same = store
+                    .provider_sessions
+                    .get(session_id)
+                    .is_some_and(|binding| {
+                        Arc::ptr_eq(&binding.current_turn_id, &expected.current_turn_id)
+                    });
+                same && store.provider_sessions.remove(session_id).is_some()
+            } else {
+                false
+            }
+        };
+        if removed {
+            let _ = self
+                .clear_mcp_runtime_statuses_if_binding_absent(session_id, expected)
+                .await;
+        }
+        Ok(())
+    }
+
+    async fn terminalize_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        request: TerminalRequest,
+    ) -> Result<CanonicalTerminalResult> {
+        let expected_binding = self.provider_binding(session_id)?;
+        self.terminalize_turn_with_binding(session_id, turn_id, request, expected_binding)
+            .await
+    }
+
+    async fn terminalize_turn_with_binding(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        request: TerminalRequest,
+        expected_binding: Option<ProviderSessionBinding>,
+    ) -> Result<CanonicalTerminalResult> {
+        let intent = match &request {
+            TerminalRequest::Completed => TerminalIntent::Completed,
+            TerminalRequest::Aborted { .. } => TerminalIntent::Aborted,
+        };
+        let claim = self
+            .runtime
+            .terminal_arbiter()
+            .claim(
+                TerminalKey::new(session_id.clone(), turn_id.clone()),
+                intent,
+            )
+            .await
+            .map_err(|error| match error {
+                TerminalArbiterError::Poisoned => {
+                    dcc_core::CoreError::Repository("terminal coordination unavailable".to_string())
+                }
+                _ => dcc_core::CoreError::Repository(error.to_string()),
+            })?;
+        let TerminalClaimResult::Leader(claim) = claim else {
+            let TerminalClaimResult::AlreadyCommitted(outcome) = claim else {
+                unreachable!()
+            };
+            let remove_binding = matches!(
+                (&request, outcome),
+                (
+                    TerminalRequest::Aborted {
+                        source: TerminalSource::Quiesce | TerminalSource::Cancel,
+                        ..
+                    },
+                    TerminalIntent::Aborted
+                )
+            );
+            self.cleanup_terminal_binding(
                 session_id,
-                SessionEventKind::TurnCompleted {
-                    turn_id: turn_id.clone(),
-                },
+                turn_id,
+                expected_binding.as_ref(),
+                remove_binding,
             )
             .await?;
-        if matches!(outcome, AppendEventOutcome::Inserted(_)) {
-            self.publish(dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
-                session_id: session_id.0.clone(),
-                turn_id: turn_id.0.clone(),
-            })
-            .await?;
-            Ok(true)
+            return Ok(CanonicalTerminalResult {
+                outcome,
+                inserted: false,
+            });
+        };
+        // The binding token spans the entire leader transaction and cleanup,
+        // but the terminal lock itself is held only while acquiring it.
+        let _terminal_token = if let Some(expected) = expected_binding.as_ref() {
+            Some(
+                self.acquire_terminal_token(session_id, turn_id, expected)
+                    .await?,
+            )
         } else {
-            Ok(false)
+            None
+        };
+        let persistence = claim
+            .persist_then_commit_with(|_| async {
+                if let Some(existing) = self.find_terminal_event(session_id, turn_id).await? {
+                    return Ok((
+                        Self::terminal_outcome(&existing)?,
+                        TerminalPersistence {
+                            record: existing,
+                            inserted: false,
+                        },
+                    ));
+                }
+                // A provider stream can finish after its session has been
+                // rebound to a newer turn. Revalidate the short-lived
+                // binding identity immediately before cancellation/evidence
+                // so an old stream cannot finalize the replacement turn.
+                if matches!(&request, TerminalRequest::Completed) {
+                    if let Some(binding) = expected_binding.as_ref() {
+                        self.flush_assistant_messages(session_id, binding, turn_id)
+                            .await?;
+                    }
+                }
+                if let TerminalRequest::Aborted { source, .. } = &request {
+                    if matches!(source, TerminalSource::Quiesce | TerminalSource::Cancel) {
+                        if let Some(binding) = expected_binding.as_ref() {
+                            if let Some(provider) = provider_runtime(&binding.provider_id) {
+                                let _ = provider.cancel(&binding.handle).await;
+                            }
+                        }
+                    }
+                }
+                let (kind, outcome_name, reason, partial) = match &request {
+                    TerminalRequest::Completed => (
+                        SessionEventKind::TurnCompleted {
+                            turn_id: turn_id.clone(),
+                        },
+                        "completed",
+                        None,
+                        false,
+                    ),
+                    TerminalRequest::Aborted { reason, .. } => (
+                        SessionEventKind::TurnAborted {
+                            turn_id: turn_id.clone(),
+                            reason: reason.clone(),
+                        },
+                        "aborted",
+                        reason.as_deref(),
+                        true,
+                    ),
+                };
+                if let Err(error) = self
+                    .capture_turn_review_result(session_id, turn_id, outcome_name, reason, partial)
+                    .await
+                {
+                    if partial {
+                        eprintln!("[DCC] aborted turn review capture failed: {error}");
+                    } else {
+                        return Err(error);
+                    }
+                }
+                let append = self.append_session_event(session_id, kind).await?;
+                let (record, inserted) = match append {
+                    AppendEventOutcome::Inserted(record) => (record, true),
+                    AppendEventOutcome::Existing(record) => (record, false),
+                };
+                Ok((
+                    Self::terminal_outcome(&record)?,
+                    TerminalPersistence { record, inserted },
+                ))
+            })
+            .await
+            .map_err(|error| match error {
+                PersistThenCommitError::Persistence(error) => error,
+                PersistThenCommitError::Arbiter(error) => {
+                    dcc_core::CoreError::Repository(error.to_string())
+                }
+            })?;
+        let (outcome, payload) = persistence;
+        let publish_result = if payload.inserted {
+            match &payload.record.kind {
+                SessionEventKind::TurnCompleted { turn_id } => {
+                    self.publish(dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
+                        session_id: payload.record.session_id.0.clone(),
+                        turn_id: turn_id.0.clone(),
+                    })
+                    .await
+                }
+                SessionEventKind::TurnAborted { turn_id, reason } => {
+                    self.publish(dcc_core::ports::events::CoreEvent::SessionTurnAborted {
+                        session_id: payload.record.session_id.0.clone(),
+                        turn_id: turn_id.0.clone(),
+                        reason: reason.clone(),
+                    })
+                    .await
+                }
+                _ => Ok(()),
+            }
+        } else {
+            Ok(())
+        };
+        let remove_binding = matches!(
+            (&request, outcome),
+            (
+                TerminalRequest::Aborted {
+                    source: TerminalSource::Quiesce | TerminalSource::Cancel,
+                    ..
+                },
+                TerminalIntent::Aborted
+            )
+        );
+        let cleanup_result = self
+            .cleanup_terminal_binding(
+                session_id,
+                turn_id,
+                expected_binding.as_ref(),
+                remove_binding,
+            )
+            .await;
+        drop(_terminal_token);
+        if publish_result.is_err() {
+            eprintln!("[DCC] terminal event publication failed after durable commit");
         }
+        cleanup_result?;
+        Ok(CanonicalTerminalResult {
+            outcome,
+            inserted: payload.inserted,
+        })
+    }
+
+    async fn flush_assistant_messages(
+        &self,
+        session_id: &SessionId,
+        binding: &ProviderSessionBinding,
+        turn_id: &TurnId,
+    ) -> Result<()> {
+        let mut remaining = {
+            let mut tracker = binding.assistant_messages.lock().await;
+            tracker.active.drain().collect::<Vec<_>>()
+        };
+        remaining.sort_by(|left, right| left.0.cmp(&right.0));
+        for (message_id, phase) in remaining {
+            let outcome = self
+                .append_session_event(
+                    session_id,
+                    SessionEventKind::TurnAssistantMessageCompleted {
+                        turn_id: turn_id.clone(),
+                        message_id: message_id.clone(),
+                        phase: phase.clone(),
+                        content: None,
+                    },
+                )
+                .await?;
+            if matches!(outcome, AppendEventOutcome::Inserted(_))
+                && self
+                    .publish(
+                        dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageCompleted {
+                            session_id: session_id.0.clone(),
+                            turn_id: turn_id.0.clone(),
+                            message_id,
+                            phase,
+                            content: None,
+                        },
+                    )
+                    .await
+                    .is_err()
+            {
+                eprintln!("[DCC] assistant completion publication failed");
+            }
+        }
+        Ok(())
     }
 
     pub async fn emit_turn_completed(
@@ -945,20 +1397,20 @@ impl SessionCommandState {
         turn_id: &TurnId,
     ) -> Result<bool> {
         if let Some(binding) = self.provider_binding(session_id)? {
-            let _terminal = binding.terminal_lock.lock().await;
-            if binding.aborting_turn_id.lock().await.as_deref() == Some(turn_id.0.as_str()) {
-                return Ok(false);
-            }
             if binding.current_turn_id.lock().await.as_deref() != Some(turn_id.0.as_str()) {
                 return Ok(false);
             }
-            let emitted = self.emit_turn_completed_locked(session_id, turn_id).await?;
-            if emitted {
-                *binding.current_turn_id.lock().await = None;
-            }
-            return Ok(emitted);
+            let result = self
+                .terminalize_turn(session_id, turn_id, TerminalRequest::Completed)
+                .await?;
+            let _canonical_outcome = result.outcome;
+            return Ok(result.inserted);
         }
-        self.emit_turn_completed_locked(session_id, turn_id).await
+        let result = self
+            .terminalize_turn(session_id, turn_id, TerminalRequest::Completed)
+            .await?;
+        let _canonical_outcome = result.outcome;
+        Ok(result.inserted)
     }
 
     pub async fn emit_turn_aborted(
@@ -968,106 +1420,90 @@ impl SessionCommandState {
         reason: Option<String>,
     ) -> Result<()> {
         if let Some(binding) = self.provider_binding(session_id)? {
-            let _terminal = binding.terminal_lock.lock().await;
-            if binding.aborting_turn_id.lock().await.as_deref() == Some(turn_id.0.as_str()) {
+            let current_turn_id = binding.current_turn_id.lock().await.clone();
+            if current_turn_id
+                .as_deref()
+                .is_some_and(|current| current != turn_id.0.as_str())
+            {
                 return Ok(());
             }
-            let current_turn_id = binding.current_turn_id.lock().await.clone();
-            if current_turn_id.as_deref() != Some(turn_id.0.as_str()) {
-                if current_turn_id.is_some()
-                    || self.turn_has_terminal_event(session_id, turn_id).await?
-                {
-                    return Ok(());
-                }
-            }
-            self.emit_turn_aborted_locked(session_id, turn_id, reason.clone())
+            let result = self
+                .terminalize_turn(
+                    session_id,
+                    turn_id,
+                    TerminalRequest::Aborted {
+                        reason,
+                        source: TerminalSource::Passive,
+                    },
+                )
                 .await?;
-            if binding.current_turn_id.lock().await.as_deref() == Some(turn_id.0.as_str()) {
-                *binding.current_turn_id.lock().await = None;
-            }
+            let _canonical_outcome = result.outcome;
             return Ok(());
         }
-        self.emit_turn_aborted_locked(session_id, turn_id, reason)
-            .await
+        let result = self
+            .terminalize_turn(
+                session_id,
+                turn_id,
+                TerminalRequest::Aborted {
+                    reason,
+                    source: TerminalSource::Passive,
+                },
+            )
+            .await?;
+        let _canonical_outcome = result.outcome;
+        Ok(())
     }
 
-    async fn emit_turn_aborted_locked(
+    /// Finalizes a just-recorded TurnStarted when binding the new turn failed.
+    /// This deliberately never inspects, cancels, or clears the binding for a
+    /// still-running older turn in the same session.
+    pub async fn emit_unbound_started_turn_aborted(
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
         reason: Option<String>,
     ) -> Result<()> {
-        if self.turn_has_terminal_event(session_id, turn_id).await? {
-            return Ok(());
-        }
-        if let Err(error) = self
-            .capture_turn_review_result(session_id, turn_id, "aborted", reason.as_deref(), true)
-            .await
-        {
-            eprintln!("[DCC] aborted turn review capture failed: {error}");
-        }
-        let outcome = self
-            .append_session_event(
+        let result = self
+            .terminalize_turn_with_binding(
                 session_id,
-                SessionEventKind::TurnAborted {
-                    turn_id: turn_id.clone(),
-                    reason: reason.clone(),
+                turn_id,
+                TerminalRequest::Aborted {
+                    reason,
+                    source: TerminalSource::Passive,
                 },
+                None,
             )
             .await?;
-        if matches!(outcome, AppendEventOutcome::Inserted(_)) {
-            self.publish(dcc_core::ports::events::CoreEvent::SessionTurnAborted {
-                session_id: session_id.0.clone(),
-                turn_id: turn_id.0.clone(),
-                reason,
-            })
-            .await?;
-        }
+        let _canonical_outcome = result.outcome;
         Ok(())
     }
 
-    /// Claims the turn under the terminal transition lock, cancels the
-    /// provider, then reacquires the lock to capture conservative evidence.
-    /// Provider cancellation is not treated as proof that no final write raced
-    /// with it, so aborted reviews are always finalized as partial.
+    /// Claims the turn in the process-wide arbiter, cancels the provider
+    /// outside binding locks, and captures conservative evidence. Provider
+    /// cancellation is not proof that no final write raced with it, so
+    /// aborted reviews are always finalized as partial.
     pub async fn quiesce_turn_for_abort(
         &self,
         session_id: &SessionId,
         turn_id: &TurnId,
         reason: Option<&str>,
     ) -> Result<()> {
-        let Some(binding) = self.provider_binding(session_id)? else {
-            self.capture_turn_review_result(session_id, turn_id, "aborted", reason, true)
-                .await?;
-            return Ok(());
-        };
-        {
-            let _terminal = binding.terminal_lock.lock().await;
+        if let Some(binding) = self.provider_binding(session_id)? {
             if binding.current_turn_id.lock().await.as_deref() != Some(turn_id.0.as_str()) {
                 return Ok(());
             }
-            *binding.aborting_turn_id.lock().await = Some(turn_id.0.clone());
         }
-        if let Some(provider) = provider_runtime(&binding.provider_id) {
-            let _ = provider.cancel(&binding.handle).await;
-        }
-        let _terminal = binding.terminal_lock.lock().await;
-        if binding.aborting_turn_id.lock().await.as_deref() != Some(turn_id.0.as_str()) {
-            return Ok(());
-        }
-        if let Err(error) = self
-            .capture_turn_review_result(session_id, turn_id, "aborted", reason, true)
-            .await
-        {
-            eprintln!("[DCC] aborted turn review capture failed after cancellation: {error}");
-        }
-        *binding.current_turn_id.lock().await = None;
-        *binding.aborting_turn_id.lock().await = None;
-        *binding.usage_turn_id.lock().await = None;
-        if let Ok(mut store) = self.store.lock() {
-            store.provider_sessions.remove(session_id);
-        }
-        let _ = self.clear_mcp_runtime_statuses(session_id).await;
+        let result = self
+            .terminalize_turn(
+                session_id,
+                turn_id,
+                TerminalRequest::Aborted {
+                    reason: reason.map(str::to_string),
+                    source: TerminalSource::Quiesce,
+                },
+            )
+            .await?;
+        let _canonical_outcome = result.outcome;
         Ok(())
     }
 
@@ -1153,8 +1589,8 @@ impl SessionCommandState {
             provider_id: session.provider_id.clone(),
             handle: handle.clone(),
             current_turn_id: Arc::new(AsyncMutex::new(None)),
-            aborting_turn_id: Arc::new(AsyncMutex::new(None)),
             terminal_lock: Arc::new(AsyncMutex::new(())),
+            terminal_token: Arc::new(TerminalTokenState::default()),
             usage_turn_id: Arc::new(AsyncMutex::new(None)),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(
@@ -1162,11 +1598,22 @@ impl SessionCommandState {
             ),
         };
 
-        {
+        let won_binding = {
             let mut store = self.lock_store()?;
-            store
-                .provider_sessions
-                .insert(session.id.clone(), binding.clone());
+            match store.provider_sessions.entry(session.id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(binding.clone());
+                    true
+                }
+                Entry::Occupied(_) => false,
+            }
+        };
+        if !won_binding {
+            // Another state attached the same session while this adapter was
+            // preparing. Do not overwrite its binding or publish loser
+            // statuses; dispose only the handle we prepared.
+            let _ = provider.cancel(&handle).await;
+            return Ok(());
         }
 
         if let Some(provider_version) = mcp_projection_version {
@@ -1323,6 +1770,30 @@ impl SessionCommandState {
             .mcp_runtime_statuses
             .remove(session_id)
             .is_some();
+        if !removed {
+            return Ok(());
+        }
+        self.publish(
+            dcc_core::ports::events::CoreEvent::SessionMcpRuntimeStatusChanged {
+                session_id: session_id.0.clone(),
+                statuses: Vec::new(),
+            },
+        )
+        .await
+    }
+
+    async fn clear_mcp_runtime_statuses_if_binding_absent(
+        &self,
+        session_id: &SessionId,
+        _expected: &ProviderSessionBinding,
+    ) -> Result<()> {
+        let removed = {
+            let mut store = self.lock_store()?;
+            if store.provider_sessions.contains_key(session_id) {
+                return Ok(());
+            }
+            store.mcp_runtime_statuses.remove(session_id).is_some()
+        };
         if !removed {
             return Ok(());
         }
@@ -2255,31 +2726,6 @@ impl SessionCommandState {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         let mut completed = false;
                         if let Some(turn_id) = turn_id {
-                            let mut remaining = {
-                                let mut tracker = binding.assistant_messages.lock().await;
-                                tracker.active.drain().collect::<Vec<_>>()
-                            };
-                            remaining.sort_by(|left, right| left.0.cmp(&right.0));
-                            for (message_id, phase) in remaining {
-                                let _ = state
-                                    .append_and_publish_session_event(
-                                        &session_id,
-                                        SessionEventKind::TurnAssistantMessageCompleted {
-                                            turn_id: TurnId(turn_id.clone()),
-                                            message_id: message_id.clone(),
-                                            phase: phase.clone(),
-                                            content: None,
-                                        },
-                                        dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageCompleted {
-                                            session_id: session_id.0.clone(),
-                                            turn_id: turn_id.clone(),
-                                            message_id,
-                                            phase,
-                                            content: None,
-                                        },
-                                    )
-                                    .await;
-                            }
                             match state
                                 .emit_turn_completed(&session_id, &TurnId(turn_id))
                                 .await
@@ -2318,10 +2764,30 @@ impl SessionCommandState {
                 }
             }
 
-            if let Ok(mut store) = state.store.lock() {
-                store.provider_sessions.remove(&session_id);
+            // The stream may outlive a replacement binding.  Only its own
+            // binding may be removed, and the store lock is never held over
+            // the async MCP cleanup.
+            let removed = {
+                let _terminal = binding.terminal_lock.lock().await;
+                if binding.current_turn_id.lock().await.is_some() {
+                    false
+                } else if let Ok(mut store) = state.store.lock() {
+                    let same = store
+                        .provider_sessions
+                        .get(&session_id)
+                        .is_some_and(|current| {
+                            Arc::ptr_eq(&current.current_turn_id, &binding.current_turn_id)
+                        });
+                    same && store.provider_sessions.remove(&session_id).is_some()
+                } else {
+                    false
+                }
+            };
+            if removed {
+                let _ = state
+                    .clear_mcp_runtime_statuses_if_binding_absent(&session_id, &binding)
+                    .await;
             }
-            let _ = state.clear_mcp_runtime_statuses(&session_id).await;
         });
     }
 
@@ -2370,8 +2836,19 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
+        let _terminal = binding.terminal_lock.lock().await;
+        let transition_active = binding
+            .terminal_token
+            .active
+            .lock()
+            .map_err(|_| dcc_core::CoreError::Repository("terminal token unavailable".to_string()))?
+            .is_some();
+        if transition_active {
+            return Err(dcc_core::CoreError::Repository(
+                "terminal turn transition already in progress".to_string(),
+            ));
+        }
         *binding.assistant_messages.lock().await = AssistantMessageTracker::default();
-        *binding.aborting_turn_id.lock().await = None;
         *binding.current_turn_id.lock().await = turn_id.clone();
         *binding.usage_turn_id.lock().await = turn_id;
         Ok(())
@@ -2451,7 +2928,7 @@ impl SessionCommandState {
             .await
         {
             let _ = self
-                .emit_turn_aborted(session_id, &turn_id, Some(error.to_string()))
+                .emit_unbound_started_turn_aborted(session_id, &turn_id, Some(error.to_string()))
                 .await;
             return Err(error);
         }
@@ -2651,38 +3128,30 @@ impl SessionCommandState {
                 binding.provider_id
             ))
         })?;
-        let cancelling_turn = {
-            let _terminal = binding.terminal_lock.lock().await;
-            let turn_id = binding.current_turn_id.lock().await.clone();
-            *binding.aborting_turn_id.lock().await = turn_id.clone();
-            turn_id
-        };
-        let result = provider.cancel(&binding.handle).await;
-        {
-            let _terminal = binding.terminal_lock.lock().await;
-            if let Some(turn_id) = cancelling_turn.as_deref() {
-                if binding.current_turn_id.lock().await.as_deref() == Some(turn_id) {
-                    if let Err(error) = self
-                        .emit_turn_aborted_locked(
-                            session_id,
-                            &TurnId(turn_id.to_string()),
-                            Some("Provider session cancelled".to_string()),
-                        )
-                        .await
-                    {
-                        eprintln!("[DCC] cancelled turn finalization failed: {error}");
-                    }
-                }
+        let cancelling_turn = binding.current_turn_id.lock().await.clone();
+        if let Some(turn_id) = cancelling_turn {
+            let result = self
+                .terminalize_turn(
+                    session_id,
+                    &TurnId(turn_id),
+                    TerminalRequest::Aborted {
+                        reason: Some("Provider session cancelled".to_string()),
+                        source: TerminalSource::Cancel,
+                    },
+                )
+                .await?;
+            let _canonical_outcome = result.outcome;
+            Ok(())
+        } else {
+            if let Some(_idle_token) = self
+                .acquire_idle_terminal_token(session_id, &binding)
+                .await?
+            {
+                let _ = provider.cancel(&binding.handle).await;
+                self.remove_binding_if_same(session_id, &binding).await?;
             }
-            *binding.current_turn_id.lock().await = None;
-            *binding.aborting_turn_id.lock().await = None;
-            *binding.usage_turn_id.lock().await = None;
+            Ok(())
         }
-        if let Ok(mut store) = self.store.lock() {
-            store.provider_sessions.remove(session_id);
-        }
-        let _ = self.clear_mcp_runtime_statuses(session_id).await;
-        result
     }
 }
 
@@ -2802,6 +3271,14 @@ impl SessionEventRepo for SessionCommandState {
         SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await
     }
 
+    async fn find_terminal_event(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<Option<SessionEventRecord>> {
+        SessionEventRepo::find_terminal_event(&self.session_repo, session_id, turn_id).await
+    }
+
     async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()> {
         SessionEventRepo::delete_events_by_session(&self.session_repo, session_id).await
     }
@@ -2838,7 +3315,7 @@ impl DelegationRepo for SessionCommandState {
 #[async_trait]
 impl EventBus for SessionCommandState {
     async fn publish(&self, event: dcc_core::ports::events::CoreEvent) -> Result<()> {
-        self.event_bus.publish(event).await
+        self.runtime.publish_event(event).await
     }
 }
 
@@ -2853,6 +3330,152 @@ mod tests {
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
         },
     };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone, Default)]
+    struct CountingEventBus(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl EventBus for CountingEventBus {
+        async fn publish(&self, _event: dcc_core::ports::events::CoreEvent) -> Result<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct FailingEventBus;
+
+    #[async_trait]
+    impl EventBus for FailingEventBus {
+        async fn publish(&self, _event: dcc_core::ports::events::CoreEvent) -> Result<()> {
+            Err(dcc_core::CoreError::Repository(
+                "event bus failure".to_string(),
+            ))
+        }
+    }
+
+    fn sample_session(id: &str) -> Session {
+        Session {
+            id: SessionId(id.to_string()),
+            project_id: ProjectId(format!("project-{id}")),
+            workspace_id: WorkspaceId(format!("workspace-{id}")),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn terminal_racers_share_one_durable_terminal_and_publication() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-terminal-race-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let app_data = std::fs::canonicalize(app_data.path()).expect("physical app data");
+        let first_bus = CountingEventBus::default();
+        let second_bus = CountingEventBus::default();
+        let first = SessionCommandState::new_with_event_bus(
+            db_path.clone(),
+            app_data.clone(),
+            Arc::new(first_bus.clone()),
+        );
+        let second = SessionCommandState::new_with_event_bus(
+            db_path.clone(),
+            app_data,
+            Arc::new(second_bus.clone()),
+        );
+        let session = sample_session("terminal-race");
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        let workspace = sample_workspace(
+            &session.workspace_id.0,
+            workspace_root.path().to_str().expect("workspace path"),
+        );
+        let workspace_repo = SqliteWorkspaceRepo::open(&db_path).expect("workspace repo");
+        futures::executor::block_on(workspace_repo.save_workspace(&workspace))
+            .expect("save workspace");
+        futures::executor::block_on(SessionRepo::save_session(&first, &session))
+            .expect("save session");
+        let turn_id = TurnId("turn-1".to_string());
+        let session_id = session.id.clone();
+        let first_call = first.clone();
+        let second_call = second.clone();
+        let (completed, aborted) = futures::executor::block_on(async move {
+            futures::join!(
+                first_call.emit_turn_completed(&session_id, &turn_id),
+                second_call.emit_turn_aborted(
+                    &session_id,
+                    &turn_id,
+                    Some("provider failed".to_string())
+                )
+            )
+        });
+        assert!(completed.is_ok(), "completed racer failed: {completed:?}");
+        assert!(aborted.is_ok(), "aborted racer failed: {aborted:?}");
+        let events = futures::executor::block_on(SessionEventRepo::list_events_by_session(
+            &first,
+            &session.id,
+        ))
+        .expect("list terminal events");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    &event.kind,
+                    SessionEventKind::TurnCompleted { .. } | SessionEventKind::TurnAborted { .. }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(first_bus.0.load(Ordering::SeqCst), 1);
+        assert_eq!(second_bus.0.load(Ordering::SeqCst), 1);
+        drop(first);
+        drop(second);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn preexisting_terminal_skips_capture_and_publication() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-terminal-existing-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let bus = CountingEventBus::default();
+        let state = SessionCommandState::new_with_event_bus(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+            Arc::new(bus.clone()),
+        );
+        let session = sample_session("terminal-existing");
+        futures::executor::block_on(SessionRepo::save_session(&state, &session))
+            .expect("save session");
+        let turn_id = TurnId("turn-existing".to_string());
+        futures::executor::block_on(state.append_session_event(
+            &session.id,
+            SessionEventKind::TurnCompleted {
+                turn_id: turn_id.clone(),
+            },
+        ))
+        .expect("insert terminal");
+        futures::executor::block_on(state.emit_turn_aborted(
+            &session.id,
+            &turn_id,
+            Some("loser".to_string()),
+        ))
+        .expect("canonical replay");
+        assert!(state
+            .list_turn_change_sets(&session.id)
+            .expect("list review rows")
+            .is_empty());
+        assert_eq!(bus.0.load(Ordering::SeqCst), 0);
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
+    }
 
     #[test]
     fn synthetic_assistant_items_are_stable_until_a_semantic_boundary() {
@@ -3280,6 +3903,266 @@ mod tests {
             &first.process_runtime().terminal_arbiter(),
             &second.process_runtime().terminal_arbiter()
         ));
+        assert!(Arc::ptr_eq(&first.store, &second.store));
+    }
+
+    #[test]
+    fn terminal_token_blocks_replacement_until_raii_drop() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-token-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path,
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
+        let session_id = SessionId("token-session".to_string());
+        let turn_id = TurnId("token-turn".to_string());
+        let binding = ProviderSessionBinding {
+            provider_id: "codex".to_string(),
+            handle: SessionHandle {
+                provider_id: ProviderId("codex".to_string()),
+                session_id: session_id.clone(),
+                handle_id: "token-handle".to_string(),
+            },
+            current_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
+            terminal_lock: Arc::new(AsyncMutex::new(())),
+            terminal_token: Arc::new(TerminalTokenState::default()),
+            usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
+            assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
+            projected_mcp_definition_ids: Arc::new(HashSet::new()),
+        };
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session_id.clone(), binding.clone());
+        let token = futures::executor::block_on(state.acquire_terminal_token(
+            &session_id,
+            &turn_id,
+            &binding,
+        ))
+        .expect("acquire terminal token");
+        assert!(futures::executor::block_on(
+            state.set_active_turn(&session_id, Some("replacement".to_string()),)
+        )
+        .is_err());
+        drop(token);
+        futures::executor::block_on(
+            state.set_active_turn(&session_id, Some("replacement".to_string())),
+        )
+        .expect("replacement after token drop");
+    }
+
+    #[test]
+    fn aborted_leader_does_not_flush_assistant_completion_events() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-abort-flush-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
+        let session = sample_session("abort-flush");
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        let workspace = sample_workspace(
+            &session.workspace_id.0,
+            workspace_root.path().to_str().expect("workspace path"),
+        );
+        let workspace_repo = SqliteWorkspaceRepo::open(&db_path).expect("workspace repo");
+        futures::executor::block_on(workspace_repo.save_workspace(&workspace))
+            .expect("save workspace");
+        futures::executor::block_on(SessionRepo::save_session(&state, &session))
+            .expect("save session");
+        let turn_id = TurnId("abort-turn".to_string());
+        let binding = ProviderSessionBinding {
+            provider_id: "codex".to_string(),
+            handle: SessionHandle {
+                provider_id: ProviderId("codex".to_string()),
+                session_id: session.id.clone(),
+                handle_id: "abort-handle".to_string(),
+            },
+            current_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
+            terminal_lock: Arc::new(AsyncMutex::new(())),
+            terminal_token: Arc::new(TerminalTokenState::default()),
+            usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
+            assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
+            projected_mcp_definition_ids: Arc::new(HashSet::new()),
+        };
+        binding
+            .assistant_messages
+            .try_lock()
+            .expect("tracker")
+            .active
+            .insert("assistant-1".to_string(), AssistantMessagePhase::Unknown);
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), binding);
+        futures::executor::block_on(state.terminalize_turn(
+            &session.id,
+            &turn_id,
+            TerminalRequest::Aborted {
+                reason: Some("cancelled".to_string()),
+                source: TerminalSource::Passive,
+            },
+        ))
+        .expect("aborted terminal");
+        let events = futures::executor::block_on(SessionEventRepo::list_events_by_session(
+            &state,
+            &session.id,
+        ))
+        .expect("events");
+        assert!(events
+            .iter()
+            .any(|event| matches!(&event.kind, SessionEventKind::TurnAborted { .. })));
+        assert!(!events.iter().any(|event| matches!(
+            &event.kind,
+            SessionEventKind::TurnAssistantMessageCompleted { .. }
+        )));
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn publish_failure_still_cleans_terminal_binding_after_commit() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-publish-failure-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_with_event_bus(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+            Arc::new(FailingEventBus),
+        );
+        let session = sample_session("publish-failure");
+        let workspace_root = tempfile::tempdir().expect("workspace root");
+        let workspace = sample_workspace(
+            &session.workspace_id.0,
+            workspace_root.path().to_str().expect("workspace path"),
+        );
+        let workspace_repo = SqliteWorkspaceRepo::open(&db_path).expect("workspace repo");
+        futures::executor::block_on(workspace_repo.save_workspace(&workspace))
+            .expect("save workspace");
+        futures::executor::block_on(SessionRepo::save_session(&state, &session))
+            .expect("save session");
+        let turn_id = TurnId("publish-turn".to_string());
+        let binding = ProviderSessionBinding {
+            provider_id: "codex".to_string(),
+            handle: SessionHandle {
+                provider_id: ProviderId("codex".to_string()),
+                session_id: session.id.clone(),
+                handle_id: "publish-handle".to_string(),
+            },
+            current_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
+            terminal_lock: Arc::new(AsyncMutex::new(())),
+            terminal_token: Arc::new(TerminalTokenState::default()),
+            usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
+            assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
+            projected_mcp_definition_ids: Arc::new(HashSet::new()),
+        };
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), binding);
+        let result = futures::executor::block_on(state.terminalize_turn(
+            &session.id,
+            &turn_id,
+            TerminalRequest::Completed,
+        ));
+        let result = result.expect("durable terminal survives publish failure");
+        assert!(result.inserted);
+        let events = futures::executor::block_on(SessionEventRepo::list_events_by_session(
+            &state,
+            &session.id,
+        ))
+        .expect("events");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(&event.kind, SessionEventKind::TurnCompleted { .. }))
+                .count(),
+            1
+        );
+        let binding = state
+            .provider_binding(&session.id)
+            .expect("binding lookup")
+            .expect("binding retained for completed queue");
+        assert!(binding
+            .current_turn_id
+            .try_lock()
+            .expect("turn lock")
+            .is_none());
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn unbound_started_abort_preserves_older_active_binding() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-unbound-abort-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
+        let session = sample_session("unbound-abort");
+        futures::executor::block_on(SessionRepo::save_session(&state, &session))
+            .expect("save session");
+        let old_turn = TurnId("old-turn".to_string());
+        let new_turn = TurnId("new-turn".to_string());
+        let binding = ProviderSessionBinding {
+            provider_id: "codex".to_string(),
+            handle: SessionHandle {
+                provider_id: ProviderId("codex".to_string()),
+                session_id: session.id.clone(),
+                handle_id: "old-handle".to_string(),
+            },
+            current_turn_id: Arc::new(AsyncMutex::new(Some(old_turn.0.clone()))),
+            terminal_lock: Arc::new(AsyncMutex::new(())),
+            terminal_token: Arc::new(TerminalTokenState::default()),
+            usage_turn_id: Arc::new(AsyncMutex::new(Some(old_turn.0.clone()))),
+            assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
+            projected_mcp_definition_ids: Arc::new(HashSet::new()),
+        };
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), binding);
+        futures::executor::block_on(state.emit_unbound_started_turn_aborted(
+            &session.id,
+            &new_turn,
+            Some("binding token busy".to_string()),
+        ))
+        .expect("unbound turn abort");
+        let current = state
+            .provider_binding(&session.id)
+            .expect("binding lookup")
+            .expect("old binding remains");
+        assert_eq!(
+            futures::executor::block_on(current.current_turn_id.lock()).as_deref(),
+            Some(old_turn.0.as_str())
+        );
+        let events = futures::executor::block_on(SessionEventRepo::list_events_by_session(
+            &state,
+            &session.id,
+        ))
+        .expect("events");
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            SessionEventKind::TurnAborted { turn_id, .. } if turn_id == &new_turn
+        )));
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]

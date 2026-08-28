@@ -20,6 +20,8 @@ use std::{
 };
 
 use crate::terminal_arbiter::TerminalArbiter;
+use dcc_core::ports::{events::CoreEvent, EventBus};
+use dcc_core::Result as CoreResult;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PhysicalIdentity {
@@ -129,6 +131,8 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for AcquireAfterOpenError<E
 /// filesystem authorization from this registry.
 pub struct ProcessRuntime {
     terminal_arbiter: Arc<TerminalArbiter>,
+    session_store: Arc<Mutex<crate::state::SessionStore>>,
+    event_buses: Mutex<Vec<Weak<dyn EventBus>>>,
 }
 
 impl fmt::Debug for ProcessRuntime {
@@ -141,11 +145,69 @@ impl ProcessRuntime {
     fn new() -> Self {
         Self {
             terminal_arbiter: Arc::new(TerminalArbiter::default()),
+            session_store: Arc::new(Mutex::new(crate::state::SessionStore::default())),
+            event_buses: Mutex::new(Vec::new()),
         }
     }
 
     pub fn terminal_arbiter(&self) -> Arc<TerminalArbiter> {
         Arc::clone(&self.terminal_arbiter)
+    }
+
+    pub(crate) fn register_event_bus(&self, bus: &Arc<dyn EventBus>) -> CoreResult<()> {
+        let mut buses = self
+            .event_buses
+            .lock()
+            .map_err(|_| dcc_core::CoreError::Repository("event hub unavailable".to_string()))?;
+        buses.retain(|entry| entry.strong_count() != 0);
+        if !buses
+            .iter()
+            .any(|entry| Weak::ptr_eq(entry, &Arc::downgrade(bus)))
+        {
+            buses.push(Arc::downgrade(bus));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn publish_event(&self, event: CoreEvent) -> CoreResult<()> {
+        let buses = {
+            let mut entries = self.event_buses.lock().map_err(|_| {
+                dcc_core::CoreError::Repository("event hub unavailable".to_string())
+            })?;
+            let mut live = Vec::with_capacity(entries.len());
+            entries.retain(|entry| {
+                if let Some(bus) = entry.upgrade() {
+                    live.push(bus);
+                    true
+                } else {
+                    false
+                }
+            });
+            live
+        };
+        let mut first_error = None;
+        let mut delivered = false;
+        for bus in buses {
+            match bus.publish(event.clone()).await {
+                Ok(()) => delivered = true,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        if delivered {
+            Ok(())
+        } else {
+            Err(first_error.unwrap_or_else(|| {
+                dcc_core::CoreError::Repository("event hub has no subscribers".to_string())
+            }))
+        }
+    }
+
+    pub(crate) fn session_store(&self) -> Arc<Mutex<crate::state::SessionStore>> {
+        Arc::clone(&self.session_store)
     }
 }
 

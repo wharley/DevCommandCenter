@@ -543,7 +543,10 @@ pub async fn send_turn(
         .set_active_turn(&output.session.id, Some(turn_id.0.clone()))
         .await
     {
-        return Err(abort_turn(error.to_string()).await);
+        let _ = state
+            .emit_unbound_started_turn_aborted(&session_id, &turn_id, Some(error.to_string()))
+            .await;
+        return Err(error.to_string());
     }
     if let Err(error) = state
         .capture_turn_review_baseline(&output.session, &turn_id)
