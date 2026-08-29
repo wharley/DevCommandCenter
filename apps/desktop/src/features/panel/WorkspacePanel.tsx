@@ -19,6 +19,11 @@ import {
 	type DiffAnnotationRequest,
 	type DiffAnnotationSubmit,
 } from "@/features/editor/WorkspaceEditorSurface";
+import {
+	DiffAnnotationPopover,
+	type PendingAnnotation,
+} from "@/features/editor/diff-annotation";
+import { subscribeWorkspaceDiffAnnotation } from "@/features/editor/workspace-diff-annotation-command";
 import { FileTabsSurface } from "@/features/editor/file-tabs-surface";
 import { resolveConfirmedFileSurfaceCloseHandler } from "@/features/editor/file-surface.logic";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
@@ -129,6 +134,11 @@ type ComposerPrefill = {
 };
 
 type ComposerPrefillConsumption = Pick<ComposerPrefill, "text" | "nonce">;
+
+type InspectorPendingAnnotation = {
+	pending: PendingAnnotation;
+	targetSessionId: string | null;
+};
 
 /** Formats a diff selection as a markdown context block for the agent prompt. */
 function buildAnnotationContextBlock(request: DiffAnnotationRequest): string {
@@ -353,6 +363,8 @@ export function WorkspacePanel({
 	const [reviewAnnotations, setReviewAnnotations] = useState<ReviewAnnotation[]>(
 		[],
 	);
+	const [inspectorPendingAnnotation, setInspectorPendingAnnotation] =
+		useState<InspectorPendingAnnotation | null>(null);
 	const [isApprovingPlan, setIsApprovingPlan] = useState(false);
 	const [secondarySurfaceWidth, setSecondarySurfaceWidth] = useState(() =>
 		readSecondarySurfaceWidth(workspaceId),
@@ -374,6 +386,16 @@ export function WorkspacePanel({
 	const secondarySurfaceWidthRef = useRef(secondarySurfaceWidth);
 	secondarySurfaceWidthRef.current = secondarySurfaceWidth;
 	const restoredSecondarySurfaceWorkspaceRef = useRef<string | null>(null);
+	useEffect(() => {
+		setInspectorPendingAnnotation(null);
+		return subscribeWorkspaceDiffAnnotation((command) => {
+			if (command.workspaceId !== workspaceId) return;
+			setInspectorPendingAnnotation({
+				pending: command.pending,
+				targetSessionId: command.targetSessionId ?? null,
+			});
+		});
+	}, [workspaceId]);
 	const setSecondarySurfaceContainerNode = useCallback(
 		(node: HTMLDivElement | null) => {
 			setSecondarySurfaceContainer(node);
@@ -596,6 +618,45 @@ export function WorkspacePanel({
 			setReviewAnnotations((prev) => [...prev, { id, request, note }]);
 		},
 		[],
+	);
+	const handleSubmitInspectorAnnotation = useCallback(
+		(instruction: string, newSession: boolean) => {
+			if (!inspectorPendingAnnotation) return;
+			const turn = buildAnnotationTurn(
+				buildAnnotationContent(
+					inspectorPendingAnnotation.pending.request,
+					instruction,
+				),
+			);
+			void onSubmitPrompt(turn, {
+				forceNewSession: newSession,
+				targetSessionId: inspectorPendingAnnotation.targetSessionId,
+			});
+			setInspectorPendingAnnotation(null);
+		},
+		[buildAnnotationTurn, inspectorPendingAnnotation, onSubmitPrompt],
+	);
+	const handleEditInspectorAnnotation = useCallback(
+		(instruction: string) => {
+			if (!inspectorPendingAnnotation) return;
+			handleEditAnnotationInComposer({
+				request: inspectorPendingAnnotation.pending.request,
+				instruction,
+			});
+			setInspectorPendingAnnotation(null);
+		},
+		[handleEditAnnotationInComposer, inspectorPendingAnnotation],
+	);
+	const handleAddInspectorAnnotationToReview = useCallback(
+		(note: string) => {
+			if (!inspectorPendingAnnotation) return;
+			handleAddToReview({
+				request: inspectorPendingAnnotation.pending.request,
+				note,
+			});
+			setInspectorPendingAnnotation(null);
+		},
+		[handleAddToReview, inspectorPendingAnnotation],
 	);
 	const handleRemoveReviewAnnotation = useCallback((id: string) => {
 		setReviewAnnotations((prev) => prev.filter((item) => item.id !== id));
@@ -1566,6 +1627,17 @@ export function WorkspacePanel({
 				onClear={handleClearReview}
 				onSubmit={handleSubmitReview}
 			/>
+			{inspectorPendingAnnotation ? (
+				<DiffAnnotationPopover
+					pending={inspectorPendingAnnotation.pending}
+					canEditInComposer
+					canAddToReview
+					onSubmit={handleSubmitInspectorAnnotation}
+					onEditInComposer={handleEditInspectorAnnotation}
+					onAddToReview={handleAddInspectorAnnotationToReview}
+					onCancel={() => setInspectorPendingAnnotation(null)}
+				/>
+			) : null}
 		</>
 	);
 }

@@ -53,6 +53,8 @@ import { NumberTicker } from "@/components/ui/number-ticker";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceChangesDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
+import type { DiffAnnotationPayload } from "@/features/editor/diff-types";
+import { dispatchWorkspaceDiffAnnotation } from "@/features/editor/workspace-diff-annotation-command";
 import type { WorkspaceGitChangeEntry, WorkspacePrReviewComment } from "@dcc/contracts";
 import {
 	workspaceGitDiscardFile,
@@ -560,6 +562,7 @@ function ReviewChangeCard({
 	runGit,
 	reviewCommentCount = 0,
 	onExpand,
+	onAnnotate,
 }: {
 	entry: WorkspaceGitChangeEntry;
 	group: "staged" | "unstaged" | "committed";
@@ -570,6 +573,10 @@ function ReviewChangeCard({
 	runGit: (fn: () => Promise<void>) => Promise<void>;
 	reviewCommentCount?: number;
 	onExpand?: (selection: WorkspaceGitPreviewSelection) => void;
+	onAnnotate?: (
+		selection: WorkspaceGitPreviewSelection,
+		payload: DiffAnnotationPayload,
+	) => void;
 }) {
 	const { t } = useTranslation("common");
 	const cardRef = useRef<HTMLElement | null>(null);
@@ -742,6 +749,12 @@ function ReviewChangeCard({
 							originalText={query.data.originalText}
 							modifiedText={query.data.modifiedText}
 							inline
+							onAnnotate={
+								onAnnotate
+									? (payload) => onAnnotate(selection, payload)
+									: undefined
+							}
+							annotateLabel={t("diffAnnotate.sendToAgent")}
 							className="h-full"
 						/>
 					) : null}
@@ -758,6 +771,7 @@ function BranchDiffSection({
 	selectedPath = null,
 	reviewCommentCounts,
 	onExpand,
+	onAnnotate,
 }: {
 	workspaceRoot: string;
 	gitBusy: boolean;
@@ -765,6 +779,10 @@ function BranchDiffSection({
 	selectedPath?: string | null;
 	reviewCommentCounts?: Map<string, number>;
 	onExpand?: (selection: WorkspaceGitPreviewSelection) => void;
+	onAnnotate?: (
+		selection: WorkspaceGitPreviewSelection,
+		payload: DiffAnnotationPayload,
+	) => void;
 }) {
 	const query = useWorkspaceGitBranchDiff(workspaceRoot);
 	const prevDataRef = useRef(query.data?.changes);
@@ -836,6 +854,7 @@ function BranchDiffSection({
 								runGit={async () => {}}
 								reviewCommentCount={reviewCommentCounts?.get(entry.path) ?? 0}
 								onExpand={onExpand}
+								onAnnotate={onAnnotate}
 							/>
 						))}
 					</div>
@@ -888,6 +907,7 @@ function ChangesGroup({
 	selectedPath = null,
 	reviewCommentCounts,
 	onSelect,
+	onAnnotate,
 }: {
 	label: string;
 	count: number;
@@ -909,6 +929,10 @@ function ChangesGroup({
 	selectedPath?: string | null;
 	reviewCommentCounts?: Map<string, number>;
 	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
+	onAnnotate?: (
+		selection: WorkspaceGitPreviewSelection,
+		payload: DiffAnnotationPayload,
+	) => void;
 }) {
 	return (
 		<div className="border-b border-border/35 last:border-b-0">
@@ -971,6 +995,7 @@ function ChangesGroup({
 								runGit={runGit}
 								reviewCommentCount={reviewCommentCounts?.get(e.path) ?? 0}
 								onExpand={onSelect}
+								onAnnotate={onAnnotate}
 							/>
 						))}
 					</div>
@@ -1093,6 +1118,25 @@ export function InspectorChangesSection({
 			onOpenExpandedPreview?.(enrichPreviewSelection(selection));
 		},
 		[enrichPreviewSelection, onOpenExpandedPreview],
+	);
+	const handleAnnotatePreview = useCallback(
+		(
+			selection: WorkspaceGitPreviewSelection,
+			payload: DiffAnnotationPayload,
+		) => {
+			if (!workspaceId) return;
+			const enrichedSelection = enrichPreviewSelection(selection);
+			const { anchor, ...request } = payload;
+			dispatchWorkspaceDiffAnnotation({
+				workspaceId,
+				targetSessionId: enrichedSelection.targetSessionId ?? null,
+				pending: {
+					request: { ...request, path: enrichedSelection.path },
+					anchor,
+				},
+			});
+		},
+		[enrichPreviewSelection, workspaceId],
 	);
 	const handleScopeChange = useCallback(
 		(scope: InspectorReviewScope) => {
@@ -1367,6 +1411,7 @@ export function InspectorChangesSection({
 							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
 							onSelect={handleExpandPreview}
+							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
 						/>
 					) : null}
 					{activeScope === "working" && data.unstaged.length > 0 ? (
@@ -1396,6 +1441,7 @@ export function InspectorChangesSection({
 							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
 							onSelect={handleExpandPreview}
+							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
 						/>
 					) : null}
 					{activeScope === "working" && !hasAny ? (
@@ -1424,6 +1470,7 @@ export function InspectorChangesSection({
 							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
 							onExpand={handleExpandPreview}
+							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
 						/>
 					) : null}
 					{codeRabbitEnabled &&
