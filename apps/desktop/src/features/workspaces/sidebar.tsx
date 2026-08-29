@@ -756,11 +756,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					item.headerVariant === "project" && item.sourceKey
 						? repositoriesBySourceKey.get(item.sourceKey) ?? null
 						: null;
-				const canCreateProjectWorkspace =
-					item.headerVariant === "project" &&
-					repository !== null &&
-					Boolean(onCreateWorkspaceFromProject) &&
-					!isCreatingWorkspace;
 				const canOpenProjectBranch =
 					item.headerVariant === "project" &&
 					repository !== null &&
@@ -780,8 +775,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					repository !== null &&
 					Boolean(onSetProjectPinned);
 				const canManageProject =
-					canCreateProjectWorkspace ||
-					canOpenProjectBranch ||
 					canEditProject ||
 					canPinProject ||
 					canRemoveProject;
@@ -871,36 +864,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							) : null}
 						</button>
 
-						{canCreateProjectWorkspace ? (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("sidebar.createWorkspaceFromProject", {
-											label: item.label,
-										})}
-										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
-										onClick={(event) => {
-											event.stopPropagation();
-											onCreateWorkspaceFromProject?.({
-												projectId: repository.projectId,
-												workspaceRoot: repository.rootPath,
-												baseBranch: repository.baseBranch,
-												label: repositoryDisplayName(repository),
-											});
-										}}
-									>
-										<Plus className="size-4" strokeWidth={2.1} aria-hidden />
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="top">
-									{t("sidebar.newWorkspace")}
-								</TooltipContent>
-							</Tooltip>
-						) : null}
-
 						{canOpenProjectBranch ? (
 							<Tooltip>
 								<TooltipTrigger asChild>
@@ -987,23 +950,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											{t("sidebar.editProject")}
 										</DropdownMenuItem>
 									) : null}
-									{repository && onCreateWorkspaceFromProject ? (
-										<DropdownMenuItem
-											className="gap-2 text-[13px]"
-											onSelect={(event) => {
-												event.preventDefault();
-												onCreateWorkspaceFromProject({
-													projectId: repository.projectId,
-													workspaceRoot: repository.rootPath,
-													baseBranch: repository.baseBranch,
-													label: repositoryDisplayName(repository),
-												});
-											}}
-										>
-											<Plus className="size-3.5" strokeWidth={2} aria-hidden />
-											{t("sidebar.newWorkspace")}
-										</DropdownMenuItem>
-									) : null}
 									{canRemoveProject ? (
 										<DropdownMenuItem
 											className="gap-2 text-[13px] text-destructive focus:text-destructive"
@@ -1065,7 +1011,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			onArchiveWorkspace,
 			onRenameWorkspace,
 			onCompleteWorkspace,
-			onCreateWorkspaceFromProject,
 			onOpenBranchFromProject,
 			onDeleteProject,
 			onUpdateProjectIdentity,
