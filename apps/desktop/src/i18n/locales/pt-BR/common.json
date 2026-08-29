@@ -1162,8 +1162,23 @@
     "terminalNote": "As sessões de terminal ficam na gaveta de workbench na parte inferior do layout — elas não são espelhadas aqui para o inspetor ficar focado em sinais do Git e da sessão."
   },
   "conversationLaunch": {
-    "title": "O que vamos fazer em {{workspaceName}}?",
-    "hint": "Descreva o resultado no composer abaixo. O DCC prepara automaticamente a conversa e a worktree protegida."
+    "title": "Vamos construir",
+    "hint": "{{workspaceName}}"
+  },
+  "newTask": {
+    "title": "Vamos construir",
+    "chooseProject": "Escolha um projeto",
+    "projects": "Iniciar tarefa em",
+    "multipleProjects": "Selecionar vários projetos…",
+    "multipleProjectsDescription": "Coordene dois ou mais projetos na mesma tarefa.",
+    "openAnotherProject": "Abrir outro projeto…",
+    "execution": {
+      "protected": "Worktree protegido",
+      "protectedDescription": "Isolado do checkout original",
+      "local": "Local direto",
+      "localDescription": "Usa o checkout atual",
+      "fixedAfterCreation": "O modo de execução é definido ao criar a tarefa."
+    }
   },
   "composer": {
     "ariaLabel": "Composer do workspace",

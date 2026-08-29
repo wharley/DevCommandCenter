@@ -29,6 +29,7 @@ import type {
 	AgentResolutionRunResult,
 } from "@/features/merge/agent-conflict-resolution";
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
+import { WorkspaceDeliveryControls } from "@/features/commit/WorkspaceDeliveryControls";
 import type { ManualDelegationRequest } from "@/features/sessions/delegation-request";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
@@ -183,7 +184,6 @@ type WorkspacePanelProps = {
 	workspaceBranch: string;
 	workspacePath: string | null;
 	workspaceSetupReport?: WorkspaceSetupReport | null;
-	projectRootPath?: string | null;
 	projectLabel?: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
@@ -256,7 +256,6 @@ type WorkspacePanelProps = {
 	onReviewChanges?: () => void;
 	onOpenMultiProjectDelivery?: () => void;
 	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
-	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
 	/** Opens the inspector and previews an implementation delegation diff. */
@@ -280,7 +279,6 @@ export function WorkspacePanel({
 	workspaceBranch,
 	workspacePath,
 	workspaceSetupReport = null,
-	projectRootPath = null,
 	projectLabel = null,
 	projectIcon = null,
 	projectColor = null,
@@ -332,7 +330,6 @@ export function WorkspacePanel({
 	onReviewChanges,
 	onOpenMultiProjectDelivery,
 	onCompleteWorkspace,
-	onCreateTaskFromBranch,
 	onRunRecommendedSetup,
 	onSkipRecommendedSetup,
 	onReviewDelegation,
@@ -1130,7 +1127,7 @@ export function WorkspacePanel({
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			<header
 				className={[
-					"border-b border-border/60 px-4 py-3",
+					"shrink-0 border-b border-border/60 bg-background/95 px-4 py-2 backdrop-blur",
 					"pl-[calc(env(safe-area-inset-left)+1rem)] pr-[calc(env(safe-area-inset-right)+1rem)]",
 				].join(" ")}
 			>
@@ -1151,8 +1148,20 @@ export function WorkspacePanel({
 					onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}
 					terminalScopes={terminalScopes}
 					workspacePath={workspacePath}
-					inspectorCollapsed={inspectorCollapsed}
-					onToggleInspector={onToggleInspector}
+					workspaceActions={
+						<WorkspaceDeliveryControls
+							changeSummary={gitChangeSummary}
+							gitStatusState={gitStatusState}
+							commitMode={commitMode}
+							forgeRequestLabel={forgeRequestLabel}
+							deliveryBusy={delivery.busy || commitPreparationBusy}
+							multiProjectCount={workspaceContextProjects.length}
+							onReviewChanges={onReviewChanges ?? onToggleInspector}
+							onRunDeliveryAction={runDeliveryAction}
+							onCreateChangeRequest={(draft) => setCreateRequestDraft(draft)}
+							onOpenMultiProjectDelivery={onOpenMultiProjectDelivery}
+						/>
+					}
 				/>
 			</header>
 
@@ -1195,7 +1204,8 @@ export function WorkspacePanel({
 					/>
 				) : null}
 
-				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">
+				<div className="shrink-0 px-3 pb-3 pt-2 sm:px-4">
+					<div className="mx-auto w-full max-w-[52rem]">
 					<WorkspaceComposer
 						draftKey={workspaceId}
 						disabled={false}
@@ -1209,15 +1219,12 @@ export function WorkspacePanel({
 						focusRequestKey={composerFocusRequestKey}
 						workspacePath={workspacePath}
 						workspaceSetupReport={workspaceSetupReport}
-						projectRootPath={projectRootPath}
 						workspaceBranch={workspaceBranch}
 						projectLabel={projectLabel}
 						projectIcon={projectIcon}
 						projectColor={projectColor}
 						currentBranch={currentBranch}
 						isIsolatedWorkspace={isIsolatedWorkspace}
-						gitChangeSummary={gitChangeSummary}
-						gitStatusState={gitStatusState}
 						contextProjects={workspaceContextProjects}
 						showPlanFollowUpPrompt={showPlanFollowUpPrompt}
 						planTitle={activePlanTitle}
@@ -1232,17 +1239,10 @@ export function WorkspacePanel({
 						openDelegateMenuSignal={delegateSignal ?? 0}
 						onAbortSession={onAbortSession}
 						onReviewPlan={onOpenPlanSurface}
-						onReviewChanges={onReviewChanges ?? onToggleInspector}
-						commitMode={commitMode}
-						forgeRequestLabel={forgeRequestLabel}
-						deliveryBusy={delivery.busy || commitPreparationBusy}
-						onRunDeliveryAction={runDeliveryAction}
-						onCreateChangeRequest={(draft) => setCreateRequestDraft(draft)}
-						onOpenMultiProjectDelivery={onOpenMultiProjectDelivery}
-						onCreateTaskFromBranch={onCreateTaskFromBranch}
 						onRunRecommendedSetup={onRunRecommendedSetup}
 						onSkipRecommendedSetup={onSkipRecommendedSetup}
 					/>
+					</div>
 				</div>
 			</div>
 		</div>

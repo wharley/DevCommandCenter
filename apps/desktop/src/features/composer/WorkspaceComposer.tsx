@@ -50,12 +50,7 @@ import type {
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { canAbortRun } from "@/features/sessions/session-chrome-state";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
-import {
-	ExecutionDock,
-	type ExecutionDockChangeSummary,
-} from "./ExecutionDock";
-import type { ExecutionDockRunMode } from "./ExecutionDock.actions";
-import type { CommitMode } from "@/features/commit/WorkspaceCommitButton.logic";
+import { ExecutionContextRail } from "./ExecutionContextRail";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ComposerApprovalPolicyMenu } from "./ComposerApprovalPolicyMenu";
 import { ComposerExecutionMenu } from "./ComposerExecutionMenu";
@@ -140,15 +135,12 @@ type WorkspaceComposerProps = {
 	focusRequestKey?: number | null;
 	workspacePath: string | null;
 	workspaceSetupReport?: WorkspaceSetupReport | null;
-	projectRootPath: string | null;
 	workspaceBranch: string | null;
 	projectLabel: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
 	currentBranch: string | null;
 	isIsolatedWorkspace: boolean;
-	gitChangeSummary: ExecutionDockChangeSummary | null;
-	gitStatusState?: "loading" | "ready" | "error";
 	contextProjects?: Array<{
 		id: string;
 		name: string;
@@ -171,16 +163,8 @@ type WorkspaceComposerProps = {
 	openDelegateMenuSignal?: number;
 	onAbortSession: () => void;
 	onReviewPlan: () => void;
-	onReviewChanges?: () => void;
-	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
 	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
 	onSkipRecommendedSetup?: () => Promise<void>;
-	commitMode?: CommitMode | null;
-	forgeRequestLabel?: "PR" | "MR";
-	deliveryBusy?: boolean;
-	onRunDeliveryAction?: (mode: ExecutionDockRunMode) => Promise<void> | void;
-	onCreateChangeRequest?: (draft: boolean) => void;
-	onOpenMultiProjectDelivery?: () => void;
 };
 
 export function WorkspaceComposer({
@@ -196,15 +180,12 @@ export function WorkspaceComposer({
 	focusRequestKey = null,
 	workspacePath,
 	workspaceSetupReport = null,
-	projectRootPath,
 	workspaceBranch,
 	projectLabel,
 	projectIcon = null,
 	projectColor = null,
 	currentBranch,
 	isIsolatedWorkspace,
-	gitChangeSummary,
-	gitStatusState = "ready",
 	contextProjects = [],
 	showPlanFollowUpPrompt,
 	planTitle,
@@ -219,16 +200,8 @@ export function WorkspaceComposer({
 	openDelegateMenuSignal,
 	onAbortSession,
 	onReviewPlan,
-	onReviewChanges,
-	onCreateTaskFromBranch,
 	onRunRecommendedSetup,
 	onSkipRecommendedSetup,
-	commitMode,
-	forgeRequestLabel,
-	deliveryBusy,
-	onRunDeliveryAction,
-	onCreateChangeRequest,
-	onOpenMultiProjectDelivery,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
@@ -808,31 +781,6 @@ export function WorkspaceComposer({
 		[t],
 	);
 	return [
-		<ExecutionDock
-			key="execution-dock"
-			projectLabel={projectLabel}
-			projectIcon={projectIcon}
-			projectColor={projectColor}
-			workspacePath={workspacePath}
-			projectRootPath={projectRootPath}
-			baseBranch={workspaceBranch}
-			currentBranch={currentBranch}
-			isIsolatedWorkspace={isIsolatedWorkspace}
-			changeSummary={gitChangeSummary}
-			gitStatusState={gitStatusState}
-			contextProjects={contextProjects}
-			setupReport={workspaceSetupReport}
-			onReviewChanges={onReviewChanges}
-			onCreateTaskFromBranch={onCreateTaskFromBranch}
-			onRunRecommendedSetup={onRunRecommendedSetup}
-			onSkipRecommendedSetup={onSkipRecommendedSetup}
-			commitMode={commitMode}
-			forgeRequestLabel={forgeRequestLabel}
-			deliveryBusy={deliveryBusy}
-			onRunDeliveryAction={onRunDeliveryAction}
-			onCreateChangeRequest={onCreateChangeRequest}
-			onOpenMultiProjectDelivery={onOpenMultiProjectDelivery}
-		/>,
 		<div
 			key="composer-surface"
 			ref={composerRootRef}
@@ -1299,5 +1247,19 @@ export function WorkspaceComposer({
 				</div>
 			</div>
 		</div>,
+		<ExecutionContextRail
+			key="execution-context"
+			projectLabel={projectLabel}
+			projectIcon={projectIcon}
+			projectColor={projectColor}
+			workspacePath={workspacePath}
+			baseBranch={workspaceBranch}
+			currentBranch={currentBranch}
+			isIsolatedWorkspace={isIsolatedWorkspace}
+			contextProjects={contextProjects}
+			setupReport={workspaceSetupReport}
+			onRunRecommendedSetup={onRunRecommendedSetup}
+			onSkipRecommendedSetup={onSkipRecommendedSetup}
+		/>,
 	];
 }

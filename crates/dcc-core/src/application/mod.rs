@@ -27,7 +27,7 @@ pub use close_session::{close_session, CloseSessionInput, CloseSessionOutput};
 pub use create_workspace_bundle::create_workspace_bundle;
 pub use create_workspace_for_repo::{
     create_workspace_for_repo, finalize_workspace_for_repo, prepare_workspace_for_repo,
-    CreateWorkspaceForRepoInput, FinalizedWorkspace, PreparedWorkspace,
+    CreateWorkspaceForRepoInput, FinalizedWorkspace, PreparedWorkspace, WorkspaceIsolationMode,
 };
 pub use create_workspace_from_url::{create_workspace_from_url, CreateWorkspaceFromUrlInput};
 pub use mcp_conformance::{run_provider_mcp_conformance, McpConformanceFailure};

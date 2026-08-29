@@ -1,32 +1,10 @@
-import {
-	AlertCircle,
-	Clock3,
-	History,
-	PanelRightOpen,
-	Plus,
-	RefreshCw,
-	Search,
-	SquareTerminal,
-	X,
-} from "lucide-react";
-import { memo } from "react";
+import { History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, X } from "lucide-react";
+import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceEditorPicker } from "./workspace-editor-picker";
 import type { DccRuntimeSessionSnapshot } from "./workbench-types";
 import { canResumeSession } from "./session-chrome-state";
@@ -34,10 +12,7 @@ import { isSessionArchived, visibleSessions } from "./session-close";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import { cn } from "@/lib/utils";
 import type { TerminalScopeTarget } from "@/features/terminal/terminal-scope";
-import {
-	useActiveTerminalCount,
-	useGlobalActiveTerminalCount,
-} from "@/features/terminal/use-active-terminal-count";
+import { useActiveTerminalCount, useGlobalActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 import { getToggleTerminalShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 
 export type DccWorkbenchChatHeaderProps = {
@@ -57,351 +32,82 @@ export type DccWorkbenchChatHeaderProps = {
 	sessionActionSessionId: string | null;
 	onOpenTerminal?: () => void;
 	terminalScopes?: TerminalScopeTarget[];
-	/** Current inspector visibility — the header action is shown only when closed. */
-	inspectorCollapsed?: boolean;
-	/** Opens the inspector from the closed state. */
-	onToggleInspector?: () => void;
+	workspaceActions?: ReactNode;
 };
 
-/** Chat column top bar with titles left and action icons right. */
-
+/** Single-row workspace bar. Every visible action opens a concrete surface. */
 export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
-	threadTitle,
-	projectLabel,
-	workspacePath,
-	sessions,
-	selectedSessionId,
-	isLoadingSessions,
-	sessionSnapshot,
-	onSelectSession,
-	onStartSession,
-	onCloseSession,
-	onRestoreSession,
-	onOpenSessionSearch,
-	onResumeSession,
-	sessionActionSessionId,
-	onOpenTerminal,
-	terminalScopes,
-	inspectorCollapsed,
-	onToggleInspector,
+	threadTitle, projectLabel, workspacePath, sessions, selectedSessionId,
+	isLoadingSessions, sessionSnapshot, onSelectSession, onStartSession,
+	onCloseSession, onRestoreSession, onOpenSessionSearch, onResumeSession,
+	sessionActionSessionId, onOpenTerminal, terminalScopes, workspaceActions,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
-	const inspectorIsClosed = inspectorCollapsed ?? true;
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const visibleSessionList = visibleSessions(sessions);
 	const archivedSessionList = sessions.filter(isSessionArchived);
-	const activeSessionId = selectedSessionId ?? visibleSessionList[0]?.session.id ?? "";
 	const activeTerminalCount = useActiveTerminalCount(terminalScopes);
 	const globalActiveTerminalCount = useGlobalActiveTerminalCount();
 	const terminalShortcut = getToggleTerminalShortcutKeys().join("+");
-	const terminalLabel =
-		globalActiveTerminalCount > activeTerminalCount
-			? t("workbench.terminal.openWithBackground", {
-					total: globalActiveTerminalCount,
-					current: activeTerminalCount,
-				})
-			: activeTerminalCount > 0
-				? t("workbench.terminal.openWithActive", {
-						count: activeTerminalCount,
-					})
-				: t("workbench.terminal.open");
+	const terminalLabel = globalActiveTerminalCount > activeTerminalCount
+		? t("workbench.terminal.openWithBackground", { total: globalActiveTerminalCount, current: activeTerminalCount })
+		: activeTerminalCount > 0
+			? t("workbench.terminal.openWithActive", { count: activeTerminalCount })
+			: t("workbench.terminal.open");
 
 	return (
-		<div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2">
-			<div className="flex min-w-0 items-center justify-between gap-3 overflow-hidden sm:gap-4">
-				<div className="flex min-w-0 flex-1 items-center overflow-hidden">
-					<h2
-						className="min-w-0 truncate text-sm font-medium text-foreground"
-						title={projectLabel ? `${projectLabel} / ${threadTitle}` : threadTitle}
-					>
-						{projectLabel ? (
-							<span className="font-normal text-muted-foreground">
-								{projectLabel} <span className="px-1 text-border">/</span>
-							</span>
-						) : null}
-						{threadTitle}
-					</h2>
-				</div>
-
-				<div className="flex shrink-0 items-center justify-end gap-1.5 @3xl/header-actions:gap-2">
-					<div
-						className="flex items-center gap-0.5 rounded-md border border-border/50 bg-muted/25 p-0.5"
-						role="toolbar"
-						aria-label={t("workbench.sessionControlsAria")}
-					>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									className="h-7 w-7 shrink-0 [&_svg]:size-3.5"
-									aria-label={t("workbench.resumeAria")}
-									onClick={onResumeSession}
-									disabled={!sessionSnapshot || !resumeOk}
-								>
-									<RefreshCw strokeWidth={2} />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent side="bottom">
-								{!sessionSnapshot
-									? t("workbench.resumeTooltipNone")
-									: resumeOk
-										? t("workbench.resumeTooltipOk")
-										: t("workbench.resumeTooltipActive")}
-							</TooltipContent>
-						</Tooltip>
-					</div>
-					<WorkspaceEditorPicker workspacePath={workspacePath} />
-					{onOpenTerminal ? (
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-sm"
-									className="relative shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-									onClick={onOpenTerminal}
-									aria-label={terminalLabel}
-								>
-									<SquareTerminal className="size-3.5" strokeWidth={1.8} />
-									{globalActiveTerminalCount > 0 ? (
-										<span
-											className={cn(
-												"absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background px-1 text-[9px] font-medium leading-none text-white",
-												activeTerminalCount > 0 ? "bg-sky-500" : "bg-amber-500",
-											)}
-										>
-											{globalActiveTerminalCount}
-										</span>
-									) : null}
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent side="bottom">
-								{terminalLabel} · {terminalShortcut}
-							</TooltipContent>
-						</Tooltip>
-					) : null}
-					{onToggleInspector && inspectorIsClosed ? (
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-sm"
-									onClick={onToggleInspector}
-									aria-label={t("workbench.inspectorToggle.open")}
-									className="shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-								>
-									<PanelRightOpen className="size-3.5" strokeWidth={1.8} />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent side="bottom">
-								{t("workbench.inspectorToggle.open")}
-							</TooltipContent>
-						</Tooltip>
-					) : null}
-				</div>
-			</div>
-
-			<div
-				className={cn(
-					"flex items-center gap-2",
-					!isLoadingSessions && sessions.length === 0 && "hidden",
-				)}
-			>
-				<div className="group/tabs-scroll relative min-w-0 flex-1">
-					<div className="scrollbar-none min-w-0 flex-1 overflow-x-auto">
-						{isLoadingSessions ? (
-							<div className="flex h-[1.85rem] items-center gap-1.5 px-2 text-[12px] text-muted-foreground">
-								<Clock3 className="size-3 animate-pulse" strokeWidth={1.8} />
-								<span>{t("workbench.loadingSessions")}</span>
-							</div>
-						) : visibleSessionList.length > 0 ? (
-							<Tabs
-								value={activeSessionId}
-								onValueChange={onSelectSession}
-								className="min-w-max gap-0"
-							>
-								<TabsList
-									aria-label={t("workbench.sessionTabsAria")}
-									className="inline-flex min-w-full w-max justify-start self-start gap-0 rounded-none bg-transparent p-0"
-								>
-									{visibleSessionList.map((session) => {
-										const state = session.projection.state;
-										const stateDotClass =
-											state === "active"
-												? "bg-chart-2"
-												: state === "completed"
-													? "bg-emerald-500"
-													: state === "aborted"
-														? "bg-destructive"
-														: "bg-muted-foreground";
-
-										return (
-											<Tooltip key={session.session.id}>
-												<TooltipTrigger asChild>
-													<div className="group/tab relative min-w-[6.5rem] max-w-[14rem] shrink-0 flex-none">
-														<TabsTrigger
-															value={session.session.id}
-															className="h-[1.85rem] w-full justify-start gap-1.5 overflow-hidden rounded-md px-2 pr-7 text-[13px] text-muted-foreground transition-[color,background-color,border-color,box-shadow] after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-transparent hover:bg-accent/30 data-[state=active]:border-border/60 data-[state=active]:bg-accent/60 data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:after:bg-foreground"
-															title={session.thread.title}
-														>
-															<span className="flex min-w-0 flex-1 items-center gap-1.5">
-																<span
-																	aria-hidden
-																	className={cn("size-1.5 shrink-0 rounded-full", stateDotClass)}
-																/>
-																<span className="truncate font-medium">
-																	{session.thread.title}
-																</span>
-															</span>
-														</TabsTrigger>
-														<button
-															type="button"
-															aria-label={t("workbench.closeSessionAria", {
-																title: session.thread.title,
-															})}
-															title={t("workbench.closeSessionTooltip")}
-															disabled={sessionActionSessionId === session.session.id}
-															onClick={(event) => {
-																event.preventDefault();
-																event.stopPropagation();
-																onCloseSession(session.session.id);
-															}}
-															className="absolute right-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground/80 opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/tab:opacity-100 disabled:pointer-events-none disabled:opacity-40"
-														>
-															<X className="size-3" strokeWidth={2} />
-														</button>
-													</div>
-												</TooltipTrigger>
-												<TooltipContent
-													side="bottom"
-													sideOffset={4}
-													className="flex h-[22px] items-center rounded-md px-1.5 text-[11px] leading-none"
-												>
-													<span className="truncate">
-														{session.thread.title} ·{" "}
-														{sessionStateLabel(session.projection.state, t)}
-													</span>
-												</TooltipContent>
-											</Tooltip>
-										);
-									})}
-								</TabsList>
-							</Tabs>
-						) : (
-							<div className="flex h-[1.85rem] items-center gap-1.5 px-2 text-[12px] text-muted-foreground">
-								<AlertCircle className="size-3" strokeWidth={1.8} />
-								{t("workbench.noSessions")}
-							</div>
-						)}
-					</div>
-				</div>
-
+		<div className="@container/header-actions flex min-w-0 flex-1 items-center justify-between gap-3 overflow-hidden">
+			<h2 className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground" title={projectLabel ? `${projectLabel} / ${threadTitle}` : threadTitle}>
+				{threadTitle}
+			</h2>
+			<div className="flex shrink-0 items-center justify-end gap-1">
 				<Tooltip>
 					<TooltipTrigger asChild>
-						<Button
-							aria-label={t("workbench.newSessionAria")}
-							onClick={onStartSession}
-							variant="ghost"
-							size="icon-sm"
-							className="shrink-0 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-						>
-							<Plus className="size-3.5" strokeWidth={1.8} />
+						<Button type="button" variant="ghost" size="icon-sm" onClick={onResumeSession} disabled={!sessionSnapshot || !resumeOk} aria-label={t("workbench.resumeAria")} className="text-muted-foreground hover:text-foreground">
+							<RefreshCw className="size-3.5" strokeWidth={1.9} />
 						</Button>
 					</TooltipTrigger>
-					<TooltipContent
-						side="bottom"
-						sideOffset={4}
-						className="flex h-[24px] items-center gap-2 rounded-md px-2 text-[12px] leading-none"
-					>
-						<span>{t("workbench.newSessionTooltip")}</span>
-					</TooltipContent>
+					<TooltipContent side="bottom">{!sessionSnapshot ? t("workbench.resumeTooltipNone") : resumeOk ? t("workbench.resumeTooltipOk") : t("workbench.resumeTooltipActive")}</TooltipContent>
 				</Tooltip>
-
+				<WorkspaceEditorPicker workspacePath={workspacePath} />
+				{onOpenTerminal ? (
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button type="button" variant="ghost" size="icon-sm" className="relative text-muted-foreground hover:text-foreground" onClick={onOpenTerminal} aria-label={terminalLabel}>
+								<SquareTerminal className="size-3.5" strokeWidth={1.8} />
+								{globalActiveTerminalCount > 0 ? <span className={cn("absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background px-1 text-[9px] font-medium leading-none text-white", activeTerminalCount > 0 ? "bg-sky-500" : "bg-amber-500")}>{globalActiveTerminalCount}</span> : null}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">{terminalLabel} · {terminalShortcut}</TooltipContent>
+					</Tooltip>
+				) : null}
+				{workspaceActions}
 				<Tooltip>
-					<TooltipTrigger asChild>
-						<Button
-							aria-label={t("workbench.sessionSearch.buttonAria")}
-							onClick={onOpenSessionSearch}
-							variant="ghost"
-							size="icon-sm"
-							className="shrink-0 text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-						>
-							<Search className="size-3.5" strokeWidth={1.8} />
-						</Button>
-					</TooltipTrigger>
-					<TooltipContent
-						side="bottom"
-						sideOffset={4}
-						className="flex h-[24px] items-center gap-2 rounded-md px-2 text-[12px] leading-none"
-					>
-						<span>{t("workbench.sessionSearch.buttonTooltip")}</span>
-					</TooltipContent>
+					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onStartSession} aria-label={t("workbench.newSessionAria")} className="text-muted-foreground hover:text-foreground"><Plus className="size-3.5" /></Button></TooltipTrigger>
+					<TooltipContent side="bottom">{t("workbench.newSessionTooltip")}</TooltipContent>
 				</Tooltip>
-
+				<Tooltip>
+					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onOpenSessionSearch} aria-label={t("workbench.sessionSearch.buttonAria")} className="text-muted-foreground hover:text-foreground"><Search className="size-3.5" /></Button></TooltipTrigger>
+					<TooltipContent side="bottom">{t("workbench.sessionSearch.buttonTooltip")}</TooltipContent>
+				</Tooltip>
 				<DropdownMenu>
-					<DropdownMenuTrigger asChild>
-						<Button
-							aria-label={t("workbench.sessionHistoryAria")}
-							variant="ghost"
-							size="icon-sm"
-							className="shrink-0 text-muted-foreground hover:bg-accent/60 hover:text-foreground focus-visible:border-transparent focus-visible:ring-0"
-						>
-							<History className="size-3.5" strokeWidth={1.8} />
-						</Button>
-					</DropdownMenuTrigger>
-					<DropdownMenuContent
-						align="end"
-						className="max-h-96 w-64 overscroll-contain"
-					>
+					<DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon-sm" aria-label={t("workbench.sessionHistoryAria")} className="text-muted-foreground hover:text-foreground">{isLoadingSessions ? <LoaderCircle className="size-3.5 animate-spin" /> : <History className="size-3.5" />}</Button></DropdownMenuTrigger>
+					<DropdownMenuContent align="end" className="max-h-96 w-72 overscroll-contain">
 						<DropdownMenuLabel>{t("workbench.sessionHistoryLabel")}</DropdownMenuLabel>
 						<DropdownMenuSeparator />
-						{sessions.length > 0 ? (
-							<>
-								{visibleSessionList.map((session) => (
-									<DropdownMenuItem
-										key={session.session.id}
-										onSelect={() => {
-											onSelectSession(session.session.id);
-										}}
-										className="flex items-center justify-between gap-2"
-									>
-										<span className="min-w-0 truncate">{session.thread.title}</span>
-										<span className="shrink-0 text-[11px] text-muted-foreground">
-											{sessionStateLabel(session.projection.state, t)}
-										</span>
-									</DropdownMenuItem>
-								))}
-								{archivedSessionList.length > 0 ? (
-									<>
-										<DropdownMenuSeparator />
-										<DropdownMenuLabel className="text-xs text-muted-foreground">
-											{t("workbench.archivedSessionsLabel")}
-										</DropdownMenuLabel>
-										{archivedSessionList.map((session) => (
-											<DropdownMenuItem
-												key={session.session.id}
-												onSelect={() => {
-													onRestoreSession(session.session.id);
-												}}
-												className="flex items-center justify-between gap-2"
-											>
-												<span className="min-w-0 truncate">{session.thread.title}</span>
-												<span className="shrink-0 text-[11px] text-muted-foreground">
-													{t("workbench.restoreSessionLabel")}
-												</span>
-											</DropdownMenuItem>
-										))}
-									</>
-								) : null}
-							</>
-						) : (
-							<DropdownMenuItem disabled>
-								{t("workbench.noSessions")}
+						{visibleSessionList.length > 0 ? visibleSessionList.map((session) => (
+							<DropdownMenuItem key={session.session.id} onSelect={() => onSelectSession(session.session.id)} className="group/session gap-2">
+								<span className={cn("size-1.5 shrink-0 rounded-full", session.session.id === selectedSessionId ? "bg-emerald-500" : "bg-muted-foreground/45")} />
+								<span className="min-w-0 flex-1 truncate">{session.thread.title}</span>
+								<span className="text-[10px] text-muted-foreground">{sessionStateLabel(session.projection.state, t)}</span>
+								<button type="button" disabled={sessionActionSessionId === session.session.id} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onCloseSession(session.session.id); }} aria-label={t("workbench.closeSessionAria", { title: session.thread.title })} className="grid size-5 place-items-center rounded-sm opacity-0 hover:bg-accent group-hover/session:opacity-100 focus-visible:opacity-100"><X className="size-3" /></button>
 							</DropdownMenuItem>
-						)}
+						)) : <DropdownMenuItem disabled>{t("workbench.noSessions")}</DropdownMenuItem>}
+						{archivedSessionList.length > 0 ? <>
+							<DropdownMenuSeparator />
+							<DropdownMenuLabel className="text-xs text-muted-foreground">{t("workbench.archivedSessionsLabel")}</DropdownMenuLabel>
+							{archivedSessionList.map((session) => <DropdownMenuItem key={session.session.id} onSelect={() => onRestoreSession(session.session.id)} className="justify-between gap-2"><span className="min-w-0 truncate">{session.thread.title}</span><span className="text-[10px] text-muted-foreground">{t("workbench.restoreSessionLabel")}</span></DropdownMenuItem>)}
+						</> : null}
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</div>

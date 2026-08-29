@@ -185,7 +185,6 @@ type SessionWorkbenchProps = {
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
 	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
-	onCreateTaskFromBranch?: (branch: string) => Promise<void>;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
 	onRerunDelegation?: (input: {
@@ -268,7 +267,6 @@ export function SessionWorkbench({
 	onToggleInspector,
 	onReviewChanges,
 	onCompleteWorkspace,
-	onCreateTaskFromBranch,
 	onReviewDelegation,
 	onRerunDelegation,
 	onResolveConflictWithAgent,
@@ -769,7 +767,6 @@ export function SessionWorkbench({
 						workspaceBranch={workspaceBranch}
 						workspacePath={workspacePath}
 						workspaceSetupReport={workspaceSetupReport}
-						projectRootPath={terminalRootPath}
 						projectLabel={resolvedProjectLabel}
 						projectIcon={projectIcon}
 						projectColor={projectColor}
@@ -825,7 +822,6 @@ export function SessionWorkbench({
 						onReviewChanges={onReviewChanges}
 						onCompleteWorkspace={onCompleteWorkspace}
 						onOpenMultiProjectDelivery={handleOpenDelivery}
-						onCreateTaskFromBranch={onCreateTaskFromBranch}
 						onRunRecommendedSetup={handleRunRecommendedSetup}
 						onSkipRecommendedSetup={handleSkipRecommendedSetup}
 						onReviewDelegation={onReviewDelegation}

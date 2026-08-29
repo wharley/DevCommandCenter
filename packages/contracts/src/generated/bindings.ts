@@ -489,6 +489,11 @@ export type CreateWorkspaceForRepoInput = {
 	workspaceRoot: string,
 	baseBranch: string,
 	name: string | null,
+	/**
+	 *  Omitted by older clients and internal flows; protected worktrees remain
+	 *  the safe default for every task created without an explicit choice.
+	 */
+	isolationMode: WorkspaceIsolationMode | null,
 };
 
 export type CreateWorkspaceForRepoOutput = {
@@ -2428,6 +2433,8 @@ export type WorkspaceGitValidationStep = {
 };
 
 export type WorkspaceId = string;
+
+export type WorkspaceIsolationMode = "protectedWorktree" | "localDirect";
 
 export type WorkspacePipeline = {
 	id: number,

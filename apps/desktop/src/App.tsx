@@ -25,6 +25,7 @@ import type {
 	SessionEventRecord,
 	SessionSearchResult,
 	WorkspaceRemoteBranchDeletionTarget,
+	WorkspaceIsolationMode,
 	WorkspaceSessionSummary,
 } from "@dcc/contracts";
 import {
@@ -97,6 +98,7 @@ import {
 import { SessionSearchDialog } from "./features/sessions/session-search-dialog";
 import { resolveDelegateTaskToolInstructions } from "./features/sessions/delegate-task-tool-instructions";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
+import { NewTaskLaunchState } from "./features/panel/NewTaskLaunchState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
 import { sessionThreadHistoryQueryOptions } from "./features/sessions/session-thread-history";
@@ -989,12 +991,17 @@ export default function App() {
 	const [workspaceCreationMode, setWorkspaceCreationMode] = useState<"open" | "clone">(
 		"open",
 	);
+	const [workspaceCreationScope, setWorkspaceCreationScope] = useState<
+		"single" | "multi"
+	>("single");
 	const [workspaceRepositoryContext, setWorkspaceRepositoryContext] =
 		useState<ExistingRepositoryContext | null>(null);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [isSkillsOpen, setIsSkillsOpen] = useState(false);
 	const [isUsageOpen, setIsUsageOpen] = useState(false);
-	const [globalSurface, setGlobalSurface] = useState<"pullRequests" | null>(null);
+	const [globalSurface, setGlobalSurface] = useState<
+		"pullRequests" | "newTask" | null
+	>(null);
 	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
 	const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
 	const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
@@ -1395,11 +1402,6 @@ export default function App() {
 	const activeWorkspace =
 		selectedBundleMembers.find((workspace) => workspace.id === selectedBundleMemberId) ??
 		selectedWorkspace;
-	const activeProjectRootPath = activeWorkspace?.rootPath ?? null;
-	const activeProjectId = activeWorkspace?.projectId ?? null;
-	const canCreateTaskFromDock =
-		selectedBundleMembers.length <= 1 &&
-		Boolean(activeProjectRootPath && activeProjectId);
 	const composerFocusSequenceRef = useRef(0);
 	const [pendingComposerFocusRequest, setPendingComposerFocusRequest] = useState<{
 		workspaceId: string;
@@ -1428,33 +1430,6 @@ export default function App() {
 		}, 1_000);
 		return () => window.clearTimeout(timeout);
 	}, [composerFocusRequestKey]);
-	const handleCreateTaskFromDockBranch = useCallback(
-		async (baseBranch: string) => {
-			if (!activeProjectRootPath || !activeProjectId) {
-				throw new Error(t("composer.executionDock.origin.unavailable"));
-			}
-			const result = await createWorkspace({
-				projectId: activeProjectId,
-				workspaceRoot: activeProjectRootPath,
-				baseBranch,
-				name: null,
-			});
-			notifyWorkspaceCreationResult(t, "open", result);
-			void queryClient.invalidateQueries({
-				queryKey: ["workspaces", backendCacheKey],
-			});
-			requestNewTaskComposerFocus(result.workspace.id);
-		},
-		[
-			activeProjectId,
-			activeProjectRootPath,
-			backendCacheKey,
-			createWorkspace,
-			queryClient,
-			requestNewTaskComposerFocus,
-			t,
-		],
-	);
 	const handleSelectWorkspaceSurface = useCallback(
 		(workspaceId: string) => {
 			setGlobalSurface(null);
@@ -4267,12 +4242,14 @@ export default function App() {
 		(
 			mode: "open" | "clone",
 			repositoryContext: ExistingRepositoryContext | null = null,
+			creationScope: "single" | "multi" = "single",
 		) => {
 			if (isRemoteBackend) {
 				showRemoteUnsupported("workspaces");
 				return;
 			}
 			setWorkspaceCreationMode(mode);
+			setWorkspaceCreationScope(mode === "open" ? creationScope : "single");
 			setWorkspaceRepositoryContext(mode === "open" ? repositoryContext : null);
 			setIsCreateWorkspaceOpen(true);
 		},
@@ -4283,7 +4260,7 @@ export default function App() {
 			projectId: string;
 			workspaceRoot: string;
 			baseBranch: string;
-			label: string;
+			isolationMode?: WorkspaceIsolationMode;
 		}) => {
 			try {
 				const result = await createWorkspace({
@@ -4291,12 +4268,14 @@ export default function App() {
 					workspaceRoot: input.workspaceRoot,
 					baseBranch: input.baseBranch,
 					name: null,
+					isolationMode: input.isolationMode ?? null,
 				});
 				notifyWorkspaceCreationResult(t, "open", result);
 				void queryClient.invalidateQueries({
 					queryKey: ["workspaces", backendCacheKey],
 				});
 				requestNewTaskComposerFocus(result.workspace.id);
+				setGlobalSurface(null);
 			} catch (error) {
 				toast.error(t("workspaceDialog.toastCreateError"), {
 					description: error instanceof Error ? error.message : String(error),
@@ -4626,8 +4605,12 @@ export default function App() {
 							sessionQueryScope={backendCacheKey}
 							onSelectWorkspace={handleSelectWorkspaceSurface}
 							onCreateWorkspace={() => {
-								setGlobalSurface(null);
-								openWorkspaceDialog("open");
+								if (isRemoteBackend) {
+									showRemoteUnsupported("workspaces");
+									return;
+								}
+								setInspectorCollapsed(true);
+								setGlobalSurface("newTask");
 							}}
 							onCloneWorkspace={() => {
 								setGlobalSurface(null);
@@ -4691,9 +4674,7 @@ export default function App() {
 							onInstallUpdate={() => {
 								void installUpdate();
 							}}
-							selectedWorkspaceId={
-								globalSurface === "pullRequests" ? null : selectedWorkspaceId
-							}
+							selectedWorkspaceId={globalSurface ? null : selectedWorkspaceId}
 							workspaces={filteredWorkspaces}
 						/>
 					</aside>
@@ -4778,6 +4759,7 @@ export default function App() {
 							<CreateWorkspaceDialog
 								open={isCreateWorkspaceOpen}
 								mode={workspaceCreationMode}
+								initialCreationScope={workspaceCreationScope}
 								repositoryContext={workspaceRepositoryContext}
 								onOpenChange={handleWorkspaceDialogOpenChange}
 								onCreateWorkspace={async (input) => {
@@ -4824,6 +4806,27 @@ export default function App() {
 									onSelectProvider={handleSelectProvider}
 									onSelectModel={handleSelectModel}
 								/>
+							) : globalSurface === "newTask" ? (
+								<NewTaskLaunchState
+									repositories={repositoriesFromBackend}
+									isCreating={isCreatingWorkspace}
+									onSelectProject={async (repository, isolationMode) => {
+										await handleQuickCreateTask({
+											projectId: repository.projectId,
+											workspaceRoot: repository.rootPath,
+											baseBranch: repository.baseBranch,
+											isolationMode,
+										});
+									}}
+									onSelectMultiple={() => {
+										setGlobalSurface(null);
+										openWorkspaceDialog("open", null, "multi");
+									}}
+									onOpenProject={() => {
+										setGlobalSurface(null);
+										openWorkspaceDialog("open");
+									}}
+								/>
 							) : hasWorkspace && selectedWorkspace ? (
 								<SessionWorkbench
 									workspaceId={selectedWorkspace.id}
@@ -4844,8 +4847,7 @@ export default function App() {
 									projectIcon={activeProjectIcon}
 									projectColor={activeProjectColor}
 									terminalWorktreePath={
-										selectedWorkspacePath ??
-										(isRemoteBackend ? null : (activeWorkspace?.worktreePath ?? null))
+										isRemoteBackend ? null : (activeWorkspace?.worktreePath ?? null)
 									}
 									workspaceScopeOptions={selectedBundleMembers.map((workspace, index) => {
 										const repository = repositoriesFromBackend.find(
@@ -4920,11 +4922,6 @@ export default function App() {
 									onCompleteWorkspace={
 									isRemoteBackend ? undefined : handleCompleteWorkspace
 								}
-									onCreateTaskFromBranch={
-										canCreateTaskFromDock
-											? handleCreateTaskFromDockBranch
-											: undefined
-									}
 									onReviewDelegation={handleReviewDelegation}
 									onRerunDelegation={handleRerunDelegation}
 									onResolveConflictWithAgent={handleResolveConflictWithAgent}
@@ -4953,7 +4950,7 @@ export default function App() {
 						</div>
 					</section>
 
-					{globalSurface !== "pullRequests" && !inspectorCollapsed && (
+					{globalSurface === null && !inspectorCollapsed && (
 						<>
 							{inspectorPresentation === "contextual" ? (
 								<button

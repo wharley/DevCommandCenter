@@ -15,11 +15,21 @@ use crate::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub enum WorkspaceIsolationMode {
+    ProtectedWorktree,
+    LocalDirect,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateWorkspaceForRepoInput {
     pub project_id: ProjectId,
     pub workspace_root: String,
     pub base_branch: String,
     pub name: Option<String>,
+    /// Omitted by older clients and internal flows; protected worktrees remain
+    /// the safe default for every task created without an explicit choice.
+    pub isolation_mode: Option<WorkspaceIsolationMode>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -93,13 +103,28 @@ where
         ));
     }
 
-    let PreparedWorktree {
-        path: worktree_path,
-        branch,
-        created_at,
-    } = git
-        .prepare_worktree(&input.workspace_root, &input.base_branch)
-        .await?;
+    let isolation_mode = input
+        .isolation_mode
+        .clone()
+        .unwrap_or(WorkspaceIsolationMode::ProtectedWorktree);
+    let (execution_path, branch, created_at, persisted_worktree_path) = match isolation_mode {
+        WorkspaceIsolationMode::ProtectedWorktree => {
+            let PreparedWorktree {
+                path,
+                branch,
+                created_at,
+            } = git
+                .prepare_worktree(&input.workspace_root, &input.base_branch)
+                .await?;
+            (path.clone(), branch, created_at, Some(path))
+        }
+        WorkspaceIsolationMode::LocalDirect => (
+            input.workspace_root.clone(),
+            input.base_branch.clone(),
+            now_iso(),
+            None,
+        ),
+    };
     let now = now_iso();
     let workspace_id = WorkspaceId(Uuid::new_v4().to_string());
 
@@ -109,7 +134,7 @@ where
         name: input.name.clone(),
         root_path: input.workspace_root,
         base_branch: branch,
-        worktree_path: Some(worktree_path.clone()),
+        worktree_path: persisted_worktree_path,
         source: None,
         state: WorkspaceState::SetupPending,
         setup_report: None,
@@ -122,13 +147,13 @@ where
         .publish(CoreEvent::WorkspacePrepared {
             workspace_id: workspace.id.0.clone(),
             project_id: workspace.project_id.0.clone(),
-            worktree_path: worktree_path.clone(),
+            worktree_path: execution_path.clone(),
         })
         .await?;
 
     Ok(PreparedWorkspace {
         workspace,
-        worktree_path,
+        worktree_path: execution_path,
     })
 }
 
@@ -329,6 +354,7 @@ mod tests {
             workspace_root: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
             name: Some("Feature shell".to_string()),
+            isolation_mode: None,
         };
 
         let finalized =
@@ -368,5 +394,31 @@ mod tests {
             recorded_events[1],
             CoreEvent::WorkspaceReady { .. }
         ));
+    }
+
+    #[test]
+    fn local_direct_workspace_uses_the_repository_without_persisting_a_worktree() {
+        let repo = FakeWorkspaceRepo::default();
+        let git = FakeGitOps {
+            worktree_path: "/tmp/should-not-be-used".to_string(),
+        };
+        let events = FakeEventBus::default();
+
+        let input = CreateWorkspaceForRepoInput {
+            project_id: ProjectId("project-local".to_string()),
+            workspace_root: "/tmp/local-repo".to_string(),
+            base_branch: "main".to_string(),
+            name: Some("Local task".to_string()),
+            isolation_mode: Some(WorkspaceIsolationMode::LocalDirect),
+        };
+
+        let finalized =
+            futures::executor::block_on(create_workspace_for_repo(&repo, &git, &events, input))
+                .expect("local workspace creation should succeed");
+
+        assert_eq!(finalized.workspace.root_path, "/tmp/local-repo");
+        assert_eq!(finalized.workspace.base_branch, "main");
+        assert_eq!(finalized.workspace.worktree_path, None);
+        assert_eq!(finalized.workspace.state, WorkspaceState::Ready);
     }
 }

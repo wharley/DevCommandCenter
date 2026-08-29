@@ -76,6 +76,7 @@ export type ExistingRepositoryContext = {
 type CreateWorkspaceDialogProps = {
 	open: boolean;
 	mode: WorkspaceCreationMode;
+	initialCreationScope?: "single" | "multi";
 	repositoryContext?: ExistingRepositoryContext | null;
 	onOpenChange: (open: boolean) => void;
 	onCreateWorkspace: (input: CreateWorkspaceForRepoInput) => Promise<WorkspaceCreationResult>;
@@ -165,6 +166,7 @@ export function notifyWorkspaceCreationResult(
 export function CreateWorkspaceDialog({
 	open,
 	mode,
+	initialCreationScope = "single",
 	repositoryContext = null,
 	onOpenChange,
 	onCreateWorkspace,
@@ -220,7 +222,7 @@ export function CreateWorkspaceDialog({
 			setForm(initialForm);
 			setAvailableBranches([]);
 			setIsLoadingBranches(false);
-			setCreationScope("single");
+			setCreationScope(mode === "open" ? initialCreationScope : "single");
 			setWorkspaceStart(initialWorkspaceStart(repositoryContext !== null));
 			setSourceUrl("");
 			setValidatedSourceUrl("");
@@ -233,7 +235,7 @@ export function CreateWorkspaceDialog({
 				void loadBranchesForWorkspaceRoot(initialForm.workspaceRoot);
 			}
 		}
-	}, [mode, open, repositoryContext]);
+	}, [initialCreationScope, mode, open, repositoryContext]);
 
 	function selectSingleRepository(repository: RepositoryOption) {
 		setSelectedSingleRepositoryId(repository.id);
@@ -492,6 +494,7 @@ export function CreateWorkspaceDialog({
 						workspaceRoot: repository.rootPath,
 						baseBranch: repository.baseBranch,
 						name: repositoryDisplayName(repository),
+						isolationMode: null,
 					})),
 				});
 				toast.success(t("workspaceDialog.multiToastSuccess"), {
@@ -523,6 +526,7 @@ export function CreateWorkspaceDialog({
 					workspaceRoot: form.workspaceRoot.trim(),
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
+					isolationMode: null,
 				});
 				notifyWorkspaceCreationResult(t, mode, result);
 			}

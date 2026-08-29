@@ -7044,6 +7044,7 @@ pub async fn create_workspace_from_source_url(
             workspace_root: root.clone(),
             base_branch: tracking_ref,
             name: workspace_name,
+            isolation_mode: None,
         },
     )
     .await
@@ -7135,6 +7136,10 @@ async fn recover_existing_workspace_for_create(
     app: Option<&AppHandle>,
     input: &CreateWorkspaceForRepoInput,
 ) -> Result<Option<CreateWorkspaceForRepoOutput>, String> {
+    let expects_worktree = !matches!(
+        input.isolation_mode.as_ref(),
+        Some(dcc_core::application::WorkspaceIsolationMode::LocalDirect)
+    );
     let existing = repo
         .list_workspaces()
         .await
@@ -7144,6 +7149,7 @@ async fn recover_existing_workspace_for_create(
             workspace.project_id == input.project_id
                 && workspace.root_path.trim() == input.workspace_root.trim()
                 && workspace.base_branch.trim() == input.base_branch.trim()
+                && workspace.worktree_path.is_some() == expects_worktree
                 // A repository can legitimately have several completed tasks
                 // created from the same base branch. Only reuse a durable row
                 // that still represents an interrupted creation.
@@ -8766,6 +8772,7 @@ mod editor_workspace_file_tests {
                 workspace_root: existing.root_path.clone(),
                 base_branch: existing.base_branch.clone(),
                 name: None,
+                isolation_mode: None,
             },
         )
         .await
@@ -8806,6 +8813,7 @@ mod editor_workspace_file_tests {
                 workspace_root: existing.root_path.clone(),
                 base_branch: existing.base_branch.clone(),
                 name: None,
+                isolation_mode: None,
             },
         )
         .await
@@ -8916,6 +8924,7 @@ mod editor_workspace_file_tests {
             workspace_root: root.to_string(),
             base_branch: "main".to_string(),
             name: None,
+            isolation_mode: None,
         }
     }
 
