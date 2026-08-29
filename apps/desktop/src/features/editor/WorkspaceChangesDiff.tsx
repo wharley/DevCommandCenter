@@ -119,6 +119,7 @@ export default function WorkspaceChangesDiff({
 	const viewRef = useRef<CodeViewHandle<AnnotationMetadata> | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const selectionButtonRef = useRef<HTMLButtonElement | null>(null);
+	const selectionResetFrameRef = useRef<number | null>(null);
 	const [selectedLines, setSelectedLines] =
 		useState<CodeViewLineSelection | null>(null);
 	const originalHash = useMemo(
@@ -177,6 +178,27 @@ export default function WorkspaceChangesDiff({
 		return () => cancelAnimationFrame(frame);
 	}, [focusLine, modifiedHash, originalHash]);
 
+	useEffect(
+		() => () => {
+			if (selectionResetFrameRef.current !== null) {
+				cancelAnimationFrame(selectionResetFrameRef.current);
+			}
+		},
+		[],
+	);
+
+	const resetSelectionAfterInteraction = useCallback(() => {
+		setSelectedLines(null);
+		if (selectionResetFrameRef.current !== null) {
+			cancelAnimationFrame(selectionResetFrameRef.current);
+		}
+		selectionResetFrameRef.current = requestAnimationFrame(() => {
+			selectionResetFrameRef.current = null;
+			viewRef.current?.clearSelectedLines();
+			setSelectedLines(null);
+		});
+	}, []);
+
 	const handleAnnotate = useCallback(
 		(range: CodeViewLineSelection["range"], trigger?: HTMLElement | null) => {
 			if (!onAnnotate) return;
@@ -188,9 +210,12 @@ export default function WorkspaceChangesDiff({
 					anchor: triggerAnchor(trigger ?? containerRef.current),
 				}),
 			);
-			setSelectedLines(null);
+			// Pierre commits the gutter selection after invoking its click callback.
+			// Clear again on the next frame so a cancelled annotation cannot leave the
+			// utility pinned to the previous line.
+			resetSelectionAfterInteraction();
 		},
-		[modifiedText, onAnnotate, originalText],
+		[modifiedText, onAnnotate, originalText, resetSelectionAfterInteraction],
 	);
 
 	return (
