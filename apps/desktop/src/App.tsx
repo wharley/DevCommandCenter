@@ -4426,23 +4426,38 @@ export default function App() {
 				.filter((candidate) => affectedWorkspaceIds.includes(candidate.id))
 				.flatMap((candidate) => [candidate.worktreePath, candidate.rootPath])
 				.filter((root): root is string => Boolean(root));
-			await terminateWorkspaceTerminals(affectedWorkspaceIds);
-			await deleteWorkspace(workspaceId, options);
-			cleanupDeletedWorkspaceFrontendState(queryClient, {
-				workspaceIds: affectedWorkspaceIds,
-				sessionIds: affectedSessionIds,
-				roots,
-			});
-			purgeSessionsEvents(affectedSessionIds);
-			setSessionSnapshotsById((current) => {
-				const next = { ...current };
-				for (const sessionId of affectedSessionIds) delete next[sessionId];
-				return next;
-			});
-			if (selectedWorkspace && affectedWorkspaceIds.includes(selectedWorkspace.id)) {
-				requestSurfaceSelection(null);
+			let deletionFailed = false;
+			try {
+				await terminateWorkspaceTerminals(affectedWorkspaceIds);
+				await deleteWorkspace(workspaceId, options);
+				cleanupDeletedWorkspaceFrontendState(queryClient, {
+					workspaceIds: affectedWorkspaceIds,
+					sessionIds: affectedSessionIds,
+					roots,
+				});
+				purgeSessionsEvents(affectedSessionIds);
+				setSessionSnapshotsById((current) => {
+					const next = { ...current };
+					for (const sessionId of affectedSessionIds) delete next[sessionId];
+					return next;
+				});
+				if (selectedWorkspace && affectedWorkspaceIds.includes(selectedWorkspace.id)) {
+					requestSurfaceSelection(null);
+				}
+			} catch (error) {
+				deletionFailed = true;
+				throw error;
+			} finally {
+				// A deletion can cross Git, filesystem and SQLite boundaries. Always
+				// reload the authoritative state so a partial failure never leaves a
+				// stale remote target or disk size in the confirmation dialog.
+				try {
+					await refreshWorkspaceCollections();
+				} catch (refreshError) {
+					// Preserve the actionable deletion error if both operations fail.
+					if (!deletionFailed) throw refreshError;
+				}
 			}
-			await refreshWorkspaceCollections();
 		},
 		[
 			allWorkspaces,

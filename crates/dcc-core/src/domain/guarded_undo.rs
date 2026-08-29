@@ -649,13 +649,15 @@ impl TurnRestoreSet {
                     && self.expires_at.is_some()
                     && self.file_count > 0
                     && self.root_id.is_some()
-                    && self.git_identity.as_ref().is_some_and(|git| {
-                        matches!(
-                            &git.checkout_ref,
-                            CheckoutRefV1::Symbolic { full_name }
-                                if full_name.starts_with("refs/heads/")
-                        )
-                    }) => {}
+                    && self
+                        .git_identity
+                        .as_ref()
+                        .is_some_and(|git| match &git.checkout_ref {
+                            CheckoutRefV1::Symbolic { full_name } => {
+                                full_name.starts_with("refs/heads/")
+                            }
+                            CheckoutRefV1::Detached => true,
+                        }) => {}
             RestoreSetState::Ineligible | RestoreSetState::Failed | RestoreSetState::Expired
                 if self.reason_code.is_some() && self.completed_at.is_some() => {}
             RestoreSetState::Consumed

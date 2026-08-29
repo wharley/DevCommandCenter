@@ -10,35 +10,50 @@
   Workspace-first AI coding hub for managing agents, reviews, terminals, and task flows across multiple providers.
 </p>
 
-Dev Command Center (DCC) is a local-first desktop workbench for software engineering with AI agents. It combines isolated Git worktrees, terminal execution, session orchestration, provider integrations, and local persistence in a single Tauri application.
+Dev Command Center (DCC) is a local-first desktop workbench for software
+engineering with AI agents. It connects isolated Git worktrees, multi-provider
+sessions, review and delivery workflows, terminals, usage insights, and local
+persistence in one Tauri application.
 
-![Dev Command Center screenshot](docs/assets/app-screenshot-new.png)
+![Dev Command Center running an agent task across multiple projects](docs/assets/dcc-workbench-running-task.png)
 
 ## Core capabilities
 
 - **Workspace-first agent sessions**: run AI coding work inside isolated Git worktrees while keeping session history, runtime context, terminals, and reviews connected to the active workspace.
+- **Last Turn Review and Guarded Undo**: inspect the exact result of a completed agent turn and, for eligible macOS workspaces, preview and safely restore the previous file contents. See [Last Turn Review and Guarded Undo](docs/GUARDED_UNDO.md).
+- **Pull Request Center**: review GitHub pull requests and GitLab merge requests, inspect checks and discussions, publish review actions, create isolated implementation tasks, and directly merge eligible GitHub PRs with an explicitly confirmed strategy.
 - **Delegation agents**: hand off review, explanation, or implementation tasks to child sessions, inspect their work in the Inspector, send feedback back to the child agent, and apply or discard the isolated worktree output. See [Delegation agents](docs/DELEGATION_AGENTS.md).
+- **Git and delivery workflows**: inspect live changes, commit and push, create or update change requests, recover delivery failures, and resolve merge conflicts without leaving the workbench.
+- **Managed MCP integrations**: connect trusted local or remote tools with scoped bindings, OS-backed credential storage, runtime status, and per-tool Ask/Allow/Deny policies.
+- **Usage and skills**: compare real provider activity, inspect token and model usage, and manage project skills from a provider-neutral source.
 - **Mobile companion pairing**: pair a phone with the desktop app through QR code + PIN and use companion workflows on the same trusted network or through Tailscale. See [Mobile web companion](docs/MOBILE_WEB.md).
 - **Provider-neutral workflows**: use Claude, Gemini, Codex, Cursor, and other provider integrations from the same workbench surface.
-- **Built-in review surface**: inspect changed files, real diffs, branch status, CodeRabbit feedback, and PR-ready state without leaving DCC.
+- **Built-in review surface**: inspect changed files, inline diffs, annotations, branch status, CodeRabbit feedback, validations, and PR-ready state without leaving DCC.
 
 ## What you can do in DCC
 
-- Create isolated workspaces and git worktrees for parallel tasks without juggling `git stash`.
+- Create isolated workspaces and Git worktrees for parallel tasks without juggling `git stash`.
+- See active tasks from every project in one Running section and track completed worktree storage before permanent deletion.
 - Run agent workflows across providers such as Claude, Gemini, Codex, and Cursor from the same desktop surface.
 - Keep local session history, replay prior activity, and preserve workspace-specific runtime context.
 - Open embedded project terminals with tabs for repo-level work that should stay inside the app.
 - Open the active workspace in a preferred editor such as Cursor, Zed, or VS Code.
-- Inspect workspace changes, diffs, and review surfaces without leaving the DCC workbench.
+- Review the current workspace or isolate the latest agent turn, with a guarded restore when its safety capture is eligible.
+- Inspect pull requests, discussions, checks, approvals, conflicts, and merge readiness from a dedicated hub.
+- Create readable semantic `dcc/`, `dcc/fix/`, and `dcc/feat/` branches from task titles while preserving existing user branches.
+- Resolve Git conflicts with index-backed ours/theirs/result controls and optional agent assistance.
 - Drive plan mode, mission specs, and follow-up implementation flows from the same session.
 - Manage project skills from a provider-neutral source and compile them into agent-native targets such as `.claude/skills/`, `AGENTS.md`, `GEMINI.md`, and `.cursor/rules/`.
+- Connect DCC-managed MCP servers to compatible providers without editing provider-owned configuration.
+- Compare provider, model, token, cache, reasoning, and cost activity recorded by DCC.
 - Use optional mobile pairing and local HTTP access for companion workflows on the same trusted network.
 
 ## Product shape
 
 - Workspace-first: the main unit is an isolated task workspace tied to a repository and branch context.
 - Local-first: state, sessions, and runtime surfaces stay on your machine.
-- Agent-aware: DCC is not just a terminal wrapper; it keeps plans, specs, diffs, session events, and provider context connected inside one workbench.
+- Human-controlled: agents can implement and prepare delivery, while destructive actions, permissions, reviews, merges, and restores stay explicit.
+- Agent-aware: DCC is not just a terminal wrapper; it keeps plans, specs, diffs, session events, permissions, usage, and provider context connected inside one workbench.
 
 ## Stack
 
@@ -120,9 +135,13 @@ DCC was shaped by the broader ecosystem of AI coding tools, terminal-native deve
 - [Support](SUPPORT.md)
 - [Release guide](docs/RELEASING.md)
 - [Codex orchestration](docs/CODEX_ORCHESTRATION.md)
+- [Last Turn Review and Guarded Undo](docs/GUARDED_UNDO.md)
+- [Guarded Undo engineering contract](docs/GUARDED_UNDO_DESIGN.md)
 - [Delegation agents](docs/DELEGATION_AGENTS.md)
 - [Mobile web companion](docs/MOBILE_WEB.md)
 - [Mobile pairing security model](docs/SECURITY_MOBILE_PAIRING.md)
+- [MCP trust model](docs/MCP_TRUST_MODEL.md)
 - [CodeRabbit integration](docs/CODERABBIT.md)
+- [Git conflict resolution](docs/GIT_CONFLICT_RESOLUTION.md)
 - [Delivery workflows roadmap](docs/DELIVERY_WORKFLOWS_ROADMAP.md)
 - [Monaco Editor in Tauri](docs/MONACO_TAURI.md)

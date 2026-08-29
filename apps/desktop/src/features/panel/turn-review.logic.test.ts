@@ -55,6 +55,28 @@ describe("turn review presentation", () => {
 	});
 
 	it.each([
+		["untracked_path", "untracked_path"],
+		["index_changed", "index_changed"],
+		["metadata_changed", "metadata_changed"],
+		["detached_head", "detached_head"],
+		["no_target_changes", "no_target_changes"],
+		["head_changed", "git_changed"],
+		["unsupported_status", "unsupported_change"],
+		["git_filter_present", "unsupported_git"],
+	] as const)("explains ineligible capture reason %s as %s", (reasonCode, reason) => {
+		expect(
+			resolveGuardedUndoCapture({
+				state: "ineligible",
+				reasonCode,
+				fileCount: 0,
+				artifactBytes: 0,
+				completedAt: "t1",
+				expiresAt: null,
+			}),
+		).toEqual({ state: "ineligible", reason });
+	});
+
+	it.each([
 		["eligible", "protected"],
 		["collecting", "collecting"],
 		["expired", "expired"],

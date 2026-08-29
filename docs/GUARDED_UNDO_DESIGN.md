@@ -1,10 +1,12 @@
 # Guarded Undo: Capture v2 and Restoration Contract
 
-Status: implemented locally as a macOS beta; pending manual crash QA and release
+Status: macOS beta enabled in the desktop build; release validation remains required
 
 Milestone: M4
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
+
+User-facing guide: [Last Turn Review and Guarded Undo](GUARDED_UNDO.md)
 
 ## Decision
 
@@ -80,9 +82,11 @@ restoration set is `eligible` only when all of these statements are true:
 
 1. The turn has exactly one registered workspace root and that root resolves
    to exactly one Git worktree.
-2. `HEAD` exists and the exact object ID and symbolic ref observed at baseline
-   equal those observed at result. This is an edge comparison, not a claim that
-   no intermediate Git operation occurred.
+2. `HEAD` exists and the exact object ID plus checkout identity observed at
+   baseline equal those observed at result. A symbolic checkout requires the
+   same full ref; a detached checkout requires the same detached state and OID.
+   This is an edge comparison, not a claim that no intermediate Git operation
+   occurred.
 3. The index fingerprint is identical at baseline and result. A turn that
    leaves the index changed is ineligible. Intermediate index operations that
    return to the observed baseline bytes may not be detected and are not undone.
@@ -93,9 +97,11 @@ restoration set is `eligible` only when all of these statements are true:
    ineligible. Ignored paths are outside this contract.
 5. Every target has stable raw bytes while its baseline and result fingerprints
    are collected. The baseline raw bytes are persisted as the preimage.
-6. File mode, executable bit, ownership-sensitive metadata, and path identity
-   observed at baseline equal those observed at result. M4 v1 changes content
-   only and makes no claim about intermediate metadata operations.
+6. File mode, executable bit, ownership-sensitive metadata, and link semantics
+   observed at baseline equal those observed at result. A regular file may be
+   atomically replaced during an editor save; its result identity is captured
+   and becomes the exact identity required by prepare and execute. M4 v1 changes
+   content only and makes no claim about intermediate metadata operations.
 7. No target uses a Git clean/process filter, working-tree encoding, or other
    attribute conversion that makes the relationship between raw worktree
    bytes and Git evidence ambiguous. Git LFS targets are therefore ineligible.
@@ -137,9 +143,9 @@ collapsing them into “the repository”:
 | Workspace/root | Internal `workspace_id` plus an OS-derived physical `root_id`: Unix directory `(st_dev, st_ino)` held by handle; Windows `(volume serial, file ID)` held by handle | Same registered workspace and same physical directory object; aliases resolve to the same identity and lock |
 | Git worktree | Stable Git common-dir/worktree-dir identity derived by the Git adapter | Same worktree; no path-only trust |
 | `HEAD` | Exact object ID | Equal to captured baseline/result object ID |
-| Checkout ref | `symbolic` plus full ref name, or `detached` | M4 v1 requires the same symbolic ref; detached is ineligible |
+| Checkout ref | `symbolic` plus full ref name, or `detached` | Same checkout kind; symbolic uses the same full ref and detached uses the same exact `HEAD` OID |
 | Index | SHA-256 over bounded raw index bytes plus relevant stat identity | Equal at baseline, result, prepare, and execute |
-| Target worktree file | Normalized repository-relative byte path, size, SHA-256, regular-file identity including link count, and supported metadata fingerprint | Current raw result fingerprint and supported metadata MUST match; link count is exactly one |
+| Target worktree file | Normalized repository-relative byte path, size, SHA-256, result regular-file identity including link count, and supported metadata fingerprint | Current raw result fingerprint, result file identity, and supported metadata MUST match; link count is exactly one |
 | Preimage | Raw bytes, size, SHA-256, and artifact SHA-256 | Artifact digest and length MUST verify before use |
 
 Paths stored for restoration are repository-relative. Absolute repository
@@ -487,29 +493,25 @@ common-dir. The paired runner rejects a foreign repository and retains all
 three admissions after async-waiter cancellation until its blocking operation
 actually finishes.
 
-This foundation does not yet claim a durable delegation binding or a
-transactional apply. Explicit removal scopes the child to DCC's delegation
+Delegation apply/removal, delivery, remote-branch deletion, workspace mutation,
+and turn capture use the shared process runtime and its physical-root/common-dir
+coordination. Explicit delegation removal scopes the child to DCC's delegation
 directory, proves the shared physical common-dir, observes its branch and OID,
-and deletes only a matching `dcc/delegation/*` ref through `update-ref` CAS.
-If the child is already absent, DCC does not guess a branch name. Implicit
-repository-wide `worktree prune` was removed from creation and cleanup paths.
-Remote-branch deletion similarly binds the confirmation to remote, branch,
-local HEAD OID, and redacted effective push URL; it observes the exact live
-remote OID and uses `force-with-lease`, so a successor ref is preserved.
-Multiple push destinations fail closed. Listing workspaces is read-only and
-retains broken rows with an explicit reason for repair or explicit deletion.
+and deletes only a matching `dcc/delegation/*` ref through `update-ref` CAS. If
+the child is already absent, DCC does not guess a branch name. Remote-branch
+deletion binds confirmation to remote, branch, local HEAD OID, and redacted
+effective push URL; it observes the exact live remote OID and uses
+`force-with-lease`, so a successor ref is preserved. Multiple push destinations
+fail closed. Listing workspaces remains read-only and retains broken rows for
+repair or explicit deletion.
 
-Multi-root mutation, turn-interval, and capture-edge admission is atomic and
-ordered, with one shared receipt and per-root generations. Capture itself does
-not yet admit the worktree/common-dir pair, so this foundation does not by
-itself permit an eligible set. External-terminal setup reports, remaining
-delivery and remote ownership/materialization actions, workspace/repository
-creation, creation-time generated-context writes, deletion-triggered delegation
-cleanup, workspace/repository deletion, and every partial lifecycle without a
-durable saga remain outside known coverage. Until capture consumes common-dir
-authority and that inventory is complete, the driver deliberately finalizes
-completed turns through the known-mutation-coverage fail-closed path. The
-feature remains default-off and cannot emit an eligible set.
+Multi-root mutation, turn-interval, capture-edge admission, and Git common-dir
+authority are coordinated and ordered. The macOS desktop feature can emit an
+eligible set only when the complete M4 contract succeeds. Unknown mutations,
+unsupported layouts, identity drift, and external races remain fail-closed and
+produce an ineligible, failed, blocked, or recovery state instead of weakening
+the contract. Other platforms remain unavailable until their filesystem
+adapters satisfy the same reviewed guarantees.
 
 The process MUST acquire a single-instance lifetime lock in the DCC app-data
 directory before startup recovery, retention, artifact purge, or interval
@@ -724,9 +726,10 @@ gate succeeds, it performs neither capture nor global cleanup.
 - Acquire the app-data single-instance lifetime lock before startup cleanup,
   retention, integrity audit, privacy controls, or capture; failure to acquire
   it is fail-closed and performs no cleanup.
-- Keep the Phase 1 implementation behind a feature flag. Windows remains
-  explicitly `adapter_unsupported` until the handle-relative,
-  reparse-rejecting adapter and its tests are complete.
+- Keep the implementation behind a compile-time feature. The desktop build
+  enables it on macOS; Windows and other platforms remain explicitly
+  `adapter_unsupported` until their handle-relative adapters and tests are
+  complete.
 - Compare M3 evidence with M4 classification in tests without using M3 as an
   artifact source.
 
@@ -747,19 +750,20 @@ quarantine as restoration content.
 - Add exclusive coordination, verified exchange files, durable journaling,
   exchange/replace-with-backup adapters, displaced-file validation,
   post-verification, startup recovery, and recovery UI.
-- Ship disabled by default until crash/fault-injection tests pass on every
-  enabled platform/filesystem combination.
+- Enable execution only for a reviewed platform/filesystem adapter. The macOS
+  desktop beta is enabled; unsupported platforms and filesystems fail closed.
 
-### Phase 4 — Product rollout (beta UI implemented; release controls pending)
+### Phase 4 — Product rollout (beta UI and user guide implemented; broader rollout pending)
 
 - Enable for the minimum `M`-only scope, add EN/PT-BR copy, accessibility, and
   content-free local metrics.
-- Publish the exact limitations and a user-visible artifact purge control.
+- Publish the exact limitations. A user-visible artifact purge control remains
+  follow-up work.
 
 ### Later phases
 
 Additions/deletions, renames, executable-bit changes, symlinks, untracked files,
-multi-root turns, detached HEAD, filters/LFS, and three-way reconciliation each
+multi-root turns, filters/LFS, and three-way reconciliation each
 require a separate design extension. None may silently broaden v1 eligibility.
 
 ## Acceptance and test matrix

@@ -6427,6 +6427,13 @@ async fn cleanup_unused_workspace_push_target(
         return Ok(());
     };
     let active_root = resolve_workspace_active_root(removed).to_string();
+    if !Path::new(&active_root).exists() {
+        // This is optional shared-repository configuration cleanup. A prior
+        // partial deletion may already have removed the worktree; retaining a
+        // now-unused DCC remote is safer than blocking permanent workspace
+        // cleanup on a physical root that no longer exists.
+        return Ok(());
+    }
     state
         .run_git_workspace_mutation_blocking(&active_root, move |trusted_root| {
             let root = trusted_root
@@ -6644,7 +6651,23 @@ fn delete_workspace_remote_branch_target(
                 .to_string(),
         );
     }
-    let (raw_push_url, observed_push_url) = observed_workspace_push_url(active_root, remote)?;
+    delete_confirmed_remote_branch_at_root(
+        active_root,
+        remote,
+        branch,
+        &expected_oid,
+        expected_push_url,
+    )
+}
+
+fn delete_confirmed_remote_branch_at_root(
+    root: &str,
+    remote: &str,
+    branch: &str,
+    expected_oid: &str,
+    expected_push_url: &str,
+) -> Result<(), String> {
+    let (raw_push_url, observed_push_url) = observed_workspace_push_url(root, remote)?;
     if push_url_contains_credentials(&raw_push_url) {
         return Err(
             "The remote push URL contains embedded credentials. Remove them and use your credential manager before deleting a branch."
@@ -6657,13 +6680,13 @@ fn delete_workspace_remote_branch_target(
                 .to_string(),
         );
     }
-    if remote_default_branch(active_root, &raw_push_url)?.as_deref() == Some(branch) {
+    if remote_default_branch(root, &raw_push_url)?.as_deref() == Some(branch) {
         return Err(format!(
             "Refusing to delete `{branch}` because it is the default branch on `{remote}`."
         ));
     }
 
-    let Some(observed_remote_oid) = remote_branch_oid(active_root, &raw_push_url, branch)? else {
+    let Some(observed_remote_oid) = remote_branch_oid(root, &raw_push_url, branch)? else {
         return Ok(());
     };
     if observed_remote_oid != expected_oid {
@@ -6676,7 +6699,7 @@ fn delete_workspace_remote_branch_target(
     let remote_ref = format!("refs/heads/{branch}");
     let lease = format!("--force-with-lease={remote_ref}:{expected_oid}");
     let delete_refspec = format!(":{remote_ref}");
-    let output = run_git_output(active_root, &["push", &lease, remote, &delete_refspec])?;
+    let output = run_git_output(root, &["push", &lease, remote, &delete_refspec])?;
     if !output.status.success() {
         return Err(git_output_err(
             "git push --force-with-lease",
@@ -6684,6 +6707,41 @@ fn delete_workspace_remote_branch_target(
         ));
     }
     Ok(())
+}
+
+fn delete_workspace_remote_branch_after_worktree_loss(
+    repository_root: &str,
+    workspace: &Workspace,
+    expected: &WorkspaceRemoteBranchDeletionTarget,
+) -> Result<(), String> {
+    let remote = expected.remote.trim();
+    let branch = expected.branch.trim();
+    if remote.is_empty() || branch.is_empty() {
+        return Err(
+            "The remote branch confirmation is incomplete. Reopen the deletion dialog and try again."
+                .to_string(),
+        );
+    }
+    validate_branch_for_fetch(repository_root, branch)?;
+    if workspace.base_branch.trim() == branch || matches!(branch, "main" | "master" | "trunk") {
+        return Err(format!("Refusing to delete protected branch `{branch}`."));
+    }
+    let expected_oid = validate_remote_branch_deletion_oid(&expected.expected_oid)?;
+    let local_ref = format!("refs/heads/{branch}");
+    let local_oid = resolve_commitish_sha(repository_root, &local_ref)?;
+    if !local_oid.eq_ignore_ascii_case(&expected_oid) {
+        return Err(
+            "The saved local branch no longer matches the confirmed worktree commit. Review the branch before trying again."
+                .to_string(),
+        );
+    }
+    delete_confirmed_remote_branch_at_root(
+        repository_root,
+        remote,
+        branch,
+        &expected_oid,
+        &expected.push_url,
+    )
 }
 
 fn delete_workspace_remote_branch(
@@ -7787,6 +7845,8 @@ pub async fn delete_workspace_bundle(
         created_workspaces.push(workspace);
     }
 
+    ensure_workspace_history_deletable(&session_repo, &created_workspaces)?;
+
     let mut delegation_cleanup_errors = Vec::new();
     for workspace in created_workspaces.iter().rev() {
         if let Err(error) = cleanup_delegation_worktrees(&state, &session_repo, workspace).await {
@@ -7881,23 +7941,7 @@ pub async fn delete_workspace_bundle(
         ));
     }
 
-    let mut bundle_session_ids = Vec::new();
-    for workspace in &created_workspaces {
-        let sessions = session_repo
-            .list_workspace_sessions(&workspace.id)
-            .map_err(|error| error.to_string())?;
-        bundle_session_ids.extend(sessions.into_iter().map(|summary| summary.session.id));
-    }
-    for session_id in bundle_session_ids {
-        SessionRepo::delete_session(&session_repo, &session_id)
-            .await
-            .map_err(|error| {
-                format!(
-                    "failed to remove multi-workspace session {}: {error}",
-                    session_id.0
-                )
-            })?;
-    }
+    cleanup_workspace_session_records(&session_repo, &created_workspaces, &state.db_path).await?;
 
     repo.delete_workspace_bundle(&input.bundle_id)
         .await
@@ -9569,6 +9613,54 @@ mod editor_workspace_file_tests {
                 .expect("read surviving remote branch"),
             successor_oid
         );
+    }
+
+    #[test]
+    fn remote_branch_deletion_recovers_after_the_worktree_is_already_missing() {
+        let repo = TestDir::new("delete-missing-worktree-workspace");
+        let remote = TestDir::new("delete-missing-worktree-remote");
+        let run = |root: &str, args: &[&str]| {
+            let output = run_git_output(root, args).expect("run git");
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(remote.as_str(), &["init", "--bare"]);
+        run(repo.as_str(), &["init", "-b", "main"]);
+        run(repo.as_str(), &["config", "user.name", "DCC Test"]);
+        run(
+            repo.as_str(),
+            &["config", "user.email", "dcc@example.invalid"],
+        );
+        run(repo.as_str(), &["commit", "--allow-empty", "-m", "base"]);
+        run(repo.as_str(), &["remote", "add", "origin", remote.as_str()]);
+        run(repo.as_str(), &["push", "-u", "origin", "main"]);
+        run(repo.as_str(), &["switch", "-c", "feature/delete"]);
+        run(repo.as_str(), &["commit", "--allow-empty", "-m", "work"]);
+        run(repo.as_str(), &["push", "-u", "origin", "feature/delete"]);
+
+        let mut workspace = imported_fork_workspace("missing-worktree", repo.as_str(), "origin");
+        workspace.source = None;
+        let target = workspace_remote_branch_deletion_target(&workspace)
+            .expect("capture deletion target")
+            .expect("published branch target");
+        workspace.worktree_path = Some("/missing/dcc-worktree".to_owned());
+        run(repo.as_str(), &["switch", "main"]);
+
+        delete_workspace_remote_branch_after_worktree_loss(repo.as_str(), &workspace, &target)
+            .expect("delete from the persisted repository after worktree loss");
+        assert!(!run_git_output(
+            remote.as_str(),
+            &["show-ref", "--verify", "refs/heads/feature/delete"]
+        )
+        .expect("inspect remote")
+        .status
+        .success());
+        delete_workspace_remote_branch_after_worktree_loss(repo.as_str(), &workspace, &target)
+            .expect("remote deletion recovery is idempotent");
     }
 
     #[test]
@@ -12051,6 +12143,7 @@ pub async fn delete_workspace(
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    ensure_workspace_history_deletable(&session_repo, std::slice::from_ref(&workspace))?;
     cleanup_delegation_worktrees(&state, &session_repo, &workspace).await?;
     if input.delete_remote_branch {
         let expected_target = input.expected_remote_target.ok_or_else(|| {
@@ -12059,15 +12152,42 @@ pub async fn delete_workspace(
         })?;
         let active_root = resolve_workspace_active_root(&workspace).to_string();
         let remote_workspace = workspace.clone();
-        state
-            .run_git_workspace_mutation_blocking(&active_root, move |trusted_root| {
-                let trusted_root = trusted_root
-                    .to_str()
-                    .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
-                delete_workspace_remote_branch(&remote_workspace, trusted_root, &expected_target)
-            })
-            .await
-            .map_err(workspace_mutation_error)?;
+        if Path::new(&active_root).exists() {
+            state
+                .run_git_workspace_mutation_blocking(&active_root, move |trusted_root| {
+                    let trusted_root = trusted_root
+                        .to_str()
+                        .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
+                    delete_workspace_remote_branch(
+                        &remote_workspace,
+                        trusted_root,
+                        &expected_target,
+                    )
+                })
+                .await
+                .map_err(workspace_mutation_error)?;
+        } else {
+            let repository_root = workspace.root_path.clone();
+            let authorized_root = repository_root.clone();
+            let workspace_id = workspace.id.clone();
+            state
+                .run_git_workspace_mutation_for_workspace_blocking(
+                    &workspace_id,
+                    &authorized_root,
+                    move |trusted_root| {
+                        let trusted_root = trusted_root
+                            .to_str()
+                            .ok_or_else(|| "repository root is not valid UTF-8".to_string())?;
+                        delete_workspace_remote_branch_after_worktree_loss(
+                            trusted_root,
+                            &remote_workspace,
+                            &expected_target,
+                        )
+                    },
+                )
+                .await
+                .map_err(workspace_mutation_error)?;
+        }
     }
     cleanup_unused_workspace_push_target(&state, &repo, &workspace, &BTreeSet::new()).await?;
     cleanup_workspace_files(&workspace)?;
@@ -12531,6 +12651,8 @@ async fn delete_repository_with_workspaces(
         right_depth.cmp(&left_depth)
     });
 
+    ensure_workspace_history_deletable(session_repo, &workspaces)?;
+
     for workspace in &workspaces {
         cleanup_delegation_worktrees(state, session_repo, workspace).await?;
         cleanup_workspace_files(workspace)?;
@@ -12557,58 +12679,8 @@ async fn cleanup_workspace_session_records(
         .iter()
         .map(|workspace| workspace.id.clone())
         .collect::<Vec<_>>();
-    let mut session_ids = session_repo
-        .list_session_ids_for_workspace_scope(&workspace_ids)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|session_id| session_id.0)
-        .collect::<BTreeSet<_>>();
-    let delegations = DelegationRepo::list_delegations(session_repo, None, None)
-        .await
-        .map_err(|error| error.to_string())?;
-    let removed_workspace_ids = workspace_ids
-        .iter()
-        .map(|workspace_id| workspace_id.0.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut delegation_ids = BTreeSet::new();
-
-    loop {
-        let mut changed = false;
-        for delegation in &delegations {
-            let parent_removed = session_ids.contains(&delegation.parent_session_id.0);
-            let workspace_removed =
-                removed_workspace_ids.contains(&delegation.workspace_id.0.as_str());
-            let child_removed = delegation
-                .child_session_id
-                .as_ref()
-                .is_some_and(|session_id| session_ids.contains(&session_id.0));
-            if workspace_removed || parent_removed || child_removed {
-                delegation_ids.insert(delegation.id.0.clone());
-                if let Some(child_session_id) = delegation.child_session_id.as_ref() {
-                    changed |= session_ids.insert(child_session_id.0.clone());
-                }
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-
-    for delegation_id in delegation_ids {
-        session_repo
-            .delete_delegation_record(&dcc_core::domain::delegation::DelegationId(delegation_id))
-            .map_err(|error| error.to_string())?;
-    }
-    for session_id in session_ids {
-        SessionRepo::delete_session(
-            session_repo,
-            &dcc_core::domain::session::SessionId(session_id),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    }
     session_repo
-        .delete_search_rows_for_workspaces(&workspace_ids)
+        .delete_workspace_history(&workspace_ids)
         .map_err(|error| error.to_string())?;
 
     let mut coderabbit_roots = BTreeSet::new();
@@ -12628,4 +12700,17 @@ async fn cleanup_workspace_session_records(
         )?;
     }
     Ok(())
+}
+
+fn ensure_workspace_history_deletable(
+    session_repo: &SqliteSessionRepo,
+    workspaces: &[Workspace],
+) -> Result<(), String> {
+    let workspace_ids = workspaces
+        .iter()
+        .map(|workspace| workspace.id.clone())
+        .collect::<Vec<_>>();
+    session_repo
+        .ensure_workspace_history_deletable(&workspace_ids)
+        .map_err(|error| error.to_string())
 }

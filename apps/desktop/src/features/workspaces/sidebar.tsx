@@ -725,11 +725,20 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			});
 			setWorkspaceDeletionTarget(null);
 		} catch (error) {
-			toast.error(
+			const message =
 				error instanceof Error
 					? error.message
-					: t("sidebar.deleteWorkspaceError"),
+					: typeof error === "string"
+						? error
+						: "";
+			toast.error(
+				message.includes("Undo recovery is still active")
+					? t("sidebar.deleteWorkspaceUndoRecoveryActive")
+					: message || t("sidebar.deleteWorkspaceError"),
 			);
+			// The backend may already have removed a remote branch or worktree.
+			// Closing forces the next confirmation to use the refreshed target.
+			setWorkspaceDeletionTarget(null);
 		} finally {
 			setIsDeletingWorkspace(false);
 		}

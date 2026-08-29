@@ -2869,6 +2869,226 @@ impl SqliteSessionRepo {
         Ok(session_ids)
     }
 
+    fn workspace_history_scope(
+        conn: &Connection,
+        workspace_ids: &BTreeSet<String>,
+    ) -> Result<(BTreeSet<String>, BTreeSet<String>)> {
+        let mut session_ids = BTreeSet::new();
+        let mut statement = conn
+            .prepare("SELECT id, workspace_id, additional_workspace_ids_json FROM dcc_sessions")
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        for row in rows {
+            let (session_id, workspace_id, additional_json) =
+                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let additional =
+                serde_json::from_str::<Vec<String>>(&additional_json).unwrap_or_default();
+            if workspace_ids.contains(&workspace_id)
+                || additional
+                    .iter()
+                    .any(|workspace_id| workspace_ids.contains(workspace_id))
+            {
+                session_ids.insert(session_id);
+            }
+        }
+        drop(statement);
+
+        let mut delegation_ids = BTreeSet::new();
+        loop {
+            let mut changed = false;
+            let mut statement = conn
+                .prepare(
+                    "SELECT id, parent_session_id, child_session_id, workspace_id FROM dcc_delegations",
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            for row in rows {
+                let (delegation_id, parent_session_id, child_session_id, workspace_id) =
+                    row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let belongs_to_scope = workspace_ids.contains(&workspace_id)
+                    || session_ids.contains(&parent_session_id)
+                    || child_session_id
+                        .as_ref()
+                        .is_some_and(|session_id| session_ids.contains(session_id));
+                if !belongs_to_scope {
+                    continue;
+                }
+                delegation_ids.insert(delegation_id);
+                if let Some(child_session_id) = child_session_id {
+                    changed |= session_ids.insert(child_session_id);
+                }
+            }
+            drop(statement);
+            if !changed {
+                break;
+            }
+        }
+
+        Ok((session_ids, delegation_ids))
+    }
+
+    fn workspace_restore_set_ids(
+        conn: &Connection,
+        workspace_ids: &BTreeSet<String>,
+        session_ids: &BTreeSet<String>,
+    ) -> Result<Vec<String>> {
+        let mut statement = conn
+            .prepare("SELECT restore_set_id, workspace_id, session_id FROM dcc_turn_restore_sets")
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut restore_set_ids = Vec::new();
+        for row in rows {
+            let (restore_set_id, workspace_id, session_id) =
+                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            if workspace_ids.contains(&workspace_id) || session_ids.contains(&session_id) {
+                restore_set_ids.push(restore_set_id);
+            }
+        }
+        Ok(restore_set_ids)
+    }
+
+    fn ensure_restore_sets_are_discardable(
+        conn: &Connection,
+        restore_set_ids: &[String],
+    ) -> Result<()> {
+        for restore_set_id in restore_set_ids {
+            let active = conn
+                .query_row(
+                    "SELECT state FROM dcc_undo_operations WHERE restore_set_id = ?1 AND active = 1 LIMIT 1",
+                    params![restore_set_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(guarded_undo_error)?;
+            if active.is_some() {
+                return Err(guarded_undo_error(
+                    "An Undo recovery is still active for this task. Open Last turn, refresh the recovery status, and try deleting again.",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Verifies that retiring a workspace cannot destroy an active Undo
+    /// recovery. Eligible, ineligible and terminal captures are ordinary
+    /// workspace history and are intentionally discardable on deletion.
+    pub fn ensure_workspace_history_deletable(&self, workspace_ids: &[WorkspaceId]) -> Result<()> {
+        if workspace_ids.is_empty() {
+            return Ok(());
+        }
+        let workspace_ids = workspace_ids
+            .iter()
+            .map(|workspace_id| workspace_id.0.clone())
+            .collect::<BTreeSet<_>>();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let (session_ids, _) = Self::workspace_history_scope(&conn, &workspace_ids)?;
+        let restore_set_ids = Self::workspace_restore_set_ids(&conn, &workspace_ids, &session_ids)?;
+        Self::ensure_restore_sets_are_discardable(&conn, &restore_set_ids)
+    }
+
+    /// Atomically removes session, review and guarded-Undo history owned by a
+    /// retiring workspace scope. Active recovery journals fail before any row
+    /// is changed; terminal journals and captures are deleted in dependency
+    /// order so their RESTRICT constraints cannot strand the workspace.
+    pub fn delete_workspace_history(&self, workspace_ids: &[WorkspaceId]) -> Result<()> {
+        if workspace_ids.is_empty() {
+            return Ok(());
+        }
+        let workspace_ids = workspace_ids
+            .iter()
+            .map(|workspace_id| workspace_id.0.clone())
+            .collect::<BTreeSet<_>>();
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let (session_ids, delegation_ids) =
+            Self::workspace_history_scope(&transaction, &workspace_ids)?;
+        let restore_set_ids =
+            Self::workspace_restore_set_ids(&transaction, &workspace_ids, &session_ids)?;
+        Self::ensure_restore_sets_are_discardable(&transaction, &restore_set_ids)?;
+
+        for restore_set_id in &restore_set_ids {
+            transaction
+                .execute(
+                    "DELETE FROM dcc_undo_operations WHERE restore_set_id = ?1 AND active = 0",
+                    params![restore_set_id],
+                )
+                .map_err(guarded_undo_error)?;
+            transaction
+                .execute(
+                    "DELETE FROM dcc_turn_restore_sets WHERE restore_set_id = ?1",
+                    params![restore_set_id],
+                )
+                .map_err(guarded_undo_error)?;
+        }
+        for delegation_id in delegation_ids {
+            transaction
+                .execute(
+                    "DELETE FROM dcc_delegations WHERE id = ?1",
+                    params![delegation_id],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        for session_id in &session_ids {
+            transaction
+                .execute(
+                    "DELETE FROM dcc_sessions WHERE id = ?1",
+                    params![session_id],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            transaction
+                .execute(
+                    "DELETE FROM dcc_session_search WHERE session_id = ?1",
+                    params![session_id],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        for workspace_id in workspace_ids {
+            transaction
+                .execute(
+                    "DELETE FROM dcc_session_search WHERE workspace_id = ?1",
+                    params![workspace_id],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
     pub fn delete_delegation_record(&self, id: &DelegationId) -> Result<bool> {
         let conn = self
             .conn
@@ -7386,6 +7606,149 @@ mod tests {
         assert!(repo
             .get_guarded_undo_capture_summary("snapshot-summary")
             .is_err());
+    }
+
+    #[test]
+    fn workspace_history_deletion_discards_ineligible_capture_and_unblocks_workspace() {
+        let conn = in_memory_conn();
+        let session_repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        let workspace_repo = SqliteWorkspaceRepo::from_connection(conn.clone()).unwrap();
+        seed_guarded_undo_parents(&conn.lock().unwrap(), "retire-ineligible");
+        let collecting = collecting_restore_set("retire-ineligible");
+        session_repo.create_turn_restore_set(&collecting).unwrap();
+        let mut ineligible = collecting;
+        ineligible.state = RestoreSetState::Ineligible;
+        ineligible.reason_code = Some(GuardedUndoReasonCode::UntrackedPath);
+        ineligible.completed_at = Some("t2".to_owned());
+        assert!(session_repo
+            .finalize_turn_restore_set(&ineligible, &[])
+            .unwrap());
+
+        let workspace_id = WorkspaceId("workspace-retire-ineligible".to_owned());
+        session_repo
+            .ensure_workspace_history_deletable(std::slice::from_ref(&workspace_id))
+            .expect("an ineligible capture is discardable workspace history");
+        session_repo
+            .delete_workspace_history(std::slice::from_ref(&workspace_id))
+            .expect("delete workspace history in dependency order");
+        session_repo
+            .delete_workspace_history(std::slice::from_ref(&workspace_id))
+            .expect("retrying history deletion is idempotent");
+        futures::executor::block_on(workspace_repo.delete_workspace(&workspace_id))
+            .expect("guarded undo no longer blocks the workspace row");
+
+        let locked = conn.lock().unwrap();
+        for table in [
+            "dcc_turn_restore_sets",
+            "dcc_turn_change_sets",
+            "dcc_sessions",
+            "dcc_workspaces",
+        ] {
+            assert_eq!(
+                locked
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                0,
+                "{table} must not retain the retired workspace"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_history_deletion_discards_eligible_capture_and_terminal_undo_journal() {
+        let conn = in_memory_conn();
+        let session_repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        let workspace_repo = SqliteWorkspaceRepo::from_connection(conn.clone()).unwrap();
+        let (eligible, _) =
+            persist_eligible_restore_set(&session_repo, &conn, "retire-terminal", "t2");
+        conn.lock()
+            .unwrap()
+            .execute(
+                r#"INSERT INTO dcc_undo_operations (
+                       operation_id, restore_set_id, journal_version, state, active,
+                       cleanup_pending, prepared_identity_json, reason_code,
+                       created_at, updated_at, completed_at
+                   ) VALUES ('operation-retire-terminal', ?1, 1, 'blocked', 0, 0, '{}',
+                             'workspace_changed', 't3', 't4', 't4')"#,
+                params![eligible.restore_set_id.0],
+            )
+            .unwrap();
+
+        let workspace_id = WorkspaceId("workspace-retire-terminal".to_owned());
+        session_repo
+            .delete_workspace_history(std::slice::from_ref(&workspace_id))
+            .expect("eligible capture and terminal journal are discardable history");
+        futures::executor::block_on(workspace_repo.delete_workspace(&workspace_id))
+            .expect("terminal Undo history no longer blocks workspace deletion");
+
+        let locked = conn.lock().unwrap();
+        for table in [
+            "dcc_undo_operations",
+            "dcc_turn_restore_files",
+            "dcc_turn_restore_sets",
+            "dcc_turn_change_sets",
+            "dcc_sessions",
+            "dcc_workspaces",
+        ] {
+            assert_eq!(
+                locked
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                0,
+                "{table} must not retain terminal history"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_history_deletion_blocks_active_undo_before_changing_rows() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).unwrap();
+        let (eligible, _) = persist_eligible_restore_set(&repo, &conn, "retire-active", "t2");
+        conn.lock()
+            .unwrap()
+            .execute(
+                r#"INSERT INTO dcc_undo_operations (
+                       operation_id, restore_set_id, journal_version, state, active,
+                       cleanup_pending, prepared_identity_json, created_at, updated_at
+                   ) VALUES ('operation-retire-active', ?1, 1, 'preparing', 1, 1, '{}', 't3', 't3')"#,
+                params![eligible.restore_set_id.0],
+            )
+            .unwrap();
+        let workspace_id = WorkspaceId("workspace-retire-active".to_owned());
+
+        let preflight = repo
+            .ensure_workspace_history_deletable(std::slice::from_ref(&workspace_id))
+            .expect_err("active recovery must block before external deletion");
+        assert!(preflight
+            .to_string()
+            .contains("Undo recovery is still active"));
+        assert!(repo
+            .delete_workspace_history(std::slice::from_ref(&workspace_id))
+            .is_err());
+
+        let locked = conn.lock().unwrap();
+        for table in [
+            "dcc_undo_operations",
+            "dcc_turn_restore_sets",
+            "dcc_turn_change_sets",
+            "dcc_sessions",
+            "dcc_workspaces",
+        ] {
+            assert_eq!(
+                locked
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                1,
+                "{table} must remain intact after blocked preflight"
+            );
+        }
     }
 
     #[test]

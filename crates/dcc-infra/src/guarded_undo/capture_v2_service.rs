@@ -1226,10 +1226,26 @@ fn security_metadata_matches(
     baseline: &dcc_core::domain::guarded_undo::RegularFileMetadataV1,
     result: &dcc_core::domain::guarded_undo::RegularFileMetadataV1,
 ) -> bool {
-    // macOS metadata intentionally excludes size, mtime and ctime. Content
-    // edits may change those values; only owner/mode/link/file identity and
-    // other security invariants participate in this comparison.
-    baseline == result
+    // Editors commonly save by atomically replacing a regular file, which
+    // legitimately changes its inode. The result inode is persisted and must
+    // still match during prepare/execute; across the provider turn we compare
+    // only metadata whose drift changes the restoration semantics.
+    baseline.validate().is_ok()
+        && result.validate().is_ok()
+        && !baseline.file_identity.is_empty()
+        && !result.file_identity.is_empty()
+        && baseline.fields.contains_key("file_id")
+        && result.fields.contains_key("file_id")
+        && baseline.schema_version == result.schema_version
+        && baseline.adapter == result.adapter
+        && baseline.link_count == result.link_count
+        && baseline.fields.iter().all(|(key, value)| {
+            key == "file_id" || result.fields.get(key).is_some_and(|result| result == value)
+        })
+        && result
+            .fields
+            .keys()
+            .all(|key| key == "file_id" || baseline.fields.contains_key(key))
 }
 
 fn git_identity(
@@ -1428,7 +1444,13 @@ mod tests {
     use crate::guarded_undo::macos_root::CapturedBytes;
     use rusqlite::{params, Connection};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::{ffi::CString, fs, os::unix::ffi::OsStrExt, process::Command, sync::Mutex};
+    use std::{
+        ffi::CString,
+        fs,
+        os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+        process::Command,
+        sync::Mutex,
+    };
 
     struct ManualClock(Mutex<Instant>);
 
@@ -1656,6 +1678,60 @@ mod tests {
                 files[0].pre_sha256,
             )
             .unwrap();
+    }
+
+    #[test]
+    fn stable_detached_task_turn_with_atomic_editor_save_is_eligible() {
+        let fixture = Fixture::new();
+        run_git(
+            &fixture.request.workspace_absolute,
+            &["checkout", "--detach", "-q"],
+        );
+        let handle = fixture.service.begin(fixture.request.clone()).unwrap();
+        let target = fixture.request.workspace_absolute.join("tracked.txt");
+        let replacement = fixture.request.workspace_absolute.join("tracked.txt.new");
+        fs::write(&replacement, b"after atomic save\n").unwrap();
+        remove_xattrs(&replacement);
+        fs::rename(&replacement, &target).unwrap();
+
+        let summary = fixture.service.finish(handle).unwrap();
+        assert_eq!(summary.state, RestoreSetState::Eligible);
+        assert_eq!(summary.reason_code, None);
+        assert_eq!(summary.file_count, 1);
+
+        let ready = match fixture.service.prepare_guarded_undo(
+            &fixture.request.snapshot_id,
+            &fixture.request.workspace_absolute,
+        ) {
+            PrepareGuardedUndoResult::Ready(ready) => ready,
+            other => panic!("expected detached atomic-save preview, got {other:?}"),
+        };
+        assert!(matches!(
+            fixture
+                .service
+                .execute_guarded_undo(&ready.preview_token, true),
+            ExecuteGuardedUndoResult::Completed { .. }
+        ));
+        assert_eq!(fs::read(target).unwrap(), b"before\n");
+    }
+
+    #[test]
+    fn atomic_editor_save_that_changes_permissions_remains_ineligible() {
+        let fixture = Fixture::new();
+        let handle = fixture.service.begin(fixture.request.clone()).unwrap();
+        let target = fixture.request.workspace_absolute.join("tracked.txt");
+        let replacement = fixture.request.workspace_absolute.join("tracked.txt.new");
+        fs::write(&replacement, b"after unsafe metadata change\n").unwrap();
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o600)).unwrap();
+        remove_xattrs(&replacement);
+        fs::rename(&replacement, &target).unwrap();
+
+        let summary = fixture.service.finish(handle).unwrap();
+        assert_eq!(summary.state, RestoreSetState::Ineligible);
+        assert_eq!(
+            summary.reason_code,
+            Some(GuardedUndoReasonCode::MetadataChanged)
+        );
     }
 
     #[test]

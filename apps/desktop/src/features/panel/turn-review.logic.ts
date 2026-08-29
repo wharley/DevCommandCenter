@@ -20,6 +20,14 @@ export type GuardedUndoCapturePresentation = {
 		| "collecting"
 		| "expired"
 		| "consumed"
+		| "untracked_path"
+		| "index_changed"
+		| "metadata_changed"
+		| "detached_head"
+		| "no_target_changes"
+		| "git_changed"
+		| "unsupported_change"
+		| "unsupported_git"
 		| "interrupted"
 		| "unsupported"
 		| "limit"
@@ -168,6 +176,37 @@ export function resolveGuardedUndoCapture(
 		].includes(reason ?? "")
 	) {
 		return { state, reason: "interrupted" };
+	}
+	if (reason === "untracked_path") return { state, reason: "untracked_path" };
+	if (reason === "index_changed") return { state, reason: "index_changed" };
+	if (reason === "metadata_changed") return { state, reason: "metadata_changed" };
+	if (reason === "detached_head") return { state, reason: "detached_head" };
+	if (reason === "no_target_changes") {
+		return { state, reason: "no_target_changes" };
+	}
+	if (
+		["head_changed", "ref_changed", "repository_identity_changed"].includes(
+			reason,
+		)
+	) {
+		return { state, reason: "git_changed" };
+	}
+	if (
+		["unsupported_status", "unmerged_path", "tracked_manifest_changed"].includes(
+			reason,
+		)
+	) {
+		return { state, reason: "unsupported_change" };
+	}
+	if (
+		[
+			"git_filter_present",
+			"working_tree_encoding_present",
+			"git_attributes_changed",
+			"assume_unchanged",
+		].includes(reason)
+	) {
+		return { state, reason: "unsupported_git" };
 	}
 	if (
 		[

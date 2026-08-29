@@ -356,6 +356,22 @@ impl WorkspaceCommandState {
         .map_err(|_| WorkspaceMutationAuthorizationError::RepositoryUnavailable)?
     }
 
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    async fn authorize_workspace_mutation_for_id(
+        &self,
+        workspace_id: &WorkspaceId,
+        requested_root: &str,
+    ) -> std::result::Result<AuthorizedWorkspaceMutation, WorkspaceMutationAuthorizationError> {
+        let db_path = self.db_path.clone();
+        let workspace_id = workspace_id.clone();
+        let requested_root = requested_root.to_owned();
+        tokio::task::spawn_blocking(move || {
+            resolve_authorized_workspace_mutation_for_id(&db_path, &workspace_id, &requested_root)
+        })
+        .await
+        .map_err(|_| WorkspaceMutationAuthorizationError::RepositoryUnavailable)?
+    }
+
     /// Resolves durable authority first, then delegates physical admission and
     /// the complete synchronous operation to the process runtime.
     #[allow(dead_code)] // Foundation API; handlers are integrated separately.
@@ -481,6 +497,38 @@ impl WorkspaceCommandState {
             .authorize_workspace_mutation(requested_root)
             .await
             .map_err(WorkspaceMutationRequestError::Authorization)?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let binding = AuthorizedWorkspaceMutation {
+            workspace_absolute: PathBuf::from(requested_root),
+        };
+        self.runtime
+            .run_git_workspace_mutation_blocking(binding, operation)
+            .await
+            .map_err(WorkspaceMutationRequestError::Runtime)
+    }
+
+    /// Recovery variant for a workspace whose worktree may already be gone.
+    /// The workspace id removes ambiguity when several task rows share the
+    /// repository root, while the requested root must still match that exact
+    /// durable row before the physical Git lease is acquired.
+    pub(crate) async fn run_git_workspace_mutation_for_workspace_blocking<T, E, F>(
+        &self,
+        workspace_id: &WorkspaceId,
+        requested_root: &str,
+        operation: F,
+    ) -> std::result::Result<T, WorkspaceMutationRequestError<E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let binding = self
+            .authorize_workspace_mutation_for_id(workspace_id, requested_root)
+            .await
+            .map_err(WorkspaceMutationRequestError::Authorization)?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let _ = workspace_id;
         #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
         let binding = AuthorizedWorkspaceMutation {
             workspace_absolute: PathBuf::from(requested_root),
@@ -755,6 +803,31 @@ fn resolve_authorized_workspace_mutation(
         return Err(WorkspaceMutationAuthorizationError::UnknownMapping);
     };
     Ok(AuthorizedWorkspaceMutation { workspace_absolute })
+}
+
+#[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+fn resolve_authorized_workspace_mutation_for_id(
+    db_path: &Path,
+    workspace_id: &WorkspaceId,
+    requested_root: &str,
+) -> std::result::Result<AuthorizedWorkspaceMutation, WorkspaceMutationAuthorizationError> {
+    let requested_root = requested_root.trim();
+    if requested_root.is_empty() || !Path::new(requested_root).is_absolute() {
+        return Err(WorkspaceMutationAuthorizationError::InvalidRequest);
+    }
+    let repo = SqliteWorkspaceRepo::open(db_path)
+        .map_err(|_| WorkspaceMutationAuthorizationError::RepositoryUnavailable)?;
+    let workspace = futures::executor::block_on(repo.get_workspace(workspace_id))
+        .map_err(|_| WorkspaceMutationAuthorizationError::RepositoryUnavailable)?
+        .ok_or(WorkspaceMutationAuthorizationError::UnknownMapping)?;
+    if workspace.root_path != requested_root
+        && workspace.worktree_path.as_deref() != Some(requested_root)
+    {
+        return Err(WorkspaceMutationAuthorizationError::UnknownMapping);
+    }
+    Ok(AuthorizedWorkspaceMutation {
+        workspace_absolute: PathBuf::from(requested_root),
+    })
 }
 
 #[derive(Clone)]
@@ -4882,6 +4955,25 @@ mod tests {
             ambiguous,
             Err(WorkspaceMutationAuthorizationError::AmbiguousMapping)
         ));
+
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        {
+            let exact = workspace_state
+                .authorize_workspace_mutation_for_id(&workspace.id, &durable_worktree)
+                .await
+                .expect("workspace id disambiguates a shared repository root");
+            assert_eq!(
+                exact.into_workspace_absolute(),
+                PathBuf::from(&durable_worktree)
+            );
+            assert!(matches!(
+                workspace_state
+                    .authorize_workspace_mutation_for_id(&workspace.id, &duplicate.root_path)
+                    .await,
+                Err(WorkspaceMutationAuthorizationError::UnknownMapping)
+            ));
+        }
+
         let debug = format!("{ambiguous:?}");
         assert!(!debug.contains(&durable_worktree));
         assert!(!format!("{workspace_state:?}").contains(db_path.to_string_lossy().as_ref()));

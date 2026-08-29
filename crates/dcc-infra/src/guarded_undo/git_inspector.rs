@@ -776,8 +776,7 @@ impl<R: IndexFileReader> GitInspector<R> {
         }
 
         let tracked_manifest_sha256 = manifest_digest(&tracked);
-        let logical_ineligibility_reasons =
-            inspection_reasons(&checkout_ref, split_index, &tracked, &untracked);
+        let logical_ineligibility_reasons = inspection_reasons(split_index, &tracked, &untracked);
         Ok(GitInspection {
             layout,
             head_oid,
@@ -1574,15 +1573,15 @@ fn classify_entry(mode: u32, stage: u8, _skip_worktree: bool) -> TrackedPathKind
 }
 
 fn inspection_reasons(
-    checkout_ref: &CheckoutRef,
     split_index: bool,
     tracked: &[TrackedManifestEntry],
     untracked: &[OpaqueRepoPath],
 ) -> Vec<GuardedUndoReasonCode> {
     let mut reasons = Vec::new();
-    if matches!(checkout_ref, CheckoutRef::Detached) {
-        push_reason(&mut reasons, GuardedUndoReasonCode::DetachedHead);
-    }
+    // A stable detached HEAD is a complete Git identity: capture and execute
+    // both bind to the exact OID and checkout kind. DCC task worktrees start
+    // detached before their semantic branch is materialized, so treating the
+    // state itself as unsafe would make the first normal turn ineligible.
     if split_index {
         push_reason(&mut reasons, GuardedUndoReasonCode::SparseOrSkipWorktree);
     }
@@ -2000,12 +1999,15 @@ mod tests {
 
     #[test]
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn detached_head_is_classified_without_losing_the_raw_oid() {
+    fn stable_detached_head_keeps_the_raw_oid_without_becoming_ineligible() {
         let repo = repository();
         git(repo.path(), &["checkout", "--detach", "-q"]);
         let result = inspector().inspect(repo.path()).unwrap();
         assert_eq!(result.checkout_ref, CheckoutRef::Detached);
         assert!(matches!(result.head_oid.len(), 20 | 32));
+        assert!(!result
+            .logical_ineligibility_reasons
+            .contains(&GuardedUndoReasonCode::DetachedHead));
     }
 
     #[test]
