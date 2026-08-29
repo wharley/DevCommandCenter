@@ -75,7 +75,7 @@ export function NewTaskLaunchState({
 			<div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-28 pt-20">
 				<div className="flex w-full max-w-xl flex-col items-center text-center">
 					<div className="mb-5 grid size-11 place-items-center rounded-full border border-border/65 bg-muted/20 text-foreground">
-						<span className="text-lg leading-none">›_</span>
+						<img src="/dcc-glyph.svg" alt="" className="size-6" />
 					</div>
 					<h1 className="text-balance text-[32px] font-medium tracking-[-0.045em] text-foreground">
 						{t("newTask.title")}

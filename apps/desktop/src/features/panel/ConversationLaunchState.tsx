@@ -20,7 +20,7 @@ export function ConversationLaunchState({
 					{t("conversationLaunch.title", { workspaceName })}
 				</h2>
 				<p className="mx-auto mt-3 max-w-xl text-[13px] leading-6 text-muted-foreground">
-					{t("conversationLaunch.hint")}
+					{t("conversationLaunch.hint", { workspaceName })}
 				</p>
 			</div>
 		</div>
