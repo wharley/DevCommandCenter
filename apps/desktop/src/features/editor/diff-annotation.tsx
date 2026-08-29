@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -137,10 +138,10 @@ export function DiffAnnotationPopover({
 	const trimmed = instruction.trim();
 	const canSubmit = trimmed.length > 0;
 
-	return (
+	return createPortal(
 		<>
 			<div
-				className="fixed inset-0 z-40 bg-black/5 supports-backdrop-filter:backdrop-blur-[1px] animate-in fade-in-0 duration-100"
+				className="fixed inset-0 z-[70] bg-black/5 supports-backdrop-filter:backdrop-blur-[1px] animate-in fade-in-0 duration-100"
 				onMouseDown={onCancel}
 				aria-hidden
 			/>
@@ -149,7 +150,7 @@ export function DiffAnnotationPopover({
 				role="dialog"
 				aria-modal="true"
 				aria-label={t("diffAnnotate.dialogLabel")}
-				className="fixed z-50 flex max-h-[calc(100vh-1.5rem)] w-[348px] max-w-[calc(100vw-1.5rem)] origin-top flex-col overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10 animate-in fade-in-0 zoom-in-95 duration-100"
+				className="fixed z-[71] flex max-h-[calc(100vh-1.5rem)] w-[348px] max-w-[calc(100vw-1.5rem)] origin-top flex-col overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10 animate-in fade-in-0 zoom-in-95 duration-100"
 				style={{
 					top: position?.top ?? anchor.top,
 					left: position?.left ?? anchor.left,
@@ -255,6 +256,7 @@ export function DiffAnnotationPopover({
 					</Button>
 				</div>
 			</div>
-		</>
+		</>,
+		document.body,
 	);
 }
