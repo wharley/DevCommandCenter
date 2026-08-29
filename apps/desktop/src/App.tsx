@@ -221,7 +221,6 @@ import {
 	buildPlanImplementationThreadTitle,
 } from "./features/panel/plan-content";
 import type { WorkspaceSurfaceSelection } from "./features/panel/workspace-surface";
-import { isTurnReviewIdentityActive } from "./features/panel/turn-review.logic";
 import type { WorkspaceFileReference } from "./components/workspace-file-reference";
 import {
 	buildMissionContinueCriterionPrompt,
@@ -984,6 +983,10 @@ export default function App() {
 	const [delegateSignal, setDelegateSignal] = useState(0);
 	const [reviewDelegationRequest, setReviewDelegationRequest] = useState<{
 		delegationId: string;
+		nonce: number;
+	} | null>(null);
+	const [lastTurnReviewRequest, setLastTurnReviewRequest] = useState<{
+		sessionId: string;
 		nonce: number;
 	} | null>(null);
 	const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
@@ -2014,35 +2017,19 @@ export default function App() {
 	const openPlanSurface = useCallback(() => {
 		requestSurfaceSelection({ kind: "plan" });
 	}, [requestSurfaceSelection]);
-	const openTurnReviewSurface = useCallback(
+	const openLastTurnReviewInInspector = useCallback(
 		(sessionId: string) => {
-			const workspaceId = activeWorkspace?.id ?? selectedWorkspace?.id ?? null;
-			if (!workspaceId) return;
-			requestSurfaceSelection({ kind: "turn-review", sessionId, workspaceId });
+			requestSurfaceSelection(null, () => {
+				setInspectorMode("git");
+				openContextualInspector();
+				setLastTurnReviewRequest((current) => ({
+					sessionId,
+					nonce: (current?.nonce ?? 0) + 1,
+				}));
+			});
 		},
-		[activeWorkspace?.id, requestSurfaceSelection, selectedWorkspace?.id],
+		[openContextualInspector, requestSurfaceSelection],
 	);
-	useEffect(() => {
-		const selection = surfaceSelectionRef.current;
-		if (selection?.kind !== "turn-review") return;
-		const activeReviewWorkspaceId =
-			activeWorkspace?.id ?? selectedWorkspace?.id ?? null;
-		const activeSessionWorkspace =
-			effectiveSelectedSessionId && activeReviewWorkspaceId
-				? {
-						sessionId: effectiveSelectedSessionId,
-						workspaceId: activeReviewWorkspaceId,
-					}
-				: null;
-		if (!isTurnReviewIdentityActive(selection, activeSessionWorkspace)) {
-			requestSurfaceSelection(null);
-		}
-	}, [
-		activeWorkspace?.id,
-		effectiveSelectedSessionId,
-		requestSurfaceSelection,
-		selectedWorkspace?.id,
-	]);
 	const runWorkbenchCommand = useCallback(
 		(command: WorkbenchCommand) => {
 			recordUxMetric("command_palette_action");
@@ -4941,7 +4928,7 @@ export default function App() {
 									onFileSurfaceClosed={handleFileSurfaceClosed}
 									onCloseSurface={handleCloseSurface}
 									onOpenPlanSurface={openPlanSurface}
-									onOpenTurnReview={openTurnReviewSurface}
+									onOpenTurnReview={openLastTurnReviewInInspector}
 									onOpenFileReference={handleOpenConversationFile}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
 									inspectorCollapsed={inspectorCollapsed}
@@ -5075,11 +5062,11 @@ export default function App() {
 									}
 									onRequestClose={closeInspector}
 									onOpenExpandedPreview={handleExpandGitDiff}
-									onOpenLastTurnReview={openTurnReviewSurface}
 									onContextualActionComplete={
 										handleInspectorContextualActionComplete
 									}
 									reviewDelegationRequest={reviewDelegationRequest}
+									lastTurnReviewRequest={lastTurnReviewRequest}
 									activeTab={inspectorTab}
 									onTabChange={setInspectorTab}
 									mode={inspectorMode}

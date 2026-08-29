@@ -1121,6 +1121,7 @@
       "scopeLabel": "Changes scope",
       "scopes": {
         "working": "Workspace",
+        "last-turn": "Last turn",
         "branch": "Branch"
       },
       "groups": {
@@ -1136,6 +1137,14 @@
       "discardFile": "Discard file changes",
       "loadingDiff": "Loading diff…",
       "diffFailed": "Unable to load the diff",
+      "revertAll": "Revert all",
+      "stageAll": "Stage all",
+      "unstageAll": "Unstage all",
+      "cancel": "Cancel",
+      "revertAllConfirmTitle": "Revert all changes?",
+      "revertAllConfirmDescription_one": "This discards the local change in {{count}} file, including staged content. Git cannot undo this action.",
+      "revertAllConfirmDescription_other": "This discards the local changes in {{count}} files, including staged content. Git cannot undo this action.",
+      "revertAllConfirmAction": "Revert changes",
       "emptyWorking": "The workspace has no local changes.",
       "emptyBranch": "This branch has no changes against its base yet.",
       "loadingGit": "Reading changed files…",

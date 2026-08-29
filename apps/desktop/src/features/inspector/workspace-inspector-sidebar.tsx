@@ -6,7 +6,6 @@ import {
 	ChevronRight,
 	ChevronUp,
 	Code2,
-	FileDiff,
 	GitFork,
 	GitBranch,
 	Info,
@@ -202,6 +201,7 @@ type WorkspaceInspectorSidebarProps = {
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	reviewDelegationRequest?: { delegationId: string; nonce: number } | null;
+	lastTurnReviewRequest?: { sessionId: string; nonce: number } | null;
 	onSelectSession: (sessionId: string) => void;
 	onPrefillComposer?: (text: string) => void;
 	onOpenMergeConflictResolver: (input: {
@@ -249,7 +249,6 @@ type WorkspaceInspectorSidebarProps = {
 	onPinnedChange: (pinned: boolean) => void;
 	onRequestClose: () => void;
 	onOpenExpandedPreview?: (selection?: WorkspaceGitPreviewSelection) => void;
-	onOpenLastTurnReview?: (sessionId: string) => void;
 	onContextualActionComplete?: () => void;
 	activeTab: InspectorTab;
 	onTabChange: (tab: InspectorTab) => void;
@@ -1567,6 +1566,7 @@ export function WorkspaceInspectorSidebar({
 	selectedPreview,
 	onSelectPreview,
 	reviewDelegationRequest,
+	lastTurnReviewRequest,
 	onSelectSession,
 	onPrefillComposer,
 	onOpenMergeConflictResolver,
@@ -1585,7 +1585,6 @@ export function WorkspaceInspectorSidebar({
 	onPinnedChange,
 	onRequestClose,
 	onOpenExpandedPreview,
-	onOpenLastTurnReview,
 	onContextualActionComplete,
 	activeTab,
 	onTabChange,
@@ -3580,6 +3579,9 @@ export function WorkspaceInspectorSidebar({
 							<div className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border/35">
 								<InspectorChangesSection
 									workspaceRoot={changesWorkspaceRoot}
+									workspaceId={workspaceId}
+									sessionId={sessionId}
+									lastTurnReviewRequest={lastTurnReviewRequest}
 									selectedPreview={selectedPreview}
 									onSelectPreview={onSelectPreview}
 									onPrefillComposer={onPrefillComposer}
@@ -3590,27 +3592,6 @@ export function WorkspaceInspectorSidebar({
 										(isSessionWorktreeView ? sessionId : null)
 									}
 									onOpenExpandedPreview={onOpenExpandedPreview}
-									headerAction={
-										sessionId && onOpenLastTurnReview ? (
-											<Tooltip>
-												<TooltipTrigger asChild>
-													<Button
-														type="button"
-														variant="ghost"
-														size="icon-xs"
-														className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-														onClick={() => onOpenLastTurnReview(sessionId)}
-														aria-label={t("turnReview.action")}
-													>
-														<FileDiff className="size-3.5" strokeWidth={1.8} />
-													</Button>
-												</TooltipTrigger>
-												<TooltipContent side="bottom">
-													{t("turnReview.action")}
-												</TooltipContent>
-											</Tooltip>
-										) : null
-									}
 								/>
 							</div>
 						</div>

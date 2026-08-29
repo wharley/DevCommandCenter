@@ -1,4 +1,5 @@
 export type InspectorChangesScope = "working" | "branch";
+export type InspectorReviewScope = InspectorChangesScope | "last-turn";
 export type InspectorChangeGroup = "staged" | "unstaged" | "committed";
 
 type ChangeStatsEntry = {
@@ -37,9 +38,33 @@ export function defaultInspectorChangesScope(
 
 export function changeGroupBelongsToScope(
 	group: InspectorChangeGroup,
-	scope: InspectorChangesScope,
+	scope: InspectorReviewScope,
 ): boolean {
+	if (scope === "last-turn") return false;
 	return scope === "branch" ? group === "committed" : group !== "committed";
+}
+
+export function availableInspectorReviewScopes(
+	hasLastTurnReview: boolean,
+): InspectorReviewScope[] {
+	return hasLastTurnReview
+		? ["working", "last-turn", "branch"]
+		: ["working", "branch"];
+}
+
+export function resolveInspectorReviewScope(
+	preferredScope: InspectorReviewScope | null,
+	hasLastTurnContext: boolean,
+	workingFileCount: number,
+	branchFileCount: number,
+): InspectorReviewScope {
+	if (preferredScope === "last-turn" && !hasLastTurnContext) {
+		return defaultInspectorChangesScope(workingFileCount, branchFileCount);
+	}
+	return (
+		preferredScope ??
+		defaultInspectorChangesScope(workingFileCount, branchFileCount)
+	);
 }
 
 const MIN_REVIEW_CARD_DIFF_HEIGHT = 190;

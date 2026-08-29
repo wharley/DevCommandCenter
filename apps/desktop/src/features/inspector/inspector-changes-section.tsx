@@ -7,9 +7,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
 import {
 	AlertCircle,
+	Check,
 	ChevronDown,
 	ChevronRight,
 	CloudIcon,
+	Clock3,
 	Expand,
 	GitCompareArrows,
 	LaptopIcon,
@@ -27,13 +29,26 @@ import {
 	useMemo,
 	useRef,
 	useState,
-	type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AnimatedShinyText } from "@/components/ui/animated-shiny-text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -47,6 +62,8 @@ import {
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
 import { useCodeRabbitIntegrationEnabled } from "@/features/settings/coderabbit-preferences";
+import { TurnReviewSurface } from "@/features/panel/turn-review-surface";
+import { useCachedTurnReviewSummary } from "@/features/panel/turn-review-query";
 import { CodeRabbitReviewSection } from "./coderabbit-review-section";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
 import { useWorkspaceGitBranchDiff, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "./use-workspace-git-branch-diff";
@@ -55,12 +72,13 @@ import {
 	type WorkspaceGitPreviewSelection,
 } from "./workspace-git-file-preview";
 import {
+	availableInspectorReviewScopes,
 	changeGroupBelongsToScope,
-	defaultInspectorChangesScope,
 	reviewCardDiffHeight,
+	resolveInspectorReviewScope,
 	shouldEagerLoadReviewCard,
 	summarizeInspectorChanges,
-	type InspectorChangesScope,
+	type InspectorReviewScope,
 } from "./inspector-changes-presentation";
 import { useWorkspaceGitFilePreviewContent } from "./use-workspace-git-file-preview-content";
 
@@ -964,12 +982,14 @@ function ChangesGroup({
 
 type InspectorChangesSectionProps = {
 	workspaceRoot: string | null;
+	workspaceId: string | null;
+	sessionId: string | null;
+	lastTurnReviewRequest?: { sessionId: string; nonce: number } | null;
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onPrefillComposer?: (text: string) => void;
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
 	targetSessionId?: string | null;
-	headerAction?: ReactNode;
 	onOpenExpandedPreview?: (selection?: WorkspaceGitPreviewSelection) => void;
 	/** A commit/push/PR action is reconciling the Git state shown below. */
 	isGitActionInProgress?: boolean;
@@ -977,12 +997,14 @@ type InspectorChangesSectionProps = {
 
 export function InspectorChangesSection({
 	workspaceRoot,
+	workspaceId,
+	sessionId,
+	lastTurnReviewRequest = null,
 	selectedPreview,
 	onSelectPreview,
 	onPrefillComposer,
 	reviewCommentsByPath = EMPTY_REVIEW_COMMENTS_BY_PATH,
 	targetSessionId = null,
-	headerAction = null,
 	onOpenExpandedPreview,
 	isGitActionInProgress = false,
 }: InspectorChangesSectionProps) {
@@ -993,12 +1015,27 @@ export function InspectorChangesSection({
 	const [changesTreeView, setChangesTreeView] = useState(false);
 	const [scopePreference, setScopePreference] = useState<{
 		root: string;
-		scope: InspectorChangesScope;
+		scope: InspectorReviewScope;
 	} | null>(null);
 	const [gitBusy, setGitBusy] = useState(false);
+	const [discardAllDialogOpen, setDiscardAllDialogOpen] = useState(false);
 	const codeRabbitEnabled = useCodeRabbitIntegrationEnabled();
+	const lastTurnReview = useCachedTurnReviewSummary(sessionId, workspaceId);
+	const handledLastTurnReviewRequestRef = useRef<number | null>(null);
 
 	const root = workspaceRoot?.trim() ?? "";
+	useEffect(() => {
+		if (
+			!lastTurnReviewRequest ||
+			lastTurnReviewRequest.sessionId !== sessionId ||
+			handledLastTurnReviewRequestRef.current === lastTurnReviewRequest.nonce
+		) {
+			return;
+		}
+		handledLastTurnReviewRequestRef.current = lastTurnReviewRequest.nonce;
+		setScopePreference({ root, scope: "last-turn" });
+		onSelectPreview(null);
+	}, [lastTurnReviewRequest, onSelectPreview, root, sessionId]);
 
 	useEffect(() => {
 		if (
@@ -1073,7 +1110,7 @@ export function InspectorChangesSection({
 		[enrichPreviewSelection, onOpenExpandedPreview],
 	);
 	const handleScopeChange = useCallback(
-		(scope: InspectorChangesScope) => {
+		(scope: InspectorReviewScope) => {
 			setScopePreference({ root, scope });
 			if (
 				selectedPreview &&
@@ -1105,6 +1142,19 @@ export function InspectorChangesSection({
 					workspaceRoot: root,
 					relativePath: ".",
 				});
+			});
+		},
+		[root, runGit],
+	);
+	const discardAllWorkingChanges = useCallback(
+		async (stagedPaths: string[], allPaths: string[]) => {
+			await runGit(async () => {
+				for (const relativePath of stagedPaths) {
+					await workspaceGitUnstageFile({ workspaceRoot: root, relativePath });
+				}
+				for (const relativePath of [...new Set(allPaths)]) {
+					await workspaceGitDiscardFile({ workspaceRoot: root, relativePath });
+				}
 			});
 		},
 		[root, runGit],
@@ -1143,11 +1193,42 @@ export function InspectorChangesSection({
 	const hasAny = data.staged.length > 0 || data.unstaged.length > 0;
 	const workingChanges = [...data.staged, ...data.unstaged];
 	const branchChanges = branchDiffQuery.data?.changes ?? [];
-	const activeScope =
-		(scopePreference?.root === root ? scopePreference.scope : null) ??
-		defaultInspectorChangesScope(workingChanges.length, branchChanges.length);
-	const visibleChanges = activeScope === "working" ? workingChanges : branchChanges;
-	const visibleSummary = summarizeInspectorChanges(visibleChanges);
+	const preferredScope =
+		scopePreference?.root === root ? scopePreference.scope : null;
+	const activeScope = resolveInspectorReviewScope(
+		preferredScope,
+		Boolean(sessionId && workspaceId),
+		workingChanges.length,
+		branchChanges.length,
+	);
+	const visibleChanges =
+		activeScope === "working"
+			? workingChanges
+			: activeScope === "branch"
+				? branchChanges
+				: [];
+	const visibleSummary =
+		activeScope === "last-turn" && lastTurnReview
+			? {
+					fileCount: lastTurnReview.files.length,
+					insertions: lastTurnReview.insertions,
+					deletions: lastTurnReview.deletions,
+				}
+			: summarizeInspectorChanges(visibleChanges);
+	const reviewScopes = availableInspectorReviewScopes(
+		Boolean(sessionId && workspaceId),
+	);
+	const scopeCounts: Record<InspectorReviewScope, number> = {
+		working: workingChanges.length,
+		"last-turn": lastTurnReview?.files.length ?? 0,
+		branch: branchChanges.length,
+	};
+	const ActiveScopeIcon =
+		activeScope === "working"
+			? LaptopIcon
+			: activeScope === "last-turn"
+				? Clock3
+				: GitCompareArrows;
 	const hasReviewableChanges = hasAny || branchChanges.length > 0;
 
 	if (selectedPreview) {
@@ -1178,37 +1259,53 @@ export function InspectorChangesSection({
 		<div className="relative flex min-h-0 flex-1 flex-col">
 			<div className="shrink-0 border-b border-border/50 bg-background">
 				<div className="flex min-h-10 items-center gap-1 px-2 py-1.5">
-					<div
-						className="flex min-w-0 flex-1 gap-0.5 rounded-md bg-muted/35 p-0.5"
-						role="tablist"
-						aria-label={t("inspector.changes.scopeLabel")}
-					>
-						{(["working", "branch"] as const).map((scope) => {
-							const active = scope === activeScope;
-							const count =
-								scope === "working" ? workingChanges.length : branchChanges.length;
-							const Icon = scope === "working" ? LaptopIcon : GitCompareArrows;
-							return (
-								<button
-									key={scope}
-									type="button"
-									role="tab"
-									aria-selected={active}
-									onClick={() => handleScopeChange(scope)}
-									className={cn(
-										"flex h-7 min-w-0 flex-1 items-center justify-center gap-1 rounded-[5px] px-1.5 text-[10.5px] font-medium transition-colors",
-										active
-											? "bg-background text-foreground shadow-sm"
-											: "text-muted-foreground hover:text-foreground",
-									)}
-								>
-									<Icon className="size-3.5 shrink-0" strokeWidth={1.9} />
-									<span className="truncate">{t(`inspector.changes.scopes.${scope}`)}</span>
-									<span className="shrink-0 tabular-nums opacity-65">{count}</span>
-								</button>
-							);
-						})}
-					</div>
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="h-8 min-w-0 flex-1 justify-start gap-2 rounded-lg px-2 text-[11px] font-medium hover:bg-muted/50"
+								aria-label={t("inspector.changes.scopeLabel")}
+							>
+								<ActiveScopeIcon className="size-3.5 shrink-0" strokeWidth={1.9} />
+								<span className="truncate">
+									{t(`inspector.changes.scopes.${activeScope}`)}
+								</span>
+								<span className="tabular-nums text-muted-foreground">
+									{scopeCounts[activeScope]}
+								</span>
+								<ChevronDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start" className="min-w-52">
+							{reviewScopes.map((scope) => {
+								const Icon =
+									scope === "working"
+										? LaptopIcon
+										: scope === "last-turn"
+											? Clock3
+											: GitCompareArrows;
+								return (
+									<DropdownMenuItem
+										key={scope}
+										size="sm"
+										className="h-8 gap-2"
+										onSelect={() => handleScopeChange(scope)}
+									>
+										<Icon className="size-3.5 shrink-0" strokeWidth={1.9} />
+										<span className="min-w-0 flex-1 truncate">
+											{t(`inspector.changes.scopes.${scope}`)}
+										</span>
+										<span className="tabular-nums text-muted-foreground">
+											{scopeCounts[scope]}
+										</span>
+										{scope === activeScope ? <Check className="size-3.5" /> : null}
+									</DropdownMenuItem>
+								);
+							})}
+						</DropdownMenuContent>
+					</DropdownMenu>
 					<div
 						className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums"
 						aria-label={t("inspector.changes.fileCount", {
@@ -1218,44 +1315,53 @@ export function InspectorChangesSection({
 						<span className="text-emerald-600 dark:text-emerald-400">+{visibleSummary.insertions}</span>
 						<span className="text-destructive">−{visibleSummary.deletions}</span>
 					</div>
-					{headerAction}
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-xs"
-								className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-								aria-label={t(
+					{activeScope !== "last-turn" ? (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+									aria-label={t(
+										changesTreeView
+											? "inspector.changes.listView"
+											: "inspector.changes.treeView",
+									)}
+									onClick={() => setChangesTreeView((value) => !value)}
+								>
+									{changesTreeView ? (
+										<ListIcon className="size-4" />
+									) : (
+										<ListTree className="size-4" />
+									)}
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="bottom">
+								{t(
 									changesTreeView
 										? "inspector.changes.listView"
 										: "inspector.changes.treeView",
 								)}
-								onClick={() => setChangesTreeView((value) => !value)}
-							>
-								{changesTreeView ? (
-									<ListIcon className="size-4" />
-								) : (
-									<ListTree className="size-4" />
-								)}
-							</Button>
-						</TooltipTrigger>
-						<TooltipContent side="bottom">
-							{t(
-								changesTreeView
-									? "inspector.changes.listView"
-									: "inspector.changes.treeView",
-							)}
-						</TooltipContent>
-					</Tooltip>
+							</TooltipContent>
+						</Tooltip>
+					) : null}
 				</div>
 			</div>
-			<ScrollArea
-				viewportProps={{ "data-inspector-scroll-key": "git-changes" }}
-				className="min-h-0 flex-1 bg-muted/[0.08] text-[11.5px]"
-				aria-label="Git changes"
+			{activeScope === "last-turn" && sessionId && workspaceId ? (
+				<TurnReviewSurface sessionId={sessionId} workspaceId={workspaceId} />
+			) : (
+				<ScrollArea
+					viewportProps={{ "data-inspector-scroll-key": "git-changes" }}
+					className="min-h-0 flex-1 bg-muted/[0.08] text-[11.5px]"
+					aria-label="Git changes"
 				>
-					<div className="min-w-0 max-w-full overflow-x-hidden py-1">
+					<div
+						className={cn(
+							"min-w-0 max-w-full overflow-x-hidden py-1",
+							activeScope === "working" && hasAny && "pb-16",
+						)}
+					>
 					{activeScope === "working" && data.staged.length > 0 ? (
 						<ChangesGroup
 							label={t("inspector.changes.groups.staged")}
@@ -1348,7 +1454,53 @@ export function InspectorChangesSection({
 						/>
 					) : null}
 				</div>
-			</ScrollArea>
+				</ScrollArea>
+			)}
+			{activeScope === "working" && hasAny ? (
+				<div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
+					<div className="pointer-events-auto flex items-center rounded-full border border-border/70 bg-background/95 p-1 shadow-lg backdrop-blur">
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="h-8 rounded-full gap-1.5 px-3"
+							disabled={gitBusy || data.conflictCount > 0}
+							onClick={() => setDiscardAllDialogOpen(true)}
+						>
+							<Undo2Icon className="size-3.5" />
+							{t("inspector.changes.revertAll")}
+						</Button>
+						<div className="mx-0.5 h-5 w-px bg-border/70" aria-hidden />
+						{data.unstaged.length > 0 ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="h-8 rounded-full gap-1.5 px-3"
+								disabled={gitBusy || data.conflictCount > 0}
+								onClick={() => void stageAll()}
+							>
+								<PlusIcon className="size-3.5" />
+								{t("inspector.changes.stageAll")}
+							</Button>
+						) : (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="h-8 rounded-full gap-1.5 px-3"
+								disabled={gitBusy}
+								onClick={() =>
+									void unstageAll(data.staged.map((entry) => entry.path))
+								}
+							>
+								<MinusIcon className="size-3.5" />
+								{t("inspector.changes.unstageAll")}
+							</Button>
+						)}
+					</div>
+				</div>
+			) : null}
 			{isGitActionInProgress ? (
 				<div
 					className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-md border border-border/60 bg-background/95 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm backdrop-blur-[1px]"
@@ -1359,6 +1511,41 @@ export function InspectorChangesSection({
 					{t("inspector.changes.updatingGit")}
 				</div>
 			) : null}
+			<Dialog open={discardAllDialogOpen} onOpenChange={setDiscardAllDialogOpen}>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>{t("inspector.changes.revertAllConfirmTitle")}</DialogTitle>
+						<DialogDescription>
+							{t("inspector.changes.revertAllConfirmDescription", {
+								count: workingChanges.length,
+							})}
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => setDiscardAllDialogOpen(false)}
+						>
+							{t("inspector.changes.cancel")}
+						</Button>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={gitBusy}
+							onClick={() => {
+								setDiscardAllDialogOpen(false);
+								void discardAllWorkingChanges(
+									data.staged.map((entry) => entry.path),
+									workingChanges.map((entry) => entry.path),
+								);
+							}}
+						>
+							{t("inspector.changes.revertAllConfirmAction")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

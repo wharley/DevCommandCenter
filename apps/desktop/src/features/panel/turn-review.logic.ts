@@ -1,80 +1,4 @@
-import type { CoreEvent, TurnReviewFile, TurnReviewSummary } from "@dcc/contracts";
-
-export type TurnReviewIdentity = {
-	sessionId: string;
-	workspaceId: string;
-};
-
-export type TurnReviewInvalidationCursor = {
-	identity: string | null;
-	terminalEvent: string | null;
-};
-
-export function reconcileTurnReviewSelection(
-	selectedPath: string | null,
-	files: TurnReviewFile[],
-): string | null {
-	if (selectedPath && files.some((file) => file.path === selectedPath)) {
-		return selectedPath;
-	}
-	return (
-		files.find((file) => !file.previewUnavailable)?.path ??
-		files[0]?.path ??
-		null
-	);
-}
-
-export function latestTurnReviewTerminalEvent(
-	events: CoreEvent[],
-	sessionId: string,
-): string | null {
-	for (let index = events.length - 1; index >= 0; index -= 1) {
-		const event = events[index];
-		if (
-			"sessionTurnCompleted" in event &&
-			event.sessionTurnCompleted?.session_id === sessionId
-		) {
-			return `completed:${event.sessionTurnCompleted.turn_id}`;
-		}
-		if (
-			"sessionTurnAborted" in event &&
-			event.sessionTurnAborted?.session_id === sessionId
-		) {
-			return `aborted:${event.sessionTurnAborted.turn_id}`;
-		}
-	}
-	return null;
-}
-
-export function shouldInvalidateTurnReview(
-	previous: TurnReviewInvalidationCursor,
-	next: TurnReviewInvalidationCursor,
-): boolean {
-	return Boolean(
-		next.identity &&
-			previous.identity === next.identity &&
-			next.terminalEvent &&
-			previous.terminalEvent !== next.terminalEvent,
-	);
-}
-
-export function isTurnReviewIdentityActive(
-	review: TurnReviewIdentity,
-	active: TurnReviewIdentity | null,
-): boolean {
-	return Boolean(
-		active &&
-			review.sessionId === active.sessionId &&
-			review.workspaceId === active.workspaceId,
-	);
-}
-
-export type TurnReviewPreviewState =
-	| "idle"
-	| "loading"
-	| "error"
-	| "diff"
-	| "unavailable";
+import type { TurnReviewSummary } from "@dcc/contracts";
 
 export type TurnReviewOutcomePresentation = {
 	outcome: "completed" | "aborted";
@@ -309,17 +233,4 @@ export function resolveTurnReviewOutcome(
 		return { outcome: "aborted", reason: "provider" };
 	}
 	return { outcome: "aborted", reason: "other" };
-}
-
-export function resolveTurnReviewPreviewState(input: {
-	selectedPath: string | null;
-	isFetching: boolean;
-	isError: boolean;
-	diff: string | null | undefined;
-}): TurnReviewPreviewState {
-	if (!input.selectedPath) return "idle";
-	if (input.isFetching) return "loading";
-	if (input.isError) return "error";
-	if (input.diff) return "diff";
-	return "unavailable";
 }

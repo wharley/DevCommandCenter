@@ -119,13 +119,7 @@ import {
 	resolveSecondarySurfaceRestoration,
 	shouldRenderGitDiffSurface,
 } from "./secondary-surface-layout";
-import { TurnReviewSurface } from "./turn-review-surface";
 import { TurnReviewActionSummary } from "./turn-review-action-summary";
-import {
-	latestTurnReviewTerminalEvent,
-	shouldInvalidateTurnReview,
-} from "./turn-review.logic";
-import { lastTurnReviewQueryKey } from "./turn-review-query";
 
 /** Composer draft injection request; the nonce lets a repeated annotation re-fire. */
 type ComposerPrefill = {
@@ -366,50 +360,6 @@ export function WorkspacePanel({
 		[onFileSurfaceClosed, onCloseSurface],
 	);
 	const queryClient = useQueryClient();
-	const activeTurnReviewSessionId =
-		workspaceSurfaceSelection?.kind === "turn-review"
-			? workspaceSurfaceSelection.sessionId
-			: null;
-	const terminalReviewEvent = useMemo(
-		() =>
-			activeTurnReviewSessionId
-				? latestTurnReviewTerminalEvent(
-						sessionEvents,
-						activeTurnReviewSessionId,
-					)
-				: null,
-		[activeTurnReviewSessionId, sessionEvents],
-	);
-	const reviewInvalidationRef = useRef<{
-		identity: string | null;
-		terminalEvent: string | null;
-	}>({ identity: null, terminalEvent: null });
-	useEffect(() => {
-		const selection =
-			workspaceSurfaceSelection?.kind === "turn-review"
-				? workspaceSurfaceSelection
-				: null;
-		const identity = selection
-			? `${selection.sessionId}:${selection.workspaceId}`
-			: null;
-		const previous = reviewInvalidationRef.current;
-		const next = {
-			identity,
-			terminalEvent: terminalReviewEvent,
-		};
-		reviewInvalidationRef.current = next;
-		if (!selection || !shouldInvalidateTurnReview(previous, next)) return;
-		void queryClient.invalidateQueries({
-			queryKey: lastTurnReviewQueryKey(
-				selection.sessionId,
-				selection.workspaceId,
-			),
-		});
-	}, [
-		queryClient,
-		terminalReviewEvent,
-		workspaceSurfaceSelection,
-	]);
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
 	);
@@ -1322,13 +1272,7 @@ export function WorkspacePanel({
 		</div>
 	);
 	const secondarySurfaceContent =
-		workspaceSurfaceSelection?.kind === "turn-review" ? (
-			<TurnReviewSurface
-				sessionId={workspaceSurfaceSelection.sessionId}
-				workspaceId={workspaceSurfaceSelection.workspaceId}
-				onClose={onCloseSurface}
-			/>
-		) : workspaceSurfaceSelection?.kind === "git-diff" &&
+		workspaceSurfaceSelection?.kind === "git-diff" &&
 			shouldRenderGitDiffSurface(inspectorCollapsed) ? (
 			<WorkspaceEditorSurface
 				workspaceRoot={workspacePath}

@@ -1,17 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { PrepareGuardedUndoOutput } from "@dcc/contracts";
+import type {
+	PrepareGuardedUndoOutput,
+	TurnReviewFile,
+} from "@dcc/contracts";
+import { getMaterialFileIcon } from "file-extension-icon-js";
 import {
 	AlertTriangle,
-	CheckCircle2,
-	FileDiff,
+	ChevronDown,
+	ChevronRight,
 	Loader2,
 	RotateCcw,
 	ShieldAlert,
-	X,
+	ShieldCheck,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
 	Dialog,
 	DialogContent,
@@ -31,22 +36,139 @@ import { cn } from "@/lib/utils";
 import {
 	canPrepareGuardedUndo,
 	isGuardedUndoPreviewExpired,
-	reconcileTurnReviewSelection,
 	resolveGuardedUndoCapture,
 	resolveGuardedUndoFailureReason,
 	resolveTurnReviewOutcome,
-	resolveTurnReviewPreviewState,
 } from "./turn-review.logic";
 import { lastTurnReviewQueryKey } from "./turn-review-query";
+import {
+	reviewCardDiffHeight,
+	shouldEagerLoadReviewCard,
+} from "@/features/inspector/inspector-changes-presentation";
+
+function TurnReviewCard({
+	snapshotId,
+	file,
+	index,
+}: {
+	snapshotId: string;
+	file: TurnReviewFile;
+	index: number;
+}) {
+	const { t } = useTranslation("common");
+	const cardRef = useRef<HTMLElement | null>(null);
+	const [open, setOpen] = useState(true);
+	const [shouldLoad, setShouldLoad] = useState(() =>
+		shouldEagerLoadReviewCard(index),
+	);
+	useEffect(() => {
+		if (shouldLoad || !open || file.previewUnavailable) return;
+		if (typeof IntersectionObserver === "undefined") {
+			setShouldLoad(true);
+			return;
+		}
+		const target = cardRef.current;
+		if (!target) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (!entries.some((entry) => entry.isIntersecting)) return;
+				setShouldLoad(true);
+				observer.disconnect();
+			},
+			{ rootMargin: "700px 0px" },
+		);
+		observer.observe(target);
+		return () => observer.disconnect();
+	}, [file.previewUnavailable, open, shouldLoad]);
+	const diffQuery = useQuery({
+		queryKey: ["turnReviewFileDiff", snapshotId, file.path],
+		queryFn: () => loadTurnReviewFileDiff(snapshotId, file.path),
+		enabled: open && shouldLoad && !file.previewUnavailable,
+	});
+	const name = file.path.split("/").pop() ?? file.path;
+	const folder = file.path.includes("/")
+		? file.path.slice(0, file.path.lastIndexOf("/"))
+		: "";
+
+	return (
+		<article
+			ref={cardRef}
+			className="overflow-hidden rounded-xl border border-border/60 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+		>
+			<div className="flex min-h-11 items-center gap-2 border-b border-border/45 px-2.5 py-1.5">
+				<button
+					type="button"
+					className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					onClick={() => setOpen((value) => !value)}
+					aria-expanded={open}
+				>
+					{open ? (
+						<ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+					) : (
+						<ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+					)}
+					<img src={getMaterialFileIcon(name)} alt="" className="size-3.5 shrink-0" />
+					<span className="min-w-0 flex-1 truncate">
+						<span className="font-medium text-foreground">{name}</span>
+						{folder ? (
+							<span className="ml-1.5 text-[10px] text-muted-foreground">
+								{folder}
+							</span>
+						) : null}
+					</span>
+				</button>
+				<div className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums">
+					{file.insertions > 0 ? (
+						<span className="text-emerald-600 dark:text-emerald-400">
+							+{file.insertions}
+						</span>
+					) : null}
+					{file.deletions > 0 ? (
+						<span className="text-destructive">−{file.deletions}</span>
+					) : null}
+					<span className="min-w-4 text-center font-semibold text-muted-foreground">
+						{file.status}
+					</span>
+				</div>
+			</div>
+			{open ? (
+				<div
+					className="min-h-[190px] overflow-hidden bg-background"
+					style={{
+						height: `${reviewCardDiffHeight(file.insertions, file.deletions)}px`,
+					}}
+				>
+					{file.previewUnavailable ? (
+						<div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">
+							{t("turnReview.previewUnavailable")}
+						</div>
+					) : !shouldLoad || diffQuery.isFetching ? (
+						<div className="flex h-full items-center justify-center">
+							<Loader2 className="size-4 animate-spin text-muted-foreground" />
+						</div>
+					) : diffQuery.isError || !diffQuery.data?.diff ? (
+						<div className="flex h-full items-center justify-center p-4 text-center text-xs text-destructive">
+							{t("turnReview.diffFailed")}
+						</div>
+					) : (
+						<WorkspacePatchDiffLoader
+							path={file.path}
+							patch={diffQuery.data.diff}
+							className="h-full"
+						/>
+					)}
+				</div>
+			) : null}
+		</article>
+	);
+}
 
 export function TurnReviewSurface({
 	sessionId,
 	workspaceId,
-	onClose,
 }: {
 	sessionId: string;
 	workspaceId: string;
-	onClose: () => void;
 }) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -55,35 +177,7 @@ export function TurnReviewSurface({
 		queryFn: () => loadLastTurnReview(sessionId, workspaceId),
 	});
 	const review = reviewQuery.data ?? null;
-	const [selectedPath, setSelectedPath] = useState<string | null>(null);
-	useEffect(() => {
-		setSelectedPath((current) =>
-			reconcileTurnReviewSelection(current, review?.files ?? []),
-		);
-	}, [review?.files, review?.state, review?.snapshotId]);
-	const selectedFile =
-		review?.files.find((file) => file.path === selectedPath) ?? null;
-	const diffEnabled = Boolean(
-		review?.snapshotId &&
-			selectedPath &&
-			selectedFile &&
-			!selectedFile.previewUnavailable,
-	);
-	const diffQuery = useQuery({
-		queryKey: ["turnReviewFileDiff", review?.snapshotId, selectedPath],
-		queryFn: () => loadTurnReviewFileDiff(review!.snapshotId, selectedPath!),
-		enabled: diffEnabled,
-	});
-	const previewState = resolveTurnReviewPreviewState({
-		selectedPath,
-		isFetching: diffEnabled && diffQuery.isFetching,
-		isError: diffEnabled && diffQuery.isError,
-		diff: diffQuery.data?.diff,
-	});
 	const stateLabel = review ? t(`turnReview.states.${review.state}`) : "";
-	const compatibilityLabel = review
-		? t(`turnReview.compatibility.${review.compatibility}`)
-		: "";
 	const outcome = resolveTurnReviewOutcome(
 		review?.turnOutcome,
 		review?.outcomeReason,
@@ -175,16 +269,6 @@ export function TurnReviewSurface({
 			})
 			: "",
 	});
-	const fingerprints = useMemo(() => {
-		if (!review) return null;
-		return {
-			base: review.baseFingerprint?.slice(0, 12) ?? "—",
-			result: review.resultFingerprint?.slice(0, 12) ?? "—",
-		};
-	}, [review]);
-	const activeUndoReason = activeUndo
-		? resolveGuardedUndoFailureReason(activeUndo.reasonCode)
-		: null;
 	const outcomeReason = undoOutcome
 		? resolveGuardedUndoFailureReason(undoOutcome.reasonCode)
 		: null;
@@ -203,42 +287,9 @@ export function TurnReviewSurface({
 
 	return (
 		<section
-			className="flex h-full min-h-0 flex-col bg-background"
+			className="relative flex h-full min-h-0 flex-col bg-background"
 			aria-label={t("turnReview.title")}
 		>
-			<header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-				<FileDiff className="size-4 text-primary" />
-				<div className="min-w-0 flex-1">
-					<h2 className="truncate text-sm font-semibold">{t("turnReview.title")}</h2>
-					<p className="truncate text-[11px] text-muted-foreground">{t("turnReview.subtitle")}</p>
-				</div>
-					{undoAvailable ? (
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="h-8 gap-1.5"
-							disabled={prepareUndoMutation.isPending}
-							onClick={() => review && prepareUndoMutation.mutate(review.snapshotId)}
-						>
-							{prepareUndoMutation.isPending ? (
-								<Loader2 className="size-3.5 animate-spin" />
-							) : (
-								<RotateCcw className="size-3.5" />
-							)}
-							{t("turnReview.guardedUndo.action")}
-						</Button>
-					) : null}
-					<Button
-					type="button"
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("turnReview.close")}
-					onClick={onClose}
-				>
-					<X className="size-4" />
-				</Button>
-			</header>
 			{reviewQuery.isPending ? (
 				<div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
 					<Loader2 className="size-4 animate-spin" /> {t("turnReview.loading")}
@@ -253,125 +304,152 @@ export function TurnReviewSurface({
 				</div>
 			) : (
 				<>
-					<div className="shrink-0 space-y-2 border-b border-border/60 p-3 text-xs">
-						<div className="flex flex-wrap items-center gap-2">
-							<span className="rounded-full border px-2 py-0.5 font-medium">{stateLabel}</span>
-							{outcome ? <span className={cn("rounded-full border px-2 py-0.5 font-medium", outcome.outcome === "completed" ? "text-emerald-600" : "text-amber-600")}>{t(`turnReview.outcomes.${outcome.outcome}`)}</span> : null}
-							<span className={cn("rounded-full border px-2 py-0.5", review.compatibility === "matches_result" ? "text-emerald-600" : "text-amber-600")}>{compatibilityLabel}</span>
-							<span
-								className={cn(
-									"rounded-full border px-2 py-0.5",
-									guardedUndo.state === "eligible"
-										? "text-emerald-600"
-										: guardedUndo.state === "failed"
-											? "text-destructive"
-											: "text-amber-600",
-								)}
-							>
-								{t(`turnReview.guardedUndo.states.${guardedUndo.state}`)}
+					<div className="shrink-0 space-y-1.5 border-b border-border/50 px-3 py-2 text-[10.5px]">
+						<div className="flex items-center gap-2">
+							<span className="font-medium text-foreground">{stateLabel}</span>
+							{outcome ? (
+								<span
+									className={cn(
+										"text-muted-foreground",
+										outcome.outcome === "aborted" && "text-amber-600",
+									)}
+								>
+									· {t(`turnReview.outcomes.${outcome.outcome}`)}
+								</span>
+							) : null}
+							<span className="ml-auto tabular-nums text-muted-foreground">
+								{t("turnReview.fileCount", { count: review.files.length })} ·{" "}
+								<span className="text-emerald-600">+{review.insertions}</span>{" "}
+								<span className="text-destructive">−{review.deletions}</span>
 							</span>
-							<span className="ml-auto tabular-nums text-muted-foreground">{t("turnReview.fileCount", { count: review.files.length })} · <span className="text-emerald-600">+{review.insertions}</span> <span className="text-destructive">−{review.deletions}</span></span>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<span
+										className={cn(
+											"inline-flex size-5 items-center justify-center rounded-full",
+											guardedUndo.state === "eligible"
+												? "bg-emerald-500/10 text-emerald-600"
+												: "bg-muted text-muted-foreground",
+										)}
+										tabIndex={0}
+									>
+										{guardedUndo.state === "eligible" ? (
+											<ShieldCheck className="size-3.5" />
+										) : (
+											<ShieldAlert className="size-3.5" />
+										)}
+									</span>
+								</TooltipTrigger>
+								<TooltipContent side="bottom" className="max-w-72">
+									<p className="font-medium">
+										{t(`turnReview.guardedUndo.states.${guardedUndo.state}`)}
+									</p>
+									<p className="mt-1 text-muted-foreground">{guardedUndoReason}</p>
+								</TooltipContent>
+							</Tooltip>
 						</div>
 						<p className="text-muted-foreground">{t("turnReview.attributionNotice")}</p>
-						{outcome?.reason ? <p className="flex gap-1.5 text-amber-600"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{t(`turnReview.outcomeReasons.${outcome.reason}`)}</p> : null}
-						{review.state === "partial" ? <p className="flex gap-1.5 text-amber-600"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{t("turnReview.partialNotice")}</p> : null}
-						{review.diffTruncated ? <p className="flex gap-1.5 text-amber-600"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{t("turnReview.diffTruncatedNotice")}</p> : null}
-						{review.compatibility === "diverged" ? <p className="flex gap-1.5 text-amber-600"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{t("turnReview.divergedNotice")}</p> : null}
-						{review.excludedPreexistingUntrackedCount > 0 ? <p className="text-amber-600">{t("turnReview.excludedUntracked", { count: review.excludedPreexistingUntrackedCount })}</p> : null}
-						{review.observedValidations.length > 0 ? <p className="flex gap-1.5 text-muted-foreground"><CheckCircle2 className="mt-0.5 size-3.5 shrink-0" />{t("turnReview.observedValidations", { values: review.observedValidations.join(", ") })}</p> : null}
-						{review.error ? <p className="text-destructive">{review.error}</p> : null}
-							<p
-							className={cn(
-								"text-muted-foreground",
-								guardedUndo.state === "failed" && "text-destructive",
-							)}
-						>
-								{guardedUndoReason}
+						{review.compatibility === "diverged" ? (
+							<p className="flex gap-1.5 text-amber-600">
+								<AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+								{t("turnReview.divergedNotice")}
 							</p>
-							{activeUndo ? (
-								<div
-									className={cn(
-										"rounded-md border p-2.5",
-										activeUndo.status === "recovery_required"
-											? "border-destructive/40 bg-destructive/5 text-destructive"
-											: "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400",
-									)}
+						) : null}
+						{activeUndo ? (
+							<div
+								className={cn(
+									"flex items-center gap-2 rounded-md border px-2 py-1.5",
+									activeUndo.status === "recovery_required"
+										? "border-destructive/40 bg-destructive/5 text-destructive"
+										: "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400",
+								)}
+							>
+								{activeUndo.status === "recovery_required" ? (
+									<ShieldAlert className="size-3.5 shrink-0" />
+								) : (
+									<Loader2 className="size-3.5 shrink-0 animate-spin" />
+								)}
+								<span className="min-w-0 flex-1 truncate font-medium">
+									{t(`turnReview.guardedUndo.operationStates.${activeUndo.status}`)}
+								</span>
+								<Button
+									type="button"
+									variant="ghost"
+									size="xs"
+									className="h-6 px-2"
+									onClick={() =>
+										void queryClient.invalidateQueries({
+											queryKey: lastTurnReviewQueryKey(sessionId, workspaceId),
+										})
+									}
 								>
-									<p className="flex items-center gap-1.5 font-medium">
-										{activeUndo.status === "recovery_required" ? (
-											<ShieldAlert className="size-3.5" />
-										) : (
-											<Loader2 className="size-3.5 animate-spin" />
-										)}
-										{t(`turnReview.guardedUndo.operationStates.${activeUndo.status}`)}
-									</p>
-									{activeUndoReason ? (
-										<p className="mt-1">
-											{t(`turnReview.guardedUndo.failureReasons.${activeUndoReason}`)}
-										</p>
-									) : null}
-									<p className="mt-1 font-mono text-[10px] opacity-75">
-										{t("turnReview.guardedUndo.operationId", {
-											operationId: activeUndo.operationId,
-										})}
-									</p>
-									<Button
-										type="button"
-										variant="outline"
-										size="xs"
-										className="mt-2"
-										onClick={() =>
-											void queryClient.invalidateQueries({
-												queryKey: lastTurnReviewQueryKey(sessionId, workspaceId),
-											})
-										}
-									>
-										{t("turnReview.guardedUndo.refreshRecovery")}
-									</Button>
-								</div>
-							) : null}
-							{prepareUndoMutation.isError ? (
-								<p className="text-destructive">
-									{t("turnReview.guardedUndo.prepareFailed")}
-								</p>
-							) : null}
-							{prepareProblem && prepareProblemReason ? (
-								<div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5 text-amber-700 dark:text-amber-400">
-									<p className="font-medium">
-										{t(`turnReview.guardedUndo.prepareResults.${prepareProblem.status}`)}
-									</p>
-									<p className="mt-1">
-										{t(`turnReview.guardedUndo.failureReasons.${prepareProblemReason}`)}
-									</p>
-								</div>
-							) : null}
-							{undoOutcome && !undoDialogOpen ? (
-								<p
-									className={cn(
-										undoOutcome.status === "completed"
-											? "text-emerald-600"
-											: "text-amber-600",
-									)}
+									{t("turnReview.guardedUndo.refreshRecovery")}
+								</Button>
+							</div>
+						) : null}
+						{prepareUndoMutation.isError ? (
+							<p className="text-destructive">
+								{t("turnReview.guardedUndo.prepareFailed")}
+							</p>
+						) : null}
+						{prepareProblem && prepareProblemReason ? (
+							<p className="text-amber-600">
+								{t(`turnReview.guardedUndo.failureReasons.${prepareProblemReason}`)}
+							</p>
+						) : null}
+						{undoOutcome && !undoDialogOpen ? (
+							<p
+								className={cn(
+									undoOutcome.status === "completed"
+										? "text-emerald-600"
+										: "text-amber-600",
+								)}
+							>
+								{t(`turnReview.guardedUndo.results.${undoOutcome.status}`)}
+							</p>
+						) : null}
+					</div>
+					<div className="min-h-0 flex-1 overflow-y-auto bg-muted/[0.08] px-2 pb-20 pt-2">
+						{review.files.length === 0 ? (
+							<div className="flex min-h-36 items-center justify-center px-4 text-center text-xs text-muted-foreground">
+								{review.state === "collecting"
+									? t("turnReview.collectingHint")
+									: t("turnReview.noChanges")}
+							</div>
+						) : (
+							<div className="space-y-2">
+								{review.files.map((file, index) => (
+									<TurnReviewCard
+										key={`${review.snapshotId}:${file.path}`}
+										snapshotId={review.snapshotId}
+										file={file}
+										index={index}
+									/>
+								))}
+							</div>
+						)}
+					</div>
+					{undoAvailable ? (
+						<div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
+							<div className="pointer-events-auto flex items-center rounded-full border border-border/70 bg-background/95 p-1 shadow-lg backdrop-blur">
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-8 rounded-full gap-1.5 px-3"
+									disabled={prepareUndoMutation.isPending}
+									onClick={() => prepareUndoMutation.mutate(review.snapshotId)}
 								>
-									{t(`turnReview.guardedUndo.results.${undoOutcome.status}`)}
-								</p>
-							) : null}
-						<details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">{t("turnReview.fingerprints")}</summary><code className="mt-1 block">{fingerprints?.base} → {fingerprints?.result}</code></details>
-					</div>
-					<div className="grid min-h-0 flex-1 grid-cols-[minmax(150px,38%)_1fr]">
-						<div
-							className="min-h-0 overflow-y-auto border-r border-border/60 p-1.5"
-						>
-							{review.files.length === 0 ? <p className="p-3 text-xs text-muted-foreground">{review.state === "collecting" ? t("turnReview.collectingHint") : t("turnReview.noChanges")}</p> : review.files.map((file) => (
-								<button key={file.path} type="button" aria-pressed={selectedPath === file.path} onClick={() => setSelectedPath(file.path)} className={cn("flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted", selectedPath === file.path && "bg-muted text-foreground")}>
-									<span className="w-3 shrink-0 font-semibold text-muted-foreground">{file.status}</span><span className="min-w-0 flex-1 truncate">{file.path}</span>
-								</button>
-							))}
+									{prepareUndoMutation.isPending ? (
+										<Loader2 className="size-3.5 animate-spin" />
+									) : (
+										<RotateCcw className="size-3.5" />
+									)}
+									{t("turnReview.guardedUndo.action")}
+								</Button>
+							</div>
 						</div>
-						<div className="min-h-0 overflow-hidden bg-muted/15">
-							{previewState === "loading" ? <div className="flex h-full items-center justify-center"><Loader2 className="size-4 animate-spin" /></div> : previewState === "error" ? <div className="flex h-full items-center justify-center p-4 text-center text-xs text-destructive">{t("turnReview.diffFailed")}</div> : previewState === "diff" ? <WorkspacePatchDiffLoader key={`${review.snapshotId}:${selectedPath}`} path={selectedPath!} patch={diffQuery.data!.diff!} className="h-full" /> : <div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">{previewState === "unavailable" ? t("turnReview.previewUnavailable") : review.state === "collecting" ? t("turnReview.collectingHint") : review.state === "no_changes" ? t("turnReview.noChanges") : t("turnReview.selectFile")}</div>}
-						</div>
-					</div>
+					) : null}
 				</>
 			)}
 			<Dialog open={undoDialogOpen} onOpenChange={closeUndoDialog}>

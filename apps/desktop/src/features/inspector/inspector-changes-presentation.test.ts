@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+	availableInspectorReviewScopes,
 	changeGroupBelongsToScope,
 	defaultInspectorChangesScope,
 	reviewCardDiffHeight,
+	resolveInspectorReviewScope,
 	shouldEagerLoadReviewCard,
 	summarizeInspectorChanges,
 } from "./inspector-changes-presentation";
@@ -36,6 +38,31 @@ describe("inspector changes presentation", () => {
 		expect(changeGroupBelongsToScope("committed", "working")).toBe(false);
 		expect(changeGroupBelongsToScope("committed", "branch")).toBe(true);
 		expect(changeGroupBelongsToScope("unstaged", "branch")).toBe(false);
+		expect(changeGroupBelongsToScope("unstaged", "last-turn")).toBe(false);
+	});
+
+	it("adds the last turn to the review selector only when a session can provide it", () => {
+		expect(availableInspectorReviewScopes(true)).toEqual([
+			"working",
+			"last-turn",
+			"branch",
+		]);
+		expect(availableInspectorReviewScopes(false)).toEqual([
+			"working",
+			"branch",
+		]);
+	});
+
+	it("falls back from the last turn when the selected session disappears", () => {
+		expect(resolveInspectorReviewScope("last-turn", false, 2, 4)).toBe(
+			"working",
+		);
+		expect(resolveInspectorReviewScope("last-turn", false, 0, 4)).toBe(
+			"branch",
+		);
+		expect(resolveInspectorReviewScope("last-turn", true, 0, 0)).toBe(
+			"last-turn",
+		);
 	});
 
 	it("sizes review cards for a continuous feed without letting one file dominate", () => {

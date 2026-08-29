@@ -1121,6 +1121,7 @@
       "scopeLabel": "Escopo das mudanças",
       "scopes": {
         "working": "Workspace",
+        "last-turn": "Último turno",
         "branch": "Branch"
       },
       "groups": {
@@ -1136,6 +1137,14 @@
       "discardFile": "Descartar mudanças do arquivo",
       "loadingDiff": "Carregando diff…",
       "diffFailed": "Não foi possível carregar o diff",
+      "revertAll": "Reverter tudo",
+      "stageAll": "Preparar tudo",
+      "unstageAll": "Remover tudo",
+      "cancel": "Cancelar",
+      "revertAllConfirmTitle": "Reverter todas as mudanças?",
+      "revertAllConfirmDescription_one": "Esta ação descarta a mudança local de {{count}} arquivo, incluindo conteúdo preparado. Ela não pode ser desfeita pelo Git.",
+      "revertAllConfirmDescription_other": "Esta ação descarta as mudanças locais de {{count}} arquivos, incluindo conteúdo preparado. Ela não pode ser desfeita pelo Git.",
+      "revertAllConfirmAction": "Reverter mudanças",
       "emptyWorking": "O workspace não possui mudanças locais.",
       "emptyBranch": "Este branch ainda não possui mudanças em relação à base.",
       "loadingGit": "Lendo arquivos alterados…",
