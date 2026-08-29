@@ -6,6 +6,83 @@ import {
 } from "./use-workspaces";
 
 describe("workspaceToSummary", () => {
+	it("treats a recommended setup report as ready instead of blocking the task", () => {
+		const summary = workspaceToSummary({
+			id: "recommended-setup",
+			projectId: "widgets",
+			name: "Ready task",
+			rootPath: "/repo/widgets",
+			baseBranch: "main",
+			worktreePath: "/repo/.dcc-worktrees/recommended-setup",
+			source: null,
+			state: "setup_pending",
+			setupReport: {
+				status: "pending",
+				steps: [
+					{
+						label: "Install dependencies",
+						command: "yarn install",
+						sourcePath: "/repo/widgets/package.json",
+						status: "pending",
+						detail: null,
+					},
+				],
+				message: "Setup is recommended.",
+			},
+			pinnedAt: null,
+			createdAt: "2026-01-01T00:00:00Z",
+			updatedAt: "2026-01-01T00:00:00Z",
+		});
+
+		expect(summary.status).toBe("ready");
+	});
+
+	it("keeps a failed setup visible as a workspace problem", () => {
+		const summary = workspaceToSummary({
+			id: "failed-setup",
+			projectId: "widgets",
+			name: "Needs attention",
+			rootPath: "/repo/widgets",
+			baseBranch: "main",
+			worktreePath: "/repo/.dcc-worktrees/failed-setup",
+			source: null,
+			state: "setup_pending",
+			setupReport: {
+				status: "failed",
+				steps: [],
+				message: "Setup failed.",
+			},
+			pinnedAt: null,
+			createdAt: "2026-01-01T00:00:00Z",
+			updatedAt: "2026-01-01T00:00:00Z",
+		});
+
+		expect(summary.status).toBe("setup_pending");
+	});
+
+	it("does not keep a local-direct task blocked by a legacy setup failure", () => {
+		const summary = workspaceToSummary({
+			id: "local-legacy-setup",
+			projectId: "widgets",
+			name: "Local task",
+			rootPath: "/repo/widgets",
+			baseBranch: "main",
+			worktreePath: null,
+			source: null,
+			state: "setup_pending",
+			setupReport: {
+				status: "failed",
+				steps: [],
+				message: "workspace mutation is unavailable",
+			},
+			pinnedAt: null,
+			createdAt: "2026-01-01T00:00:00Z",
+			updatedAt: "2026-01-01T00:00:00Z",
+		});
+
+		expect(summary.status).toBe("ready");
+	});
+
 	it("keeps the base branch out of an untitled task name", () => {
 		const summary = workspaceToSummary({
 			id: "blank-1",

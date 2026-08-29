@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
 	AlertTriangleIcon,
@@ -23,16 +22,7 @@ import {
 	addTerminal as addTerminalTab,
 	ensureTerminal as ensureTerminalTab,
 	setActiveTerminal as setActiveTerminalTab,
-	getTerminalRuntimeId,
-	renameTerminal as renameTerminalTab,
 } from "@/features/terminal/terminal-tabs-store";
-import {
-	attachTerminal,
-	detachTerminal,
-	ensureTerminal as ensureTerminalRuntime,
-	writeTerminalInput,
-	type TerminalListener,
-} from "@/features/terminal/terminal-store";
 import { WorkspacePanel } from "@/features/panel";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type {
@@ -63,10 +53,6 @@ import {
 } from "@/features/workspaces/workbench-command";
 import { recordUxMetric } from "@/lib/ux-metrics";
 import { openExternal } from "@/lib/shell-api";
-import {
-	workspaceRecordSetupOutcome,
-	workspaceSkipSetup,
-} from "@/lib/workspace-api";
 import { pathBasename } from "@/lib/path-basename";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -275,7 +261,6 @@ export function SessionWorkbench({
 	delegateSignal,
 }: SessionWorkbenchProps) {
 	const { t } = useTranslation("common");
-	const queryClient = useQueryClient();
 	const [terminalUiStates, setTerminalUiStates] =
 		useState<WorkspaceTerminalUiStates>({});
 	const [terminalComposerPrefill, setTerminalComposerPrefill] = useState<{
@@ -412,114 +397,6 @@ export function SessionWorkbench({
 		},
 		[terminalScopes, updateTerminalUiState],
 	);
-	const refreshWorkspaceSetupState = useCallback(async () => {
-		await Promise.all([
-			queryClient.invalidateQueries({
-				queryKey: ["workspaces", sessionQueryScope],
-			}),
-			queryClient.invalidateQueries({
-				queryKey: ["workspaceBundles", sessionQueryScope],
-			}),
-		]);
-	}, [queryClient, sessionQueryScope]);
-	const handleRunRecommendedSetup = useCallback(
-		async (commands: string[]) => {
-			const scope = terminalScopes.find(
-				(item) => item.kind === "worktree" && Boolean(item.cwd),
-			);
-			if (!scope?.cwd || commands.length === 0) {
-				throw new Error(t("composer.executionDock.setup.unavailable"));
-			}
-			// Setup must never be typed into an existing terminal that may already be busy.
-			const terminalId = addTerminalTab(scope.scopeKey, {
-				reuseAtCapacity: false,
-			});
-			if (!terminalId) {
-				throw new Error(t("composer.executionDock.setup.unavailable"));
-			}
-			renameTerminalTab(
-				scope.scopeKey,
-				terminalId,
-				t("composer.executionDock.setup.terminalTitle"),
-			);
-			updateTerminalUiState((current) => ({
-				...current,
-				open: true,
-				expanded: false,
-				scopeKind: "worktree",
-			}));
-			const runtimeId = getTerminalRuntimeId(scope.scopeKey, terminalId);
-			const snapshot = await ensureTerminalRuntime(runtimeId, scope.cwd, {
-				title: "Setup",
-				workspaceName: terminalWorkspaceName ?? workspaceName,
-				workspaceBranch: terminalWorkspaceBranch ?? workspaceBranch,
-				providerLabel: selectedProviderLabel,
-				sessionState,
-				sessionId,
-			});
-			if (snapshot.status !== "running") {
-				throw new Error(t("composer.executionDock.setup.unavailable"));
-			}
-
-			await new Promise<void>((resolve, reject) => {
-				const marker = `__DCC_SETUP_DONE_${crypto.randomUUID()}__`;
-				let tail = "";
-				let settled = false;
-				const finish = (success: boolean) => {
-					if (settled) return;
-					settled = true;
-					detachTerminal(runtimeId, listener);
-					void workspaceRecordSetupOutcome({
-						workspaceRoot: scope.cwd!,
-						success,
-					})
-						.then(refreshWorkspaceSetupState)
-						.then(() => {
-							if (success) resolve();
-							else reject(new Error(t("composer.executionDock.setup.commandFailed")));
-						})
-						.catch(reject);
-				};
-				const listener: TerminalListener = {
-					onChunk(data) {
-						tail = `${tail}${data}`.slice(-8192);
-						const match = tail.match(new RegExp(`${marker}:(\\d+)`));
-						if (match) finish(match[1] === "0");
-					},
-					onStatusChange(status) {
-						if (status === "exited" || status === "error") finish(false);
-					},
-				};
-				attachTerminal(runtimeId, listener);
-				const commandChain = commands.map((command) => `( ${command} )`).join(" && ");
-				writeTerminalInput(
-					runtimeId,
-					`{ ${commandChain}; }; __dcc_setup_status=$?; printf '\\n${marker}:%s\\n' "$__dcc_setup_status"\r`,
-				);
-			});
-		},
-		[
-			refreshWorkspaceSetupState,
-			selectedProviderLabel,
-			sessionId,
-			sessionState,
-			t,
-			terminalScopes,
-			terminalWorkspaceBranch,
-			terminalWorkspaceName,
-			updateTerminalUiState,
-			workspaceBranch,
-			workspaceName,
-		],
-	);
-	const handleSkipRecommendedSetup = useCallback(async () => {
-		const workspaceRoot = terminalWorktreePath ?? workspacePath;
-		if (!workspaceRoot) {
-			throw new Error(t("composer.executionDock.setup.unavailable"));
-		}
-		await workspaceSkipSetup({ workspaceRoot });
-		await refreshWorkspaceSetupState();
-	}, [refreshWorkspaceSetupState, t, terminalWorktreePath, workspacePath]);
 	const restoreInspectorAfterTerminal = useCallback(() => {
 		if (inspectorBeforeTerminalExpandRef.current === false) {
 			onInspectorCollapsedChange?.(false);
@@ -822,8 +699,6 @@ export function SessionWorkbench({
 						onReviewChanges={onReviewChanges}
 						onCompleteWorkspace={onCompleteWorkspace}
 						onOpenMultiProjectDelivery={handleOpenDelivery}
-						onRunRecommendedSetup={handleRunRecommendedSetup}
-						onSkipRecommendedSetup={handleSkipRecommendedSetup}
 						onReviewDelegation={onReviewDelegation}
 						onRerunDelegation={onRerunDelegation}
 						onResolveConflictWithAgent={onResolveConflictWithAgent}

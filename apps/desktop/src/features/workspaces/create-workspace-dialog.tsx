@@ -137,9 +137,7 @@ export function notifyWorkspaceCreationResult(
 
 	switch (result.setupReport.status) {
 		case "pending":
-			toast.success(successTitle, {
-				description: setupReportDescription(t, result.setupReport, result.setupHints),
-			});
+			toast.success(successTitle);
 			return;
 		case "completed":
 			toast.success(successTitle, {

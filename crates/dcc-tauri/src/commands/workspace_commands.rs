@@ -954,6 +954,9 @@ fn is_path_inside(path: &Path, root: &Path) -> bool {
 }
 
 fn collect_workspace_setup_hints(workspace: &Workspace) -> Vec<WorkspaceSetupHint> {
+    if workspace.worktree_path.is_none() {
+        return Vec::new();
+    }
     detect_workspace_setup_suggestions(resolve_workspace_setup_root(workspace))
         .into_iter()
         .map(|suggestion| WorkspaceSetupHint {
@@ -967,6 +970,9 @@ fn collect_workspace_setup_hints(workspace: &Workspace) -> Vec<WorkspaceSetupHin
 fn collect_workspace_setup_suggestions(
     workspace: &Workspace,
 ) -> Vec<dcc_infra::git::WorkspaceSetupSuggestion> {
+    if workspace.worktree_path.is_none() {
+        return Vec::new();
+    }
     detect_workspace_setup_suggestions(resolve_workspace_setup_root(workspace))
 }
 
@@ -1041,15 +1047,16 @@ async fn persist_workspace_setup_outcome(
 }
 
 fn workspace_state_for_setup_report(report: &WorkspaceSetupReport) -> WorkspaceState {
-    let has_required_setup_action = report.steps.iter().any(|step| {
-        step.command != FORGE_METADATA_STEP_COMMAND
-            && matches!(
-                step.status,
-                WorkspaceSetupStatus::Pending
-                    | WorkspaceSetupStatus::Warning
-                    | WorkspaceSetupStatus::Failed
-            )
-    });
+    let has_required_setup_action = (report.status == WorkspaceSetupStatus::Failed
+        && report.steps.is_empty())
+        || report.steps.iter().any(|step| {
+            step.command != FORGE_METADATA_STEP_COMMAND
+                && step.command != "compile_mission_spec_context"
+                && matches!(
+                    step.status,
+                    WorkspaceSetupStatus::Warning | WorkspaceSetupStatus::Failed
+                )
+        });
     if has_required_setup_action {
         WorkspaceState::SetupPending
     } else {
@@ -8346,6 +8353,83 @@ mod editor_workspace_file_tests {
             created_at: "2026-08-01T00:00:00Z".to_string(),
             updated_at: "2026-08-01T00:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn local_direct_tasks_do_not_offer_recommended_setup() {
+        let root = tempfile::tempdir().expect("local direct root");
+        fs::write(root.path().join("package.json"), "{}").expect("write package manifest");
+        let mut workspace = workspace_for_rename("local-direct-setup", "Local task");
+        workspace.root_path = root.path().to_string_lossy().into_owned();
+        workspace.worktree_path = None;
+
+        assert!(collect_workspace_setup_hints(&workspace).is_empty());
+        let report = recommended_workspace_setup_report(&workspace);
+        assert_eq!(report.status, WorkspaceSetupStatus::Skipped);
+        assert!(report.steps.is_empty());
+        assert_eq!(
+            workspace_state_for_setup_report(&report),
+            WorkspaceState::Ready
+        );
+    }
+
+    #[test]
+    fn recommended_setup_is_non_blocking_until_a_problem_is_observed() {
+        let pending = WorkspaceSetupReport {
+            status: WorkspaceSetupStatus::Pending,
+            steps: vec![WorkspaceSetupStepReport {
+                label: "Install dependencies".to_string(),
+                command: "yarn install".to_string(),
+                source_path: "package.json".to_string(),
+                status: WorkspaceSetupStatus::Pending,
+                detail: None,
+            }],
+            message: None,
+        };
+        assert_eq!(
+            workspace_state_for_setup_report(&pending),
+            WorkspaceState::Ready
+        );
+
+        let failed = WorkspaceSetupReport {
+            status: WorkspaceSetupStatus::Failed,
+            steps: vec![WorkspaceSetupStepReport {
+                status: WorkspaceSetupStatus::Failed,
+                detail: Some("command failed".to_string()),
+                ..pending.steps[0].clone()
+            }],
+            message: Some("Setup failed".to_string()),
+        };
+        assert_eq!(
+            workspace_state_for_setup_report(&failed),
+            WorkspaceState::SetupPending
+        );
+
+        let runner_failure = WorkspaceSetupReport {
+            status: WorkspaceSetupStatus::Failed,
+            steps: Vec::new(),
+            message: Some("Setup runner failed".to_string()),
+        };
+        assert_eq!(
+            workspace_state_for_setup_report(&runner_failure),
+            WorkspaceState::SetupPending
+        );
+
+        let compile_warning = WorkspaceSetupReport {
+            status: WorkspaceSetupStatus::Warning,
+            steps: vec![WorkspaceSetupStepReport {
+                label: "Compile mission context".to_string(),
+                command: "compile_mission_spec_context".to_string(),
+                source_path: "AGENTS.md".to_string(),
+                status: WorkspaceSetupStatus::Warning,
+                detail: Some("Context unavailable".to_string()),
+            }],
+            message: None,
+        };
+        assert_eq!(
+            workspace_state_for_setup_report(&compile_warning),
+            WorkspaceState::Ready
+        );
     }
 
     #[tokio::test]

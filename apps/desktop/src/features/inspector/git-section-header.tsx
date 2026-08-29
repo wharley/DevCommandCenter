@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ExternalLink, FileDiff, GitBranch, RotateCcw } from "lucide-react";
+import { ExternalLink, FileDiff, GitBranch } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceCommitButton } from "@/features/commit";
@@ -36,10 +36,6 @@ export type GitSectionHeaderProps = {
   onCommit?: (message?: string, body?: string | null, stagedFingerprint?: string) => Promise<void> | void;
   onPrepareCommitMessage?: () => Promise<WorkspaceCommitMessageSuggestion>;
   onReviewConflictResolution?: () => void;
-  onRetrySetup?: () => Promise<void> | void;
-  isRetryingSetup?: boolean;
-  showRetrySetup?: boolean;
-  retrySetupLabel?: string;
   prUrl?: string | null;
   prNumber?: number | null;
   prProvider?: string | null;
@@ -57,10 +53,6 @@ export function GitSectionHeader({
   onCommit,
   onPrepareCommitMessage,
   onReviewConflictResolution,
-  onRetrySetup,
-  isRetryingSetup = false,
-  showRetrySetup = false,
-  retrySetupLabel = "Retry setup",
   prUrl = null,
   prNumber = null,
   prProvider = null,
@@ -140,28 +132,6 @@ export function GitSectionHeader({
             <TooltipContent side="bottom">
               {t("inspector.gitConfirmation.reviewResolution")}
             </TooltipContent>
-          </Tooltip>
-        ) : null}
-        {showRetrySetup ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className="rounded-[9px] border-amber-500/25 bg-amber-500/10 text-amber-950 hover:bg-amber-500/14 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-400/12"
-                disabled={isRetryingSetup}
-                aria-label={retrySetupLabel}
-                onClick={() => {
-                  void onRetrySetup?.();
-                }}
-              >
-                <RotateCcw
-                  className={cn("size-3.5", isRetryingSetup ? "animate-spin" : undefined)}
-                />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{retrySetupLabel}</TooltipContent>
           </Tooltip>
         ) : null}
         {commitMode !== "merged" && !hideCommitAction && !suppressCommitButton ? (

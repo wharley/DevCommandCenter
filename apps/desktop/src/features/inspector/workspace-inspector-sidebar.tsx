@@ -102,7 +102,6 @@ import {
 	workspaceRemoveDelegationWorktree,
 	workspaceGitSyncBase,
 	workspaceGitValidationConfig,
-	workspaceRunSetup,
 } from "@/lib/workspace-api";
 import { loadWorkspaceSessions } from "@/lib/session-api";
 import { buildMissionSpecFilename } from "@/features/composer/WorkspaceComposer.logic";
@@ -143,7 +142,6 @@ import type {
 	Repository,
 	WorkspacePrReviewComment,
 	WorkspaceRunProjectTasksOutput,
-	WorkspaceSetupReport,
 } from "@dcc/contracts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { recordUxMetric } from "@/lib/ux-metrics";
@@ -171,7 +169,6 @@ import {
 	isInspectorGitModeShortcut,
 } from "@/features/shortcuts/shortcut-utils";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
-import { setupReportDescription } from "@/features/workspaces/workspace-setup-report";
 import type { ForgeCliProvider } from "@dcc/contracts";
 import { cn } from "@/lib/utils";
 import { approveDelegation, cancelDelegation, listDelegations } from "@/lib/delegation-api";
@@ -191,7 +188,6 @@ type WorkspaceInspectorSidebarProps = {
 	workspacePath: string | null;
 	sessionWorkspacePath?: string | null;
 	workspaceStatus: WorkspaceStatus | null;
-	workspaceSetupReport: WorkspaceSetupReport | null;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	sessionState: string;
@@ -1494,54 +1490,6 @@ function CodeTreeNodeList({
 	);
 }
 
-function SetupPendingBanner({
-	title,
-	description,
-	detailsLabel,
-}: {
-	title: string;
-	description: string;
-	detailsLabel: string;
-}) {
-	return (
-		<div className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/8 px-2.5 py-2 text-[11px] text-amber-950 dark:text-amber-100">
-			<div className="flex items-center justify-between gap-2">
-				<p className="min-w-0 truncate font-medium leading-tight">{title}</p>
-				<Popover>
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<PopoverTrigger asChild>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-xs"
-									className="size-5 shrink-0 rounded-full border border-amber-500/25 text-amber-900 hover:bg-amber-500/12 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-400/12"
-									aria-label={detailsLabel}
-								>
-									<Info className="size-3.5" aria-hidden />
-								</Button>
-							</PopoverTrigger>
-						</TooltipTrigger>
-						<TooltipContent side="top">{detailsLabel}</TooltipContent>
-					</Tooltip>
-					<PopoverContent
-						align="end"
-						side="bottom"
-						className="max-h-72 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto"
-					>
-						<PopoverHeader>
-							<PopoverTitle>{title}</PopoverTitle>
-							<PopoverDescription className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/80">
-								{description}
-							</PopoverDescription>
-						</PopoverHeader>
-					</PopoverContent>
-				</Popover>
-			</div>
-		</div>
-	);
-}
-
 /**
  * Right rail: Git + session activity / context integrated from App props — no placeholder cards.
  */
@@ -1555,7 +1503,6 @@ export function WorkspaceInspectorSidebar({
 	workspacePath,
 	sessionWorkspacePath,
 	workspaceStatus,
-	workspaceSetupReport,
 	selectedProviderLabel,
 	selectedModelLabel,
 	sessionState,
@@ -2014,7 +1961,6 @@ export function WorkspaceInspectorSidebar({
 		(codeRabbitStatusQuery.isPending ? t("inspector.codeRabbit.checking") : null);
 	const [isSyncingBase, setIsSyncingBase] = useState(false);
 	const [isGitActionInProgress, setIsGitActionInProgress] = useState(false);
-	const [isRetryingSetup, setIsRetryingSetup] = useState(false);
 	const [isCompilingSpecContext, setIsCompilingSpecContext] = useState(false);
 	const [pendingGitConfirmation, setPendingGitConfirmation] =
 		useState<PendingGitConfirmation>(null);
@@ -2043,11 +1989,6 @@ export function WorkspaceInspectorSidebar({
 	const forgeIdentityLabel =
 		forgeIdentityAccount?.name?.trim() || forgeIdentityLogin || forgeContext.providerLabel;
 	const forgeIdentitySubtitle = forgeIdentityLogin ? `@${forgeIdentityLogin}` : null;
-	const isSetupPending = workspaceStatus === "setup_pending";
-	const setupReportSummary =
-		workspaceSetupReport == null
-			? null
-			: setupReportDescription(t, workspaceSetupReport, []);
 	const forgeCliMessage =
 		workspaceForgeContext?.message ??
 		(workspaceForgeContextQuery.isPending
@@ -2658,70 +2599,6 @@ export function WorkspaceInspectorSidebar({
 	const handleSyncBase = useCallback(() => {
 		setPendingGitConfirmation("sync-base");
 	}, []);
-
-	const handleRetrySetup = useCallback(async () => {
-		const root = workspacePath?.trim();
-		if (!root) {
-			toast.error("No workspace path");
-			throw new Error("No workspace path");
-		}
-
-		setIsRetryingSetup(true);
-		const loadingToast = toast.loading(t("inspector.setupRetry.loading"));
-		try {
-			const result = await workspaceRunSetup({ workspaceRoot: root });
-			const description = setupReportDescription(t, result.setupReport, result.setupHints);
-
-			switch (result.setupReport.status) {
-				case "completed":
-					toast.success(t("inspector.setupRetry.successTitle"), {
-						id: loadingToast,
-						description,
-					});
-					break;
-				case "warning":
-					toast.warning(t("inspector.setupRetry.pendingTitle"), {
-						id: loadingToast,
-						description,
-					});
-					break;
-				case "failed":
-					toast.error(t("inspector.setupRetry.pendingTitle"), {
-						id: loadingToast,
-						description,
-					});
-					break;
-				default:
-					toast.success(t("inspector.setupRetry.successTitle"), {
-						id: loadingToast,
-						description,
-					});
-					break;
-			}
-
-			await queryClient.invalidateQueries({
-				queryKey: ["workspaces"],
-			});
-			await queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_GIT_STATUS_QUERY_KEY, root],
-			});
-			await queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_PR_STATUS_QUERY_KEY, root],
-			});
-			await queryClient.invalidateQueries({
-				queryKey: [WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY, root],
-			});
-		} catch (error) {
-			const message = getInspectorActionErrorMessage(error);
-			toast.error(t("inspector.setupRetry.errorTitle"), {
-				id: loadingToast,
-				description: message,
-			});
-			throw error;
-		} finally {
-			setIsRetryingSetup(false);
-		}
-	}, [queryClient, t, workspacePath]);
 
 	const handleSelectForgeLogin = useCallback(
 		async (login: string) => {
@@ -3388,10 +3265,6 @@ export function WorkspaceInspectorSidebar({
 									forgeLogin: selectedForgeLogin,
 								});
 							}}
-							onRetrySetup={handleRetrySetup}
-							isRetryingSetup={isRetryingSetup}
-							showRetrySetup={isSetupPending}
-							retrySetupLabel={t("inspector.setupRetry.button")}
 							prUrl={prStatus?.url ?? null}
 							prNumber={prStatus?.number ?? null}
 							prProvider={prStatus?.provider ?? null}
@@ -3566,13 +3439,6 @@ export function WorkspaceInspectorSidebar({
 										</Button>
 									</div>
 								</div>
-							) : null}
-							{isSetupPending && setupReportSummary ? (
-								<SetupPendingBanner
-									title={t("inspector.setupRetry.pendingTitle")}
-									description={setupReportSummary}
-									detailsLabel={t("inspector.setupRetry.details")}
-								/>
 							) : null}
 							<div className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border/35">
 								<InspectorChangesSection

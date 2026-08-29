@@ -256,8 +256,6 @@ type WorkspacePanelProps = {
 	onReviewChanges?: () => void;
 	onOpenMultiProjectDelivery?: () => void;
 	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
-	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
-	onSkipRecommendedSetup?: () => Promise<void>;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
 	onRerunDelegation?: (input: {
@@ -330,8 +328,6 @@ export function WorkspacePanel({
 	onReviewChanges,
 	onOpenMultiProjectDelivery,
 	onCompleteWorkspace,
-	onRunRecommendedSetup,
-	onSkipRecommendedSetup,
 	onReviewDelegation,
 	onRerunDelegation,
 	onResolveConflictWithAgent,
@@ -1239,8 +1235,7 @@ export function WorkspacePanel({
 						openDelegateMenuSignal={delegateSignal ?? 0}
 						onAbortSession={onAbortSession}
 						onReviewPlan={onOpenPlanSurface}
-						onRunRecommendedSetup={onRunRecommendedSetup}
-						onSkipRecommendedSetup={onSkipRecommendedSetup}
+						onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}
 					/>
 					</div>
 				</div>

@@ -163,8 +163,7 @@ type WorkspaceComposerProps = {
 	openDelegateMenuSignal?: number;
 	onAbortSession: () => void;
 	onReviewPlan: () => void;
-	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
-	onSkipRecommendedSetup?: () => Promise<void>;
+	onOpenTerminal?: () => void;
 };
 
 export function WorkspaceComposer({
@@ -200,8 +199,7 @@ export function WorkspaceComposer({
 	openDelegateMenuSignal,
 	onAbortSession,
 	onReviewPlan,
-	onRunRecommendedSetup,
-	onSkipRecommendedSetup,
+	onOpenTerminal,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
@@ -1252,14 +1250,12 @@ export function WorkspaceComposer({
 			projectLabel={projectLabel}
 			projectIcon={projectIcon}
 			projectColor={projectColor}
-			workspacePath={workspacePath}
 			baseBranch={workspaceBranch}
 			currentBranch={currentBranch}
 			isIsolatedWorkspace={isIsolatedWorkspace}
 			contextProjects={contextProjects}
 			setupReport={workspaceSetupReport}
-			onRunRecommendedSetup={onRunRecommendedSetup}
-			onSkipRecommendedSetup={onSkipRecommendedSetup}
+			onOpenTerminal={onOpenTerminal}
 		/>,
 	];
 }

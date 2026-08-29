@@ -5007,7 +5007,6 @@ export default function App() {
 									workspacePath={selectedLocalWorkspacePath}
 									sessionWorkspacePath={selectedSessionWorkspacePath}
 									workspaceStatus={selectedWorkspace?.status ?? null}
-									workspaceSetupReport={selectedWorkspace?.setupReport ?? null}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}
 									sessionState={selectedSessionSnapshot?.state ?? "idle"}

@@ -1,17 +1,15 @@
-import { Check, FolderGit2, GitBranch, LoaderCircle, ShieldCheck, Terminal, X } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { AlertTriangle, Check, FolderGit2, GitBranch, ShieldCheck, Terminal } from "lucide-react";
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSetupReport } from "@dcc/contracts";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { setupDisplayCommand } from "@/features/workspaces/workspace-setup-report";
 import { ProjectIdentityGlyph } from "@/features/workspaces/project-identity";
 
 type ExecutionContextRailProps = {
 	projectLabel: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
-	workspacePath: string | null;
 	baseBranch: string | null;
 	currentBranch: string | null;
 	isIsolatedWorkspace: boolean;
@@ -23,91 +21,57 @@ type ExecutionContextRailProps = {
 		color?: string | null;
 	}>;
 	setupReport?: WorkspaceSetupReport | null;
-	onRunRecommendedSetup?: (commands: string[]) => Promise<void>;
-	onSkipRecommendedSetup?: () => Promise<void>;
+	onOpenTerminal?: () => void;
 };
 
 export const ExecutionContextRail = memo(function ExecutionContextRail({
 	projectLabel,
 	projectIcon = null,
 	projectColor = null,
-	workspacePath,
 	baseBranch,
 	currentBranch,
 	isIsolatedWorkspace,
 	contextProjects = [],
 	setupReport = null,
-	onRunRecommendedSetup,
-	onSkipRecommendedSetup,
+	onOpenTerminal,
 }: ExecutionContextRailProps) {
 	const { t } = useTranslation("common");
-	const [isRunningSetup, setIsRunningSetup] = useState(false);
-	const [setupError, setSetupError] = useState<string | null>(null);
 	const multiProject = contextProjects.length > 1;
 	const displayedProject = projectLabel || t("composer.executionDock.projectFallback");
 	const workingBranch = currentBranch && currentBranch !== "HEAD" ? currentBranch : baseBranch;
 	const visibleProjects = multiProject
 		? contextProjects.slice(0, 3)
 		: [{ id: "active", name: displayedProject, branch: baseBranch ?? "", icon: projectIcon, color: projectColor }];
-	const setupCommands =
-		setupReport?.steps
-			.filter(
-				(step) =>
-					step.command !== "compile_mission_spec_context" &&
-					(step.status === "pending" || step.status === "failed"),
-			)
-			.map((step) => step.command) ?? [];
-	const setupSummary = setupCommands.map(setupDisplayCommand).join(" · ");
-
-	useEffect(() => setSetupError(null), [setupReport?.status, workspacePath]);
-
-	async function runSetup() {
-		if (!onRunRecommendedSetup || isRunningSetup) return;
-		setIsRunningSetup(true);
-		setSetupError(null);
-		try {
-			await onRunRecommendedSetup(setupCommands);
-		} catch (error) {
-			setSetupError(error instanceof Error ? error.message : String(error));
-		} finally {
-			setIsRunningSetup(false);
-		}
-	}
-
-	async function skipSetup() {
-		if (!onSkipRecommendedSetup || isRunningSetup) return;
-		setIsRunningSetup(true);
-		setSetupError(null);
-		try {
-			await onSkipRecommendedSetup();
-		} catch (error) {
-			setSetupError(error instanceof Error ? error.message : String(error));
-		} finally {
-			setIsRunningSetup(false);
-		}
-	}
+	const setupProblem = setupReport?.steps.find(
+		(step) =>
+			step.command !== "compile_mission_spec_context" &&
+			step.command !== "refresh_repository_forge_metadata" &&
+			(step.status === "warning" || step.status === "failed"),
+	);
+	const hasSetupFailure =
+		isIsolatedWorkspace &&
+		(Boolean(setupProblem) ||
+			(setupReport?.status === "failed" && setupReport.steps.length === 0));
 
 	return (
 		<div className="mt-2 flex flex-col gap-2 px-1">
-			{setupCommands.length > 0 ? (
+			{hasSetupFailure ? (
 				<div className="flex min-w-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2">
-					<Terminal className="size-3.5 shrink-0 text-amber-500" />
+					<AlertTriangle className="size-3.5 shrink-0 text-amber-500" />
 					<span className="min-w-0 flex-1">
 						<strong className="block text-[10.5px] font-medium">
-							{setupReport?.status === "failed"
-								? t("composer.executionDock.setup.failed")
-								: t("composer.executionDock.setup.recommended")}
+							{t("composer.executionDock.setup.failed")}
 						</strong>
-						<small className={cn("block truncate font-mono text-[9.5px] text-muted-foreground", setupError && "text-destructive")}>
-							{setupError ?? setupSummary}
+						<small className="block truncate text-[9.5px] text-muted-foreground">
+							{setupProblem?.detail ??
+								setupReport?.message ??
+								setupProblem?.label ??
+								t("composer.executionDock.setup.commandFailed")}
 						</small>
 					</span>
-					<button type="button" disabled={!onSkipRecommendedSetup || isRunningSetup} onClick={() => void skipSetup()} className="inline-flex h-6 items-center gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50">
-						<X className="size-3" /> {t("composer.executionDock.setup.skip")}
-					</button>
-					<button type="button" disabled={!onRunRecommendedSetup || isRunningSetup} onClick={() => void runSetup()} className="inline-flex h-6 items-center gap-1 rounded-md bg-amber-500/15 px-2 text-[10px] font-medium text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200">
-						{isRunningSetup ? <LoaderCircle className="size-3 animate-spin" /> : <Terminal className="size-3" />}
-						{t("composer.executionDock.setup.run")}
+					<button type="button" disabled={!onOpenTerminal} onClick={onOpenTerminal} className="inline-flex h-6 items-center gap-1 rounded-md bg-amber-500/15 px-2 text-[10px] font-medium text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200">
+						<Terminal className="size-3" />
+						{t("workbench.terminal.open")}
 					</button>
 				</div>
 			) : null}

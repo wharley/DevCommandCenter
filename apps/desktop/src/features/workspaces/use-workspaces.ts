@@ -148,14 +148,34 @@ export function workspaceToSummary(
 	workspace: Workspace,
 	remoteDeletionTarget?: WorkspaceRemoteBranchDeletionTarget | null,
 ): WorkspaceSummary {
-	const status =
-		workspace.state === "ready"
+	// Older tasks may have persisted `setup_pending` for recommendations that
+	// were never required. Only an observed warning/failure should keep setup
+	// as a blocking workspace state in the streamlined task flow.
+	const setupReport = workspace.setupReport;
+	const hasSetupProblem =
+		workspace.worktreePath !== null &&
+		workspace.worktreePath !== undefined &&
+		(Boolean(
+			setupReport?.steps.some(
+				(step) =>
+					step.command !== "compile_mission_spec_context" &&
+					step.command !== "refresh_repository_forge_metadata" &&
+					(step.status === "warning" || step.status === "failed"),
+			),
+		) ||
+			(setupReport?.status === "failed" && setupReport.steps.length === 0));
+	const effectiveState =
+		workspace.state === "setup_pending" && !hasSetupProblem
 			? "ready"
-			: workspace.state === "archived"
+			: workspace.state;
+	const status =
+		effectiveState === "ready"
+			? "ready"
+			: effectiveState === "archived"
 				? "archived"
-				: workspace.state === "completed"
+				: effectiveState === "completed"
 					? "completed"
-				: workspace.state === "initializing"
+				: effectiveState === "initializing"
 					? "initializing"
 					: "setup_pending";
 
