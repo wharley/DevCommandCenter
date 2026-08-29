@@ -33,6 +33,71 @@ export function includePickedRepository<Repository extends { rootPath: string }>
 	return [pickedRepository, ...repositories];
 }
 
+export const LAST_TASK_REPOSITORY_ROOT_STORAGE_KEY =
+	"dcc-last-task-repository-root-v1";
+
+type RepositoryRootPreferenceStorage = Pick<
+	Storage,
+	"getItem" | "setItem"
+>;
+
+function browserPreferenceStorage(): RepositoryRootPreferenceStorage | null {
+	if (typeof window === "undefined") {
+		return null;
+	}
+	return window.localStorage;
+}
+
+export function readLastTaskRepositoryRoot(
+	storage: RepositoryRootPreferenceStorage | null = browserPreferenceStorage(),
+): string | null {
+	try {
+		const root = storage
+			?.getItem(LAST_TASK_REPOSITORY_ROOT_STORAGE_KEY)
+			?.trim();
+		return root ? normalizeWorkspaceRoot(root) : null;
+	} catch {
+		return null;
+	}
+}
+
+export function rememberLastTaskRepositoryRoot(
+	rootPath: string,
+	storage: RepositoryRootPreferenceStorage | null = browserPreferenceStorage(),
+): void {
+	const normalized = normalizeWorkspaceRoot(rootPath.trim());
+	if (!normalized) {
+		return;
+	}
+	try {
+		storage?.setItem(LAST_TASK_REPOSITORY_ROOT_STORAGE_KEY, normalized);
+	} catch {
+		// Preferences are best-effort when WebKit storage is unavailable.
+	}
+}
+
+export function initialTaskRepository<Repository extends { rootPath: string }>(
+	repositories: readonly Repository[],
+	explicitRoot: string | null | undefined,
+	rememberedRoot: string | null | undefined,
+): Repository | null {
+	for (const preferredRoot of [explicitRoot, rememberedRoot]) {
+		if (!preferredRoot?.trim()) {
+			continue;
+		}
+		const normalizedPreferredRoot = normalizeWorkspaceRoot(preferredRoot.trim());
+		const match = repositories.find(
+			(repository) =>
+				normalizeWorkspaceRoot(repository.rootPath) === normalizedPreferredRoot,
+		);
+		if (match) {
+			return match;
+		}
+	}
+
+	return repositories[0] ?? null;
+}
+
 export type WorkspaceStart = "new" | "branch";
 
 export function initialWorkspaceStart(hasRepositoryContext: boolean): WorkspaceStart {

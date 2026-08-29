@@ -38,9 +38,12 @@ import type {
 import {
 	includePickedRepository,
 	inferProjectIdFromWorkspaceRoot,
+	initialTaskRepository,
 	initialWorkspaceStart,
 	isBranchWorkspaceSource,
 	normalizeWorkspaceRoot,
+	readLastTaskRepositoryRoot,
+	rememberLastTaskRepositoryRoot,
 	repositoryNameFromWorkspaceRoot,
 	type WorkspaceStart,
 } from "./create-workspace-dialog.logic";
@@ -202,13 +205,14 @@ export function CreateWorkspaceDialog({
 		if (open) {
 			branchLoadSequenceRef.current += 1;
 			suppressCloseAutoFocusRef.current = false;
-			const contextRepository = repositoryContext
-				? repositories.find(
-						(repository) => repository.rootPath === repositoryContext.workspaceRoot,
-					)
-				: null;
 			const initialRepository =
-				mode === "open" ? (contextRepository ?? repositories[0] ?? null) : null;
+				mode === "open"
+					? initialTaskRepository(
+							repositories,
+							repositoryContext?.workspaceRoot,
+							readLastTaskRepositoryRoot(),
+						)
+					: null;
 			const initialForm = initialRepository
 				? {
 						...buildInitialForm(mode, repositoryContext),
@@ -236,6 +240,7 @@ export function CreateWorkspaceDialog({
 	}, [initialCreationScope, mode, open, repositoryContext]);
 
 	function selectSingleRepository(repository: RepositoryOption) {
+		rememberLastTaskRepositoryRoot(repository.rootPath);
 		setSelectedSingleRepositoryId(repository.id);
 		setForm((current) => ({
 			...current,
@@ -362,6 +367,7 @@ export function CreateWorkspaceDialog({
 			};
 			setPickedRepository(repositoryOption);
 			setSelectedSingleRepositoryId(repositoryOption.id);
+			rememberLastTaskRepositoryRoot(repositoryOption.rootPath);
 
 			setForm((current) => ({
 				...current,
@@ -527,6 +533,9 @@ export function CreateWorkspaceDialog({
 					isolationMode: null,
 				});
 				notifyWorkspaceCreationResult(t, mode, result);
+			}
+			if (mode === "open" && creationScope === "single") {
+				rememberLastTaskRepositoryRoot(form.workspaceRoot);
 			}
 			onOpenChange(false);
 		} catch (error) {

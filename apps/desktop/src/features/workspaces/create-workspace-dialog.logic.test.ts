@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
 	includePickedRepository,
 	inferProjectIdFromWorkspaceRoot,
+	initialTaskRepository,
 	initialWorkspaceStart,
 	isBranchWorkspaceSource,
+	LAST_TASK_REPOSITORY_ROOT_STORAGE_KEY,
+	readLastTaskRepositoryRoot,
+	rememberLastTaskRepositoryRoot,
 	repositoryNameFromWorkspaceRoot,
 } from "./create-workspace-dialog.logic";
 
@@ -41,6 +45,62 @@ describe("includePickedRepository", () => {
 
 	it("uses the selected folder name as its project label", () => {
 		expect(repositoryNameFromWorkspaceRoot("/projects/New App/")).toBe("New App");
+	});
+});
+
+describe("last task repository", () => {
+	const repositories = [
+		{ id: "alpha", rootPath: "/projects/alpha" },
+		{ id: "beta", rootPath: "/projects/beta" },
+	];
+
+	it("prefers the remembered repository over the first repository", () => {
+		expect(initialTaskRepository(repositories, null, "/projects/beta/")).toBe(
+			repositories[1],
+		);
+	});
+
+	it("lets an explicit project context override the remembered repository", () => {
+		expect(
+			initialTaskRepository(
+				repositories,
+				"/projects/alpha",
+				"/projects/beta",
+			),
+		).toBe(repositories[0]);
+	});
+
+	it("falls back to the first available repository when the remembered one was removed", () => {
+		expect(
+			initialTaskRepository(repositories, null, "/projects/removed"),
+		).toBe(repositories[0]);
+	});
+
+	it("persists a normalized path and tolerates unavailable storage", () => {
+		const values = new Map<string, string>();
+		const storage = {
+			getItem: (key: string) => values.get(key) ?? null,
+			setItem: (key: string, value: string) => values.set(key, value),
+		};
+
+		rememberLastTaskRepositoryRoot("/projects/beta/", storage);
+		expect(values.get(LAST_TASK_REPOSITORY_ROOT_STORAGE_KEY)).toBe(
+			"/projects/beta",
+		);
+		expect(readLastTaskRepositoryRoot(storage)).toBe("/projects/beta");
+
+		const unavailableStorage = {
+			getItem: () => {
+				throw new Error("unavailable");
+			},
+			setItem: () => {
+				throw new Error("unavailable");
+			},
+		};
+		expect(readLastTaskRepositoryRoot(unavailableStorage)).toBeNull();
+		expect(() =>
+			rememberLastTaskRepositoryRoot("/projects/alpha", unavailableStorage),
+		).not.toThrow();
 	});
 });
 
