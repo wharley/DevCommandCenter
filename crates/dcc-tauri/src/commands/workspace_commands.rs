@@ -2887,19 +2887,43 @@ fn push_observed_commit_to_remote(
         );
     }
     if identity.branch != "HEAD" {
-        let upstream = format!("{remote}/{remote_branch}");
-        let configured = run_git_output(
-            root,
-            &[
-                "branch",
-                &format!("--set-upstream-to={upstream}"),
-                &identity.branch,
-            ],
-        )?;
-        if !configured.status.success() {
+        // Exact-SHA pushes cannot use `push -u` to record the current branch's
+        // destination. Materialize the commit we just delivered and persist
+        // the same branch configuration that `push -u` would write. Using
+        // `branch --set-upstream-to` here is too strict: it rejects remotes
+        // without a matching fetch refspec after the push has already
+        // succeeded.
+        // We know the exact commit accepted by the push above, so materialize
+        // the corresponding local observation before recording the route.
+        let remote_tracking_ref = format!("refs/remotes/{remote}/{remote_branch}");
+        let recorded = run_git_output(root, &["update-ref", &remote_tracking_ref, &identity.head])?;
+        if !recorded.status.success() {
             return Err(git_output_err(
-                "git branch --set-upstream-to",
-                &configured.stderr,
+                "git update-ref remote tracking branch",
+                &recorded.stderr,
+            ));
+        }
+        let remote_key = format!("branch.{}.remote", identity.branch);
+        let configured_remote = run_git_output(
+            root,
+            &["config", "--local", "--replace-all", &remote_key, remote],
+        )?;
+        if !configured_remote.status.success() {
+            return Err(git_output_err(
+                "git config branch push remote",
+                &configured_remote.stderr,
+            ));
+        }
+        let merge_key = format!("branch.{}.merge", identity.branch);
+        let merge_ref = format!("refs/heads/{remote_branch}");
+        let configured_merge = run_git_output(
+            root,
+            &["config", "--local", "--replace-all", &merge_key, &merge_ref],
+        )?;
+        if !configured_merge.status.success() {
+            return Err(git_output_err(
+                "git config branch push merge ref",
+                &configured_merge.stderr,
             ));
         }
     }
@@ -9877,6 +9901,59 @@ mod editor_workspace_file_tests {
             resolve_commitish_sha(remote.as_str(), "refs/heads/work")
                 .expect("remote remains at observed commit"),
             observed.head
+        );
+    }
+
+    #[test]
+    fn exact_push_records_destination_without_a_fetch_refspec() {
+        let repo = TestDir::new("exact-push-no-fetch-refspec-workspace");
+        let remote = TestDir::new("exact-push-no-fetch-refspec-remote");
+        let init_remote =
+            run_git_output(remote.as_str(), &["init", "--bare"]).expect("initialize bare remote");
+        assert!(init_remote.status.success());
+        let git = |args: &[&str]| {
+            let output = run_git_output(repo.as_str(), args).expect("run git");
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-b", "work"]);
+        git(&["config", "user.name", "DCC Test"]);
+        git(&["config", "user.email", "dcc@example.invalid"]);
+        git(&["commit", "--allow-empty", "-m", "observed"]);
+        git(&["remote", "add", "origin", remote.as_str()]);
+        git(&["config", "--unset-all", "remote.origin.fetch"]);
+
+        let observed = observe_push_identity(repo.as_str()).expect("observe push identity");
+        push_observed_commit_to_remote(
+            Path::new("/unused-for-local-remote.sqlite"),
+            repo.as_str(),
+            "origin",
+            "work",
+            &observed,
+            None,
+        )
+        .expect("push observed commit without a fetch refspec");
+
+        assert_eq!(
+            resolve_commitish_sha(repo.as_str(), "refs/remotes/origin/work")
+                .expect("materialized remote-tracking commit"),
+            observed.head
+        );
+        assert_eq!(
+            run_git_output(repo.as_str(), &["config", "--get", "branch.work.remote"])
+                .expect("read push remote")
+                .stdout,
+            b"origin\n"
+        );
+        assert_eq!(
+            run_git_output(repo.as_str(), &["config", "--get", "branch.work.merge"])
+                .expect("read push merge ref")
+                .stdout,
+            b"refs/heads/work\n"
         );
     }
 
