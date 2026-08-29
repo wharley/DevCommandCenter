@@ -32,6 +32,8 @@ export type ExecutionDockStatus =
 	| {
 			kind: "local-and-branch";
 			localFiles: number;
+			localAdditions: number;
+			localDeletions: number;
 			branchFiles: number;
 		}
 	| { kind: "ahead"; commits: number };
@@ -53,6 +55,8 @@ export function resolveExecutionDockStatus(
 		return {
 			kind: "local-and-branch",
 			localFiles: summary.files,
+			localAdditions: summary.additions,
+			localDeletions: summary.deletions,
 			branchFiles: summary.branchFiles,
 		};
 	}

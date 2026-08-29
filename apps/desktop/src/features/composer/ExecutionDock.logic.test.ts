@@ -34,7 +34,13 @@ describe("resolveExecutionDockStatus", () => {
 				{ ...cleanSummary, files: 2, additions: 8, branchFiles: 5 },
 				"ready",
 			),
-		).toEqual({ kind: "local-and-branch", localFiles: 2, branchFiles: 5 });
+		).toEqual({
+			kind: "local-and-branch",
+			localFiles: 2,
+			localAdditions: 8,
+			localDeletions: 0,
+			branchFiles: 5,
+		});
 	});
 
 	it("reports a merged pull request when the worktree is clean", () => {

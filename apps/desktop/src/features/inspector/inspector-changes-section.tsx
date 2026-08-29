@@ -984,7 +984,6 @@ type InspectorChangesSectionProps = {
 	workspaceRoot: string | null;
 	workspaceId: string | null;
 	sessionId: string | null;
-	lastTurnReviewRequest?: { sessionId: string; nonce: number } | null;
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onPrefillComposer?: (text: string) => void;
@@ -999,7 +998,6 @@ export function InspectorChangesSection({
 	workspaceRoot,
 	workspaceId,
 	sessionId,
-	lastTurnReviewRequest = null,
 	selectedPreview,
 	onSelectPreview,
 	onPrefillComposer,
@@ -1021,21 +1019,8 @@ export function InspectorChangesSection({
 	const [discardAllDialogOpen, setDiscardAllDialogOpen] = useState(false);
 	const codeRabbitEnabled = useCodeRabbitIntegrationEnabled();
 	const lastTurnReview = useCachedTurnReviewSummary(sessionId, workspaceId);
-	const handledLastTurnReviewRequestRef = useRef<number | null>(null);
 
 	const root = workspaceRoot?.trim() ?? "";
-	useEffect(() => {
-		if (
-			!lastTurnReviewRequest ||
-			lastTurnReviewRequest.sessionId !== sessionId ||
-			handledLastTurnReviewRequestRef.current === lastTurnReviewRequest.nonce
-		) {
-			return;
-		}
-		handledLastTurnReviewRequestRef.current = lastTurnReviewRequest.nonce;
-		setScopePreference({ root, scope: "last-turn" });
-		onSelectPreview(null);
-	}, [lastTurnReviewRequest, onSelectPreview, root, sessionId]);
 
 	useEffect(() => {
 		if (

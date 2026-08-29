@@ -431,77 +431,88 @@ export const ExecutionDock = memo(function ExecutionDock({
 					className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 overflow-hidden border-r border-border/45 px-3 py-2 text-[11px] text-muted-foreground/90 transition-colors hover:bg-muted/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-70"
 					aria-label={t("composer.executionDock.reviewChanges")}
 				>
-				<FileDiff className="size-3.5 shrink-0" strokeWidth={1.8} />
-				{gitStatus.kind === "loading" ? (
-					<span className="min-w-0 flex-1 truncate">
-						{t("composer.executionDock.readingChanges")}
-					</span>
-				) : gitStatus.kind === "error" ? (
-					<span className="min-w-0 flex-1 truncate">
-						{t("composer.executionDock.changesUnavailable")}
-					</span>
-				) : gitStatus.kind === "local" ? (
-					<span className="min-w-0 flex-1 truncate tabular-nums">
-						<strong className="font-medium text-foreground">{gitStatus.files}</strong>
-						<span className="ml-1 max-[440px]:hidden">
-							{t("composer.executionDock.changes", {
+					<FileDiff className="size-3.5 shrink-0" strokeWidth={1.8} />
+					{gitStatus.kind === "loading" ? (
+						<span className="min-w-0 flex-1 truncate">
+							{t("composer.executionDock.readingChanges")}
+						</span>
+					) : gitStatus.kind === "error" ? (
+						<span className="min-w-0 flex-1 truncate">
+							{t("composer.executionDock.changesUnavailable")}
+						</span>
+					) : gitStatus.kind === "local" ? (
+						<span
+							className="min-w-0 flex-1 truncate tabular-nums"
+							title={t("composer.executionDock.localChanges", {
 								count: gitStatus.files,
 							})}
+						>
+							{gitStatus.additions > 0 ? (
+								<span className="text-emerald-600 dark:text-emerald-400">
+									+{gitStatus.additions}
+								</span>
+							) : null}
+							{gitStatus.deletions > 0 ? (
+								<span className="ml-1 text-destructive">
+									−{gitStatus.deletions}
+								</span>
+							) : null}
 						</span>
-						{gitStatus.additions > 0 ? (
-							<span className="ml-1 text-emerald-600 dark:text-emerald-400">
-								+{gitStatus.additions}
-							</span>
-						) : null}
-						{gitStatus.deletions > 0 ? (
-							<span className="ml-1 text-destructive">−{gitStatus.deletions}</span>
-						) : null}
-					</span>
-				) : gitStatus.kind === "branch" ? (
-					<span className="min-w-0 flex-1 truncate tabular-nums">
-						<span className="font-medium text-foreground">
-							{t("composer.executionDock.viewDiff")}
+					) : gitStatus.kind === "branch" ? (
+						<span
+							className="min-w-0 flex-1 truncate tabular-nums"
+							title={t("composer.executionDock.branchFiles", {
+								count: gitStatus.files,
+							})}
+						>
+							{gitStatus.additions > 0 ? (
+								<span className="text-emerald-600 dark:text-emerald-400">
+									+{gitStatus.additions}
+								</span>
+							) : null}
+							{gitStatus.deletions > 0 ? (
+								<span className="ml-1 text-destructive">
+									−{gitStatus.deletions}
+								</span>
+							) : null}
 						</span>
-						<span className="mx-1 text-muted-foreground/80">·</span>
-						<strong className="font-medium text-foreground">{gitStatus.files}</strong>
-						<span className="ml-1 max-[440px]:hidden">
-							{t("composer.executionDock.branchFiles", { count: gitStatus.files })}
+					) : gitStatus.kind === "local-and-branch" ? (
+						<span
+							className="min-w-0 flex-1 truncate tabular-nums"
+							title={`${t("composer.executionDock.localChanges", {
+								count: gitStatus.localFiles,
+							})} · ${t("composer.executionDock.branchDiffShort", {
+								count: gitStatus.branchFiles,
+							})}`}
+						>
+							{gitStatus.localAdditions > 0 ? (
+								<span className="text-emerald-600 dark:text-emerald-400">
+									+{gitStatus.localAdditions}
+								</span>
+							) : null}
+							{gitStatus.localDeletions > 0 ? (
+								<span className="ml-1 text-destructive">
+									−{gitStatus.localDeletions}
+								</span>
+							) : null}
 						</span>
-						{gitStatus.additions > 0 ? (
-							<span className="ml-1 text-emerald-600 dark:text-emerald-400">+{gitStatus.additions}</span>
-						) : null}
-						{gitStatus.deletions > 0 ? (
-							<span className="ml-1 text-destructive">−{gitStatus.deletions}</span>
-						) : null}
-					</span>
-				) : gitStatus.kind === "local-and-branch" ? (
-					<span className="min-w-0 flex-1 truncate tabular-nums">
-						<strong className="font-medium text-foreground">{gitStatus.localFiles}</strong>
-						<span className="max-[440px]:hidden">
-							{t("composer.executionDock.localChanges", { count: gitStatus.localFiles })}
-						</span>
-						<span className="mx-1 text-muted-foreground/70">·</span>
-						<span className="font-medium text-foreground">
-							{t("composer.executionDock.branchDiffShort", { count: gitStatus.branchFiles })}
-						</span>
-					</span>
-				) : gitStatus.kind === "merged" ? (
-					<span className="min-w-0 flex-1 truncate text-emerald-700 dark:text-emerald-400">
-						{gitStatus.pullRequestNumber
-							? t("composer.executionDock.mergedWithNumber", {
+					) : gitStatus.kind === "merged" ? (
+						<span className="min-w-0 flex-1 truncate text-emerald-700 dark:text-emerald-400">
+							{gitStatus.pullRequestNumber
+								? t("composer.executionDock.mergedWithNumber", {
 									pr: gitStatus.pullRequestNumber,
 								})
-							: t("composer.executionDock.merged")}
-					</span>
-				) : gitStatus.kind === "ahead" ? (
-					<span className="min-w-0 flex-1 truncate text-foreground/80">
-						{t("composer.executionDock.ahead", { count: gitStatus.commits })}
-					</span>
-				) : (
-					<span className="min-w-0 flex-1 truncate text-foreground/65">
-						{t("composer.executionDock.noChanges")}
-					</span>
-				)}
+								: t("composer.executionDock.merged")}
+						</span>
+					) : gitStatus.kind === "ahead" ? (
+						<span className="min-w-0 flex-1 truncate text-foreground/80">
+							{t("composer.executionDock.ahead", { count: gitStatus.commits })}
+						</span>
+					) : (
+						<span className="min-w-0 flex-1 truncate text-foreground/65">
+							{t("composer.executionDock.noChanges")}
+						</span>
+					)}
 				</button>
 				<div className="flex min-w-24 max-[440px]:min-w-10">
 					<button

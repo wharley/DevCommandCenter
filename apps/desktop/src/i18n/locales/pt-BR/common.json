@@ -2748,10 +2748,7 @@
     "empty": "Nenhum arquivo encontrado."
   },
   "turnReview": {
-    "action": "Alterações do último turno",
     "title": "Revisão do último turno",
-    "subtitle": "Evidência Git limitada capturada para este workspace",
-    "close": "Fechar revisão do último turno",
     "loading": "Carregando revisão do turno…",
     "failed": "Não foi possível carregar a revisão do turno.",
     "unavailable": "Não há revisão capturada para esta sessão e workspace.",

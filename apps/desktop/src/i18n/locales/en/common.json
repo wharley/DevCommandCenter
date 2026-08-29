@@ -2748,10 +2748,7 @@
     "empty": "No files match."
   },
   "turnReview": {
-    "action": "Changes from last turn",
     "title": "Last turn review",
-    "subtitle": "Bounded Git evidence captured for this workspace",
-    "close": "Close last turn review",
     "loading": "Loading turn review…",
     "failed": "The turn review could not be loaded.",
     "unavailable": "No captured review is available for this session and workspace.",

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { FileDiff, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import type { WorkspaceSessionSummary, WorkspaceSetupReport } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -119,7 +119,6 @@ import {
 	resolveSecondarySurfaceRestoration,
 	shouldRenderGitDiffSurface,
 } from "./secondary-surface-layout";
-import { TurnReviewActionSummary } from "./turn-review-action-summary";
 
 /** Composer draft injection request; the nonce lets a repeated annotation re-fire. */
 type ComposerPrefill = {
@@ -180,8 +179,6 @@ function buildReviewContent(
 
 type WorkspacePanelProps = {
 	workspaceId: string;
-	/** Active bundle member whose per-turn evidence should be reviewed. */
-	turnReviewWorkspaceId?: string | null;
 	workspaceName: string;
 	workspaceBranch: string;
 	workspacePath: string | null;
@@ -239,7 +236,6 @@ type WorkspacePanelProps = {
 	onFileSurfaceClosed?: () => void;
 	onCloseSurface: () => void;
 	onOpenPlanSurface: () => void;
-	onOpenTurnReview: (sessionId: string) => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	onImplementPlanInNewThread: (input: {
 		planMarkdown: string;
@@ -280,7 +276,6 @@ type WorkspacePanelProps = {
 
 export function WorkspacePanel({
 	workspaceId,
-	turnReviewWorkspaceId = workspaceId,
 	workspaceName,
 	workspaceBranch,
 	workspacePath,
@@ -325,7 +320,6 @@ export function WorkspacePanel({
 	onFileSurfaceClosed,
 	onCloseSurface,
 	onOpenPlanSurface,
-	onOpenTurnReview,
 	onOpenFileReference,
 	onImplementPlanInNewThread,
 	terminalScopes,
@@ -1202,24 +1196,6 @@ export function WorkspacePanel({
 				) : null}
 
 				<div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4">
-					{effectiveSessionId && sessionSnapshot?.activeTurnId === null && lastTurnState ? (
-						<Button
-							type="button"
-							variant="ghost"
-							size="xs"
-							className="mb-2 h-7 w-full max-w-xl justify-start gap-1.5 px-2 text-[11px] text-muted-foreground"
-							onClick={() => onOpenTurnReview(effectiveSessionId)}
-						>
-							<FileDiff className="size-3.5" />
-							<span>{t("turnReview.action")}</span>
-							{turnReviewWorkspaceId ? (
-								<TurnReviewActionSummary
-									sessionId={effectiveSessionId}
-									workspaceId={turnReviewWorkspaceId}
-								/>
-							) : null}
-						</Button>
-					) : null}
 					<WorkspaceComposer
 						draftKey={workspaceId}
 						disabled={false}

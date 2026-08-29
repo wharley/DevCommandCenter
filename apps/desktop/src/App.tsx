@@ -985,10 +985,6 @@ export default function App() {
 		delegationId: string;
 		nonce: number;
 	} | null>(null);
-	const [lastTurnReviewRequest, setLastTurnReviewRequest] = useState<{
-		sessionId: string;
-		nonce: number;
-	} | null>(null);
 	const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
 	const [workspaceCreationMode, setWorkspaceCreationMode] = useState<"open" | "clone">(
 		"open",
@@ -2017,19 +2013,6 @@ export default function App() {
 	const openPlanSurface = useCallback(() => {
 		requestSurfaceSelection({ kind: "plan" });
 	}, [requestSurfaceSelection]);
-	const openLastTurnReviewInInspector = useCallback(
-		(sessionId: string) => {
-			requestSurfaceSelection(null, () => {
-				setInspectorMode("git");
-				openContextualInspector();
-				setLastTurnReviewRequest((current) => ({
-					sessionId,
-					nonce: (current?.nonce ?? 0) + 1,
-				}));
-			});
-		},
-		[openContextualInspector, requestSurfaceSelection],
-	);
 	const runWorkbenchCommand = useCallback(
 		(command: WorkbenchCommand) => {
 			recordUxMetric("command_palette_action");
@@ -4928,7 +4911,6 @@ export default function App() {
 									onFileSurfaceClosed={handleFileSurfaceClosed}
 									onCloseSurface={handleCloseSurface}
 									onOpenPlanSurface={openPlanSurface}
-									onOpenTurnReview={openLastTurnReviewInInspector}
 									onOpenFileReference={handleOpenConversationFile}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
 									inspectorCollapsed={inspectorCollapsed}
@@ -5066,7 +5048,6 @@ export default function App() {
 										handleInspectorContextualActionComplete
 									}
 									reviewDelegationRequest={reviewDelegationRequest}
-									lastTurnReviewRequest={lastTurnReviewRequest}
 									activeTab={inspectorTab}
 									onTabChange={setInspectorTab}
 									mode={inspectorMode}

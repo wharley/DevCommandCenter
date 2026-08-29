@@ -201,7 +201,6 @@ type WorkspaceInspectorSidebarProps = {
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	reviewDelegationRequest?: { delegationId: string; nonce: number } | null;
-	lastTurnReviewRequest?: { sessionId: string; nonce: number } | null;
 	onSelectSession: (sessionId: string) => void;
 	onPrefillComposer?: (text: string) => void;
 	onOpenMergeConflictResolver: (input: {
@@ -1566,7 +1565,6 @@ export function WorkspaceInspectorSidebar({
 	selectedPreview,
 	onSelectPreview,
 	reviewDelegationRequest,
-	lastTurnReviewRequest,
 	onSelectSession,
 	onPrefillComposer,
 	onOpenMergeConflictResolver,
@@ -3581,7 +3579,6 @@ export function WorkspaceInspectorSidebar({
 									workspaceRoot={changesWorkspaceRoot}
 									workspaceId={workspaceId}
 									sessionId={sessionId}
-									lastTurnReviewRequest={lastTurnReviewRequest}
 									selectedPreview={selectedPreview}
 									onSelectPreview={onSelectPreview}
 									onPrefillComposer={onPrefillComposer}
