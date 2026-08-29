@@ -3809,13 +3809,25 @@ export default function App() {
 		},
 		[requestSurfaceSelection],
 	);
-	const handleExpandGitDiff = useCallback(() => {
-		if (surfaceSelectionRef.current?.kind !== "git-diff") {
-			return;
-		}
-		setGitDiffExpanded(true);
-		setInspectorCollapsed(true);
-	}, [setInspectorCollapsed]);
+	const handleExpandGitDiff = useCallback(
+		(selection?: WorkspaceGitPreviewSelection) => {
+			const expand = () => {
+				setGitDiffExpanded(true);
+				setInspectorCollapsed(true);
+			};
+			if (selection) {
+				requestSurfaceSelection(
+					{ kind: "git-diff", file: selection },
+					expand,
+				);
+				return;
+			}
+			if (surfaceSelectionRef.current?.kind === "git-diff") {
+				expand();
+			}
+		},
+		[requestSurfaceSelection, setInspectorCollapsed],
+	);
 
 	const handleOpenMergeConflictResolver = useCallback(
 		(input: {
@@ -4619,7 +4631,7 @@ export default function App() {
 		surfaceSelection?.kind ?? null,
 		gitDiffExpanded,
 	);
-	const visibleInspectorWidth = inlineGitDiffReview
+	const visibleInspectorWidth = inspectorMode === "git" || inlineGitDiffReview
 		? DEFAULT_REVIEW_SURFACE_WIDTH
 		: inspectorWidth;
 
@@ -4982,7 +4994,7 @@ export default function App() {
 									onClick={closeInspector}
 								/>
 							) : null}
-							{!inlineGitDiffReview ? (
+							{inspectorMode !== "git" ? (
 								<ResizeSeparator
 									side="right"
 									widthAt={visibleInspectorWidth}

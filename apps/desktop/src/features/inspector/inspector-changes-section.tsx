@@ -6,8 +6,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
 import {
+	AlertCircle,
+	ChevronDown,
 	ChevronRight,
 	CloudIcon,
+	Expand,
 	GitCompareArrows,
 	LaptopIcon,
 	List as ListIcon,
@@ -34,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { WorkspaceChangesDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
 import type { WorkspaceGitChangeEntry, WorkspacePrReviewComment } from "@dcc/contracts";
 import {
 	workspaceGitDiscardFile,
@@ -53,9 +57,12 @@ import {
 import {
 	changeGroupBelongsToScope,
 	defaultInspectorChangesScope,
+	reviewCardDiffHeight,
+	shouldEagerLoadReviewCard,
 	summarizeInspectorChanges,
 	type InspectorChangesScope,
 } from "./inspector-changes-presentation";
+import { useWorkspaceGitFilePreviewContent } from "./use-workspace-git-file-preview-content";
 
 export { WORKSPACE_GIT_STATUS_QUERY_KEY, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY };
 
@@ -525,20 +532,221 @@ function ShinyFlash({ active, children }: { active: boolean; children: React.Rea
 	);
 }
 
+function ReviewChangeCard({
+	entry,
+	group,
+	workspaceRoot,
+	baseBranch = null,
+	index,
+	gitBusy,
+	runGit,
+	reviewCommentCount = 0,
+	onExpand,
+}: {
+	entry: WorkspaceGitChangeEntry;
+	group: "staged" | "unstaged" | "committed";
+	workspaceRoot: string;
+	baseBranch?: string | null;
+	index: number;
+	gitBusy: boolean;
+	runGit: (fn: () => Promise<void>) => Promise<void>;
+	reviewCommentCount?: number;
+	onExpand?: (selection: WorkspaceGitPreviewSelection) => void;
+}) {
+	const { t } = useTranslation("common");
+	const cardRef = useRef<HTMLElement | null>(null);
+	const [open, setOpen] = useState(true);
+	const [shouldLoad, setShouldLoad] = useState(() =>
+		shouldEagerLoadReviewCard(index),
+	);
+	const input = { workspaceRoot, relativePath: entry.path };
+	const unmerged = /^(U|AA|DD|AU|UA|DU|UD)$/.test(
+		entry.status.toUpperCase(),
+	);
+	const selection = useMemo<WorkspaceGitPreviewSelection>(
+		() => ({
+			group,
+			path: entry.path,
+			name: entry.name,
+			status: entry.status,
+			baseBranch,
+		}),
+		[baseBranch, entry.name, entry.path, entry.status, group],
+	);
+
+	useEffect(() => {
+		if (shouldLoad || !open) return;
+		if (typeof IntersectionObserver === "undefined") {
+			setShouldLoad(true);
+			return;
+		}
+		const target = cardRef.current;
+		if (!target) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (!entries.some((candidate) => candidate.isIntersecting)) return;
+				setShouldLoad(true);
+				observer.disconnect();
+			},
+			{ rootMargin: "700px 0px" },
+		);
+		observer.observe(target);
+		return () => observer.disconnect();
+	}, [open, shouldLoad]);
+
+	const query = useWorkspaceGitFilePreviewContent(
+		shouldLoad && open
+			? {
+					workspaceRoot,
+					relativePath: entry.path,
+					status: entry.status,
+					scope: group,
+					baseBranch,
+				}
+			: null,
+	);
+	const iconSrc = getMaterialFileIcon(entry.name);
+	const folder = dirname(entry.path);
+
+	return (
+		<article
+			ref={cardRef}
+			className="overflow-hidden rounded-xl border border-border/60 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+		>
+			<div className="flex min-h-11 items-center gap-2 border-b border-border/45 px-2.5 py-1.5">
+				<button
+					type="button"
+					className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					onClick={() => setOpen((value) => !value)}
+					aria-expanded={open}
+				>
+					{open ? (
+						<ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+					) : (
+						<ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+					)}
+					<img src={iconSrc} alt="" className="size-3.5 shrink-0" />
+					<span className="min-w-0 flex-1 truncate">
+						<span className="font-medium text-foreground">{entry.name}</span>
+						{folder ? (
+							<span className="ml-1.5 text-[10px] text-muted-foreground">
+								{folder}
+							</span>
+						) : null}
+					</span>
+				</button>
+				<div className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums">
+					{entry.insertions > 0 ? (
+						<span className="text-emerald-600 dark:text-emerald-400">
+							+{entry.insertions}
+						</span>
+					) : null}
+					{entry.deletions > 0 ? (
+						<span className="text-destructive">−{entry.deletions}</span>
+					) : null}
+					{reviewCommentCount > 0 ? (
+						<span className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
+							<MessageSquare className="size-2.5" />
+							{reviewCommentCount}
+						</span>
+					) : null}
+					<span
+						className={cn(
+							"min-w-4 text-center font-semibold",
+							statusClass(entry.status),
+						)}
+					>
+						{entry.status}
+					</span>
+					{group === "staged" ? (
+						<RowIconButton
+							aria-label={t("inspector.changes.unstageFile")}
+							disabled={gitBusy}
+							onClick={() =>
+								void runGit(() => workspaceGitUnstageFile(input))
+							}
+						>
+							<MinusIcon className="size-3.5" />
+						</RowIconButton>
+					) : group === "unstaged" && !unmerged ? (
+						<>
+							<RowIconButton
+								aria-label={t("inspector.changes.discardFile")}
+								disabled={gitBusy}
+								onClick={() =>
+									void runGit(() => workspaceGitDiscardFile(input))
+								}
+							>
+								<Undo2Icon className="size-3.5" />
+							</RowIconButton>
+							<RowIconButton
+								aria-label={t("inspector.changes.stageFile")}
+								disabled={gitBusy}
+								onClick={() =>
+									void runGit(() => workspaceGitStageFile(input))
+								}
+							>
+								<PlusIcon className="size-3.5" />
+							</RowIconButton>
+						</>
+					) : null}
+					{onExpand ? (
+						<RowIconButton
+							aria-label={t("inspector.changes.expandDiff")}
+							onClick={() => onExpand(selection)}
+						>
+							<Expand className="size-3.5" />
+						</RowIconButton>
+					) : null}
+				</div>
+			</div>
+			{open ? (
+				<div
+					className="min-h-[190px] overflow-hidden bg-background"
+					style={{
+						height: `${reviewCardDiffHeight(entry.insertions, entry.deletions)}px`,
+					}}
+				>
+					{!shouldLoad || query.isPending ? (
+						<div className="flex h-full items-center justify-center gap-2 text-[11px] text-muted-foreground">
+							<LoaderCircleIcon className="size-3.5 animate-spin" />
+							{t("inspector.changes.loadingDiff")}
+						</div>
+					) : query.isError ? (
+						<div className="flex h-full items-center justify-center gap-2 px-4 text-center text-[11px] text-destructive">
+							<AlertCircle className="size-3.5" />
+							{(query.error as Error)?.message ??
+								t("inspector.changes.diffFailed")}
+						</div>
+					) : query.data ? (
+						<WorkspaceChangesDiffLoader
+							path={entry.path}
+							originalText={query.data.originalText}
+							modifiedText={query.data.modifiedText}
+							inline
+							className="h-full"
+						/>
+					) : null}
+				</div>
+			) : null}
+		</article>
+	);
+}
+
 function BranchDiffSection({
 	workspaceRoot,
 	gitBusy,
 	treeView,
 	selectedPath = null,
 	reviewCommentCounts,
-	onSelect,
+	onExpand,
 }: {
 	workspaceRoot: string;
 	gitBusy: boolean;
 	treeView: boolean;
 	selectedPath?: string | null;
 	reviewCommentCounts?: Map<string, number>;
-	onSelect?: (selection: WorkspaceGitPreviewSelection) => void;
+	onExpand?: (selection: WorkspaceGitPreviewSelection) => void;
 }) {
 	const query = useWorkspaceGitBranchDiff(workspaceRoot);
 	const prevDataRef = useRef(query.data?.changes);
@@ -593,25 +801,23 @@ function BranchDiffSection({
 						selectedPath={selectedPath}
 						reviewCommentCounts={reviewCommentCounts}
 						onSelect={(selection) =>
-							onSelect?.({ ...selection, baseBranch })
+							onExpand?.({ ...selection, baseBranch })
 						}
 					/>
 				) : (
-					<div className="pb-1">
-						{changes.map((entry: WorkspaceGitChangeEntry) => (
-							<ChangeRow
+					<div className="space-y-2 px-2 pb-2">
+						{changes.map((entry: WorkspaceGitChangeEntry, index: number) => (
+							<ReviewChangeCard
 								key={`remote-${entry.path}-${entry.status}`}
 								entry={entry}
 								group="committed"
 								workspaceRoot={workspaceRoot}
+								baseBranch={baseBranch}
+								index={index}
 								gitBusy={gitBusy}
 								runGit={async () => {}}
-								flashingPaths={flashingPaths}
-								selected={selectedPath === entry.path}
 								reviewCommentCount={reviewCommentCounts?.get(entry.path) ?? 0}
-								onSelect={(selection) =>
-									onSelect?.({ ...selection, baseBranch })
-								}
+								onExpand={onExpand}
 							/>
 						))}
 					</div>
@@ -735,18 +941,18 @@ function ChangesGroup({
 						onSelect={onSelect}
 					/>
 				) : (
-					<div className="pb-2 pl-1">
-						{entries.map((e) => (
-							<ChangeRow
+					<div className="space-y-2 px-2 pb-2">
+						{entries.map((e, index) => (
+							<ReviewChangeCard
 								key={`${group}-${e.path}-${e.status}`}
 								entry={e}
 								group={group}
 								workspaceRoot={workspaceRoot}
+								index={index}
 								gitBusy={gitBusy}
 								runGit={runGit}
-								selected={selectedPath === e.path}
 								reviewCommentCount={reviewCommentCounts?.get(e.path) ?? 0}
-								onSelect={onSelect}
+								onExpand={onSelect}
 							/>
 						))}
 					</div>
@@ -764,7 +970,7 @@ type InspectorChangesSectionProps = {
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
 	targetSessionId?: string | null;
 	headerAction?: ReactNode;
-	onOpenExpandedPreview?: () => void;
+	onOpenExpandedPreview?: (selection?: WorkspaceGitPreviewSelection) => void;
 	/** A commit/push/PR action is reconciling the Git state shown below. */
 	isGitActionInProgress?: boolean;
 };
@@ -841,20 +1047,30 @@ export function InspectorChangesSection({
 		}
 		return counts;
 	}, [reviewCommentsByPath]);
+	const enrichPreviewSelection = useCallback(
+		(selection: WorkspaceGitPreviewSelection) => ({
+			...selection,
+			workspaceRootOverride: selection.workspaceRootOverride ?? root,
+			targetSessionId: selection.targetSessionId ?? targetSessionId,
+			reviewComments: reviewCommentsByPath.get(selection.path) ?? [],
+		}),
+		[reviewCommentsByPath, root, targetSessionId],
+	);
 	const handleSelectPreview = useCallback(
 		(selection: WorkspaceGitPreviewSelection | null) => {
 			if (!selection) {
 				onSelectPreview(null);
 				return;
 			}
-			onSelectPreview({
-				...selection,
-				workspaceRootOverride: selection.workspaceRootOverride ?? root,
-				targetSessionId: selection.targetSessionId ?? targetSessionId,
-				reviewComments: reviewCommentsByPath.get(selection.path) ?? [],
-			});
+			onSelectPreview(enrichPreviewSelection(selection));
 		},
-		[onSelectPreview, reviewCommentsByPath, root, targetSessionId],
+		[enrichPreviewSelection, onSelectPreview],
+	);
+	const handleExpandPreview = useCallback(
+		(selection: WorkspaceGitPreviewSelection) => {
+			onOpenExpandedPreview?.(enrichPreviewSelection(selection));
+		},
+		[enrichPreviewSelection, onOpenExpandedPreview],
 	);
 	const handleScopeChange = useCallback(
 		(scope: InspectorChangesScope) => {
@@ -941,7 +1157,7 @@ export function InspectorChangesSection({
 					workspaceRoot={root}
 					selection={selectedPreview}
 					onBack={() => handleSelectPreview(null)}
-					onExpand={onOpenExpandedPreview}
+					onExpand={() => onOpenExpandedPreview?.(selectedPreview)}
 					forceUnified
 				/>
 				{isGitActionInProgress ? (
@@ -1059,7 +1275,7 @@ export function InspectorChangesSection({
 							showViewToggle={false}
 							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
-							onSelect={handleSelectPreview}
+							onSelect={handleExpandPreview}
 						/>
 					) : null}
 					{activeScope === "working" && data.unstaged.length > 0 ? (
@@ -1088,7 +1304,7 @@ export function InspectorChangesSection({
 							}
 							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
-							onSelect={handleSelectPreview}
+							onSelect={handleExpandPreview}
 						/>
 					) : null}
 					{activeScope === "working" && !hasAny ? (
@@ -1116,7 +1332,7 @@ export function InspectorChangesSection({
 							treeView={changesTreeView}
 							selectedPath={null}
 							reviewCommentCounts={reviewCommentCounts}
-							onSelect={handleSelectPreview}
+							onExpand={handleExpandPreview}
 						/>
 					) : null}
 					{codeRabbitEnabled &&

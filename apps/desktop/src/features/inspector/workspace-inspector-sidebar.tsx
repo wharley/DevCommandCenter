@@ -248,7 +248,7 @@ type WorkspaceInspectorSidebarProps = {
 	isPinned: boolean;
 	onPinnedChange: (pinned: boolean) => void;
 	onRequestClose: () => void;
-	onOpenExpandedPreview?: () => void;
+	onOpenExpandedPreview?: (selection?: WorkspaceGitPreviewSelection) => void;
 	onOpenLastTurnReview?: (sessionId: string) => void;
 	onContextualActionComplete?: () => void;
 	activeTab: InspectorTab;
@@ -265,7 +265,6 @@ type InspectorTab = "activity" | "context" | "spec";
 export type WorkspaceInspectorMode = "git" | "code";
 
 const SESSION_DOCK_TABS: InspectorTab[] = ["activity", "context", "spec"];
-const INSPECTOR_MODES: WorkspaceInspectorMode[] = ["git", "code"];
 const EMPTY_CODE_FILE_PATHS: string[] = [];
 const WORKSPACE_CONFLICT_STATE_QUERY_KEY = "workspaceGitConflictState";
 type PendingGitConfirmation = "merge" | "complete-merge" | "sync-base" | null;
@@ -1146,56 +1145,46 @@ function InspectorModeDock({
 	onRequestClose: () => void;
 }) {
 	const { t } = useTranslation("common");
+	const CurrentIcon = mode === "git" ? GitBranch : Code2;
+	const alternateMode: WorkspaceInspectorMode =
+		mode === "git" ? "code" : "git";
+	const AlternateIcon = alternateMode === "git" ? GitBranch : Code2;
+	const alternateShortcutKeys =
+		alternateMode === "git"
+			? getInspectorGitModeShortcutKeys()
+			: getInspectorCodeModeShortcutKeys();
 	return (
 		<nav
 			aria-label={t("inspector.modeDock.ariaLabel")}
 			className="shrink-0 border-b border-border/60 bg-sidebar"
 		>
 			<div className="flex h-10 items-center gap-1 px-2">
-				<div className="flex min-w-0 flex-1 items-center gap-1">
-				{INSPECTOR_MODES.map((item) => {
-					const active = item === mode;
-					const Icon = item === "git" ? GitBranch : Code2;
-					const shortcutKeys =
-						item === "git"
-							? getInspectorGitModeShortcutKeys()
-							: getInspectorCodeModeShortcutKeys();
-					return (
-						<Tooltip key={item}>
-							<TooltipTrigger asChild>
-								<button
-									type="button"
-									aria-label={t(`inspector.modeDock.${item}`)}
-									aria-pressed={active}
-									onMouseDown={(event) => {
-										event.preventDefault();
-										event.stopPropagation();
-									}}
-									onClick={(event) => {
-										event.preventDefault();
-										event.stopPropagation();
-										onModeChange(item);
-									}}
-									className={cn(
-										"flex h-7 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[12px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
-										active
-											? "bg-muted text-foreground shadow-sm"
-											: "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
-									)}
-								>
-									<Icon className="size-4" strokeWidth={2} />
-									<span className="font-medium">{t(`inspector.modeDock.${item}`)}</span>
-								</button>
-							</TooltipTrigger>
-							<TooltipContent side="top" className="gap-2">
-								<span>{t(`inspector.modeDock.${item}`)}</span>
-								<InlineShortcutDisplay keys={shortcutKeys} />
-							</TooltipContent>
-						</Tooltip>
-					);
-				})}
+				<div className="flex min-w-0 flex-1 items-center gap-2 px-1.5">
+					<CurrentIcon className="size-4 shrink-0 text-foreground" strokeWidth={2} />
+					<span className="truncate text-[12px] font-semibold text-foreground">
+						{t(`inspector.modeDock.${mode}`)}
+					</span>
 				</div>
-				<div className="ml-1 flex shrink-0 items-center gap-0.5 border-l border-border/60 pl-1.5">
+				<div className="ml-1 flex shrink-0 items-center gap-0.5">
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className="size-7 cursor-pointer text-muted-foreground hover:text-foreground"
+								aria-label={t(`inspector.modeDock.${alternateMode}`)}
+								onClick={() => onModeChange(alternateMode)}
+							>
+								<AlternateIcon className="size-3.5" strokeWidth={1.8} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom" className="gap-2">
+							<span>{t(`inspector.modeDock.${alternateMode}`)}</span>
+							<InlineShortcutDisplay keys={alternateShortcutKeys} />
+						</TooltipContent>
+					</Tooltip>
+					<div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden />
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button
@@ -3636,7 +3625,7 @@ export function WorkspaceInspectorSidebar({
 					/>
 				)}
 
-			{sessionDockOpen ? (
+			{inspectorMode === "code" && (sessionDockOpen ? (
 			<>
 			<ResizeHandle
 				label={t("inspector.sessionDock.resize")}
@@ -4482,7 +4471,7 @@ export function WorkspaceInspectorSidebar({
 						live={sessionState === "active"}
 						onExpand={openSessionDock}
 					/>
-				)}
+				))}
 			</div>
 			<Dialog
 				open={pendingGitConfirmation !== null}
