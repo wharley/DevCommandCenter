@@ -39,6 +39,7 @@ import { Button } from "@/components/ui/button";
 import { openInEditor } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
 import {
+	DEFAULT_REVIEW_SURFACE_WIDTH,
 	MAX_INSPECTOR_WIDTH,
 	MAX_SIDEBAR_WIDTH,
 	MIN_INSPECTOR_WIDTH,
@@ -59,6 +60,10 @@ import {
 	WorkspaceInspectorSidebar,
 	type WorkspaceInspectorMode,
 } from "./features/inspector";
+import {
+	isInlineGitDiffReview,
+	shouldReturnToGitFiles,
+} from "./features/inspector/git-diff-review-navigation";
 import {
 	shouldCollapseContextualInspector,
 	type InspectorPresentation,
@@ -1251,6 +1256,7 @@ export default function App() {
 	);
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
+	const [gitDiffExpanded, setGitDiffExpanded] = useState(false);
 	const [surfaceSelectionWorkspaceId, setSurfaceSelectionWorkspaceId] =
 		useState<string | null>(null);
 	const surfaceSelectionRef = useRef<WorkspaceSurfaceSelection | null>(null);
@@ -1267,6 +1273,9 @@ export default function App() {
 	const fileOpenRequestIdRef = useRef(0);
 	const applySurfaceSelection = useCallback(
 		(next: WorkspaceSurfaceSelection | null) => {
+			if (next?.kind !== "git-diff") {
+				setGitDiffExpanded(false);
+			}
 			if (
 				surfaceSelectionRef.current?.kind === "merge-conflict" &&
 				next === null &&
@@ -1945,12 +1954,14 @@ export default function App() {
 		selectedSessionSummary,
 	]);
 	const openContextualInspector = useCallback(() => {
+		setGitDiffExpanded(false);
 		setInspectorPresentation((current) =>
 			!inspectorCollapsed && current === "pinned" ? current : "contextual",
 		);
 		setInspectorCollapsed(false);
 	}, [inspectorCollapsed, setInspectorCollapsed]);
 	const openPinnedInspector = useCallback(() => {
+		setGitDiffExpanded(false);
 		setInspectorPresentation("pinned");
 		setInspectorCollapsed(false);
 	}, [setInspectorCollapsed]);
@@ -3798,6 +3809,13 @@ export default function App() {
 		},
 		[requestSurfaceSelection],
 	);
+	const handleExpandGitDiff = useCallback(() => {
+		if (surfaceSelectionRef.current?.kind !== "git-diff") {
+			return;
+		}
+		setGitDiffExpanded(true);
+		setInspectorCollapsed(true);
+	}, [setInspectorCollapsed]);
 
 	const handleOpenMergeConflictResolver = useCallback(
 		(input: {
@@ -3917,8 +3935,20 @@ export default function App() {
 	}, [requestSurfaceSelection]);
 
 	const handleCloseSurface = useCallback(() => {
-		requestSurfaceSelection(null);
-	}, [requestSurfaceSelection]);
+		const returnToGitFiles = shouldReturnToGitFiles(
+			surfaceSelectionRef.current?.kind ?? null,
+			gitDiffExpanded,
+		);
+		requestSurfaceSelection(
+			null,
+			returnToGitFiles
+				? () => {
+						setInspectorMode("git");
+						openContextualInspector();
+					}
+				: undefined,
+		);
+	}, [gitDiffExpanded, openContextualInspector, requestSurfaceSelection]);
 	const handleOpenAgentSession = useCallback(
 		(sessionId: string) => {
 			setSelectedSessionId(sessionId);
@@ -4585,6 +4615,13 @@ export default function App() {
 		: null;
 	const activeProjectIcon = activeProjectRepository?.icon ?? null;
 	const activeProjectColor = activeProjectRepository?.color ?? null;
+	const inlineGitDiffReview = isInlineGitDiffReview(
+		surfaceSelection?.kind ?? null,
+		gitDiffExpanded,
+	);
+	const visibleInspectorWidth = inlineGitDiffReview
+		? DEFAULT_REVIEW_SURFACE_WIDTH
+		: inspectorWidth;
 
 	return (
 		<>
@@ -4945,24 +4982,26 @@ export default function App() {
 									onClick={closeInspector}
 								/>
 							) : null}
-							<ResizeSeparator
-								side="right"
-								widthAt={inspectorWidth}
-								ariaLabel={t("app.resizeInspectorAria")}
-								ariaMin={MIN_INSPECTOR_WIDTH}
-								ariaMax={MAX_INSPECTOR_WIDTH}
-								ariaNow={inspectorWidth}
-								isActive={isInspectorResizing}
-								onMouseDown={handleResizeStart("inspector")}
-								onKeyDown={handleResizeKeyDown("inspector")}
-								hideOnCompact
-							/>
+							{!inlineGitDiffReview ? (
+								<ResizeSeparator
+									side="right"
+									widthAt={visibleInspectorWidth}
+									ariaLabel={t("app.resizeInspectorAria")}
+									ariaMin={MIN_INSPECTOR_WIDTH}
+									ariaMax={MAX_INSPECTOR_WIDTH}
+									ariaNow={visibleInspectorWidth}
+									isActive={isInspectorResizing}
+									onMouseDown={handleResizeStart("inspector")}
+									onKeyDown={handleResizeKeyDown("inspector")}
+									hideOnCompact
+								/>
+							) : null}
 
 							<aside
 								aria-label={t("app.inspectorSidebarAria")}
 								className="inspector-enter relative z-40 h-full shrink-0 overflow-hidden border-l border-border/60 bg-sidebar max-[1180px]:absolute max-[1180px]:inset-y-0 max-[1180px]:right-0 max-[1180px]:z-50 max-[1180px]:shadow-2xl"
 								style={{
-									width: `min(${inspectorWidth}px, calc(100vw - 32px))`,
+									width: `min(${visibleInspectorWidth}px, calc(100vw - 32px))`,
 								}}
 							>
 								<WorkspaceInspectorSidebar
@@ -5023,7 +5062,7 @@ export default function App() {
 										setInspectorPresentation(pinned ? "pinned" : "contextual")
 									}
 									onRequestClose={closeInspector}
-									onOpenExpandedPreview={() => setInspectorCollapsed(true)}
+									onOpenExpandedPreview={handleExpandGitDiff}
 									onOpenLastTurnReview={openTurnReviewSurface}
 									onContextualActionComplete={
 										handleInspectorContextualActionComplete

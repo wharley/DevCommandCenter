@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_REVIEW_SURFACE_WIDTH } from "@/shell/layout";
 import {
 	canDockSecondarySurface,
 	clampSecondarySurfaceWidth,
@@ -23,6 +24,7 @@ describe("secondary surface layout", () => {
 		expect(clampSecondarySurfaceWidth(DEFAULT_SECONDARY_SURFACE_WIDTH)).toBe(
 			DEFAULT_SECONDARY_SURFACE_WIDTH,
 		);
+		expect(DEFAULT_SECONDARY_SURFACE_WIDTH).toBe(DEFAULT_REVIEW_SURFACE_WIDTH);
 	});
 
 	it("clamps drag widths to readable bounds", () => {

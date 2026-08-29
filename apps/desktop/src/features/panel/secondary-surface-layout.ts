@@ -1,5 +1,7 @@
+import { DEFAULT_REVIEW_SURFACE_WIDTH } from "@/shell/layout";
+
 /** Default width for the desktop-only companion surface beside the conversation. */
-export const DEFAULT_SECONDARY_SURFACE_WIDTH = 560;
+export const DEFAULT_SECONDARY_SURFACE_WIDTH = DEFAULT_REVIEW_SURFACE_WIDTH;
 export const MIN_SECONDARY_SURFACE_WIDTH = 360;
 export const MAX_SECONDARY_SURFACE_WIDTH = 840;
 export const MIN_PRIMARY_SURFACE_WIDTH = 400;

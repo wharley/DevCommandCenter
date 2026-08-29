@@ -3,7 +3,9 @@ export const MIN_SIDEBAR_WIDTH = 220;
 export const MAX_SIDEBAR_WIDTH = 520;
 export const DEFAULT_INSPECTOR_WIDTH = 360;
 export const MIN_INSPECTOR_WIDTH = 280;
-export const MAX_INSPECTOR_WIDTH = 560;
+/** Shared opening width for focused review surfaces, including turn review. */
+export const DEFAULT_REVIEW_SURFACE_WIDTH = 560;
+export const MAX_INSPECTOR_WIDTH = DEFAULT_REVIEW_SURFACE_WIDTH;
 export const SIDEBAR_RESIZE_STEP = 16;
 export const SIDEBAR_RESIZE_HIT_AREA = 20;
 
