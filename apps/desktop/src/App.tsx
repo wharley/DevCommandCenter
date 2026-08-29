@@ -4604,13 +4604,18 @@ export default function App() {
 							showCompletedDiskUsage={!isRemoteBackend}
 							sessionQueryScope={backendCacheKey}
 							onSelectWorkspace={handleSelectWorkspaceSurface}
-							onCreateWorkspace={() => {
+							onNewTask={() => {
 								if (isRemoteBackend) {
 									showRemoteUnsupported("workspaces");
 									return;
 								}
 								setInspectorCollapsed(true);
 								setGlobalSurface("newTask");
+							}}
+							newTaskActive={globalSurface === "newTask"}
+							onCreateWorkspace={() => {
+								setGlobalSurface(null);
+								openWorkspaceDialog("open");
 							}}
 							onCloneWorkspace={() => {
 								setGlobalSurface(null);

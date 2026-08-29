@@ -239,6 +239,8 @@ type WorkspacesSidebarProps = {
 	showCompletedDiskUsage?: boolean;
 	sessionQueryScope?: string;
 	onSelectWorkspace: (workspaceId: string) => void;
+	onNewTask: () => void;
+	newTaskActive?: boolean;
 	onCreateWorkspace: () => void;
 	onCloneWorkspace: () => void;
 	onCreateWorkspaceFromProject?: (input: {
@@ -307,6 +309,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	showCompletedDiskUsage = true,
 	sessionQueryScope = "local",
 	onSelectWorkspace,
+	onNewTask,
+	newTaskActive = false,
 	onCreateWorkspace,
 	onCloneWorkspace,
 	onCreateWorkspaceFromProject,
@@ -1106,6 +1110,26 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							type="button"
 							variant="ghost"
 							size="icon-xs"
+							onClick={onNewTask}
+							disabled={isCreatingWorkspace}
+							aria-current={newTaskActive ? "page" : undefined}
+							aria-label={t("sidebar.newWorkspace")}
+							className={cn(
+								"text-muted-foreground hover:text-foreground",
+								newTaskActive && "bg-accent text-foreground",
+							)}
+						>
+							<Plus className="size-4" strokeWidth={1.9} />
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent side="right">{t("sidebar.newWorkspace")}</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
 							onClick={onOpenPullRequests}
 							aria-current={pullRequestsActive ? "page" : undefined}
 							aria-label={t("sidebar.pullRequests")}
@@ -1322,7 +1346,22 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					</Tooltip>
 				</div>
 
-				<div className="px-2 pb-3 pt-1">
+				<div className="space-y-1 px-2 pb-3 pt-1">
+					<button
+						type="button"
+						onClick={onNewTask}
+						disabled={isCreatingWorkspace}
+						aria-current={newTaskActive ? "page" : undefined}
+						className={cn(
+							"flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+							newTaskActive
+								? "bg-accent text-foreground shadow-sm"
+								: "text-foreground hover:bg-accent/50",
+						)}
+					>
+						<Plus className="size-4" strokeWidth={1.9} />
+						<span>{t("sidebar.newWorkspace")}</span>
+					</button>
 					<button
 						type="button"
 						onClick={onOpenPullRequests}
