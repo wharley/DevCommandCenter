@@ -3079,7 +3079,7 @@ export default function App() {
 	) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
-			return;
+			return false;
 		}
 		const automaticTaskTitle = selectedWorkspace &&
 			(selectedWorkspace.isAutoNamed || isAutomaticTaskTitle(selectedWorkspace.name))
@@ -3094,7 +3094,7 @@ export default function App() {
 				: null;
 		if (targetSessionId && !options?.forceNewSession && !targetSessionSummary) {
 			toast.error(t("inspector.delegations.applyMissingChild"));
-			return;
+			return false;
 		}
 		const targetSessionProvider =
 			targetSessionSummary != null
@@ -3109,7 +3109,7 @@ export default function App() {
 			targetProviderBlockReason ?? (targetSessionSummary ? null : selectedProviderBlockReason);
 		if (effectiveProviderBlockReason) {
 			toast.error(effectiveProviderBlockReason);
-			return;
+			return false;
 		}
 		let currentSession =
 			targetSessionSummary != null
@@ -3127,13 +3127,14 @@ export default function App() {
 			setPendingPromptSessionId(null);
 		}
 
+		let promptAccepted = false;
 		try {
 			// `forceNewSession` always spins up a fresh thread (used by the diff
 			// annotation flow); otherwise we reuse the selected session and only
 			// start one when none exists yet.
 			if (options?.forceNewSession || !currentSession || !currentSessionId) {
 				if (!selectedProvider || !selectedWorkspace) {
-					return;
+					return false;
 				}
 
 				const started = await startThread({
@@ -3190,7 +3191,7 @@ export default function App() {
 			}
 
 			if (!currentSessionId || !currentSession) {
-				return;
+				return false;
 			}
 
 			const turnProvider = targetSessionProvider ?? selectedProvider;
@@ -3223,6 +3224,7 @@ export default function App() {
 				fastMode: turn.envelope.fastMode,
 				approvalPolicy: turn.envelope.approvalPolicy,
 			});
+			promptAccepted = true;
 			recordUxMetric("first_prompt");
 
 			if (automaticTaskTitle && selectedWorkspace) {
@@ -3383,6 +3385,7 @@ export default function App() {
 					}
 				}
 			}
+			return true;
 		} catch (error) {
 			const message =
 				error instanceof Error
@@ -3392,6 +3395,7 @@ export default function App() {
 						: "Failed to send prompt";
 			console.error("[dcc] send prompt failed:", error);
 			toast.error(message);
+			return promptAccepted;
 		} finally {
 			setPendingPrompt((current) =>
 				current === trimmedPrompt ? null : current,
