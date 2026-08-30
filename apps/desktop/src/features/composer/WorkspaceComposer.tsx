@@ -430,7 +430,7 @@ export function WorkspaceComposer({
 				if (
 					composerDraftKeyRef.current !== submittedDraftKey ||
 					editorRef.current !== editor ||
-					readComposerPrompt(editor).trim().length > 0
+					readComposerPrompt(editor).length > 0
 				) {
 					return;
 				}
@@ -560,7 +560,11 @@ export function WorkspaceComposer({
 
 	const submitDelegation = useCallback(
 		async (targetProviderIds: string[], targetModelId: string | null = null) => {
-			if (!onDelegatePrompt || isSubmitting || targetProviderIds.length === 0) {
+			if (
+				!onDelegatePrompt ||
+				isSubmittingRef.current ||
+				targetProviderIds.length === 0
+			) {
 				return;
 			}
 			const editor = editorRef.current;
@@ -571,6 +575,7 @@ export function WorkspaceComposer({
 			if (rawPrompt.length === 0) {
 				return;
 			}
+			isSubmittingRef.current = true;
 			setSendMenuOpen(false);
 			setIsSubmitting(true);
 			try {
@@ -598,6 +603,7 @@ export function WorkspaceComposer({
 				// place — the dirty-worktree preflight rejects a perfectly good
 				// instruction that the user should be able to retry after committing.
 			} finally {
+				isSubmittingRef.current = false;
 				setIsSubmitting(false);
 			}
 		},
@@ -607,7 +613,6 @@ export function WorkspaceComposer({
 			delegateAllowFileEdits,
 			effort,
 			isFastMode,
-			isSubmitting,
 			onDelegatePrompt,
 			ultrathinkSelected,
 		],
