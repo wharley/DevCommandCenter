@@ -11,6 +11,7 @@ import {
 	isSteerDisabled,
 	resolvePlanModeState,
 	setPlanModeState,
+	submitComposerDraftOptimistically,
 } from "./WorkspaceComposer.logic";
 
 describe("WorkspaceComposer.logic", () => {
@@ -79,6 +80,53 @@ describe("WorkspaceComposer.logic", () => {
 		expect(
 			canSendPrompt({ disabled: false, hasContent: false, isSubmitting: false }),
 		).toBe(false);
+	});
+
+	it("clears the submitted draft before waiting for acceptance", async () => {
+		const events: string[] = [];
+		let acceptSubmission: (accepted: boolean) => void = () => {
+			throw new Error("submission resolver was not initialized");
+		};
+		const submission = submitComposerDraftOptimistically({
+			clearSubmittedDraft: () => events.push("clear"),
+			submit: () =>
+				new Promise<boolean>((resolve) => {
+					events.push("submit");
+					acceptSubmission = resolve;
+				}),
+			restoreSubmittedDraft: () => events.push("restore"),
+		});
+
+		expect(events).toEqual(["clear", "submit"]);
+		acceptSubmission(true);
+		await expect(submission).resolves.toBe(true);
+		expect(events).toEqual(["clear", "submit"]);
+	});
+
+	it("restores an optimistically cleared draft when submission is rejected", async () => {
+		const events: string[] = [];
+		const accepted = await submitComposerDraftOptimistically({
+			clearSubmittedDraft: () => events.push("clear"),
+			submit: async () => false,
+			restoreSubmittedDraft: () => events.push("restore"),
+		});
+
+		expect(accepted).toBe(false);
+		expect(events).toEqual(["clear", "restore"]);
+	});
+
+	it("restores an optimistically cleared draft when submission throws", async () => {
+		const events: string[] = [];
+		const accepted = await submitComposerDraftOptimistically({
+			clearSubmittedDraft: () => events.push("clear"),
+			submit: async () => {
+				throw new Error("network failure");
+			},
+			restoreSubmittedDraft: () => events.push("restore"),
+		});
+
+		expect(accepted).toBe(false);
+		expect(events).toEqual(["clear", "restore"]);
 	});
 
 	it("scopes plan mode by workspace before a session exists", () => {

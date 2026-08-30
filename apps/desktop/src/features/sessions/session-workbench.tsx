@@ -135,7 +135,7 @@ type SessionWorkbenchProps = {
 	onSubmitPrompt: (
 		turn: ComposerSubmittedTurn,
 		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
-	) => Promise<void>;
+	) => Promise<boolean>;
 	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onQueuePrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onResumeSession: () => Promise<void>;

@@ -140,6 +140,28 @@ export function isSteerDisabled(submitEnabled: boolean, sending: boolean) {
 	return !submitEnabled || !sending;
 }
 
+export async function submitComposerDraftOptimistically({
+	clearSubmittedDraft,
+	submit,
+	restoreSubmittedDraft,
+}: {
+	clearSubmittedDraft: () => void;
+	submit: () => Promise<boolean>;
+	restoreSubmittedDraft: () => void;
+}) {
+	clearSubmittedDraft();
+	try {
+		const accepted = await submit();
+		if (!accepted) {
+			restoreSubmittedDraft();
+		}
+		return accepted;
+	} catch {
+		restoreSubmittedDraft();
+		return false;
+	}
+}
+
 export function buildMissionSpecFilename(workspaceBranch: string | null) {
 	const source = workspaceBranch?.trim() || "mission";
 	const slug = source

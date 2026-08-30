@@ -69,6 +69,7 @@ import {
 	isSendDisabled,
 	resolvePlanModeState,
 	setPlanModeState,
+	submitComposerDraftOptimistically,
 } from "./WorkspaceComposer.logic";
 import { DEFAULT_SLASH_COMMANDS } from "./default-slash-commands";
 import { $createFileBadgeNode, FileBadgeNode } from "./editor/file-badge-node";
@@ -154,7 +155,7 @@ type WorkspaceComposerProps = {
 	planApproved: boolean;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
-	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
+	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<boolean>;
 	onSteerPrompt?: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onQueuePrompt?: (turn: ComposerSubmittedTurn) => Promise<void>;
 	/** Absent when the surface cannot delegate (no parent session yet). */
@@ -204,6 +205,7 @@ export function WorkspaceComposer({
 	const { t } = useTranslation("common");
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const isSubmittingRef = useRef(false);
 	const [queuedTurns, setQueuedTurns] = useState<QueuedTurn[]>([]);
 	const [queueActionId, setQueueActionId] = useState<string | null>(null);
 	const [isFastMode, setIsFastMode] = useState(loadDirectResponse);
@@ -222,6 +224,8 @@ export function WorkspaceComposer({
 	const ultrathinkSelected = effortSelection.ultrathink;
 	const [planModeByScope, setPlanModeByScope] = useState<Record<string, boolean>>({});
 	const composerDraftKey = useMemo(() => getComposerDraftKey(draftKey), [draftKey]);
+	const composerDraftKeyRef = useRef(composerDraftKey);
+	composerDraftKeyRef.current = composerDraftKey;
 	const composerEffortKey = useMemo(
 		() => getComposerEffortKey(draftKey),
 		[draftKey],
@@ -383,8 +387,7 @@ export function WorkspaceComposer({
 				}
 				return true;
 			}
-			await onSubmitPrompt(turn);
-			return true;
+			return onSubmitPrompt(turn);
 		},
 		[
 			availableEffortLevels,
@@ -405,7 +408,7 @@ export function WorkspaceComposer({
 
 	const handleSubmitDraft = useCallback(
 		async (behavior: "send" | "queue" | "steer" = "send") => {
-			if (isSubmitting) {
+			if (isSubmittingRef.current) {
 				return;
 			}
 
@@ -419,19 +422,41 @@ export function WorkspaceComposer({
 				return;
 			}
 
-			setIsSubmitting(true);
-			try {
-				const accepted = await submitFromComposer(prompt, behavior);
-				if (!accepted) {
+			const submittedDraftKey = composerDraftKey;
+			const submittedEditorState = editor.getEditorState();
+			const restoreSubmittedDraft = () => {
+				// A failed request must not overwrite a new draft or leak the old draft
+				// into a workspace selected while the request was in flight.
+				if (
+					composerDraftKeyRef.current !== submittedDraftKey ||
+					editorRef.current !== editor ||
+					readComposerPrompt(editor).length > 0
+				) {
 					return;
 				}
-				clearDraft(composerDraftKey);
-				setEditorText(editor, "");
+				editor.setEditorState(submittedEditorState);
+			};
+
+			// The timeline accepts the prompt optimistically, so clear the matching
+			// composer state at the same boundary instead of waiting for backend and
+			// metadata work to finish.
+			isSubmittingRef.current = true;
+			setIsSubmitting(true);
+			try {
+				await submitComposerDraftOptimistically({
+					clearSubmittedDraft: () => {
+						clearDraft(submittedDraftKey);
+						setEditorText(editor, "");
+					},
+					submit: () => submitFromComposer(prompt, behavior),
+					restoreSubmittedDraft,
+				});
 			} finally {
+				isSubmittingRef.current = false;
 				setIsSubmitting(false);
 			}
 		},
-		[composerDraftKey, isSubmitting, submitFromComposer],
+		[composerDraftKey, submitFromComposer],
 	);
 
 	const handleRemoveQueuedTurn = useCallback(
@@ -535,7 +560,11 @@ export function WorkspaceComposer({
 
 	const submitDelegation = useCallback(
 		async (targetProviderIds: string[], targetModelId: string | null = null) => {
-			if (!onDelegatePrompt || isSubmitting || targetProviderIds.length === 0) {
+			if (
+				!onDelegatePrompt ||
+				isSubmittingRef.current ||
+				targetProviderIds.length === 0
+			) {
 				return;
 			}
 			const editor = editorRef.current;
@@ -546,6 +575,7 @@ export function WorkspaceComposer({
 			if (rawPrompt.length === 0) {
 				return;
 			}
+			isSubmittingRef.current = true;
 			setSendMenuOpen(false);
 			setIsSubmitting(true);
 			try {
@@ -573,6 +603,7 @@ export function WorkspaceComposer({
 				// place — the dirty-worktree preflight rejects a perfectly good
 				// instruction that the user should be able to retry after committing.
 			} finally {
+				isSubmittingRef.current = false;
 				setIsSubmitting(false);
 			}
 		},
@@ -582,7 +613,6 @@ export function WorkspaceComposer({
 			delegateAllowFileEdits,
 			effort,
 			isFastMode,
-			isSubmitting,
 			onDelegatePrompt,
 			ultrathinkSelected,
 		],
@@ -760,7 +790,7 @@ export function WorkspaceComposer({
 	});
 	const sendDisabled = isSendDisabled(submitEnabled, isSubmitting);
 	const steerDisabled = !submitEnabled || isSubmitting;
-	const submitDisabledForPlugin = !submitEnabled;
+	const submitDisabledForPlugin = sendDisabled;
 
 	const planActive = isPlanMode;
 	const placeholder = planActive
