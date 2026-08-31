@@ -365,7 +365,7 @@ export function SkillsDialog({
 						</div>
 
 						<ScrollArea className="max-h-[320px] min-w-0 w-full">
-							<div className="flex min-w-0 w-full flex-col gap-2 pr-3">
+							<div className="flex min-w-0 w-full flex-col gap-2">
 								{skills.length === 0 && !loading ? (
 									<p className="py-8 text-center text-sm text-muted-foreground">
 										{t("skills.emptyList")}
