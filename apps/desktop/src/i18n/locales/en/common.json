@@ -2447,7 +2447,7 @@
     "slashOnlyBadge": "slash-only",
     "editAria": "Edit {{name}}",
     "deleteAria": "Delete {{name}}",
-    "compileNote": "Compiles into the active worktree so the running agent sees changes.",
+    "compileNote": "Compiles into the active checkout so the running agent sees changes.",
     "detected": {
       "title": "Detected in project",
       "hint": "Passive inventory: DCC shows what exists without importing or rewriting external files.",

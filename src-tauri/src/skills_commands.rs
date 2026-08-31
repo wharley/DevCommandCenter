@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{command, State};
 
 use crate::{db_error, ApiResult};
+use dcc_core::domain::workspace::WorkspaceId;
 use dcc_tauri::state::WorkspaceCommandState;
 
 /// Target agent the source skill compiles to.
@@ -453,6 +454,12 @@ fn detect_context_sources(
 // ---------------------------------------------------------------------------
 
 fn compile_skills(project_root: &str, target_root: &str) -> ApiResult<()> {
+    // A freshly opened checkout may contain previously compiled, committed
+    // targets but no DCC source manifest yet. Treat that as uninitialized
+    // rather than interpreting it as an empty source and deleting targets.
+    if !manifest_path(project_root).is_file() {
+        return Ok(());
+    }
     let skills = load_skills(project_root);
     let target = Path::new(target_root);
 
@@ -653,19 +660,24 @@ pub fn skills_list(project_root: String) -> ApiResult<Vec<SkillRecord>> {
 pub async fn skills_save(
     state: State<'_, WorkspaceCommandState>,
     project_root: String,
+    workspace_id: String,
     skill: SkillRecord,
 ) -> ApiResult<()> {
     match state
-        .run_registered_workspace_mutation(&project_root, move |authorized| {
-            let authorized = authorized
-                .to_str()
-                .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
-            save_skill(authorized, skill)
-        })
+        .run_registered_workspace_mutation_for_workspace_id(
+            &WorkspaceId(workspace_id),
+            &project_root,
+            move |authorized| {
+                let authorized = authorized
+                    .to_str()
+                    .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+                save_skill(authorized, skill)
+            },
+        )
         .await
     {
         Ok(result) => result,
-        Err(_) => Err(db_error("workspace mutation is unavailable")),
+        Err(error) => Err(db_error(error)),
     }
 }
 
@@ -673,46 +685,55 @@ pub async fn skills_save(
 pub async fn skills_delete(
     state: State<'_, WorkspaceCommandState>,
     project_root: String,
+    workspace_id: String,
     name: String,
 ) -> ApiResult<()> {
     match state
-        .run_registered_workspace_mutation(&project_root, move |authorized| {
-            let authorized = authorized
-                .to_str()
-                .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
-            let dir = skills_root(authorized).join(&name);
-            if dir.exists() {
-                fs::remove_dir_all(&dir)
-                    .map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
-            }
-            let mut manifest = read_manifest(authorized);
-            manifest.skills.retain(|entry| entry.name != name);
-            write_manifest(authorized, &manifest)
-        })
+        .run_registered_workspace_mutation_for_workspace_id(
+            &WorkspaceId(workspace_id),
+            &project_root,
+            move |authorized| {
+                let authorized = authorized
+                    .to_str()
+                    .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+                let dir = skills_root(authorized).join(&name);
+                if dir.exists() {
+                    fs::remove_dir_all(&dir)
+                        .map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
+                }
+                let mut manifest = read_manifest(authorized);
+                manifest.skills.retain(|entry| entry.name != name);
+                write_manifest(authorized, &manifest)
+            },
+        )
         .await
     {
         Ok(result) => result,
-        Err(_) => Err(db_error("workspace mutation is unavailable")),
+        Err(error) => Err(db_error(error)),
     }
 }
 
 #[command]
 pub async fn skills_compile(
     state: State<'_, WorkspaceCommandState>,
-    project_root: String,
-    target_root: String,
+    checkout_root: String,
+    workspace_id: String,
 ) -> ApiResult<()> {
     match state
-        .run_registered_workspace_mutation(&target_root, move |authorized| {
-            let authorized = authorized
-                .to_str()
-                .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
-            compile_skills(&project_root, authorized)
-        })
+        .run_registered_workspace_mutation_for_workspace_id(
+            &WorkspaceId(workspace_id),
+            &checkout_root,
+            move |authorized| {
+                let authorized = authorized
+                    .to_str()
+                    .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+                compile_skills(authorized, authorized)
+            },
+        )
         .await
     {
         Ok(result) => result,
-        Err(_) => Err(db_error("workspace mutation is unavailable")),
+        Err(error) => Err(db_error(error)),
     }
 }
 
@@ -902,5 +923,49 @@ mod tests {
         assert_eq!(codex.relative_path, ".agents/skills");
         assert_eq!(codex.managed_count, 1);
         assert_eq!(codex.external_count, 0);
+    }
+
+    #[test]
+    fn missing_source_manifest_does_not_remove_managed_targets() {
+        let source = tempdir().expect("source tempdir");
+        let target = tempdir().expect("target tempdir");
+        let native = target.path().join(".agents/skills/existing");
+        fs::create_dir_all(&native).unwrap();
+        fs::write(native.join("SKILL.md"), "committed skill").unwrap();
+        fs::write(
+            target.path().join(".agents/skills/.dcc-managed.json"),
+            "[\"existing\"]",
+        )
+        .unwrap();
+
+        compile_skills(
+            source.path().to_string_lossy().as_ref(),
+            target.path().to_string_lossy().as_ref(),
+        )
+        .unwrap();
+
+        assert!(native.join("SKILL.md").is_file());
+        assert_eq!(
+            fs::read_to_string(native.join("SKILL.md")).unwrap(),
+            "committed skill"
+        );
+    }
+
+    #[test]
+    fn compiles_source_and_targets_in_the_same_checkout() {
+        let checkout = tempdir().expect("active checkout");
+        save_skill(
+            checkout.path().to_string_lossy().as_ref(),
+            skill("same-checkout", &[TARGET_CLAUDE]),
+        )
+        .unwrap();
+
+        let root = checkout.path().to_string_lossy();
+        compile_skills(&root, &root).unwrap();
+
+        assert!(checkout
+            .path()
+            .join(".claude/skills/same-checkout/SKILL.md")
+            .is_file());
     }
 }

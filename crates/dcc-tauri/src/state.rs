@@ -422,6 +422,44 @@ impl WorkspaceCommandState {
         }
     }
 
+    /// Public command-shell bridge for mutations whose caller has an exact
+    /// workspace row. Guarded macOS builds check the row id against the active
+    /// root, so shared repository roots cannot produce an ambiguous mapping;
+    /// feature-off builds preserve the existing direct-runner behavior.
+    pub async fn run_registered_workspace_mutation_for_workspace_id<T, E, F>(
+        &self,
+        workspace_id: &WorkspaceId,
+        requested_root: &str,
+        operation: F,
+    ) -> std::result::Result<std::result::Result<T, E>, String>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(&Path) -> std::result::Result<T, E> + Send + 'static,
+    {
+        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+        let binding = self
+            .authorize_workspace_mutation_for_id(workspace_id, requested_root)
+            .await
+            .map_err(|error| error.to_string())?;
+        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
+        let binding = {
+            let _ = workspace_id;
+            AuthorizedWorkspaceMutation {
+                workspace_absolute: PathBuf::from(requested_root),
+            }
+        };
+        match self
+            .runtime
+            .run_workspace_mutation(binding, operation)
+            .await
+        {
+            Ok(value) => Ok(Ok(value)),
+            Err(WorkspaceMutationRunError::Operation(error)) => Ok(Err(error)),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     /// Runs a synchronous child-process-capable operation under the same
     /// durable authorization and physical mutation lease as other workspace
     /// mutations.  Feature-off preserves the pre-M4 blocking executor.

@@ -29,15 +29,16 @@ import {
 	type SkillRecord,
 	type SkillTargetAgent,
 } from "@/lib/skills-api";
+import { skillsErrorMessage } from "./skills-error";
 
 export type SkillsDialogProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onSkillsChanged?: () => void;
-	/** Project root (`rootPath`) — the source of truth `.devcommandcenter/skills/` lives here. */
+	/** Active checkout (`worktreePath` for protected worktrees, `rootPath` for local-direct). */
 	projectRoot: string | null;
-	/** Active worktree path where native skills and compiled instruction artifacts land. */
-	targetRoot: string | null;
+	/** Exact workspace row used to authorize mutations when roots are shared. */
+	workspaceId: string | null;
 };
 
 const TARGET_LABELS: Record<SkillTargetAgent, string> = {
@@ -86,7 +87,7 @@ export function SkillsDialog({
 	onOpenChange,
 	onSkillsChanged,
 	projectRoot,
-	targetRoot,
+	workspaceId,
 }: SkillsDialogProps) {
 	const { t } = useTranslation("common");
 	const [skills, setSkills] = useState<SkillRecord[]>([]);
@@ -108,16 +109,16 @@ export function SkillsDialog({
 		try {
 			const [nextSkills, nextDetections] = await Promise.all([
 				listSkills(projectRoot),
-				detectSkillContext(projectRoot, targetRoot),
+				detectSkillContext(projectRoot, projectRoot),
 			]);
 			setSkills(nextSkills);
 			setDetections(nextDetections);
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : t("skills.toast.loadError"));
+			toast.error(skillsErrorMessage(error, t("skills.toast.loadError")));
 		} finally {
 			setLoading(false);
 		}
-	}, [projectRoot, targetRoot, t]);
+	}, [projectRoot, t]);
 
 	useEffect(() => {
 		if (open) {
@@ -127,20 +128,14 @@ export function SkillsDialog({
 	}, [open, refresh]);
 
 	const recompile = useCallback(async () => {
-		if (!projectRoot || !targetRoot) {
+		if (!projectRoot || !workspaceId) {
 			return;
 		}
-		try {
-			await compileSkills(projectRoot, targetRoot);
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : t("skills.toast.compileError"),
-			);
-		}
-	}, [projectRoot, targetRoot, t]);
+		await compileSkills(projectRoot, workspaceId);
+	}, [projectRoot, workspaceId]);
 
 	const handleSave = useCallback(async () => {
-		if (!projectRoot || !form) {
+		if (!projectRoot || !workspaceId || !form) {
 			return;
 		}
 		const name = form.name.trim();
@@ -158,7 +153,7 @@ export function SkillsDialog({
 		}
 		setBusy(true);
 		try {
-			await saveSkill(projectRoot, {
+			await saveSkill(projectRoot, workspaceId, {
 				name,
 				description: form.description.trim(),
 				body: form.body,
@@ -172,31 +167,31 @@ export function SkillsDialog({
 			await refresh();
 			onSkillsChanged?.();
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : t("skills.toast.saveError"));
+			toast.error(skillsErrorMessage(error, t("skills.toast.saveError")));
 		} finally {
 			setBusy(false);
 		}
-	}, [projectRoot, form, onSkillsChanged, recompile, refresh, t]);
+	}, [projectRoot, workspaceId, form, onSkillsChanged, recompile, refresh, t]);
 
 	const handleDelete = useCallback(
 		async (name: string) => {
-			if (!projectRoot) {
+			if (!projectRoot || !workspaceId) {
 				return;
 			}
 			setBusy(true);
 			try {
-				await deleteSkill(projectRoot, name);
+				await deleteSkill(projectRoot, workspaceId, name);
 				await recompile();
 				toast.success(t("skills.toast.deleted", { name }));
 				await refresh();
 				onSkillsChanged?.();
 			} catch (error) {
-				toast.error(error instanceof Error ? error.message : t("skills.toast.deleteError"));
+				toast.error(skillsErrorMessage(error, t("skills.toast.deleteError")));
 			} finally {
 				setBusy(false);
 			}
 		},
-		[onSkillsChanged, projectRoot, recompile, refresh, t],
+		[onSkillsChanged, projectRoot, workspaceId, recompile, refresh, t],
 	);
 
 	const detectionDescription = useCallback(
@@ -503,7 +498,7 @@ export function SkillsDialog({
 								</div>
 							)}
 						</div>
-						{targetRoot ? (
+						{projectRoot ? (
 							<p className="text-[11px] text-muted-foreground">
 								{t("skills.compileNote")}
 							</p>

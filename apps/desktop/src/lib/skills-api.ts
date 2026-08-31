@@ -8,7 +8,7 @@ export type SkillTargetAgent =
 	| "gemini"
 	| "cursor";
 
-/** Provider-neutral skill. Source of truth lives in `.devcommandcenter/skills/`. */
+/** Provider-neutral skill. Source of truth lives in `.devcommandcenter/skills/` in the active checkout. */
 export type SkillRecord = {
 	name: string;
 	description: string;
@@ -39,21 +39,24 @@ export function listSkills(projectRoot: string) {
 	return invoke<SkillRecord[]>("skills_list", { projectRoot });
 }
 
-export function saveSkill(projectRoot: string, skill: SkillRecord) {
-	return invoke<void>("skills_save", { projectRoot, skill });
+export function saveSkill(projectRoot: string, workspaceId: string, skill: SkillRecord) {
+	return invoke<void>("skills_save", { projectRoot, workspaceId, skill });
 }
 
-export function deleteSkill(projectRoot: string, name: string) {
-	return invoke<void>("skills_delete", { projectRoot, name });
+export function deleteSkill(projectRoot: string, workspaceId: string, name: string) {
+	return invoke<void>("skills_delete", { projectRoot, workspaceId, name });
 }
 
 /**
- * Projects the neutral source into each agent's native format inside `targetRoot`
- * (the active worktree, where agents run): native skill directories plus legacy
+ * Projects the neutral source into each agent's native format inside the active
+ * checkout where agents run: native skill directories plus legacy
  * always-on instruction targets such as `AGENTS.md`.
  */
-export function compileSkills(projectRoot: string, targetRoot: string) {
-	return invoke<void>("skills_compile", { projectRoot, targetRoot });
+export function compileSkills(checkoutRoot: string, workspaceId: string) {
+	return invoke<void>("skills_compile", {
+		checkoutRoot,
+		workspaceId,
+	});
 }
 
 export function detectSkillContext(

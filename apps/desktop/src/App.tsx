@@ -71,6 +71,7 @@ import {
 } from "./features/inspector/inspector-presentation";
 import { SettingsDialog } from "./features/settings";
 import { SkillsDialog, getTotalSkillContextCount } from "./features/skills";
+import { resolveActiveSkillsCheckout } from "./features/skills/skills-path";
 import { compileSkills, detectSkillContext } from "./lib/skills-api";
 import { OnboardingWizard } from "./features/onboarding";
 import { ShortcutCheatsheetDialog } from "./features/shortcuts";
@@ -1547,12 +1548,15 @@ export default function App() {
 		activeWorkspace?.worktreePath ?? activeWorkspace?.rootPath ?? null;
 	const selectedLocalWorkspacePath = isRemoteBackend ? null : selectedWorkspacePath;
 
-	// Keep compiled skill artifacts in sync with the active worktree, so a freshly
-	// created worktree (or one edited elsewhere) picks up project skills without
-	// needing to re-save in the Skills dialog. Idempotent on the Rust side.
-	const skillsProjectRoot = selectedWorkspace?.rootPath ?? null;
+	// Keep the neutral source and compiled artifacts in the active checkout. A
+	// protected worktree uses worktreePath; LocalDirect uses rootPath. The exact
+	// workspace id disambiguates shared repository roots for mutations.
+	const skillsProjectRoot = activeWorkspace
+		? resolveActiveSkillsCheckout(activeWorkspace)
+		: null;
+	const skillsWorkspaceId = activeWorkspace?.id ?? null;
 	const skillContextCountQuery = useQuery({
-		queryKey: ["skills", "context-count", skillsProjectRoot, selectedWorkspacePath],
+		queryKey: ["skills", "context-count", skillsWorkspaceId, skillsProjectRoot],
 		enabled: !isRemoteBackend && Boolean(skillsProjectRoot),
 		queryFn: async () => {
 			if (!skillsProjectRoot) {
@@ -1572,21 +1576,30 @@ export default function App() {
 		if (isRemoteBackend || !skillsProjectRoot || !selectedWorkspacePath) {
 			return;
 		}
-		void compileSkills(skillsProjectRoot, selectedWorkspacePath)
+		if (!skillsWorkspaceId) {
+			return;
+		}
+		void compileSkills(skillsProjectRoot, skillsWorkspaceId)
 			.then(() =>
 				queryClient.invalidateQueries({
 					queryKey: [
 						"skills",
 						"context-count",
+						skillsWorkspaceId,
 						skillsProjectRoot,
-						selectedWorkspacePath,
 					],
 				}),
 			)
 			.catch(() => {
 				/* background recompile; errors surface on demand in the Skills dialog */
 			});
-	}, [isRemoteBackend, queryClient, skillsProjectRoot, selectedWorkspacePath]);
+	}, [
+		isRemoteBackend,
+		queryClient,
+		skillsProjectRoot,
+		skillsWorkspaceId,
+		selectedWorkspacePath,
+	]);
 	const [
 		missionSpecAutoCompileFailuresByKey,
 		setMissionSpecAutoCompileFailuresByKey,
@@ -5307,8 +5320,8 @@ export default function App() {
 						queryKey: ["skills", "context-count"],
 					});
 				}}
-				projectRoot={selectedWorkspace?.rootPath ?? null}
-				targetRoot={selectedWorkspacePath}
+				projectRoot={skillsProjectRoot}
+				workspaceId={skillsWorkspaceId}
 			/>
 			{isUsageOpen ? (
 				<Suspense fallback={null}>

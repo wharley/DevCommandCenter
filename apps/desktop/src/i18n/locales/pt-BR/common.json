@@ -2447,7 +2447,7 @@
     "slashOnlyBadge": "só slash",
     "editAria": "Editar {{name}}",
     "deleteAria": "Excluir {{name}}",
-    "compileNote": "Compila para o worktree ativo para o agente em execução ver as mudanças.",
+    "compileNote": "Compila para o checkout ativo para o agente em execução ver as mudanças.",
     "detected": {
       "title": "Detectado no projeto",
       "hint": "Inventário passivo: o DCC mostra o que existe, sem importar ou reescrever arquivos externos.",
