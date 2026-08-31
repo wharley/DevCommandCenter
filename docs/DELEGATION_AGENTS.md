@@ -38,14 +38,11 @@ approval card in the thread rather than as a form.
 
 ### Switching providers in one session
 
-DCC persists the shared timeline, but provider runtimes do not expose native
-1:1 memory to one another. When the provider is changed in an existing session,
-the next direct turn receives one deterministic, bounded re-anchor containing
-workspace/Git metadata, available mission and plan context, and recent durable
-user/assistant messages. The user's latest prompt remains authoritative;
-the packet is context, not a new instruction. It is intentionally limited and
-does not include a full transcript, tool noise, or reasoning. Starting a new
-thread always means starting fresh.
+Switching the provider for the next turn in the same session is not delegation
+and does not create a child or another worktree. Select the new provider and
+send normally; DCC attaches a bounded re-anchor automatically. See
+[Provider handoff](PROVIDER_HANDOFF.md) for the flow, included context, and
+boundaries.
 
 ### Options in the delegate menu
 
