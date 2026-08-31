@@ -28,6 +28,7 @@ persistence in one Tauri application.
 - **Usage and skills**: compare real provider activity, inspect token and model usage, and manage project skills from a provider-neutral source.
 - **Mobile companion pairing**: pair a phone with the desktop app through QR code + PIN and use companion workflows on the same trusted network or through Tailscale. See [Mobile web companion](docs/MOBILE_WEB.md).
 - **Provider-neutral workflows**: use Claude, Gemini, Codex, Cursor, and other provider integrations from the same workbench surface.
+- **Provider handoff**: switching providers inside an existing session sends a bounded, provider-neutral re-anchor on the next turn. DCC persists the timeline, but the new runtime does not receive native 1:1 memory; a new thread starts fresh.
 - **Built-in review surface**: inspect changed files, inline diffs, annotations, branch status, CodeRabbit feedback, validations, and PR-ready state without leaving DCC.
 
 ## What you can do in DCC

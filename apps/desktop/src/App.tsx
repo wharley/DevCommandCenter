@@ -177,6 +177,11 @@ import type {
 } from "./features/composer/composer-turn";
 import { resolveDelegationDefaults } from "./features/sessions/delegation-defaults";
 import {
+	buildProviderHandoffContext,
+	mergeProviderHandoffToolInstructions,
+	shouldCreateProviderHandoff,
+} from "./features/sessions/provider-handoff-context";
+import {
 	canRerunDelegation,
 	rerunMode,
 } from "./features/sessions/delegation-decisions";
@@ -3207,10 +3212,86 @@ export default function App() {
 			}
 			setPendingPrompt(trimmedPrompt);
 			setPendingPromptSessionId(currentSessionId);
-			const toolInstructions = resolveDelegateTaskToolInstructions({
+			const baseToolInstructions = resolveDelegateTaskToolInstructions({
 				provider: turnProvider,
 				providers: providerChoices,
 			});
+			let providerHandoffContext: string | null = null;
+			const shouldInspectProviderHandoff =
+				!options?.forceNewSession &&
+				!targetSessionSummary &&
+				currentSession.turnCount > 0 &&
+				Boolean(currentSession.providerId) &&
+				Boolean(turnProvider?.id) &&
+				currentSession.providerId !== turnProvider?.id;
+			if (shouldInspectProviderHandoff) {
+				try {
+					const historyEvents = await loadSessionThreadEvents(currentSessionId);
+					const handoffMessages = projectWorkspaceMessages(
+						historyEvents,
+						sessionEvents,
+						currentSessionId,
+						null,
+					);
+					if (
+						shouldCreateProviderHandoff({
+							session: currentSession,
+							destinationProviderId: turnProvider?.id,
+							messages: handoffMessages,
+							forceNewSession: options?.forceNewSession,
+							targetSessionId,
+						})
+					) {
+						const [git, specs] = await Promise.all([
+							selectedLocalWorkspacePath
+								? Promise.all([
+										workspaceGitStatus({ workspaceRoot: selectedLocalWorkspacePath }),
+										workspaceGitBranchDiff({ workspaceRoot: selectedLocalWorkspacePath }),
+									]).then(([status, branchDiff]) => ({
+										currentBranch: status.currentBranch,
+										baseBranch: branchDiff.baseBranch,
+										staged: status.staged,
+										unstaged: status.unstaged,
+										branchDiff: branchDiff.changes,
+									})).catch((error) => {
+										console.warn("[dcc] provider handoff Git context unavailable:", error);
+										return null;
+									})
+								: Promise.resolve(null),
+							selectedLocalWorkspacePath
+								? listMissionSpecs({ workspaceRoot: selectedLocalWorkspacePath })
+										.catch((error) => {
+											console.warn("[dcc] provider handoff mission context unavailable:", error);
+											return null;
+										})
+								: Promise.resolve(null),
+						]);
+						const activePlanState = derivePlanFollowUpState(handoffMessages);
+						providerHandoffContext = buildProviderHandoffContext({
+							sourceProviderId: currentSession.providerId ?? "unknown",
+							destinationProviderId: turnProvider?.id ?? "unknown",
+							workspaceName: selectedWorkspace?.name,
+							workspacePath: selectedLocalWorkspacePath,
+							branch: selectedWorkspace?.branch,
+							git,
+							missionSpec: specs?.specs[0]?.content ?? null,
+							activePlan:
+								activePlanState.activePlanMessage?.plan?.markdown ??
+								activePlanState.activePlanMessage?.content ??
+								null,
+							recentMessages: handoffMessages,
+							currentPrompt: trimmedPrompt,
+						});
+					}
+				} catch (error) {
+					// Handoff is an enhancement; history/projection failure must not block the turn.
+					console.warn("[dcc] provider handoff context unavailable:", error);
+				}
+			}
+			const toolInstructions = mergeProviderHandoffToolInstructions(
+				baseToolInstructions,
+				providerHandoffContext,
+			);
 
 			const result = await sendTurn({
 				sessionId: currentSessionId,
@@ -3624,8 +3705,16 @@ export default function App() {
 			setSelectedProviderId(providerId);
 			const provider = providerChoices.find((candidate) => candidate.id === providerId);
 			setSelectedModelId(resolveSelectedModelId(provider ?? null, null));
+			if (
+				selectedSessionSnapshot &&
+				selectedSessionSnapshot.turnCount > 0 &&
+				selectedSessionSnapshot.providerId &&
+				selectedSessionSnapshot.providerId !== providerId
+			) {
+				toast.info(t("composer.followUp.providerHandoffNotice"));
+			}
 		},
-		[providerChoices],
+		[providerChoices, selectedSessionSnapshot, t],
 	);
 
 	const handleSelectModel = useCallback((modelId: string) => {

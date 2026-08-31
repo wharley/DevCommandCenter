@@ -36,6 +36,17 @@ Delegating is the same send you already do, pointed at another agent.
 The parent agent can also request a delegation itself; that arrives as an
 approval card in the thread rather than as a form.
 
+### Switching providers in one session
+
+DCC persists the shared timeline, but provider runtimes do not expose native
+1:1 memory to one another. When the provider is changed in an existing session,
+the next direct turn receives one deterministic, bounded re-anchor containing
+workspace/Git metadata, available mission and plan context, and recent durable
+user/assistant messages. The user's latest prompt remains authoritative;
+the packet is context, not a new instruction. It is intentionally limited and
+does not include a full transcript, tool noise, or reasoning. Starting a new
+thread always means starting fresh.
+
 ### Options in the delegate menu
 
 - **Can edit files** — off by default. Turning it on makes this an implementation

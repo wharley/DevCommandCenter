@@ -1233,6 +1233,7 @@
       "queueActionFailed": "Não foi possível atualizar a fila.",
       "dispatchFailed": "Não foi possível enviar a próxima mensagem.",
       "sendNext": "Enviar próxima",
+      "providerHandoffNotice": "Um contexto limitado seguirá no próximo turno. Uma nova thread começa limpa.",
       "moveUp": "Mover para cima",
       "moveDown": "Mover para baixo",
       "edit": "Editar mensagem",

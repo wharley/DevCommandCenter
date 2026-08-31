@@ -1233,6 +1233,7 @@
       "queueActionFailed": "Unable to update the queue.",
       "dispatchFailed": "Unable to send the next message.",
       "sendNext": "Send next",
+      "providerHandoffNotice": "Limited context will follow on your next turn. A new thread starts fresh.",
       "moveUp": "Move up",
       "moveDown": "Move down",
       "edit": "Edit message",

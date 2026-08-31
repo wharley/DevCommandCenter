@@ -27,11 +27,11 @@ use dcc_core::{
         provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
         session::SessionId,
     },
-    ports::{Input, Provider, SessionConfig},
+    ports::{Input, Provider, ProviderTurnInput, SessionConfig},
     CoreError, Result,
 };
 
-use crate::common::{apply_cli_spawn_environment, augmented_path};
+use crate::common::{append_tool_instructions, apply_cli_spawn_environment, augmented_path};
 
 const PROVIDER_ID: &str = "grok";
 const PROVIDER_LABEL: &str = "Grok Build";
@@ -554,6 +554,19 @@ fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
+fn compose_grok_prompt(turn: &ProviderTurnInput) -> String {
+    append_tool_instructions(
+        compose_wire_prompt_for_provider(
+            PROVIDER_ID,
+            &turn.prompt,
+            turn.plan_mode,
+            turn.effort.as_deref(),
+            turn.fast_mode,
+        ),
+        turn.tool_instructions.as_deref(),
+    )
+}
+
 #[async_trait]
 impl Provider for GrokAcpAdapter {
     fn id(&self) -> ProviderId {
@@ -580,13 +593,7 @@ impl Provider for GrokAcpAdapter {
             })?;
         let prompt = match input {
             Input::Text(text) => text,
-            Input::Turn(turn) => compose_wire_prompt_for_provider(
-                PROVIDER_ID,
-                &turn.prompt,
-                turn.plan_mode,
-                turn.effort.as_deref(),
-                turn.fast_mode,
-            ),
+            Input::Turn(turn) => compose_grok_prompt(&turn),
             Input::UserInputResponse(_) => {
                 return Err(CoreError::Provider(
                     "Grok ACP user-input responses are not supported yet".to_string(),
@@ -696,6 +703,20 @@ pub fn descriptor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn includes_tool_instructions_in_the_wire_prompt() {
+        let prompt = compose_grok_prompt(&ProviderTurnInput {
+            prompt: "Continue the task".to_string(),
+            tool_instructions: Some("DCC handoff context".to_string()),
+            plan_mode: None,
+            effort: None,
+            fast_mode: None,
+            approval_policy: None,
+        });
+        assert!(prompt.contains("Continue the task"));
+        assert!(prompt.contains("DCC handoff context"));
+    }
 
     #[test]
     fn uses_cached_token_when_the_cli_exposes_it() {
