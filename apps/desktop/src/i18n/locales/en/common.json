@@ -511,6 +511,9 @@
       "openRequest": "Open PR"
     }
   },
+  "splash": {
+    "initializing": "Initializing workspace…"
+  },
   "bootstrap": {
     "title": "No workspace open",
     "description": "Open a project or clone from URL to start from zero. The chat, inspector, and terminal surfaces will appear once a workspace exists.",
