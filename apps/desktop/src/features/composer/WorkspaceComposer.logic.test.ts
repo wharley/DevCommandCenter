@@ -1,3 +1,4 @@
+import type { CoreEvent } from "@dcc/contracts";
 import { describe, expect, it } from "vitest";
 import {
 	buildMissionSpecFilename,
@@ -9,10 +10,13 @@ import {
 	isComposerSubmitEnabled,
 	isSendDisabled,
 	isSteerDisabled,
+	latestTurnQueueEventKey,
 	resolvePlanModeState,
 	setPlanModeState,
 	submitComposerDraftOptimistically,
 } from "./WorkspaceComposer.logic";
+
+const event = (value: object) => value as CoreEvent;
 
 describe("WorkspaceComposer.logic", () => {
 	it("removes only the redundant Claude brand from the compact model label", () => {
@@ -74,6 +78,39 @@ describe("WorkspaceComposer.logic", () => {
 		expect(isSendDisabled(ok, true)).toBe(true);
 		expect(isSteerDisabled(ok, false)).toBe(true);
 		expect(isSteerDisabled(ok, true)).toBe(false);
+	});
+
+	it("changes the queue refresh key when a queued turn is dispatched", () => {
+		const queued = event({
+			sessionTurnQueued: {
+				session_id: "session-a",
+				queued_turn: { id: "queued-a" },
+			},
+		});
+		const nextTurnStarted = event({
+			sessionTurnStarted: {
+				session_id: "session-a",
+				turn_id: "turn-b",
+				prompt: "follow up",
+			},
+		});
+		const dispatched = event({
+			sessionQueuedTurnDispatched: {
+				session_id: "session-a",
+				queued_turn_id: "queued-a",
+				turn_id: "turn-b",
+			},
+		});
+
+		expect(latestTurnQueueEventKey([queued])).toBe(
+			"session-a:queued:queued-a",
+		);
+		expect(latestTurnQueueEventKey([queued, nextTurnStarted])).toBe(
+			"session-a:queued:queued-a",
+		);
+		expect(latestTurnQueueEventKey([queued, nextTurnStarted, dispatched])).toBe(
+			"session-a:dispatched:queued-a:turn-b",
+		);
 	});
 
 	it("blocks send when no content is present", () => {

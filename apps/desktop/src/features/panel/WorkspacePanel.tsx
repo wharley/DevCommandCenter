@@ -86,6 +86,7 @@ import {
 	buildMissionSpecFilename,
 	getComposerApprovalPolicyKey,
 	getComposerEffortKey,
+	latestTurnQueueEventKey,
 } from "@/features/composer/WorkspaceComposer.logic";
 import {
 	buildPlanDelegationPrompt,
@@ -860,6 +861,10 @@ export function WorkspacePanel({
 			),
 		[effectiveSessionId, historyEvents, pendingPrompt, sessionEvents],
 	);
+	const turnQueueEventKey = useMemo(
+		() => latestTurnQueueEventKey(sessionEvents),
+		[sessionEvents],
+	);
 	const replaceComposerDraft = useCallback((text: string) => {
 		if (!text.trim()) return;
 		setComposerPrefill((previous) => ({
@@ -1271,6 +1276,7 @@ export function WorkspacePanel({
 						selectedModelId={selectedModelId}
 						selectedProviderRuntime={selectedProviderRuntime}
 						sessionSnapshot={sessionSnapshot}
+						turnQueueEventKey={turnQueueEventKey}
 						pendingPrompt={pendingPrompt}
 						prefill={composerPrefill}
 						focusRequestKey={composerFocusRequestKey}

@@ -1,3 +1,5 @@
+import type { CoreEvent } from "@dcc/contracts";
+
 export const composerToolbarTriggerClassName =
 	"cursor-pointer rounded-[9px] px-1 py-0.5 text-[13px] font-medium transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50";
 
@@ -138,6 +140,37 @@ export function isSendDisabled(submitEnabled: boolean, sending: boolean) {
 
 export function isSteerDisabled(submitEnabled: boolean, sending: boolean) {
 	return !submitEnabled || !sending;
+}
+
+/**
+ * Returns a stable key for the latest live event that changes the durable turn
+ * queue. Token and timeline events intentionally reuse the previous key so they
+ * do not poll the queue while an agent is streaming.
+ */
+export function latestTurnQueueEventKey(events: CoreEvent[]) {
+	for (let index = events.length - 1; index >= 0; index -= 1) {
+		const event = events[index];
+		if ("sessionTurnQueued" in event && event.sessionTurnQueued) {
+			const value = event.sessionTurnQueued;
+			return `${value.session_id}:queued:${value.queued_turn.id}`;
+		}
+		if ("sessionQueuedTurnRemoved" in event && event.sessionQueuedTurnRemoved) {
+			const value = event.sessionQueuedTurnRemoved;
+			return `${value.session_id}:removed:${value.queued_turn_id}`;
+		}
+		if ("sessionTurnQueueReordered" in event && event.sessionTurnQueueReordered) {
+			const value = event.sessionTurnQueueReordered;
+			return `${value.session_id}:reordered:${value.queued_turn_ids.join(",")}`;
+		}
+		if (
+			"sessionQueuedTurnDispatched" in event &&
+			event.sessionQueuedTurnDispatched
+		) {
+			const value = event.sessionQueuedTurnDispatched;
+			return `${value.session_id}:dispatched:${value.queued_turn_id}:${value.turn_id}`;
+		}
+	}
+	return null;
 }
 
 export async function submitComposerDraftOptimistically({

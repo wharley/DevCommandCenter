@@ -126,6 +126,7 @@ type WorkspaceComposerProps = {
 	selectedModelId: string | null;
 	selectedProviderRuntime: ProviderRuntimeConfig | null;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
+	turnQueueEventKey: string | null;
 	pendingPrompt: string | null;
 	/** External draft injection; annotations append and recovery actions replace. */
 	prefill?: {
@@ -175,6 +176,7 @@ export function WorkspaceComposer({
 	selectedModelId,
 	selectedProviderRuntime,
 	sessionSnapshot,
+	turnQueueEventKey,
 	pendingPrompt,
 	prefill,
 	focusRequestKey = null,
@@ -323,7 +325,7 @@ export function WorkspaceComposer({
 
 	useEffect(() => {
 		void refreshTurnQueue();
-	}, [activeTurnId, refreshTurnQueue]);
+	}, [activeTurnId, refreshTurnQueue, turnQueueEventKey]);
 
 	const availableEffortLevels = useMemo(
 		() => selectedModel?.effortLevels ?? DEFAULT_EFFORT_LEVELS,
