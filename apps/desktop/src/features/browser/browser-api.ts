@@ -33,6 +33,8 @@ export type BrowserAgentContext = {
 export type BrowserSemanticMap = {
 	mapId: string;
 	generation: number;
+	/** Backend page-load revision; together with mapId/generation it is an action anchor. */
+	pageLoadRevision: number;
 	items: BrowserSemanticItem[];
 	truncated: boolean;
 };

@@ -20,6 +20,7 @@ describe("formatBrowserAgentContext", () => {
 				semanticMap: {
 					mapId: "m-7-3",
 					generation: 3,
+					pageLoadRevision: 5,
 					truncated: true,
 					items: [{
 						reference: "e1",
@@ -84,6 +85,7 @@ describe("formatBrowserAgentContext", () => {
 				semanticMap: {
 					mapId: "m-1-1",
 					generation: 1,
+					pageLoadRevision: 1,
 					truncated: false,
 					items: Array.from({ length: 100 }, (_, index) => ({
 						reference: `e${index + 1}`,

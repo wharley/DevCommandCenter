@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::net::Ipv6Addr;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, WebviewBuilder};
@@ -39,6 +40,12 @@ const MAX_BROWSER_SEMANTIC_SERIALIZED_CHARS: usize = 5_000;
 const MAX_BROWSER_CONTEXT_ENVELOPE_CHARS: usize = 14_000;
 const MAX_BROWSER_CONTEXT_URL_CHARS: usize = 2_048;
 const BROWSER_CONTEXT_TIMEOUT: Duration = Duration::from_secs(2);
+/// A deliberate, short-lived consent window. It is in-memory only and must be
+/// armed again after expiry, a new Browser lifecycle, or any close; a future UI
+/// may renew it only through another explicit user gesture.
+const BROWSER_CONTROL_GRANT_TTL: Duration = Duration::from_secs(60);
+/// Scroll is deliberately constrained to a small single action in CSS pixels.
+const MAX_BROWSER_SCROLL_DELTA: f64 = 2_000.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -74,8 +81,62 @@ pub struct BrowserAgentContext {
 pub struct BrowserSemanticMap {
     pub map_id: String,
     pub generation: u64,
+    pub page_load_revision: u64,
     pub items: Vec<BrowserSemanticItem>,
     pub truncated: bool,
+}
+
+/// Complete identity required for a future provider-neutral Browser control
+/// action. It is untrusted input and is compared byte-for-byte with the
+/// server-side semantic-map record before anything can happen.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserActionAnchor {
+    pub workspace_id: String,
+    pub session_id: Option<String>,
+    pub lifecycle_token: u64,
+    pub map_id: String,
+    pub generation: u64,
+    pub url: String,
+    pub page_load_revision: u64,
+}
+
+/// This is intentionally narrower than an MCP bridge: no item references,
+/// selectors, HTML, form values, or arbitrary page script can be supplied.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum BrowserControlAction {
+    Navigate { url: String },
+    Reload,
+    Scroll { delta_x: f64, delta_y: f64 },
+}
+
+enum PreparedBrowserControlAction {
+    Navigate(Url),
+    Reload,
+    Scroll { delta_x: f64, delta_y: f64 },
+}
+
+impl PreparedBrowserControlAction {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Navigate(_) => "navigate",
+            Self::Reload => "reload",
+            Self::Scroll { .. } => "scroll",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserActionResult {
+    pub action: String,
+    pub status: String,
+    pub requires_context_refresh: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -196,6 +257,13 @@ struct BrowserSemanticMapRecord {
     page_load_revision: u64,
 }
 
+#[derive(Debug, Clone)]
+struct BrowserControlGrant {
+    scope: String,
+    lifecycle_token: u64,
+    expires_at: Instant,
+}
+
 /// Runtime state for the one browser child WebView. Context is keyed by the
 /// active workspace and optional session, while the native view is reused.
 pub struct BrowserState {
@@ -210,6 +278,9 @@ pub struct BrowserState {
     lifecycle_token: Arc<Mutex<u64>>,
     lifecycle_open: Arc<Mutex<bool>>,
     occluded: Arc<Mutex<bool>>,
+    /// Temporary backend-only consent. There is no persisted token and no
+    /// renderer capability beyond the scoped arm/disarm commands.
+    control_grant: Arc<Mutex<Option<BrowserControlGrant>>>,
     /// Serializes native child-WebView operations in IPC arrival order, also
     /// across async scope validation. Context extraction keeps it through its
     /// short, bounded native callback wait so a new command cannot change its
@@ -229,6 +300,7 @@ impl Default for BrowserState {
             lifecycle_token: Arc::new(Mutex::new(0)),
             lifecycle_open: Arc::new(Mutex::new(false)),
             occluded: Arc::new(Mutex::new(false)),
+            control_grant: Arc::new(Mutex::new(None)),
             operation_lock: Arc::new(AsyncMutex::new(())),
         }
     }
@@ -499,6 +571,7 @@ fn issue_semantic_map(
     Ok(BrowserSemanticMap {
         map_id,
         generation,
+        page_load_revision: expected_page_load_revision,
         items,
         truncated,
     })
@@ -521,6 +594,175 @@ fn current_page_load_revision(
         return Err("browser page changed while reading context".to_string());
     }
     Ok(context.page_load_revision)
+}
+
+fn clear_browser_control_grant(state: &BrowserState) {
+    if let Ok(mut grant) = state.control_grant.lock() {
+        *grant = None;
+    }
+}
+
+fn control_grant_is_current(
+    grant: Option<&BrowserControlGrant>,
+    scope: &str,
+    lifecycle_token: u64,
+    now: Instant,
+) -> bool {
+    grant.is_some_and(|grant| {
+        grant.scope == scope && grant.lifecycle_token == lifecycle_token && grant.expires_at > now
+    })
+}
+
+fn arm_browser_control_grant(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    lifecycle_token: u64,
+    now: Instant,
+) -> Result<(), String> {
+    let mut grant = state
+        .control_grant
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    *grant = Some(BrowserControlGrant {
+        scope: scope_key(workspace_id, session_id),
+        lifecycle_token,
+        expires_at: now + BROWSER_CONTROL_GRANT_TTL,
+    });
+    Ok(())
+}
+
+fn require_browser_control_grant(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    lifecycle_token: u64,
+    now: Instant,
+) -> Result<(), String> {
+    let scope = scope_key(workspace_id, session_id);
+    let mut grant = state
+        .control_grant
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    if grant.as_ref().is_some_and(|grant| grant.expires_at <= now) {
+        *grant = None;
+    }
+    if control_grant_is_current(grant.as_ref(), &scope, lifecycle_token, now) {
+        Ok(())
+    } else {
+        Err("browser control is not armed".to_string())
+    }
+}
+
+fn normalize_browser_scroll_delta(delta_x: f64, delta_y: f64) -> Result<(f64, f64), String> {
+    if !delta_x.is_finite()
+        || !delta_y.is_finite()
+        || delta_x.abs() > MAX_BROWSER_SCROLL_DELTA
+        || delta_y.abs() > MAX_BROWSER_SCROLL_DELTA
+    {
+        return Err("browser scroll action is invalid".to_string());
+    }
+    Ok((delta_x, delta_y))
+}
+
+/// Reject malformed user input before consuming an otherwise valid map. Once
+/// prepared, the map is consumed immediately before the native side effect.
+fn prepare_browser_control_action(
+    action: BrowserControlAction,
+) -> Result<PreparedBrowserControlAction, String> {
+    match action {
+        BrowserControlAction::Navigate { url } => validate_browser_url(&url)
+            .map(PreparedBrowserControlAction::Navigate)
+            .map_err(|_| "browser navigate action is invalid".to_string()),
+        BrowserControlAction::Reload => Ok(PreparedBrowserControlAction::Reload),
+        BrowserControlAction::Scroll { delta_x, delta_y } => {
+            let (delta_x, delta_y) = normalize_browser_scroll_delta(delta_x, delta_y)?;
+            Ok(PreparedBrowserControlAction::Scroll { delta_x, delta_y })
+        }
+    }
+}
+
+/// Only finite, bounded numeric literals reach this fixed page-side script.
+/// It has no selector, DOM traversal, input value access, or renderer-provided JS.
+fn browser_scroll_script(delta_x: f64, delta_y: f64) -> String {
+    format!("(() => {{ window.scrollBy({delta_x}, {delta_y}); }})()")
+}
+
+fn browser_action_anchor_matches_context(
+    context: &BrowserContext,
+    anchor: &BrowserActionAnchor,
+    scope: &str,
+) -> bool {
+    context_is_ready_for_url(context, &anchor.url)
+        && context.page_load_revision == anchor.page_load_revision
+        && semantic_map_record_is_current(
+            context.semantic_map.as_ref(),
+            scope,
+            anchor.lifecycle_token,
+            &anchor.url,
+            anchor.page_load_revision,
+            &anchor.map_id,
+            anchor.generation,
+        )
+}
+
+fn consume_semantic_map_for_anchor(
+    context: &mut BrowserContext,
+    anchor: &BrowserActionAnchor,
+    scope: &str,
+) -> bool {
+    if !browser_action_anchor_matches_context(context, anchor, scope) {
+        return false;
+    }
+    context.semantic_map = None;
+    true
+}
+
+/// The map is already consumed before this final native check. Reuse it for
+/// every page-level action so a navigation that races after anchor validation
+/// cannot target a different document.
+fn require_action_native_url(
+    current_url: &str,
+    anchor: &BrowserActionAnchor,
+) -> Result<(), String> {
+    if current_url == anchor.url {
+        Ok(())
+    } else {
+        Err("browser action anchor is stale".to_string())
+    }
+}
+
+/// Validates the full untrusted client anchor against the current backend map,
+/// then consumes the map while the caller holds `operation_lock`. Consuming
+/// first makes both a successful action and a native side-effect failure require
+/// a new explicit context extraction.
+fn consume_browser_action_anchor(
+    state: &BrowserState,
+    anchor: &BrowserActionAnchor,
+) -> Result<(), String> {
+    require_current_lifecycle(
+        state,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+        anchor.lifecycle_token,
+        "browser action anchor is stale",
+    )?;
+    let snapshot = current_snapshot(state)?;
+    if !snapshot.visible || snapshot.url.as_deref() != Some(anchor.url.as_str()) {
+        return Err("browser action anchor is stale".to_string());
+    }
+    let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
+    let mut contexts = state
+        .contexts
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let context = contexts
+        .get_mut(&scope)
+        .ok_or_else(|| "browser action anchor is stale".to_string())?;
+    if !consume_semantic_map_for_anchor(context, anchor, &scope) {
+        return Err("browser action anchor is stale".to_string());
+    }
+    Ok(())
 }
 
 fn browser_context_script() -> String {
@@ -1279,6 +1521,7 @@ pub async fn browser_open(
     }
     // Even a reopen to the same URL is a distinct surface lifecycle.
     invalidate_semantic_map_for_scope(&state, &workspace_id, session_id.as_deref());
+    clear_browser_control_grant(&state);
     *state
         .lifecycle_open
         .lock()
@@ -1424,6 +1667,177 @@ pub async fn browser_reload(
     let snapshot = current_snapshot(&state)?;
     emit_snapshot(&app, snapshot.clone());
     Ok(snapshot)
+}
+
+/// Arms the in-memory Browser-control capability after a future explicit UI
+/// gesture. The grant is intentionally scoped and short lived; no bearer token
+/// is returned, persisted, or logged.
+#[tauri::command]
+pub async fn browser_arm_control(
+    state: State<'_, BrowserState>,
+    sessions: State<'_, SessionCommandState>,
+    workspace_id: String,
+    session_id: Option<String>,
+    lifecycle_token: u64,
+) -> Result<(), String> {
+    let _operation = state.operation_lock.lock().await;
+    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser control lifecycle is stale",
+    )?;
+    if !current_snapshot(&state)?.visible {
+        return Err("browser is not visible".to_string());
+    }
+    arm_browser_control_grant(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        Instant::now(),
+    )
+}
+
+/// Removes the temporary Browser-control capability without exposing a token.
+#[tauri::command]
+pub async fn browser_disarm_control(
+    state: State<'_, BrowserState>,
+    sessions: State<'_, SessionCommandState>,
+    workspace_id: String,
+    session_id: Option<String>,
+    lifecycle_token: u64,
+) -> Result<(), String> {
+    let _operation = state.operation_lock.lock().await;
+    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser control lifecycle is stale",
+    )?;
+    clear_browser_control_grant(&state);
+    Ok(())
+}
+
+/// Executes only a small allowlist of page-level actions. This is an internal
+/// action engine, not an MCP bridge and not element automation.
+#[tauri::command]
+pub async fn browser_execute_action(
+    state: State<'_, BrowserState>,
+    sessions: State<'_, SessionCommandState>,
+    anchor: BrowserActionAnchor,
+    action: BrowserControlAction,
+) -> Result<BrowserActionResult, String> {
+    let _operation = state.operation_lock.lock().await;
+    validate_scope(
+        &sessions,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+    )
+    .await?;
+    require_current_lifecycle(
+        &state,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+        anchor.lifecycle_token,
+        "browser action anchor is stale",
+    )?;
+    require_browser_control_grant(
+        &state,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+        anchor.lifecycle_token,
+        Instant::now(),
+    )?;
+    let action = prepare_browser_control_action(action)?;
+    consume_browser_action_anchor(&state, &anchor)?;
+
+    let action_name = action.name().to_string();
+    match action {
+        PreparedBrowserControlAction::Navigate(url) => {
+            let webview = state
+                .webview
+                .lock()
+                .map_err(|_| "browser state lock poisoned".to_string())?;
+            let webview = webview
+                .as_ref()
+                .ok_or_else(|| "browser is not open".to_string())?;
+            let current_url = webview
+                .url()
+                .map_err(|_| "browser action anchor is stale".to_string())?
+                .to_string();
+            require_action_native_url(&current_url, &anchor)?;
+            if let Ok(mut contexts) = state.contexts.lock() {
+                mark_context_loading(
+                    contexts
+                        .entry(scope_key(
+                            &anchor.workspace_id,
+                            anchor.session_id.as_deref(),
+                        ))
+                        .or_default(),
+                    url.to_string(),
+                );
+            }
+            webview
+                .navigate(url)
+                .map_err(|_| "browser navigate action failed".to_string())?;
+        }
+        PreparedBrowserControlAction::Reload => {
+            let webview = state
+                .webview
+                .lock()
+                .map_err(|_| "browser state lock poisoned".to_string())?;
+            let webview = webview
+                .as_ref()
+                .ok_or_else(|| "browser is not open".to_string())?;
+            let current_url = webview
+                .url()
+                .map_err(|_| "browser action anchor is stale".to_string())?
+                .to_string();
+            require_action_native_url(&current_url, &anchor)?;
+            if let Ok(mut contexts) = state.contexts.lock() {
+                mark_context_loading(
+                    contexts
+                        .entry(scope_key(
+                            &anchor.workspace_id,
+                            anchor.session_id.as_deref(),
+                        ))
+                        .or_default(),
+                    current_url,
+                );
+            }
+            webview
+                .reload()
+                .map_err(|_| "browser reload action failed".to_string())?;
+        }
+        PreparedBrowserControlAction::Scroll { delta_x, delta_y } => {
+            let webview = state
+                .webview
+                .lock()
+                .map_err(|_| "browser state lock poisoned".to_string())?;
+            let webview = webview
+                .as_ref()
+                .ok_or_else(|| "browser is not open".to_string())?;
+            let current_url = webview
+                .url()
+                .map_err(|_| "browser action anchor is stale".to_string())?
+                .to_string();
+            require_action_native_url(&current_url, &anchor)?;
+            webview
+                .eval(browser_scroll_script(delta_x, delta_y))
+                .map_err(|_| "browser scroll action failed".to_string())?;
+        }
+    }
+
+    Ok(BrowserActionResult {
+        action: action_name,
+        status: "executed".to_string(),
+        requires_context_refresh: true,
+    })
 }
 
 #[tauri::command]
@@ -1684,6 +2098,7 @@ pub async fn browser_hide(
         lifecycle_token,
         "browser close lifecycle is stale",
     )?;
+    clear_browser_control_grant(&state);
     {
         let webview = state
             .webview
@@ -1729,14 +2144,21 @@ pub fn shutdown(state: &BrowserState) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration as StdDuration, Instant};
+
     use super::{
-        advance_lifecycle_token, context_is_ready_for_url, mark_context_loading,
-        normalize_browser_bounds, normalize_browser_context_text, normalize_browser_semantic_map,
-        occlusion_request_is_current, page_load_matches_expected, page_load_revision_is_current,
+        advance_lifecycle_token, arm_browser_control_grant, browser_action_anchor_matches_context,
+        browser_scroll_script, clear_browser_control_grant, consume_semantic_map_for_anchor,
+        context_is_ready_for_url, control_grant_is_current, mark_context_loading,
+        normalize_browser_bounds, normalize_browser_context_text, normalize_browser_scroll_delta,
+        normalize_browser_semantic_map, occlusion_request_is_current, page_load_matches_expected,
+        page_load_revision_is_current, prepare_browser_control_action, require_action_native_url,
         sanitize_browser_link_destination, semantic_item_serialized_chars,
         semantic_map_record_is_current, should_persist_context_url, validate_browser_url,
-        BrowserBounds, BrowserContext, BrowserSemanticItemExtraction, BrowserSemanticMapExtraction,
-        BrowserSemanticMapRecord, MAX_BROWSER_SEMANTIC_ITEMS,
+        BrowserActionAnchor, BrowserBounds, BrowserContext, BrowserControlAction,
+        BrowserControlGrant, BrowserSemanticItemExtraction, BrowserSemanticMap,
+        BrowserSemanticMapExtraction, BrowserSemanticMapRecord, BrowserState,
+        MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
     #[test]
@@ -1836,6 +2258,220 @@ mod tests {
         assert!(!script.contains("localStorage"));
         assert!(!script.contains("sessionStorage"));
         assert!(!script.contains(".value"));
+    }
+
+    fn action_anchor_and_context() -> (BrowserActionAnchor, BrowserContext) {
+        let scope = "workspace\u{1f}|session".to_string();
+        let anchor = BrowserActionAnchor {
+            workspace_id: "workspace".to_string(),
+            session_id: Some("session".to_string()),
+            lifecycle_token: 8,
+            map_id: "m-8-2".to_string(),
+            generation: 2,
+            url: "https://example.test/page".to_string(),
+            page_load_revision: 4,
+        };
+        let context = BrowserContext {
+            url: Some(anchor.url.clone()),
+            expected_url: Some(anchor.url.clone()),
+            ready_url: Some(anchor.url.clone()),
+            page_load_revision: anchor.page_load_revision,
+            semantic_map: Some(BrowserSemanticMapRecord {
+                scope,
+                map_id: anchor.map_id.clone(),
+                generation: anchor.generation,
+                lifecycle_token: anchor.lifecycle_token,
+                url: anchor.url.clone(),
+                page_load_revision: anchor.page_load_revision,
+            }),
+            ..BrowserContext::default()
+        };
+        (anchor, context)
+    }
+
+    #[test]
+    fn action_anchor_requires_every_current_identity_dimension_and_is_consumed() {
+        let (anchor, context) = action_anchor_and_context();
+        let scope = super::scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
+        assert!(browser_action_anchor_matches_context(
+            &context, &anchor, &scope
+        ));
+
+        let mut stale = anchor.clone();
+        stale.workspace_id = "other-workspace".to_string();
+        assert!(!browser_action_anchor_matches_context(
+            &context,
+            &stale,
+            &super::scope_key(&stale.workspace_id, stale.session_id.as_deref()),
+        ));
+        let mut stale = anchor.clone();
+        stale.session_id = Some("other-session".to_string());
+        assert!(!browser_action_anchor_matches_context(
+            &context,
+            &stale,
+            &super::scope_key(&stale.workspace_id, stale.session_id.as_deref()),
+        ));
+        for stale in [
+            BrowserActionAnchor {
+                lifecycle_token: 9,
+                ..anchor.clone()
+            },
+            BrowserActionAnchor {
+                map_id: "m-8-3".to_string(),
+                ..anchor.clone()
+            },
+            BrowserActionAnchor {
+                generation: 3,
+                ..anchor.clone()
+            },
+            BrowserActionAnchor {
+                url: "https://example.test/other".to_string(),
+                ..anchor.clone()
+            },
+            BrowserActionAnchor {
+                page_load_revision: 5,
+                ..anchor.clone()
+            },
+        ] {
+            assert!(!browser_action_anchor_matches_context(
+                &context, &stale, &scope
+            ));
+        }
+
+        let mut consumable = context.clone();
+        assert!(consume_semantic_map_for_anchor(
+            &mut consumable,
+            &anchor,
+            &scope
+        ));
+        assert!(consumable.semantic_map.is_none());
+        assert!(!consume_semantic_map_for_anchor(
+            &mut consumable,
+            &anchor,
+            &scope
+        ));
+
+        let invalid_payload_keeps_map = context.clone();
+        assert!(
+            prepare_browser_control_action(BrowserControlAction::Navigate {
+                url: "javascript:alert(1)".to_string(),
+            })
+            .is_err()
+        );
+        assert!(invalid_payload_keeps_map.semantic_map.is_some());
+    }
+
+    #[test]
+    fn navigate_reload_and_scroll_require_the_final_native_url_recheck() {
+        let (anchor, _) = action_anchor_and_context();
+        for action in ["navigate", "reload", "scroll"] {
+            assert!(
+                require_action_native_url(&anchor.url, &anchor).is_ok(),
+                "{action}"
+            );
+            assert!(
+                require_action_native_url("https://example.test/changed", &anchor).is_err(),
+                "{action}"
+            );
+        }
+    }
+
+    #[test]
+    fn control_grants_are_scoped_lifecycle_bound_expiring_and_clearable() {
+        let now = Instant::now();
+        let grant = BrowserControlGrant {
+            scope: "workspace\u{1f}|session".to_string(),
+            lifecycle_token: 8,
+            expires_at: now + StdDuration::from_secs(60),
+        };
+        assert!(control_grant_is_current(
+            Some(&grant),
+            "workspace\u{1f}|session",
+            8,
+            now,
+        ));
+        assert!(!control_grant_is_current(
+            Some(&grant),
+            "workspace\u{1f}|other-session",
+            8,
+            now,
+        ));
+        assert!(!control_grant_is_current(
+            Some(&grant),
+            "workspace\u{1f}|session",
+            9,
+            now,
+        ));
+        assert!(!control_grant_is_current(
+            Some(&grant),
+            "workspace\u{1f}|session",
+            8,
+            grant.expires_at,
+        ));
+
+        let state = BrowserState::default();
+        arm_browser_control_grant(&state, "workspace", Some("session"), 8, now).unwrap();
+        assert!(control_grant_is_current(
+            state.control_grant.lock().unwrap().as_ref(),
+            "workspace\u{1f}|session",
+            8,
+            now,
+        ));
+        // browser_open and browser_hide call this same helper before their
+        // lifecycle transitions, so neither can retain a prior arm.
+        clear_browser_control_grant(&state);
+        assert!(state.control_grant.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn scroll_actions_are_finite_bounded_and_use_a_fixed_literal_script() {
+        assert_eq!(
+            normalize_browser_scroll_delta(2_000.0, -2_000.0),
+            Ok((2_000.0, -2_000.0))
+        );
+        assert!(normalize_browser_scroll_delta(2_000.1, 0.0).is_err());
+        assert!(normalize_browser_scroll_delta(f64::NAN, 0.0).is_err());
+        assert!(normalize_browser_scroll_delta(0.0, f64::INFINITY).is_err());
+        let script = browser_scroll_script(12.5, -40.0);
+        assert!(script.contains("window.scrollBy(12.5, -40)"));
+        assert!(!script.contains("eval("));
+        assert!(!script.contains("querySelector"));
+        assert!(!script.contains("document."));
+        assert!(!script.contains(".value"));
+
+        let action: BrowserControlAction =
+            serde_json::from_str(r#"{"kind":"scroll","deltaX":12.5,"deltaY":-40}"#).unwrap();
+        assert_eq!(
+            action,
+            BrowserControlAction::Scroll {
+                delta_x: 12.5,
+                delta_y: -40.0,
+            }
+        );
+        assert!(serde_json::from_str::<BrowserControlAction>(
+            r#"{"kind":"scroll","delta_x":12.5,"delta_y":-40}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn action_anchor_and_semantic_map_serialize_in_camel_case() {
+        let (anchor, _) = action_anchor_and_context();
+        let anchor = serde_json::to_value(anchor).unwrap();
+        assert_eq!(anchor["workspaceId"], "workspace");
+        assert_eq!(anchor["pageLoadRevision"], 4);
+        assert!(anchor.get("workspace_id").is_none());
+
+        let map = serde_json::to_value(BrowserSemanticMap {
+            map_id: "m-8-2".to_string(),
+            generation: 2,
+            page_load_revision: 4,
+            items: Vec::new(),
+            truncated: false,
+        })
+        .unwrap();
+        assert_eq!(map["pageLoadRevision"], 4);
+        assert!(map.get("page_load_revision").is_none());
     }
 
     #[test]
