@@ -33,8 +33,9 @@ use tower::limit::ConcurrencyLimitLayer;
 use url::Url;
 
 use crate::browser_commands::{
-    execute_browser_control_action, extract_browser_control_context, BrowserActionAnchor,
-    BrowserControlAction, BrowserState,
+    discard_browser_evidence_capture, execute_browser_control_action,
+    extract_browser_control_context, read_browser_evidence_capture, start_browser_evidence_capture,
+    BrowserActionAnchor, BrowserControlAction, BrowserState,
 };
 use dcc_tauri::state::{EphemeralMcpProjection, EphemeralMcpProjectionLease, SessionCommandState};
 
@@ -49,14 +50,26 @@ const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_PROTOCOL_COMPAT: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
 const DCC_BROWSER_DEFINITION_ID: &str = "dcc-browser-webview-internal";
 const DCC_BROWSER_SERVER_NAME: &str = "dcc-browser-webview";
-const BROWSER_MCP_TOOL_NAMES: [&str; 6] = [
+const BROWSER_MCP_TOOL_NAMES: [&str; 8] = [
     "dcc_browser_context",
     "dcc_browser_navigate",
     "dcc_browser_reload",
     "dcc_browser_scroll",
     "dcc_browser_click",
     "dcc_browser_fill",
+    "dcc_browser_evidence_start",
+    "dcc_browser_evidence_read",
 ];
+
+fn browser_mcp_tool_policies() -> Vec<ProviderMcpToolPolicy> {
+    BROWSER_MCP_TOOL_NAMES
+        .into_iter()
+        .map(|tool_name| ProviderMcpToolPolicy {
+            tool_name: tool_name.to_string(),
+            decision: McpToolPolicyDecision::Ask,
+        })
+        .collect()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LeasePhase {
@@ -78,6 +91,9 @@ struct TokenBinding {
 #[derive(Default)]
 struct TokenRegistry {
     by_lease: HashMap<String, TokenBinding>,
+    /// One active evidence handle per lease, bounded by the lease registry.
+    /// The capture itself remains owned by BrowserState and is one-shot there.
+    evidence_capture_leases: HashMap<String, String>,
 }
 
 impl TokenRegistry {
@@ -90,6 +106,61 @@ impl TokenRegistry {
                     && bool::from(entry.token_hash.ct_eq(token_hash))
             })
             .cloned()
+    }
+
+    fn bind_evidence_capture(&mut self, binding: &TokenBinding, capture_id: &str) -> bool {
+        if !self
+            .by_lease
+            .get(&binding.lease_id)
+            .is_some_and(|current| bool::from(current.token_hash.ct_eq(&binding.token_hash)))
+        {
+            return false;
+        }
+        // A later capture replaces the prior bridge association for this
+        // lease. BrowserState keeps only one active capture per scope.
+        self.evidence_capture_leases
+            .retain(|_, owner| owner != &binding.lease_id);
+        self.evidence_capture_leases
+            .insert(capture_id.to_string(), binding.lease_id.clone());
+        true
+    }
+
+    fn claim_evidence_capture(&mut self, lease_id: &str, capture_id: &str) -> bool {
+        if self
+            .evidence_capture_leases
+            .get(capture_id)
+            .is_some_and(|owner| owner == lease_id)
+        {
+            self.evidence_capture_leases.remove(capture_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn remove_lease(&mut self, lease_id: &str) -> Vec<String> {
+        let capture_ids = self
+            .evidence_capture_leases
+            .iter()
+            .filter_map(|(capture_id, owner)| (owner == lease_id).then(|| capture_id.clone()))
+            .collect::<Vec<_>>();
+        self.by_lease.remove(lease_id);
+        self.evidence_capture_leases
+            .retain(|_, owner| owner != lease_id);
+        capture_ids
+    }
+
+    fn take_all_evidence_captures(&mut self) -> Vec<(TokenBinding, String)> {
+        let captures = std::mem::take(&mut self.evidence_capture_leases);
+        captures
+            .into_iter()
+            .filter_map(|(capture_id, lease_id)| {
+                self.by_lease
+                    .get(&lease_id)
+                    .cloned()
+                    .map(|binding| (binding, capture_id))
+            })
+            .collect()
     }
 }
 
@@ -150,8 +221,20 @@ impl BrowserMcpBridge {
                 let _ = sender.send(());
             }
         }
-        if let Ok(mut registry) = self.registry.lock() {
+        let cleanup = if let Ok(mut registry) = self.registry.lock() {
+            let cleanup = registry.take_all_evidence_captures();
             registry.by_lease.clear();
+            cleanup
+        } else {
+            Vec::new()
+        };
+        for (binding, capture_id) in cleanup {
+            discard_browser_evidence_capture(
+                &self.browser,
+                &binding.workspace_id,
+                Some(&binding.session_id),
+                &capture_id,
+            );
         }
     }
 
@@ -236,6 +319,33 @@ impl BrowserMcpBridge {
             && phase_accepts_protocol(current.phase, header)
     }
 
+    fn bind_evidence_capture(&self, binding: &TokenBinding, capture_id: &str) -> bool {
+        self.registry
+            .lock()
+            .is_ok_and(|mut registry| registry.bind_evidence_capture(binding, capture_id))
+    }
+
+    /// Claiming removes the association before the core drain callback. A
+    /// lease cannot retry or read another lease's capture after any failure.
+    fn claim_evidence_capture(&self, binding: &TokenBinding, capture_id: &str) -> bool {
+        self.registry.lock().is_ok_and(|mut registry| {
+            registry
+                .by_lease
+                .get(&binding.lease_id)
+                .is_some_and(|current| bool::from(current.token_hash.ct_eq(&binding.token_hash)))
+                && registry.claim_evidence_capture(&binding.lease_id, capture_id)
+        })
+    }
+
+    fn lease_is_current(&self, binding: &TokenBinding) -> bool {
+        self.registry.lock().is_ok_and(|registry| {
+            registry
+                .by_lease
+                .get(&binding.lease_id)
+                .is_some_and(|current| bool::from(current.token_hash.ct_eq(&binding.token_hash)))
+        })
+    }
+
     fn issue_projection(
         &self,
         session: &Session,
@@ -258,13 +368,7 @@ impl BrowserMcpBridge {
             SecretValue::new(format!("Bearer {plaintext}").into_bytes()).map_err(|_| {
                 CoreError::Repository("failed to create Browser MCP credential".to_string())
             })?;
-        let policies = BROWSER_MCP_TOOL_NAMES
-            .into_iter()
-            .map(|tool_name| ProviderMcpToolPolicy {
-                tool_name: tool_name.to_string(),
-                decision: McpToolPolicyDecision::Ask,
-            })
-            .collect();
+        let policies = browser_mcp_tool_policies();
         let server = ProviderMcpServerConfig {
             definition_id: McpDefinitionId(DCC_BROWSER_DEFINITION_ID.to_string()),
             server_name: DCC_BROWSER_SERVER_NAME.to_string(),
@@ -300,11 +404,26 @@ impl EphemeralMcpProjection for BrowserMcpBridge {
     }
 
     fn revoke_session(&self, session_id: &SessionId, lease_id: &str) {
-        if let Ok(mut registry) = self.registry.lock() {
-            if registry.by_lease.get(lease_id).is_some_and(|binding| {
+        let cleanup = if let Ok(mut registry) = self.registry.lock() {
+            let binding = registry.by_lease.get(lease_id).cloned();
+            if binding.as_ref().is_some_and(|binding| {
                 binding.session_id == session_id.0 && binding.lease_id == lease_id
             }) {
-                registry.by_lease.remove(lease_id);
+                binding.map(|binding| (binding, registry.remove_lease(lease_id)))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some((binding, capture_ids)) = cleanup {
+            for capture_id in capture_ids {
+                discard_browser_evidence_capture(
+                    &self.browser,
+                    &binding.workspace_id,
+                    Some(&binding.session_id),
+                    &capture_id,
+                );
             }
         }
     }
@@ -494,6 +613,16 @@ struct FillArgs {
     reference: String,
     text: String,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EvidenceStartArgs {
+    anchor: BrowserActionAnchor,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EvidenceReadArgs {
+    capture_id: String,
+}
 
 /// References are public opaque capabilities only within the map. This keeps
 /// malformed MCP arguments out of the dispatcher, before map consumption.
@@ -516,6 +645,16 @@ fn valid_fill_text(text: &str) -> bool {
         && !text
             .chars()
             .any(|character| character.is_control() && !matches!(character, '\n' | '\t' | '\r'))
+}
+
+/// Public evidence handles are deliberately narrower than generic opaque
+/// strings: a lowercase 128-bit hex credential generated by BrowserState.
+fn valid_evidence_capture_id(capture_id: &str) -> bool {
+    capture_id.len() == 34
+        && capture_id.starts_with("c-")
+        && capture_id.as_bytes()[2..]
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
 }
 
 fn click_args_are_well_formed(arguments: &Value) -> bool {
@@ -552,6 +691,13 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
             .arguments
             .as_ref()
             .is_some_and(fill_args_are_well_formed),
+        "dcc_browser_evidence_start" => call.arguments.as_ref().is_some_and(|arguments| {
+            serde_json::from_value::<EvidenceStartArgs>(arguments.clone()).is_ok()
+        }),
+        "dcc_browser_evidence_read" => call.arguments.as_ref().is_some_and(|arguments| {
+            serde_json::from_value::<EvidenceReadArgs>(arguments.clone())
+                .is_ok_and(|args| valid_evidence_capture_id(&args.capture_id))
+        }),
         _ => false,
     }
 }
@@ -681,6 +827,68 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                 .await
             }
             _ => tool_error("invalid browser action"),
+        },
+        "dcc_browser_evidence_start" => match call
+            .arguments
+            .and_then(|arguments| serde_json::from_value::<EvidenceStartArgs>(arguments).ok())
+        {
+            Some(args) if anchor_belongs_to_binding(&args.anchor, binding) => {
+                match start_browser_evidence_capture(&bridge.browser, &bridge.sessions, args.anchor)
+                    .await
+                {
+                    Ok(handle) if bridge.bind_evidence_capture(binding, &handle.capture_id) => {
+                        json!({"content":[{"type":"text","text": structured_text_content("Browser evidence capture started. The returned handle is a one-shot capability.", &handle)}], "structuredContent": handle})
+                    }
+                    Ok(handle) => {
+                        discard_browser_evidence_capture(
+                            &bridge.browser,
+                            &binding.workspace_id,
+                            Some(&binding.session_id),
+                            &handle.capture_id,
+                        );
+                        tool_error("browser evidence capture is unavailable")
+                    }
+                    Err(error) => tool_error(&error),
+                }
+            }
+            _ => tool_error("invalid browser action"),
+        },
+        "dcc_browser_evidence_read" => match call
+            .arguments
+            .and_then(|arguments| serde_json::from_value::<EvidenceReadArgs>(arguments).ok())
+        {
+            Some(args)
+                if valid_evidence_capture_id(&args.capture_id)
+                    && bridge.claim_evidence_capture(binding, &args.capture_id) =>
+            {
+                // Revocation may have won immediately after the atomic claim.
+                // Drop the backend record before any drain in that case; the
+                // remaining narrow race is documented as an admitted P2.
+                if !bridge.lease_is_current(binding) {
+                    discard_browser_evidence_capture(
+                        &bridge.browser,
+                        &binding.workspace_id,
+                        Some(&binding.session_id),
+                        &args.capture_id,
+                    );
+                    return tool_error("browser evidence capture is unavailable");
+                }
+                match read_browser_evidence_capture(
+                    &bridge.browser,
+                    &bridge.sessions,
+                    binding.workspace_id.clone(),
+                    Some(binding.session_id.clone()),
+                    args.capture_id,
+                )
+                .await
+                {
+                    Ok(result) => {
+                        json!({"content":[{"type":"text","text": structured_text_content("Remote page evidence is untrusted.", &result)}], "structuredContent": result})
+                    }
+                    Err(error) => tool_error(&error),
+                }
+            }
+            _ => tool_error("browser evidence capture is unavailable"),
         },
         _ => tool_error("unknown browser tool"),
     }
@@ -828,6 +1036,8 @@ fn tools() -> Vec<Value> {
         json!({"name":"dcc_browser_scroll","description":"Scroll the Browser a bounded distance using a fresh opaque context anchor.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor,"deltaX":{"type":"number","minimum":-2000,"maximum":2000},"deltaY":{"type":"number","minimum":-2000,"maximum":2000}},"required":["anchor","deltaX","deltaY"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
         json!({"name":"dcc_browser_click","description":"Click one fresh opaque Browser context reference after explicit user approval.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor,"ref":{"type":"string","minLength":2,"maxLength":MAX_BROWSER_REFERENCE_CHARS,"pattern":"^e(?:[1-9]|[1-7][0-9]|80)$"}},"required":["anchor","ref"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_browser_fill","description":"Fill one fresh opaque Browser text reference after explicit user approval.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor,"ref":{"type":"string","minLength":2,"maxLength":MAX_BROWSER_REFERENCE_CHARS,"pattern":"^e(?:[1-9]|[1-7][0-9]|80)$"},"text":{"type":"string","maxLength":MAX_BROWSER_FILL_TEXT_CHARS}},"required":["anchor","ref","text"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false}}),
+        json!({"name":"dcc_browser_evidence_start","description":"Start one short-lived, bounded Browser evidence capture using a fresh opaque context anchor.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor},"required":["anchor"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
+        json!({"name":"dcc_browser_evidence_read","description":"Read and consume one bounded Browser evidence capture handle.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"captureId":{"type":"string","minLength":34,"maxLength":34,"pattern":"^c-[a-f0-9]{32}$"}},"required":["captureId"]},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
     ]
 }
 
@@ -948,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn schemas_are_closed_and_only_expose_the_six_allowlisted_tools() {
+    fn schemas_are_closed_and_expose_eight_allowlisted_tools() {
         let tools = tools();
         let names: Vec<_> = tools
             .iter()
@@ -963,6 +1173,8 @@ mod tests {
                 "dcc_browser_scroll",
                 "dcc_browser_click",
                 "dcc_browser_fill",
+                "dcc_browser_evidence_start",
+                "dcc_browser_evidence_read",
             ]
         );
         for tool in &tools {
@@ -975,7 +1187,7 @@ mod tests {
             tools[3]["inputSchema"]["properties"]["deltaX"]["maximum"],
             json!(2000)
         );
-        for tool in &tools[4..] {
+        for tool in &tools[4..6] {
             assert_eq!(
                 tool["inputSchema"]["properties"]["anchor"]["additionalProperties"],
                 Value::Bool(false)
@@ -994,7 +1206,24 @@ mod tests {
         );
         assert_eq!(tools[4]["annotations"]["openWorldHint"], Value::Bool(true));
         assert_eq!(tools[5]["annotations"]["openWorldHint"], Value::Bool(false));
+        assert_eq!(
+            tools[6]["annotations"],
+            json!({"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false})
+        );
+        assert_eq!(
+            tools[7]["annotations"],
+            json!({"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false})
+        );
+        assert_eq!(
+            tools[7]["inputSchema"]["properties"]["captureId"]["pattern"],
+            json!("^c-[a-f0-9]{32}$")
+        );
         assert_eq!(BROWSER_MCP_TOOL_NAMES.len(), tools.len());
+        let policies = browser_mcp_tool_policies();
+        assert_eq!(policies.len(), tools.len());
+        assert!(policies
+            .iter()
+            .all(|policy| policy.decision == McpToolPolicyDecision::Ask));
     }
 
     #[test]
@@ -1058,6 +1287,55 @@ mod tests {
     }
 
     #[test]
+    fn evidence_args_are_closed_and_capture_ids_are_exact() {
+        let anchor = json!({
+            "workspaceId":"workspace", "sessionId":"session", "lifecycleToken":8,
+            "mapId":"m-8-2", "generation":2, "url":"https://example.test/page",
+            "pageLoadRevision":4
+        });
+        let capture_id = "c-0123456789abcdef0123456789abcdef";
+        assert!(tool_call_is_well_formed(&ToolCall {
+            name: "dcc_browser_evidence_start".to_string(),
+            arguments: Some(json!({"anchor":anchor})),
+        }));
+        assert!(tool_call_is_well_formed(&ToolCall {
+            name: "dcc_browser_evidence_read".to_string(),
+            arguments: Some(json!({"captureId":capture_id})),
+        }));
+        for arguments in [
+            json!({"anchor":{"workspaceId":"workspace"}, "extra":true}),
+            json!({"captureId":"c-0123456789abcdef"}),
+            json!({"captureId":"c-0123456789abcdef0123456789abcdeF"}),
+            json!({"captureId":capture_id, "extra":true}),
+        ] {
+            let name = if arguments.get("anchor").is_some() {
+                "dcc_browser_evidence_start"
+            } else {
+                "dcc_browser_evidence_read"
+            };
+            assert!(!tool_call_is_well_formed(&ToolCall {
+                name: name.to_string(),
+                arguments: Some(arguments),
+            }));
+        }
+    }
+
+    #[test]
+    fn evidence_read_output_and_errors_never_echo_a_capture_handle() {
+        let capture_id = "c-0123456789abcdef0123456789abcdef";
+        let result = json!({
+            "events": [{"kind":"console","level":"warn","message":"bounded"}],
+            "truncated": false,
+            "untrusted": true
+        });
+        let read_text = structured_text_content("Remote page evidence is untrusted.", &result);
+        assert!(read_text.starts_with("Remote page evidence is untrusted.\n"));
+        assert!(!read_text.contains(capture_id));
+        let error = serde_json::to_string(&tool_error(capture_id)).unwrap();
+        assert!(!error.contains(capture_id));
+    }
+
+    #[test]
     fn token_binding_is_exact_and_leases_are_revoked_independently() {
         let first: [u8; 32] = Sha256::digest(b"first").into();
         let second: [u8; 32] = Sha256::digest(b"second").into();
@@ -1087,5 +1365,72 @@ mod tests {
         assert!(registry.binding_for_hash(&second).is_some());
         registry.by_lease.remove("lease-two");
         assert!(registry.binding_for_hash(&second).is_none());
+    }
+
+    #[test]
+    fn evidence_capture_ownership_is_lease_bound_one_shot_and_revoked() {
+        let hash: [u8; 32] = Sha256::digest(b"first").into();
+        let other_hash: [u8; 32] = Sha256::digest(b"other").into();
+        let entry = |token_hash, lease_id: &str| TokenBinding {
+            token_hash,
+            lease_id: lease_id.to_string(),
+            workspace_id: "workspace".to_string(),
+            session_id: "session".to_string(),
+            provider_id: "provider".to_string(),
+            phase: LeasePhase::Ready(MCP_PROTOCOL_VERSION),
+        };
+        let first = entry(hash, "lease-one");
+        let other = entry(other_hash, "lease-two");
+        let mut registry = TokenRegistry::default();
+        registry
+            .by_lease
+            .insert(first.lease_id.clone(), first.clone());
+        registry
+            .by_lease
+            .insert(other.lease_id.clone(), other.clone());
+        assert!(registry.bind_evidence_capture(&first, "c-0123456789abcdef0123456789abcdef"));
+        assert!(
+            !registry.claim_evidence_capture(&other.lease_id, "c-0123456789abcdef0123456789abcdef")
+        );
+        assert!(
+            registry.claim_evidence_capture(&first.lease_id, "c-0123456789abcdef0123456789abcdef")
+        );
+        assert!(
+            !registry.claim_evidence_capture(&first.lease_id, "c-0123456789abcdef0123456789abcdef")
+        );
+        assert!(registry.bind_evidence_capture(&first, "c-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(registry.bind_evidence_capture(&first, "c-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        assert!(
+            !registry.claim_evidence_capture(&first.lease_id, "c-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        let removed = registry.remove_lease(&first.lease_id);
+        assert_eq!(removed, vec!["c-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]);
+        assert!(
+            !registry.claim_evidence_capture(&first.lease_id, "c-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
+    }
+
+    #[test]
+    fn shutdown_cleanup_collects_capture_ids_with_their_scope_binding() {
+        let hash: [u8; 32] = Sha256::digest(b"shutdown").into();
+        let binding = TokenBinding {
+            token_hash: hash,
+            lease_id: "lease-shutdown".to_string(),
+            workspace_id: "workspace".to_string(),
+            session_id: "session".to_string(),
+            provider_id: "provider".to_string(),
+            phase: LeasePhase::Ready(MCP_PROTOCOL_VERSION),
+        };
+        let mut registry = TokenRegistry::default();
+        registry
+            .by_lease
+            .insert(binding.lease_id.clone(), binding.clone());
+        assert!(registry.bind_evidence_capture(&binding, "c-0123456789abcdef0123456789abcdef"));
+        let cleanup = registry.take_all_evidence_captures();
+        assert_eq!(cleanup.len(), 1);
+        assert_eq!(cleanup[0].0.workspace_id, "workspace");
+        assert_eq!(cleanup[0].0.session_id, "session");
+        assert_eq!(cleanup[0].1, "c-0123456789abcdef0123456789abcdef");
+        assert!(registry.evidence_capture_leases.is_empty());
     }
 }

@@ -10,6 +10,7 @@ use std::net::Ipv6Addr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, Manager, State, Webview, WebviewUrl, Wry};
@@ -48,6 +49,14 @@ const BROWSER_CONTROL_GRANT_TTL: Duration = Duration::from_secs(60);
 const MAX_BROWSER_SCROLL_DELTA: f64 = 2_000.0;
 const MAX_BROWSER_FILL_CHARS: usize = 2_000;
 const MAX_BROWSER_REFERENCE_CHARS: usize = 3;
+const MAX_BROWSER_EVIDENCE_EVENTS: usize = 32;
+const MAX_BROWSER_EVIDENCE_MESSAGE_CHARS: usize = 240;
+const MAX_BROWSER_EVIDENCE_URL_CHARS: usize = 512;
+const MAX_BROWSER_EVIDENCE_CHARS: usize = 12_000;
+const MAX_BROWSER_EVIDENCE_CALLBACK_CHARS: usize = 24_000;
+const MAX_BROWSER_EVIDENCE_LINE: u32 = 1_000_000;
+const BROWSER_EVIDENCE_TTL: Duration = Duration::from_secs(60);
+const BROWSER_EVIDENCE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +110,40 @@ pub struct BrowserActionAnchor {
     pub generation: u64,
     pub url: String,
     pub page_load_revision: u64,
+}
+
+/// A short-lived, one-shot handle for a user-requested Browser evidence read.
+/// The renderer receives only this opaque id; the page token is backend-owned,
+/// never logged, and never persisted.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserEvidenceCaptureHandle {
+    pub capture_id: String,
+    pub remaining_ms: u64,
+}
+
+/// Remote page evidence is deliberately labeled untrusted. It contains only
+/// bounded, redacted event summaries and is not retained after this response.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserEvidenceResult {
+    pub events: Vec<BrowserEvidenceEvent>,
+    pub truncated: bool,
+    pub untrusted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserEvidenceEvent {
+    pub kind: String,
+    pub sequence: u64,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
 }
 
 /// This is intentionally narrower than an MCP bridge: actions may carry only
@@ -311,6 +354,17 @@ struct BrowserControlGrant {
     expires_at: Instant,
 }
 
+#[derive(Debug, Clone)]
+struct BrowserEvidenceCaptureRecord {
+    scope: String,
+    capture_token: String,
+    lifecycle_token: u64,
+    url: String,
+    page_load_revision: u64,
+    document_identity: f64,
+    expires_at: Instant,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserControlStatus {
@@ -336,6 +390,10 @@ pub struct BrowserState {
     /// Temporary backend-only consent. There is no persisted token and no
     /// renderer capability beyond the scoped arm/disarm commands.
     control_grant: Arc<Mutex<Option<BrowserControlGrant>>>,
+    /// At most one active evidence capture is expected per scope. The page
+    /// owns only a random, non-enumerable key; the backend owns this record and
+    /// consumes it before draining the page-side ring.
+    evidence_captures: Arc<Mutex<HashMap<String, BrowserEvidenceCaptureRecord>>>,
     /// Serializes native child-WebView operations in IPC arrival order, also
     /// across async scope validation. Context extraction keeps it through its
     /// short, bounded native callback wait so a new command cannot change its
@@ -356,6 +414,7 @@ impl Default for BrowserState {
             lifecycle_open: Arc::new(Mutex::new(false)),
             occluded: Arc::new(Mutex::new(false)),
             control_grant: Arc::new(Mutex::new(None)),
+            evidence_captures: Arc::new(Mutex::new(HashMap::new())),
             operation_lock: Arc::new(AsyncMutex::new(())),
         }
     }
@@ -813,6 +872,211 @@ fn require_browser_control_grant(
     }
 }
 
+fn browser_control_grant_expiry(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    lifecycle_token: u64,
+    now: Instant,
+) -> Result<Instant, String> {
+    let scope = scope_key(workspace_id, session_id);
+    let mut grant = state
+        .control_grant
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    if grant.as_ref().is_some_and(|grant| grant.expires_at <= now) {
+        *grant = None;
+    }
+    let Some(grant) = grant.as_ref() else {
+        return Err("browser control is not armed".to_string());
+    };
+    if grant.scope != scope || grant.lifecycle_token != lifecycle_token {
+        return Err("browser control is not armed".to_string());
+    }
+    Ok(grant.expires_at)
+}
+
+fn new_browser_evidence_credential(prefix: &str) -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    format!("{prefix}-{}", hex::encode(bytes))
+}
+
+fn validate_browser_evidence_capture_id(capture_id: &str) -> Result<(), String> {
+    // This is a public, one-shot opaque handle, not an arbitrary identifier.
+    // Keep it exactly aligned with the MCP schema so malformed handles are
+    // rejected before any capture lookup or side effect.
+    if capture_id.len() != 34
+        || !capture_id.starts_with("c-")
+        || !capture_id.as_bytes()[2..]
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+    {
+        return Err("browser evidence capture id is invalid".to_string());
+    }
+    Ok(())
+}
+
+fn invalidate_browser_evidence_for_scope(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+) {
+    let scope = scope_key(workspace_id, session_id);
+    if let Ok(mut captures) = state.evidence_captures.lock() {
+        captures.retain(|_, capture| capture.scope != scope);
+    }
+}
+
+fn clear_browser_evidence_captures(state: &BrowserState) {
+    if let Ok(mut captures) = state.evidence_captures.lock() {
+        captures.clear();
+    }
+}
+
+fn expire_browser_evidence_capture(
+    captures: &Arc<Mutex<HashMap<String, BrowserEvidenceCaptureRecord>>>,
+    capture_id: &str,
+    capture_token: &str,
+) {
+    if let Ok(mut captures) = captures.lock() {
+        if captures
+            .get(capture_id)
+            .is_some_and(|capture| capture.capture_token == capture_token)
+        {
+            captures.remove(capture_id);
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserEvidenceCallback {
+    ok: bool,
+    #[serde(default)]
+    events: Vec<BrowserEvidenceEventRaw>,
+    #[serde(default)]
+    truncated: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserEvidenceEventRaw {
+    kind: String,
+    sequence: u64,
+    message: String,
+    url: Option<String>,
+    line: Option<u64>,
+    column: Option<u64>,
+}
+
+fn contains_sensitive_browser_evidence_term(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    [
+        "authorization",
+        "cookie",
+        "token",
+        "secret",
+        "password",
+        "bearer",
+        "api key",
+    ]
+    .iter()
+    .any(|term| lower.contains(term))
+}
+
+fn normalize_browser_evidence_message(raw: &str) -> String {
+    let mut normalized = raw
+        .chars()
+        .filter(|character| !character.is_control() || *character == '\n' || *character == '\t')
+        .take(MAX_BROWSER_EVIDENCE_MESSAGE_CHARS)
+        .collect::<String>();
+    if contains_sensitive_browser_evidence_term(&normalized) {
+        normalized = "[redacted sensitive browser evidence]".to_string();
+    }
+    normalized
+}
+
+fn sanitize_browser_evidence_url(raw: Option<&str>) -> Option<String> {
+    let raw = raw?.trim();
+    let parsed = Url::parse(raw).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return None;
+    }
+    let path = parsed.path();
+    let path = path
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(MAX_BROWSER_EVIDENCE_URL_CHARS)
+        .collect::<String>();
+    let host = parsed.host_str()?;
+    let host = if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    let authority = parsed
+        .port()
+        .map(|port| format!("{host}:{port}"))
+        .unwrap_or(host);
+    let sanitized = format!("{}://{}{}", parsed.scheme(), authority, path);
+    if contains_sensitive_browser_evidence_term(&sanitized) {
+        return Some("[redacted sensitive browser evidence URL]".to_string());
+    }
+    Some(sanitized)
+}
+
+fn normalize_browser_evidence_events(
+    raw_events: Vec<BrowserEvidenceEventRaw>,
+    mut truncated: bool,
+) -> (Vec<BrowserEvidenceEvent>, bool) {
+    let mut events = Vec::with_capacity(MAX_BROWSER_EVIDENCE_EVENTS);
+    for raw in raw_events.into_iter().take(MAX_BROWSER_EVIDENCE_EVENTS + 1) {
+        if events.len() >= MAX_BROWSER_EVIDENCE_EVENTS {
+            truncated = true;
+            break;
+        }
+        let kind = match raw.kind.as_str() {
+            "consoleWarn" | "consoleError" | "error" | "resourceError" | "unhandledRejection" => {
+                raw.kind
+            }
+            _ => {
+                truncated = true;
+                continue;
+            }
+        };
+        if raw.sequence == 0 {
+            truncated = true;
+            continue;
+        }
+        let event = BrowserEvidenceEvent {
+            kind,
+            sequence: raw.sequence,
+            message: normalize_browser_evidence_message(&raw.message),
+            url: sanitize_browser_evidence_url(raw.url.as_deref()),
+            line: raw
+                .line
+                .filter(|line| *line <= u64::from(MAX_BROWSER_EVIDENCE_LINE))
+                .map(|line| line as u32),
+            column: raw
+                .column
+                .filter(|column| *column <= u64::from(MAX_BROWSER_EVIDENCE_LINE))
+                .map(|column| column as u32),
+        };
+        let mut candidate = events.clone();
+        candidate.push(event.clone());
+        let serialized_chars = serde_json::to_string(&candidate)
+            .map(|value| value.chars().count())
+            .unwrap_or(MAX_BROWSER_EVIDENCE_CHARS + 1);
+        if serialized_chars > MAX_BROWSER_EVIDENCE_CHARS {
+            truncated = true;
+            break;
+        }
+        events.push(event);
+    }
+    (events, truncated)
+}
+
 fn normalize_browser_scroll_delta(delta_x: f64, delta_y: f64) -> Result<(f64, f64), String> {
     if !delta_x.is_finite()
         || !delta_y.is_finite()
@@ -1045,6 +1309,19 @@ fn parse_browser_action_callback(raw: &str) -> Result<(), String> {
         Some("disabled") => Err("browser action target is disabled".to_string()),
         Some("incompatible") => Err("browser action target is incompatible".to_string()),
         _ => Err("browser action failed".to_string()),
+    }
+}
+
+fn parse_browser_evidence_callback(raw: &str) -> Result<BrowserEvidenceCallback, String> {
+    if raw.chars().count() > MAX_BROWSER_EVIDENCE_CALLBACK_CHARS {
+        return Err("browser evidence response exceeded its budget".to_string());
+    }
+    let callback: BrowserEvidenceCallback = serde_json::from_str(raw)
+        .map_err(|_| "browser evidence response was invalid".to_string())?;
+    if callback.ok {
+        Ok(callback)
+    } else {
+        Err("browser evidence capture was unavailable".to_string())
     }
 }
 
@@ -1317,6 +1594,263 @@ fn consume_browser_action_anchor(
         return Err("browser action anchor is stale".to_string());
     }
     Ok(())
+}
+
+fn consume_browser_evidence_anchor(
+    state: &BrowserState,
+    anchor: &BrowserActionAnchor,
+) -> Result<f64, String> {
+    require_current_lifecycle(
+        state,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+        anchor.lifecycle_token,
+        "browser evidence anchor is stale",
+    )?;
+    let snapshot = current_snapshot(state)?;
+    if !snapshot.visible || snapshot.url.as_deref() != Some(anchor.url.as_str()) {
+        return Err("browser evidence anchor is stale".to_string());
+    }
+    let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
+    let mut contexts = state
+        .contexts
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let context = contexts
+        .get_mut(&scope)
+        .ok_or_else(|| "browser evidence anchor is stale".to_string())?;
+    if !browser_action_anchor_matches_context(context, anchor, &scope) {
+        return Err("browser evidence anchor is stale".to_string());
+    }
+    let record = context
+        .semantic_map
+        .as_ref()
+        .ok_or_else(|| "browser evidence anchor is stale".to_string())?;
+    let document_identity = record.document_identity;
+    context.semantic_map = None;
+    Ok(document_identity)
+}
+
+async fn eval_browser_evidence_with_callback(
+    state: &BrowserState,
+    script: String,
+) -> Result<String, String> {
+    let (sender, receiver) = oneshot::channel();
+    let sender = Arc::new(Mutex::new(Some(sender)));
+    {
+        let webview = state
+            .webview
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        let webview = webview
+            .as_ref()
+            .ok_or_else(|| "browser is not open".to_string())?;
+        let sender = sender.clone();
+        webview
+            .eval_with_callback(script, move |raw| {
+                if let Ok(mut sender) = sender.lock() {
+                    if let Some(sender) = sender.take() {
+                        let _ = sender.send(raw);
+                    }
+                }
+            })
+            .map_err(|_| "browser evidence script failed".to_string())?;
+    }
+    timeout(BROWSER_EVIDENCE_TIMEOUT, receiver)
+        .await
+        .map_err(|_| "browser evidence script timed out".to_string())?
+        .map_err(|_| "browser evidence response was cancelled".to_string())
+}
+
+fn browser_evidence_start_script(
+    capture_token: &str,
+    expected_url: &str,
+    document_identity: f64,
+    ttl_ms: u64,
+) -> Result<String, String> {
+    let token_json = serde_json::to_string(capture_token)
+        .map_err(|_| "browser evidence token is invalid".to_string())?;
+    let url_json = serde_json::to_string(expected_url)
+        .map_err(|_| "browser evidence URL is invalid".to_string())?;
+    if !document_identity.is_finite() || document_identity <= 0.0 {
+        return Err("browser document identity is unavailable".to_string());
+    }
+    let ttl_ms = ttl_ms.min(BROWSER_EVIDENCE_TTL.as_millis() as u64).max(1);
+    Ok(format!(
+        r#"(() => {{
+  let stop = () => {{}};
+  try {{
+    const key = {token_json};
+    const expectedUrl = {url_json};
+    const expectedIdentity = {document_identity};
+    if (window.location.href !== expectedUrl
+      || !Number.isFinite(performance.timeOrigin)
+      || performance.timeOrigin !== expectedIdentity
+      || Object.prototype.hasOwnProperty.call(window, key)) return {{ ok: false }};
+    const maxEvents = {MAX_BROWSER_EVIDENCE_EVENTS};
+    const maxMessageChars = {MAX_BROWSER_EVIDENCE_MESSAGE_CHARS};
+    const maxUrlChars = {MAX_BROWSER_EVIDENCE_URL_CHARS};
+    const events = [];
+    let sequence = 0;
+    let truncated = false;
+    let timer = 0;
+    const bounded = (value) => String(value ?? "").slice(0, maxMessageChars);
+    const safeUrl = (value) => {{
+      if (typeof value !== "string") return null;
+      try {{
+        const url = new URL(value, window.location.href);
+        if (!["http:", "https:"].includes(url.protocol) || !url.host) return null;
+        return `${{url.protocol}}//${{url.host}}${{url.pathname}}`.slice(0, maxUrlChars);
+      }} catch (_) {{ return null; }}
+    }};
+    const messageOf = (value) => {{
+      if (typeof value === "string") return bounded(value);
+      if (value instanceof Error && typeof value.message === "string") return bounded(value.message);
+      return "";
+    }};
+    const lineOf = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 1000000 ? value : null;
+    const add = (kind, message, url, line, column) => {{
+      if (typeof message !== "string" || !message) return;
+      sequence += 1;
+      if (events.length >= maxEvents) {{ events.shift(); truncated = true; }}
+      events.push({{
+        kind,
+        sequence,
+        message: bounded(message),
+        url: safeUrl(url),
+        line: lineOf(line),
+        column: lineOf(column),
+      }});
+    }};
+    const originalWarn = console.warn;
+    const originalError = console.error;
+    const warn = (...args) => {{
+      try {{ if (typeof originalWarn === "function") originalWarn.apply(console, args); }}
+      finally {{ add("consoleWarn", messageOf(args[0]), null, null, null); }}
+    }};
+    const error = (...args) => {{
+      try {{ if (typeof originalError === "function") originalError.apply(console, args); }}
+      finally {{ add("consoleError", messageOf(args[0]), null, null, null); }}
+    }};
+    const onError = (event) => {{
+      if (event.target === window) {{
+        add("error", typeof event.message === "string" ? bounded(event.message) : "", event.filename, event.lineno, event.colno);
+        return;
+      }}
+      const target = event.target;
+      const url = target && typeof target.src === "string" ? target.src : target && typeof target.href === "string" ? target.href : null;
+      add("resourceError", "resource load failed", url, null, null);
+    }};
+    const onRejection = (event) => {{
+      const reason = event.reason;
+      const message = typeof reason === "string" ? reason : reason instanceof Error && typeof reason.message === "string" ? reason.message : "";
+      add("unhandledRejection", bounded(message), null, null, null);
+    }};
+    let installedWarn = false;
+    let installedError = false;
+    let installedErrorListener = false;
+    let installedRejectionListener = false;
+    stop = () => {{
+      clearTimeout(timer);
+      if (installedWarn && console.warn === warn) console.warn = originalWarn;
+      if (installedError && console.error === error) console.error = originalError;
+      if (installedErrorListener) window.removeEventListener("error", onError, true);
+      if (installedRejectionListener) window.removeEventListener("unhandledrejection", onRejection, false);
+      try {{ delete window[key]; }} catch (_) {{}}
+    }};
+    const drain = () => {{
+      const result = {{ events: events.slice(0, maxEvents), truncated }};
+      stop();
+      return result;
+    }};
+    console.warn = warn;
+    installedWarn = true;
+    console.error = error;
+    installedError = true;
+    Object.defineProperty(window, key, {{ value: {{ drain }}, configurable: true, enumerable: false, writable: false }});
+    window.addEventListener("error", onError, true);
+    installedErrorListener = true;
+    window.addEventListener("unhandledrejection", onRejection, false);
+    installedRejectionListener = true;
+    timer = window.setTimeout(stop, {ttl_ms});
+    return {{ ok: true }};
+  }} catch (_) {{
+    try {{ stop(); }} catch (_) {{}}
+    return {{ ok: false }};
+  }}
+}})()"#
+    ))
+}
+
+fn browser_evidence_read_script(
+    capture_token: &str,
+    expected_url: &str,
+    document_identity: f64,
+) -> Result<String, String> {
+    let token_json = serde_json::to_string(capture_token)
+        .map_err(|_| "browser evidence token is invalid".to_string())?;
+    let url_json = serde_json::to_string(expected_url)
+        .map_err(|_| "browser evidence URL is invalid".to_string())?;
+    if !document_identity.is_finite() || document_identity <= 0.0 {
+        return Err("browser document identity is unavailable".to_string());
+    }
+    Ok(format!(
+        r#"(() => {{
+  try {{
+    const key = {token_json};
+    if (window.location.href !== {url_json}
+      || !Number.isFinite(performance.timeOrigin)
+      || performance.timeOrigin !== {document_identity}) return {{ ok: false, events: [], truncated: true }};
+    const state = window[key];
+    if (!state || typeof state.drain !== "function") return {{ ok: false, events: [], truncated: true }};
+    const result = state.drain();
+    return {{ ok: true, events: Array.isArray(result.events) ? result.events : [], truncated: Boolean(result.truncated) }};
+  }} catch (_) {{ return {{ ok: false, events: [], truncated: true }}; }}
+}})()"#
+    ))
+}
+
+/// Stops an installed evidence wrapper without exposing its buffered events.
+/// The fixed script is document-bound; a navigation turns this into a safe
+/// `{ ok: false }` no-op and the page's unload/timer remains the fallback.
+fn browser_evidence_cleanup_script(
+    capture_token: &str,
+    expected_url: &str,
+    document_identity: f64,
+) -> Result<String, String> {
+    let token_json = serde_json::to_string(capture_token)
+        .map_err(|_| "browser evidence token is invalid".to_string())?;
+    let url_json = serde_json::to_string(expected_url)
+        .map_err(|_| "browser evidence URL is invalid".to_string())?;
+    if !document_identity.is_finite() || document_identity <= 0.0 {
+        return Err("browser document identity is unavailable".to_string());
+    }
+    Ok(format!(
+        r#"(() => {{
+  try {{
+    if (window.location.href !== {url_json}
+      || !Number.isFinite(performance.timeOrigin)
+      || performance.timeOrigin !== {document_identity}) return {{ ok: false }};
+    const state = window[{token_json}];
+    if (!state || typeof state.drain !== "function") return {{ ok: false }};
+    state.drain();
+    return {{ ok: true }};
+  }} catch (_) {{ return {{ ok: false }}; }}
+}})()"#
+    ))
+}
+
+fn parse_browser_evidence_cleanup_callback(raw: &str) -> Result<(), String> {
+    if raw.chars().count() > 64 {
+        return Err("browser evidence cleanup response was invalid".to_string());
+    }
+    let callback: BrowserEvidenceCallback = serde_json::from_str(raw)
+        .map_err(|_| "browser evidence cleanup response was invalid".to_string())?;
+    if callback.ok && callback.events.is_empty() && !callback.truncated {
+        Ok(())
+    } else {
+        Err("browser evidence cleanup was unavailable".to_string())
+    }
 }
 
 fn browser_context_script() -> String {
@@ -1886,6 +2420,7 @@ fn build_browser(
     let state_active_scope = state.active_scope.clone();
     let navigation_contexts = state.contexts.clone();
     let navigation_active_scope = state.active_scope.clone();
+    let navigation_evidence_captures = state.evidence_captures.clone();
     let state_visible = state.visible.clone();
     let page_load_app = app.clone();
     let page_load_contexts = state.contexts.clone();
@@ -1894,6 +2429,7 @@ fn build_browser(
     let page_load_session = state.active_session.clone();
     let page_load_visible = state.visible.clone();
     let page_load_token = state.lifecycle_token.clone();
+    let page_load_evidence_captures = state.evidence_captures.clone();
     let builder = WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(url))
         .on_navigation(move |url| {
             if validate_browser_url(url.as_str()).is_err() {
@@ -1907,7 +2443,13 @@ fn build_browser(
                 return false;
             };
             if let Ok(mut contexts) = navigation_contexts.lock() {
-                mark_context_loading(contexts.entry(scope).or_default(), url.as_str().to_string());
+                mark_context_loading(
+                    contexts.entry(scope.clone()).or_default(),
+                    url.as_str().to_string(),
+                );
+            }
+            if let Ok(mut captures) = navigation_evidence_captures.lock() {
+                captures.retain(|_, capture| capture.scope != scope);
             }
             true
         })
@@ -1979,6 +2521,9 @@ fn build_browser(
                             invalidate_semantic_map(context);
                         }
                     }
+                }
+                if let Ok(mut captures) = page_load_evidence_captures.lock() {
+                    captures.retain(|_, capture| capture.scope != key);
                 }
                 return;
             }
@@ -2090,6 +2635,7 @@ pub async fn browser_open(
     }
     // Even a reopen to the same URL is a distinct surface lifecycle.
     invalidate_semantic_map_for_scope(&state, &workspace_id, session_id.as_deref());
+    clear_browser_evidence_captures(&state);
     clear_browser_control_grant(&state);
     *state
         .lifecycle_open
@@ -2176,6 +2722,7 @@ pub async fn browser_navigate(
             url.to_string(),
         );
     }
+    invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
     {
         let webview = state
             .webview
@@ -2229,6 +2776,7 @@ pub async fn browser_reload(
                 current_url.clone(),
             );
         }
+        invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
         webview
             .reload()
             .map_err(|error| format!("failed to reload browser: {error}"))?;
@@ -2321,6 +2869,7 @@ pub async fn browser_disarm_control(
         "browser control lifecycle is stale",
     )?;
     clear_browser_control_grant(&state);
+    invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
     Ok(BrowserControlStatus {
         armed: false,
         remaining_ms: 0,
@@ -2427,6 +2976,11 @@ pub(crate) async fn execute_browser_control_action(
                     url.to_string(),
                 );
             }
+            invalidate_browser_evidence_for_scope(
+                state,
+                &anchor.workspace_id,
+                anchor.session_id.as_deref(),
+            );
             webview
                 .navigate(url)
                 .map_err(|_| "browser navigate action failed".to_string())?;
@@ -2463,6 +3017,11 @@ pub(crate) async fn execute_browser_control_action(
                     current_url,
                 );
             }
+            invalidate_browser_evidence_for_scope(
+                state,
+                &anchor.workspace_id,
+                anchor.session_id.as_deref(),
+            );
             webview
                 .reload()
                 .map_err(|_| "browser reload action failed".to_string())?;
@@ -2566,6 +3125,281 @@ pub(crate) async fn execute_browser_control_action(
         status: "executed".to_string(),
         requires_context_refresh: true,
     })
+}
+
+/// Starts a short-lived, one-shot remote-page evidence ring. The map anchor is
+/// consumed before installation; no event buffer exists between explicit
+/// starts, and the returned id is the only renderer-visible way to drain this
+/// capture. The page token remains backend-only.
+#[tauri::command]
+pub async fn browser_start_evidence_capture(
+    state: State<'_, BrowserState>,
+    sessions: State<'_, SessionCommandState>,
+    anchor: BrowserActionAnchor,
+) -> Result<BrowserEvidenceCaptureHandle, String> {
+    start_browser_evidence_capture(&state, &sessions, anchor).await
+}
+
+/// Shared by the Tauri command and app-owned MCP projection. It consumes a
+/// fresh semantic anchor before installing the temporary evidence wrappers.
+pub(crate) async fn start_browser_evidence_capture(
+    state: &BrowserState,
+    sessions: &SessionCommandState,
+    anchor: BrowserActionAnchor,
+) -> Result<BrowserEvidenceCaptureHandle, String> {
+    let _operation = state.operation_lock.lock().await;
+    validate_scope(
+        &sessions,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+    )
+    .await?;
+    require_current_lifecycle(
+        &state,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+        anchor.lifecycle_token,
+        "browser evidence anchor is stale",
+    )?;
+    let now = Instant::now();
+    let grant_expiry = browser_control_grant_expiry(
+        &state,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+        anchor.lifecycle_token,
+        now,
+    )?;
+    let snapshot = current_snapshot(&state)?;
+    if !snapshot.visible || snapshot.url.as_deref() != Some(anchor.url.as_str()) {
+        return Err("browser evidence anchor is stale".to_string());
+    }
+    let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
+    {
+        let mut captures = state
+            .evidence_captures
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        captures.retain(|_, capture| capture.expires_at > now);
+        if captures
+            .values()
+            .any(|capture| capture.scope == scope && capture.expires_at > now)
+        {
+            return Err("browser evidence capture is already active".to_string());
+        }
+    }
+    let document_identity = consume_browser_evidence_anchor(&state, &anchor)?;
+    let capture_id = new_browser_evidence_credential("c");
+    let capture_token = new_browser_evidence_credential("t");
+    let capture_now = Instant::now();
+    let expires_at = (capture_now + BROWSER_EVIDENCE_TTL).min(grant_expiry);
+    let record = BrowserEvidenceCaptureRecord {
+        scope,
+        capture_token: capture_token.clone(),
+        lifecycle_token: anchor.lifecycle_token,
+        url: anchor.url.clone(),
+        page_load_revision: anchor.page_load_revision,
+        document_identity,
+        expires_at,
+    };
+    state
+        .evidence_captures
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?
+        .insert(capture_id.clone(), record);
+
+    let script = match browser_evidence_start_script(
+        &capture_token,
+        &anchor.url,
+        document_identity,
+        expires_at
+            .saturating_duration_since(capture_now)
+            .as_millis()
+            .min(u64::MAX as u128) as u64,
+    ) {
+        Ok(script) => script,
+        Err(error) => {
+            expire_browser_evidence_capture(&state.evidence_captures, &capture_id, &capture_token);
+            return Err(error);
+        }
+    };
+    if let Err(error) = require_browser_control_grant(
+        &state,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+        anchor.lifecycle_token,
+        Instant::now(),
+    ) {
+        expire_browser_evidence_capture(&state.evidence_captures, &capture_id, &capture_token);
+        return Err(error);
+    }
+    let started = eval_browser_evidence_with_callback(&state, script)
+        .await
+        .and_then(|raw| parse_browser_evidence_callback(&raw).map(|_| ()));
+    if let Err(error) = started {
+        expire_browser_evidence_capture(&state.evidence_captures, &capture_id, &capture_token);
+        return Err(error);
+    }
+
+    let remaining_ms = expires_at
+        .duration_since(Instant::now())
+        .as_millis()
+        .min(u64::MAX as u128) as u64;
+    let captures = state.evidence_captures.clone();
+    let expiry_id = capture_id.clone();
+    let expiry_token = capture_token.clone();
+    let delay = expires_at.saturating_duration_since(Instant::now());
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        expire_browser_evidence_capture(&captures, &expiry_id, &expiry_token);
+    });
+    Ok(BrowserEvidenceCaptureHandle {
+        capture_id,
+        remaining_ms,
+    })
+}
+
+/// Consumes and drains one evidence capture. The backend record is removed
+/// before the native callback, so timeout, page changes, or malformed remote
+/// data cannot be retried with the same capability.
+#[tauri::command]
+pub async fn browser_read_evidence_capture(
+    state: State<'_, BrowserState>,
+    sessions: State<'_, SessionCommandState>,
+    workspace_id: String,
+    session_id: Option<String>,
+    capture_id: String,
+) -> Result<BrowserEvidenceResult, String> {
+    read_browser_evidence_capture(&state, &sessions, workspace_id, session_id, capture_id).await
+}
+
+/// Shared one-shot evidence drain. The binding owns workspace/session; callers
+/// deliberately cannot provide a lifecycle token for this operation.
+pub(crate) async fn read_browser_evidence_capture(
+    state: &BrowserState,
+    sessions: &SessionCommandState,
+    workspace_id: String,
+    session_id: Option<String>,
+    capture_id: String,
+) -> Result<BrowserEvidenceResult, String> {
+    let _operation = state.operation_lock.lock().await;
+    validate_browser_evidence_capture_id(&capture_id)?;
+    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
+    let snapshot = current_snapshot(&state)?;
+    let lifecycle_token = snapshot.lifecycle_token;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser evidence capture is stale",
+    )?;
+    require_browser_control_grant(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        Instant::now(),
+    )?;
+    let scope = scope_key(&workspace_id, session_id.as_deref());
+    let record = {
+        let mut captures = state
+            .evidence_captures
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        let Some(record) = captures.get(&capture_id).cloned() else {
+            return Err("browser evidence capture is unavailable".to_string());
+        };
+        if record.scope != scope
+            || record.lifecycle_token != lifecycle_token
+            || record.expires_at <= Instant::now()
+        {
+            captures.remove(&capture_id);
+            return Err("browser evidence capture is stale".to_string());
+        }
+        if !snapshot.visible || snapshot.url.as_deref() != Some(record.url.as_str()) {
+            captures.remove(&capture_id);
+            return Err("browser evidence capture is stale".to_string());
+        }
+        let current_revision = state
+            .contexts
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?
+            .get(&scope)
+            .filter(|context| context_is_ready_for_url(context, &record.url))
+            .map(|context| context.page_load_revision);
+        if current_revision != Some(record.page_load_revision) {
+            captures.remove(&capture_id);
+            return Err("browser evidence capture is stale".to_string());
+        }
+        // One-shot consume happens before the native drain callback.
+        captures.remove(&capture_id);
+        record
+    };
+
+    // Recheck the grant at the effect boundary. Expiry after consumption is a
+    // safe failure and deliberately cannot restore the consumed capability.
+    require_browser_control_grant(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        Instant::now(),
+    )?;
+    let script =
+        browser_evidence_read_script(&record.capture_token, &record.url, record.document_identity)?;
+    let raw = eval_browser_evidence_with_callback(&state, script).await?;
+    let callback = parse_browser_evidence_callback(&raw)?;
+    let (events, truncated) =
+        normalize_browser_evidence_events(callback.events, callback.truncated);
+    Ok(BrowserEvidenceResult {
+        events,
+        truncated,
+        untrusted: true,
+    })
+}
+
+/// Best-effort cleanup for an evidence capture that could not be handed to an
+/// authenticated projection lease. It immediately removes the backend record
+/// and, when a Tokio runtime is available, schedules a short fixed-script
+/// drain to restore page wrappers without returning their buffered events.
+pub(crate) fn discard_browser_evidence_capture(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    capture_id: &str,
+) {
+    let scope = scope_key(workspace_id, session_id);
+    let record = state
+        .evidence_captures
+        .lock()
+        .ok()
+        .and_then(|mut captures| {
+            let belongs_to_scope = captures
+                .get(capture_id)
+                .is_some_and(|capture| capture.scope == scope);
+            belongs_to_scope
+                .then(|| captures.remove(capture_id))
+                .flatten()
+        });
+    let Some(record) = record else {
+        return;
+    };
+    let state = state.clone();
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(async move {
+            let _operation = state.operation_lock.lock().await;
+            let Ok(script) = browser_evidence_cleanup_script(
+                &record.capture_token,
+                &record.url,
+                record.document_identity,
+            ) else {
+                return;
+            };
+            if let Ok(raw) = eval_browser_evidence_with_callback(&state, script).await {
+                let _ = parse_browser_evidence_cleanup_callback(&raw);
+            }
+        });
+    }
 }
 
 #[tauri::command]
@@ -2919,6 +3753,7 @@ pub async fn browser_hide(
         "browser close lifecycle is stale",
     )?;
     clear_browser_control_grant(&state);
+    invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
     {
         let webview = state
             .webview
@@ -2955,6 +3790,7 @@ pub async fn browser_hide(
 }
 
 pub fn shutdown(state: &BrowserState) {
+    clear_browser_evidence_captures(state);
     if let Ok(mut webview) = state.webview.lock() {
         if let Some(webview) = webview.take() {
             let _ = webview.close();
@@ -2968,22 +3804,26 @@ mod tests {
 
     use super::{
         advance_lifecycle_token, arm_browser_control_grant, browser_action_anchor_matches_context,
-        browser_scroll_script, browser_semantic_action_script, clear_browser_control_grant,
-        click_target_is_compatible, consume_semantic_map_for_anchor, context_is_ready_for_url,
-        control_grant_is_current, control_grant_status, fill_target_is_compatible,
-        mark_context_loading, normalize_browser_bounds, normalize_browser_context_text,
+        browser_evidence_cleanup_script, browser_evidence_read_script,
+        browser_evidence_start_script, browser_scroll_script, browser_semantic_action_script,
+        clear_browser_control_grant, click_target_is_compatible, consume_semantic_map_for_anchor,
+        context_is_ready_for_url, control_grant_is_current, control_grant_status,
+        fill_target_is_compatible, mark_context_loading, normalize_browser_bounds,
+        normalize_browser_context_text, normalize_browser_evidence_events,
         normalize_browser_fill_text, normalize_browser_scroll_delta,
         normalize_browser_semantic_map, occlusion_request_is_current, page_load_matches_expected,
         page_load_revision_is_current, parse_browser_action_callback,
+        parse_browser_evidence_callback, parse_browser_evidence_cleanup_callback,
         prepare_browser_control_action, require_action_native_url, require_browser_control_grant,
-        sanitize_browser_link_destination, semantic_item_serialized_chars,
-        semantic_map_record_is_current, should_persist_context_url,
-        validate_browser_document_identity, validate_browser_reference, validate_browser_url,
-        BrowserActionAnchor, BrowserActionResult, BrowserBounds, BrowserContext,
-        BrowserControlAction, BrowserControlGrant, BrowserControlStatus,
+        sanitize_browser_evidence_url, sanitize_browser_link_destination,
+        semantic_item_serialized_chars, semantic_map_record_is_current, should_persist_context_url,
+        validate_browser_document_identity, validate_browser_evidence_capture_id,
+        validate_browser_reference, validate_browser_url, BrowserActionAnchor, BrowserActionResult,
+        BrowserBounds, BrowserContext, BrowserControlAction, BrowserControlGrant,
+        BrowserControlStatus, BrowserEvidenceCaptureRecord, BrowserEvidenceEventRaw,
         BrowserSemanticItemExtraction, BrowserSemanticMap, BrowserSemanticMapExtraction,
         BrowserSemanticMapRecord, BrowserSemanticTargetRecord, BrowserState,
-        MAX_BROWSER_SEMANTIC_ITEMS,
+        MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS, MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
     #[test]
@@ -3860,5 +4700,225 @@ mod tests {
         assert_eq!(token, 2);
         advance_lifecycle_token(&mut token);
         assert_eq!(token, 3);
+    }
+
+    #[test]
+    fn evidence_scripts_are_fixed_bounded_and_document_bound() {
+        let start =
+            browser_evidence_start_script("t-test-secret", "https://example.test/page", 42.5, 900)
+                .unwrap();
+        assert!(start.find("let stop").unwrap() < start.find("try").unwrap());
+        assert!(start.contains("stop = () =>"));
+        assert!(start.contains("try { stop(); } catch (_) {}"));
+        assert!(start.contains("window.setTimeout(stop, 900)"));
+        assert!(start.contains("maxEvents"));
+        assert!(start.contains("events.shift()"));
+        assert!(start.contains("window.location.href !== expectedUrl"));
+        assert!(start.contains("performance.timeOrigin !== expectedIdentity"));
+        assert!(start.contains("window.addEventListener(\"error\", onError, true)"));
+        assert!(start.contains("window.removeEventListener(\"error\", onError, true)"));
+        assert!(!start.contains("JSON.stringify"));
+        assert!(!start.contains("document.cookie"));
+        assert!(!start.contains("localStorage"));
+        assert!(!start.contains("sessionStorage"));
+        assert!(!start.contains("fetch("));
+        assert!(!start.contains("XMLHttpRequest"));
+        assert!(!start.contains("WebSocket"));
+        assert!(!start.contains("querySelector"));
+        assert!(!start.contains(".value"));
+
+        let read = browser_evidence_read_script("t-test-secret", "https://example.test/page", 42.5)
+            .unwrap();
+        assert!(read.contains("state.drain()"));
+        assert!(read.contains("window.location.href !=="));
+        assert!(read.contains("performance.timeOrigin !=="));
+        assert!(!read.contains("JSON.stringify"));
+    }
+
+    #[test]
+    fn evidence_url_sanitization_preserves_port_but_drops_secrets() {
+        assert_eq!(
+            sanitize_browser_evidence_url(Some("https://localhost:3000/path?q=private#fragment",)),
+            Some("https://localhost:3000/path".to_string())
+        );
+        assert_eq!(
+            sanitize_browser_evidence_url(Some("https://user:pass@example.test/a")),
+            Some("https://example.test/a".to_string())
+        );
+        assert_eq!(
+            sanitize_browser_evidence_url(Some("https://example.test/token/reset")),
+            Some("[redacted sensitive browser evidence URL]".to_string())
+        );
+        assert!(sanitize_browser_evidence_url(Some("javascript:alert(1)")).is_none());
+    }
+
+    #[test]
+    fn evidence_events_are_allowlisted_redacted_and_budgeted() {
+        let raw = (0..MAX_BROWSER_EVIDENCE_EVENTS + 2)
+            .map(|sequence| BrowserEvidenceEventRaw {
+                kind: if sequence == 0 {
+                    "unknown".to_string()
+                } else {
+                    "consoleWarn".to_string()
+                },
+                sequence: sequence as u64,
+                message: if sequence == 1 {
+                    "authorization token leaked".to_string()
+                } else {
+                    "safe message".to_string()
+                },
+                url: Some("https://localhost:3000/app?q=hidden".to_string()),
+                line: Some(1_000_001),
+                column: Some(12),
+            })
+            .collect();
+        let (events, truncated) = normalize_browser_evidence_events(raw, false);
+        assert!(truncated);
+        assert!(events.len() <= MAX_BROWSER_EVIDENCE_EVENTS);
+        assert_eq!(events[0].message, "[redacted sensitive browser evidence]");
+        assert_eq!(events[0].url.as_deref(), Some("https://localhost:3000/app"));
+        assert!(events[0].line.is_none());
+        assert_eq!(events[0].column, Some(12));
+        assert!(
+            serde_json::to_string(&events).unwrap().chars().count() <= MAX_BROWSER_EVIDENCE_CHARS
+        );
+    }
+
+    #[test]
+    fn evidence_callback_is_bounded_and_requires_ok() {
+        let callback =
+            parse_browser_evidence_callback(r#"{"ok":true,"events":[],"truncated":false}"#)
+                .unwrap();
+        assert!(callback.ok);
+        assert!(
+            parse_browser_evidence_callback(r#"{"ok":false,"events":[],"truncated":true}"#,)
+                .is_err()
+        );
+        assert!(parse_browser_evidence_callback(&format!(
+            "{{\"ok\":true,\"events\":[],\"padding\":\"{}\"}}",
+            "x".repeat(super::MAX_BROWSER_EVIDENCE_CALLBACK_CHARS)
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn navigation_and_page_load_scope_invalidation_removes_evidence() {
+        let state = BrowserState::default();
+        state.evidence_captures.lock().unwrap().insert(
+            "c-test".to_string(),
+            BrowserEvidenceCaptureRecord {
+                scope: "workspace\u{1f}|session".to_string(),
+                capture_token: "t-test".to_string(),
+                lifecycle_token: 8,
+                url: "https://example.test/page".to_string(),
+                page_load_revision: 4,
+                document_identity: 42.5,
+                expires_at: Instant::now() + StdDuration::from_secs(60),
+            },
+        );
+        super::invalidate_browser_evidence_for_scope(&state, "other", Some("session"));
+        assert!(state
+            .evidence_captures
+            .lock()
+            .unwrap()
+            .contains_key("c-test"));
+        super::invalidate_browser_evidence_for_scope(&state, "workspace", Some("session"));
+        assert!(state.evidence_captures.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn evidence_expiry_is_token_matched_and_one_shot() {
+        let state = BrowserState::default();
+        state.evidence_captures.lock().unwrap().insert(
+            "c-test".to_string(),
+            BrowserEvidenceCaptureRecord {
+                scope: "workspace\u{1f}|session".to_string(),
+                capture_token: "t-test".to_string(),
+                lifecycle_token: 8,
+                url: "https://example.test/page".to_string(),
+                page_load_revision: 4,
+                document_identity: 42.5,
+                expires_at: Instant::now() + StdDuration::from_secs(60),
+            },
+        );
+        super::expire_browser_evidence_capture(&state.evidence_captures, "c-test", "wrong-token");
+        assert!(state
+            .evidence_captures
+            .lock()
+            .unwrap()
+            .contains_key("c-test"));
+        super::expire_browser_evidence_capture(&state.evidence_captures, "c-test", "t-test");
+        assert!(state.evidence_captures.lock().unwrap().is_empty());
+        super::expire_browser_evidence_capture(&state.evidence_captures, "c-test", "t-test");
+    }
+
+    #[test]
+    fn capture_handle_and_result_never_serialize_page_token_or_capture_id() {
+        let handle = super::BrowserEvidenceCaptureHandle {
+            capture_id: "c-public".to_string(),
+            remaining_ms: 1_000,
+        };
+        let handle_json = serde_json::to_string(&handle).unwrap();
+        assert!(handle_json.contains("c-public"));
+        assert!(!handle_json.contains("t-private"));
+
+        let result = super::BrowserEvidenceResult {
+            events: Vec::new(),
+            truncated: false,
+            untrusted: true,
+        };
+        let result_json = serde_json::to_string(&result).unwrap();
+        assert!(!result_json.contains("captureId"));
+        assert!(!result_json.contains("t-private"));
+        assert!(result_json.contains("untrusted"));
+    }
+
+    #[test]
+    fn evidence_capture_ids_are_small_opaque_backend_handles() {
+        assert!(validate_browser_evidence_capture_id("c-0123456789abcdef0123456789abcdef").is_ok());
+        assert!(validate_browser_evidence_capture_id("").is_err());
+        assert!(validate_browser_evidence_capture_id("c/secret").is_err());
+        assert!(
+            validate_browser_evidence_capture_id("c-0123456789abcdef0123456789abcdeF").is_err()
+        );
+        assert!(validate_browser_evidence_capture_id("c-0123456789abcdef").is_err());
+    }
+
+    #[test]
+    fn evidence_cleanup_script_drains_without_returning_remote_events() {
+        let script =
+            browser_evidence_cleanup_script("t-private-token", "https://example.test/page", 42.5)
+                .unwrap();
+        assert!(script.contains("state.drain();"));
+        assert!(!script.contains("events"));
+        assert!(parse_browser_evidence_cleanup_callback(r#"{"ok":true}"#).is_ok());
+        assert!(parse_browser_evidence_cleanup_callback(
+            r#"{"ok":true,"events":[{"message":"must not return"}]}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn discard_evidence_capture_removes_backend_record_before_best_effort_cleanup() {
+        let state = BrowserState::default();
+        state.evidence_captures.lock().unwrap().insert(
+            "c-0123456789abcdef0123456789abcdef".to_string(),
+            BrowserEvidenceCaptureRecord {
+                scope: "workspace\u{1f}|session".to_string(),
+                capture_token: "t-private-token".to_string(),
+                lifecycle_token: 8,
+                url: "https://example.test/page".to_string(),
+                page_load_revision: 4,
+                document_identity: 42.5,
+                expires_at: Instant::now() + StdDuration::from_secs(60),
+            },
+        );
+        super::discard_browser_evidence_capture(
+            &state,
+            "workspace",
+            Some("session"),
+            "c-0123456789abcdef0123456789abcdef",
+        );
+        assert!(state.evidence_captures.lock().unwrap().is_empty());
     }
 }

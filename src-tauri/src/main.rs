@@ -6996,6 +6996,8 @@ pub fn run() {
             browser_commands::browser_control_status,
             browser_commands::browser_disarm_control,
             browser_commands::browser_execute_action,
+            browser_commands::browser_start_evidence_capture,
+            browser_commands::browser_read_evidence_capture,
             browser_commands::browser_extract_context,
             browser_commands::browser_set_bounds,
             browser_commands::browser_set_occluded,
