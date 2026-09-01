@@ -207,11 +207,7 @@ impl BrowserMcpBridge {
             shutdown: Mutex::new(Some(shutdown_tx)),
             shutting_down: AtomicBool::new(false),
         });
-        let app = Router::new()
-            .route("/mcp", post(mcp_post))
-            .with_state(Arc::clone(&bridge))
-            .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
-            .layer(ConcurrencyLimitLayer::new(8));
+        let app = browser_mcp_router(Arc::clone(&bridge));
         tokio::spawn(async move {
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(async {
@@ -398,6 +394,17 @@ impl BrowserMcpBridge {
         registry.by_lease.insert(lease_id.clone(), binding);
         Ok(Some(EphemeralMcpProjectionLease { server, lease_id }))
     }
+}
+
+/// The production listener and local conformance tests share the exact same
+/// route, body limit, and concurrency gate. Tests call this router in-process;
+/// no port, WebView, provider runtime, or external network is involved.
+fn browser_mcp_router(bridge: Arc<BrowserMcpBridge>) -> Router {
+    Router::new()
+        .route("/mcp", post(mcp_post))
+        .with_state(bridge)
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(ConcurrencyLimitLayer::new(8))
 }
 
 impl EphemeralMcpProjection for BrowserMcpBridge {
@@ -1219,8 +1226,117 @@ fn tools() -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    use axum::body::to_bytes;
+    use tempfile::TempDir;
+    use tower::util::ServiceExt;
+
     use super::*;
     use crate::browser_commands::{bounded_browser_audit_provider_id, read_browser_audit};
+
+    const TEST_BEARER: &str = "browser-mcp-in-process-test-bearer";
+    const TEST_LEASE_ID: &str = "browser-mcp-in-process-test-lease";
+
+    fn test_bridge(phase: LeasePhase) -> (Arc<BrowserMcpBridge>, TokenBinding, TempDir) {
+        let temp = tempfile::tempdir().expect("temporary session state");
+        let root = std::fs::canonicalize(temp.path()).expect("physical temporary session state");
+        let sessions =
+            SessionCommandState::new_headless(root.join("sessions.sqlite"), root.join("app-data"));
+        let binding = TokenBinding {
+            token_hash: Sha256::digest(TEST_BEARER.as_bytes()).into(),
+            lease_id: TEST_LEASE_ID.to_string(),
+            workspace_id: "workspace".to_string(),
+            session_id: "session".to_string(),
+            provider_id: "test-provider".to_string(),
+            phase,
+        };
+        let bridge = Arc::new(BrowserMcpBridge {
+            browser: BrowserState::default(),
+            sessions,
+            registry: Mutex::new(TokenRegistry::default()),
+            endpoint: "http://127.0.0.1:0/mcp".to_string(),
+            shutdown: Mutex::new(None),
+            shutting_down: AtomicBool::new(false),
+        });
+        bridge
+            .registry
+            .lock()
+            .expect("test registry")
+            .by_lease
+            .insert(binding.lease_id.clone(), binding.clone());
+        (bridge, binding, temp)
+    }
+
+    fn mcp_request(body: impl Into<Body>) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER}"))
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.into())
+            .expect("valid in-process MCP request")
+    }
+
+    fn initialize_request(version: &str) -> Value {
+        json!({
+            "jsonrpc":"2.0", "id":"init", "method":"initialize",
+            "params":{"protocolVersion":version,"capabilities":{},"clientInfo":{"name":"fixture","version":"1"}}
+        })
+    }
+
+    fn tool_call_request(id: Option<&str>, name: &str, arguments: Value) -> Value {
+        let mut request = json!({
+            "jsonrpc":"2.0", "method":"tools/call",
+            "params":{"name":name,"arguments":arguments}
+        });
+        if let Some(id) = id {
+            request["id"] = Value::String(id.to_string());
+        }
+        request
+    }
+
+    fn test_anchor() -> Value {
+        json!({
+            "workspaceId":"workspace", "sessionId":"session", "lifecycleToken":8,
+            "mapId":"m-8-2", "generation":2, "url":"https://example.test/page",
+            "pageLoadRevision":4
+        })
+    }
+
+    async fn response_json(response: Response) -> Value {
+        let body = to_bytes(response.into_body(), MAX_BODY_BYTES + 1024)
+            .await
+            .expect("bounded MCP response");
+        serde_json::from_slice(&body).expect("JSON-RPC response")
+    }
+
+    async fn router_call(app: &Router, request: Request<Body>) -> Response {
+        app.clone()
+            .oneshot(request)
+            .await
+            .expect("in-process router response")
+    }
+
+    async fn ready_router(version: &str) -> (Router, Arc<BrowserMcpBridge>, TokenBinding, TempDir) {
+        let (bridge, binding, temp) = test_bridge(LeasePhase::Issued);
+        let app = browser_mcp_router(Arc::clone(&bridge));
+        let initialize = router_call(
+            &app,
+            mcp_request(Body::from(initialize_request(version).to_string())),
+        )
+        .await;
+        assert_eq!(initialize.status(), StatusCode::OK);
+        let mut initialized = mcp_request(Body::from(
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string(),
+        ));
+        initialized.headers_mut().insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_str(version).expect("fixed protocol version"),
+        );
+        let initialized = router_call(&app, initialized).await;
+        assert_eq!(initialized.status(), StatusCode::ACCEPTED);
+        (app, bridge, binding, temp)
+    }
 
     fn headers(values: &[(&str, &str)]) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -1231,6 +1347,299 @@ mod tests {
             );
         }
         headers
+    }
+
+    #[tokio::test]
+    async fn in_process_router_rejects_transport_and_json_rpc_before_dispatch() {
+        let (bridge, _binding, _temp) = test_bridge(LeasePhase::Issued);
+        let app = browser_mcp_router(Arc::clone(&bridge));
+
+        let unauthorized = Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        assert_eq!(
+            router_call(&app, unauthorized).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let mut foreign_origin = mcp_request(Body::from("{}"));
+        foreign_origin.headers_mut().insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://example.test"),
+        );
+        assert_eq!(
+            router_call(&app, foreign_origin).await.status(),
+            StatusCode::FORBIDDEN
+        );
+
+        let mut insufficient_accept = mcp_request(Body::from("{}"));
+        insufficient_accept
+            .headers_mut()
+            .insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+        assert_eq!(
+            router_call(&app, insufficient_accept).await.status(),
+            StatusCode::NOT_ACCEPTABLE
+        );
+
+        let mut wrong_content_type = mcp_request(Body::from("{}"));
+        wrong_content_type
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+        assert_eq!(
+            router_call(&app, wrong_content_type).await.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
+
+        let batch = router_call(&app, mcp_request(Body::from("[]"))).await;
+        assert_eq!(batch.status(), StatusCode::OK);
+        assert_eq!(response_json(batch).await["error"]["code"], -32600);
+
+        let malformed = router_call(&app, mcp_request(Body::from("{"))).await;
+        assert_eq!(malformed.status(), StatusCode::OK);
+        assert_eq!(response_json(malformed).await["error"]["code"], -32700);
+
+        let oversized = router_call(
+            &app,
+            mcp_request(Body::from(vec![b'x'; MAX_BODY_BYTES + 1])),
+        )
+        .await;
+        assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(
+            read_browser_audit(&bridge.browser, "workspace", Some("session"), 10)
+                .expect("audit read")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn in_process_router_enforces_lifecycle_versions_and_no_effect_notifications() {
+        for protocol in MCP_PROTOCOL_COMPAT {
+            let (bridge, _binding, _temp) = test_bridge(LeasePhase::Issued);
+            let app = browser_mcp_router(Arc::clone(&bridge));
+
+            let initialize = router_call(
+                &app,
+                mcp_request(Body::from(initialize_request(protocol).to_string())),
+            )
+            .await;
+            assert_eq!(initialize.status(), StatusCode::OK);
+            assert_eq!(
+                initialize.headers().get("MCP-Protocol-Version"),
+                Some(&HeaderValue::from_str(protocol).unwrap())
+            );
+
+            let mut list_before_ready = mcp_request(Body::from(
+                json!({"jsonrpc":"2.0","id":"list-before","method":"tools/list"}).to_string(),
+            ));
+            list_before_ready.headers_mut().insert(
+                "MCP-Protocol-Version",
+                HeaderValue::from_str(protocol).unwrap(),
+            );
+            let list_before_ready = router_call(&app, list_before_ready).await;
+            assert_eq!(list_before_ready.status(), StatusCode::OK);
+            assert_eq!(
+                response_json(list_before_ready).await["error"]["code"],
+                -32600
+            );
+
+            let mut initialized = mcp_request(Body::from(
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string(),
+            ));
+            initialized.headers_mut().insert(
+                "MCP-Protocol-Version",
+                HeaderValue::from_str(protocol).unwrap(),
+            );
+            let initialized = router_call(&app, initialized).await;
+            assert_eq!(initialized.status(), StatusCode::ACCEPTED);
+            assert!(to_bytes(initialized.into_body(), 1)
+                .await
+                .unwrap()
+                .is_empty());
+
+            let mut generic_notification = mcp_request(Body::from(
+                json!({"jsonrpc":"2.0","method":"notifications/progress"}).to_string(),
+            ));
+            generic_notification.headers_mut().insert(
+                "MCP-Protocol-Version",
+                HeaderValue::from_str(protocol).unwrap(),
+            );
+            let generic_notification = router_call(&app, generic_notification).await;
+            assert_eq!(generic_notification.status(), StatusCode::ACCEPTED);
+            assert!(to_bytes(generic_notification.into_body(), 1)
+                .await
+                .unwrap()
+                .is_empty());
+
+            let missing_header = router_call(
+                &app,
+                mcp_request(Body::from(
+                    json!({"jsonrpc":"2.0","id":"missing","method":"tools/list"}).to_string(),
+                )),
+            )
+            .await;
+            assert_eq!(missing_header.status(), StatusCode::BAD_REQUEST);
+
+            let mut wrong_header = mcp_request(Body::from(
+                json!({"jsonrpc":"2.0","id":"wrong","method":"tools/list"}).to_string(),
+            ));
+            wrong_header.headers_mut().insert(
+                "MCP-Protocol-Version",
+                HeaderValue::from_static("2099-01-01"),
+            );
+            assert_eq!(
+                router_call(&app, wrong_header).await.status(),
+                StatusCode::BAD_REQUEST
+            );
+
+            let mut list = mcp_request(Body::from(
+                json!({"jsonrpc":"2.0","id":"list","method":"tools/list"}).to_string(),
+            ));
+            list.headers_mut().insert(
+                "MCP-Protocol-Version",
+                HeaderValue::from_str(protocol).unwrap(),
+            );
+            let list = router_call(&app, list).await;
+            assert_eq!(list.status(), StatusCode::OK);
+            let tools = response_json(list).await["result"]["tools"]
+                .as_array()
+                .cloned()
+                .expect("tools array");
+            assert_eq!(tools.len(), BROWSER_MCP_TOOL_NAMES.len());
+            assert_eq!(
+                tools
+                    .iter()
+                    .filter_map(|tool| tool["name"].as_str())
+                    .collect::<Vec<_>>(),
+                BROWSER_MCP_TOOL_NAMES
+            );
+            assert!(tools
+                .iter()
+                .all(|tool| { tool["inputSchema"]["additionalProperties"] == Value::Bool(false) }));
+            assert!(
+                read_browser_audit(&bridge.browser, "workspace", Some("session"), 10)
+                    .expect("audit read")
+                    .is_empty()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn in_process_router_drops_notifications_and_bad_tools_without_audit_or_payload_echo() {
+        let (app, bridge, _binding, _temp) = ready_router(MCP_PROTOCOL_VERSION).await;
+        let private_fill = "private-fill-text-must-not-escape";
+
+        let mut notification = mcp_request(Body::from(
+            tool_call_request(
+                None,
+                "dcc_browser_fill",
+                json!({"anchor":test_anchor(),"ref":"e1","text":private_fill}),
+            )
+            .to_string(),
+        ));
+        notification.headers_mut().insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static(MCP_PROTOCOL_VERSION),
+        );
+        let notification = router_call(&app, notification).await;
+        assert_eq!(notification.status(), StatusCode::ACCEPTED);
+        assert!(to_bytes(notification.into_body(), 1)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let mut malformed = mcp_request(Body::from(
+            tool_call_request(
+                Some("malformed"),
+                "dcc_browser_fill",
+                json!({"ref":"e1","text":private_fill,"unexpected":true}),
+            )
+            .to_string(),
+        ));
+        malformed.headers_mut().insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static(MCP_PROTOCOL_VERSION),
+        );
+        let malformed = router_call(&app, malformed).await;
+        assert_eq!(malformed.status(), StatusCode::OK);
+        let malformed = response_json(malformed).await;
+        assert_eq!(malformed["error"]["code"], -32602);
+        assert!(!malformed.to_string().contains(private_fill));
+
+        let mut unknown = mcp_request(Body::from(
+            tool_call_request(Some("unknown"), "dcc_browser_unknown", json!({})).to_string(),
+        ));
+        unknown.headers_mut().insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static(MCP_PROTOCOL_VERSION),
+        );
+        let unknown = router_call(&app, unknown).await;
+        assert_eq!(unknown.status(), StatusCode::OK);
+        assert_eq!(response_json(unknown).await["error"]["code"], -32602);
+
+        let audit = read_browser_audit(&bridge.browser, "workspace", Some("session"), 10)
+            .expect("audit read");
+        assert!(audit.is_empty());
+        assert!(!serde_json::to_string(&audit)
+            .unwrap()
+            .contains(private_fill));
+    }
+
+    #[tokio::test]
+    async fn shutdown_race_after_auth_dispatches_once_and_audits_without_payload() {
+        let (bridge, binding, _temp) = test_bridge(LeasePhase::Ready(MCP_PROTOCOL_VERSION));
+        let private_fill = "private-fill-text-must-not-escape";
+        // This models shutdown winning after the HTTP authentication/lifecycle
+        // gate. A shutdown before `mcp_post` authenticates returns 503 with no
+        // audit because no closed Browser tool was admitted for dispatch.
+        bridge.shutting_down.store(true, Ordering::Release);
+        let response = handle_rpc(
+            Arc::clone(&bridge),
+            binding,
+            tool_call_request(
+                Some("shutdown-race"),
+                "dcc_browser_fill",
+                json!({"anchor":test_anchor(),"ref":"e1","text":private_fill}),
+            ),
+            Some(MCP_PROTOCOL_VERSION),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), MAX_BODY_BYTES)
+            .await
+            .expect("bounded shutdown response");
+        assert!(body.is_empty());
+
+        let audit = read_browser_audit(&bridge.browser, "workspace", Some("session"), 10)
+            .expect("audit read");
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].origin, BrowserAuditOrigin::Mcp);
+        assert_eq!(audit[0].tool, BrowserAuditTool::Fill);
+        assert_eq!(audit[0].outcome, BrowserAuditOutcome::Failed);
+        assert_eq!(audit[0].grant_state, BrowserAuditGrantState::NotApplicable);
+        let audit_json = serde_json::to_string(&audit).expect("serializable audit");
+        assert!(!audit_json.contains(private_fill));
+        assert!(!audit_json.contains(TEST_BEARER));
+        assert!(!audit_json.contains(TEST_LEASE_ID));
+        let audit_value = serde_json::to_value(&audit).expect("audit JSON shape");
+        let record = audit_value[0].as_object().expect("closed audit record");
+        for field in [
+            "reference",
+            "ref",
+            "text",
+            "arguments",
+            "url",
+            "message",
+            "captureId",
+        ] {
+            assert!(
+                !record.contains_key(field),
+                "audit unexpectedly exposes {field}"
+            );
+        }
     }
 
     #[test]
