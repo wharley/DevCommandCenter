@@ -16,7 +16,10 @@ use std::{
     collections::HashMap,
     fmt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, OnceLock, Weak,
+    },
 };
 
 use crate::guarded_undo_runtime::ConfigureOutcome;
@@ -25,8 +28,15 @@ use crate::guarded_undo_runtime::GuardedUndoRuntimeError;
 use crate::guarded_undo_runtime::{GuardedUndoRuntime, WorkspaceMutationRunError};
 use crate::state::AuthorizedWorkspaceMutation;
 use crate::terminal_arbiter::TerminalArbiter;
-use dcc_core::ports::{events::CoreEvent, EventBus};
 use dcc_core::Result as CoreResult;
+use dcc_core::{
+    domain::session::SessionEventRecord,
+    ports::{
+        events::CoreEvent, EventBus, SessionLiveDurableIdentity, SessionLiveEventEnvelope,
+        MAX_SESSION_LIVE_RUNTIME_SEQUENCE,
+    },
+};
+use uuid::Uuid;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PhysicalIdentity {
@@ -145,6 +155,10 @@ pub struct ProcessRuntime {
     workspace_mutations: Arc<dcc_infra::guarded_undo::coordinator::WorkspaceMutationCoordinator>,
     session_store: Arc<Mutex<crate::state::SessionStore>>,
     event_buses: Mutex<Vec<Weak<dyn EventBus>>>,
+    /// Public process-local identifier, never persisted or used as authority.
+    runtime_generation: String,
+    /// Allocated once per session-live event before fanout. It never wraps.
+    next_live_sequence: AtomicU64,
 }
 
 impl fmt::Debug for ProcessRuntime {
@@ -173,6 +187,8 @@ impl ProcessRuntime {
             workspace_mutations,
             session_store: Arc::new(Mutex::new(crate::state::SessionStore::default())),
             event_buses: Mutex::new(Vec::new()),
+            runtime_generation: Uuid::new_v4().to_string(),
+            next_live_sequence: AtomicU64::new(0),
         }
     }
 
@@ -374,7 +390,78 @@ impl ProcessRuntime {
         Ok(())
     }
 
+    /// Publishes the legacy event and, for session-scoped events, an additive
+    /// live envelope. Workspace events deliberately have no session envelope.
     pub(crate) async fn publish_event(&self, event: CoreEvent) -> CoreResult<()> {
+        let live_event = self.new_live_event(event.clone(), None);
+        self.publish_to_buses(event, live_event).await
+    }
+
+    /// Publishes an event whose durable identity came from the canonical
+    /// SQLite append outcome. The record is never reconstructed from caller
+    /// input, so a racing append cannot mislabel a live envelope.
+    pub(crate) async fn publish_durable_session_event(
+        &self,
+        record: &SessionEventRecord,
+        event: CoreEvent,
+    ) -> CoreResult<()> {
+        if !event.matches_session_record(record) {
+            return Err(dcc_core::CoreError::Repository(
+                "durable session event does not match its canonical record".to_string(),
+            ));
+        }
+        let durable = SessionLiveDurableIdentity {
+            session_id: record.session_id.0.clone(),
+            event_id: record.event_id.clone(),
+            sequence: record.sequence,
+        };
+        let live_event = self.new_live_event(event.clone(), Some(durable));
+        self.publish_to_buses(event, live_event).await
+    }
+
+    fn new_live_event(
+        &self,
+        event: CoreEvent,
+        durable: Option<SessionLiveDurableIdentity>,
+    ) -> Option<SessionLiveEventEnvelope> {
+        if event.session_id().is_none() {
+            return None;
+        }
+        let runtime_sequence = self.allocate_live_sequence()?;
+        Some(SessionLiveEventEnvelope {
+            runtime_generation: self.runtime_generation.clone(),
+            runtime_sequence,
+            durable,
+            event,
+        })
+    }
+
+    fn allocate_live_sequence(&self) -> Option<u64> {
+        let mut current = self.next_live_sequence.load(Ordering::Relaxed);
+        loop {
+            if current >= MAX_SESSION_LIVE_RUNTIME_SEQUENCE {
+                // Fail closed instead of wrapping and making an old envelope
+                // appear current. Legacy CoreEvent delivery remains intact.
+                return None;
+            }
+            let next = current + 1;
+            match self.next_live_sequence.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(next),
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    async fn publish_to_buses(
+        &self,
+        event: CoreEvent,
+        live_event: Option<SessionLiveEventEnvelope>,
+    ) -> CoreResult<()> {
         let buses = {
             let mut entries = self.event_buses.lock().map_err(|_| {
                 dcc_core::CoreError::Repository("event hub unavailable".to_string())
@@ -401,6 +488,13 @@ impl ProcessRuntime {
                     }
                 }
             }
+            if let Some(live_event) = live_event.as_ref() {
+                // This is an additive transport: a failure to emit it must not
+                // change legacy CoreEvent delivery semantics.
+                if bus.publish_session_live(live_event.clone()).await.is_err() {
+                    eprintln!("[DCC] session live event publication failed");
+                }
+            }
         }
         if delivered {
             Ok(())
@@ -409,6 +503,16 @@ impl ProcessRuntime {
                 dcc_core::CoreError::Repository("event hub has no subscribers".to_string())
             }))
         }
+    }
+
+    #[cfg(test)]
+    fn runtime_generation(&self) -> &str {
+        &self.runtime_generation
+    }
+
+    #[cfg(test)]
+    fn set_next_live_sequence_for_test(&self, sequence: u64) {
+        self.next_live_sequence.store(sequence, Ordering::Relaxed);
     }
 
     pub(crate) fn session_store(&self) -> Arc<Mutex<crate::state::SessionStore>> {
@@ -744,8 +848,30 @@ mod tests {
         ffi::CString,
         fs,
         os::unix::{ffi::OsStrExt, fs::symlink, fs::PermissionsExt},
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        },
     };
+
+    #[derive(Default)]
+    struct RecordingEventBus {
+        legacy: Mutex<Vec<CoreEvent>>,
+        live: Mutex<Vec<SessionLiveEventEnvelope>>,
+    }
+
+    #[async_trait::async_trait]
+    impl EventBus for RecordingEventBus {
+        async fn publish(&self, event: CoreEvent) -> CoreResult<()> {
+            self.legacy.lock().unwrap().push(event);
+            Ok(())
+        }
+
+        async fn publish_session_live(&self, event: SessionLiveEventEnvelope) -> CoreResult<()> {
+            self.live.lock().unwrap().push(event);
+            Ok(())
+        }
+    }
 
     struct Scope {
         _root: tempfile::TempDir,
@@ -784,6 +910,158 @@ mod tests {
             Err(AcquireAfterOpenError::Scope(error)) => Err(error),
             Err(AcquireAfterOpenError::Consumer(never)) => match never {},
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn live_session_envelopes_are_unique_and_preserve_legacy_fanout() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let runtime = acquire(&registry, &scope.db, &scope.app_data).unwrap();
+        let bus = Arc::new(RecordingEventBus::default());
+        let event_bus: Arc<dyn EventBus> = bus.clone();
+        runtime.register_event_bus(&event_bus).unwrap();
+
+        runtime
+            .publish_event(CoreEvent::WorkspaceReady {
+                workspace_id: "workspace-1".to_string(),
+                project_id: "project-1".to_string(),
+                worktree_path: "/redacted".to_string(),
+            })
+            .await
+            .unwrap();
+        runtime
+            .publish_event(CoreEvent::SessionMcpRuntimeStatusChanged {
+                session_id: "session-1".to_string(),
+                statuses: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let record = SessionEventRecord {
+            event_id: "canonical-event-id".to_string(),
+            session_id: dcc_core::domain::session::SessionId("session-1".to_string()),
+            sequence: 41,
+            occurred_at: "2026-09-01T00:00:00Z".to_string(),
+            kind: dcc_core::domain::session::SessionEventKind::TurnCompleted {
+                turn_id: dcc_core::domain::session::TurnId("turn-1".to_string()),
+            },
+        };
+        runtime
+            .publish_durable_session_event(
+                &record,
+                CoreEvent::SessionTurnCompleted {
+                    session_id: "session-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let legacy = bus.legacy.lock().unwrap();
+        assert_eq!(legacy.len(), 3, "legacy fanout stays unchanged");
+        let live = bus.live.lock().unwrap();
+        assert_eq!(live.len(), 2, "workspace events have no session envelope");
+        assert_eq!(live[0].runtime_sequence, 1);
+        assert_eq!(live[1].runtime_sequence, 2);
+        assert_eq!(live[0].runtime_generation, live[1].runtime_generation);
+        assert_eq!(live[0].runtime_generation, runtime.runtime_generation());
+        assert!(live[0].durable.is_none());
+        assert_eq!(
+            live[1].durable.as_ref().unwrap(),
+            &SessionLiveDurableIdentity {
+                session_id: "session-1".to_string(),
+                event_id: "canonical-event-id".to_string(),
+                sequence: 41,
+            }
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn live_sequence_never_wraps_into_a_reused_identity() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let runtime = acquire(&registry, &scope.db, &scope.app_data).unwrap();
+        let bus = Arc::new(RecordingEventBus::default());
+        let event_bus: Arc<dyn EventBus> = bus.clone();
+        runtime.register_event_bus(&event_bus).unwrap();
+        runtime.set_next_live_sequence_for_test(MAX_SESSION_LIVE_RUNTIME_SEQUENCE);
+
+        runtime
+            .publish_event(CoreEvent::SessionMcpRuntimeStatusChanged {
+                session_id: "session-1".to_string(),
+                statuses: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(bus.legacy.lock().unwrap().len(), 1);
+        assert!(bus.live.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn js_safe_live_sequence_is_emitted_once_then_fails_closed() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let runtime = acquire(&registry, &scope.db, &scope.app_data).unwrap();
+        let bus = Arc::new(RecordingEventBus::default());
+        let event_bus: Arc<dyn EventBus> = bus.clone();
+        runtime.register_event_bus(&event_bus).unwrap();
+        runtime.set_next_live_sequence_for_test(MAX_SESSION_LIVE_RUNTIME_SEQUENCE - 1);
+
+        runtime
+            .publish_event(CoreEvent::SessionMcpRuntimeStatusChanged {
+                session_id: "session-1".to_string(),
+                statuses: Vec::new(),
+            })
+            .await
+            .unwrap();
+        runtime
+            .publish_event(CoreEvent::SessionMcpRuntimeStatusChanged {
+                session_id: "session-1".to_string(),
+                statuses: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(bus.legacy.lock().unwrap().len(), 2);
+        assert_eq!(bus.live.lock().unwrap().len(), 1);
+        assert_eq!(
+            bus.live.lock().unwrap()[0].runtime_sequence,
+            MAX_SESSION_LIVE_RUNTIME_SEQUENCE
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mismatched_canonical_record_is_not_published_to_any_transport() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let runtime = acquire(&registry, &scope.db, &scope.app_data).unwrap();
+        let bus = Arc::new(RecordingEventBus::default());
+        let event_bus: Arc<dyn EventBus> = bus.clone();
+        runtime.register_event_bus(&event_bus).unwrap();
+        let record = SessionEventRecord {
+            event_id: "canonical-event-id".to_string(),
+            session_id: dcc_core::domain::session::SessionId("session-1".to_string()),
+            sequence: 1,
+            occurred_at: "2026-09-01T00:00:00Z".to_string(),
+            kind: dcc_core::domain::session::SessionEventKind::TurnCompleted {
+                turn_id: dcc_core::domain::session::TurnId("turn-1".to_string()),
+            },
+        };
+
+        let result = runtime
+            .publish_durable_session_event(
+                &record,
+                CoreEvent::SessionTurnAborted {
+                    session_id: "session-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    reason: None,
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(bus.legacy.lock().unwrap().is_empty());
+        assert!(bus.live.lock().unwrap().is_empty());
     }
 
     #[test]

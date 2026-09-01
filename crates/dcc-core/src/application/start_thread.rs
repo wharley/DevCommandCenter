@@ -137,13 +137,16 @@ where
     };
     if created {
         events
-            .publish(CoreEvent::SessionStarted {
-                session_id: session_id.0.clone(),
-                workspace_id: input.workspace_id.0.clone(),
-                project_id: input.project_id.0.clone(),
-                provider_id: input.provider_id.clone(),
-                model: input.model,
-            })
+            .publish_durable_session(
+                &started_event,
+                CoreEvent::SessionStarted {
+                    session_id: session_id.0.clone(),
+                    workspace_id: input.workspace_id.0.clone(),
+                    project_id: input.project_id.0.clone(),
+                    provider_id: input.provider_id.clone(),
+                    model: input.model,
+                },
+            )
             .await?;
     }
 

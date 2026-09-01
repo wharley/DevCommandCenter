@@ -2137,8 +2137,17 @@ impl SessionCommandState {
         core_event: dcc_core::ports::events::CoreEvent,
     ) -> Result<()> {
         let outcome = self.append_session_event(session_id, kind).await?;
-        if matches!(outcome, AppendEventOutcome::Inserted(_)) {
-            self.publish(core_event).await?;
+        self.publish_appended_session_event(outcome, core_event)
+            .await
+    }
+
+    async fn publish_appended_session_event(
+        &self,
+        outcome: AppendEventOutcome,
+        core_event: dcc_core::ports::events::CoreEvent,
+    ) -> Result<()> {
+        if let AppendEventOutcome::Inserted(record) = outcome {
+            EventBus::publish_durable_session(self, &record, core_event).await?;
         }
         Ok(())
     }
@@ -2585,18 +2594,26 @@ impl SessionCommandState {
         let publish_result = if payload.inserted {
             match &payload.record.kind {
                 SessionEventKind::TurnCompleted { turn_id } => {
-                    self.publish(dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
-                        session_id: payload.record.session_id.0.clone(),
-                        turn_id: turn_id.0.clone(),
-                    })
+                    EventBus::publish_durable_session(
+                        self,
+                        &payload.record,
+                        dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
+                            session_id: payload.record.session_id.0.clone(),
+                            turn_id: turn_id.0.clone(),
+                        },
+                    )
                     .await
                 }
                 SessionEventKind::TurnAborted { turn_id, reason } => {
-                    self.publish(dcc_core::ports::events::CoreEvent::SessionTurnAborted {
-                        session_id: payload.record.session_id.0.clone(),
-                        turn_id: turn_id.0.clone(),
-                        reason: reason.clone(),
-                    })
+                    EventBus::publish_durable_session(
+                        self,
+                        &payload.record,
+                        dcc_core::ports::events::CoreEvent::SessionTurnAborted {
+                            session_id: payload.record.session_id.0.clone(),
+                            turn_id: turn_id.0.clone(),
+                            reason: reason.clone(),
+                        },
+                    )
                     .await
                 }
                 _ => Ok(()),
@@ -2656,9 +2673,10 @@ impl SessionCommandState {
                     },
                 )
                 .await?;
-            if matches!(outcome, AppendEventOutcome::Inserted(_))
-                && self
-                    .publish(
+            if let AppendEventOutcome::Inserted(record) = outcome {
+                if self
+                    .publish_durable_session(
+                        &record,
                         dcc_core::ports::events::CoreEvent::SessionTurnAssistantMessageCompleted {
                             session_id: session_id.0.clone(),
                             turn_id: turn_id.0.clone(),
@@ -2669,8 +2687,9 @@ impl SessionCommandState {
                     )
                     .await
                     .is_err()
-            {
-                eprintln!("[DCC] assistant completion publication failed");
+                {
+                    eprintln!("[DCC] assistant completion publication failed");
+                }
             }
         }
         Ok(())
@@ -4882,6 +4901,16 @@ impl EventBus for SessionCommandState {
     async fn publish(&self, event: dcc_core::ports::events::CoreEvent) -> Result<()> {
         self.runtime.publish_event(event).await
     }
+
+    async fn publish_durable_session(
+        &self,
+        record: &SessionEventRecord,
+        event: dcc_core::ports::events::CoreEvent,
+    ) -> Result<()> {
+        self.runtime
+            .publish_durable_session_event(record, event)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -4954,6 +4983,28 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
+    struct RecordingLiveEventBus {
+        legacy: Arc<Mutex<Vec<dcc_core::ports::events::CoreEvent>>>,
+        live: Arc<Mutex<Vec<dcc_core::ports::SessionLiveEventEnvelope>>>,
+    }
+
+    #[async_trait]
+    impl EventBus for RecordingLiveEventBus {
+        async fn publish(&self, event: dcc_core::ports::events::CoreEvent) -> Result<()> {
+            self.legacy.lock().expect("legacy event lock").push(event);
+            Ok(())
+        }
+
+        async fn publish_session_live(
+            &self,
+            event: dcc_core::ports::SessionLiveEventEnvelope,
+        ) -> Result<()> {
+            self.live.lock().expect("live event lock").push(event);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
     struct FailingEventBus;
 
     #[async_trait]
@@ -4979,6 +5030,57 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn appended_live_event_uses_canonical_record_and_existing_is_silent() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-live-event-{}.sqlite", Uuid::new_v4())),
+        );
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let bus = RecordingLiveEventBus::default();
+        let state = SessionCommandState::new_with_event_bus(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+            Arc::new(bus.clone()),
+        );
+        let record = SessionEventRecord {
+            event_id: "canonical-event".to_string(),
+            session_id: SessionId("session-live".to_string()),
+            sequence: 73,
+            occurred_at: "2026-09-01T00:00:00Z".to_string(),
+            kind: SessionEventKind::TurnCompleted {
+                turn_id: TurnId("turn-live".to_string()),
+            },
+        };
+        let event = dcc_core::ports::events::CoreEvent::SessionTurnCompleted {
+            session_id: "session-live".to_string(),
+            turn_id: "turn-live".to_string(),
+        };
+
+        futures::executor::block_on(state.publish_appended_session_event(
+            AppendEventOutcome::Inserted(record.clone()),
+            event.clone(),
+        ))
+        .expect("inserted event publishes");
+        futures::executor::block_on(
+            state.publish_appended_session_event(AppendEventOutcome::Existing(record), event),
+        )
+        .expect("existing event remains silent");
+
+        assert_eq!(bus.legacy.lock().expect("legacy event lock").len(), 1);
+        let live = bus.live.lock().expect("live event lock");
+        assert_eq!(live.len(), 1);
+        assert_eq!(
+            live[0].durable.as_ref().expect("durable identity").event_id,
+            "canonical-event"
+        );
+        assert_eq!(
+            live[0].durable.as_ref().expect("durable identity").sequence,
+            73
+        );
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]

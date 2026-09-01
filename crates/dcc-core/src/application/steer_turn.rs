@@ -96,11 +96,14 @@ where
     };
     if inserted {
         events
-            .publish(CoreEvent::SessionTurnSteered {
-                session_id: input.session_id.0.clone(),
-                turn_id: turn_id.0.clone(),
-                prompt: input.prompt,
-            })
+            .publish_durable_session(
+                &canonical,
+                CoreEvent::SessionTurnSteered {
+                    session_id: input.session_id.0.clone(),
+                    turn_id: turn_id.0.clone(),
+                    prompt: input.prompt,
+                },
+            )
             .await?;
     }
 

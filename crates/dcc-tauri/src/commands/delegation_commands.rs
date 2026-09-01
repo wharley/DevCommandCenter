@@ -169,8 +169,8 @@ async fn append_and_publish_parent_event(
     let outcome = SessionEventRepo::append_event(state, &event)
         .await
         .map_err(|error| error.to_string())?;
-    if matches!(outcome, AppendEventOutcome::Inserted(_)) {
-        EventBus::publish(state, core_event)
+    if let AppendEventOutcome::Inserted(record) = outcome {
+        EventBus::publish_durable_session(state, &record, core_event)
             .await
             .map_err(|error| error.to_string())?;
     }

@@ -170,19 +170,25 @@ where
     sessions.save_session(&session).await?;
     if publish_turn {
         events
-            .publish(CoreEvent::SessionTurnAborted {
-                session_id: input.session_id.0.clone(),
-                turn_id: active_turn_id.0.clone(),
-                reason: canonical_reason.clone(),
-            })
+            .publish_durable_session(
+                &canonical_turn,
+                CoreEvent::SessionTurnAborted {
+                    session_id: input.session_id.0.clone(),
+                    turn_id: active_turn_id.0.clone(),
+                    reason: canonical_reason.clone(),
+                },
+            )
             .await?;
     }
     if publish_session {
         events
-            .publish(CoreEvent::SessionAborted {
-                session_id: input.session_id.0.clone(),
-                reason: canonical_reason,
-            })
+            .publish_durable_session(
+                &canonical_session,
+                CoreEvent::SessionAborted {
+                    session_id: input.session_id.0.clone(),
+                    reason: canonical_reason,
+                },
+            )
             .await?;
     }
 

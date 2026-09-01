@@ -9,7 +9,10 @@ pub mod repository;
 pub use credential_store::{
     CredentialStore, CredentialStoreError, CredentialStoreResult, SecretValue,
 };
-pub use events::{CoreEvent, EventBus};
+pub use events::{
+    CoreEvent, EventBus, SessionLiveDurableIdentity, SessionLiveEventEnvelope,
+    MAX_SESSION_LIVE_RUNTIME_SEQUENCE,
+};
 pub use git::{ClonedRepository, GitOps, PreparedWorktree};
 pub use mcp_conformance::{
     McpConformanceAdapter, McpConformanceAdapterError, McpConformanceAdapterResult,

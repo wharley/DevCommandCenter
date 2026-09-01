@@ -1679,6 +1679,56 @@ export type SessionEventRecord = {
 
 export type SessionId = string;
 
+/**
+ *  Canonical durable identity, supplied only after SQLite has accepted the
+ *  session event. It is intentionally absent for runtime-only session events.
+ */
+export type SessionLiveDurableIdentity = {
+	sessionId: string,
+	eventId: string,
+	sequence: number,
+};
+
+/**
+ *  Additive live transport envelope for session events.
+ *
+ *  `runtime_generation` and `runtime_sequence` are process-local identity
+ *  hints, not durable ordering. Consumers must use `durable` to reconcile a
+ *  hydrated session transcript and must not infer a global session order from
+ *  `runtime_sequence`.
+ */
+export type SessionLiveEventEnvelope = SessionLiveEventEnvelope_Serialize | SessionLiveEventEnvelope_Deserialize;
+
+/**
+ *  Additive live transport envelope for session events.
+ *
+ *  `runtime_generation` and `runtime_sequence` are process-local identity
+ *  hints, not durable ordering. Consumers must use `durable` to reconcile a
+ *  hydrated session transcript and must not infer a global session order from
+ *  `runtime_sequence`.
+ */
+export type SessionLiveEventEnvelope_Deserialize = {
+	runtimeGeneration: string,
+	runtimeSequence: number,
+	durable: SessionLiveDurableIdentity | null,
+	event: CoreEvent,
+};
+
+/**
+ *  Additive live transport envelope for session events.
+ *
+ *  `runtime_generation` and `runtime_sequence` are process-local identity
+ *  hints, not durable ordering. Consumers must use `durable` to reconcile a
+ *  hydrated session transcript and must not infer a global session order from
+ *  `runtime_sequence`.
+ */
+export type SessionLiveEventEnvelope_Serialize = {
+	runtimeGeneration: string,
+	runtimeSequence: number,
+	durable?: SessionLiveDurableIdentity | null,
+	event: CoreEvent,
+};
+
 export type SessionProjection = {
 	sessionId: SessionId,
 	projectId: ProjectId,

@@ -191,13 +191,16 @@ where
     sessions.save_session(&session).await?;
     if created {
         events
-            .publish(CoreEvent::SessionTurnStarted {
-                session_id: input.session_id.0.clone(),
-                turn_id: turn_id.0.clone(),
-                prompt: input.prompt,
-                plan_mode: input.plan_mode,
-                model: session.model.clone(),
-            })
+            .publish_durable_session(
+                &started,
+                CoreEvent::SessionTurnStarted {
+                    session_id: input.session_id.0.clone(),
+                    turn_id: turn_id.0.clone(),
+                    prompt: input.prompt,
+                    plan_mode: input.plan_mode,
+                    model: session.model.clone(),
+                },
+            )
             .await?;
     }
 

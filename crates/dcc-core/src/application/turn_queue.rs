@@ -103,7 +103,7 @@ where
         approval_policy: input.turn.approval_policy,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
-    let (_event, inserted) = append(
+    let (event, inserted) = append(
         events,
         &queued_turn.session_id,
         &history,
@@ -113,10 +113,13 @@ where
     )
     .await?;
     if inserted {
-        bus.publish(CoreEvent::SessionTurnQueued {
-            session_id: queued_turn.session_id.0.clone(),
-            queued_turn: queued_turn.clone(),
-        })
+        bus.publish_durable_session(
+            &event,
+            CoreEvent::SessionTurnQueued {
+                session_id: queued_turn.session_id.0.clone(),
+                queued_turn: queued_turn.clone(),
+            },
+        )
         .await?;
     }
     Ok(queued_turn)
@@ -157,14 +160,17 @@ where
         },
     )
     .await?;
-    history.push(event);
     if inserted {
-        bus.publish(CoreEvent::SessionQueuedTurnRemoved {
-            session_id: input.session_id.0.clone(),
-            queued_turn_id: input.queued_turn_id,
-        })
+        bus.publish_durable_session(
+            &event,
+            CoreEvent::SessionQueuedTurnRemoved {
+                session_id: input.session_id.0.clone(),
+                queued_turn_id: input.queued_turn_id,
+            },
+        )
         .await?;
     }
+    history.push(event);
     Ok(project_turn_queue(&history))
 }
 
@@ -200,14 +206,17 @@ where
         },
     )
     .await?;
-    history.push(event);
     if inserted {
-        bus.publish(CoreEvent::SessionTurnQueueReordered {
-            session_id: input.session_id.0.clone(),
-            queued_turn_ids: input.queued_turn_ids,
-        })
+        bus.publish_durable_session(
+            &event,
+            CoreEvent::SessionTurnQueueReordered {
+                session_id: input.session_id.0.clone(),
+                queued_turn_ids: input.queued_turn_ids,
+            },
+        )
         .await?;
     }
+    history.push(event);
     Ok(project_turn_queue(&history))
 }
 
@@ -223,7 +232,7 @@ where
     B: EventBus + Sync,
 {
     let history = events.list_events_by_session(session_id).await?;
-    let (_event, inserted) = append(
+    let (event, inserted) = append(
         events,
         session_id,
         &history,
@@ -234,11 +243,14 @@ where
     )
     .await?;
     if inserted {
-        bus.publish(CoreEvent::SessionQueuedTurnDispatched {
-            session_id: session_id.0.clone(),
-            queued_turn_id,
-            turn_id: turn_id.0,
-        })
+        bus.publish_durable_session(
+            &event,
+            CoreEvent::SessionQueuedTurnDispatched {
+                session_id: session_id.0.clone(),
+                queued_turn_id,
+                turn_id: turn_id.0,
+            },
+        )
         .await
     } else {
         Ok(())

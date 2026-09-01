@@ -1,11 +1,18 @@
 use async_trait::async_trait;
 use tauri::{AppHandle, Emitter};
 
-use dcc_core::{ports::events::CoreEvent, CoreError, Result};
+use dcc_core::{
+    ports::events::{CoreEvent, SessionLiveEventEnvelope},
+    CoreError, Result,
+};
 
 pub const PHASE_0A_EVENT_PREFIX: &str = "dcc/phase-0a";
 pub const WORKSPACE_EVENT_PREFIX: &str = "dcc/workspace";
 pub const SESSION_EVENT_PREFIX: &str = "dcc/session";
+/// Additive envelope transport. Legacy per-event topics and `dcc:core-event`
+/// keep their original bare `CoreEvent` payloads. The desktop listener and
+/// hydration reconciliation intentionally migrate in a follow-up slice.
+pub const SESSION_LIVE_EVENT_NAME: &str = "dcc/session/live";
 
 pub(crate) fn core_event_name(event: &CoreEvent) -> String {
     match event {
@@ -144,6 +151,12 @@ impl dcc_core::ports::EventBus for TauriEventBus {
             .map_err(|error| CoreError::EventBus(error.to_string()))?;
 
         Ok(())
+    }
+
+    async fn publish_session_live(&self, event: SessionLiveEventEnvelope) -> Result<()> {
+        self.app
+            .emit(SESSION_LIVE_EVENT_NAME, &event)
+            .map_err(|error| CoreError::EventBus(error.to_string()))
     }
 }
 

@@ -93,12 +93,15 @@ where
     };
     if created {
         events
-            .publish(CoreEvent::SessionPlanApproved {
-                session_id: input.session_id.0,
-                plan_message_id: plan_message_id.to_string(),
-                plan_version: input.plan_version,
-                plan_hash: plan_hash.to_string(),
-            })
+            .publish_durable_session(
+                &event,
+                CoreEvent::SessionPlanApproved {
+                    session_id: input.session_id.0,
+                    plan_message_id: plan_message_id.to_string(),
+                    plan_version: input.plan_version,
+                    plan_hash: plan_hash.to_string(),
+                },
+            )
             .await?;
     }
 
@@ -115,6 +118,7 @@ mod tests {
     struct FakeStore {
         records: Arc<Mutex<Vec<SessionEventRecord>>>,
         published: Arc<Mutex<Vec<CoreEvent>>>,
+        durable: Arc<Mutex<Vec<(String, u64)>>>,
     }
 
     #[async_trait]
@@ -161,6 +165,18 @@ mod tests {
                 .expect("published lock poisoned")
                 .push(event);
             Ok(())
+        }
+
+        async fn publish_durable_session(
+            &self,
+            record: &SessionEventRecord,
+            event: CoreEvent,
+        ) -> Result<()> {
+            self.durable
+                .lock()
+                .expect("durable lock poisoned")
+                .push((record.event_id.clone(), record.sequence));
+            self.publish(event).await
         }
     }
 
@@ -213,6 +229,14 @@ mod tests {
                 plan_hash: "fnv1a32:12345678".to_string(),
             }
         );
+        assert_eq!(
+            store
+                .durable
+                .lock()
+                .expect("durable lock poisoned")
+                .as_slice(),
+            [(output.event.event_id.clone(), output.event.sequence)]
+        );
     }
 
     #[test]
@@ -241,6 +265,10 @@ mod tests {
                 .lock()
                 .expect("published lock poisoned")
                 .len(),
+            1
+        );
+        assert_eq!(
+            store.durable.lock().expect("durable lock poisoned").len(),
             1
         );
     }

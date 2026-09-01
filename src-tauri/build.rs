@@ -47,7 +47,10 @@ use dcc_core::{
             WorkspaceBundleSummary,
         },
     },
-    ports::{events::CoreEvent, ProviderRuntimeConfig},
+    ports::{
+        events::{CoreEvent, SessionLiveDurableIdentity, SessionLiveEventEnvelope},
+        ProviderRuntimeConfig,
+    },
 };
 use dcc_tauri::commands::{
     coderabbit::{
@@ -709,6 +712,8 @@ fn main() {
         .typ::<FailDelegationInput>()
         .typ::<FailDelegationOutput>()
         .typ::<CoreEvent>()
+        .typ::<SessionLiveDurableIdentity>()
+        .typ::<SessionLiveEventEnvelope>()
         .constant(
             "WORKSPACE_METHODS",
             WorkspaceMethods {

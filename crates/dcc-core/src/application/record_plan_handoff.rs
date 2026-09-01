@@ -119,14 +119,17 @@ where
     };
     if created {
         events
-            .publish(CoreEvent::SessionPlanHandedOff {
-                session_id: input.session_id.0,
-                plan_message_id: plan_message_id.to_string(),
-                plan_version: input.plan_version,
-                plan_hash: plan_hash.to_string(),
-                action: action.to_string(),
-                target_session_id: target_session_id.map(|session_id| session_id.0),
-            })
+            .publish_durable_session(
+                &event,
+                CoreEvent::SessionPlanHandedOff {
+                    session_id: input.session_id.0,
+                    plan_message_id: plan_message_id.to_string(),
+                    plan_version: input.plan_version,
+                    plan_hash: plan_hash.to_string(),
+                    action: action.to_string(),
+                    target_session_id: target_session_id.map(|session_id| session_id.0),
+                },
+            )
             .await?;
     }
 

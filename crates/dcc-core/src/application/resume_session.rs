@@ -76,9 +76,12 @@ where
     sessions.save_session(&session).await?;
     if created {
         events
-            .publish(CoreEvent::SessionResumed {
-                session_id: input.session_id.0.clone(),
-            })
+            .publish_durable_session(
+                &resumed,
+                CoreEvent::SessionResumed {
+                    session_id: input.session_id.0.clone(),
+                },
+            )
             .await?;
     }
 
