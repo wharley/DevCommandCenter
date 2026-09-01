@@ -11,6 +11,8 @@ import type {
 	PrepareGuardedUndoOutput,
 	PrepareTurnOutput,
 	SessionEventRecord,
+	SessionLiveEventEnvelope,
+	SessionLiveSnapshot,
 	SessionSearchResult,
 	WorkspaceSessionSummary,
 	TurnReviewSummary,
@@ -176,6 +178,13 @@ export function loadSessionThreadEvents(sessionId: string) {
 	});
 }
 
+/** Durable baseline paired with the additive `dcc/session/live` stream. */
+export function loadSessionLiveSnapshot(sessionId: string) {
+	return invoke<SessionLiveSnapshot>(SESSION_METHODS.sessionLiveSnapshot, {
+		sessionId,
+	});
+}
+
 export function loadLastTurnReview(sessionId: string, workspaceId: string) {
 	return invoke<TurnReviewSummary | null>(SESSION_METHODS.lastTurnReview, {
 		input: { sessionId, workspaceId },
@@ -309,4 +318,12 @@ export async function listenSessionEvents(
 			void unlisten();
 		}
 	};
+}
+
+export async function listenSessionLiveEvents(
+	handler: (envelope: SessionLiveEventEnvelope) => void,
+) {
+	return listen<SessionLiveEventEnvelope>("dcc/session/live", (event) => {
+		handler(event.payload);
+	});
 }

@@ -19,8 +19,8 @@ use dcc_tauri::{
         NativeSubagentControlOutput, PrepareGuardedUndoInput, PrepareGuardedUndoOutput,
         PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
         RespondToUserInputInput, RespondToUserInputOutput, RunPullRequestReviewAgentInput,
-        RunPullRequestReviewAgentOutput, SearchSessionsInput, StartMcpOauthInput,
-        StartMcpOauthOutput, SteerNativeSubagentInput, TurnReviewFileDiffInput,
+        RunPullRequestReviewAgentOutput, SearchSessionsInput, SessionLiveSnapshot,
+        StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput, TurnReviewFileDiffInput,
         TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     state::SessionCommandState,
@@ -199,6 +199,14 @@ pub async fn list_thread_events(
     session_id: String,
 ) -> Result<Vec<SessionEventRecord>, String> {
     session_command_impl::list_thread_events(state, app, session_id).await
+}
+
+#[tauri::command]
+pub async fn session_live_snapshot(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<SessionLiveSnapshot, String> {
+    session_command_impl::session_live_snapshot(state, session_id).await
 }
 
 #[tauri::command]

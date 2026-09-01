@@ -113,9 +113,9 @@ use dcc_tauri::commands::{
         PrepareGuardedUndoInput, PrepareGuardedUndoOutput, PrepareTurnOutput,
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
         RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
-        SearchSessionsInput, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
-        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
-        WaitMcpOauthOutput,
+        SearchSessionsInput, SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput,
+        SteerNativeSubagentInput, TurnReviewFileDiffInput, TurnReviewFileDiffOutput,
+        TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -297,6 +297,7 @@ struct SessionMethods {
     close_session: String,
     restore_session: String,
     list_thread_events: String,
+    session_live_snapshot: String,
     last_turn_review: String,
     turn_review_file_diff: String,
     prepare_guarded_undo: String,
@@ -714,6 +715,7 @@ fn main() {
         .typ::<CoreEvent>()
         .typ::<SessionLiveDurableIdentity>()
         .typ::<SessionLiveEventEnvelope>()
+        .typ::<SessionLiveSnapshot>()
         .constant(
             "WORKSPACE_METHODS",
             WorkspaceMethods {
@@ -860,6 +862,7 @@ fn main() {
             close_session: "close_session".to_string(),
             restore_session: "restore_session".to_string(),
             list_thread_events: "list_thread_events".to_string(),
+            session_live_snapshot: "session_live_snapshot".to_string(),
             last_turn_review: "last_turn_review".to_string(),
             turn_review_file_diff: "turn_review_file_diff".to_string(),
             prepare_guarded_undo: "prepare_guarded_undo".to_string(),

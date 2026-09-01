@@ -3,7 +3,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { LoaderCircle } from "lucide-react";
-import type { WorkspaceSessionSummary, WorkspaceSetupReport } from "@dcc/contracts";
+import type {
+	SessionEventRecord,
+	WorkspaceSessionSummary,
+	WorkspaceSetupReport,
+} from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -216,6 +220,13 @@ type WorkspacePanelProps = {
 	isLoadingSessions: boolean;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	sessionEvents: CoreEvent[];
+	/** Additive live transport owns this selected session's timeline when present. */
+	hydratedSessionHistory?: {
+		sessionId: string;
+		history: SessionEventRecord[];
+		ready: boolean;
+		active?: boolean;
+	} | null;
 	pendingPrompt: string | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
@@ -305,6 +316,7 @@ export function WorkspacePanel({
 	isLoadingSessions,
 	sessionSnapshot,
 	sessionEvents,
+	hydratedSessionHistory = null,
 	pendingPrompt,
 	onSelectProvider,
 	onSelectModel,
@@ -699,18 +711,28 @@ export function WorkspacePanel({
 		? selectedSessionId
 		: (sessions.find((summary) => summary.session.workspaceId === workspaceId)
 				?.session.id ?? null);
+	const hasHydratedHistory =
+		hydratedSessionHistory?.sessionId === effectiveSessionId &&
+		hydratedSessionHistory.active !== false;
 	const threadHistoryQuery = useQuery(
 		sessionThreadHistoryQueryOptions(effectiveSessionId, {
 			scope: sessionQueryScope,
+			enabled: !hasHydratedHistory,
 			refetchInterval: false,
 		}),
 	);
 	const selectedSessionTitle =
 		sessions.find((session) => session.session.id === effectiveSessionId)?.thread
 			.title ?? workspaceName;
-	const historyEvents = threadHistoryQuery.data ?? [];
+	const historyEvents = hasHydratedHistory
+		? (hydratedSessionHistory?.history ?? [])
+		: (threadHistoryQuery.data ?? []);
 	const hasLoaded = sessionSnapshot
-		? Boolean(threadHistoryQuery.isFetched || sessionEvents.length > 0)
+		? Boolean(
+				hasHydratedHistory
+					? hydratedSessionHistory?.ready || sessionEvents.length > 0
+					: threadHistoryQuery.isFetched || sessionEvents.length > 0,
+			)
 		: true;
 	const hasEmptyThread = !sessionSnapshot;
 	const sessionState = sessionSnapshot?.state ?? null;

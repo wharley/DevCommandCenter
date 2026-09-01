@@ -102,6 +102,7 @@ import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapStat
 import { NewTaskLaunchState } from "./features/panel/NewTaskLaunchState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
+import { useSessionLiveHydration } from "./features/sessions/use-session-live-hydration";
 import { sessionThreadHistoryQueryOptions } from "./features/sessions/session-thread-history";
 import {
 	isTerminalEventDurable,
@@ -1831,13 +1832,20 @@ export default function App() {
 			: (visibleWorkspaceSessions[0]?.session.id ?? null);
 	const {
 		activityEvents: sessionActivityEvents,
-		events: sessionEvents,
+		events: legacySessionEvents,
 		purgeSessionEvents,
 		purgeSessionsEvents,
 		purgeThroughTurnEvents,
 		purgeThroughSessionTerminalEvents,
 		getBufferStats: getSessionEventBufferStats,
 	} = useSessionEventFeed(handleSessionEvent, effectiveSelectedSessionId);
+	const hydratedSession = useSessionLiveHydration(effectiveSelectedSessionId);
+	// Legacy topics still drive global compatibility effects. The selected
+	// conversation surface renders only the reconciled live overlay below.
+	const timelineSessionEvents =
+		hydratedSession.active && hydratedSession.ready
+			? hydratedSession.liveEvents
+			: legacySessionEvents;
 	purgeThroughTurnEventsRef.current = purgeThroughTurnEvents;
 	purgeThroughSessionTerminalEventsRef.current = purgeThroughSessionTerminalEvents;
 	useEffect(() => {
@@ -2661,7 +2669,7 @@ export default function App() {
 							workspacePath: delegationWorkspacePath,
 							parentSessionId,
 							parentSessionTitle: parentTitle,
-							liveSessionEvents: sessionEvents,
+									liveSessionEvents: legacySessionEvents,
 						}));
 					const started = await startThread({
 						workspaceId: selectedWorkspace.id,
@@ -2825,7 +2833,7 @@ export default function App() {
 			selectedSessionSnapshot,
 			selectedSessionSummary,
 			selectedWorkspace,
-			sessionEvents,
+			legacySessionEvents,
 		],
 	);
 
@@ -3270,7 +3278,7 @@ export default function App() {
 					const historyEvents = await loadSessionThreadEvents(currentSessionId);
 					const handoffMessages = projectWorkspaceMessages(
 						historyEvents,
-						sessionEvents,
+						legacySessionEvents,
 						currentSessionId,
 						null,
 					);
@@ -3455,7 +3463,7 @@ export default function App() {
 
 					const planMessages = projectWorkspaceMessages(
 						[],
-						sessionEvents,
+						legacySessionEvents,
 						currentSessionId,
 						null,
 					);
@@ -3569,7 +3577,7 @@ export default function App() {
 			selectedLocalWorkspacePath,
 			selectedWorkspaceAdditionalWorkspaceIds,
 			selectedWorkspace,
-			sessionEvents,
+			legacySessionEvents,
 			t,
 			workspaceSessions,
 	]);
@@ -5070,7 +5078,12 @@ export default function App() {
 									selectedSessionId={effectiveSelectedSessionId}
 									isLoadingSessions={workspaceSessionsQuery.isPending}
 									sessionSnapshot={selectedSessionSnapshot}
-									sessionEvents={sessionEvents}
+									sessionEvents={timelineSessionEvents}
+									hydratedSessionHistory={
+										hydratedSession.active && hydratedSession.ready
+											? hydratedSession
+											: null
+									}
 									pendingPrompt={visiblePendingPrompt}
 									onSelectProvider={handleSelectProvider}
 									onSelectModel={handleSelectModel}
@@ -5167,7 +5180,7 @@ export default function App() {
 								<WorkspaceInspectorSidebar
 									providerCatalog={providerCatalog}
 									sessionSnapshot={selectedSessionSnapshot}
-									sessionEvents={sessionEvents}
+									sessionEvents={legacySessionEvents}
 									sessionActivityEvents={sessionActivityEvents}
 									currentRepository={
 										selectedWorkspace?.rootPath?.trim()

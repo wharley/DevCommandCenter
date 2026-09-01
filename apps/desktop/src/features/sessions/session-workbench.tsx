@@ -12,6 +12,7 @@ import type {
 	CoreEvent,
 	ProviderCatalog,
 	ProviderRuntimeConfig,
+	SessionEventRecord,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
 import {
@@ -148,6 +149,12 @@ type SessionWorkbenchProps = {
 	isLoadingSessions: boolean;
 	sessionSnapshot: RuntimeSessionSnapshot | null;
 	sessionEvents: CoreEvent[];
+	hydratedSessionHistory?: {
+		sessionId: string;
+		history: SessionEventRecord[];
+		ready: boolean;
+		active?: boolean;
+	} | null;
 	pendingPrompt: string | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
@@ -243,6 +250,7 @@ export function SessionWorkbench({
 	isLoadingSessions,
 	sessionSnapshot,
 	sessionEvents,
+	hydratedSessionHistory = null,
 	pendingPrompt,
 	onSelectProvider,
 	onSelectModel,
@@ -969,6 +977,7 @@ export function SessionWorkbench({
 						isLoadingSessions={isLoadingSessions}
 						sessionSnapshot={sessionSnapshot}
 						sessionEvents={sessionEvents}
+						hydratedSessionHistory={hydratedSessionHistory}
 						pendingPrompt={pendingPrompt}
 						onSelectProvider={onSelectProvider}
 						onSelectModel={onSelectModel}

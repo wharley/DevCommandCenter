@@ -10,8 +10,9 @@ pub const PHASE_0A_EVENT_PREFIX: &str = "dcc/phase-0a";
 pub const WORKSPACE_EVENT_PREFIX: &str = "dcc/workspace";
 pub const SESSION_EVENT_PREFIX: &str = "dcc/session";
 /// Additive envelope transport. Legacy per-event topics and `dcc:core-event`
-/// keep their original bare `CoreEvent` payloads. The desktop listener and
-/// hydration reconciliation intentionally migrate in a follow-up slice.
+/// keep their original bare `CoreEvent` payloads for compatibility and
+/// fallback. The desktop timeline consumes this topic through its reconciled
+/// live hydration path.
 pub const SESSION_LIVE_EVENT_NAME: &str = "dcc/session/live";
 
 pub(crate) fn core_event_name(event: &CoreEvent) -> String {

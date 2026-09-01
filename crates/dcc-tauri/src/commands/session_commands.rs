@@ -61,6 +61,76 @@ pub struct RunPullRequestReviewAgentOutput {
     pub response: String,
 }
 
+/// One-time durable baseline for the additive `dcc/session/live` transport.
+/// The renderer subscribes before requesting this snapshot, then uses the
+/// high-water mark to retain only events published after this read.
+///
+/// This is intentionally bounded independently from the legacy full timeline
+/// read. Overflow is rejected rather than returning a partial history that
+/// could be mistaken for an authoritative complete baseline.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLiveSnapshot {
+    pub session_id: String,
+    pub events: Vec<SessionEventRecord>,
+    pub durable_high_watermark: u64,
+    pub runtime_generation: String,
+}
+
+const SESSION_LIVE_SNAPSHOT_MAX_EVENTS: usize = 4096;
+const SESSION_LIVE_SNAPSHOT_MAX_RECORD_BYTES: usize = 512 * 1024;
+const SESSION_LIVE_SNAPSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+fn session_live_snapshot_from_bounded_records(
+    session_id: &SessionId,
+    events: Vec<SessionEventRecord>,
+    runtime_generation: String,
+) -> Result<SessionLiveSnapshot, String> {
+    if events.len() > SESSION_LIVE_SNAPSHOT_MAX_EVENTS {
+        return Err("Live session history exceeds the snapshot event limit.".to_string());
+    }
+
+    let mut total_bytes = 0usize;
+    for event in &events {
+        let record_bytes = serde_json::to_vec(event)
+            .map_err(|_| "Live session history record is invalid.".to_string())?
+            .len();
+        if record_bytes > SESSION_LIVE_SNAPSHOT_MAX_RECORD_BYTES {
+            return Err("Live session history record exceeds the snapshot size limit.".to_string());
+        }
+        total_bytes = total_bytes
+            .checked_add(record_bytes)
+            .ok_or_else(|| "Live session history exceeds the snapshot size limit.".to_string())?;
+        if total_bytes > SESSION_LIVE_SNAPSHOT_MAX_BYTES {
+            return Err("Live session history exceeds the snapshot size limit.".to_string());
+        }
+    }
+
+    let snapshot = session_live_snapshot_from_records(session_id, events, runtime_generation);
+    if serde_json::to_vec(&snapshot)
+        .map_err(|_| "Live session history is invalid.".to_string())?
+        .len()
+        > SESSION_LIVE_SNAPSHOT_MAX_BYTES
+    {
+        return Err("Live session history exceeds the snapshot size limit.".to_string());
+    }
+    Ok(snapshot)
+}
+
+fn session_live_snapshot_from_records(
+    session_id: &SessionId,
+    events: Vec<SessionEventRecord>,
+    runtime_generation: String,
+) -> SessionLiveSnapshot {
+    let durable_high_watermark = events.last().map(|event| event.sequence).unwrap_or(0);
+    SessionLiveSnapshot {
+        session_id: session_id.0.clone(),
+        events,
+        durable_high_watermark,
+        runtime_generation,
+    }
+}
+
 #[tauri::command]
 pub async fn run_pull_request_review_agent(
     state: State<'_, SessionCommandState>,
@@ -963,6 +1033,26 @@ pub async fn list_thread_events(
 }
 
 #[tauri::command]
+pub async fn session_live_snapshot(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<SessionLiveSnapshot, String> {
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() {
+        return Err("sessionId is required".to_string());
+    }
+    let session_id = SessionId(session_id);
+    let events = SessionEventRepo::list_events_by_session_limited(
+        &*state,
+        &session_id,
+        SESSION_LIVE_SNAPSHOT_MAX_EVENTS + 1,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    session_live_snapshot_from_bounded_records(&session_id, events, state.runtime_generation())
+}
+
+#[tauri::command]
 pub async fn list_mcp_runtime_statuses(
     state: State<'_, SessionCommandState>,
     input: ListMcpRuntimeStatusesInput,
@@ -1494,5 +1584,111 @@ mod tests {
         assert_eq!(summary.file_count, 2);
         assert_eq!(summary.artifact_bytes, 12);
         assert_eq!(summary.reason_code, None);
+    }
+
+    #[test]
+    fn live_snapshot_uses_canonical_records_and_their_high_watermark() {
+        let session_id = SessionId("session-live".to_string());
+        let records = vec![SessionEventRecord {
+            event_id: "event-7".to_string(),
+            session_id: session_id.clone(),
+            sequence: 7,
+            occurred_at: "2026-09-01T00:00:00Z".to_string(),
+            kind: dcc_core::domain::session::SessionEventKind::SessionResumed,
+        }];
+        let snapshot = session_live_snapshot_from_records(
+            &session_id,
+            records,
+            "runtime-generation".to_string(),
+        );
+        assert_eq!(snapshot.session_id, "session-live");
+        assert_eq!(snapshot.durable_high_watermark, 7);
+        assert_eq!(snapshot.events[0].event_id, "event-7");
+        assert_eq!(snapshot.runtime_generation, "runtime-generation");
+
+        let empty = session_live_snapshot_from_records(&session_id, Vec::new(), "g".to_string());
+        assert_eq!(empty.durable_high_watermark, 0);
+    }
+
+    fn snapshot_record(session_id: &SessionId, sequence: u64) -> SessionEventRecord {
+        SessionEventRecord {
+            event_id: format!("event-{sequence}"),
+            session_id: session_id.clone(),
+            sequence,
+            occurred_at: "2026-09-01T00:00:00Z".to_string(),
+            kind: dcc_core::domain::session::SessionEventKind::SessionResumed,
+        }
+    }
+
+    #[test]
+    fn live_snapshot_accepts_the_exact_event_limit_and_rejects_overflow() {
+        let session_id = SessionId("session-live-bounded".to_string());
+        let exact = (1..=SESSION_LIVE_SNAPSHOT_MAX_EVENTS as u64)
+            .map(|sequence| snapshot_record(&session_id, sequence))
+            .collect();
+        let snapshot = session_live_snapshot_from_bounded_records(
+            &session_id,
+            exact,
+            "runtime-generation".to_string(),
+        )
+        .expect("exact limit is accepted");
+        assert_eq!(snapshot.events.len(), SESSION_LIVE_SNAPSHOT_MAX_EVENTS);
+        assert_eq!(
+            snapshot.durable_high_watermark,
+            SESSION_LIVE_SNAPSHOT_MAX_EVENTS as u64
+        );
+
+        let overflow = (1..=(SESSION_LIVE_SNAPSHOT_MAX_EVENTS + 1) as u64)
+            .map(|sequence| snapshot_record(&session_id, sequence))
+            .collect();
+        assert!(session_live_snapshot_from_bounded_records(
+            &session_id,
+            overflow,
+            "runtime-generation".to_string(),
+        )
+        .expect_err("max plus one is rejected")
+        .contains("event limit"));
+    }
+
+    #[test]
+    fn live_snapshot_rejects_oversized_records_and_total_bytes() {
+        let session_id = SessionId("session-live-bytes".to_string());
+        let oversized_record = SessionEventRecord {
+            event_id: "event-oversized".to_string(),
+            session_id: session_id.clone(),
+            sequence: 1,
+            occurred_at: "2026-09-01T00:00:00Z".to_string(),
+            kind: dcc_core::domain::session::SessionEventKind::TurnDelta {
+                turn_id: dcc_core::domain::session::TurnId("turn-1".to_string()),
+                content: "x".repeat(SESSION_LIVE_SNAPSHOT_MAX_RECORD_BYTES),
+            },
+        };
+        assert!(session_live_snapshot_from_bounded_records(
+            &session_id,
+            vec![oversized_record],
+            "runtime-generation".to_string(),
+        )
+        .expect_err("oversized record is rejected")
+        .contains("record exceeds"));
+
+        let total_overflow = (1..=33)
+            .map(|sequence| SessionEventRecord {
+                event_id: format!("event-{sequence}"),
+                session_id: session_id.clone(),
+                sequence,
+                occurred_at: "2026-09-01T00:00:00Z".to_string(),
+                kind: dcc_core::domain::session::SessionEventKind::TurnDelta {
+                    turn_id: dcc_core::domain::session::TurnId(format!("turn-{sequence}")),
+                    content: "x".repeat(SESSION_LIVE_SNAPSHOT_MAX_RECORD_BYTES / 2),
+                },
+            })
+            .collect();
+        assert!(session_live_snapshot_from_bounded_records(
+            &session_id,
+            total_overflow,
+            "runtime-generation".to_string(),
+        )
+        .expect_err("total bytes are rejected")
+        .contains("snapshot size"));
     }
 }

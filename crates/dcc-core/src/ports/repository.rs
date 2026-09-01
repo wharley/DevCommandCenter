@@ -196,6 +196,21 @@ pub trait SessionEventRepo: Send + Sync {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<SessionEventRecord>>;
+    /// Returns no more than `limit` canonical events in durable sequence order.
+    ///
+    /// The default preserves source compatibility for lightweight repositories.
+    /// Production repositories that can enforce the bound in storage must
+    /// override it; callers that need to detect overflow should request one
+    /// more item than their accepted maximum.
+    async fn list_events_by_session_limited(
+        &self,
+        session_id: &SessionId,
+        limit: usize,
+    ) -> Result<Vec<SessionEventRecord>> {
+        let mut events = self.list_events_by_session(session_id).await?;
+        events.truncate(limit);
+        Ok(events)
+    }
     async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()>;
 }
 

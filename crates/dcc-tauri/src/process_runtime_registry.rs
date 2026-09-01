@@ -505,8 +505,10 @@ impl ProcessRuntime {
         }
     }
 
-    #[cfg(test)]
-    fn runtime_generation(&self) -> &str {
+    /// Public process-local generation used only to reconcile the additive
+    /// session-live transport with a durable snapshot. It is not authority or
+    /// persisted state.
+    pub(crate) fn runtime_generation(&self) -> &str {
         &self.runtime_generation
     }
 

@@ -1017,6 +1017,10 @@ impl EventBus for NoopEventBus {
 }
 
 impl SessionCommandState {
+    pub(crate) fn runtime_generation(&self) -> String {
+        self.runtime.runtime_generation().to_string()
+    }
+
     pub fn new(app: AppHandle, db_path: PathBuf) -> Self {
         let app_data_dir = app
             .path()
@@ -4636,6 +4640,15 @@ impl SessionEventRepo for SessionCommandState {
         session_id: &SessionId,
     ) -> Result<Vec<SessionEventRecord>> {
         SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await
+    }
+
+    async fn list_events_by_session_limited(
+        &self,
+        session_id: &SessionId,
+        limit: usize,
+    ) -> Result<Vec<SessionEventRecord>> {
+        SessionEventRepo::list_events_by_session_limited(&self.session_repo, session_id, limit)
+            .await
     }
 
     async fn find_terminal_event(

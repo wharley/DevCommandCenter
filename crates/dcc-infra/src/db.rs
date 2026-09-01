@@ -4063,6 +4063,20 @@ impl SqliteSessionRepo {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<SessionEventRecord>> {
+        self.list_events_by_session_limited_sync(session_id, i64::MAX as usize)
+    }
+
+    /// Reads a bounded prefix in SQLite rather than materializing an unbounded
+    /// session history in the process. Callers request `max + 1` when they
+    /// need to reject overflow without returning a partial history.
+    pub fn list_events_by_session_limited_sync(
+        &self,
+        session_id: &SessionId,
+        limit: usize,
+    ) -> Result<Vec<SessionEventRecord>> {
+        let limit = i64::try_from(limit).map_err(|_| {
+            dcc_core::CoreError::Repository("session event limit overflow".to_string())
+        })?;
         let conn = self
             .conn
             .lock()
@@ -4074,11 +4088,12 @@ impl SqliteSessionRepo {
 				  FROM dcc_session_events
 				 WHERE session_id = ?1
 				 ORDER BY sequence ASC
+				 LIMIT ?2
 				"#,
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let rows = stmt
-            .query_map(params![session_id.0.clone()], Self::event_from_row)
+            .query_map(params![session_id.0.clone(), limit], Self::event_from_row)
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
 
         let mut events = Vec::new();
@@ -6043,6 +6058,14 @@ impl SessionEventRepo for SqliteSessionRepo {
         self.list_events_by_session_sync(session_id)
     }
 
+    async fn list_events_by_session_limited(
+        &self,
+        session_id: &SessionId,
+        limit: usize,
+    ) -> Result<Vec<SessionEventRecord>> {
+        self.list_events_by_session_limited_sync(session_id, limit)
+    }
+
     async fn delete_events_by_session(&self, session_id: &SessionId) -> Result<()> {
         let conn = self
             .conn
@@ -7583,6 +7606,42 @@ mod tests {
         Arc::new(Mutex::new(
             Connection::open_in_memory().expect("open in-memory sqlite"),
         ))
+    }
+
+    #[test]
+    fn limited_session_event_read_is_ordered_and_does_not_materialize_past_sql_limit() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let session = Session {
+            id: SessionId("limited-event-session".to_string()),
+            project_id: ProjectId("limited-event-project".to_string()),
+            workspace_id: WorkspaceId("limited-event-workspace".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-09-01T00:00:00Z".to_string(),
+            updated_at: "2026-09-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_session(&session)).expect("save session");
+        for sequence in 1..=3 {
+            futures::executor::block_on(repo.append_event(&SessionEventRecord {
+                event_id: format!("limited-event-{sequence}"),
+                session_id: session.id.clone(),
+                sequence,
+                occurred_at: "2026-09-01T00:00:00Z".to_string(),
+                kind: SessionEventKind::SessionResumed,
+            }))
+            .expect("append event");
+        }
+
+        let limited = repo
+            .list_events_by_session_limited_sync(&session.id, 2)
+            .expect("bounded query");
+        assert_eq!(limited.len(), 2);
+        assert_eq!(limited[0].sequence, 1);
+        assert_eq!(limited[1].sequence, 2);
     }
 
     fn delegation_worktree_operation(id: &str) -> DelegationWorktreeOperation {
