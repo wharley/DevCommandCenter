@@ -64,10 +64,8 @@ const MAX_BROWSER_AUDIT_ENTRIES: usize = 256;
 const MAX_BROWSER_AUDIT_SCOPE_CHARS: usize = 128;
 const MAX_BROWSER_AUDIT_PROVIDER_CHARS: usize = 128;
 const MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS: usize = 64;
-#[allow(dead_code)] // Used by the future trusted audit reader above.
 const MAX_BROWSER_AUDIT_READ_LIMIT: usize = 100;
 
-#[allow(dead_code)] // Constructed by the MCP bridge integration in its next slice.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum BrowserAuditOrigin {
@@ -131,6 +129,33 @@ pub(crate) struct BrowserAuditRecord {
     pub grant_state: BrowserAuditGrantState,
     pub outcome: BrowserAuditOutcome,
     pub timestamp_ms: u64,
+}
+
+/// The only audit shape exposed by the trusted viewer. Scope and lease
+/// identity have already been validated internally and are intentionally not
+/// returned to the renderer.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserAuditViewRecord {
+    pub(crate) origin: BrowserAuditOrigin,
+    pub(crate) provider_id: Option<String>,
+    pub(crate) tool: BrowserAuditTool,
+    pub(crate) grant_state: BrowserAuditGrantState,
+    pub(crate) outcome: BrowserAuditOutcome,
+    pub(crate) timestamp_ms: u64,
+}
+
+impl From<BrowserAuditRecord> for BrowserAuditViewRecord {
+    fn from(record: BrowserAuditRecord) -> Self {
+        Self {
+            origin: record.origin,
+            provider_id: record.provider_id,
+            tool: record.tool,
+            grant_state: record.grant_state,
+            outcome: record.outcome,
+            timestamp_ms: record.timestamp_ms,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -635,9 +660,9 @@ pub(crate) fn append_browser_audit(
     }
 }
 
-/// Reads a bounded newest-first snapshot for trusted in-process UI code. No
-/// Tauri/MCP command exposes this yet, so there is no new remote query surface.
-#[allow(dead_code)] // Reserved for a future trusted Browser diagnostics view.
+/// Reads a bounded newest-first snapshot for trusted in-process UI code. The
+/// Tauri viewer adds the active scope/lifecycle checks before calling this;
+/// MCP never receives a query surface for runtime audit records.
 pub(crate) fn read_browser_audit(
     state: &BrowserState,
     workspace_id: &str,
@@ -3408,6 +3433,38 @@ pub async fn browser_control_status(
     ))
 }
 
+/// Returns the bounded, content-free audit snapshot for the currently active
+/// Browser lifecycle. This is a trusted Tauri diagnostic surface only; it does
+/// not expose the MCP projection or any page payload.
+#[tauri::command]
+pub async fn browser_read_audit(
+    state: State<'_, BrowserState>,
+    sessions: State<'_, SessionCommandState>,
+    workspace_id: String,
+    session_id: Option<String>,
+    lifecycle_token: u64,
+    limit: usize,
+) -> Result<Vec<BrowserAuditViewRecord>, String> {
+    let _operation = state.operation_lock.lock().await;
+    if limit == 0 || limit > MAX_BROWSER_AUDIT_READ_LIMIT {
+        return Err("browser audit limit is invalid".to_string());
+    }
+    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser audit lifecycle is stale",
+    )?;
+    read_browser_audit(&state, &workspace_id, session_id.as_deref(), limit).map(|records| {
+        records
+            .into_iter()
+            .map(BrowserAuditViewRecord::from)
+            .collect()
+    })
+}
+
 /// Removes the temporary Browser-control capability without exposing a token.
 #[tauri::command]
 pub async fn browser_disarm_control(
@@ -4482,17 +4539,18 @@ mod tests {
         page_load_revision_is_current, parse_browser_action_callback,
         parse_browser_evidence_callback, parse_browser_evidence_cleanup_callback,
         prepare_browser_control_action, read_browser_audit, require_action_native_url,
-        require_browser_control_grant, sanitize_browser_evidence_url,
+        require_browser_control_grant, require_current_lifecycle, sanitize_browser_evidence_url,
         sanitize_browser_link_destination, sanitize_browser_location_url, select_browser_open_url,
         semantic_item_serialized_chars, semantic_map_record_is_current, should_persist_context_url,
         validate_browser_document_identity, validate_browser_evidence_capture_id,
         validate_browser_reference, validate_browser_url, BrowserActionAnchor, BrowserActionResult,
         BrowserAuditGrantState, BrowserAuditOrigin, BrowserAuditOutcome, BrowserAuditRecord,
-        BrowserAuditTool, BrowserBounds, BrowserContext, BrowserControlAction, BrowserControlGrant,
-        BrowserControlStatus, BrowserEvidenceCaptureRecord, BrowserEvidenceEventRaw,
-        BrowserLocationCache, BrowserSemanticItemExtraction, BrowserSemanticMap,
-        BrowserSemanticMapExtraction, BrowserSemanticMapRecord, BrowserSemanticTargetRecord,
-        BrowserState, MAX_BROWSER_AUDIT_ENTRIES, MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS,
+        BrowserAuditTool, BrowserAuditViewRecord, BrowserBounds, BrowserContext,
+        BrowserControlAction, BrowserControlGrant, BrowserControlStatus,
+        BrowserEvidenceCaptureRecord, BrowserEvidenceEventRaw, BrowserLocationCache,
+        BrowserSemanticItemExtraction, BrowserSemanticMap, BrowserSemanticMapExtraction,
+        BrowserSemanticMapRecord, BrowserSemanticTargetRecord, BrowserState,
+        MAX_BROWSER_AUDIT_ENTRIES, MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS,
         MAX_BROWSER_AUDIT_PROVIDER_CHARS, MAX_BROWSER_AUDIT_SCOPE_CHARS,
         MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS,
         MAX_BROWSER_LOCATION_CACHE_ENTRIES, MAX_BROWSER_SEMANTIC_ITEMS,
@@ -5809,6 +5867,35 @@ mod tests {
     }
 
     #[test]
+    fn browser_audit_viewer_guard_rejects_stale_scope_and_closed_lifecycle() {
+        let state = BrowserState::default();
+
+        assert!(
+            require_current_lifecycle(&state, "workspace", Some("session"), 7, "stale",).is_err()
+        );
+
+        *state.active_scope.lock().unwrap() = Some("workspace\u{1f}|session".to_string());
+        *state.lifecycle_token.lock().unwrap() = 7;
+        *state.lifecycle_open.lock().unwrap() = true;
+
+        assert!(
+            require_current_lifecycle(&state, "other-workspace", Some("session"), 7, "stale",)
+                .is_err()
+        );
+        assert!(
+            require_current_lifecycle(&state, "workspace", Some("session"), 6, "stale",).is_err()
+        );
+        assert!(
+            require_current_lifecycle(&state, "workspace", Some("session"), 7, "stale",).is_ok()
+        );
+
+        *state.lifecycle_open.lock().unwrap() = false;
+        assert!(
+            require_current_lifecycle(&state, "workspace", Some("session"), 7, "stale",).is_err()
+        );
+    }
+
+    #[test]
     fn browser_audit_outcome_classifies_disabled_target_as_rejected() {
         assert_eq!(
             browser_audit_outcome(Some("browser action target is disabled")),
@@ -5921,6 +6008,48 @@ mod tests {
         assert!(serialized.contains("notArmed"));
         assert!(serialized.contains("dcc_browser_fill"));
         assert!(serialized.contains("mcp"));
+    }
+
+    #[test]
+    fn browser_audit_view_serialization_excludes_scope_and_internal_identity() {
+        let record = BrowserAuditRecord {
+            origin: BrowserAuditOrigin::Mcp,
+            provider_id: Some("provider".to_string()),
+            lease_fingerprint: Some("0123456789abcdef".to_string()),
+            workspace_id: "workspace".to_string(),
+            session_id: Some("session".to_string()),
+            tool: BrowserAuditTool::EvidenceRead,
+            grant_state: BrowserAuditGrantState::Armed,
+            outcome: BrowserAuditOutcome::Executed,
+            timestamp_ms: 123,
+        };
+        let serialized = serde_json::to_value(BrowserAuditViewRecord::from(record)).unwrap();
+        let object = serialized.as_object().unwrap();
+
+        assert!(object.contains_key("origin"));
+        assert!(object.contains_key("providerId"));
+        assert!(object.contains_key("tool"));
+        assert!(object.contains_key("grantState"));
+        assert!(object.contains_key("outcome"));
+        assert!(object.contains_key("timestampMs"));
+        for forbidden in [
+            "workspaceId",
+            "sessionId",
+            "leaseFingerprint",
+            "url",
+            "ref",
+            "text",
+            "message",
+            "error",
+            "token",
+            "captureId",
+            "event",
+        ] {
+            assert!(
+                !object.contains_key(forbidden),
+                "unexpected field: {forbidden}"
+            );
+        }
     }
 
     #[test]

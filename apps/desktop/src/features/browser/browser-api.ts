@@ -23,6 +23,32 @@ export type BrowserControlStatus = {
 	remainingMs: number;
 };
 
+/** Closed, content-free audit vocabulary produced by the trusted Browser backend. */
+export type BrowserAuditOrigin = "ui" | "mcp";
+export type BrowserAuditTool =
+	| "dcc_browser_context"
+	| "dcc_browser_navigate"
+	| "dcc_browser_reload"
+	| "dcc_browser_scroll"
+	| "dcc_browser_click"
+	| "dcc_browser_fill"
+	| "dcc_browser_evidence_start"
+	| "dcc_browser_evidence_read"
+	| "browser_arm_control"
+	| "browser_disarm_control";
+export type BrowserAuditGrantState = "armed" | "expired" | "missing" | "notApplicable";
+export type BrowserAuditOutcome = "executed" | "rejected" | "stale" | "notArmed" | "failed";
+
+/** No URL, page content, reference, request payload, or bearer/lease data is rendered from audit records. */
+export type BrowserAuditRecord = {
+	origin: BrowserAuditOrigin;
+	providerId: string | null;
+	tool: BrowserAuditTool;
+	grantState: BrowserAuditGrantState;
+	outcome: BrowserAuditOutcome;
+	timestampMs: number;
+};
+
 /** Bounded page context obtained by the backend after an explicit user action. */
 export type BrowserAgentContext = {
 	workspaceId: string;
@@ -124,6 +150,16 @@ export function disarmBrowserControl(input: {
 	lifecycleToken: number;
 }) {
 	return invoke<BrowserControlStatus>("browser_disarm_control", input);
+}
+
+/** Reads a bounded, newest-first audit snapshot on explicit viewer open/refresh only. */
+export function readBrowserAudit(input: {
+	workspaceId: string;
+	sessionId: string | null;
+	lifecycleToken: number;
+	limit: 50;
+}) {
+	return invoke<BrowserAuditRecord[]>("browser_read_audit", input);
 }
 
 export function extractBrowserContext(input: {

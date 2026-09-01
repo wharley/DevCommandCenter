@@ -11,6 +11,7 @@ import {
 	getBrowserControlStatus,
 	armBrowserControl,
 	disarmBrowserControl,
+	readBrowserAudit,
 	navigateBrowser,
 	openBrowser,
 	setBrowserBounds,
@@ -19,6 +20,9 @@ import {
 import {
 	readBrowserBounds,
 	browserControlExpiryDelay,
+	browserAuditTime,
+	isCurrentBrowserAuditRequest,
+	newestFirstBrowserAuditRecords,
 	snapBrowserBoundsToDevicePixels,
 } from "./workspace-browser-surface";
 
@@ -140,10 +144,74 @@ describe("browser-api", () => {
 		expect(invokeMock.mock.calls.flat()).not.toContain("token");
 	});
 
+	it("reads the trusted audit only through a bounded lifecycle-scoped command", async () => {
+		await readBrowserAudit({
+			workspaceId: "workspace-1",
+			sessionId: "session-1",
+			lifecycleToken: 9,
+			limit: 50,
+		});
+
+		expect(invokeMock).toHaveBeenCalledWith("browser_read_audit", {
+			workspaceId: "workspace-1",
+			sessionId: "session-1",
+			lifecycleToken: 9,
+			limit: 50,
+		});
+	});
+
 	it("uses one bounded expiry delay rather than an interval", () => {
 		expect(browserControlExpiryDelay(60_000.2)).toBe(60_001);
 		expect(browserControlExpiryDelay(-1)).toBe(0);
 		expect(browserControlExpiryDelay(Number.NaN)).toBe(0);
+	});
+
+	it("discards audit responses after close, lifecycle, scope, or request changes", () => {
+		const scope = { workspaceId: "workspace-1", sessionId: "session-1", lifecycleToken: 3 };
+		expect(isCurrentBrowserAuditRequest({
+			requestId: 7,
+			currentRequestId: 7,
+			open: true,
+			expected: scope,
+			current: scope,
+		})).toBe(true);
+		expect(isCurrentBrowserAuditRequest({
+			requestId: 7,
+			currentRequestId: 8,
+			open: true,
+			expected: scope,
+			current: scope,
+		})).toBe(false);
+		expect(isCurrentBrowserAuditRequest({
+			requestId: 7,
+			currentRequestId: 7,
+			open: false,
+			expected: scope,
+			current: scope,
+		})).toBe(false);
+		expect(isCurrentBrowserAuditRequest({
+			requestId: 7,
+			currentRequestId: 7,
+			open: true,
+			expected: scope,
+			current: { ...scope, lifecycleToken: 4 },
+		})).toBe(false);
+	});
+
+	it("formats only valid local audit timestamps", () => {
+		expect(browserAuditTime(1_700_000_000_000)?.getTime()).toBe(1_700_000_000_000);
+		expect(browserAuditTime(-1)).toBeNull();
+		expect(browserAuditTime(Number.NaN)).toBeNull();
+	});
+
+	it("orders the trusted audit newest-first without mutating the response", () => {
+		const records = [
+			{ origin: "ui" as const, providerId: null, tool: "dcc_browser_reload" as const, grantState: "notApplicable" as const, outcome: "executed" as const, timestampMs: 3 },
+			{ origin: "mcp" as const, providerId: "provider", tool: "dcc_browser_click" as const, grantState: "armed" as const, outcome: "stale" as const, timestampMs: 9 },
+		];
+		const ordered = newestFirstBrowserAuditRecords(records);
+		expect(ordered.map((record) => record.timestampMs)).toEqual([9, 3]);
+		expect(records.map((record) => record.timestampMs)).toEqual([3, 9]);
 	});
 
 	it("normalizes DOM bounds before sending them to native layout", () => {

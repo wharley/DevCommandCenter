@@ -2906,6 +2906,47 @@
     "controlInactive": "Agent control disabled",
     "armControlShort": "Agent 60s",
     "controlOnShort": "Agent on",
+    "audit": {
+      "open": "Open browser activity",
+      "title": "Browser activity",
+      "description": "Recent browser actions for this session",
+      "refresh": "Refresh browser activity",
+      "loading": "Loading activity…",
+      "error": "Browser activity could not be loaded.",
+      "empty": "No browser activity yet.",
+      "entries": "Browser activity entries",
+      "unknownTime": "Unknown time",
+      "origin": {
+        "ui": "UI",
+        "mcp": "MCP · {{provider}}",
+        "providerUnavailable": "provider unavailable"
+      },
+      "grant": {
+        "armed": "armed",
+        "expired": "expired",
+        "missing": "not armed",
+        "notApplicable": "not applicable"
+      },
+      "outcome": {
+        "executed": "completed",
+        "rejected": "rejected",
+        "stale": "stale",
+        "notArmed": "not armed",
+        "failed": "failed"
+      },
+      "tools": {
+        "dcc_browser_context": "Read page context",
+        "dcc_browser_navigate": "Navigate",
+        "dcc_browser_reload": "Reload",
+        "dcc_browser_scroll": "Scroll",
+        "dcc_browser_click": "Click",
+        "dcc_browser_fill": "Fill field",
+        "dcc_browser_evidence_start": "Start evidence",
+        "dcc_browser_evidence_read": "Read evidence",
+        "browser_arm_control": "Enable agent control",
+        "browser_disarm_control": "Disable agent control"
+      }
+    },
     "close": "Close browser",
     "resize": "Resize browser",
     "loading": "Loading page…",

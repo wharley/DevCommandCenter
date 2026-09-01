@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Globe2, LoaderCircle, RefreshCw, Shield, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Globe2, History, LoaderCircle, RefreshCw, Shield, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
 	hideBrowser,
 	getBrowserControlStatus,
 	armBrowserControl,
 	disarmBrowserControl,
+	readBrowserAudit,
 	listenBrowserState,
 	navigateBrowser,
 	openBrowser,
@@ -14,6 +16,7 @@ import {
 	setBrowserBounds,
 	extractBrowserContext,
 	type BrowserAgentContext,
+	type BrowserAuditRecord,
 	type BrowserBounds,
 	type BrowserSnapshot,
 } from "./browser-api";
@@ -75,6 +78,41 @@ export function browserControlExpiryDelay(remainingMs: number): number {
 	return Math.max(0, Math.ceil(Number.isFinite(remainingMs) ? remainingMs : 0));
 }
 
+type BrowserAuditRequestScope = {
+	workspaceId: string;
+	sessionId: string | null;
+	lifecycleToken: number;
+};
+
+/** Keeps late audit responses from a closed, changed, or reopened Browser scope out of the viewer. */
+export function isCurrentBrowserAuditRequest(input: {
+	requestId: number;
+	currentRequestId: number;
+	open: boolean;
+	expected: BrowserAuditRequestScope;
+	current: BrowserAuditRequestScope | null;
+}): boolean {
+	return input.open
+		&& input.requestId === input.currentRequestId
+		&& input.current?.workspaceId === input.expected.workspaceId
+		&& input.current.sessionId === input.expected.sessionId
+		&& input.current.lifecycleToken === input.expected.lifecycleToken;
+}
+
+export function browserAuditTime(timestampMs: number): Date | null {
+	if (!Number.isSafeInteger(timestampMs) || timestampMs < 0) return null;
+	const date = new Date(timestampMs);
+	return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function newestFirstBrowserAuditRecords(records: BrowserAuditRecord[]): BrowserAuditRecord[] {
+	return [...records].sort((left, right) => {
+		const leftTime = browserAuditTime(left.timestampMs)?.getTime() ?? -1;
+		const rightTime = browserAuditTime(right.timestampMs)?.getTime() ?? -1;
+		return rightTime - leftTime;
+	});
+}
+
 export function WorkspaceBrowserSurface({
 	workspaceId,
 	sessionId,
@@ -92,9 +130,18 @@ export function WorkspaceBrowserSurface({
 	const [sendingContext, setSendingContext] = useState(false);
 	const [controlStatus, setControlStatus] = useState<{ armed: boolean; remainingMs: number }>({ armed: false, remainingMs: 0 });
 	const [controlBusy, setControlBusy] = useState(false);
+	const [auditOpen, setAuditOpen] = useState(false);
+	const [auditRecords, setAuditRecords] = useState<BrowserAuditRecord[] | null>(null);
+	const [auditLoading, setAuditLoading] = useState(false);
+	const [auditFailed, setAuditFailed] = useState(false);
 	const [lifecycleToken, setLifecycleToken] = useState<number | null>(null);
 	const lifecycleTokenRef = useRef<number | null>(null);
 	const controlExpiryTimerRef = useRef<number | null>(null);
+	const auditRequestRef = useRef(0);
+	const auditOpenRef = useRef(false);
+	const auditScopeRef = useRef<BrowserAuditRequestScope | null>(null);
+	auditOpenRef.current = auditOpen;
+	auditScopeRef.current = lifecycleToken === null ? null : { workspaceId, sessionId, lifecycleToken };
 	const updateLifecycleToken = useCallback((next: number) => {
 		lifecycleTokenRef.current = next;
 		setLifecycleToken(next);
@@ -223,6 +270,18 @@ export function WorkspaceBrowserSurface({
 	}, [clearControlExpiryTimer, controlStatus]);
 
 	useEffect(() => {
+		// A Browser scope/lifecycle transition makes every in-flight audit read
+		// stale. Closing also removes the marked portal before the next native
+		// surface can become visible.
+		auditRequestRef.current += 1;
+		auditOpenRef.current = false;
+		setAuditOpen(false);
+		setAuditRecords(null);
+		setAuditLoading(false);
+		setAuditFailed(false);
+	}, [lifecycleToken, sessionId, workspaceId]);
+
+	useEffect(() => {
 		return () => {
 			clearControlExpiryTimer();
 			const lifecycleToken = lifecycleTokenRef.current;
@@ -309,6 +368,67 @@ export function WorkspaceBrowserSurface({
 			.finally(() => setControlBusy(false));
 	}, [controlBusy, controlStatus.armed, sessionId, workspaceId]);
 
+	const loadAudit = useCallback((token: number) => {
+		const expected = { workspaceId, sessionId, lifecycleToken: token };
+		const requestId = auditRequestRef.current + 1;
+		auditRequestRef.current = requestId;
+		setAuditLoading(true);
+		setAuditFailed(false);
+		void readBrowserAudit({ ...expected, limit: 50 })
+			.then((records) => {
+				if (!isCurrentBrowserAuditRequest({
+					requestId,
+					currentRequestId: auditRequestRef.current,
+					open: auditOpenRef.current,
+					expected,
+					current: auditScopeRef.current,
+				})) return;
+				setAuditRecords(newestFirstBrowserAuditRecords(records));
+			})
+			.catch(() => {
+				if (!isCurrentBrowserAuditRequest({
+					requestId,
+					currentRequestId: auditRequestRef.current,
+					open: auditOpenRef.current,
+					expected,
+					current: auditScopeRef.current,
+				})) return;
+				setAuditFailed(true);
+			})
+			.finally(() => {
+				if (!isCurrentBrowserAuditRequest({
+					requestId,
+					currentRequestId: auditRequestRef.current,
+					open: auditOpenRef.current,
+					expected,
+					current: auditScopeRef.current,
+				})) return;
+				setAuditLoading(false);
+			});
+	}, [sessionId, workspaceId]);
+
+	const handleAuditOpenChange = useCallback((nextOpen: boolean) => {
+		if (!nextOpen) {
+			auditRequestRef.current += 1;
+			auditOpenRef.current = false;
+			setAuditOpen(false);
+			setAuditLoading(false);
+			return;
+		}
+		const token = lifecycleTokenRef.current;
+		if (token === null) return;
+		auditOpenRef.current = true;
+		setAuditOpen(true);
+		setAuditRecords(null);
+		loadAudit(token);
+	}, [loadAudit]);
+
+	const handleAuditRefresh = useCallback(() => {
+		const token = lifecycleTokenRef.current;
+		if (token === null || auditLoading || !auditOpenRef.current) return;
+		loadAudit(token);
+	}, [auditLoading, loadAudit]);
+
 	const handleClose = useCallback(() => {
 		clearControlExpiryTimer();
 		setControlStatus({ armed: false, remainingMs: 0 });
@@ -364,6 +484,72 @@ export function WorkspaceBrowserSurface({
 						<Sparkles className="size-3.5" />
 					)}
 				</Button>
+				<Popover open={auditOpen} onOpenChange={handleAuditOpenChange}>
+					<PopoverTrigger asChild>
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							aria-label={t("browser.audit.open")}
+							title={t("browser.audit.open")}
+							disabled={lifecycleToken === null}
+						>
+							<History className="size-3.5" />
+						</Button>
+					</PopoverTrigger>
+					<PopoverContent side="bottom" align="end" className="w-80 max-w-[calc(100vw-1rem)] p-3">
+						<div className="flex items-center justify-between gap-2">
+							<div className="min-w-0">
+								<p className="text-sm font-medium">{t("browser.audit.title")}</p>
+								<p className="text-xs text-muted-foreground">{t("browser.audit.description")}</p>
+							</div>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								onClick={handleAuditRefresh}
+								aria-label={t("browser.audit.refresh")}
+								title={t("browser.audit.refresh")}
+								disabled={auditLoading}
+							>
+								{auditLoading ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+							</Button>
+						</div>
+						{auditLoading ? (
+							<p className="flex items-center gap-1.5 py-4 text-xs text-muted-foreground" role="status">
+								<LoaderCircle className="size-3 animate-spin" />
+								{t("browser.audit.loading")}
+							</p>
+						) : auditFailed ? (
+							<p className="py-4 text-xs text-destructive" role="alert">{t("browser.audit.error")}</p>
+						) : auditRecords?.length ? (
+							<ul className="max-h-72 space-y-1 overflow-y-auto" aria-label={t("browser.audit.entries")}>
+								{auditRecords.map((record, index) => {
+									const timestamp = browserAuditTime(record.timestampMs);
+									return (
+										<li key={`${record.timestampMs}-${record.tool}-${index}`} className="rounded-md border border-border/60 px-2 py-1.5 text-xs">
+											<div className="flex items-center justify-between gap-2">
+												<span className="min-w-0 truncate font-medium">{t(`browser.audit.tools.${record.tool}`)}</span>
+												<time className="shrink-0 text-[10px] text-muted-foreground">
+													{timestamp ? timestamp.toLocaleTimeString() : t("browser.audit.unknownTime")}
+												</time>
+											</div>
+											<div className="mt-0.5 flex flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
+												<span>{record.origin === "mcp"
+													? t("browser.audit.origin.mcp", { provider: record.providerId ?? t("browser.audit.origin.providerUnavailable") })
+													: t("browser.audit.origin.ui")}</span>
+												<span>{t(`browser.audit.grant.${record.grantState}`)}</span>
+												<span>{t(`browser.audit.outcome.${record.outcome}`)}</span>
+											</div>
+										</li>
+									);
+								})}
+							</ul>
+						) : (
+							<p className="py-4 text-xs text-muted-foreground">{t("browser.audit.empty")}</p>
+						)}
+					</PopoverContent>
+				</Popover>
 				{sessionId ? (
 					<Button
 						type="button"

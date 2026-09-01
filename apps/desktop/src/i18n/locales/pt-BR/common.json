@@ -2906,6 +2906,47 @@
     "controlInactive": "Controle do agente desativado",
     "armControlShort": "Agente 60s",
     "controlOnShort": "Agente ativo",
+    "audit": {
+      "open": "Abrir atividade do navegador",
+      "title": "Atividade do navegador",
+      "description": "Ações recentes do navegador nesta sessão",
+      "refresh": "Atualizar atividade do navegador",
+      "loading": "Carregando atividade…",
+      "error": "Não foi possível carregar a atividade do navegador.",
+      "empty": "Ainda não há atividade do navegador.",
+      "entries": "Registros de atividade do navegador",
+      "unknownTime": "Hora desconhecida",
+      "origin": {
+        "ui": "Interface",
+        "mcp": "MCP · {{provider}}",
+        "providerUnavailable": "provedor indisponível"
+      },
+      "grant": {
+        "armed": "permitido",
+        "expired": "expirado",
+        "missing": "não permitido",
+        "notApplicable": "não aplicável"
+      },
+      "outcome": {
+        "executed": "concluída",
+        "rejected": "rejeitada",
+        "stale": "desatualizada",
+        "notArmed": "não permitido",
+        "failed": "falhou"
+      },
+      "tools": {
+        "dcc_browser_context": "Ler contexto da página",
+        "dcc_browser_navigate": "Navegar",
+        "dcc_browser_reload": "Recarregar",
+        "dcc_browser_scroll": "Rolar",
+        "dcc_browser_click": "Clicar",
+        "dcc_browser_fill": "Preencher campo",
+        "dcc_browser_evidence_start": "Iniciar evidência",
+        "dcc_browser_evidence_read": "Ler evidência",
+        "browser_arm_control": "Permitir controle do agente",
+        "browser_disarm_control": "Desativar controle do agente"
+      }
+    },
     "close": "Fechar navegador",
     "resize": "Redimensionar navegador",
     "loading": "Carregando página…",
