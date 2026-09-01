@@ -25,6 +25,17 @@ import {
 } from "@/features/terminal/terminal-tabs-store";
 import { WorkspacePanel } from "@/features/panel";
 import { WorkspaceBrowserSurface } from "@/features/browser/workspace-browser-surface";
+import {
+	clampBrowserSurfaceWidthForContainer,
+	BROWSER_SPLITTER_WIDTH,
+	effectiveInspectorCollapsedForBrowserOpen,
+	MIN_BROWSER_SURFACE_WIDTH,
+	MAX_BROWSER_SURFACE_WIDTH,
+	persistBrowserSurfaceWidth,
+	readBrowserSurfaceWidth,
+	shouldRestoreInspectorAfterBrowserClose,
+	shouldSplitBrowser,
+} from "@/features/browser/browser-layout";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type {
 	ComposerDelegationRequest,
@@ -265,6 +276,23 @@ export function SessionWorkbench({
 	const [terminalUiStates, setTerminalUiStates] =
 		useState<WorkspaceTerminalUiStates>({});
 	const [browserOpen, setBrowserOpen] = useState(false);
+	const [browserSurfaceWidth, setBrowserSurfaceWidth] = useState(() =>
+		readBrowserSurfaceWidth(workspaceId),
+	);
+	const [workbenchWidth, setWorkbenchWidth] = useState(0);
+	const [browserResizing, setBrowserResizing] = useState(false);
+	const workbenchRef = useRef<HTMLDivElement | null>(null);
+	const browserResizeFrameRef = useRef<number | null>(null);
+	const browserResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+	const browserSurfaceWidthRef = useRef(browserSurfaceWidth);
+	const browserRestoreRef = useRef<{
+		workspaceId: string;
+		sessionId: string | null;
+		cycle: number;
+		inspectorCollapsed: boolean;
+	} | null>(null);
+	const browserCycleRef = useRef(0);
+	browserSurfaceWidthRef.current = browserSurfaceWidth;
 	const [terminalComposerPrefill, setTerminalComposerPrefill] = useState<{
 		workspaceId: string;
 		text: string;
@@ -292,6 +320,8 @@ export function SessionWorkbench({
 	}, [workspaceId]);
 	useEffect(() => {
 		setBrowserOpen(false);
+		setBrowserSurfaceWidth(readBrowserSurfaceWidth(workspaceId));
+		browserRestoreRef.current = null;
 	}, [workspaceId]);
 	const inspectorBeforeTerminalExpandRef = useRef<boolean | null>(null);
 	const [deliveryOpen, setDeliveryOpen] = useState(false);
@@ -310,6 +340,56 @@ export function SessionWorkbench({
 		projectLabel?.trim() ||
 		(terminalRootPath ? pathBasename(terminalRootPath) : (projectId ?? workspaceName));
 	const sessionId = sessionSnapshot?.sessionId ?? null;
+	useEffect(() => {
+		const element = workbenchRef.current;
+		if (!element) return;
+		let frameId: number | null = null;
+		let pendingWidth = 0;
+		const flushWidth = () => {
+			frameId = null;
+			setWorkbenchWidth((current) =>
+				current === pendingWidth ? current : pendingWidth,
+			);
+		};
+		const updateWidth = () => {
+			pendingWidth = Math.round(element.getBoundingClientRect().width);
+			if (frameId === null) {
+				frameId = requestAnimationFrame(flushWidth);
+			}
+		};
+		updateWidth();
+		if (typeof ResizeObserver === "undefined") {
+			window.addEventListener("resize", updateWidth);
+			return () => {
+				if (frameId !== null) cancelAnimationFrame(frameId);
+				window.removeEventListener("resize", updateWidth);
+			};
+		}
+		const observer = new ResizeObserver(updateWidth);
+		observer.observe(element);
+		return () => {
+			if (frameId !== null) cancelAnimationFrame(frameId);
+			observer.disconnect();
+		};
+	}, []);
+	const browserSplit = browserOpen && shouldSplitBrowser(workbenchWidth);
+	const visibleBrowserWidth = clampBrowserSurfaceWidthForContainer(
+		browserSurfaceWidth,
+		workbenchWidth,
+	);
+	const maxBrowserSurfaceWidth = clampBrowserSurfaceWidthForContainer(
+		MAX_BROWSER_SURFACE_WIDTH,
+		workbenchWidth,
+	);
+	const updateBrowserSurfaceWidth = useCallback(
+		(nextWidth: number, persist = false) => {
+			const width = clampBrowserSurfaceWidthForContainer(nextWidth, workbenchWidth);
+			browserSurfaceWidthRef.current = width;
+			setBrowserSurfaceWidth(width);
+			if (persist) persistBrowserSurfaceWidth(workspaceId, width);
+		},
+		[workbenchWidth, workspaceId],
+	);
 	const terminalWorkspaceKey = terminalWorkspaceId ?? workspaceId;
 	const terminalUiState = getWorkspaceTerminalUiState(
 		terminalUiStates,
@@ -443,14 +523,104 @@ export function SessionWorkbench({
 			updateTerminalUiState,
 		],
 	);
-	const handleOpenBrowser = useCallback(() => {
-		if (terminalOpen) handleTerminalOpenChange(false);
-		setBrowserOpen(true);
-	}, [handleTerminalOpenChange, terminalOpen]);
+	useEffect(() => {
+		if (!browserResizing) return;
+		let pendingClientX: number | null = null;
+		const flushResize = () => {
+			browserResizeFrameRef.current = null;
+			const resize = browserResizeRef.current;
+			if (!resize || pendingClientX === null) return;
+			const clientX = pendingClientX;
+			pendingClientX = null;
+			updateBrowserSurfaceWidth(resize.startWidth + resize.startX - clientX);
+		};
+		const onMouseMove = (event: MouseEvent) => {
+			pendingClientX = event.clientX;
+			if (browserResizeFrameRef.current === null) {
+				browserResizeFrameRef.current = requestAnimationFrame(flushResize);
+			}
+		};
+		const onMouseUp = () => {
+			if (browserResizeFrameRef.current !== null) {
+				cancelAnimationFrame(browserResizeFrameRef.current);
+				flushResize();
+			}
+			persistBrowserSurfaceWidth(workspaceId, browserSurfaceWidthRef.current);
+			browserResizeRef.current = null;
+			setBrowserResizing(false);
+		};
+		const previousCursor = document.body.style.cursor;
+		const previousUserSelect = document.body.style.userSelect;
+		document.body.style.cursor = "col-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("mousemove", onMouseMove);
+		window.addEventListener("mouseup", onMouseUp);
+		return () => {
+			if (browserResizeFrameRef.current !== null) {
+				cancelAnimationFrame(browserResizeFrameRef.current);
+				browserResizeFrameRef.current = null;
+			}
+			document.body.style.cursor = previousCursor;
+			document.body.style.userSelect = previousUserSelect;
+			window.removeEventListener("mousemove", onMouseMove);
+			window.removeEventListener("mouseup", onMouseUp);
+		};
+	}, [browserResizing, updateBrowserSurfaceWidth, workspaceId]);
 	const handleCloseBrowser = useCallback(() => {
+		const restore = browserRestoreRef.current;
 		setBrowserOpen(false);
+		browserRestoreRef.current = null;
+		if (restore && shouldRestoreInspectorAfterBrowserClose({
+			currentWorkspaceId: workspaceId,
+			currentSessionId: sessionId,
+			currentInspectorCollapsed: inspectorCollapsed,
+			openedWorkspaceId: restore.workspaceId,
+			openedSessionId: restore.sessionId,
+			openedCycle: restore.cycle,
+			currentCycle: browserCycleRef.current,
+			openedInspectorCollapsed: restore.inspectorCollapsed,
+		})) {
+			onInspectorCollapsedChange?.(false);
+		}
 		requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
-	}, []);
+	}, [inspectorCollapsed, onInspectorCollapsedChange, sessionId, workspaceId]);
+	const handleOpenBrowser = useCallback(() => {
+		if (browserOpen) {
+			handleCloseBrowser();
+			return;
+		}
+		const previousInspectorCollapsed = effectiveInspectorCollapsedForBrowserOpen({
+			inspectorCollapsed,
+			inspectorBeforeTerminalExpand: inspectorBeforeTerminalExpandRef.current,
+		});
+		// Closing an expanded terminal may restore the Inspector synchronously;
+		// apply the browser takeover/split policy after that lifecycle completes.
+		if (terminalOpen) handleTerminalOpenChange(false);
+		browserCycleRef.current += 1;
+		browserRestoreRef.current = {
+			workspaceId,
+			sessionId,
+			cycle: browserCycleRef.current,
+			inspectorCollapsed: previousInspectorCollapsed,
+		};
+		if (previousInspectorCollapsed === false) onInspectorCollapsedChange?.(true);
+		setBrowserOpen(true);
+	}, [
+		browserOpen,
+		handleCloseBrowser,
+		handleTerminalOpenChange,
+		inspectorCollapsed,
+		onInspectorCollapsedChange,
+		sessionId,
+		terminalOpen,
+		workspaceId,
+	]);
+	useEffect(() => {
+		const restore = browserRestoreRef.current;
+		if (restore && (restore.workspaceId !== workspaceId || restore.sessionId !== sessionId)) {
+			browserRestoreRef.current = null;
+		}
+	}, [sessionId, workspaceId]);
 	const handleSendTerminalToAgent = useCallback(
 		(context: TerminalAgentContext) => {
 			terminalPrefillNonceRef.current += 1;
@@ -510,8 +680,10 @@ export function SessionWorkbench({
 		[handleOpenTerminal, handleTerminalOpenChange, terminalOpen],
 	);
 
-	// Full-bleed terminal takeover — hide the chat column entirely.
-	const chatHidden = browserOpen || (terminalOpen && terminalExpanded);
+	// Compact windows use a full-bleed native browser takeover; wide windows keep
+	// the conversation visible beside the browser companion surface.
+	const browserTakeover = browserOpen && !browserSplit;
+	const chatHidden = browserTakeover || (terminalOpen && terminalExpanded);
 	const deliverableScopeOptions = workspaceScopeOptions.filter(
 		(workspace) => workspace.needsDelivery === true,
 	);
@@ -583,7 +755,7 @@ export function SessionWorkbench({
 		) ?? false;
 
 	return (
-		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+		<div ref={workbenchRef} className={browserSplit ? "flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden bg-background" : "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"}>
 			{!chatHidden ? (
 				<div className="@container/header-actions flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
 					{workspaceScopeOptions.length > 1 ? (
@@ -701,6 +873,7 @@ export function SessionWorkbench({
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}
 						onOpenBrowser={handleOpenBrowser}
+						browserOpen={browserOpen && !browserTakeover}
 						externalComposerPrefill={
 							terminalComposerPrefill?.workspaceId === workspaceId
 								? terminalComposerPrefill
@@ -724,11 +897,49 @@ export function SessionWorkbench({
 			) : null}
 
 			{browserOpen ? (
-				<WorkspaceBrowserSurface
-					workspaceId={workspaceId}
-					sessionId={sessionId}
-					onClose={handleCloseBrowser}
-				/>
+				<div
+					key="workspace-browser-surface"
+					className={browserSplit ? "flex min-h-0 min-w-0 shrink-0 flex-row overflow-hidden border-l border-border/60 bg-background" : "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"}
+					style={browserSplit ? { width: visibleBrowserWidth + BROWSER_SPLITTER_WIDTH } : undefined}
+				>
+					<div
+						role="separator"
+						aria-orientation="vertical"
+						aria-label={t("browser.resize")}
+						aria-valuemin={MIN_BROWSER_SURFACE_WIDTH}
+						aria-valuemax={maxBrowserSurfaceWidth}
+						aria-valuenow={visibleBrowserWidth}
+						tabIndex={browserSplit ? 0 : -1}
+						className={browserSplit ? "relative z-10 w-1.5 shrink-0 cursor-col-resize border-r border-border/60 bg-muted/20 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : "hidden"}
+						onMouseDown={(event) => {
+							event.preventDefault();
+							browserResizeRef.current = {
+								startX: event.clientX,
+								startWidth: visibleBrowserWidth,
+							};
+							setBrowserResizing(true);
+						}}
+						onKeyDown={(event) => {
+							const keyboardWidths: Record<string, number> = {
+								ArrowLeft: visibleBrowserWidth + 16,
+								ArrowRight: visibleBrowserWidth - 16,
+								Home: MIN_BROWSER_SURFACE_WIDTH,
+								End: MAX_BROWSER_SURFACE_WIDTH,
+							};
+							const nextWidth = keyboardWidths[event.key];
+							if (nextWidth === undefined) return;
+							event.preventDefault();
+							updateBrowserSurfaceWidth(nextWidth, true);
+						}}
+					/>
+					<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+						<WorkspaceBrowserSurface
+							workspaceId={workspaceId}
+							sessionId={sessionId}
+							onClose={handleCloseBrowser}
+						/>
+					</div>
+				</div>
 			) : terminalOpen ? (
 				<WorkspaceTerminalDrawer
 					open={terminalOpen}

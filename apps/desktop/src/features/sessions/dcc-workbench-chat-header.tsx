@@ -32,6 +32,7 @@ export type DccWorkbenchChatHeaderProps = {
 	sessionActionSessionId: string | null;
 	onOpenTerminal?: () => void;
 	onOpenBrowser?: () => void;
+	browserOpen?: boolean;
 	terminalScopes?: TerminalScopeTarget[];
 	workspaceActions?: ReactNode;
 };
@@ -41,7 +42,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	threadTitle, projectLabel, workspacePath, sessions, selectedSessionId,
 	isLoadingSessions, sessionSnapshot, onSelectSession, onStartSession,
 	onCloseSession, onRestoreSession, onOpenSessionSearch, onResumeSession,
-	sessionActionSessionId, onOpenTerminal, onOpenBrowser, terminalScopes, workspaceActions,
+	sessionActionSessionId, onOpenTerminal, onOpenBrowser, browserOpen = false, terminalScopes, workspaceActions,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
 	const resumeOk = canResumeSession(sessionSnapshot);
@@ -85,11 +86,11 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 				{onOpenBrowser ? (
 					<Tooltip>
 						<TooltipTrigger asChild>
-							<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" onClick={onOpenBrowser} aria-label={t("browser.open")}>
+							<Button type="button" variant="ghost" size="icon-sm" className={browserOpen ? "text-cyan-400 hover:text-cyan-300" : "text-muted-foreground hover:text-foreground"} onClick={onOpenBrowser} aria-label={browserOpen ? t("browser.close") : t("browser.open")}>
 								<Globe2 className="size-3.5" strokeWidth={1.8} />
 							</Button>
 						</TooltipTrigger>
-						<TooltipContent side="bottom">{t("browser.open")}</TooltipContent>
+						<TooltipContent side="bottom">{browserOpen ? t("browser.close") : t("browser.open")}</TooltipContent>
 					</Tooltip>
 				) : null}
 				{workspaceActions}

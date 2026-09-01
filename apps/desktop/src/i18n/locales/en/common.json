@@ -2900,6 +2900,7 @@
     "go": "Go",
     "reload": "Reload page",
     "close": "Close browser",
+    "resize": "Resize browser",
     "loading": "Loading page…",
     "error": "Browser error: {{error}}"
   },

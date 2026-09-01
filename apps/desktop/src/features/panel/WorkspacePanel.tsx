@@ -255,6 +255,7 @@ type WorkspacePanelProps = {
 	terminalScopes?: TerminalScopeTarget[];
 	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 	onOpenBrowser?: () => void;
+	browserOpen?: boolean;
 	externalComposerPrefill?: ComposerPrefill | null;
 	onExternalComposerPrefillConsumed?: (
 		prefill: ComposerPrefillConsumption,
@@ -333,6 +334,7 @@ export function WorkspacePanel({
 	terminalScopes,
 	onOpenTerminal,
 	onOpenBrowser,
+	browserOpen,
 	externalComposerPrefill,
 	onExternalComposerPrefillConsumed,
 	composerFocusRequestKey = null,
@@ -1211,6 +1213,7 @@ export function WorkspacePanel({
 					sessionActionSessionId={sessionActionSessionId}
 					onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}
 					onOpenBrowser={onOpenBrowser}
+					browserOpen={browserOpen}
 					terminalScopes={terminalScopes}
 					workspacePath={workspacePath}
 					workspaceActions={
