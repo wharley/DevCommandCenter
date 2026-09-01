@@ -16,6 +16,17 @@ export type BrowserSnapshot = {
 	title: string | null;
 };
 
+/** Bounded page context obtained by the backend after an explicit user action. */
+export type BrowserAgentContext = {
+	workspaceId: string;
+	sessionId: string | null;
+	url: string;
+	title: string | null;
+	text: string;
+	selectionOnly: boolean;
+	truncated: boolean;
+};
+
 export function openBrowser(input: {
 	workspaceId: string;
 	sessionId: string | null;
@@ -47,6 +58,16 @@ export function reloadBrowser(input: {
 	sessionId: string | null;
 }) {
 	return invoke<BrowserSnapshot>("browser_reload", {
+		workspaceId: input.workspaceId,
+		sessionId: input.sessionId,
+	});
+}
+
+export function extractBrowserContext(input: {
+	workspaceId: string;
+	sessionId: string | null;
+}) {
+	return invoke<BrowserAgentContext>("browser_extract_context", {
 		workspaceId: input.workspaceId,
 		sessionId: input.sessionId,
 	});

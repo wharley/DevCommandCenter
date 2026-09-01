@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Globe2, LoaderCircle, RefreshCw, X } from "lucide-react";
+import { Globe2, LoaderCircle, RefreshCw, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,8 @@ import {
 	openBrowser,
 	reloadBrowser,
 	setBrowserBounds,
+	extractBrowserContext,
+	type BrowserAgentContext,
 	type BrowserBounds,
 	type BrowserSnapshot,
 } from "./browser-api";
@@ -17,6 +19,7 @@ type WorkspaceBrowserSurfaceProps = {
 	workspaceId: string;
 	sessionId: string | null;
 	onClose: () => void;
+	onSendToAgent?: (context: BrowserAgentContext) => void;
 };
 
 /**
@@ -65,6 +68,7 @@ export function WorkspaceBrowserSurface({
 	workspaceId,
 	sessionId,
 	onClose,
+	onSendToAgent,
 }: WorkspaceBrowserSurfaceProps) {
 	const viewportRef = useRef<HTMLDivElement | null>(null);
 	const boundsFrameRef = useRef<number | null>(null);
@@ -73,6 +77,7 @@ export function WorkspaceBrowserSurface({
 	const [address, setAddress] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [sendingContext, setSendingContext] = useState(false);
 
 	const updateBounds = useCallback(() => {
 		const viewport = viewportRef.current;
@@ -117,6 +122,7 @@ export function WorkspaceBrowserSurface({
 
 	useEffect(() => {
 		let unlisten: (() => void) | undefined;
+		let disposed = false;
 		void listenBrowserState((next) => {
 			if (next.workspaceId !== workspaceId || next.sessionId !== sessionId) return;
 			setSnapshot(next);
@@ -124,10 +130,17 @@ export function WorkspaceBrowserSurface({
 			setLoading(false);
 		})
 			.then((dispose) => {
-				unlisten = dispose;
+				if (disposed) {
+					dispose();
+				} else {
+					unlisten = dispose;
+				}
 			})
 			.catch(() => {});
-		return () => unlisten?.();
+		return () => {
+			disposed = true;
+			unlisten?.();
+		};
 	}, [sessionId, workspaceId]);
 
 	useEffect(() => {
@@ -138,11 +151,15 @@ export function WorkspaceBrowserSurface({
 
 	useEffect(() => {
 		const viewport = viewportRef.current;
-		if (!viewport || typeof ResizeObserver === "undefined") return;
-		const observer = new ResizeObserver(scheduleBoundsUpdate);
-		observer.observe(viewport);
+		if (!viewport) return;
+		const observer = typeof ResizeObserver === "undefined"
+			? null
+			: new ResizeObserver(scheduleBoundsUpdate);
+		observer?.observe(viewport);
+		window.addEventListener("resize", scheduleBoundsUpdate);
 		return () => {
-			observer.disconnect();
+			observer?.disconnect();
+			window.removeEventListener("resize", scheduleBoundsUpdate);
 			if (boundsFrameRef.current !== null) {
 				cancelAnimationFrame(boundsFrameRef.current);
 				boundsFrameRef.current = null;
@@ -175,6 +192,18 @@ export function WorkspaceBrowserSurface({
 			})
 			.finally(() => setLoading(false));
 	}, [sessionId, workspaceId]);
+
+	const handleSendToAgent = useCallback(() => {
+		if (!onSendToAgent || sendingContext) return;
+		setError(null);
+		setSendingContext(true);
+		void extractBrowserContext({ workspaceId, sessionId })
+			.then(onSendToAgent)
+			.catch((reason: unknown) => {
+				setError(reason instanceof Error ? reason.message : String(reason));
+			})
+			.finally(() => setSendingContext(false));
+	}, [onSendToAgent, sendingContext, sessionId, workspaceId]);
 
 	const handleClose = useCallback(() => {
 		void hideBrowser({ workspaceId, sessionId }).catch(() => {}).finally(onClose);
@@ -209,6 +238,20 @@ export function WorkspaceBrowserSurface({
 				) : null}
 				<Button type="button" variant="ghost" size="icon-sm" onClick={handleReload} aria-label={t("browser.reload")} disabled={loading}>
 					<RefreshCw className="size-3.5" />
+				</Button>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					onClick={handleSendToAgent}
+					aria-label={t("browser.sendToAgent")}
+					disabled={!onSendToAgent || loading || sendingContext}
+				>
+					{sendingContext ? (
+						<LoaderCircle className="size-3.5 animate-spin" />
+					) : (
+						<Sparkles className="size-3.5" />
+					)}
 				</Button>
 				<Button type="button" variant="ghost" size="icon-sm" onClick={handleClose} aria-label={t("browser.close")}>
 					<X className="size-3.5" />

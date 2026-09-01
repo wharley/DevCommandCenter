@@ -6,8 +6,16 @@ vi.mock("@tauri-apps/api/core", () => ({
 	invoke: invokeMock,
 }));
 
-import { navigateBrowser, openBrowser, setBrowserBounds } from "./browser-api";
-import { readBrowserBounds } from "./workspace-browser-surface";
+import {
+	extractBrowserContext,
+	navigateBrowser,
+	openBrowser,
+	setBrowserBounds,
+} from "./browser-api";
+import {
+	readBrowserBounds,
+	snapBrowserBoundsToDevicePixels,
+} from "./workspace-browser-surface";
 
 describe("browser-api", () => {
 	beforeEach(() => {
@@ -54,6 +62,19 @@ describe("browser-api", () => {
 		expect(invokeMock).not.toHaveBeenCalledWith("webview_create", expect.anything());
 	});
 
+	it("requests page context only through the scoped backend command", async () => {
+		await extractBrowserContext({
+			workspaceId: "workspace-1",
+			sessionId: "session-1",
+		});
+
+		expect(invokeMock).toHaveBeenCalledWith("browser_extract_context", {
+			workspaceId: "workspace-1",
+			sessionId: "session-1",
+		});
+		expect(invokeMock).not.toHaveBeenCalledWith("webview_eval", expect.anything());
+	});
+
 	it("normalizes DOM bounds before sending them to native layout", () => {
 		const element = document.createElement("div");
 		vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
@@ -64,5 +85,14 @@ describe("browser-api", () => {
 		} as DOMRect);
 
 		expect(readBrowserBounds(element)).toEqual({ x: 0, y: 0, width: 720, height: 480 });
+	});
+
+	it("snaps fractional edges outward to device pixels", () => {
+		expect(
+			snapBrowserBoundsToDevicePixels(
+				{ x: 10.25, y: 20.25, width: 100.1, height: 200.1 },
+				2,
+			),
+		).toEqual({ x: 10, y: 20, width: 100.5, height: 200.5 });
 	});
 });

@@ -6990,6 +6990,7 @@ pub fn run() {
             browser_commands::browser_open,
             browser_commands::browser_navigate,
             browser_commands::browser_reload,
+            browser_commands::browser_extract_context,
             browser_commands::browser_set_bounds,
             browser_commands::browser_hide,
             pair_init,

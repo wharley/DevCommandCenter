@@ -26,6 +26,12 @@ import {
 import { WorkspacePanel } from "@/features/panel";
 import { WorkspaceBrowserSurface } from "@/features/browser/workspace-browser-surface";
 import {
+	formatBrowserAgentContext,
+	isBrowserContextForScope,
+	isBrowserPrefillForScope,
+} from "@/features/browser/browser-agent-context";
+import type { BrowserAgentContext } from "@/features/browser/browser-api";
+import {
 	clampBrowserSurfaceWidthForContainer,
 	BROWSER_SPLITTER_WIDTH,
 	effectiveInspectorCollapsedForBrowserOpen,
@@ -299,6 +305,13 @@ export function SessionWorkbench({
 		nonce: number;
 		mode: "append";
 	} | null>(null);
+	const [browserComposerPrefill, setBrowserComposerPrefill] = useState<{
+		workspaceId: string;
+		sessionId: string | null;
+		text: string;
+		nonce: number;
+		mode: "append";
+	} | null>(null);
 	const terminalPrefillNonceRef = useRef(0);
 	const handleComposerPrefillConsumed = useCallback(
 		(prefill: { text: string; nonce: number }) => {
@@ -309,9 +322,16 @@ export function SessionWorkbench({
 				setTerminalComposerPrefill(null);
 				return;
 			}
+			if (
+				browserComposerPrefill?.nonce === prefill.nonce &&
+				browserComposerPrefill.text === prefill.text
+			) {
+				setBrowserComposerPrefill(null);
+				return;
+			}
 			onComposerPrefillConsumed?.(prefill);
 		},
-		[onComposerPrefillConsumed, terminalComposerPrefill],
+		[onComposerPrefillConsumed, browserComposerPrefill, terminalComposerPrefill],
 	);
 	useEffect(() => {
 		// Terminal context belongs to the workspace where it was collected and
@@ -340,6 +360,13 @@ export function SessionWorkbench({
 		projectLabel?.trim() ||
 		(terminalRootPath ? pathBasename(terminalRootPath) : (projectId ?? workspaceName));
 	const sessionId = sessionSnapshot?.sessionId ?? null;
+	const browserScopeRef = useRef({ workspaceId, sessionId });
+	browserScopeRef.current = { workspaceId, sessionId };
+	useEffect(() => {
+		// Browser callbacks can resolve after switching conversations. A prefill
+		// is valid only for the exact session that requested it.
+		setBrowserComposerPrefill(null);
+	}, [sessionId, workspaceId]);
 	useEffect(() => {
 		const element = workbenchRef.current;
 		if (!element) return;
@@ -652,6 +679,40 @@ export function SessionWorkbench({
 		},
 		[handleTerminalOpenChange, t],
 	);
+	const handleSendBrowserToAgent = useCallback(
+		(context: BrowserAgentContext) => {
+			// The backend scopes this command, and this ref adds protection against
+			// a Promise from an old surface resolving after a session switch.
+			const activeScope = browserScopeRef.current;
+			if (!isBrowserContextForScope(context, activeScope)) {
+				return;
+			}
+			terminalPrefillNonceRef.current += 1;
+			setBrowserComposerPrefill({
+				workspaceId: activeScope.workspaceId,
+				sessionId: activeScope.sessionId,
+				nonce: terminalPrefillNonceRef.current,
+				mode: "append",
+				text: formatBrowserAgentContext(context, {
+					prompt: t("browser.agentContext.prompt"),
+					url: t("browser.agentContext.url"),
+					title: t("browser.agentContext.title"),
+					source: t("browser.agentContext.source"),
+					truncated: t("browser.agentContext.truncated"),
+					selection: t("browser.agentContext.selection"),
+					visibleText: t("browser.agentContext.visibleText"),
+					yes: t("browser.agentContext.yes"),
+					no: t("browser.agentContext.no"),
+				}),
+			});
+			if (browserSplit) {
+				requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
+			} else {
+				handleCloseBrowser();
+			}
+		},
+		[browserSplit, handleCloseBrowser, t],
+	);
 
 	useEffect(
 		() => () => {
@@ -875,9 +936,14 @@ export function SessionWorkbench({
 						onOpenBrowser={handleOpenBrowser}
 						browserOpen={browserOpen && !browserTakeover}
 						externalComposerPrefill={
-							terminalComposerPrefill?.workspaceId === workspaceId
-								? terminalComposerPrefill
-								: composerPrefill
+							isBrowserPrefillForScope(browserComposerPrefill, {
+								workspaceId,
+								sessionId,
+							})
+								? browserComposerPrefill
+								: terminalComposerPrefill?.workspaceId === workspaceId
+									? terminalComposerPrefill
+									: composerPrefill
 						}
 						onExternalComposerPrefillConsumed={handleComposerPrefillConsumed}
 						composerFocusRequestKey={composerFocusRequestKey}
@@ -937,6 +1003,7 @@ export function SessionWorkbench({
 							workspaceId={workspaceId}
 							sessionId={sessionId}
 							onClose={handleCloseBrowser}
+							onSendToAgent={handleSendBrowserToAgent}
 						/>
 					</div>
 				</div>
