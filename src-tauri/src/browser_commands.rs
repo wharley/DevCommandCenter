@@ -58,6 +58,9 @@ const MAX_BROWSER_EVIDENCE_URL_CHARS: usize = 512;
 const MAX_BROWSER_EVIDENCE_CHARS: usize = 12_000;
 const MAX_BROWSER_EVIDENCE_CALLBACK_CHARS: usize = 24_000;
 const MAX_BROWSER_EVIDENCE_LINE: u32 = 1_000_000;
+/// Resource Timing duration is rounded to milliseconds and never reveals a
+/// timing larger than this short, explicit evidence capture window.
+const MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS: u32 = 60_000;
 const BROWSER_EVIDENCE_TTL: Duration = Duration::from_secs(60);
 const BROWSER_EVIDENCE_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_BROWSER_AUDIT_ENTRIES: usize = 256;
@@ -244,6 +247,12 @@ pub struct BrowserEvidenceEvent {
     pub line: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub column: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initiator_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
 }
 
 /// This is intentionally narrower than an MCP bridge: actions may carry only
@@ -1431,29 +1440,92 @@ fn invalidate_browser_evidence_for_scope(
     session_id: Option<&str>,
 ) {
     let scope = scope_key(workspace_id, session_id);
-    if let Ok(mut captures) = state.evidence_captures.lock() {
-        captures.retain(|_, capture| capture.scope != scope);
+    invalidate_browser_evidence_for_scope_key(state, &scope);
+}
+
+fn invalidate_browser_evidence_for_scope_key(state: &BrowserState, scope: &str) {
+    let removed = state.evidence_captures.lock().ok().map(|mut captures| {
+        let capture_ids = captures
+            .iter()
+            .filter_map(|(capture_id, capture)| {
+                (capture.scope == scope).then(|| capture_id.clone())
+            })
+            .collect::<Vec<_>>();
+        capture_ids
+            .into_iter()
+            .filter_map(|capture_id| captures.remove(&capture_id))
+            .collect::<Vec<_>>()
+    });
+    for record in removed.unwrap_or_default() {
+        schedule_browser_evidence_cleanup(state, record);
     }
 }
 
 fn clear_browser_evidence_captures(state: &BrowserState) {
-    if let Ok(mut captures) = state.evidence_captures.lock() {
-        captures.clear();
+    let removed = state.evidence_captures.lock().ok().map(|mut captures| {
+        captures
+            .drain()
+            .map(|(_, record)| record)
+            .collect::<Vec<_>>()
+    });
+    for record in removed.unwrap_or_default() {
+        schedule_browser_evidence_cleanup(state, record);
     }
 }
 
-fn expire_browser_evidence_capture(
-    captures: &Arc<Mutex<HashMap<String, BrowserEvidenceCaptureRecord>>>,
+/// Atomically take an evidence record only when its private page capability
+/// still matches. Callers must schedule cleanup only after this returns it.
+fn take_browser_evidence_capture_with_token(
+    captures: &mut HashMap<String, BrowserEvidenceCaptureRecord>,
     capture_id: &str,
     capture_token: &str,
-) {
-    if let Ok(mut captures) = captures.lock() {
-        if captures
-            .get(capture_id)
-            .is_some_and(|capture| capture.capture_token == capture_token)
-        {
-            captures.remove(capture_id);
+) -> Option<BrowserEvidenceCaptureRecord> {
+    captures
+        .get(capture_id)
+        .is_some_and(|capture| capture.capture_token == capture_token)
+        .then(|| captures.remove(capture_id))
+        .flatten()
+}
+
+fn remove_browser_evidence_capture_with_token(
+    state: &BrowserState,
+    capture_id: &str,
+    capture_token: &str,
+) -> Option<BrowserEvidenceCaptureRecord> {
+    state
+        .evidence_captures
+        .lock()
+        .ok()
+        .and_then(|mut captures| {
+            take_browser_evidence_capture_with_token(&mut captures, capture_id, capture_token)
+        })
+}
+
+/// The record must already have been removed from backend state before this is
+/// called. The fixed page-side drain is best effort: it never returns buffered
+/// evidence and it fails closed if the child WebView navigated or closed.
+fn schedule_browser_evidence_cleanup(state: &BrowserState, record: BrowserEvidenceCaptureRecord) {
+    let state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        let _operation = state.operation_lock.lock().await;
+        let Ok(script) = browser_evidence_cleanup_script(
+            &record.capture_token,
+            &record.url,
+            record.document_identity,
+        ) else {
+            return;
+        };
+        if let Ok(raw) = eval_browser_evidence_with_callback(&state, script).await {
+            let _ = parse_browser_evidence_cleanup_callback(&raw);
         }
+    });
+}
+
+fn expire_browser_evidence_capture(state: &BrowserState, capture_id: &str, capture_token: &str) {
+    if let Some(record) =
+        remove_browser_evidence_capture_with_token(state, capture_id, capture_token)
+    {
+        schedule_browser_evidence_cleanup(state, record);
     }
 }
 
@@ -1476,6 +1548,9 @@ struct BrowserEvidenceEventRaw {
     url: Option<String>,
     line: Option<u64>,
     column: Option<u64>,
+    initiator_type: Option<String>,
+    duration_ms: Option<u64>,
+    status: Option<u64>,
 }
 
 fn contains_sensitive_browser_evidence_term(value: &str) -> bool {
@@ -1534,6 +1609,21 @@ fn sanitize_browser_evidence_url(raw: Option<&str>) -> Option<String> {
     Some(sanitized)
 }
 
+fn normalize_browser_evidence_resource_initiator_type(raw: Option<&str>) -> Option<String> {
+    let raw = raw?;
+    match raw {
+        "script" | "link" | "img" | "css" | "font" | "fetch" | "xmlhttprequest" => {
+            Some(raw.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn normalize_browser_evidence_resource_status(raw: Option<u64>) -> Option<u16> {
+    raw.filter(|status| (100..=599).contains(status))
+        .map(|status| status as u16)
+}
+
 fn normalize_browser_evidence_events(
     raw_events: Vec<BrowserEvidenceEventRaw>,
     mut truncated: bool,
@@ -1544,32 +1634,57 @@ fn normalize_browser_evidence_events(
             truncated = true;
             break;
         }
-        let kind = match raw.kind.as_str() {
+        if raw.sequence == 0 {
+            truncated = true;
+            continue;
+        }
+        let event = match raw.kind.as_str() {
             "consoleWarn" | "consoleError" | "error" | "resourceError" | "unhandledRejection" => {
-                raw.kind
+                BrowserEvidenceEvent {
+                    kind: raw.kind,
+                    sequence: raw.sequence,
+                    message: normalize_browser_evidence_message(&raw.message),
+                    url: sanitize_browser_evidence_url(raw.url.as_deref()),
+                    line: raw
+                        .line
+                        .filter(|line| *line <= u64::from(MAX_BROWSER_EVIDENCE_LINE))
+                        .map(|line| line as u32),
+                    column: raw
+                        .column
+                        .filter(|column| *column <= u64::from(MAX_BROWSER_EVIDENCE_LINE))
+                        .map(|column| column as u32),
+                    initiator_type: None,
+                    duration_ms: None,
+                    status: None,
+                }
+            }
+            "resource" => {
+                let Some(url) = sanitize_browser_evidence_url(raw.url.as_deref()) else {
+                    truncated = true;
+                    continue;
+                };
+                BrowserEvidenceEvent {
+                    kind: "resource".to_string(),
+                    sequence: raw.sequence,
+                    // Resource Timing data must never supply its own message:
+                    // it may carry server-originated or page-controlled text.
+                    message: "resource timing observed".to_string(),
+                    url: Some(url),
+                    line: None,
+                    column: None,
+                    initiator_type: normalize_browser_evidence_resource_initiator_type(
+                        raw.initiator_type.as_deref(),
+                    ),
+                    duration_ms: raw.duration_ms.map(|duration| {
+                        duration.min(u64::from(MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS)) as u32
+                    }),
+                    status: normalize_browser_evidence_resource_status(raw.status),
+                }
             }
             _ => {
                 truncated = true;
                 continue;
             }
-        };
-        if raw.sequence == 0 {
-            truncated = true;
-            continue;
-        }
-        let event = BrowserEvidenceEvent {
-            kind,
-            sequence: raw.sequence,
-            message: normalize_browser_evidence_message(&raw.message),
-            url: sanitize_browser_evidence_url(raw.url.as_deref()),
-            line: raw
-                .line
-                .filter(|line| *line <= u64::from(MAX_BROWSER_EVIDENCE_LINE))
-                .map(|line| line as u32),
-            column: raw
-                .column
-                .filter(|column| *column <= u64::from(MAX_BROWSER_EVIDENCE_LINE))
-                .map(|column| column as u32),
         };
         let mut candidate = events.clone();
         candidate.push(event.clone());
@@ -2184,6 +2299,7 @@ fn browser_evidence_start_script(
         return Err("browser document identity is unavailable".to_string());
     }
     let ttl_ms = ttl_ms.min(BROWSER_EVIDENCE_TTL.as_millis() as u64).max(1);
+    let max_resource_entries = MAX_BROWSER_EVIDENCE_EVENTS + 1;
     Ok(format!(
         r#"(() => {{
   let stop = () => {{}};
@@ -2196,12 +2312,17 @@ fn browser_evidence_start_script(
       || performance.timeOrigin !== expectedIdentity
       || Object.prototype.hasOwnProperty.call(window, key)) return {{ ok: false }};
     const maxEvents = {MAX_BROWSER_EVIDENCE_EVENTS};
+    // A single observer callback may be very large. Inspect at most one more
+    // entry than the retained ring, so overflow is explicit without walking
+    // an unbounded browser-supplied list.
+    const maxResourceEntries = {max_resource_entries};
     const maxMessageChars = {MAX_BROWSER_EVIDENCE_MESSAGE_CHARS};
     const maxUrlChars = {MAX_BROWSER_EVIDENCE_URL_CHARS};
     const events = [];
     let sequence = 0;
     let truncated = false;
     let timer = 0;
+    let resourceObserver = null;
     const bounded = (value) => String(value ?? "").slice(0, maxMessageChars);
     const safeUrl = (value) => {{
       if (typeof value !== "string") return null;
@@ -2217,7 +2338,7 @@ fn browser_evidence_start_script(
       return "";
     }};
     const lineOf = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 1000000 ? value : null;
-    const add = (kind, message, url, line, column) => {{
+    const add = (kind, message, url, line, column, resource = null) => {{
       if (typeof message !== "string" || !message) return;
       sequence += 1;
       if (events.length >= maxEvents) {{ events.shift(); truncated = true; }}
@@ -2228,6 +2349,9 @@ fn browser_evidence_start_script(
         url: safeUrl(url),
         line: lineOf(line),
         column: lineOf(column),
+        initiatorType: resource?.initiatorType ?? null,
+        durationMs: resource?.durationMs ?? null,
+        status: resource?.status ?? null,
       }});
     }};
     const originalWarn = console.warn;
@@ -2254,16 +2378,40 @@ fn browser_evidence_start_script(
       const message = typeof reason === "string" ? reason : reason instanceof Error && typeof reason.message === "string" ? reason.message : "";
       add("unhandledRejection", bounded(message), null, null, null);
     }};
+    const onResources = (entries) => {{
+      try {{
+        // This list is delivered by this observer after explicit installation;
+        // no historical Performance timeline is queried or requested.
+        const resourceEntries = entries.getEntries();
+        let processed = 0;
+        for (const entry of resourceEntries) {{
+          if (processed >= maxResourceEntries) {{ truncated = true; break; }}
+          processed += 1;
+          if (!entry || entry.entryType !== "resource") continue;
+          const initiator = typeof entry.initiatorType === "string" && ["script", "link", "img", "css", "font", "fetch", "xmlhttprequest"].includes(entry.initiatorType)
+            ? entry.initiatorType : null;
+          const durationMs = Number.isFinite(entry.duration)
+            ? Math.min({MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS}, Math.max(0, Math.round(entry.duration))) : null;
+          const status = Number.isSafeInteger(entry.responseStatus) && entry.responseStatus >= 100 && entry.responseStatus <= 599
+            ? entry.responseStatus : null;
+          add("resource", "resource timing observed", entry.name, null, null, {{ initiatorType: initiator, durationMs, status }});
+        }}
+      }} catch (_) {{}}
+    }};
     let installedWarn = false;
     let installedError = false;
     let installedErrorListener = false;
     let installedRejectionListener = false;
     stop = () => {{
-      clearTimeout(timer);
-      if (installedWarn && console.warn === warn) console.warn = originalWarn;
-      if (installedError && console.error === error) console.error = originalError;
-      if (installedErrorListener) window.removeEventListener("error", onError, true);
-      if (installedRejectionListener) window.removeEventListener("unhandledrejection", onRejection, false);
+      // Every cleanup step is isolated. Disconnect first: a tampered console
+      // or event API must not leave the observer collecting after a drain.
+      try {{ if (resourceObserver) resourceObserver.disconnect(); }} catch (_) {{}}
+      resourceObserver = null;
+      try {{ clearTimeout(timer); }} catch (_) {{}}
+      try {{ if (installedWarn && console.warn === warn) console.warn = originalWarn; }} catch (_) {{}}
+      try {{ if (installedError && console.error === error) console.error = originalError; }} catch (_) {{}}
+      try {{ if (installedErrorListener) window.removeEventListener("error", onError, true); }} catch (_) {{}}
+      try {{ if (installedRejectionListener) window.removeEventListener("unhandledrejection", onRejection, false); }} catch (_) {{}}
       try {{ delete window[key]; }} catch (_) {{}}
     }};
     const drain = () => {{
@@ -2280,6 +2428,17 @@ fn browser_evidence_start_script(
     installedErrorListener = true;
     window.addEventListener("unhandledrejection", onRejection, false);
     installedRejectionListener = true;
+    if (typeof PerformanceObserver === "function") {{
+      try {{
+        resourceObserver = new PerformanceObserver(onResources);
+        // Only entries occurring after this user-requested start may reach
+        // the bounded ring; no prior timeline entries are requested.
+        resourceObserver.observe({{ type: "resource" }});
+      }} catch (_) {{
+        try {{ resourceObserver?.disconnect(); }} catch (_) {{}}
+        resourceObserver = null;
+      }}
+    }}
     timer = window.setTimeout(stop, {ttl_ms});
     return {{ ok: true }};
   }} catch (_) {{
@@ -2929,7 +3088,7 @@ fn build_browser(
     let state_active_scope = state.active_scope.clone();
     let navigation_contexts = state.contexts.clone();
     let navigation_active_scope = state.active_scope.clone();
-    let navigation_evidence_captures = state.evidence_captures.clone();
+    let navigation_state = state.clone();
     let state_visible = state.visible.clone();
     let page_load_app = app.clone();
     let page_load_contexts = state.contexts.clone();
@@ -2938,7 +3097,7 @@ fn build_browser(
     let page_load_session = state.active_session.clone();
     let page_load_visible = state.visible.clone();
     let page_load_token = state.lifecycle_token.clone();
-    let page_load_evidence_captures = state.evidence_captures.clone();
+    let page_load_state = state.clone();
     let page_load_persisted_locations = state.persisted_locations.clone();
     let builder = WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(url))
         .on_navigation(move |url| {
@@ -2958,9 +3117,7 @@ fn build_browser(
                     url.as_str().to_string(),
                 );
             }
-            if let Ok(mut captures) = navigation_evidence_captures.lock() {
-                captures.retain(|_, capture| capture.scope != scope);
-            }
+            invalidate_browser_evidence_for_scope_key(&navigation_state, &scope);
             true
         })
         .on_new_window(|_, _| NewWindowResponse::Deny)
@@ -3032,9 +3189,7 @@ fn build_browser(
                         }
                     }
                 }
-                if let Ok(mut captures) = page_load_evidence_captures.lock() {
-                    captures.retain(|_, capture| capture.scope != key);
-                }
+                invalidate_browser_evidence_for_scope_key(&page_load_state, &key);
                 return;
             }
             if !matches!(payload.event(), PageLoadEvent::Finished) {
@@ -3857,18 +4012,31 @@ pub(crate) async fn start_browser_evidence_capture(
         return Err("browser evidence anchor is stale".to_string());
     }
     let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
-    {
+    let (expired, active_capture_exists) = {
         let mut captures = state
             .evidence_captures
             .lock()
             .map_err(|_| "browser state lock poisoned".to_string())?;
-        captures.retain(|_, capture| capture.expires_at > now);
-        if captures
+        let expired_ids = captures
+            .iter()
+            .filter_map(|(capture_id, capture)| {
+                (capture.expires_at <= now).then(|| capture_id.clone())
+            })
+            .collect::<Vec<_>>();
+        let expired = expired_ids
+            .into_iter()
+            .filter_map(|capture_id| captures.remove(&capture_id))
+            .collect::<Vec<_>>();
+        let active_capture_exists = captures
             .values()
-            .any(|capture| capture.scope == scope && capture.expires_at > now)
-        {
-            return Err("browser evidence capture is already active".to_string());
-        }
+            .any(|capture| capture.scope == scope && capture.expires_at > now);
+        (expired, active_capture_exists)
+    };
+    for record in expired {
+        schedule_browser_evidence_cleanup(state, record);
+    }
+    if active_capture_exists {
+        return Err("browser evidence capture is already active".to_string());
     }
     let document_identity = consume_browser_evidence_anchor(&state, &anchor)?;
     let capture_id = new_browser_evidence_credential("c");
@@ -3901,7 +4069,8 @@ pub(crate) async fn start_browser_evidence_capture(
     ) {
         Ok(script) => script,
         Err(error) => {
-            expire_browser_evidence_capture(&state.evidence_captures, &capture_id, &capture_token);
+            // No page-side wrapper exists when script construction failed.
+            let _ = remove_browser_evidence_capture_with_token(state, &capture_id, &capture_token);
             return Err(error);
         }
     };
@@ -3912,14 +4081,17 @@ pub(crate) async fn start_browser_evidence_capture(
         anchor.lifecycle_token,
         Instant::now(),
     ) {
-        expire_browser_evidence_capture(&state.evidence_captures, &capture_id, &capture_token);
+        // This is before `eval_with_callback`, so no wrapper could be live.
+        let _ = remove_browser_evidence_capture_with_token(state, &capture_id, &capture_token);
         return Err(error);
     }
     let started = eval_browser_evidence_with_callback(&state, script)
         .await
         .and_then(|raw| parse_browser_evidence_callback(&raw).map(|_| ()));
     if let Err(error) = started {
-        expire_browser_evidence_capture(&state.evidence_captures, &capture_id, &capture_token);
+        // Evaluation may have installed wrappers before its callback failed or
+        // timed out. Remove the capability first, then attempt a fixed drain.
+        expire_browser_evidence_capture(state, &capture_id, &capture_token);
         return Err(error);
     }
 
@@ -3927,13 +4099,13 @@ pub(crate) async fn start_browser_evidence_capture(
         .duration_since(Instant::now())
         .as_millis()
         .min(u64::MAX as u128) as u64;
-    let captures = state.evidence_captures.clone();
+    let expiry_state = state.clone();
     let expiry_id = capture_id.clone();
     let expiry_token = capture_token.clone();
     let delay = expires_at.saturating_duration_since(Instant::now());
     tokio::spawn(async move {
         tokio::time::sleep(delay).await;
-        expire_browser_evidence_capture(&captures, &expiry_id, &expiry_token);
+        expire_browser_evidence_capture(&expiry_state, &expiry_id, &expiry_token);
     });
     Ok(BrowserEvidenceCaptureHandle {
         capture_id,
@@ -4037,32 +4209,45 @@ pub(crate) async fn read_browser_evidence_capture(
         record
     };
 
-    // Recheck the grant at the effect boundary. Expiry after consumption is a
-    // safe failure and deliberately cannot restore the consumed capability.
-    require_browser_control_grant(
-        &state,
-        &workspace_id,
-        session_id.as_deref(),
-        lifecycle_token,
-        Instant::now(),
-    )?;
-    let script =
-        browser_evidence_read_script(&record.capture_token, &record.url, record.document_identity)?;
-    let raw = eval_browser_evidence_with_callback(&state, script).await?;
-    let callback = parse_browser_evidence_callback(&raw)?;
-    let (events, truncated) =
-        normalize_browser_evidence_events(callback.events, callback.truncated);
-    Ok(BrowserEvidenceResult {
-        events,
-        truncated,
-        untrusted: true,
-    })
+    let result = async {
+        // Recheck the grant at the effect boundary. Expiry after consumption is
+        // a safe failure and deliberately cannot restore the consumed capability.
+        require_browser_control_grant(
+            &state,
+            &workspace_id,
+            session_id.as_deref(),
+            lifecycle_token,
+            Instant::now(),
+        )?;
+        let script = browser_evidence_read_script(
+            &record.capture_token,
+            &record.url,
+            record.document_identity,
+        )?;
+        let raw = eval_browser_evidence_with_callback(&state, script).await?;
+        let callback = parse_browser_evidence_callback(&raw)?;
+        let (events, truncated) =
+            normalize_browser_evidence_events(callback.events, callback.truncated);
+        Ok(BrowserEvidenceResult {
+            events,
+            truncated,
+            untrusted: true,
+        })
+    }
+    .await;
+    if result.is_err() {
+        // The page-side wrapper may still be installed after a construction,
+        // callback, parse, timeout, or grant-boundary failure. The one-shot
+        // record is already gone, so cleanup cannot re-expose its events.
+        schedule_browser_evidence_cleanup(state, record);
+    }
+    result
 }
 
 /// Best-effort cleanup for an evidence capture that could not be handed to an
 /// authenticated projection lease. It immediately removes the backend record
-/// and, when a Tokio runtime is available, schedules a short fixed-script
-/// drain to restore page wrappers without returning their buffered events.
+/// and schedules a short fixed-script drain to restore page wrappers without
+/// returning their buffered events.
 pub(crate) fn discard_browser_evidence_capture(
     state: &BrowserState,
     workspace_id: &str,
@@ -4085,22 +4270,7 @@ pub(crate) fn discard_browser_evidence_capture(
     let Some(record) = record else {
         return;
     };
-    let state = state.clone();
-    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-        runtime.spawn(async move {
-            let _operation = state.operation_lock.lock().await;
-            let Ok(script) = browser_evidence_cleanup_script(
-                &record.capture_token,
-                &record.url,
-                record.document_identity,
-            ) else {
-                return;
-            };
-            if let Ok(raw) = eval_browser_evidence_with_callback(&state, script).await {
-                let _ = parse_browser_evidence_cleanup_callback(&raw);
-            }
-        });
-    }
+    schedule_browser_evidence_cleanup(state, record);
 }
 
 #[tauri::command]
@@ -4534,12 +4704,14 @@ mod tests {
         context_is_ready_for_url, control_grant_is_current, control_grant_status,
         fill_target_is_compatible, mark_context_loading, normalize_browser_bounds,
         normalize_browser_context_text, normalize_browser_evidence_events,
-        normalize_browser_fill_text, normalize_browser_scroll_delta,
-        normalize_browser_semantic_map, occlusion_request_is_current, page_load_matches_expected,
-        page_load_revision_is_current, parse_browser_action_callback,
-        parse_browser_evidence_callback, parse_browser_evidence_cleanup_callback,
-        prepare_browser_control_action, read_browser_audit, require_action_native_url,
-        require_browser_control_grant, require_current_lifecycle, sanitize_browser_evidence_url,
+        normalize_browser_evidence_resource_initiator_type,
+        normalize_browser_evidence_resource_status, normalize_browser_fill_text,
+        normalize_browser_scroll_delta, normalize_browser_semantic_map,
+        occlusion_request_is_current, page_load_matches_expected, page_load_revision_is_current,
+        parse_browser_action_callback, parse_browser_evidence_callback,
+        parse_browser_evidence_cleanup_callback, prepare_browser_control_action,
+        read_browser_audit, require_action_native_url, require_browser_control_grant,
+        require_current_lifecycle, sanitize_browser_evidence_url,
         sanitize_browser_link_destination, sanitize_browser_location_url, select_browser_open_url,
         semantic_item_serialized_chars, semantic_map_record_is_current, should_persist_context_url,
         validate_browser_document_identity, validate_browser_evidence_capture_id,
@@ -4553,7 +4725,8 @@ mod tests {
         MAX_BROWSER_AUDIT_ENTRIES, MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS,
         MAX_BROWSER_AUDIT_PROVIDER_CHARS, MAX_BROWSER_AUDIT_SCOPE_CHARS,
         MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS,
-        MAX_BROWSER_LOCATION_CACHE_ENTRIES, MAX_BROWSER_SEMANTIC_ITEMS,
+        MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS, MAX_BROWSER_LOCATION_CACHE_ENTRIES,
+        MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
     #[test]
@@ -5606,6 +5779,22 @@ mod tests {
         assert!(start.contains("performance.timeOrigin !== expectedIdentity"));
         assert!(start.contains("window.addEventListener(\"error\", onError, true)"));
         assert!(start.contains("window.removeEventListener(\"error\", onError, true)"));
+        assert!(start.contains("new PerformanceObserver(onResources)"));
+        assert!(start.contains("resourceObserver.observe({ type: \"resource\" })"));
+        assert!(start.contains("resourceObserver.disconnect()"));
+        assert!(start.contains("const maxResourceEntries = 33"));
+        assert!(start.contains("if (processed >= maxResourceEntries) { truncated = true; break; }"));
+        assert!(
+            start.find("resourceObserver.disconnect()").unwrap()
+                < start.find("clearTimeout(timer)").unwrap()
+        );
+        assert!(start.contains("try { if (installedWarn"));
+        assert!(start.contains("try { if (installedErrorListener)"));
+        // `entries.getEntries()` is the observer-delivered batch, not a query
+        // of the global Performance timeline.
+        assert!(!start.contains("performance.getEntries"));
+        assert!(!start.contains("buffered"));
+        assert!(!start.contains("setInterval"));
         assert!(!start.contains("JSON.stringify"));
         assert!(!start.contains("document.cookie"));
         assert!(!start.contains("localStorage"));
@@ -5659,6 +5848,9 @@ mod tests {
                 url: Some("https://localhost:3000/app?q=hidden".to_string()),
                 line: Some(1_000_001),
                 column: Some(12),
+                initiator_type: None,
+                duration_ms: None,
+                status: None,
             })
             .collect();
         let (events, truncated) = normalize_browser_evidence_events(raw, false);
@@ -5668,6 +5860,85 @@ mod tests {
         assert_eq!(events[0].url.as_deref(), Some("https://localhost:3000/app"));
         assert!(events[0].line.is_none());
         assert_eq!(events[0].column, Some(12));
+        assert!(
+            serde_json::to_string(&events).unwrap().chars().count() <= MAX_BROWSER_EVIDENCE_CHARS
+        );
+    }
+
+    #[test]
+    fn resource_timing_evidence_is_allowlisted_clamped_and_content_free() {
+        let raw = vec![
+            BrowserEvidenceEventRaw {
+                kind: "resource".to_string(),
+                sequence: 1,
+                message: "authorization: never use this".to_string(),
+                url: Some(
+                    "https://user:password@example.test:8443/assets/app.js?token=private#hash"
+                        .to_string(),
+                ),
+                line: Some(7),
+                column: Some(8),
+                initiator_type: Some("fetch".to_string()),
+                duration_ms: Some(u64::from(MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS) + 1),
+                status: Some(503),
+            },
+            BrowserEvidenceEventRaw {
+                kind: "resource".to_string(),
+                sequence: 2,
+                message: "ignored".to_string(),
+                url: Some("https://example.test/image.png".to_string()),
+                line: None,
+                column: None,
+                initiator_type: Some("worker".to_string()),
+                duration_ms: Some(12),
+                status: Some(99),
+            },
+            BrowserEvidenceEventRaw {
+                kind: "resource".to_string(),
+                sequence: 3,
+                message: "ignored".to_string(),
+                url: Some("javascript:alert(1)".to_string()),
+                line: None,
+                column: None,
+                initiator_type: Some("script".to_string()),
+                duration_ms: Some(1),
+                status: Some(200),
+            },
+        ];
+        let (events, truncated) = normalize_browser_evidence_events(raw, false);
+        assert!(truncated);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "resource");
+        assert_eq!(events[0].message, "resource timing observed");
+        assert_eq!(
+            events[0].url.as_deref(),
+            Some("https://example.test:8443/assets/app.js")
+        );
+        assert_eq!(events[0].initiator_type.as_deref(), Some("fetch"));
+        assert_eq!(
+            events[0].duration_ms,
+            Some(MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS)
+        );
+        assert_eq!(events[0].status, Some(503));
+        assert!(events[0].line.is_none());
+        assert!(events[0].column.is_none());
+        assert!(events[1].initiator_type.is_none());
+        assert_eq!(events[1].duration_ms, Some(12));
+        assert!(events[1].status.is_none());
+        assert_eq!(
+            normalize_browser_evidence_resource_initiator_type(Some("script")).as_deref(),
+            Some("script")
+        );
+        assert!(normalize_browser_evidence_resource_initiator_type(Some("beacon")).is_none());
+        assert_eq!(
+            normalize_browser_evidence_resource_status(Some(100)),
+            Some(100)
+        );
+        assert_eq!(
+            normalize_browser_evidence_resource_status(Some(599)),
+            Some(599)
+        );
+        assert!(normalize_browser_evidence_resource_status(Some(600)).is_none());
         assert!(
             serde_json::to_string(&events).unwrap().chars().count() <= MAX_BROWSER_EVIDENCE_CHARS
         );
@@ -5713,6 +5984,23 @@ mod tests {
             .contains_key("c-test"));
         super::invalidate_browser_evidence_for_scope(&state, "workspace", Some("session"));
         assert!(state.evidence_captures.lock().unwrap().is_empty());
+
+        state.evidence_captures.lock().unwrap().insert(
+            "c-other".to_string(),
+            BrowserEvidenceCaptureRecord {
+                scope: "other\u{1f}|session".to_string(),
+                capture_token: "t-other".to_string(),
+                lifecycle_token: 9,
+                url: "https://example.test/other".to_string(),
+                page_load_revision: 5,
+                document_identity: 43.5,
+                expires_at: Instant::now() + StdDuration::from_secs(60),
+            },
+        );
+        super::clear_browser_evidence_captures(&state);
+        // The registry is drained before cleanup is scheduled, so no command
+        // can read the capture while its page wrapper is being drained.
+        assert!(state.evidence_captures.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -5730,15 +6018,44 @@ mod tests {
                 expires_at: Instant::now() + StdDuration::from_secs(60),
             },
         );
-        super::expire_browser_evidence_capture(&state.evidence_captures, "c-test", "wrong-token");
+        super::expire_browser_evidence_capture(&state, "c-test", "wrong-token");
         assert!(state
             .evidence_captures
             .lock()
             .unwrap()
             .contains_key("c-test"));
-        super::expire_browser_evidence_capture(&state.evidence_captures, "c-test", "t-test");
+        super::expire_browser_evidence_capture(&state, "c-test", "t-test");
         assert!(state.evidence_captures.lock().unwrap().is_empty());
-        super::expire_browser_evidence_capture(&state.evidence_captures, "c-test", "t-test");
+        super::expire_browser_evidence_capture(&state, "c-test", "t-test");
+    }
+
+    #[test]
+    fn evidence_capture_take_requires_the_current_private_token() {
+        let mut captures = std::collections::HashMap::new();
+        captures.insert(
+            "c-test".to_string(),
+            BrowserEvidenceCaptureRecord {
+                scope: "workspace\u{1f}|session".to_string(),
+                capture_token: "t-current".to_string(),
+                lifecycle_token: 8,
+                url: "https://example.test/page".to_string(),
+                page_load_revision: 4,
+                document_identity: 42.5,
+                expires_at: Instant::now() + StdDuration::from_secs(60),
+            },
+        );
+        assert!(
+            super::take_browser_evidence_capture_with_token(&mut captures, "c-test", "t-old",)
+                .is_none()
+        );
+        assert!(captures.contains_key("c-test"));
+        let taken =
+            super::take_browser_evidence_capture_with_token(&mut captures, "c-test", "t-current");
+        assert_eq!(
+            taken.as_ref().map(|record| record.capture_token.as_str()),
+            Some("t-current")
+        );
+        assert!(captures.is_empty());
     }
 
     #[test]
