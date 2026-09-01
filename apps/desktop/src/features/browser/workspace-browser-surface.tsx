@@ -19,14 +19,46 @@ type WorkspaceBrowserSurfaceProps = {
 	onClose: () => void;
 };
 
+/**
+ * Expand a logical DOM rectangle to complete device pixels before handing it
+ * to the native child WebView. Native frames are integer-sized on some
+ * platforms, so independently rounding a fractional height can expose the
+ * renderer's background along the bottom edge.
+ */
+export function snapBrowserBoundsToDevicePixels(
+	bounds: BrowserBounds,
+	devicePixelRatio = 1,
+): BrowserBounds {
+	const scale = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+		? devicePixelRatio
+		: 1;
+	const x = Math.max(0, bounds.x);
+	const y = Math.max(0, bounds.y);
+	const width = Math.max(1, bounds.width);
+	const height = Math.max(1, bounds.height);
+	const left = Math.floor(x * scale);
+	const top = Math.floor(y * scale);
+	const right = Math.ceil((x + width) * scale);
+	const bottom = Math.ceil((y + height) * scale);
+	return {
+		x: left / scale,
+		y: top / scale,
+		width: Math.max(1, (right - left) / scale),
+		height: Math.max(1, (bottom - top) / scale),
+	};
+}
+
 export function readBrowserBounds(element: HTMLElement): BrowserBounds {
 	const rect = element.getBoundingClientRect();
-	return {
-		x: Math.max(0, rect.left),
-		y: Math.max(0, rect.top),
-		width: Math.max(1, rect.width),
-		height: Math.max(1, rect.height),
-	};
+	return snapBrowserBoundsToDevicePixels(
+		{
+			x: rect.left,
+			y: rect.top,
+			width: rect.width,
+			height: rect.height,
+		},
+		typeof window !== "undefined" ? window.devicePixelRatio : 1,
+	);
 }
 
 export function WorkspaceBrowserSurface({
