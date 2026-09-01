@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Globe2, LoaderCircle, RefreshCw, Sparkles, X } from "lucide-react";
+import { Globe2, LoaderCircle, RefreshCw, Shield, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
 	hideBrowser,
+	getBrowserControlStatus,
+	armBrowserControl,
+	disarmBrowserControl,
 	listenBrowserState,
 	navigateBrowser,
 	openBrowser,
@@ -67,6 +70,11 @@ export function readBrowserBounds(element: HTMLElement): BrowserBounds {
 	);
 }
 
+/** A single expiration timer is sufficient; the backend remains authoritative. */
+export function browserControlExpiryDelay(remainingMs: number): number {
+	return Math.max(0, Math.ceil(Number.isFinite(remainingMs) ? remainingMs : 0));
+}
+
 export function WorkspaceBrowserSurface({
 	workspaceId,
 	sessionId,
@@ -82,11 +90,20 @@ export function WorkspaceBrowserSurface({
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [sendingContext, setSendingContext] = useState(false);
+	const [controlStatus, setControlStatus] = useState<{ armed: boolean; remainingMs: number }>({ armed: false, remainingMs: 0 });
+	const [controlBusy, setControlBusy] = useState(false);
 	const [lifecycleToken, setLifecycleToken] = useState<number | null>(null);
 	const lifecycleTokenRef = useRef<number | null>(null);
+	const controlExpiryTimerRef = useRef<number | null>(null);
 	const updateLifecycleToken = useCallback((next: number) => {
 		lifecycleTokenRef.current = next;
 		setLifecycleToken(next);
+	}, []);
+	const clearControlExpiryTimer = useCallback(() => {
+		if (controlExpiryTimerRef.current !== null) {
+			window.clearTimeout(controlExpiryTimerRef.current);
+			controlExpiryTimerRef.current = null;
+		}
 	}, []);
 
 	useBrowserOcclusion({
@@ -175,12 +192,41 @@ export function WorkspaceBrowserSurface({
 	}, [sessionId, updateLifecycleToken, workspaceId]);
 
 	useEffect(() => {
+		clearControlExpiryTimer();
+		setControlStatus({ armed: false, remainingMs: 0 });
+		if (!sessionId || lifecycleToken === null) return;
+		let cancelled = false;
+		void getBrowserControlStatus({ workspaceId, sessionId, lifecycleToken })
+			.then((next) => {
+				if (!cancelled && lifecycleTokenRef.current === lifecycleToken) setControlStatus(next);
+			})
+			.catch((reason: unknown) => {
+				if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+			});
 		return () => {
+			cancelled = true;
+			clearControlExpiryTimer();
+		};
+	}, [clearControlExpiryTimer, lifecycleToken, sessionId, workspaceId]);
+
+	useEffect(() => {
+		clearControlExpiryTimer();
+		if (!controlStatus.armed) return;
+		controlExpiryTimerRef.current = window.setTimeout(() => {
+			controlExpiryTimerRef.current = null;
+			setControlStatus({ armed: false, remainingMs: 0 });
+		}, browserControlExpiryDelay(controlStatus.remainingMs));
+		return clearControlExpiryTimer;
+	}, [clearControlExpiryTimer, controlStatus]);
+
+	useEffect(() => {
+		return () => {
+			clearControlExpiryTimer();
 			const lifecycleToken = lifecycleTokenRef.current;
 			if (lifecycleToken === null) return;
 			void hideBrowser({ workspaceId, sessionId, lifecycleToken }).catch(() => {});
 		};
-	}, [sessionId, workspaceId]);
+	}, [clearControlExpiryTimer, sessionId, workspaceId]);
 
 	useEffect(() => {
 		const viewport = viewportRef.current;
@@ -244,14 +290,32 @@ export function WorkspaceBrowserSurface({
 			.finally(() => setSendingContext(false));
 	}, [onSendToAgent, sendingContext, sessionId, workspaceId]);
 
+	const handleControlToggle = useCallback(() => {
+		const token = lifecycleTokenRef.current;
+		if (!sessionId || token === null || controlBusy) return;
+		setError(null);
+		setControlBusy(true);
+		const input = { workspaceId, sessionId, lifecycleToken: token };
+		void (controlStatus.armed ? disarmBrowserControl(input) : armBrowserControl(input))
+			.then((next) => {
+				if (lifecycleTokenRef.current === token) setControlStatus(next);
+			})
+			.catch((reason: unknown) => {
+				setError(reason instanceof Error ? reason.message : String(reason));
+			})
+			.finally(() => setControlBusy(false));
+	}, [controlBusy, controlStatus.armed, sessionId, workspaceId]);
+
 	const handleClose = useCallback(() => {
+		clearControlExpiryTimer();
+		setControlStatus({ armed: false, remainingMs: 0 });
 		const lifecycleToken = lifecycleTokenRef.current;
 		if (lifecycleToken === null) {
 			onClose();
 			return;
 		}
 		void hideBrowser({ workspaceId, sessionId, lifecycleToken }).catch(() => {}).finally(onClose);
-	}, [onClose, sessionId, workspaceId]);
+	}, [clearControlExpiryTimer, onClose, sessionId, workspaceId]);
 
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -297,6 +361,23 @@ export function WorkspaceBrowserSurface({
 						<Sparkles className="size-3.5" />
 					)}
 				</Button>
+				{sessionId ? (
+					<Button
+						type="button"
+						variant="ghost"
+						size="xs"
+						onClick={handleControlToggle}
+						aria-label={controlStatus.armed ? t("browser.disarmControl") : t("browser.armControl")}
+						title={controlStatus.armed ? t("browser.disarmControl") : t("browser.armControl")}
+						aria-pressed={controlStatus.armed}
+						aria-busy={controlBusy}
+						disabled={loading || controlBusy || lifecycleToken === null}
+						className={controlStatus.armed ? "text-emerald-400 hover:text-emerald-300" : undefined}
+					>
+						{controlBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : controlStatus.armed ? <ShieldCheck className="size-3.5" /> : <Shield className="size-3.5" />}
+						<span>{controlStatus.armed ? t("browser.controlOnShort") : t("browser.armControlShort")}</span>
+					</Button>
+				) : null}
 				<Button type="button" variant="ghost" size="icon-sm" onClick={handleClose} aria-label={t("browser.close")}>
 					<X className="size-3.5" />
 				</Button>
@@ -308,6 +389,12 @@ export function WorkspaceBrowserSurface({
 					<span className="flex items-center gap-1.5 text-muted-foreground">
 						<LoaderCircle className="size-3 animate-spin text-cyan-500" />
 						{t("browser.loading")}
+					</span>
+				) : sessionId ? (
+					<span className={controlStatus.armed ? "text-emerald-500" : "text-muted-foreground"}>
+						{controlStatus.armed
+							? t("browser.controlActive")
+							: t("browser.controlInactive")}
 					</span>
 				) : null}
 			</div>

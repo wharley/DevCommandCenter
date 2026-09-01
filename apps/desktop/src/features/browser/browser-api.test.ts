@@ -8,6 +8,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import {
 	extractBrowserContext,
+	getBrowserControlStatus,
+	armBrowserControl,
+	disarmBrowserControl,
 	navigateBrowser,
 	openBrowser,
 	setBrowserBounds,
@@ -15,6 +18,7 @@ import {
 } from "./browser-api";
 import {
 	readBrowserBounds,
+	browserControlExpiryDelay,
 	snapBrowserBoundsToDevicePixels,
 } from "./workspace-browser-surface";
 
@@ -107,6 +111,24 @@ describe("browser-api", () => {
 			lifecycleToken: 1,
 		});
 		expect(invokeMock).not.toHaveBeenCalledWith("webview_eval", expect.anything());
+	});
+
+	it("keeps control consent lifecycle-scoped and exposes no token", async () => {
+		const input = { workspaceId: "workspace-1", sessionId: "session-1", lifecycleToken: 9 };
+		await getBrowserControlStatus(input);
+		await armBrowserControl(input);
+		await disarmBrowserControl(input);
+
+		expect(invokeMock).toHaveBeenNthCalledWith(1, "browser_control_status", input);
+		expect(invokeMock).toHaveBeenNthCalledWith(2, "browser_arm_control", input);
+		expect(invokeMock).toHaveBeenNthCalledWith(3, "browser_disarm_control", input);
+		expect(invokeMock.mock.calls.flat()).not.toContain("token");
+	});
+
+	it("uses one bounded expiry delay rather than an interval", () => {
+		expect(browserControlExpiryDelay(60_000.2)).toBe(60_001);
+		expect(browserControlExpiryDelay(-1)).toBe(0);
+		expect(browserControlExpiryDelay(Number.NaN)).toBe(0);
 	});
 
 	it("normalizes DOM bounds before sending them to native layout", () => {

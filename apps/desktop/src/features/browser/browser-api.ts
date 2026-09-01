@@ -17,6 +17,12 @@ export type BrowserSnapshot = {
 	title: string | null;
 };
 
+/** In-memory, lifecycle-bound Browser control consent; no capability token is exposed. */
+export type BrowserControlStatus = {
+	armed: boolean;
+	remainingMs: number;
+};
+
 /** Bounded page context obtained by the backend after an explicit user action. */
 export type BrowserAgentContext = {
 	workspaceId: string;
@@ -92,6 +98,30 @@ export function reloadBrowser(input: {
 		sessionId: input.sessionId,
 		lifecycleToken: input.lifecycleToken,
 	});
+}
+
+export function getBrowserControlStatus(input: {
+	workspaceId: string;
+	sessionId: string;
+	lifecycleToken: number;
+}) {
+	return invoke<BrowserControlStatus>("browser_control_status", input);
+}
+
+export function armBrowserControl(input: {
+	workspaceId: string;
+	sessionId: string;
+	lifecycleToken: number;
+}) {
+	return invoke<BrowserControlStatus>("browser_arm_control", input);
+}
+
+export function disarmBrowserControl(input: {
+	workspaceId: string;
+	sessionId: string;
+	lifecycleToken: number;
+}) {
+	return invoke<BrowserControlStatus>("browser_disarm_control", input);
 }
 
 export function extractBrowserContext(input: {

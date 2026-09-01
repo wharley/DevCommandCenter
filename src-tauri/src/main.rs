@@ -6993,6 +6993,7 @@ pub fn run() {
             browser_commands::browser_navigate,
             browser_commands::browser_reload,
             browser_commands::browser_arm_control,
+            browser_commands::browser_control_status,
             browser_commands::browser_disarm_control,
             browser_commands::browser_execute_action,
             browser_commands::browser_extract_context,

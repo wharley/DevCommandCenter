@@ -273,6 +273,13 @@ struct BrowserControlGrant {
     expires_at: Instant,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserControlStatus {
+    pub armed: bool,
+    pub remaining_ms: u64,
+}
+
 /// Runtime state for the one browser child WebView. Context is keyed by the
 /// active workspace and optional session, while the native view is reused.
 #[derive(Clone)]
@@ -623,13 +630,44 @@ fn control_grant_is_current(
     })
 }
 
+fn control_grant_status(
+    grant: &mut Option<BrowserControlGrant>,
+    scope: &str,
+    lifecycle_token: u64,
+    now: Instant,
+) -> BrowserControlStatus {
+    if grant.as_ref().is_some_and(|grant| grant.expires_at <= now) {
+        *grant = None;
+    }
+    let Some(grant) = grant.as_ref() else {
+        return BrowserControlStatus {
+            armed: false,
+            remaining_ms: 0,
+        };
+    };
+    if !control_grant_is_current(Some(grant), scope, lifecycle_token, now) {
+        return BrowserControlStatus {
+            armed: false,
+            remaining_ms: 0,
+        };
+    }
+    BrowserControlStatus {
+        armed: true,
+        remaining_ms: grant
+            .expires_at
+            .duration_since(now)
+            .as_millis()
+            .min(u64::MAX as u128) as u64,
+    }
+}
+
 fn arm_browser_control_grant(
     state: &BrowserState,
     workspace_id: &str,
     session_id: Option<&str>,
     lifecycle_token: u64,
     now: Instant,
-) -> Result<(), String> {
+) -> Result<BrowserControlStatus, String> {
     let mut grant = state
         .control_grant
         .lock()
@@ -639,7 +677,12 @@ fn arm_browser_control_grant(
         lifecycle_token,
         expires_at: now + BROWSER_CONTROL_GRANT_TTL,
     });
-    Ok(())
+    Ok(control_grant_status(
+        &mut grant,
+        &scope_key(workspace_id, session_id),
+        lifecycle_token,
+        now,
+    ))
 }
 
 fn require_browser_control_grant(
@@ -1689,7 +1732,7 @@ pub async fn browser_arm_control(
     workspace_id: String,
     session_id: Option<String>,
     lifecycle_token: u64,
-) -> Result<(), String> {
+) -> Result<BrowserControlStatus, String> {
     let _operation = state.operation_lock.lock().await;
     validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
     require_current_lifecycle(
@@ -1711,6 +1754,38 @@ pub async fn browser_arm_control(
     )
 }
 
+/// Reports the current in-memory Browser-control grant for the active scope.
+/// Occlusion does not revoke the grant, and visibility is intentionally not
+/// required for this read-only status query.
+#[tauri::command]
+pub async fn browser_control_status(
+    state: State<'_, BrowserState>,
+    sessions: State<'_, SessionCommandState>,
+    workspace_id: String,
+    session_id: Option<String>,
+    lifecycle_token: u64,
+) -> Result<BrowserControlStatus, String> {
+    let _operation = state.operation_lock.lock().await;
+    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser control lifecycle is stale",
+    )?;
+    let mut grant = state
+        .control_grant
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    Ok(control_grant_status(
+        &mut grant,
+        &scope_key(&workspace_id, session_id.as_deref()),
+        lifecycle_token,
+        Instant::now(),
+    ))
+}
+
 /// Removes the temporary Browser-control capability without exposing a token.
 #[tauri::command]
 pub async fn browser_disarm_control(
@@ -1719,7 +1794,7 @@ pub async fn browser_disarm_control(
     workspace_id: String,
     session_id: Option<String>,
     lifecycle_token: u64,
-) -> Result<(), String> {
+) -> Result<BrowserControlStatus, String> {
     let _operation = state.operation_lock.lock().await;
     validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
     require_current_lifecycle(
@@ -1730,7 +1805,10 @@ pub async fn browser_disarm_control(
         "browser control lifecycle is stale",
     )?;
     clear_browser_control_grant(&state);
-    Ok(())
+    Ok(BrowserControlStatus {
+        armed: false,
+        remaining_ms: 0,
+    })
 }
 
 /// Executes only a small allowlist of page-level actions. This is an internal
@@ -2259,15 +2337,16 @@ mod tests {
     use super::{
         advance_lifecycle_token, arm_browser_control_grant, browser_action_anchor_matches_context,
         browser_scroll_script, clear_browser_control_grant, consume_semantic_map_for_anchor,
-        context_is_ready_for_url, control_grant_is_current, mark_context_loading,
-        normalize_browser_bounds, normalize_browser_context_text, normalize_browser_scroll_delta,
-        normalize_browser_semantic_map, occlusion_request_is_current, page_load_matches_expected,
-        page_load_revision_is_current, prepare_browser_control_action, require_action_native_url,
+        context_is_ready_for_url, control_grant_is_current, control_grant_status,
+        mark_context_loading, normalize_browser_bounds, normalize_browser_context_text,
+        normalize_browser_scroll_delta, normalize_browser_semantic_map,
+        occlusion_request_is_current, page_load_matches_expected, page_load_revision_is_current,
+        prepare_browser_control_action, require_action_native_url,
         sanitize_browser_link_destination, semantic_item_serialized_chars,
         semantic_map_record_is_current, should_persist_context_url, validate_browser_url,
         BrowserActionAnchor, BrowserBounds, BrowserContext, BrowserControlAction,
-        BrowserControlGrant, BrowserSemanticItemExtraction, BrowserSemanticMap,
-        BrowserSemanticMapExtraction, BrowserSemanticMapRecord, BrowserState,
+        BrowserControlGrant, BrowserControlStatus, BrowserSemanticItemExtraction,
+        BrowserSemanticMap, BrowserSemanticMapExtraction, BrowserSemanticMapRecord, BrowserState,
         MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
@@ -2531,6 +2610,48 @@ mod tests {
         // lifecycle transitions, so neither can retain a prior arm.
         clear_browser_control_grant(&state);
         assert!(state.control_grant.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn control_grant_status_reports_remaining_and_clears_expired_grants() {
+        let now = Instant::now();
+        let mut grant = Some(BrowserControlGrant {
+            scope: "workspace\u{1f}|session".to_string(),
+            lifecycle_token: 8,
+            expires_at: now + StdDuration::from_secs(60),
+        });
+        let status = control_grant_status(&mut grant, "workspace\u{1f}|session", 8, now);
+        assert!(status.armed);
+        assert!(status.remaining_ms > 59_000);
+        assert!(status.remaining_ms <= 60_000);
+
+        let wrong_scope = control_grant_status(&mut grant, "workspace\u{1f}|other-session", 8, now);
+        assert_eq!(
+            wrong_scope,
+            BrowserControlStatus {
+                armed: false,
+                remaining_ms: 0,
+            }
+        );
+        assert!(
+            grant.is_some(),
+            "a different scope must not clear a live grant"
+        );
+
+        let expired = control_grant_status(
+            &mut grant,
+            "workspace\u{1f}|session",
+            8,
+            now + StdDuration::from_secs(60),
+        );
+        assert_eq!(
+            expired,
+            BrowserControlStatus {
+                armed: false,
+                remaining_ms: 0,
+            }
+        );
+        assert!(grant.is_none());
     }
 
     #[test]
