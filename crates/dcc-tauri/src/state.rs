@@ -91,6 +91,7 @@ use crate::terminal_arbiter::{
 use dcc_providers::provider_runtime;
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
+const EPHEMERAL_MCP_LEASE_ID_MAX_CHARS: usize = 128;
 
 #[derive(Default)]
 struct DeliveryFailureStore {
@@ -868,6 +869,18 @@ fn resolve_authorized_workspace_mutation_for_id(
     })
 }
 
+pub trait EphemeralMcpProjection: Send + Sync {
+    fn project_for_session(&self, session: &Session)
+        -> Result<Option<EphemeralMcpProjectionLease>>;
+    fn revoke_session(&self, session_id: &SessionId, lease_id: &str);
+}
+
+#[derive(Clone, Debug)]
+pub struct EphemeralMcpProjectionLease {
+    pub server: ProviderMcpServerConfig,
+    pub lease_id: String,
+}
+
 #[derive(Clone)]
 pub struct SessionCommandState {
     app_data_dir: PathBuf,
@@ -875,6 +888,7 @@ pub struct SessionCommandState {
     session_repo: SqliteSessionRepo,
     _event_bus: Arc<dyn EventBus>,
     store: Arc<Mutex<SessionStore>>,
+    ephemeral_mcp_projection: Arc<Mutex<Option<Arc<dyn EphemeralMcpProjection>>>>,
     runtime: Arc<ProcessRuntime>,
 }
 
@@ -889,7 +903,10 @@ struct ProviderSessionBinding {
     terminal_token: Arc<TerminalTokenState>,
     usage_turn_id: Arc<AsyncMutex<Option<String>>>,
     assistant_messages: Arc<AsyncMutex<AssistantMessageTracker>>,
+    /// Persistent registry definition ids only; ephemeral app-owned MCP
+    /// projections are tracked by their opaque lease instead.
     projected_mcp_definition_ids: Arc<HashSet<McpDefinitionId>>,
+    ephemeral_mcp_lease_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1056,12 +1073,90 @@ impl SessionCommandState {
             db_path,
             _event_bus: event_bus,
             store: runtime.session_store(),
+            ephemeral_mcp_projection: Arc::new(Mutex::new(None)),
             runtime,
         }
     }
 
     pub fn process_runtime(&self) -> Arc<ProcessRuntime> {
         Arc::clone(&self.runtime)
+    }
+
+    /// Installs the one app-owned ephemeral MCP projection factory. The
+    /// factory is deliberately shared by all clones of this state and cannot
+    /// be replaced after setup, so existing provider sessions never receive a
+    /// surprise hot injection.
+    pub fn install_ephemeral_mcp_projection(
+        &self,
+        projection: Arc<dyn EphemeralMcpProjection>,
+    ) -> Result<()> {
+        let mut installed = self
+            .ephemeral_mcp_projection
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if installed.is_some() {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "ephemeral MCP projection is already installed".to_string(),
+            ));
+        }
+        *installed = Some(projection);
+        Ok(())
+    }
+
+    fn ephemeral_mcp_projection(&self) -> Result<Option<Arc<dyn EphemeralMcpProjection>>> {
+        self.ephemeral_mcp_projection
+            .lock()
+            .map(|projection| projection.clone())
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    fn project_ephemeral_mcp_server(
+        &self,
+        provider_projection_version: Option<&str>,
+        session: &Session,
+    ) -> Result<Option<EphemeralMcpProjectionLease>> {
+        if provider_projection_version.is_none() {
+            return Ok(None);
+        }
+        let projection = match self.ephemeral_mcp_projection() {
+            Ok(projection) => projection,
+            Err(_) => {
+                eprintln!("[DCC] ephemeral MCP projection unavailable; continuing without it");
+                return Ok(None);
+            }
+        };
+        let Some(projection) = projection else {
+            return Ok(None);
+        };
+        let lease = match projection.project_for_session(session) {
+            Ok(lease) => lease,
+            Err(_) => {
+                eprintln!("[DCC] ephemeral MCP projection unavailable; continuing without it");
+                return Ok(None);
+            }
+        };
+        if let Some(lease) = lease.as_ref() {
+            if lease.lease_id.trim().is_empty()
+                || lease.lease_id.chars().count() > EPHEMERAL_MCP_LEASE_ID_MAX_CHARS
+            {
+                projection.revoke_session(&session.id, &lease.lease_id);
+                eprintln!(
+                    "[DCC] ephemeral MCP projection returned an invalid lease; continuing without it"
+                );
+                return Ok(None);
+            }
+        }
+        Ok(lease)
+    }
+
+    fn revoke_ephemeral_mcp_projection(&self, session_id: &SessionId, lease_id: Option<&str>) {
+        let Some(lease_id) = lease_id else {
+            return;
+        };
+        let projection = self.ephemeral_mcp_projection().ok().flatten();
+        if let Some(projection) = projection {
+            projection.revoke_session(session_id, lease_id);
+        }
     }
 
     pub(crate) fn db_path(&self) -> &std::path::Path {
@@ -2152,6 +2247,10 @@ impl SessionCommandState {
             }
         };
         if removed {
+            self.revoke_ephemeral_mcp_projection(
+                session_id,
+                expected.ephemeral_mcp_lease_id.as_deref(),
+            );
             let _ = self
                 .clear_mcp_runtime_statuses_if_binding_absent(session_id, expected)
                 .await;
@@ -2185,6 +2284,10 @@ impl SessionCommandState {
             }
         };
         if removed {
+            self.revoke_ephemeral_mcp_projection(
+                session_id,
+                expected.ephemeral_mcp_lease_id.as_deref(),
+            );
             let _ = self
                 .clear_mcp_runtime_statuses_if_binding_absent(session_id, expected)
                 .await;
@@ -2664,13 +2767,33 @@ impl SessionCommandState {
         let provider_runtime =
             self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
         let mcp_projection_version = provider.dcc_mcp_projection_version().map(str::to_string);
-        let mcp_servers = self
+        let mut mcp_servers = self
             .resolve_provider_mcp_servers(session, provider.as_ref())
             .await?;
         let projected_definition_ids = mcp_servers
             .iter()
             .map(|server| server.definition_id.clone())
             .collect::<Vec<_>>();
+        let mut ephemeral_lease_id = None;
+        let ephemeral_projection =
+            match self.project_ephemeral_mcp_server(mcp_projection_version.as_deref(), session) {
+                Ok(projection) => projection,
+                Err(error) => {
+                    return Err(error);
+                }
+            };
+        if let Some(projection) = ephemeral_projection {
+            let lease_id = projection.lease_id.clone();
+            match append_ephemeral_mcp_server(&mut mcp_servers, projection.server) {
+                Ok(()) => ephemeral_lease_id = Some(lease_id),
+                Err(_) => {
+                    self.revoke_ephemeral_mcp_projection(&session.id, Some(&lease_id));
+                    eprintln!(
+                        "[DCC] ephemeral MCP projection identity conflict; continuing without it"
+                    );
+                }
+            }
+        }
 
         let handle = match provider
             .prepare_session(SessionConfig {
@@ -2686,6 +2809,7 @@ impl SessionCommandState {
         {
             Ok(handle) => handle,
             Err(error) => {
+                self.revoke_ephemeral_mcp_projection(&session.id, ephemeral_lease_id.as_deref());
                 if let Some(provider_version) = mcp_projection_version.as_deref() {
                     if !projected_definition_ids.is_empty() {
                         let checked_at = Utc::now().to_rfc3339();
@@ -2733,10 +2857,10 @@ impl SessionCommandState {
             projected_mcp_definition_ids: Arc::new(
                 projected_definition_ids.iter().cloned().collect(),
             ),
+            ephemeral_mcp_lease_id: ephemeral_lease_id.clone(),
         };
 
-        let won_binding = {
-            let mut store = self.lock_store()?;
+        let binding_result = self.lock_store().map(|mut store| {
             match store.provider_sessions.entry(session.id.clone()) {
                 Entry::Vacant(entry) => {
                     entry.insert(binding.clone());
@@ -2744,12 +2868,21 @@ impl SessionCommandState {
                 }
                 Entry::Occupied(_) => false,
             }
+        });
+        let won_binding = match binding_result {
+            Ok(won_binding) => won_binding,
+            Err(error) => {
+                let _ = provider.cancel(&handle).await;
+                self.revoke_ephemeral_mcp_projection(&session.id, ephemeral_lease_id.as_deref());
+                return Err(error);
+            }
         };
         if !won_binding {
             // Another state attached the same session while this adapter was
             // preparing. Do not overwrite its binding or publish loser
             // statuses; dispose only the handle we prepared.
             let _ = provider.cancel(&handle).await;
+            self.revoke_ephemeral_mcp_projection(&session.id, ephemeral_lease_id.as_deref());
             return Ok(());
         }
 
@@ -3921,6 +4054,10 @@ impl SessionCommandState {
                 }
             };
             if removed {
+                state.revoke_ephemeral_mcp_projection(
+                    &session_id,
+                    binding.ephemeral_mcp_lease_id.as_deref(),
+                );
                 let _ = state
                     .clear_mcp_runtime_statuses_if_binding_absent(&session_id, &binding)
                     .await;
@@ -4308,6 +4445,22 @@ fn lexical_absolute_path(path: &std::path::Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn append_ephemeral_mcp_server(
+    servers: &mut Vec<ProviderMcpServerConfig>,
+    projection: ProviderMcpServerConfig,
+) -> Result<()> {
+    let definition_id = projection.definition_id.clone();
+    if servers.iter().any(|server| {
+        server.server_name == projection.server_name || server.definition_id == definition_id
+    }) {
+        return Err(dcc_core::CoreError::Provider(
+            "ephemeral MCP projection collides with a persistent definition".to_string(),
+        ));
+    }
+    servers.push(projection);
+    Ok(())
+}
+
 #[async_trait]
 impl WorkspaceRepo for SessionCommandState {
     async fn save_workspace(&self, _workspace: &Workspace) -> Result<()> {
@@ -4370,10 +4523,16 @@ impl SessionRepo for SessionCommandState {
     async fn delete_session(&self, id: &SessionId) -> Result<()> {
         let result = SessionRepo::delete_session(&self.session_repo, id).await;
         if result.is_ok() {
-            {
+            let binding = {
                 let mut store = self.lock_store()?;
-                store.provider_sessions.remove(id);
-            }
+                store.provider_sessions.remove(id)
+            };
+            self.revoke_ephemeral_mcp_projection(
+                id,
+                binding
+                    .as_ref()
+                    .and_then(|binding| binding.ephemeral_mcp_lease_id.as_deref()),
+            );
             let _ = self.clear_mcp_runtime_statuses(id).await;
         }
         result
@@ -4691,7 +4850,8 @@ mod tests {
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
         },
     };
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use dcc_core::ports::ProviderMcpTransport;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[test]
     fn capture_v2_terminal_mode_uses_durable_insert_and_source() {
@@ -5664,6 +5824,187 @@ mod tests {
         assert!(Arc::ptr_eq(&first.store, &second.store));
     }
 
+    #[derive(Default)]
+    struct FakeEphemeralMcpProjection {
+        fail: AtomicBool,
+        projects: AtomicUsize,
+        next_lease: AtomicUsize,
+        revocations: Mutex<Vec<(String, String)>>,
+        config: Mutex<Option<ProviderMcpServerConfig>>,
+    }
+
+    impl EphemeralMcpProjection for FakeEphemeralMcpProjection {
+        fn project_for_session(
+            &self,
+            _session: &Session,
+        ) -> Result<Option<EphemeralMcpProjectionLease>> {
+            self.projects.fetch_add(1, Ordering::SeqCst);
+            if self.fail.load(Ordering::SeqCst) {
+                return Err(dcc_core::CoreError::Provider(
+                    "synthetic projector failure".to_string(),
+                ));
+            }
+            let lease_id = format!(
+                "lease-{}",
+                self.next_lease.fetch_add(1, Ordering::SeqCst) + 1
+            );
+            self.config
+                .lock()
+                .map(|config| {
+                    config
+                        .clone()
+                        .map(|server| EphemeralMcpProjectionLease { server, lease_id })
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+        }
+
+        fn revoke_session(&self, session_id: &SessionId, lease_id: &str) {
+            self.revocations
+                .lock()
+                .expect("revocation log")
+                .push((session_id.0.clone(), lease_id.to_string()));
+        }
+    }
+
+    fn fake_ephemeral_server(definition_id: &str, server_name: &str) -> ProviderMcpServerConfig {
+        ProviderMcpServerConfig {
+            definition_id: McpDefinitionId(definition_id.to_string()),
+            server_name: server_name.to_string(),
+            transport: ProviderMcpTransport::Http {
+                url: "http://127.0.0.1:1/mcp".to_string(),
+                headers: Vec::new(),
+            },
+            oauth_state: None,
+            tool_policies: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ephemeral_projection_is_shared_gated_and_revoked_without_replacement() {
+        let root = tempfile::tempdir().expect("runtime test root");
+        let root = std::fs::canonicalize(root.path()).expect("physical root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let projector = Arc::new(FakeEphemeralMcpProjection {
+            config: Mutex::new(Some(fake_ephemeral_server(
+                "dcc-browser",
+                "dcc-browser-webview",
+            ))),
+            ..Default::default()
+        });
+        state
+            .install_ephemeral_mcp_projection(projector.clone())
+            .expect("first installation should succeed");
+        assert!(state
+            .install_ephemeral_mcp_projection(Arc::new(FakeEphemeralMcpProjection::default()))
+            .is_err());
+
+        let session = sample_session("ephemeral-projection");
+        let projected = state
+            .project_ephemeral_mcp_server(Some("audited-runtime"), &session)
+            .expect("projection should resolve")
+            .expect("audited provider should receive projection");
+        assert_eq!(projected.server.definition_id.0, "dcc-browser");
+        assert_eq!(projected.lease_id, "lease-1");
+        assert!(state
+            .project_ephemeral_mcp_server(None, &session)
+            .expect("unsupported provider should not call projector")
+            .is_none());
+        assert_eq!(projector.projects.load(Ordering::SeqCst), 1);
+
+        state.revoke_ephemeral_mcp_projection(&session.id, Some(&projected.lease_id));
+        assert_eq!(
+            projector.revocations.lock().unwrap().as_slice(),
+            &[(session.id.0.clone(), "lease-1".to_string())]
+        );
+
+        let winner = state
+            .project_ephemeral_mcp_server(Some("audited-runtime"), &session)
+            .expect("second projection should resolve")
+            .expect("second audited projection should exist");
+        assert_eq!(winner.lease_id, "lease-2");
+        let binding = ProviderSessionBinding {
+            provider_id: "codex".to_string(),
+            handle: SessionHandle {
+                provider_id: ProviderId("codex".to_string()),
+                session_id: session.id.clone(),
+                handle_id: "winner-handle".to_string(),
+            },
+            current_turn_id: Arc::new(AsyncMutex::new(None)),
+            terminal_lock: Arc::new(AsyncMutex::new(())),
+            terminal_token: Arc::new(TerminalTokenState::default()),
+            usage_turn_id: Arc::new(AsyncMutex::new(None)),
+            assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
+            projected_mcp_definition_ids: Arc::new(HashSet::new()),
+            ephemeral_mcp_lease_id: Some(winner.lease_id.clone()),
+        };
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), binding.clone());
+        futures::executor::block_on(state.remove_binding_if_same(&session.id, &binding))
+            .expect("winner cleanup should succeed");
+        assert_eq!(
+            projector.revocations.lock().unwrap().as_slice(),
+            &[
+                (session.id.0.clone(), "lease-1".to_string()),
+                (session.id.0.clone(), "lease-2".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn ephemeral_projection_error_degrades_without_blocking_base_flow() {
+        let root = tempfile::tempdir().expect("runtime test root");
+        let root = std::fs::canonicalize(root.path()).expect("physical root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let projector = Arc::new(FakeEphemeralMcpProjection {
+            fail: AtomicBool::new(true),
+            ..Default::default()
+        });
+        state
+            .install_ephemeral_mcp_projection(projector.clone())
+            .expect("projection installation should succeed");
+
+        let session = sample_session("ephemeral-projection-failure");
+        assert!(state
+            .project_ephemeral_mcp_server(Some("audited-runtime"), &session)
+            .expect("projection failure should degrade")
+            .is_none());
+        assert_eq!(projector.projects.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn ephemeral_projection_cannot_collide_with_persistent_server_identity() {
+        for (persistent_definition, persistent_name) in [
+            ("dcc-browser", "other-server"),
+            ("other-definition", "dcc-browser-webview"),
+        ] {
+            let mut servers = vec![fake_ephemeral_server(
+                persistent_definition,
+                persistent_name,
+            )];
+            let error = append_ephemeral_mcp_server(
+                &mut servers,
+                fake_ephemeral_server("dcc-browser", "dcc-browser-webview"),
+            )
+            .expect_err("persistent identity collision must fail closed");
+            assert!(error.to_string().contains("collides"));
+            assert_eq!(servers.len(), 1);
+        }
+
+        let mut servers = vec![fake_ephemeral_server("persistent", "persistent-server")];
+        append_ephemeral_mcp_server(
+            &mut servers,
+            fake_ephemeral_server("dcc-browser", "dcc-browser-webview"),
+        )
+        .expect("distinct persistent and ephemeral identities should append");
+        assert_eq!(servers.len(), 2);
+    }
+
     #[test]
     fn terminal_token_blocks_replacement_until_raii_drop() {
         let db_path = physical_db_path(
@@ -5689,6 +6030,7 @@ mod tests {
             usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
+            ephemeral_mcp_lease_id: None,
         };
         state
             .store
@@ -5748,6 +6090,7 @@ mod tests {
             usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
+            ephemeral_mcp_lease_id: None,
         };
         binding
             .assistant_messages
@@ -5822,6 +6165,7 @@ mod tests {
             usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
+            ephemeral_mcp_lease_id: None,
         };
         state
             .store
@@ -5889,6 +6233,7 @@ mod tests {
             usage_turn_id: Arc::new(AsyncMutex::new(Some(old_turn.0.clone()))),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
+            ephemeral_mcp_lease_id: None,
         };
         state
             .store

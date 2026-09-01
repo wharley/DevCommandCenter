@@ -139,6 +139,15 @@ pub struct BrowserActionResult {
     pub requires_context_refresh: bool,
 }
 
+/// Bridge-only context coupled to an opaque action identity. It never carries
+/// a locator, DOM data, credentials, or a renderer-provided script.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserControlContext {
+    pub context: BrowserAgentContext,
+    pub anchor: BrowserActionAnchor,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserSemanticItem {
@@ -266,6 +275,7 @@ struct BrowserControlGrant {
 
 /// Runtime state for the one browser child WebView. Context is keyed by the
 /// active workspace and optional session, while the native view is reused.
+#[derive(Clone)]
 pub struct BrowserState {
     pub(crate) webview: Arc<Mutex<Option<Webview<Wry>>>>,
     contexts: Arc<Mutex<HashMap<String, BrowserContext>>>,
@@ -1732,6 +1742,17 @@ pub async fn browser_execute_action(
     anchor: BrowserActionAnchor,
     action: BrowserControlAction,
 ) -> Result<BrowserActionResult, String> {
+    execute_browser_control_action(&state, &sessions, anchor, action).await
+}
+
+/// Shared by the Tauri command and the app-owned MCP listener. It owns the
+/// operation lock exactly once, before validation and map consumption.
+pub(crate) async fn execute_browser_control_action(
+    state: &BrowserState,
+    sessions: &SessionCommandState,
+    anchor: BrowserActionAnchor,
+    action: BrowserControlAction,
+) -> Result<BrowserActionResult, String> {
     let _operation = state.operation_lock.lock().await;
     validate_scope(
         &sessions,
@@ -1848,7 +1869,96 @@ pub async fn browser_extract_context(
     session_id: Option<String>,
     lifecycle_token: u64,
 ) -> Result<BrowserAgentContext, String> {
+    extract_browser_context_for_scope(&state, &sessions, workspace_id, session_id, lifecycle_token)
+        .await
+}
+
+pub(crate) async fn extract_browser_context_for_scope(
+    state: &BrowserState,
+    sessions: &SessionCommandState,
+    workspace_id: String,
+    session_id: Option<String>,
+    lifecycle_token: u64,
+) -> Result<BrowserAgentContext, String> {
     let _operation = state.operation_lock.lock().await;
+    extract_browser_context_locked(state, sessions, workspace_id, session_id, lifecycle_token).await
+}
+
+/// Context endpoint for the app-owned MCP projection. The caller never gets
+/// to supply a lifecycle token: it is taken from the active native snapshot
+/// while holding the same operation lock used for extraction.
+pub(crate) async fn extract_browser_control_context(
+    state: &BrowserState,
+    sessions: &SessionCommandState,
+    workspace_id: String,
+    session_id: Option<String>,
+) -> Result<BrowserControlContext, String> {
+    let _operation = state.operation_lock.lock().await;
+    validate_scope(sessions, &workspace_id, session_id.as_deref()).await?;
+    let snapshot = current_snapshot(state)?;
+    if !snapshot.visible {
+        return Err("browser is not visible".to_string());
+    }
+    let lifecycle_token = snapshot.lifecycle_token;
+    require_current_lifecycle(
+        state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser context lifecycle is stale",
+    )?;
+    require_browser_control_grant(
+        state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        Instant::now(),
+    )?;
+    let exact_url = snapshot
+        .url
+        .ok_or_else(|| "browser page URL is unavailable".to_string())?;
+    let context = extract_browser_context_locked(
+        state,
+        sessions,
+        workspace_id.clone(),
+        session_id.clone(),
+        lifecycle_token,
+    )
+    .await?;
+    if let Err(error) = require_browser_control_grant(
+        state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        Instant::now(),
+    ) {
+        // A grant can expire during the bounded native callback. The map was
+        // just issued for this controlled read, so revoke it before reporting
+        // the expired capability.
+        invalidate_semantic_map_for_scope(state, &workspace_id, session_id.as_deref());
+        return Err(error);
+    }
+    Ok(BrowserControlContext {
+        anchor: BrowserActionAnchor {
+            workspace_id,
+            session_id,
+            lifecycle_token,
+            map_id: context.semantic_map.map_id.clone(),
+            generation: context.semantic_map.generation,
+            url: exact_url,
+            page_load_revision: context.semantic_map.page_load_revision,
+        },
+        context,
+    })
+}
+
+async fn extract_browser_context_locked(
+    state: &BrowserState,
+    sessions: &SessionCommandState,
+    workspace_id: String,
+    session_id: Option<String>,
+    lifecycle_token: u64,
+) -> Result<BrowserAgentContext, String> {
     validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
     require_current_lifecycle(
         &state,

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod browser_commands;
+mod browser_mcp_bridge;
 mod coderabbit_commands;
 mod delegation_commands;
 mod forge_commands;
@@ -52,6 +53,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::git_support::build_review_diffs_for_path;
 use browser_commands::BrowserState;
+use browser_mcp_bridge::BrowserMcpBridge;
 use coderabbit_commands::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
     workspace_coderabbit_doctor, workspace_coderabbit_logout, workspace_coderabbit_review,
@@ -7186,6 +7188,29 @@ pub fn run() {
             eprintln!("[DCC] Database ready at {:?}", db_path);
             let session_command_state =
                 SessionCommandState::new(app.handle().clone(), db_path.clone());
+            // The optional listener is local-only. Failure leaves the human
+            // Browser and the rest of DCC available; no insecure fallback is
+            // ever installed and existing sessions are not reconfigured.
+            let browser_state = BrowserState::default();
+            let browser_mcp_bridge = match tauri::async_runtime::block_on(BrowserMcpBridge::start(
+                browser_state.clone(),
+                session_command_state.clone(),
+            )) {
+                Ok(bridge) => match session_command_state
+                    .install_ephemeral_mcp_projection(bridge.clone())
+                {
+                    Ok(()) => Some(bridge),
+                    Err(_) => {
+                        bridge.shutdown();
+                        eprintln!("[DCC][browser-mcp] unavailable: projection installation failed");
+                        None
+                    }
+                },
+                Err(_) => {
+                    eprintln!("[DCC][browser-mcp] unavailable: loopback listener not started");
+                    None
+                }
+            };
             let workspace_command_state =
                 WorkspaceCommandState::from_session(&session_command_state);
             match tauri::async_runtime::block_on(reconcile_delegation_worktree_operations(
@@ -7238,7 +7263,10 @@ pub fn run() {
             }
             let audit_db_path = db_path.clone();
             app.manage(state);
-            app.manage(BrowserState::default());
+            app.manage(browser_state);
+            if let Some(browser_mcp_bridge) = browser_mcp_bridge {
+                app.manage(browser_mcp_bridge);
+            }
             start_pair_audit_watcher(app.handle().clone(), audit_db_path);
             Ok(())
         })
@@ -7248,6 +7276,9 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     kill_all_terminals(&state, app_handle);
+                }
+                if let Some(bridge) = app_handle.try_state::<std::sync::Arc<BrowserMcpBridge>>() {
+                    bridge.shutdown();
                 }
                 if let Some(browser) = app_handle.try_state::<BrowserState>() {
                     browser_commands::shutdown(&browser);
