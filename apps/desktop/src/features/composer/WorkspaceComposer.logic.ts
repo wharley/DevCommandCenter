@@ -20,6 +20,17 @@ export function getComposerDraftKey(workspaceId: string) {
 	return `dcc.workspace.composer.draft.${workspaceId}`;
 }
 
+/** Draft persistence key isolated to one conversation within a workspace. */
+export function getComposerConversationDraftKey(
+	workspaceId: string,
+	sessionId: string | null,
+) {
+	const conversationKey = sessionId?.trim()
+		? `session.${encodeURIComponent(sessionId.trim())}`
+		: "new";
+	return `${getComposerDraftKey(workspaceId)}.conversation.${conversationKey}`;
+}
+
 export function getComposerEffortKey(workspaceId: string) {
 	return `dcc.workspace.composer.effort.${workspaceId}`;
 }

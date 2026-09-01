@@ -432,6 +432,12 @@ export function WorkspacePanel({
 	}, [workspaceId]);
 
 	useEffect(() => {
+		// An external prefill belongs to the exact workspace/session that produced
+		// it; never carry it into another conversation.
+		setComposerPrefill(null);
+	}, [selectedSessionId, workspaceId]);
+
+	useEffect(() => {
 		if (externalComposerPrefill) {
 			setComposerPrefill(externalComposerPrefill);
 			onExternalComposerPrefillConsumed?.(externalComposerPrefill);
@@ -1276,6 +1282,7 @@ export function WorkspacePanel({
 					<div className="mx-auto w-full max-w-[52rem]">
 					<WorkspaceComposer
 						draftKey={workspaceId}
+						draftSessionId={effectiveSessionId}
 						disabled={false}
 						providerChoices={providerChoices}
 						selectedProviderId={selectedProviderId}

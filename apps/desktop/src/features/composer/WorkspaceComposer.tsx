@@ -63,6 +63,7 @@ import {
 import {
 	buildSpecDraftPrompt,
 	getComposerApprovalPolicyKey,
+	getComposerConversationDraftKey,
 	getComposerDraftKey,
 	getComposerEffortKey,
 	isComposerSubmitEnabled,
@@ -120,6 +121,7 @@ import {
 
 type WorkspaceComposerProps = {
 	draftKey: string;
+	draftSessionId: string | null;
 	disabled: boolean;
 	providerChoices: ProviderCatalog["providers"];
 	selectedProviderId: string | null;
@@ -170,6 +172,7 @@ type WorkspaceComposerProps = {
 
 export function WorkspaceComposer({
 	draftKey,
+	draftSessionId,
 	disabled,
 	providerChoices,
 	selectedProviderId,
@@ -205,6 +208,7 @@ export function WorkspaceComposer({
 	onOpenTerminal,
 }: WorkspaceComposerProps) {
 	const { t } = useTranslation("common");
+	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const [hasContent, setHasContent] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const isSubmittingRef = useRef(false);
@@ -225,7 +229,17 @@ export function WorkspaceComposer({
 	const effort = effortSelection.effort;
 	const ultrathinkSelected = effortSelection.ultrathink;
 	const [planModeByScope, setPlanModeByScope] = useState<Record<string, boolean>>({});
-	const composerDraftKey = useMemo(() => getComposerDraftKey(draftKey), [draftKey]);
+	const composerDraftKey = useMemo(
+		() => getComposerConversationDraftKey(draftKey, draftSessionId),
+		[draftKey, draftSessionId],
+	);
+	const draftFallbackKeys = useMemo(
+		() => [
+			getComposerConversationDraftKey(draftKey, null),
+			getComposerDraftKey(draftKey),
+		],
+		[draftKey],
+	);
 	const composerDraftKeyRef = useRef(composerDraftKey);
 	composerDraftKeyRef.current = composerDraftKey;
 	const composerEffortKey = useMemo(
@@ -301,7 +315,6 @@ export function WorkspaceComposer({
 			null
 		);
 	}, [selectedProvider, selectedModelId]);
-	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const activeTurnId = sessionSnapshot?.activeTurnId ?? null;
 	const hasActiveTurn = Boolean(sessionSnapshot?.activeTurnId);
 	const canSteerActiveTurn = Boolean(
@@ -964,7 +977,10 @@ export function WorkspaceComposer({
 					focusRequestKey={focusRequestKey}
 				/>
 				<EditablePlugin disabled={inputDisabled} />
-				<DraftPersistencePlugin draftKey={composerDraftKey} />
+				<DraftPersistencePlugin
+					draftKey={composerDraftKey}
+					fallbackDraftKeys={draftFallbackKeys}
+				/>
 				<HasContentPlugin onChange={setHasContent} />
 			</LexicalComposer>
 

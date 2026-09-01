@@ -180,8 +180,10 @@ import { resolveDelegationDefaults } from "./features/sessions/delegation-defaul
 import {
 	buildProviderHandoffContext,
 	mergeProviderHandoffToolInstructions,
+	PROVIDER_HANDOFF_MAX_CHARS,
 	shouldCreateProviderHandoff,
 } from "./features/sessions/provider-handoff-context";
+import { ContextAttachmentLedger } from "./features/sessions/context-attachment-ledger";
 import {
 	canRerunDelegation,
 	rerunMode,
@@ -1128,6 +1130,24 @@ export default function App() {
 	const delegatedChildSessionsRef = useRef<Map<string, DelegationChildBinding>>(
 		new Map(),
 	);
+	const contextAttachmentLedgerRef = useRef(new ContextAttachmentLedger());
+	useEffect(() => {
+		const scope = {
+			workspaceId: selectedWorkspaceId ?? "",
+			sessionId: selectedSessionId,
+			providerId: selectedProviderId,
+		};
+		if (selectedWorkspaceId) {
+			contextAttachmentLedgerRef.current.syncScope(scope);
+		} else {
+			contextAttachmentLedgerRef.current.clear();
+		}
+		return () => {
+			// The handoff handler may temporarily activate a target provider/session
+			// scope different from the render scope. Always clear on effect cleanup.
+			contextAttachmentLedgerRef.current.clear();
+		};
+	}, [selectedProviderId, selectedSessionId, selectedWorkspaceId]);
 
 	const finalizeDelegationFromChild = useCallback(
 		async (
@@ -3237,6 +3257,14 @@ export default function App() {
 				Boolean(currentSession.providerId) &&
 				Boolean(turnProvider?.id) &&
 				currentSession.providerId !== turnProvider?.id;
+			const handoffScope = {
+				workspaceId: currentSession.workspaceId,
+				sessionId: currentSessionId,
+				providerId: turnProvider?.id ?? null,
+			};
+			const handoffGeneration = shouldInspectProviderHandoff
+				? contextAttachmentLedgerRef.current.syncScope(handoffScope)
+				: null;
 			if (shouldInspectProviderHandoff) {
 				try {
 					const historyEvents = await loadSessionThreadEvents(currentSessionId);
@@ -3280,7 +3308,7 @@ export default function App() {
 								: Promise.resolve(null),
 						]);
 						const activePlanState = derivePlanFollowUpState(handoffMessages);
-						providerHandoffContext = buildProviderHandoffContext({
+						const candidate = buildProviderHandoffContext({
 							sourceProviderId: currentSession.providerId ?? "unknown",
 							destinationProviderId: turnProvider?.id ?? "unknown",
 							workspaceName: selectedWorkspace?.name,
@@ -3295,6 +3323,34 @@ export default function App() {
 							recentMessages: handoffMessages,
 							currentPrompt: trimmedPrompt,
 						});
+						if (
+							handoffGeneration !== null &&
+							contextAttachmentLedgerRef.current.currentGeneration(handoffScope) ===
+								handoffGeneration
+						) {
+							const attachmentId = contextAttachmentLedgerRef.current.issue({
+								source: "provider_handoff",
+								workspaceId: handoffScope.workspaceId,
+								sessionId: handoffScope.sessionId,
+								providerId: handoffScope.providerId,
+								chars: candidate.length,
+								truncated: candidate.length >= PROVIDER_HANDOFF_MAX_CHARS,
+								trust: "derived_context",
+							});
+							if (
+								attachmentId !== null &&
+								contextAttachmentLedgerRef.current.validateCurrent(
+									attachmentId,
+									handoffScope,
+								) &&
+								contextAttachmentLedgerRef.current.consume(
+									attachmentId,
+									handoffScope,
+								)
+							) {
+								providerHandoffContext = candidate;
+							}
+						}
 					}
 				} catch (error) {
 					// Handoff is an enhancement; history/projection failure must not block the turn.

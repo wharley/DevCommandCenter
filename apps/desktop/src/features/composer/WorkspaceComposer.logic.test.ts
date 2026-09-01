@@ -6,6 +6,7 @@ import {
 	canSendPrompt,
 	decideSend,
 	getCompactComposerModelLabel,
+	getComposerConversationDraftKey,
 	getComposerDraftKey,
 	isComposerSubmitEnabled,
 	isSendDisabled,
@@ -48,6 +49,21 @@ describe("WorkspaceComposer.logic", () => {
 
 	it("builds a stable draft key", () => {
 		expect(getComposerDraftKey("alpha")).toBe("dcc.workspace.composer.draft.alpha");
+	});
+
+	it("isolates draft persistence by conversation with a stable new-session fallback", () => {
+		expect(getComposerConversationDraftKey("alpha", "session-a")).not.toBe(
+			getComposerConversationDraftKey("alpha", "session-b"),
+		);
+		expect(getComposerConversationDraftKey("alpha", null)).toBe(
+			getComposerConversationDraftKey("alpha", null),
+		);
+		expect(getComposerConversationDraftKey("alpha", "")).toBe(
+			getComposerConversationDraftKey("alpha", null),
+		);
+		expect(getComposerConversationDraftKey("alpha", "new")).not.toBe(
+			getComposerConversationDraftKey("alpha", null),
+		);
 	});
 
 	it("decides to block when disabled", () => {

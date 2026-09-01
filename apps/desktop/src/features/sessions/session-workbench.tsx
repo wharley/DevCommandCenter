@@ -16,6 +16,7 @@ import type {
 } from "@dcc/contracts";
 import {
 	WorkspaceTerminalDrawer,
+	MAX_AGENT_SELECTION_CHARS,
 	type TerminalAgentContext,
 } from "@/features/terminal";
 import {
@@ -55,6 +56,11 @@ import type { RuntimeSessionSnapshot } from "./workbench-types";
 import type { ManualDelegationRequest } from "./delegation-request";
 import type { AgentInitiatedDelegationRequest } from "./agent-delegation-request";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
+import {
+	ContextAttachmentLedger,
+	MAX_CONTEXT_ATTACHMENT_CHARS,
+} from "./context-attachment-ledger";
+import { sanitizeAndBoundTerminalOutput } from "@/features/terminal/terminal-selection";
 import type {
 	OpenTerminalRequest,
 	TerminalScopeTarget,
@@ -301,6 +307,7 @@ export function SessionWorkbench({
 	browserSurfaceWidthRef.current = browserSurfaceWidth;
 	const [terminalComposerPrefill, setTerminalComposerPrefill] = useState<{
 		workspaceId: string;
+		sessionId: string | null;
 		text: string;
 		nonce: number;
 		mode: "append";
@@ -313,6 +320,7 @@ export function SessionWorkbench({
 		mode: "append";
 	} | null>(null);
 	const terminalPrefillNonceRef = useRef(0);
+	const contextAttachmentLedgerRef = useRef(new ContextAttachmentLedger());
 	const handleComposerPrefillConsumed = useCallback(
 		(prefill: { text: string; nonce: number }) => {
 			if (
@@ -333,11 +341,6 @@ export function SessionWorkbench({
 		},
 		[onComposerPrefillConsumed, browserComposerPrefill, terminalComposerPrefill],
 	);
-	useEffect(() => {
-		// Terminal context belongs to the workspace where it was collected and
-		// must not leak into the next workspace's composer.
-		setTerminalComposerPrefill(null);
-	}, [workspaceId]);
 	useEffect(() => {
 		setBrowserOpen(false);
 		setBrowserSurfaceWidth(readBrowserSurfaceWidth(workspaceId));
@@ -362,6 +365,16 @@ export function SessionWorkbench({
 	const sessionId = sessionSnapshot?.sessionId ?? null;
 	const browserScopeRef = useRef({ workspaceId, sessionId });
 	browserScopeRef.current = { workspaceId, sessionId };
+	const contextAttachmentScopeRef = useRef({ workspaceId, sessionId });
+	contextAttachmentScopeRef.current = { workspaceId, sessionId };
+	useEffect(() => {
+		const scope = { workspaceId, sessionId };
+		contextAttachmentLedgerRef.current.syncScope(scope);
+		// Terminal context belongs to the exact workspace/session where it was
+		// collected and must not leak into the next composer's scope.
+		setTerminalComposerPrefill(null);
+		return () => contextAttachmentLedgerRef.current.invalidate(scope);
+	}, [sessionId, workspaceId]);
 	useEffect(() => {
 		// Browser callbacks can resolve after switching conversations. A prefill
 		// is valid only for the exact session that requested it.
@@ -650,17 +663,41 @@ export function SessionWorkbench({
 	}, [sessionId, workspaceId]);
 	const handleSendTerminalToAgent = useCallback(
 		(context: TerminalAgentContext) => {
+			const activeScope = contextAttachmentScopeRef.current;
+			if (
+				context.workspaceId !== activeScope.workspaceId ||
+				context.sessionId !== activeScope.sessionId
+			) {
+				return;
+			}
 			terminalPrefillNonceRef.current += 1;
 			const branch = context.branchLabel ? ` · ${context.branchLabel}` : "";
-			const safeContent = context.content.replaceAll(
-				"</terminal_output>",
-				"&lt;/terminal_output&gt;",
+			const boundedTerminalOutput = sanitizeAndBoundTerminalOutput(
+				context.content,
+				MAX_AGENT_SELECTION_CHARS,
 			);
+			const safeContent = boundedTerminalOutput.content;
 			const source = context.selectionOnly
 				? t("terminalDock.agentContext.selection")
 				: t("terminalDock.agentContext.recentOutput");
+			const attachmentId = contextAttachmentLedgerRef.current.issue({
+				source: "terminal",
+				workspaceId: activeScope.workspaceId,
+				sessionId: activeScope.sessionId,
+				chars: safeContent.length,
+				truncated: boundedTerminalOutput.truncated,
+				trust: "local_terminal",
+			});
+			// Metadata recording is best-effort; the existing prefill behavior must
+			// not depend on the ledger.
+			void (
+				attachmentId !== null &&
+				contextAttachmentLedgerRef.current.validateCurrent(attachmentId, activeScope) &&
+				contextAttachmentLedgerRef.current.consume(attachmentId, activeScope)
+			);
 			setTerminalComposerPrefill({
 				workspaceId,
+				sessionId: activeScope.sessionId,
 				nonce: terminalPrefillNonceRef.current,
 				mode: "append",
 				text: [
@@ -687,31 +724,50 @@ export function SessionWorkbench({
 			if (!isBrowserContextForScope(context, activeScope)) {
 				return;
 			}
+			const text = formatBrowserAgentContext(context, {
+				prompt: t("browser.agentContext.prompt"),
+				url: t("browser.agentContext.url"),
+				title: t("browser.agentContext.title"),
+				source: t("browser.agentContext.source"),
+				truncated: t("browser.agentContext.truncated"),
+				selection: t("browser.agentContext.selection"),
+				visibleText: t("browser.agentContext.visibleText"),
+				yes: t("browser.agentContext.yes"),
+				no: t("browser.agentContext.no"),
+				semanticMap: t("browser.agentContext.semanticMap"),
+				mapId: t("browser.agentContext.mapId"),
+				generation: t("browser.agentContext.generation"),
+				visibleElements: t("browser.agentContext.visibleElements"),
+				name: t("browser.agentContext.name"),
+				destination: t("browser.agentContext.destination"),
+				states: t("browser.agentContext.states"),
+				noVisibleElements: t("browser.agentContext.noVisibleElements"),
+			});
+			const attachmentId = contextAttachmentLedgerRef.current.issue({
+				source: "browser",
+				workspaceId: activeScope.workspaceId,
+				sessionId: activeScope.sessionId,
+				chars: text.length,
+				truncated:
+					context.truncated ||
+					context.semanticMap.truncated ||
+					text.length >= MAX_CONTEXT_ATTACHMENT_CHARS,
+				trust: "remote_untrusted",
+			});
+			// The scope check above remains authoritative for stale callbacks;
+			// metadata recording must not block the prefill.
+			void (
+				attachmentId !== null &&
+				contextAttachmentLedgerRef.current.validateCurrent(attachmentId, activeScope) &&
+				contextAttachmentLedgerRef.current.consume(attachmentId, activeScope)
+			);
 			terminalPrefillNonceRef.current += 1;
 			setBrowserComposerPrefill({
 				workspaceId: activeScope.workspaceId,
 				sessionId: activeScope.sessionId,
 				nonce: terminalPrefillNonceRef.current,
 				mode: "append",
-				text: formatBrowserAgentContext(context, {
-					prompt: t("browser.agentContext.prompt"),
-					url: t("browser.agentContext.url"),
-					title: t("browser.agentContext.title"),
-					source: t("browser.agentContext.source"),
-					truncated: t("browser.agentContext.truncated"),
-					selection: t("browser.agentContext.selection"),
-					visibleText: t("browser.agentContext.visibleText"),
-					yes: t("browser.agentContext.yes"),
-					no: t("browser.agentContext.no"),
-					semanticMap: t("browser.agentContext.semanticMap"),
-					mapId: t("browser.agentContext.mapId"),
-					generation: t("browser.agentContext.generation"),
-					visibleElements: t("browser.agentContext.visibleElements"),
-					name: t("browser.agentContext.name"),
-					destination: t("browser.agentContext.destination"),
-					states: t("browser.agentContext.states"),
-					noVisibleElements: t("browser.agentContext.noVisibleElements"),
-				}),
+				text,
 			});
 			if (browserSplit) {
 				requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
@@ -949,7 +1005,8 @@ export function SessionWorkbench({
 								sessionId,
 							})
 								? browserComposerPrefill
-								: terminalComposerPrefill?.workspaceId === workspaceId
+								: terminalComposerPrefill?.workspaceId === workspaceId &&
+										terminalComposerPrefill.sessionId === sessionId
 									? terminalComposerPrefill
 									: composerPrefill
 						}
@@ -1037,6 +1094,7 @@ export function SessionWorkbench({
 						}));
 					}}
 					workspaceName={terminalWorkspaceName ?? workspaceName}
+					workspaceId={workspaceId}
 					workspaceBranch={terminalWorkspaceBranch ?? workspaceBranch}
 					providerLabel={selectedProviderLabel}
 					sessionState={sessionState}

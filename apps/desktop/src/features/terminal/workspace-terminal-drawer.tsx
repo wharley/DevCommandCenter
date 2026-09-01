@@ -81,7 +81,7 @@ const HEIGHT_STORAGE_KEY = "dcc-workbench-terminal-dock-height-v1";
 const DEFAULT_HEIGHT_PX = 340;
 const MIN_HEIGHT_PX = 220;
 const COMPACT_MIN_HEIGHT_PX = 160;
-const MAX_AGENT_SELECTION_CHARS = 16_000;
+export const MAX_AGENT_SELECTION_CHARS = 16_000;
 /** Keep the conversation usable while the terminal rests below it. */
 const MIN_CHAT_HEIGHT_PX = 360;
 
@@ -114,6 +114,8 @@ function terminalDisplayTitle(title: string, snapshot: TerminalSnapshot | null) 
 }
 
 export type TerminalAgentContext = {
+	workspaceId: string;
+	sessionId: string | null;
 	title: string;
 	projectLabel: string;
 	scopeLabel: string;
@@ -138,6 +140,7 @@ export type WorkspaceTerminalDrawerProps = {
 	activeScopeKind: TerminalScopeKind;
 	onScopeChange: (scope: TerminalScopeKind) => void;
 	workspaceName: string;
+	workspaceId: string;
 	workspaceBranch: string;
 	providerLabel: string | null;
 	sessionState: string;
@@ -165,6 +168,7 @@ export function WorkspaceTerminalDrawer({
 	activeScopeKind,
 	onScopeChange,
 	workspaceName,
+	workspaceId,
 	workspaceBranch,
 	providerLabel,
 	sessionState,
@@ -359,6 +363,8 @@ export function WorkspaceTerminalDrawer({
 		);
 		if (!content) return;
 		onSendToAgent({
+			workspaceId,
+			sessionId,
 			title: activeTab.title,
 			projectLabel: activeScope.projectLabel,
 			scopeLabel: activeScope.label,
@@ -375,6 +381,8 @@ export function WorkspaceTerminalDrawer({
 		clearTerminalSelection,
 		cwd,
 		onSendToAgent,
+		sessionId,
+		workspaceId,
 	]);
 
 	const handleRestart = useCallback(async () => {
