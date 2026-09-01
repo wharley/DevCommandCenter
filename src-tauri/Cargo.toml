@@ -20,7 +20,7 @@ tauri-build = { version = "2", features = [] }
 dcc-core = { path = "../crates/dcc-core" }
 dcc-infra = { path = "../crates/dcc-infra" }
 dcc-tauri = { path = "../crates/dcc-tauri" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -52,6 +52,7 @@ rand = "0.8"
 subtle = "2.5"
 thiserror = "1"
 local-ip-address = "0.6"
+url = "2"
 
 [[bin]]
 name = "dccd"

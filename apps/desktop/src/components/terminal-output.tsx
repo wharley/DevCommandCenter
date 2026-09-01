@@ -12,6 +12,7 @@ type TerminalOutputProps = {
 	padding?: string;
 	onData?: (data: string) => void;
 	onResize?: (cols: number, rows: number) => void;
+	onSelectionChange?: (selection: string) => void;
 };
 
 export type TerminalHandle = {
@@ -134,12 +135,15 @@ function TerminalOutputImpl({
 	padding = "12px 2px 12px 12px",
 	onData,
 	onResize,
+	onSelectionChange,
 }: TerminalOutputProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const onDataRef = useRef<typeof onData>(onData);
 	const onResizeRef = useRef<typeof onResize>(onResize);
+	const onSelectionChangeRef = useRef<typeof onSelectionChange>(onSelectionChange);
 	onDataRef.current = onData;
 	onResizeRef.current = onResize;
+	onSelectionChangeRef.current = onSelectionChange;
 
 	useEffect(() => {
 		const container = containerRef.current;
@@ -209,6 +213,9 @@ function TerminalOutputImpl({
 			lastResizeRows = rows;
 			onResizeRef.current?.(cols, rows);
 		});
+		const selectionSub = terminal.onSelectionChange(() => {
+			onSelectionChangeRef.current?.(terminal.getSelection());
+		});
 
 		const resizeObserver = new ResizeObserver(() => {
 			if (
@@ -246,6 +253,7 @@ function TerminalOutputImpl({
 			}
 			dataSub.dispose();
 			resizeSub.dispose();
+			selectionSub.dispose();
 			linkProviderDisposable?.dispose();
 			themeObserver.disconnect();
 			resizeObserver.disconnect();

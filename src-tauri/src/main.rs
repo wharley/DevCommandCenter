@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod browser_commands;
 mod coderabbit_commands;
 mod delegation_commands;
 mod forge_commands;
@@ -50,6 +51,7 @@ use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::git_support::build_review_diffs_for_path;
+use browser_commands::BrowserState;
 use coderabbit_commands::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
     workspace_coderabbit_doctor, workspace_coderabbit_logout, workspace_coderabbit_review,
@@ -6985,6 +6987,11 @@ pub fn run() {
             terminal_list_activity,
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
+            browser_commands::browser_open,
+            browser_commands::browser_navigate,
+            browser_commands::browser_reload,
+            browser_commands::browser_set_bounds,
+            browser_commands::browser_hide,
             pair_init,
             pair_list_devices,
             pair_revoke_device,
@@ -7226,6 +7233,7 @@ pub fn run() {
             }
             let audit_db_path = db_path.clone();
             app.manage(state);
+            app.manage(BrowserState::default());
             start_pair_audit_watcher(app.handle().clone(), audit_db_path);
             Ok(())
         })
@@ -7235,6 +7243,9 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     kill_all_terminals(&state, app_handle);
+                }
+                if let Some(browser) = app_handle.try_state::<BrowserState>() {
+                    browser_commands::shutdown(&browser);
                 }
             }
         });

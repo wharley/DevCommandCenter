@@ -1517,6 +1517,7 @@
     "scopeSelector": "Escopo do terminal: {{scope}}",
     "actions": "Ações do terminal",
     "sendToAgent": "Analisar saída com agente",
+    "sendSelectionToAgent": "Enviar seleção ao agente",
     "clear": "Limpar saída",
     "interrupt": "Interromper comando",
     "restart": "Reiniciar shell",
@@ -2891,6 +2892,16 @@
         "unavailable": "O Guarded Undo está indisponível para este workspace. Nenhum arquivo foi alterado."
       }
     }
+  },
+  "browser": {
+    "open": "Abrir navegador",
+    "addressPlaceholder": "https:// ou http://localhost",
+    "addressLabel": "Endereço do navegador",
+    "go": "Ir",
+    "reload": "Recarregar página",
+    "close": "Fechar navegador",
+    "loading": "Carregando página…",
+    "error": "Erro no navegador: {{error}}"
   },
   "workspaceSearch": {
     "title": "Buscar no workspace",

@@ -24,6 +24,7 @@ import {
 	setActiveTerminal as setActiveTerminalTab,
 } from "@/features/terminal/terminal-tabs-store";
 import { WorkspacePanel } from "@/features/panel";
+import { WorkspaceBrowserSurface } from "@/features/browser/workspace-browser-surface";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type {
 	ComposerDelegationRequest,
@@ -263,6 +264,7 @@ export function SessionWorkbench({
 	const { t } = useTranslation("common");
 	const [terminalUiStates, setTerminalUiStates] =
 		useState<WorkspaceTerminalUiStates>({});
+	const [browserOpen, setBrowserOpen] = useState(false);
 	const [terminalComposerPrefill, setTerminalComposerPrefill] = useState<{
 		workspaceId: string;
 		text: string;
@@ -287,6 +289,9 @@ export function SessionWorkbench({
 		// Terminal context belongs to the workspace where it was collected and
 		// must not leak into the next workspace's composer.
 		setTerminalComposerPrefill(null);
+	}, [workspaceId]);
+	useEffect(() => {
+		setBrowserOpen(false);
 	}, [workspaceId]);
 	const inspectorBeforeTerminalExpandRef = useRef<boolean | null>(null);
 	const [deliveryOpen, setDeliveryOpen] = useState(false);
@@ -438,6 +443,14 @@ export function SessionWorkbench({
 			updateTerminalUiState,
 		],
 	);
+	const handleOpenBrowser = useCallback(() => {
+		if (terminalOpen) handleTerminalOpenChange(false);
+		setBrowserOpen(true);
+	}, [handleTerminalOpenChange, terminalOpen]);
+	const handleCloseBrowser = useCallback(() => {
+		setBrowserOpen(false);
+		requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
+	}, []);
 	const handleSendTerminalToAgent = useCallback(
 		(context: TerminalAgentContext) => {
 			terminalPrefillNonceRef.current += 1;
@@ -498,7 +511,7 @@ export function SessionWorkbench({
 	);
 
 	// Full-bleed terminal takeover — hide the chat column entirely.
-	const chatHidden = terminalOpen && terminalExpanded;
+	const chatHidden = browserOpen || (terminalOpen && terminalExpanded);
 	const deliverableScopeOptions = workspaceScopeOptions.filter(
 		(workspace) => workspace.needsDelivery === true,
 	);
@@ -687,6 +700,7 @@ export function SessionWorkbench({
 						onImplementPlanInNewThread={onImplementPlanInNewThread}
 						terminalScopes={terminalScopes}
 						onOpenTerminal={handleOpenTerminal}
+						onOpenBrowser={handleOpenBrowser}
 						externalComposerPrefill={
 							terminalComposerPrefill?.workspaceId === workspaceId
 								? terminalComposerPrefill
@@ -709,7 +723,13 @@ export function SessionWorkbench({
 				</div>
 			) : null}
 
-			{terminalOpen ? (
+			{browserOpen ? (
+				<WorkspaceBrowserSurface
+					workspaceId={workspaceId}
+					sessionId={sessionId}
+					onClose={handleCloseBrowser}
+				/>
+			) : terminalOpen ? (
 				<WorkspaceTerminalDrawer
 					open={terminalOpen}
 					onOpenChange={handleTerminalOpenChange}

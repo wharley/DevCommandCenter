@@ -45,6 +45,7 @@ type TerminalPanelProps = {
 	/** `drawer`: compact chrome for bottom workbench drawer (t3 ThreadTerminalDrawer style). */
 	variant?: "card" | "drawer";
 	autoFocus?: boolean;
+	onSelectionChange?: (selection: string) => void;
 };
 
 export type TerminalPanelHandle = {
@@ -64,6 +65,7 @@ function TerminalPanelImpl({
 	sessionId,
 	variant = "card",
 	autoFocus = false,
+	onSelectionChange,
 }: TerminalPanelProps, ref: ForwardedRef<TerminalPanelHandle>) {
 	const terminalRef = useRef<TerminalHandle | null>(null);
 	const pendingWritesRef = useRef<string[]>([]);
@@ -286,6 +288,7 @@ function TerminalPanelImpl({
 						detectLinks
 						onData={handleTerminalData}
 						onResize={handleTerminalResize}
+						onSelectionChange={onSelectionChange}
 					/>
 				</div>
 			</div>
@@ -324,6 +327,7 @@ function TerminalPanelImpl({
 					detectLinks
 					onData={handleTerminalData}
 					onResize={handleTerminalResize}
+					onSelectionChange={onSelectionChange}
 				/>
 				<div className="dcc-terminal__note">
 					<span>

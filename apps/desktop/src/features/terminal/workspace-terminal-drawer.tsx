@@ -71,12 +71,17 @@ import {
 import type { TerminalScopeKind, TerminalScopeTarget } from "./terminal-scope";
 import { cn } from "@/lib/utils";
 import { getTerminalTabNavigationTarget } from "./terminal-tab-navigation";
+import {
+	limitTerminalSelection,
+	resolveTerminalAgentContent,
+} from "./terminal-selection";
 import { openTerminalAtPath } from "@/lib/shell-api";
 
 const HEIGHT_STORAGE_KEY = "dcc-workbench-terminal-dock-height-v1";
 const DEFAULT_HEIGHT_PX = 340;
 const MIN_HEIGHT_PX = 220;
 const COMPACT_MIN_HEIGHT_PX = 160;
+const MAX_AGENT_SELECTION_CHARS = 16_000;
 /** Keep the conversation usable while the terminal rests below it. */
 const MIN_CHAT_HEIGHT_PX = 360;
 
@@ -173,12 +178,14 @@ export function WorkspaceTerminalDrawer({
 	const releaseFitRef = useRef<(() => void) | null>(null);
 	const terminalTabRefs = useRef(new Map<string, HTMLButtonElement>());
 	const terminalPanelRef = useRef<TerminalPanelHandle | null>(null);
+	const terminalSelectionRef = useRef("");
 	const heightRef = useRef(DEFAULT_HEIGHT_PX);
 	const [heightPx, setHeightPx] = useState(DEFAULT_HEIGHT_PX);
 	const [terminalStatusVersion, setTerminalStatusVersion] = useState(0);
 	const [renamingTab, setRenamingTab] = useState<{ id: string; title: string } | null>(null);
 	const [closingTab, setClosingTab] = useState<{ id: string; title: string } | null>(null);
 	const [tabTitleDraft, setTabTitleDraft] = useState("");
+	const [hasTerminalSelection, setHasTerminalSelection] = useState(false);
 
 	const { tabs, activeId } = useProjectTerminals(scopeKey);
 	const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0] ?? null;
@@ -319,12 +326,37 @@ export function WorkspaceTerminalDrawer({
 		activeSnapshot?.activityStatus === "running" ||
 		activeSnapshot?.activityStatus === "waiting";
 
+	const handleTerminalSelectionChange = useCallback((selection: string) => {
+		const boundedSelection = limitTerminalSelection(
+			selection,
+			MAX_AGENT_SELECTION_CHARS,
+		);
+		terminalSelectionRef.current = boundedSelection;
+		setHasTerminalSelection(boundedSelection.length > 0);
+	}, []);
+
+	const clearTerminalSelection = useCallback(() => {
+		terminalSelectionRef.current = "";
+		setHasTerminalSelection(false);
+	}, []);
+
+	useEffect(() => {
+		clearTerminalSelection();
+	}, [activeRuntimeId, clearTerminalSelection]);
+
+	useEffect(() => {
+		if (!open) {
+			clearTerminalSelection();
+		}
+	}, [clearTerminalSelection, open]);
+
 	const handleSendToAgent = useCallback(() => {
 		if (!activeTab || !activeRuntimeId || !cwd || !activeScope || !onSendToAgent) return;
-		const selection = (
-			terminalPanelRef.current?.getSelection().trim() ?? ""
-		).slice(-16_000);
-		const content = selection || getTerminalContextExcerpt(activeRuntimeId);
+		const { content, selectionOnly } = resolveTerminalAgentContent(
+			terminalSelectionRef.current || terminalPanelRef.current?.getSelection() || "",
+			getTerminalContextExcerpt(activeRuntimeId),
+			MAX_AGENT_SELECTION_CHARS,
+		);
 		if (!content) return;
 		onSendToAgent({
 			title: activeTab.title,
@@ -333,12 +365,21 @@ export function WorkspaceTerminalDrawer({
 			branchLabel: activeScope.branchLabel,
 			cwd,
 			content,
-			selectionOnly: Boolean(selection),
+			selectionOnly,
 		});
-	}, [activeRuntimeId, activeScope, activeTab, cwd, onSendToAgent]);
+		clearTerminalSelection();
+	}, [
+		activeRuntimeId,
+		activeScope,
+		activeTab,
+		clearTerminalSelection,
+		cwd,
+		onSendToAgent,
+	]);
 
 	const handleRestart = useCallback(async () => {
 		if (!activeRuntimeId || !activeTab || !cwd) return;
+		clearTerminalSelection();
 		terminalPanelRef.current?.clear();
 		await restartTerminal(activeRuntimeId, cwd, {
 			title: activeTab.title,
@@ -353,6 +394,7 @@ export function WorkspaceTerminalDrawer({
 		activeRuntimeId,
 		activeTab,
 		cwd,
+		clearTerminalSelection,
 		providerLabel,
 		sessionId,
 		sessionState,
@@ -604,7 +646,10 @@ export function WorkspaceTerminalDrawer({
 							</DropdownMenuItem>
 							<DropdownMenuItem
 								disabled={!activeRuntimeId}
-								onClick={() => terminalPanelRef.current?.clear()}
+								onClick={() => {
+									clearTerminalSelection();
+									terminalPanelRef.current?.clear();
+								}}
 							>
 								<Eraser className="size-4" />
 								{t("terminalDock.clear")}
@@ -680,8 +725,20 @@ export function WorkspaceTerminalDrawer({
 					id={activeTab ? `terminal-panel-${activeTab.id}` : undefined}
 					role="tabpanel"
 					aria-labelledby={activeTab ? `terminal-tab-${activeTab.id}` : undefined}
-					className="dcc-workbench-terminal-dock__panel flex min-h-0 flex-1 flex-col px-2 pb-2 pt-1"
+					className="dcc-workbench-terminal-dock__panel relative flex min-h-0 flex-1 flex-col px-2 pb-2 pt-1"
 				>
+					{hasTerminalSelection && onSendToAgent ? (
+						<Button
+							type="button"
+							size="sm"
+							className="absolute right-4 top-3 z-10 h-8 gap-1.5 shadow-lg"
+							onMouseDown={(event) => event.preventDefault()}
+							onClick={handleSendToAgent}
+						>
+							<Sparkles className="size-3.5" aria-hidden="true" />
+							{t("terminalDock.sendSelectionToAgent")}
+						</Button>
+					) : null}
 					{activeTab ? (
 						<TerminalPanel
 							ref={terminalPanelRef}
@@ -696,6 +753,7 @@ export function WorkspaceTerminalDrawer({
 							providerLabel={providerLabel}
 							sessionState={sessionState}
 							sessionId={sessionId}
+							onSelectionChange={handleTerminalSelectionChange}
 						/>
 					) : (
 						<div className="flex flex-1 items-center justify-center text-[12px] text-muted-foreground">

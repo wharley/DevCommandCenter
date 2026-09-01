@@ -1,4 +1,4 @@
-import { History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, X } from "lucide-react";
+import { Globe2, History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, X } from "lucide-react";
 import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
@@ -31,6 +31,7 @@ export type DccWorkbenchChatHeaderProps = {
 	onResumeSession: () => void;
 	sessionActionSessionId: string | null;
 	onOpenTerminal?: () => void;
+	onOpenBrowser?: () => void;
 	terminalScopes?: TerminalScopeTarget[];
 	workspaceActions?: ReactNode;
 };
@@ -40,7 +41,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	threadTitle, projectLabel, workspacePath, sessions, selectedSessionId,
 	isLoadingSessions, sessionSnapshot, onSelectSession, onStartSession,
 	onCloseSession, onRestoreSession, onOpenSessionSearch, onResumeSession,
-	sessionActionSessionId, onOpenTerminal, terminalScopes, workspaceActions,
+	sessionActionSessionId, onOpenTerminal, onOpenBrowser, terminalScopes, workspaceActions,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
 	const resumeOk = canResumeSession(sessionSnapshot);
@@ -79,6 +80,16 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="bottom">{terminalLabel} · {terminalShortcut}</TooltipContent>
+					</Tooltip>
+				) : null}
+				{onOpenBrowser ? (
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" onClick={onOpenBrowser} aria-label={t("browser.open")}>
+								<Globe2 className="size-3.5" strokeWidth={1.8} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">{t("browser.open")}</TooltipContent>
 					</Tooltip>
 				) : null}
 				{workspaceActions}

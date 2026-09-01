@@ -1517,6 +1517,7 @@
     "scopeSelector": "Terminal scope: {{scope}}",
     "actions": "Terminal actions",
     "sendToAgent": "Analyze output with agent",
+    "sendSelectionToAgent": "Send selection to agent",
     "clear": "Clear output",
     "interrupt": "Interrupt command",
     "restart": "Restart shell",
@@ -2891,6 +2892,16 @@
         "unavailable": "Guarded Undo is unavailable for this workspace. No files were changed."
       }
     }
+  },
+  "browser": {
+    "open": "Open browser",
+    "addressPlaceholder": "https:// or http://localhost",
+    "addressLabel": "Browser address",
+    "go": "Go",
+    "reload": "Reload page",
+    "close": "Close browser",
+    "loading": "Loading page…",
+    "error": "Browser error: {{error}}"
   },
   "workspaceSearch": {
     "title": "Search in workspace",
