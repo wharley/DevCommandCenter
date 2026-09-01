@@ -212,6 +212,27 @@ CREATE VIRTUAL TABLE IF NOT EXISTS dcc_session_search USING fts5(
 );
 "#;
 
+/// Durable browser location metadata is deliberately kept separate from the
+/// session projection. It contains only a caller-sanitized URL and expires
+/// opportunistically; no page data, browser state, or capability is stored.
+const BROWSER_LOCATION_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_browser_locations (
+	workspace_id TEXT NOT NULL CHECK(length(workspace_id) BETWEEN 1 AND 128),
+	session_id TEXT NOT NULL DEFAULT '' CHECK(length(session_id) <= 128),
+	safe_url TEXT NOT NULL CHECK(length(safe_url) BETWEEN 1 AND 2048),
+	saved_at_ms INTEGER NOT NULL CHECK(saved_at_ms >= 0),
+	expires_at_ms INTEGER NOT NULL CHECK(expires_at_ms > saved_at_ms),
+	PRIMARY KEY (workspace_id, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_browser_locations_expires_at
+	ON dcc_browser_locations(expires_at_ms);
+"#;
+
+pub const DEFAULT_BROWSER_LOCATION_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+const BROWSER_LOCATION_MAX_SCOPE_CHARS: usize = 128;
+const BROWSER_LOCATION_MAX_URL_CHARS: usize = 2048;
+
 const USAGE_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS dcc_turn_model_usage (
 	session_id TEXT NOT NULL,
@@ -606,7 +627,7 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
@@ -1180,7 +1201,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
@@ -3078,6 +3099,12 @@ impl SqliteSessionRepo {
         for workspace_id in workspace_ids {
             transaction
                 .execute(
+                    "DELETE FROM dcc_browser_locations WHERE workspace_id = ?1",
+                    params![workspace_id],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            transaction
+                .execute(
                     "DELETE FROM dcc_session_search WHERE workspace_id = ?1",
                     params![workspace_id],
                 )
@@ -4408,15 +4435,28 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
     }
 
     async fn delete_workspace(&self, id: &WorkspaceId) -> Result<()> {
-        let conn = self
+        let mut conn = self
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        conn.execute(
-            "DELETE FROM dcc_workspaces WHERE id = ?1",
-            params![id.0.clone()],
-        )
-        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .execute(
+                "DELETE FROM dcc_browser_locations WHERE workspace_id = ?1",
+                params![id.0.clone()],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .execute(
+                "DELETE FROM dcc_workspaces WHERE id = ?1",
+                params![id.0.clone()],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
     }
 }
@@ -4834,6 +4874,11 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let tx = conn
             .transaction()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
+            "DELETE FROM dcc_browser_locations WHERE workspace_id IN (SELECT id FROM dcc_workspaces WHERE root_path = ?1)",
+            params![id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         tx.execute(
             "DELETE FROM dcc_workspaces WHERE root_path = ?1",
             params![id.0.clone()],
@@ -5434,6 +5479,193 @@ fn load_undo_operation(
     Ok(Some((operation, files)))
 }
 
+fn validate_browser_location_scope(workspace_id: &str, session_id: &str) -> Result<()> {
+    if workspace_id.is_empty()
+        || workspace_id.chars().count() > BROWSER_LOCATION_MAX_SCOPE_CHARS
+        || session_id.chars().count() > BROWSER_LOCATION_MAX_SCOPE_CHARS
+        || workspace_id.chars().any(char::is_control)
+        || session_id.chars().any(char::is_control)
+    {
+        return Err(dcc_core::CoreError::InvalidInput(
+            "browser location scope is invalid".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_browser_location_url(safe_url: &str) -> Result<()> {
+    if safe_url.is_empty()
+        || safe_url.chars().count() > BROWSER_LOCATION_MAX_URL_CHARS
+        || safe_url.chars().any(char::is_control)
+    {
+        return Err(dcc_core::CoreError::InvalidInput(
+            "browser location URL is invalid".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn browser_location_session_id(session_id: Option<&str>) -> &str {
+    session_id.unwrap_or("")
+}
+
+impl SqliteSessionRepo {
+    /// Stores a caller-sanitized browser URL for one workspace/session scope.
+    /// The repository enforces a bounded lifetime but does not parse URLs;
+    /// URL policy remains owned by the Browser command layer.
+    pub fn save_browser_location(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+        safe_url: &str,
+        saved_at_ms: i64,
+        expires_at_ms: i64,
+    ) -> Result<()> {
+        let session_id = browser_location_session_id(session_id);
+        validate_browser_location_scope(workspace_id, session_id)?;
+        validate_browser_location_url(safe_url)?;
+        if saved_at_ms < 0
+            || expires_at_ms <= saved_at_ms
+            || expires_at_ms
+                .checked_sub(saved_at_ms)
+                .is_none_or(|ttl| ttl > DEFAULT_BROWSER_LOCATION_TTL_MS)
+        {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "browser location expiry is invalid".to_string(),
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_browser_locations
+                (workspace_id, session_id, safe_url, saved_at_ms, expires_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(workspace_id, session_id) DO UPDATE SET
+                safe_url = excluded.safe_url,
+                saved_at_ms = excluded.saved_at_ms,
+                expires_at_ms = excluded.expires_at_ms
+            WHERE excluded.saved_at_ms >= dcc_browser_locations.saved_at_ms
+            "#,
+            params![
+                workspace_id,
+                session_id,
+                safe_url,
+                saved_at_ms,
+                expires_at_ms
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    /// Loads a current URL and removes an expired row in the same critical
+    /// section. Invalid legacy rows fail closed and are removed.
+    pub fn load_browser_location(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Option<String>> {
+        let session_id = browser_location_session_id(session_id);
+        validate_browser_location_scope(workspace_id, session_id)?;
+        if now_ms < 0 {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "browser location time is invalid".to_string(),
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let row = conn
+            .query_row(
+                "SELECT safe_url, saved_at_ms, expires_at_ms FROM dcc_browser_locations WHERE workspace_id = ?1 AND session_id = ?2",
+                params![workspace_id, session_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some((safe_url, saved_at_ms, expires_at_ms)) = row else {
+            return Ok(None);
+        };
+        let valid = validate_browser_location_url(&safe_url).is_ok()
+            && saved_at_ms >= 0
+            && expires_at_ms > saved_at_ms
+            && expires_at_ms
+                .checked_sub(saved_at_ms)
+                .is_some_and(|ttl| ttl <= DEFAULT_BROWSER_LOCATION_TTL_MS);
+        if !valid || expires_at_ms <= now_ms {
+            conn.execute(
+                "DELETE FROM dcc_browser_locations WHERE workspace_id = ?1 AND session_id = ?2",
+                params![workspace_id, session_id],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            return Ok(None);
+        }
+        Ok(Some(safe_url))
+    }
+
+    pub fn delete_browser_location(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+    ) -> Result<bool> {
+        let session_id = browser_location_session_id(session_id);
+        validate_browser_location_scope(workspace_id, session_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "DELETE FROM dcc_browser_locations WHERE workspace_id = ?1 AND session_id = ?2",
+                params![workspace_id, session_id],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
+    }
+
+    pub fn delete_browser_locations_for_session(&self, session_id: &str) -> Result<usize> {
+        if session_id.is_empty() {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "browser location session is invalid".to_string(),
+            ));
+        }
+        validate_browser_location_scope("session-cleanup", session_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_browser_locations WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    pub fn delete_browser_locations_for_workspace(&self, workspace_id: &str) -> Result<usize> {
+        validate_browser_location_scope(workspace_id, "")?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_browser_locations WHERE workspace_id = ?1",
+            params![workspace_id],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+}
+
 #[async_trait]
 impl SessionRepo for SqliteSessionRepo {
     async fn save_session(&self, session: &Session) -> Result<()> {
@@ -5516,6 +5748,11 @@ impl SessionRepo for SqliteSessionRepo {
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_browser_locations WHERE session_id = ?1",
+            params![id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute(
             "DELETE FROM dcc_sessions WHERE id = ?1",
             params![id.0.clone()],
@@ -10770,5 +11007,107 @@ mod tests {
         assert!(row.0.is_none());
         assert!(row.1.is_none());
         assert!(row.2.contains("future_terminal"));
+    }
+
+    #[test]
+    fn browser_location_round_trip_is_scoped_and_expires_opportunistically() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        repo.save_browser_location("workspace", None, "https://example.test/a", 100, 200)
+            .unwrap();
+        repo.save_browser_location(
+            "workspace",
+            Some("session"),
+            "https://example.test/b",
+            100,
+            200,
+        )
+        .unwrap();
+        assert_eq!(
+            repo.load_browser_location("workspace", None, 199).unwrap(),
+            Some("https://example.test/a".to_string())
+        );
+        assert_eq!(
+            repo.load_browser_location("workspace", Some("session"), 199)
+                .unwrap(),
+            Some("https://example.test/b".to_string())
+        );
+        assert_eq!(
+            repo.load_browser_location("workspace", None, 200).unwrap(),
+            None
+        );
+        assert_eq!(
+            repo.load_browser_location("workspace", None, 200).unwrap(),
+            None
+        );
+        assert_eq!(
+            repo.load_browser_location("workspace", Some("session"), 200)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn browser_location_rejects_unbounded_input_and_stale_upserts() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        assert!(repo
+            .save_browser_location("", None, "https://example.test", 0, 1)
+            .is_err());
+        assert!(repo
+            .save_browser_location("workspace\n", None, "https://example.test", 0, 1)
+            .is_err());
+        assert!(repo
+            .save_browser_location("workspace", None, "https://example.test\n", 0, 1)
+            .is_err());
+        assert!(repo
+            .save_browser_location("workspace", None, "https://example.test", 0, 0,)
+            .is_err());
+        let long_url = format!("https://example.test/{}", "x".repeat(2040));
+        assert!(repo
+            .save_browser_location("workspace", None, &long_url, 0, 1)
+            .is_err());
+
+        repo.save_browser_location("workspace", None, "https://example.test/new", 20, 30)
+            .unwrap();
+        repo.save_browser_location("workspace", None, "https://example.test/old", 10, 30)
+            .unwrap();
+        assert_eq!(
+            repo.load_browser_location("workspace", None, 20).unwrap(),
+            Some("https://example.test/new".to_string())
+        );
+    }
+
+    #[test]
+    fn browser_location_cleanup_removes_workspace_and_session_rows() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        repo.save_browser_location("workspace", None, "https://example.test/a", 0, 10)
+            .unwrap();
+        repo.save_browser_location(
+            "workspace",
+            Some("session"),
+            "https://example.test/b",
+            0,
+            10,
+        )
+        .unwrap();
+        repo.save_browser_location("other", Some("session"), "https://example.test/c", 0, 10)
+            .unwrap();
+        assert_eq!(
+            repo.delete_browser_location("workspace", None).unwrap(),
+            true
+        );
+        assert_eq!(
+            repo.load_browser_location("workspace", None, 1).unwrap(),
+            None
+        );
+        assert_eq!(
+            repo.delete_browser_locations_for_session("session")
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            repo.load_browser_location("other", Some("session"), 1)
+                .unwrap(),
+            None
+        );
     }
 }

@@ -1159,6 +1159,51 @@ impl SessionCommandState {
         }
     }
 
+    /// Persists only a sanitized, expiring Browser URL for the supplied
+    /// workspace/session scope. Callers own URL policy and should treat an
+    /// error as best-effort persistence failure.
+    pub fn save_browser_location(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+        safe_url: &str,
+        saved_at_ms: i64,
+        expires_at_ms: i64,
+    ) -> Result<()> {
+        self.session_repo.save_browser_location(
+            workspace_id,
+            session_id,
+            safe_url,
+            saved_at_ms,
+            expires_at_ms,
+        )
+    }
+
+    /// Loads a current Browser URL, removing an expired row opportunistically.
+    pub fn load_browser_location(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+        now_ms: i64,
+    ) -> Result<Option<String>> {
+        self.session_repo
+            .load_browser_location(workspace_id, session_id, now_ms)
+    }
+
+    pub fn delete_browser_location(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+    ) -> Result<bool> {
+        self.session_repo
+            .delete_browser_location(workspace_id, session_id)
+    }
+
+    pub fn delete_browser_locations_for_workspace(&self, workspace_id: &str) -> Result<usize> {
+        self.session_repo
+            .delete_browser_locations_for_workspace(workspace_id)
+    }
+
     pub(crate) fn db_path(&self) -> &std::path::Path {
         &self.db_path
     }
@@ -6459,5 +6504,41 @@ mod tests {
                 "attempt-1",
             )
             .is_err());
+    }
+
+    #[test]
+    fn browser_location_wrappers_delegate_to_the_shared_session_database() {
+        let root = tempfile::tempdir().expect("browser location test root");
+        let app_data = root.path().join("app-data");
+        std::fs::create_dir_all(&app_data).expect("create app data");
+        let db_path = physical_db_path(root.path().join("state.sqlite"));
+        let state = SessionCommandState::new_headless(
+            db_path,
+            std::fs::canonicalize(app_data).expect("canonical app data"),
+        );
+        state
+            .save_browser_location(
+                "workspace",
+                None,
+                "https://example.test/workbench",
+                100,
+                200,
+            )
+            .expect("save browser location");
+        assert_eq!(
+            state
+                .load_browser_location("workspace", None, 199)
+                .expect("load browser location"),
+            Some("https://example.test/workbench".to_string())
+        );
+        assert!(state
+            .delete_browser_location("workspace", None)
+            .expect("delete browser location"));
+        assert_eq!(
+            state
+                .load_browser_location("workspace", None, 199)
+                .expect("load deleted browser location"),
+            None
+        );
     }
 }

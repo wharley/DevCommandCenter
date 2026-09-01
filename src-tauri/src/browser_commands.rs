@@ -23,6 +23,9 @@ use dcc_tauri::state::SessionCommandState;
 
 const BROWSER_LABEL: &str = "dcc-browser";
 const DEFAULT_URL: &str = "https://www.google.com/";
+const BROWSER_LOCATION_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
+const MAX_BROWSER_LOCATION_URL_CHARS: usize = 2_048;
+const MAX_BROWSER_LOCATION_CACHE_ENTRIES: usize = 256;
 const MAX_BROWSER_DIMENSION: f64 = 16_384.0;
 const MAX_BROWSER_CONTEXT_CHARS: usize = 6_000;
 const MAX_BROWSER_TITLE_CHARS: usize = 300;
@@ -437,6 +440,20 @@ struct BrowserEvidenceCaptureRecord {
     expires_at: Instant,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowserLocationCacheEntry {
+    safe_url: String,
+    expires_at_ms: i64,
+}
+
+/// A bounded, process-local write-dedup cache. It is never a restore source:
+/// SQLite remains authoritative across process restarts.
+#[derive(Default)]
+struct BrowserLocationCache {
+    entries: HashMap<String, BrowserLocationCacheEntry>,
+    oldest_first: VecDeque<String>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserControlStatus {
@@ -469,6 +486,10 @@ pub struct BrowserState {
     /// Content-free runtime audit records. This is intentionally not persisted
     /// or emitted; restart and the bounded ring naturally clear this telemetry.
     browser_audit: Arc<Mutex<VecDeque<BrowserAuditRecord>>>,
+    /// Last successful durable URL per Browser scope. This is deliberately
+    /// separate from page context: it only suppresses identical SQLite writes
+    /// and is never treated as page, consent, map, or evidence state.
+    persisted_locations: Arc<Mutex<BrowserLocationCache>>,
     /// Serializes native child-WebView operations in IPC arrival order, also
     /// across async scope validation. Context extraction keeps it through its
     /// short, bounded native callback wait so a new command cannot change its
@@ -493,6 +514,7 @@ impl Default for BrowserState {
             browser_audit: Arc::new(Mutex::new(VecDeque::with_capacity(
                 MAX_BROWSER_AUDIT_ENTRIES,
             ))),
+            persisted_locations: Arc::new(Mutex::new(BrowserLocationCache::default())),
             operation_lock: Arc::new(AsyncMutex::new(())),
         }
     }
@@ -777,6 +799,158 @@ pub fn validate_browser_url(raw: &str) -> Result<Url, String> {
         }
         _ => Err("browser URL scheme must be HTTPS or local HTTP".to_string()),
     }
+}
+
+/// Durable Browser locations retain navigation identity only. Query strings,
+/// fragments and credentials can carry secrets, so they never cross the
+/// runtime-to-SQLite boundary even when the live Browser currently has them.
+fn sanitize_browser_location_url(raw: &str) -> Option<String> {
+    if raw.is_empty()
+        || raw.chars().count() > MAX_BROWSER_LOCATION_URL_CHARS
+        || raw.chars().any(char::is_control)
+    {
+        return None;
+    }
+    let mut url = Url::parse(raw).ok()?;
+    url.set_username("").ok()?;
+    url.set_password(None).ok()?;
+    url.set_query(None);
+    url.set_fragment(None);
+    let safe_url = url.to_string();
+    if safe_url.chars().count() > MAX_BROWSER_LOCATION_URL_CHARS
+        || safe_url.chars().any(char::is_control)
+    {
+        return None;
+    }
+    validate_browser_url(&safe_url).ok()?;
+    Some(safe_url)
+}
+
+fn browser_location_now_ms() -> Option<i64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+}
+
+/// Exact open precedence. Runtime context preserves the existing same-process
+/// behavior; durable state is considered only after an explicit restore opt-in.
+fn select_browser_open_url(
+    initial_url: Option<&str>,
+    runtime_url: Option<String>,
+    stored_url: Option<String>,
+    restore_last_url: bool,
+) -> Result<Url, String> {
+    if let Some(initial_url) = initial_url {
+        return validate_browser_url(initial_url);
+    }
+    if let Some(runtime_url) = runtime_url {
+        return validate_browser_url(&runtime_url);
+    }
+    if restore_last_url {
+        if let Some(stored_url) = stored_url.and_then(|url| sanitize_browser_location_url(&url)) {
+            return validate_browser_url(&stored_url);
+        }
+    }
+    validate_browser_url(DEFAULT_URL)
+}
+
+/// Best-effort durable persistence runs only after the page-load callback has
+/// proved active scope, expected URL, native URL and payload URL agree. It
+/// intentionally performs synchronous, short local SQLite I/O after all
+/// Browser-state locks are dropped; failure never affects navigation.
+fn persist_browser_location(
+    sessions: &SessionCommandState,
+    persisted_locations: &Arc<Mutex<BrowserLocationCache>>,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    raw_url: &str,
+) {
+    let Some(safe_url) = sanitize_browser_location_url(raw_url) else {
+        return;
+    };
+    let Some(saved_at_ms) = browser_location_now_ms() else {
+        return;
+    };
+    let Some(expires_at_ms) = saved_at_ms.checked_add(BROWSER_LOCATION_TTL_MS) else {
+        return;
+    };
+    let key = scope_key(workspace_id, session_id);
+    let already_current = persisted_locations.lock().is_ok_and(|mut cache| {
+        browser_location_cache_purge_expired(&mut cache, saved_at_ms);
+        browser_location_cache_matches_current(&cache, &key, &safe_url, saved_at_ms)
+    });
+    if already_current {
+        return;
+    }
+    // Do not hold a Browser/cache mutex over SQLite I/O. A concurrent page
+    // callback may write the same URL once, but the database's monotonic
+    // saved_at upsert remains authoritative and the bounded cache converges.
+    if sessions
+        .save_browser_location(
+            workspace_id,
+            session_id,
+            &safe_url,
+            saved_at_ms,
+            expires_at_ms,
+        )
+        .is_ok()
+    {
+        if let Ok(mut cache) = persisted_locations.lock() {
+            browser_location_cache_purge_expired(&mut cache, saved_at_ms);
+            browser_location_cache_insert(&mut cache, key, safe_url, expires_at_ms);
+        }
+    }
+}
+
+fn browser_location_cache_purge_expired(cache: &mut BrowserLocationCache, now_ms: i64) {
+    cache
+        .entries
+        .retain(|_, entry| entry.expires_at_ms > now_ms);
+    cache
+        .oldest_first
+        .retain(|scope| cache.entries.contains_key(scope));
+}
+
+fn browser_location_cache_matches_current(
+    cache: &BrowserLocationCache,
+    scope: &str,
+    safe_url: &str,
+    now_ms: i64,
+) -> bool {
+    cache
+        .entries
+        .get(scope)
+        .is_some_and(|entry| entry.safe_url == safe_url && entry.expires_at_ms > now_ms)
+}
+
+fn browser_location_cache_remove(cache: &mut BrowserLocationCache, scope: &str) {
+    cache.entries.remove(scope);
+    cache.oldest_first.retain(|candidate| candidate != scope);
+}
+
+fn browser_location_cache_insert(
+    cache: &mut BrowserLocationCache,
+    scope: String,
+    safe_url: String,
+    expires_at_ms: i64,
+) {
+    browser_location_cache_remove(cache, &scope);
+    while cache.entries.len() >= MAX_BROWSER_LOCATION_CACHE_ENTRIES {
+        let Some(oldest_scope) = cache.oldest_first.pop_front() else {
+            cache.entries.clear();
+            break;
+        };
+        cache.entries.remove(&oldest_scope);
+    }
+    cache.entries.insert(
+        scope.clone(),
+        BrowserLocationCacheEntry {
+            safe_url,
+            expires_at_ms,
+        },
+    );
+    cache.oldest_first.push_back(scope);
 }
 
 /// Removes control sequences and bounds text crossing the native WebView
@@ -2716,6 +2890,7 @@ fn context_ready_for_scope(
 fn build_browser(
     app: &AppHandle<Wry>,
     state: &BrowserState,
+    sessions: SessionCommandState,
     url: Url,
     bounds: BrowserBounds,
     initial_occluded: bool,
@@ -2739,6 +2914,7 @@ fn build_browser(
     let page_load_visible = state.visible.clone();
     let page_load_token = state.lifecycle_token.clone();
     let page_load_evidence_captures = state.evidence_captures.clone();
+    let page_load_persisted_locations = state.persisted_locations.clone();
     let builder = WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(url))
         .on_navigation(move |url| {
             if validate_browser_url(url.as_str()).is_err() {
@@ -2864,6 +3040,13 @@ fn build_browser(
             let Some(title) = title else {
                 return;
             };
+            persist_browser_location(
+                &sessions,
+                &page_load_persisted_locations,
+                &workspace_id,
+                session_id.as_deref(),
+                &payload_url,
+            );
             emit_snapshot(
                 &page_load_app,
                 BrowserSnapshot {
@@ -2910,6 +3093,7 @@ pub async fn browser_open(
     workspace_id: String,
     session_id: Option<String>,
     initial_url: Option<String>,
+    restore_last_url: Option<bool>,
     bounds: BrowserBounds,
     initial_occluded: Option<bool>,
 ) -> Result<BrowserSnapshot, String> {
@@ -2929,10 +3113,47 @@ pub async fn browser_open(
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())?
         .clone();
-    let desired = initial_url
-        .or_else(|| context_url(&state, &workspace_id, session_id.as_deref()))
-        .unwrap_or_else(|| DEFAULT_URL.to_string());
-    let desired = validate_browser_url(&desired)?;
+    let runtime_url = context_url(&state, &workspace_id, session_id.as_deref());
+    let restore_last_url = restore_last_url.unwrap_or(false);
+    let stored_url = if initial_url.is_none() && runtime_url.is_none() && restore_last_url {
+        let now_ms = browser_location_now_ms();
+        match now_ms.and_then(|now_ms| {
+            sessions
+                .load_browser_location(&workspace_id, session_id.as_deref(), now_ms)
+                .ok()
+                .flatten()
+        }) {
+            Some(stored_url) => match sanitize_browser_location_url(&stored_url) {
+                // A DB read is deliberately not a cache insertion: the first
+                // validated PageLoad Finished after restore renews the TTL.
+                Some(safe_url) => Some(safe_url),
+                None => {
+                    let _ = sessions.delete_browser_location(&workspace_id, session_id.as_deref());
+                    if let Ok(mut cache) = state.persisted_locations.lock() {
+                        browser_location_cache_remove(&mut cache, &key);
+                    }
+                    None
+                }
+            },
+            // A missing row can mean a prior best-effort deletion (including
+            // expiry). It must not leave an in-memory dedup entry behind,
+            // otherwise a later PageLoad Finished could skip its TTL renewal.
+            None => {
+                if let Ok(mut cache) = state.persisted_locations.lock() {
+                    browser_location_cache_remove(&mut cache, &key);
+                }
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let desired = select_browser_open_url(
+        initial_url.as_deref(),
+        runtime_url,
+        stored_url,
+        restore_last_url,
+    )?;
     set_active_scope(&state, &workspace_id, session_id.as_deref())?;
     let should_navigate = requested_url || previous_scope.as_deref() != Some(key.as_str());
     {
@@ -2963,7 +3184,14 @@ pub async fn browser_open(
         }
     }
     if !existing {
-        build_browser(&app, &state, desired, bounds, initial_occluded)?;
+        build_browser(
+            &app,
+            &state,
+            sessions.inner().clone(),
+            desired,
+            bounds,
+            initial_occluded,
+        )?;
     } else {
         let webview = state
             .webview
@@ -4242,7 +4470,9 @@ mod tests {
         advance_lifecycle_token, append_browser_audit, arm_browser_control_grant,
         browser_action_anchor_matches_context, browser_audit_outcome,
         browser_evidence_cleanup_script, browser_evidence_read_script,
-        browser_evidence_start_script, browser_scroll_script, browser_semantic_action_script,
+        browser_evidence_start_script, browser_location_cache_insert,
+        browser_location_cache_matches_current, browser_location_cache_purge_expired,
+        browser_location_cache_remove, browser_scroll_script, browser_semantic_action_script,
         clear_browser_control_grant, click_target_is_compatible, consume_semantic_map_for_anchor,
         context_is_ready_for_url, control_grant_is_current, control_grant_status,
         fill_target_is_compatible, mark_context_loading, normalize_browser_bounds,
@@ -4253,18 +4483,19 @@ mod tests {
         parse_browser_evidence_callback, parse_browser_evidence_cleanup_callback,
         prepare_browser_control_action, read_browser_audit, require_action_native_url,
         require_browser_control_grant, sanitize_browser_evidence_url,
-        sanitize_browser_link_destination, semantic_item_serialized_chars,
-        semantic_map_record_is_current, should_persist_context_url,
+        sanitize_browser_link_destination, sanitize_browser_location_url, select_browser_open_url,
+        semantic_item_serialized_chars, semantic_map_record_is_current, should_persist_context_url,
         validate_browser_document_identity, validate_browser_evidence_capture_id,
         validate_browser_reference, validate_browser_url, BrowserActionAnchor, BrowserActionResult,
         BrowserAuditGrantState, BrowserAuditOrigin, BrowserAuditOutcome, BrowserAuditRecord,
         BrowserAuditTool, BrowserBounds, BrowserContext, BrowserControlAction, BrowserControlGrant,
         BrowserControlStatus, BrowserEvidenceCaptureRecord, BrowserEvidenceEventRaw,
-        BrowserSemanticItemExtraction, BrowserSemanticMap, BrowserSemanticMapExtraction,
-        BrowserSemanticMapRecord, BrowserSemanticTargetRecord, BrowserState,
-        MAX_BROWSER_AUDIT_ENTRIES, MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS,
+        BrowserLocationCache, BrowserSemanticItemExtraction, BrowserSemanticMap,
+        BrowserSemanticMapExtraction, BrowserSemanticMapRecord, BrowserSemanticTargetRecord,
+        BrowserState, MAX_BROWSER_AUDIT_ENTRIES, MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS,
         MAX_BROWSER_AUDIT_PROVIDER_CHARS, MAX_BROWSER_AUDIT_SCOPE_CHARS,
-        MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS, MAX_BROWSER_SEMANTIC_ITEMS,
+        MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS,
+        MAX_BROWSER_LOCATION_CACHE_ENTRIES, MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
     #[test]
@@ -4286,6 +4517,165 @@ mod tests {
         assert!(validate_browser_url("https://user:pass@example.com").is_err());
         assert!(validate_browser_url("https://user@example.com").is_err());
         assert!(validate_browser_url("https://example.com:443@evil.test").is_err());
+    }
+
+    #[test]
+    fn durable_browser_location_sanitization_removes_secret_components() {
+        assert_eq!(
+            sanitize_browser_location_url(
+                "https://user:secret@example.test:8443/path?q=private#fragment",
+            ),
+            Some("https://example.test:8443/path".to_string())
+        );
+        assert_eq!(
+            sanitize_browser_location_url("http://localhost:3000/path?token=private#section"),
+            Some("http://localhost:3000/path".to_string())
+        );
+        assert!(sanitize_browser_location_url("https://example.test/path\n").is_none());
+        assert!(sanitize_browser_location_url("http://example.test/private").is_none());
+        assert!(sanitize_browser_location_url("javascript:alert(1)").is_none());
+    }
+
+    #[test]
+    fn browser_open_url_precedence_keeps_restore_explicit() {
+        let initial = select_browser_open_url(
+            Some("https://initial.test/explicit"),
+            Some("https://runtime.test/current".to_string()),
+            Some("https://stored.test/last?private=yes#fragment".to_string()),
+            true,
+        )
+        .unwrap();
+        assert_eq!(initial.as_str(), "https://initial.test/explicit");
+
+        let runtime = select_browser_open_url(
+            None,
+            Some("https://runtime.test/current".to_string()),
+            Some("https://stored.test/last".to_string()),
+            true,
+        )
+        .unwrap();
+        assert_eq!(runtime.as_str(), "https://runtime.test/current");
+
+        let opt_in = select_browser_open_url(
+            None,
+            None,
+            Some("https://stored.test/last?private=yes#fragment".to_string()),
+            true,
+        )
+        .unwrap();
+        assert_eq!(opt_in.as_str(), "https://stored.test/last");
+
+        let defaulted = select_browser_open_url(
+            None,
+            None,
+            Some("https://stored.test/last".to_string()),
+            false,
+        )
+        .unwrap();
+        assert_eq!(defaulted.as_str(), super::DEFAULT_URL);
+    }
+
+    #[test]
+    fn browser_location_cache_is_bounded_and_evicts_the_oldest_scope() {
+        let mut cache = BrowserLocationCache::default();
+        for index in 0..MAX_BROWSER_LOCATION_CACHE_ENTRIES {
+            browser_location_cache_insert(
+                &mut cache,
+                format!("scope-{index}"),
+                format!("https://example.test/{index}"),
+                10_000,
+            );
+        }
+        assert_eq!(cache.entries.len(), MAX_BROWSER_LOCATION_CACHE_ENTRIES);
+        browser_location_cache_insert(
+            &mut cache,
+            "newest".to_string(),
+            "https://example.test/newest".to_string(),
+            10_000,
+        );
+        assert_eq!(cache.entries.len(), MAX_BROWSER_LOCATION_CACHE_ENTRIES);
+        assert!(!cache.entries.contains_key("scope-0"));
+        assert!(cache.entries.contains_key("newest"));
+    }
+
+    #[test]
+    fn browser_location_cache_deduplicates_only_a_current_matching_url() {
+        let mut cache = BrowserLocationCache::default();
+        browser_location_cache_insert(
+            &mut cache,
+            "scope".to_string(),
+            "https://example.test/ready".to_string(),
+            200,
+        );
+        assert!(browser_location_cache_matches_current(
+            &cache,
+            "scope",
+            "https://example.test/ready",
+            199,
+        ));
+        browser_location_cache_purge_expired(&mut cache, 200);
+        assert!(!browser_location_cache_matches_current(
+            &cache,
+            "scope",
+            "https://example.test/ready",
+            200,
+        ));
+        assert!(cache.entries.is_empty());
+        browser_location_cache_insert(
+            &mut cache,
+            "scope".to_string(),
+            "https://example.test/ready".to_string(),
+            300,
+        );
+        assert!(browser_location_cache_matches_current(
+            &cache,
+            "scope",
+            "https://example.test/ready",
+            200,
+        ));
+        browser_location_cache_remove(&mut cache, "scope");
+        assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn loading_a_durable_url_does_not_prewarm_the_write_dedup_cache() {
+        let cache = BrowserLocationCache::default();
+        let restored = select_browser_open_url(
+            None,
+            None,
+            Some("https://stored.test/last".to_string()),
+            true,
+        )
+        .unwrap();
+        assert_eq!(restored.as_str(), "https://stored.test/last");
+        // Only a successful PageLoad Finished write can enter this cache, so
+        // restored URLs renew their durable TTL on that first confirmed load.
+        assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn only_a_current_finished_page_load_is_persistable() {
+        assert!(page_load_matches_expected(
+            Some("workspace\u{1f}|session"),
+            "workspace\u{1f}|session",
+            Some("https://example.test/ready"),
+            "https://example.test/ready",
+            "https://example.test/ready",
+        ));
+        assert!(!page_load_matches_expected(
+            Some("other\u{1f}|session"),
+            "workspace\u{1f}|session",
+            Some("https://example.test/ready"),
+            "https://example.test/ready",
+            "https://example.test/ready",
+        ));
+        assert!(!page_load_matches_expected(
+            Some("workspace\u{1f}|session"),
+            "workspace\u{1f}|session",
+            Some("https://example.test/ready"),
+            "https://example.test/old",
+            "https://example.test/ready",
+        ));
     }
 
     #[test]

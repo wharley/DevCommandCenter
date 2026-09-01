@@ -139,7 +139,10 @@ export function WorkspaceBrowserSurface({
 		const bounds = readBrowserBounds(viewport);
 		setLoading(true);
 		setError(null);
-		void openBrowser({ workspaceId, sessionId, bounds, initialOccluded: isBrowserOccluded(viewport) })
+		// This surface only mounts after the user explicitly opens Browser from
+		// the workbench, so durable URL restoration remains opt-in rather than a
+		// side effect of app/workspace remounts.
+		void openBrowser({ workspaceId, sessionId, bounds, restoreLastUrl: true, initialOccluded: isBrowserOccluded(viewport) })
 			.then((next) => {
 				if (cancelled) {
 					void hideBrowser({

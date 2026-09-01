@@ -44,11 +44,26 @@ describe("browser-api", () => {
 		});
 
 		expect(invokeMock).toHaveBeenCalledWith("browser_open", {
-		workspaceId: "workspace-1",
-		sessionId: "session-1",
-		initialUrl: null,
-		bounds: { x: 0, y: 44, width: 900, height: 700 },
+			workspaceId: "workspace-1",
+			sessionId: "session-1",
+			initialUrl: null,
+			restoreLastUrl: false,
+			bounds: { x: 0, y: 44, width: 900, height: 700 },
 		});
+	});
+
+	it("serializes durable URL restore only when the caller explicitly opts in", async () => {
+		await openBrowser({
+			workspaceId: "workspace-1",
+			sessionId: null,
+			restoreLastUrl: true,
+			bounds: { x: 0, y: 44, width: 900, height: 700 },
+		});
+
+		expect(invokeMock).toHaveBeenCalledWith("browser_open", expect.objectContaining({
+			restoreLastUrl: true,
+			initialUrl: null,
+		}));
 	});
 
 	it("can start hidden when a marked overlay already covers the viewport", async () => {

@@ -62,6 +62,7 @@ export function openBrowser(input: {
 	workspaceId: string;
 	sessionId: string | null;
 	initialUrl?: string | null;
+	restoreLastUrl?: boolean;
 	bounds: BrowserBounds;
 	initialOccluded?: boolean;
 }) {
@@ -69,6 +70,7 @@ export function openBrowser(input: {
 		workspaceId: input.workspaceId,
 		sessionId: input.sessionId,
 		initialUrl: input.initialUrl ?? null,
+		restoreLastUrl: input.restoreLastUrl ?? false,
 		bounds: input.bounds,
 		...(input.initialOccluded ? { initialOccluded: true } : {}),
 	});
