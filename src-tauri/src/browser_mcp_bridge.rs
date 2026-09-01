@@ -41,10 +41,22 @@ use dcc_tauri::state::{EphemeralMcpProjection, EphemeralMcpProjectionLease, Sess
 const MAX_REGISTRY_ENTRIES: usize = 128;
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_MCP_TEXT_CONTENT_CHARS: usize = 32_000;
+/// A single consented Browser fill stays small enough for the bounded MCP
+/// request envelope. The text is never echoed in a result or error.
+const MAX_BROWSER_FILL_TEXT_CHARS: usize = 2_000;
+const MAX_BROWSER_REFERENCE_CHARS: usize = 3;
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_PROTOCOL_COMPAT: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
 const DCC_BROWSER_DEFINITION_ID: &str = "dcc-browser-webview-internal";
 const DCC_BROWSER_SERVER_NAME: &str = "dcc-browser-webview";
+const BROWSER_MCP_TOOL_NAMES: [&str; 6] = [
+    "dcc_browser_context",
+    "dcc_browser_navigate",
+    "dcc_browser_reload",
+    "dcc_browser_scroll",
+    "dcc_browser_click",
+    "dcc_browser_fill",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LeasePhase {
@@ -246,18 +258,13 @@ impl BrowserMcpBridge {
             SecretValue::new(format!("Bearer {plaintext}").into_bytes()).map_err(|_| {
                 CoreError::Repository("failed to create Browser MCP credential".to_string())
             })?;
-        let policies = [
-            "dcc_browser_context",
-            "dcc_browser_navigate",
-            "dcc_browser_reload",
-            "dcc_browser_scroll",
-        ]
-        .into_iter()
-        .map(|tool_name| ProviderMcpToolPolicy {
-            tool_name: tool_name.to_string(),
-            decision: McpToolPolicyDecision::Ask,
-        })
-        .collect();
+        let policies = BROWSER_MCP_TOOL_NAMES
+            .into_iter()
+            .map(|tool_name| ProviderMcpToolPolicy {
+                tool_name: tool_name.to_string(),
+                decision: McpToolPolicyDecision::Ask,
+            })
+            .collect();
         let server = ProviderMcpServerConfig {
             definition_id: McpDefinitionId(DCC_BROWSER_DEFINITION_ID.to_string()),
             server_name: DCC_BROWSER_SERVER_NAME.to_string(),
@@ -472,6 +479,54 @@ struct ScrollArgs {
     delta_x: f64,
     delta_y: f64,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ClickArgs {
+    anchor: BrowserActionAnchor,
+    #[serde(rename = "ref")]
+    reference: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FillArgs {
+    anchor: BrowserActionAnchor,
+    #[serde(rename = "ref")]
+    reference: String,
+    text: String,
+}
+
+/// References are public opaque capabilities only within the map. This keeps
+/// malformed MCP arguments out of the dispatcher, before map consumption.
+fn valid_browser_reference(reference: &str) -> bool {
+    let Some(number) = reference.strip_prefix('e') else {
+        return false;
+    };
+    !number.is_empty()
+        && reference.chars().count() <= MAX_BROWSER_REFERENCE_CHARS
+        && !number.starts_with('0')
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+        && number
+            .parse::<usize>()
+            .ok()
+            .is_some_and(|value| (1..=80).contains(&value))
+}
+
+fn valid_fill_text(text: &str) -> bool {
+    text.chars().count() <= MAX_BROWSER_FILL_TEXT_CHARS
+        && !text
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\t' | '\r'))
+}
+
+fn click_args_are_well_formed(arguments: &Value) -> bool {
+    serde_json::from_value::<ClickArgs>(arguments.clone())
+        .is_ok_and(|args| valid_browser_reference(&args.reference))
+}
+
+fn fill_args_are_well_formed(arguments: &Value) -> bool {
+    serde_json::from_value::<FillArgs>(arguments.clone())
+        .is_ok_and(|args| valid_browser_reference(&args.reference) && valid_fill_text(&args.text))
+}
 
 fn tool_call_is_well_formed(call: &ToolCall) -> bool {
     match call.name.as_str() {
@@ -489,6 +544,14 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         "dcc_browser_scroll" => call.arguments.as_ref().is_some_and(|arguments| {
             serde_json::from_value::<ScrollArgs>(arguments.clone()).is_ok()
         }),
+        "dcc_browser_click" => call
+            .arguments
+            .as_ref()
+            .is_some_and(click_args_are_well_formed),
+        "dcc_browser_fill" => call
+            .arguments
+            .as_ref()
+            .is_some_and(fill_args_are_well_formed),
         _ => false,
     }
 }
@@ -573,6 +636,46 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                     BrowserControlAction::Scroll {
                         delta_x: args.delta_x,
                         delta_y: args.delta_y,
+                    },
+                )
+                .await
+            }
+            _ => tool_error("invalid browser action"),
+        },
+        "dcc_browser_click" => match call
+            .arguments
+            .and_then(|arguments| serde_json::from_value::<ClickArgs>(arguments).ok())
+        {
+            Some(args)
+                if valid_browser_reference(&args.reference)
+                    && anchor_belongs_to_binding(&args.anchor, binding) =>
+            {
+                action_result(
+                    bridge,
+                    args.anchor,
+                    BrowserControlAction::Click {
+                        reference: args.reference,
+                    },
+                )
+                .await
+            }
+            _ => tool_error("invalid browser action"),
+        },
+        "dcc_browser_fill" => match call
+            .arguments
+            .and_then(|arguments| serde_json::from_value::<FillArgs>(arguments).ok())
+        {
+            Some(args)
+                if valid_browser_reference(&args.reference)
+                    && valid_fill_text(&args.text)
+                    && anchor_belongs_to_binding(&args.anchor, binding) =>
+            {
+                action_result(
+                    bridge,
+                    args.anchor,
+                    BrowserControlAction::Fill {
+                        reference: args.reference,
+                        text: args.text,
                     },
                 )
                 .await
@@ -723,6 +826,8 @@ fn tools() -> Vec<Value> {
         json!({"name":"dcc_browser_navigate","description":"Navigate the Browser using a fresh opaque context anchor.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor,"url":{"type":"string","minLength":1,"maxLength":2048}},"required":["anchor","url"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_browser_reload","description":"Reload the Browser using a fresh opaque context anchor.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor},"required":["anchor"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_browser_scroll","description":"Scroll the Browser a bounded distance using a fresh opaque context anchor.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor,"deltaX":{"type":"number","minimum":-2000,"maximum":2000},"deltaY":{"type":"number","minimum":-2000,"maximum":2000}},"required":["anchor","deltaX","deltaY"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
+        json!({"name":"dcc_browser_click","description":"Click one fresh opaque Browser context reference after explicit user approval.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor,"ref":{"type":"string","minLength":2,"maxLength":MAX_BROWSER_REFERENCE_CHARS,"pattern":"^e(?:[1-9]|[1-7][0-9]|80)$"}},"required":["anchor","ref"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
+        json!({"name":"dcc_browser_fill","description":"Fill one fresh opaque Browser text reference after explicit user approval.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"anchor":anchor,"ref":{"type":"string","minLength":2,"maxLength":MAX_BROWSER_REFERENCE_CHARS,"pattern":"^e(?:[1-9]|[1-7][0-9]|80)$"},"text":{"type":"string","maxLength":MAX_BROWSER_FILL_TEXT_CHARS}},"required":["anchor","ref","text"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false}}),
     ]
 }
 
@@ -843,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn schemas_are_closed_and_only_expose_the_four_allowlisted_tools() {
+    fn schemas_are_closed_and_only_expose_the_six_allowlisted_tools() {
         let tools = tools();
         let names: Vec<_> = tools
             .iter()
@@ -855,7 +960,9 @@ mod tests {
                 "dcc_browser_context",
                 "dcc_browser_navigate",
                 "dcc_browser_reload",
-                "dcc_browser_scroll"
+                "dcc_browser_scroll",
+                "dcc_browser_click",
+                "dcc_browser_fill",
             ]
         );
         for tool in &tools {
@@ -867,6 +974,86 @@ mod tests {
         assert_eq!(
             tools[3]["inputSchema"]["properties"]["deltaX"]["maximum"],
             json!(2000)
+        );
+        for tool in &tools[4..] {
+            assert_eq!(
+                tool["inputSchema"]["properties"]["anchor"]["additionalProperties"],
+                Value::Bool(false)
+            );
+            assert_eq!(
+                tool["inputSchema"]["properties"]["ref"]["maxLength"],
+                json!(MAX_BROWSER_REFERENCE_CHARS)
+            );
+            assert_eq!(tool["annotations"]["readOnlyHint"], Value::Bool(false));
+            assert_eq!(tool["annotations"]["destructiveHint"], Value::Bool(true));
+            assert_eq!(tool["annotations"]["idempotentHint"], Value::Bool(false));
+        }
+        assert_eq!(
+            tools[5]["inputSchema"]["properties"]["text"]["maxLength"],
+            json!(MAX_BROWSER_FILL_TEXT_CHARS)
+        );
+        assert_eq!(tools[4]["annotations"]["openWorldHint"], Value::Bool(true));
+        assert_eq!(tools[5]["annotations"]["openWorldHint"], Value::Bool(false));
+        assert_eq!(BROWSER_MCP_TOOL_NAMES.len(), tools.len());
+    }
+
+    #[test]
+    fn click_and_fill_args_are_closed_bounded_and_never_echo_input() {
+        let anchor = json!({
+            "workspaceId":"workspace", "sessionId":"session", "lifecycleToken":8,
+            "mapId":"m-8-2", "generation":2, "url":"https://example.test/page",
+            "pageLoadRevision":4
+        });
+        let click = ToolCall {
+            name: "dcc_browser_click".to_string(),
+            arguments: Some(json!({"anchor":anchor, "ref":"e80"})),
+        };
+        assert!(tool_call_is_well_formed(&click));
+        let valid_fill = ToolCall {
+            name: "dcc_browser_fill".to_string(),
+            arguments: Some(
+                json!({"anchor":click.arguments.as_ref().unwrap()["anchor"], "ref":"e1", "text":"safe\ntext"}),
+            ),
+        };
+        assert!(tool_call_is_well_formed(&valid_fill));
+        assert!(tool_call_is_well_formed(&ToolCall {
+            name: "dcc_browser_fill".to_string(),
+            arguments: Some(
+                json!({"anchor":click.arguments.as_ref().unwrap()["anchor"], "ref":"e1", "text":"x".repeat(MAX_BROWSER_FILL_TEXT_CHARS)})
+            ),
+        }));
+
+        for arguments in [
+            json!({"anchor":click.arguments.as_ref().unwrap()["anchor"], "ref":"e0"}),
+            json!({"anchor":click.arguments.as_ref().unwrap()["anchor"], "ref":"e01"}),
+            json!({"anchor":click.arguments.as_ref().unwrap()["anchor"], "ref":"e1", "extra":true}),
+            json!({"anchor":{"workspaceId":"workspace","sessionId":"session","lifecycleToken":8,"mapId":"m-8-2","generation":2,"url":"https://example.test/page","pageLoadRevision":4,"extra":true},"ref":"e1"}),
+        ] {
+            assert!(!tool_call_is_well_formed(&ToolCall {
+                name: "dcc_browser_click".to_string(),
+                arguments: Some(arguments),
+            }));
+        }
+        for text in [
+            "x".repeat(MAX_BROWSER_FILL_TEXT_CHARS + 1),
+            "contains\0nul".to_string(),
+        ] {
+            assert!(!tool_call_is_well_formed(&ToolCall {
+                name: "dcc_browser_fill".to_string(),
+                arguments: Some(
+                    json!({"anchor":click.arguments.as_ref().unwrap()["anchor"], "ref":"e1", "text":text})
+                ),
+            }));
+        }
+
+        let secret = "do-not-return-this";
+        let error = tool_error(secret);
+        let serialized = serde_json::to_string(&error).unwrap();
+        assert!(!serialized.contains(secret));
+        assert!(!serialized.contains("e80"));
+        assert_eq!(
+            tools()[4]["inputSchema"]["properties"]["ref"]["pattern"],
+            json!("^e(?:[1-9]|[1-7][0-9]|80)$")
         );
     }
 

@@ -46,6 +46,8 @@ const BROWSER_CONTEXT_TIMEOUT: Duration = Duration::from_secs(2);
 const BROWSER_CONTROL_GRANT_TTL: Duration = Duration::from_secs(60);
 /// Scroll is deliberately constrained to a small single action in CSS pixels.
 const MAX_BROWSER_SCROLL_DELTA: f64 = 2_000.0;
+const MAX_BROWSER_FILL_CHARS: usize = 2_000;
+const MAX_BROWSER_REFERENCE_CHARS: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -90,7 +92,7 @@ pub struct BrowserSemanticMap {
 /// action. It is untrusted input and is compared byte-for-byte with the
 /// server-side semantic-map record before anything can happen.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BrowserActionAnchor {
     pub workspace_id: String,
     pub session_id: Option<String>,
@@ -101,24 +103,30 @@ pub struct BrowserActionAnchor {
     pub page_load_revision: u64,
 }
 
-/// This is intentionally narrower than an MCP bridge: no item references,
-/// selectors, HTML, form values, or arbitrary page script can be supplied.
+/// This is intentionally narrower than an MCP bridge: actions may carry only
+/// a current opaque map reference and bounded fill text; selectors, HTML,
+/// runtime values, and arbitrary page script can never be supplied.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase"
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
 )]
 pub enum BrowserControlAction {
     Navigate { url: String },
     Reload,
     Scroll { delta_x: f64, delta_y: f64 },
+    Click { reference: String },
+    Fill { reference: String, text: String },
 }
 
 enum PreparedBrowserControlAction {
     Navigate(Url),
     Reload,
     Scroll { delta_x: f64, delta_y: f64 },
+    Click { reference: String },
+    Fill { reference: String, text: String },
 }
 
 impl PreparedBrowserControlAction {
@@ -127,6 +135,8 @@ impl PreparedBrowserControlAction {
             Self::Navigate(_) => "navigate",
             Self::Reload => "reload",
             Self::Scroll { .. } => "scroll",
+            Self::Click { .. } => "click",
+            Self::Fill { .. } => "fill",
         }
     }
 }
@@ -178,6 +188,7 @@ struct BrowserContextExtraction {
     text: String,
     selection_only: bool,
     truncated: bool,
+    document_identity: Option<f64>,
     #[serde(default)]
     semantic_map: BrowserSemanticMapExtraction,
 }
@@ -203,6 +214,13 @@ struct BrowserSemanticItemExtraction {
     selected: Option<bool>,
     expanded: Option<bool>,
     pressed: Option<bool>,
+    /// Page-side ordinal and element shape are trust-boundary metadata. They
+    /// are stripped from the public map and retained only in the backend
+    /// record used for the next, separately-consented action.
+    ordinal: Option<usize>,
+    tag: Option<String>,
+    input_type: Option<String>,
+    content_editable: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,6 +282,26 @@ struct BrowserSemanticMapRecord {
     lifecycle_token: u64,
     url: String,
     page_load_revision: u64,
+    document_identity: f64,
+    targets: Vec<BrowserSemanticTargetRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct BrowserSemanticTargetRecord {
+    reference: String,
+    ordinal: usize,
+    role: String,
+    name: String,
+    destination: Option<String>,
+    disabled: Option<bool>,
+    checked: Option<bool>,
+    selected: Option<bool>,
+    expanded: Option<bool>,
+    pressed: Option<bool>,
+    tag: String,
+    input_type: Option<String>,
+    content_editable: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -420,6 +458,13 @@ fn normalize_browser_semantic_text(raw: &str, max_chars: usize) -> (String, bool
     (text.trim().to_string(), truncated)
 }
 
+fn validate_browser_document_identity(value: Option<f64>) -> Result<f64, String> {
+    match value {
+        Some(value) if value.is_finite() && value > 0.0 => Ok(value),
+        _ => Err("browser document identity is unavailable".to_string()),
+    }
+}
+
 /// Produces a display-only link destination. The page is untrusted, so the
 /// backend removes credentials, query strings and fragments even if the fixed
 /// extraction script was modified by page globals or returned hostile JSON.
@@ -473,9 +518,14 @@ fn semantic_item_serialized_chars(items: &[BrowserSemanticItem]) -> usize {
 fn normalize_browser_semantic_map(
     extracted: BrowserSemanticMapExtraction,
     max_serialized_chars: usize,
-) -> (Vec<BrowserSemanticItem>, bool) {
+) -> (
+    Vec<BrowserSemanticItem>,
+    Vec<BrowserSemanticTargetRecord>,
+    bool,
+) {
     let mut truncated = extracted.truncated || extracted.items.len() > MAX_BROWSER_SEMANTIC_ITEMS;
     let mut items = Vec::new();
+    let mut targets = Vec::new();
     for extracted in extracted.items.into_iter().take(MAX_BROWSER_SEMANTIC_ITEMS) {
         let Some(role) = canonical_semantic_role(extracted.role.as_str()) else {
             // A malformed page response must not smuggle an arbitrary schema
@@ -529,15 +579,67 @@ fn normalize_browser_semantic_map(
             truncated = true;
             continue;
         }
+        let Some(ordinal) = extracted.ordinal else {
+            truncated = true;
+            continue;
+        };
+        let Some(tag) = extracted.tag.as_deref() else {
+            truncated = true;
+            continue;
+        };
+        let tag = tag.to_ascii_lowercase();
+        if ordinal == 0
+            || ordinal > MAX_BROWSER_SEMANTIC_SCAN_NODES
+            || targets
+                .last()
+                .is_some_and(|previous: &BrowserSemanticTargetRecord| ordinal <= previous.ordinal)
+            || tag.is_empty()
+            || tag.len() > 32
+            || !tag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        {
+            truncated = true;
+            continue;
+        }
+        let input_type = extracted
+            .input_type
+            .map(|input_type| input_type.to_ascii_lowercase());
+        let Some(content_editable) = extracted.content_editable else {
+            truncated = true;
+            continue;
+        };
+        if input_type.as_deref().is_some_and(|value| {
+            value.is_empty()
+                || value.len() > 32
+                || !value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        }) {
+            truncated = true;
+            continue;
+        }
         let mut candidate_items = items.clone();
         candidate_items.push(item);
         if semantic_item_serialized_chars(&candidate_items) > max_serialized_chars {
             truncated = true;
             break;
         }
+        let item = candidate_items.last().expect("candidate item was pushed");
+        targets.push(BrowserSemanticTargetRecord {
+            reference: item.reference.clone(),
+            ordinal,
+            role: item.role.clone(),
+            name: item.name.clone(),
+            destination: item.destination.clone(),
+            disabled: item.disabled,
+            checked: item.checked,
+            selected: item.selected,
+            expanded: item.expanded,
+            pressed: item.pressed,
+            tag,
+            input_type,
+            content_editable,
+        });
         items = candidate_items;
     }
-    (items, truncated)
+    (items, targets, truncated)
 }
 
 fn issue_semantic_map(
@@ -547,7 +649,9 @@ fn issue_semantic_map(
     lifecycle_token: u64,
     url: &str,
     expected_page_load_revision: u64,
+    document_identity: f64,
     items: Vec<BrowserSemanticItem>,
+    targets: Vec<BrowserSemanticTargetRecord>,
     truncated: bool,
 ) -> Result<BrowserSemanticMap, String> {
     let scope = scope_key(workspace_id, session_id);
@@ -573,6 +677,8 @@ fn issue_semantic_map(
         lifecycle_token,
         url: url.to_string(),
         page_load_revision: expected_page_load_revision,
+        document_identity,
+        targets,
     });
     if !semantic_map_record_is_current(
         context.semantic_map.as_ref(),
@@ -732,6 +838,15 @@ fn prepare_browser_control_action(
             let (delta_x, delta_y) = normalize_browser_scroll_delta(delta_x, delta_y)?;
             Ok(PreparedBrowserControlAction::Scroll { delta_x, delta_y })
         }
+        BrowserControlAction::Click { reference } => {
+            validate_browser_reference(&reference)?;
+            Ok(PreparedBrowserControlAction::Click { reference })
+        }
+        BrowserControlAction::Fill { reference, text } => {
+            validate_browser_reference(&reference)?;
+            let text = normalize_browser_fill_text(&text)?;
+            Ok(PreparedBrowserControlAction::Fill { reference, text })
+        }
     }
 }
 
@@ -739,6 +854,230 @@ fn prepare_browser_control_action(
 /// It has no selector, DOM traversal, input value access, or renderer-provided JS.
 fn browser_scroll_script(delta_x: f64, delta_y: f64) -> String {
     format!("(() => {{ window.scrollBy({delta_x}, {delta_y}); }})()")
+}
+
+fn browser_semantic_action_script(
+    target: &BrowserSemanticTargetRecord,
+    fill_text: Option<&str>,
+    expected_url: &str,
+    expected_document_identity: f64,
+) -> Result<String, String> {
+    let target_json = serde_json::to_string(target)
+        .map_err(|_| "browser action target is invalid".to_string())?;
+    let text_json = serde_json::to_string(&fill_text.unwrap_or_default())
+        .map_err(|_| "browser fill text is invalid".to_string())?;
+    let url_json = serde_json::to_string(expected_url)
+        .map_err(|_| "browser action URL is invalid".to_string())?;
+    if !expected_document_identity.is_finite() || expected_document_identity <= 0.0 {
+        return Err("browser document identity is unavailable".to_string());
+    }
+    let mode = if fill_text.is_some() { "fill" } else { "click" };
+    Ok(format!(
+        r#"(() => {{
+  try {{
+  const expected = {target_json};
+  const mode = {mode:?};
+  const fillText = {text_json};
+  const expectedUrl = {url_json};
+  const expectedDocumentIdentity = {expected_document_identity};
+  const maxAncestors = {MAX_BROWSER_SEMANTIC_ANCESTORS};
+  const maxNameChars = {MAX_BROWSER_SEMANTIC_NAME_CHARS};
+  const maxDestinationChars = {MAX_BROWSER_SEMANTIC_DESTINATION_CHARS};
+  const maxScanNodes = {MAX_BROWSER_SEMANTIC_SCAN_NODES};
+  const clean = (value, max = maxNameChars) => String(value ?? "").slice(0, Math.max(max * 4, max))
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+  const result = (ok, reason) => ({{ ok, reason }});
+  if (window.location.href !== expectedUrl) return result(false, "stale");
+  if (!Number.isFinite(performance.timeOrigin) || performance.timeOrigin !== expectedDocumentIdentity) return result(false, "stale");
+  const isVisible = (element) => {{
+    let node = element;
+    for (let depth = 0; node && depth < maxAncestors; depth += 1, node = node.parentElement) {{
+      if (node.hidden || node.inert || node.getAttribute("aria-hidden") === "true") return false;
+      const style = window.getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity) === 0) return false;
+    }}
+    if (node) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0
+      && rect.left < window.innerWidth && rect.top < window.innerHeight;
+  }};
+  const boundedText = (root) => {{
+    if (!root) return "";
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const parts = [];
+    let seen = 0;
+      let node;
+      while (seen < {MAX_BROWSER_SEMANTIC_NAME_TEXT_NODES} && (node = walker.nextNode())) {{
+        seen += 1;
+        let parent = node.parentElement;
+        let safe = true;
+        let reachedBody = false;
+        for (let depth = 0; parent && depth < maxAncestors; depth += 1, parent = parent.parentElement) {{
+          const tag = parent.tagName.toLowerCase();
+          if (["input", "textarea", "select", "option"].includes(tag) || parent.isContentEditable) {{ safe = false; break; }}
+          if (parent === document.body) {{ reachedBody = true; break; }}
+        }}
+        if (!reachedBody) safe = false;
+        if (safe && node.parentElement && isVisible(node.parentElement)) parts.push(clean(node.data));
+    }}
+    return clean(parts.join(" "));
+  }};
+  const accessibleName = (element) => {{
+    const ariaLabel = clean(element.getAttribute("aria-label"));
+    if (ariaLabel) return ariaLabel;
+    const labelledBy = (element.getAttribute("aria-labelledby") || "").trim().split(/\s+/).filter(Boolean).slice(0, 4)
+      .map((id) => document.getElementById(id))
+      .filter((label) => label && label !== element && isVisible(label))
+      .map((label) => boundedText(label))
+      .filter(Boolean).join(" ");
+    if (labelledBy) return clean(labelledBy);
+    const labels = "labels" in element && element.labels ? Array.from(element.labels).slice(0, 3) : [];
+    const associated = labels.map((label) => boundedText(label)).filter(Boolean).join(" ");
+    if (associated) return clean(associated);
+    const alt = clean(element.getAttribute("alt"));
+    if (alt) return alt;
+    const title = clean(element.getAttribute("title"));
+    if (title) return title;
+    const placeholder = clean(element.getAttribute("placeholder"));
+    if (placeholder) return placeholder;
+    if (element.isContentEditable || ["input", "textarea", "select"].includes(element.tagName.toLowerCase())) return "";
+    return boundedText(element);
+  }};
+  const canonicalRole = (element) => {{
+    const tag = element.tagName.toLowerCase();
+    const explicit = (element.getAttribute("role") || "").toLowerCase();
+    const inputType = tag === "input" ? (element.getAttribute("type") || "text").toLowerCase() : "";
+    if (tag === "input" && ["hidden", "password"].includes(inputType)) return null;
+    if (/^h[1-6]$/.test(tag)) return "heading";
+    if (explicit === "heading") return "heading";
+    if (tag === "button" || explicit === "button") return "button";
+    if ((tag === "a" && element.hasAttribute("href")) || explicit === "link") return "link";
+    if (tag === "textarea" || ["textbox", "searchbox"].includes(explicit)) return "textbox";
+    if (tag === "select" || ["combobox", "listbox"].includes(explicit)) return "select";
+    if (explicit === "checkbox") return "checkbox";
+    if (explicit === "radio") return "radio";
+    if (explicit === "switch") return "switch";
+    if (explicit === "slider") return "slider";
+    if (explicit === "spinbutton") return "spinbutton";
+    if (explicit === "option") return "option";
+    if (tag !== "input") return null;
+    if (["button", "submit", "reset", "image"].includes(inputType)) return "button";
+    if (inputType === "checkbox") return "checkbox";
+    if (inputType === "radio") return "radio";
+    if (inputType === "range") return "slider";
+    if (inputType === "number") return "spinbutton";
+    if (inputType === "file") return "file-input";
+    return "textbox";
+  }};
+  const booleanState = (element, property, ariaName) => {{
+    const aria = element.getAttribute(ariaName);
+    if (aria === "true") return true;
+    if (aria === "false") return false;
+    return typeof element[property] === "boolean" ? element[property] : null;
+  }};
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+  let scanned = 0;
+  let candidate;
+  while (scanned < maxScanNodes && (candidate = walker.nextNode())) {{
+    scanned += 1;
+    if (scanned === expected.ordinal) break;
+    candidate = null;
+  }}
+  if (!candidate || scanned !== expected.ordinal || !isVisible(candidate)) return result(false, "stale");
+  const tag = candidate.tagName.toLowerCase();
+  const inputType = tag === "input" ? (candidate.getAttribute("type") || "text").toLowerCase() : null;
+  const role = canonicalRole(candidate);
+  const destination = role === "link"
+    ? (() => {{ try {{ const url = new URL(candidate.href, window.location.href); if (!["http:", "https:"].includes(url.protocol)) return null; url.username = ""; url.password = ""; url.search = ""; url.hash = ""; return clean(url.toString(), maxDestinationChars); }} catch (_) {{ return null; }} }})()
+    : null;
+  const actual = {{ reference: expected.reference, ordinal: scanned, role, name: accessibleName(candidate), destination,
+    disabled: role === "heading" ? null : booleanState(candidate, "disabled", "aria-disabled"),
+    checked: ["checkbox", "radio", "switch"].includes(role) ? booleanState(candidate, "checked", "aria-checked") : null,
+    selected: ["select", "option"].includes(role) ? booleanState(candidate, "selected", "aria-selected") : null,
+    expanded: booleanState(candidate, "ariaExpanded", "aria-expanded"),
+    pressed: role === "button" ? booleanState(candidate, "ariaPressed", "aria-pressed") : null,
+    tag, inputType,
+    contentEditable: Boolean(candidate.isContentEditable) }};
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) return result(false, "stale");
+  if (actual.disabled === true) return result(false, "disabled");
+  const clickCompatible = actual.role === "button" && (actual.tag === "button" || (actual.tag === "input" && ["button", "submit", "reset", "image"].includes(actual.inputType)))
+    || actual.role === "link" && actual.tag === "a" && Boolean(actual.destination)
+    || ["checkbox", "radio"].includes(actual.role) && actual.tag === "input" && actual.inputType === actual.role
+    || actual.role === "switch" && (actual.tag === "button" || (actual.tag === "input" && actual.inputType === "checkbox"));
+  const fillCompatible = !actual.contentEditable && actual.role === "textbox" && (actual.tag === "textarea"
+    || actual.tag === "input" && ["text", "search", "email", "tel", "url"].includes(actual.inputType));
+  if (mode === "click") {{
+    if (!clickCompatible) return result(false, "incompatible");
+    if (typeof candidate.click !== "function") return result(false, "failed");
+    candidate.click();
+    return result(true, "ok");
+  }}
+  if (!fillCompatible || Array.from(fillText).length > {MAX_BROWSER_FILL_CHARS} || /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(fillText)) return result(false, "incompatible");
+  const prototype = actual.tag === "textarea" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+  if (typeof setter !== "function") return result(false, "failed");
+  setter.call(candidate, fillText);
+  candidate.dispatchEvent(new Event("input", {{ bubbles: true, composed: true }}));
+  candidate.dispatchEvent(new Event("change", {{ bubbles: true, composed: true }}));
+  return result(true, "ok");
+  }} catch (_) {{
+    return {{ ok: false, reason: "failed" }};
+  }}
+}})()"#
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowserActionCallback {
+    ok: bool,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+fn parse_browser_action_callback(raw: &str) -> Result<(), String> {
+    let callback: BrowserActionCallback = serde_json::from_str(raw)
+        .map_err(|_| "browser action confirmation was invalid".to_string())?;
+    if callback.ok {
+        return Ok(());
+    }
+    match callback.reason.as_deref() {
+        Some("stale") => Err("browser action anchor is stale".to_string()),
+        Some("disabled") => Err("browser action target is disabled".to_string()),
+        Some("incompatible") => Err("browser action target is incompatible".to_string()),
+        _ => Err("browser action failed".to_string()),
+    }
+}
+
+async fn eval_browser_action_with_callback(
+    state: &BrowserState,
+    script: String,
+) -> Result<(), String> {
+    let (sender, receiver) = oneshot::channel();
+    let sender = Arc::new(Mutex::new(Some(sender)));
+    {
+        let webview = state
+            .webview
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        let webview = webview
+            .as_ref()
+            .ok_or_else(|| "browser is not open".to_string())?;
+        let sender = sender.clone();
+        webview
+            .eval_with_callback(script, move |raw| {
+                if let Ok(mut sender) = sender.lock() {
+                    if let Some(sender) = sender.take() {
+                        let _ = sender.send(raw);
+                    }
+                }
+            })
+            .map_err(|_| "browser action failed".to_string())?;
+    }
+    let raw = timeout(BROWSER_CONTEXT_TIMEOUT, receiver)
+        .await
+        .map_err(|_| "browser action timed out".to_string())?
+        .map_err(|_| "browser action confirmation was cancelled".to_string())?;
+    parse_browser_action_callback(&raw)
 }
 
 fn browser_action_anchor_matches_context(
@@ -771,6 +1110,147 @@ fn consume_semantic_map_for_anchor(
     true
 }
 
+fn validate_browser_reference(reference: &str) -> Result<(), String> {
+    if reference.is_empty() || reference.chars().count() > MAX_BROWSER_REFERENCE_CHARS {
+        return Err("browser action reference is invalid".to_string());
+    }
+    let Some(number) = reference.strip_prefix('e') else {
+        return Err("browser action reference is invalid".to_string());
+    };
+    if number.is_empty()
+        || (number.len() > 1 && number.starts_with('0'))
+        || !number.bytes().all(|byte| byte.is_ascii_digit())
+        || number
+            .parse::<usize>()
+            .ok()
+            .is_none_or(|value| value == 0 || value > MAX_BROWSER_SEMANTIC_ITEMS)
+    {
+        return Err("browser action reference is invalid".to_string());
+    }
+    Ok(())
+}
+
+fn click_target_is_compatible(target: &BrowserSemanticTargetRecord) -> bool {
+    if target.disabled == Some(true) {
+        return false;
+    }
+    match target.role.as_str() {
+        "button" => {
+            target.tag == "button"
+                || (target.tag == "input"
+                    && target.input_type.as_deref().is_some_and(|input_type| {
+                        matches!(input_type, "button" | "submit" | "reset" | "image")
+                    }))
+        }
+        "link" => target.tag == "a" && target.destination.is_some(),
+        "checkbox" => target.tag == "input" && target.input_type.as_deref() == Some("checkbox"),
+        "radio" => target.tag == "input" && target.input_type.as_deref() == Some("radio"),
+        "switch" => {
+            target.tag == "button"
+                || (target.tag == "input" && target.input_type.as_deref() == Some("checkbox"))
+        }
+        _ => false,
+    }
+}
+
+fn fill_target_is_compatible(target: &BrowserSemanticTargetRecord) -> bool {
+    if target.disabled == Some(true) || target.content_editable || target.role != "textbox" {
+        return false;
+    }
+    match target.tag.as_str() {
+        "textarea" => true,
+        "input" => target.input_type.as_deref().is_some_and(|input_type| {
+            matches!(input_type, "text" | "search" | "email" | "tel" | "url")
+        }),
+        _ => false,
+    }
+}
+
+fn normalize_browser_fill_text(text: &str) -> Result<String, String> {
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    if text.chars().count() > MAX_BROWSER_FILL_CHARS
+        || text
+            .chars()
+            .any(|character| character.is_control() && character != '\n' && character != '\t')
+    {
+        return Err("browser fill text is invalid".to_string());
+    }
+    Ok(text)
+}
+
+fn consume_browser_action_target(
+    state: &BrowserState,
+    anchor: &BrowserActionAnchor,
+    reference: &str,
+) -> Result<(BrowserSemanticTargetRecord, f64), String> {
+    validate_browser_reference(reference)?;
+    require_current_lifecycle(
+        state,
+        &anchor.workspace_id,
+        anchor.session_id.as_deref(),
+        anchor.lifecycle_token,
+        "browser action anchor is stale",
+    )?;
+    let snapshot = current_snapshot(state)?;
+    if !snapshot.visible || snapshot.url.as_deref() != Some(anchor.url.as_str()) {
+        return Err("browser action anchor is stale".to_string());
+    }
+    let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
+    let mut contexts = state
+        .contexts
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let context = contexts
+        .get_mut(&scope)
+        .ok_or_else(|| "browser action anchor is stale".to_string())?;
+    if !browser_action_anchor_matches_context(context, anchor, &scope) {
+        return Err("browser action anchor is stale".to_string());
+    }
+    let record = context
+        .semantic_map
+        .as_ref()
+        .ok_or_else(|| "browser action anchor is stale".to_string())?;
+    let target = record
+        .targets
+        .iter()
+        .find(|target| target.reference == reference)
+        .cloned()
+        .ok_or_else(|| "browser action reference is stale".to_string())?;
+    let document_identity = record.document_identity;
+    context.semantic_map = None;
+    Ok((target, document_identity))
+}
+
+fn browser_action_target(
+    state: &BrowserState,
+    anchor: &BrowserActionAnchor,
+    reference: &str,
+) -> Result<(BrowserSemanticTargetRecord, f64), String> {
+    validate_browser_reference(reference)?;
+    let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
+    let contexts = state
+        .contexts
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let context = contexts
+        .get(&scope)
+        .ok_or_else(|| "browser action anchor is stale".to_string())?;
+    if !browser_action_anchor_matches_context(context, anchor, &scope) {
+        return Err("browser action anchor is stale".to_string());
+    }
+    let record = context
+        .semantic_map
+        .as_ref()
+        .ok_or_else(|| "browser action anchor is stale".to_string())?;
+    let target = record
+        .targets
+        .iter()
+        .find(|target| target.reference == reference)
+        .cloned()
+        .ok_or_else(|| "browser action reference is stale".to_string())?;
+    Ok((target, record.document_identity))
+}
+
 /// The map is already consumed before this final native check. Reuse it for
 /// every page-level action so a navigation that races after anchor validation
 /// cannot target a different document.
@@ -779,6 +1259,27 @@ fn require_action_native_url(
     anchor: &BrowserActionAnchor,
 ) -> Result<(), String> {
     if current_url == anchor.url {
+        Ok(())
+    } else {
+        Err("browser action anchor is stale".to_string())
+    }
+}
+
+fn require_action_page_revision(
+    state: &BrowserState,
+    anchor: &BrowserActionAnchor,
+) -> Result<(), String> {
+    let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
+    let contexts = state
+        .contexts
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let context = contexts
+        .get(&scope)
+        .ok_or_else(|| "browser action anchor is stale".to_string())?;
+    if context.page_load_revision == anchor.page_load_revision
+        && context_is_ready_for_url(context, &anchor.url)
+    {
         Ok(())
     } else {
         Err("browser action anchor is stale".to_string())
@@ -824,6 +1325,10 @@ fn browser_context_script() -> String {
     format!(
         r#"(() => {{
   try {{
+    const documentIdentity = (() => {{
+      try {{ const value = performance.timeOrigin; return Number.isFinite(value) && value > 0 ? value : null; }}
+      catch (_) {{ return null; }}
+    }})();
     const maxTextChars = {MAX_BROWSER_CONTEXT_CHARS};
     const maxCandidates = {MAX_BROWSER_SEMANTIC_CANDIDATES};
     const maxScanNodes = {MAX_BROWSER_SEMANTIC_SCAN_NODES};
@@ -970,6 +1475,12 @@ fn browser_context_script() -> String {
     const canonicalRole = (element) => {{
       const tag = element.tagName.toLowerCase();
       const explicit = (element.getAttribute("role") || "").toLowerCase();
+      if (tag === "input") {{
+        const inputType = (element.getAttribute("type") || "text").toLowerCase();
+        // Never map value-bearing secrets, even when a page supplies a
+        // misleading ARIA role.
+        if (inputType === "hidden" || inputType === "password") return null;
+      }}
       if (/^h[1-6]$/.test(tag)) return "heading";
       if (explicit === "heading") {{
         const level = Number.parseInt(element.getAttribute("aria-level") || "", 10);
@@ -1026,7 +1537,11 @@ fn browser_context_script() -> String {
       if (!isVisible(element)) continue;
       const role = canonicalRole(element);
       if (!role) continue;
-      const item = {{ role, name: accessibleName(element) }};
+      const tag = element.tagName.toLowerCase();
+      const inputType = tag === "input"
+        ? (element.getAttribute("type") || "text").toLowerCase()
+        : undefined;
+      const item = {{ role, name: accessibleName(element), ordinal: scanned, tag, inputType, contentEditable: Boolean(element.isContentEditable) }};
       if (role === "heading") {{
         const tag = element.tagName.toLowerCase();
         const level = /^h[1-6]$/.test(tag)
@@ -1057,6 +1572,7 @@ fn browser_context_script() -> String {
       text: visibleText.text,
       selectionOnly: Boolean(safeSelection),
       truncated: visibleText.truncated || selectionPolicyTruncated,
+      documentIdentity,
       semanticMap: map,
     }};
   }} catch (_) {{
@@ -1853,7 +2369,29 @@ pub(crate) async fn execute_browser_control_action(
         Instant::now(),
     )?;
     let action = prepare_browser_control_action(action)?;
-    consume_browser_action_anchor(&state, &anchor)?;
+    let target = match &action {
+        PreparedBrowserControlAction::Click { reference } => {
+            let (target, document_identity) = browser_action_target(state, &anchor, reference)?;
+            if !click_target_is_compatible(&target) {
+                return Err("browser action target is incompatible".to_string());
+            }
+            Some((target, document_identity))
+        }
+        PreparedBrowserControlAction::Fill { reference, .. } => {
+            let (target, document_identity) = browser_action_target(state, &anchor, reference)?;
+            if !fill_target_is_compatible(&target) {
+                return Err("browser action target is incompatible".to_string());
+            }
+            Some((target, document_identity))
+        }
+        _ => None,
+    };
+    if let Some((target, _document_identity)) = target.as_ref() {
+        let reference = &target.reference;
+        let _ = consume_browser_action_target(state, &anchor, reference)?;
+    } else {
+        consume_browser_action_anchor(&state, &anchor)?;
+    }
 
     let action_name = action.name().to_string();
     match action {
@@ -1870,6 +2408,14 @@ pub(crate) async fn execute_browser_control_action(
                 .map_err(|_| "browser action anchor is stale".to_string())?
                 .to_string();
             require_action_native_url(&current_url, &anchor)?;
+            require_action_page_revision(state, &anchor)?;
+            require_browser_control_grant(
+                state,
+                &anchor.workspace_id,
+                anchor.session_id.as_deref(),
+                anchor.lifecycle_token,
+                Instant::now(),
+            )?;
             if let Ok(mut contexts) = state.contexts.lock() {
                 mark_context_loading(
                     contexts
@@ -1898,6 +2444,14 @@ pub(crate) async fn execute_browser_control_action(
                 .map_err(|_| "browser action anchor is stale".to_string())?
                 .to_string();
             require_action_native_url(&current_url, &anchor)?;
+            require_action_page_revision(state, &anchor)?;
+            require_browser_control_grant(
+                state,
+                &anchor.workspace_id,
+                anchor.session_id.as_deref(),
+                anchor.lifecycle_token,
+                Instant::now(),
+            )?;
             if let Ok(mut contexts) = state.contexts.lock() {
                 mark_context_loading(
                     contexts
@@ -1926,9 +2480,84 @@ pub(crate) async fn execute_browser_control_action(
                 .map_err(|_| "browser action anchor is stale".to_string())?
                 .to_string();
             require_action_native_url(&current_url, &anchor)?;
+            require_action_page_revision(state, &anchor)?;
+            require_browser_control_grant(
+                state,
+                &anchor.workspace_id,
+                anchor.session_id.as_deref(),
+                anchor.lifecycle_token,
+                Instant::now(),
+            )?;
             webview
                 .eval(browser_scroll_script(delta_x, delta_y))
                 .map_err(|_| "browser scroll action failed".to_string())?;
+        }
+        PreparedBrowserControlAction::Click { .. } => {
+            let (target, document_identity) =
+                target.ok_or_else(|| "browser action target is stale".to_string())?;
+            let webview_url = {
+                let webview = state
+                    .webview
+                    .lock()
+                    .map_err(|_| "browser state lock poisoned".to_string())?;
+                let webview = webview
+                    .as_ref()
+                    .ok_or_else(|| "browser is not open".to_string())?;
+                webview
+                    .url()
+                    .map_err(|_| "browser action anchor is stale".to_string())?
+                    .to_string()
+            };
+            require_action_native_url(&webview_url, &anchor)?;
+            require_action_page_revision(state, &anchor)?;
+            require_browser_control_grant(
+                state,
+                &anchor.workspace_id,
+                anchor.session_id.as_deref(),
+                anchor.lifecycle_token,
+                Instant::now(),
+            )?;
+            eval_browser_action_with_callback(
+                state,
+                browser_semantic_action_script(&target, None, &anchor.url, document_identity)?,
+            )
+            .await?;
+        }
+        PreparedBrowserControlAction::Fill { text, .. } => {
+            let (target, document_identity) =
+                target.ok_or_else(|| "browser action target is stale".to_string())?;
+            let webview_url = {
+                let webview = state
+                    .webview
+                    .lock()
+                    .map_err(|_| "browser state lock poisoned".to_string())?;
+                let webview = webview
+                    .as_ref()
+                    .ok_or_else(|| "browser is not open".to_string())?;
+                webview
+                    .url()
+                    .map_err(|_| "browser action anchor is stale".to_string())?
+                    .to_string()
+            };
+            require_action_native_url(&webview_url, &anchor)?;
+            require_action_page_revision(state, &anchor)?;
+            require_browser_control_grant(
+                state,
+                &anchor.workspace_id,
+                anchor.session_id.as_deref(),
+                anchor.lifecycle_token,
+                Instant::now(),
+            )?;
+            eval_browser_action_with_callback(
+                state,
+                browser_semantic_action_script(
+                    &target,
+                    Some(&text),
+                    &anchor.url,
+                    document_identity,
+                )?,
+            )
+            .await?;
         }
     }
 
@@ -2100,6 +2729,7 @@ async fn extract_browser_context_locked(
     }
     let extracted: BrowserContextExtraction = serde_json::from_str(&raw)
         .map_err(|_| "browser page context response was invalid".to_string())?;
+    let document_identity = validate_browser_document_identity(extracted.document_identity)?;
     let (text, text_truncated) =
         normalize_browser_context_text(&extracted.text, MAX_BROWSER_CONTEXT_CHARS);
     let (title, title_truncated) = snapshot
@@ -2113,7 +2743,7 @@ async fn extract_browser_context_locked(
         text.chars().count() + title.chars().count() + display_url.chars().count();
     let semantic_budget = MAX_BROWSER_SEMANTIC_SERIALIZED_CHARS
         .min(MAX_BROWSER_CONTEXT_ENVELOPE_CHARS.saturating_sub(fixed_envelope_chars));
-    let (semantic_items, semantic_truncated) =
+    let (semantic_items, semantic_targets, semantic_truncated) =
         normalize_browser_semantic_map(extracted.semantic_map, semantic_budget);
 
     // Page-load callbacks do not take the operation lock. Repeat the complete
@@ -2146,7 +2776,9 @@ async fn extract_browser_context_locked(
         lifecycle_token,
         &initial_url,
         initial_page_load_revision,
+        document_identity,
         semantic_items,
+        semantic_targets,
         semantic_truncated,
     )?;
 
@@ -2336,17 +2968,21 @@ mod tests {
 
     use super::{
         advance_lifecycle_token, arm_browser_control_grant, browser_action_anchor_matches_context,
-        browser_scroll_script, clear_browser_control_grant, consume_semantic_map_for_anchor,
-        context_is_ready_for_url, control_grant_is_current, control_grant_status,
+        browser_scroll_script, browser_semantic_action_script, clear_browser_control_grant,
+        click_target_is_compatible, consume_semantic_map_for_anchor, context_is_ready_for_url,
+        control_grant_is_current, control_grant_status, fill_target_is_compatible,
         mark_context_loading, normalize_browser_bounds, normalize_browser_context_text,
-        normalize_browser_scroll_delta, normalize_browser_semantic_map,
-        occlusion_request_is_current, page_load_matches_expected, page_load_revision_is_current,
-        prepare_browser_control_action, require_action_native_url,
+        normalize_browser_fill_text, normalize_browser_scroll_delta,
+        normalize_browser_semantic_map, occlusion_request_is_current, page_load_matches_expected,
+        page_load_revision_is_current, parse_browser_action_callback,
+        prepare_browser_control_action, require_action_native_url, require_browser_control_grant,
         sanitize_browser_link_destination, semantic_item_serialized_chars,
-        semantic_map_record_is_current, should_persist_context_url, validate_browser_url,
-        BrowserActionAnchor, BrowserBounds, BrowserContext, BrowserControlAction,
-        BrowserControlGrant, BrowserControlStatus, BrowserSemanticItemExtraction,
-        BrowserSemanticMap, BrowserSemanticMapExtraction, BrowserSemanticMapRecord, BrowserState,
+        semantic_map_record_is_current, should_persist_context_url,
+        validate_browser_document_identity, validate_browser_reference, validate_browser_url,
+        BrowserActionAnchor, BrowserActionResult, BrowserBounds, BrowserContext,
+        BrowserControlAction, BrowserControlGrant, BrowserControlStatus,
+        BrowserSemanticItemExtraction, BrowserSemanticMap, BrowserSemanticMapExtraction,
+        BrowserSemanticMapRecord, BrowserSemanticTargetRecord, BrowserState,
         MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
@@ -2447,6 +3083,30 @@ mod tests {
         assert!(!script.contains("localStorage"));
         assert!(!script.contains("sessionStorage"));
         assert!(!script.contains(".value"));
+        assert!(script.contains("performance.timeOrigin"));
+        assert!(script.contains("documentIdentity"));
+    }
+
+    #[test]
+    fn document_identity_is_private_finite_and_distinguishes_same_url_documents() {
+        assert_eq!(validate_browser_document_identity(Some(42.5)), Ok(42.5));
+        assert!(validate_browser_document_identity(Some(0.0)).is_err());
+        assert!(validate_browser_document_identity(Some(f64::NAN)).is_err());
+        assert!(validate_browser_document_identity(None).is_err());
+
+        let old_document = 42.5;
+        let new_document = 43.5;
+        assert_ne!(old_document, new_document);
+        let script = browser_semantic_action_script(
+            &target("button", "button", None),
+            None,
+            "https://example.test/page",
+            old_document,
+        )
+        .unwrap();
+        assert!(script.contains("expectedDocumentIdentity"));
+        assert!(script.contains("performance.timeOrigin !== expectedDocumentIdentity"));
+        assert!(!script.contains("documentIdentity:"));
     }
 
     fn action_anchor_and_context() -> (BrowserActionAnchor, BrowserContext) {
@@ -2472,6 +3132,22 @@ mod tests {
                 lifecycle_token: anchor.lifecycle_token,
                 url: anchor.url.clone(),
                 page_load_revision: anchor.page_load_revision,
+                document_identity: 1.0,
+                targets: vec![BrowserSemanticTargetRecord {
+                    reference: "e1".to_string(),
+                    ordinal: 2,
+                    role: "button".to_string(),
+                    name: "Save".to_string(),
+                    destination: None,
+                    disabled: Some(false),
+                    checked: None,
+                    selected: None,
+                    expanded: None,
+                    pressed: None,
+                    tag: "button".to_string(),
+                    input_type: None,
+                    content_editable: false,
+                }],
             }),
             ..BrowserContext::default()
         };
@@ -2548,6 +3224,31 @@ mod tests {
             .is_err()
         );
         assert!(invalid_payload_keeps_map.semantic_map.is_some());
+    }
+
+    #[test]
+    fn unknown_reference_is_rejected_without_target_lookup_or_side_effect() {
+        let (anchor, context) = action_anchor_and_context();
+        let state = BrowserState::default();
+        let scope = super::scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
+        state.contexts.lock().unwrap().insert(scope, context);
+        assert_eq!(
+            super::browser_action_target(&state, &anchor, "e1")
+                .unwrap()
+                .0
+                .reference,
+            "e1"
+        );
+        assert!(super::browser_action_target(&state, &anchor, "e2").is_err());
+        assert!(state
+            .contexts
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .semantic_map
+            .is_some());
     }
 
     #[test]
@@ -2655,6 +3356,23 @@ mod tests {
     }
 
     #[test]
+    fn grant_is_rechecked_after_one_shot_consumption_boundary() {
+        let state = BrowserState::default();
+        let now = Instant::now();
+        *state.control_grant.lock().unwrap() = Some(BrowserControlGrant {
+            scope: "workspace\u{1f}|session".to_string(),
+            lifecycle_token: 8,
+            expires_at: now,
+        });
+        assert!(
+            require_browser_control_grant(&state, "workspace", Some("session"), 8, now,).is_err()
+        );
+        assert!(state.control_grant.lock().unwrap().is_none());
+        // The action map is consumed before this final check; expiry therefore
+        // fails closed and requires a fresh context rather than retrying it.
+    }
+
+    #[test]
     fn scroll_actions_are_finite_bounded_and_use_a_fixed_literal_script() {
         assert_eq!(
             normalize_browser_scroll_delta(2_000.0, -2_000.0),
@@ -2692,6 +3410,9 @@ mod tests {
         assert_eq!(anchor["workspaceId"], "workspace");
         assert_eq!(anchor["pageLoadRevision"], 4);
         assert!(anchor.get("workspace_id").is_none());
+        let mut anchor_with_extra = anchor.clone();
+        anchor_with_extra["extra"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<BrowserActionAnchor>(anchor_with_extra).is_err());
 
         let map = serde_json::to_value(BrowserSemanticMap {
             map_id: "m-8-2".to_string(),
@@ -2703,6 +3424,18 @@ mod tests {
         .unwrap();
         assert_eq!(map["pageLoadRevision"], 4);
         assert!(map.get("page_load_revision").is_none());
+    }
+
+    #[test]
+    fn action_result_never_echoes_reference_or_fill_text() {
+        let result = serde_json::to_string(&BrowserActionResult {
+            action: "fill".to_string(),
+            status: "executed".to_string(),
+            requires_context_refresh: true,
+        })
+        .unwrap();
+        assert!(!result.contains("e1"));
+        assert!(!result.contains("secret fill value"));
     }
 
     #[test]
@@ -2781,6 +3514,11 @@ mod tests {
             sanitize_browser_link_destination("mailto:person@example.test"),
             (None, true)
         );
+        let prefix = "https://example.test/";
+        let exact = format!("{prefix}{}", "a".repeat(180 - prefix.len()));
+        let (destination, truncated) = sanitize_browser_link_destination(&exact);
+        assert_eq!(destination.as_deref().map(str::len), Some(180));
+        assert!(!truncated);
     }
 
     #[test]
@@ -2800,6 +3538,10 @@ mod tests {
                     selected: Some(true),
                     expanded: Some(false),
                     pressed: Some(true),
+                    ordinal: Some(1),
+                    tag: Some("input".to_string()),
+                    input_type: Some("checkbox".to_string()),
+                    content_editable: Some(false),
                 },
                 BrowserSemanticItemExtraction {
                     role: "<script>evil</script>".to_string(),
@@ -2808,7 +3550,7 @@ mod tests {
                 },
             ],
         };
-        let (items, truncated) = normalize_browser_semantic_map(extracted, 500);
+        let (items, _, truncated) = normalize_browser_semantic_map(extracted, 500);
         assert!(truncated);
         assert_eq!(items.len(), 1);
         let item = &items[0];
@@ -2820,6 +3562,23 @@ mod tests {
         assert_eq!(item.pressed, None);
         assert_eq!(item.destination, None);
         assert!(semantic_item_serialized_chars(&items) <= 500);
+        let (_, targets, _) = normalize_browser_semantic_map(
+            BrowserSemanticMapExtraction {
+                items: vec![BrowserSemanticItemExtraction {
+                    role: "button".to_string(),
+                    name: "Save".to_string(),
+                    ordinal: Some(4),
+                    tag: Some("button".to_string()),
+                    content_editable: Some(false),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            5_000,
+        );
+        assert_eq!(targets[0].reference, "e1");
+        assert_eq!(targets[0].ordinal, 4);
+        assert_eq!(targets[0].tag, "button");
 
         let oversized = BrowserSemanticMapExtraction {
             items: (0..MAX_BROWSER_SEMANTIC_ITEMS + 1)
@@ -2831,7 +3590,7 @@ mod tests {
                 .collect(),
             ..Default::default()
         };
-        let (_, truncated) = normalize_browser_semantic_map(oversized, 5_000);
+        let (_, _, truncated) = normalize_browser_semantic_map(oversized, 5_000);
         assert!(truncated);
     }
 
@@ -2843,6 +3602,9 @@ mod tests {
                     role: "heading".to_string(),
                     level: Some(2),
                     name: "Section".to_string(),
+                    ordinal: Some(1),
+                    tag: Some("h2".to_string()),
+                    content_editable: Some(false),
                     ..Default::default()
                 },
                 BrowserSemanticItemExtraction {
@@ -2854,11 +3616,144 @@ mod tests {
             ],
             ..Default::default()
         };
-        let (items, truncated) = normalize_browser_semantic_map(extracted, 5_000);
+        let (items, _, truncated) = normalize_browser_semantic_map(extracted, 5_000);
         assert!(truncated);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].role, "heading");
         assert_eq!(items[0].level, Some(2));
+    }
+
+    fn target(role: &str, tag: &str, input_type: Option<&str>) -> BrowserSemanticTargetRecord {
+        BrowserSemanticTargetRecord {
+            reference: "e1".to_string(),
+            ordinal: 2,
+            role: role.to_string(),
+            name: "Accessible name".to_string(),
+            destination: (role == "link").then(|| "https://example.test".to_string()),
+            disabled: Some(false),
+            checked: None,
+            selected: None,
+            expanded: None,
+            pressed: None,
+            tag: tag.to_string(),
+            input_type: input_type.map(str::to_string),
+            content_editable: false,
+        }
+    }
+
+    #[test]
+    fn click_and_fill_targets_are_narrowly_compatible() {
+        assert!(click_target_is_compatible(&target(
+            "button", "button", None
+        )));
+        assert!(click_target_is_compatible(&target("link", "a", None)));
+        assert!(click_target_is_compatible(&target(
+            "checkbox",
+            "input",
+            Some("checkbox")
+        )));
+        assert!(click_target_is_compatible(&target(
+            "radio",
+            "input",
+            Some("radio")
+        )));
+        assert!(click_target_is_compatible(&target(
+            "switch", "button", None
+        )));
+        assert!(!click_target_is_compatible(&target("heading", "h2", None)));
+        assert!(!click_target_is_compatible(&target(
+            "slider",
+            "input",
+            Some("range")
+        )));
+        assert!(!click_target_is_compatible(&target(
+            "select", "select", None
+        )));
+        let mut disabled_button = target("button", "button", None);
+        disabled_button.disabled = Some(true);
+        assert!(!click_target_is_compatible(&disabled_button));
+
+        assert!(fill_target_is_compatible(&target(
+            "textbox",
+            "input",
+            Some("text")
+        )));
+        assert!(fill_target_is_compatible(&target(
+            "textbox", "textarea", None
+        )));
+        assert!(!fill_target_is_compatible(&target(
+            "textbox",
+            "input",
+            Some("password")
+        )));
+        assert!(!fill_target_is_compatible(&target(
+            "textbox",
+            "input",
+            Some("file")
+        )));
+        assert!(!fill_target_is_compatible(&target("textbox", "div", None)));
+        assert!(!fill_target_is_compatible(&target(
+            "textbox",
+            "input",
+            Some("hidden")
+        )));
+        let mut editable = target("textbox", "textarea", None);
+        editable.content_editable = true;
+        assert!(!fill_target_is_compatible(&editable));
+    }
+
+    #[test]
+    fn references_and_fill_text_are_bounded_before_map_consumption() {
+        assert!(validate_browser_reference("e1").is_ok());
+        assert!(validate_browser_reference("e80").is_ok());
+        assert!(validate_browser_reference("e0").is_err());
+        assert!(validate_browser_reference("e01").is_err());
+        assert!(validate_browser_reference("button").is_err());
+        assert!(validate_browser_reference("e81").is_err());
+        assert!(normalize_browser_fill_text("safe text").is_ok());
+        assert!(normalize_browser_fill_text(&"x".repeat(2_001)).is_err());
+        assert_eq!(
+            normalize_browser_fill_text("line\r\nfeed"),
+            Ok("line\nfeed".to_string())
+        );
+        assert!(normalize_browser_fill_text("bad\u{0000}value").is_err());
+        assert!(normalize_browser_fill_text("bad\u{000b}value").is_err());
+    }
+
+    #[test]
+    fn action_script_uses_escaped_data_and_callback_only_confirms_status() {
+        let mut item = target("textbox", "input", Some("text"));
+        item.name = "quote \" and </script>".to_string();
+        let script = browser_semantic_action_script(
+            &item,
+            Some("safe \" text"),
+            "https://example.test/page",
+            1.0,
+        )
+        .unwrap();
+        assert!(script.contains("expected"));
+        assert!(script.contains("window.location.href !== expectedUrl"));
+        assert!(script.contains("const result = ("));
+        assert!(script.contains("ok, reason"));
+        assert!(!script.contains("const result = JSON.stringify"));
+        assert!(script.contains("dispatchEvent"));
+        assert!(script.contains("Object.getOwnPropertyDescriptor"));
+        assert!(script.contains("checked:"));
+        assert!(script.contains("selected:"));
+        assert!(script.contains("expanded:"));
+        assert!(script.contains("pressed:"));
+        assert!(script.contains("return clean(url.toString(), maxDestinationChars);"));
+        assert!(!script.contains("value.length >= maxDestinationChars"));
+        assert!(!script.contains("querySelector"));
+        assert!(!script.contains("innerHTML"));
+        assert!(!script.contains("document.cookie"));
+        assert!(!script.contains("eval("));
+        assert!(parse_browser_action_callback(r#"{"ok":true,"reason":"ok"}"#).is_ok());
+        assert_eq!(
+            parse_browser_action_callback(r#"{"ok":false,"reason":"stale"}"#),
+            Err("browser action anchor is stale".to_string())
+        );
+        assert!(parse_browser_action_callback("not-json").is_err());
     }
 
     #[test]
@@ -2870,6 +3765,8 @@ mod tests {
             lifecycle_token: 8,
             url: "https://example.test/page".to_string(),
             page_load_revision: 4,
+            document_identity: 1.0,
+            targets: Vec::new(),
         };
         assert!(semantic_map_record_is_current(
             Some(&record),
@@ -2914,6 +3811,8 @@ mod tests {
             lifecycle_token: 3,
             url: url.to_string(),
             page_load_revision: 4,
+            document_identity: 1.0,
+            targets: Vec::new(),
         };
         assert!(!semantic_map_record_is_current(
             Some(&record),
@@ -2936,6 +3835,8 @@ mod tests {
                 lifecycle_token: 1,
                 url: "https://example.test/old".to_string(),
                 page_load_revision: 1,
+                document_identity: 1.0,
+                targets: Vec::new(),
             }),
             page_load_revision: 1,
             ..BrowserContext::default()
