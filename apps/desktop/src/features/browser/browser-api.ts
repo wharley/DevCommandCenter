@@ -26,6 +26,28 @@ export type BrowserAgentContext = {
 	text: string;
 	selectionOnly: boolean;
 	truncated: boolean;
+	semanticMap: BrowserSemanticMap;
+};
+
+/** Opaque, page-local references; these are not DOM selectors or automation locators. */
+export type BrowserSemanticMap = {
+	mapId: string;
+	generation: number;
+	items: BrowserSemanticItem[];
+	truncated: boolean;
+};
+
+export type BrowserSemanticItem = {
+	reference: string;
+	role: string;
+	level?: number;
+	name: string;
+	destination?: string;
+	disabled?: boolean;
+	checked?: boolean;
+	selected?: boolean;
+	expanded?: boolean;
+	pressed?: boolean;
 };
 
 export function openBrowser(input: {

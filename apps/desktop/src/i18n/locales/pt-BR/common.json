@@ -2912,6 +2912,14 @@
       "truncated": "Truncado",
       "selection": "texto selecionado",
       "visibleText": "texto visível da página",
+      "semanticMap": "Mapa semântico truncado",
+      "mapId": "ID do mapa",
+      "generation": "Geração",
+      "visibleElements": "Elementos visíveis",
+      "name": "Nome",
+      "destination": "Destino",
+      "states": "Estados",
+      "noVisibleElements": "Nenhum elemento visível elegível",
       "yes": "sim",
       "no": "não"
     }

@@ -703,6 +703,14 @@ export function SessionWorkbench({
 					visibleText: t("browser.agentContext.visibleText"),
 					yes: t("browser.agentContext.yes"),
 					no: t("browser.agentContext.no"),
+					semanticMap: t("browser.agentContext.semanticMap"),
+					mapId: t("browser.agentContext.mapId"),
+					generation: t("browser.agentContext.generation"),
+					visibleElements: t("browser.agentContext.visibleElements"),
+					name: t("browser.agentContext.name"),
+					destination: t("browser.agentContext.destination"),
+					states: t("browser.agentContext.states"),
+					noVisibleElements: t("browser.agentContext.noVisibleElements"),
 				}),
 			});
 			if (browserSplit) {

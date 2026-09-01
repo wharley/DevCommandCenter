@@ -24,6 +24,20 @@ const DEFAULT_URL: &str = "https://www.google.com/";
 const MAX_BROWSER_DIMENSION: f64 = 16_384.0;
 const MAX_BROWSER_CONTEXT_CHARS: usize = 6_000;
 const MAX_BROWSER_TITLE_CHARS: usize = 300;
+/// Bounds for the deliberately small, human-requested semantic page map.
+/// These constants are interpolated into the fixed page-side extraction script
+/// and enforced again at the Rust trust boundary.
+const MAX_BROWSER_SEMANTIC_CANDIDATES: usize = 300;
+const MAX_BROWSER_SEMANTIC_SCAN_NODES: usize = 1_500;
+const MAX_BROWSER_SEMANTIC_ANCESTORS: usize = 64;
+const MAX_BROWSER_CONTEXT_TEXT_NODES: usize = 600;
+const MAX_BROWSER_SEMANTIC_NAME_TEXT_NODES: usize = 24;
+const MAX_BROWSER_SEMANTIC_ITEMS: usize = 80;
+const MAX_BROWSER_SEMANTIC_NAME_CHARS: usize = 120;
+const MAX_BROWSER_SEMANTIC_DESTINATION_CHARS: usize = 180;
+const MAX_BROWSER_SEMANTIC_SERIALIZED_CHARS: usize = 5_000;
+const MAX_BROWSER_CONTEXT_ENVELOPE_CHARS: usize = 14_000;
+const MAX_BROWSER_CONTEXT_URL_CHARS: usize = 2_048;
 const BROWSER_CONTEXT_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -49,14 +63,76 @@ pub struct BrowserAgentContext {
     pub text: String,
     pub selection_only: bool,
     pub truncated: bool,
+    pub semantic_map: BrowserSemanticMap,
 }
 
-#[derive(Debug, Deserialize)]
+/// A page-local, opaque reference map intended to make a later, separately
+/// permissioned interaction contract possible. The references are not CSS,
+/// XPath, DOM ids, or locators; this command exposes no automation API.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserSemanticMap {
+    pub map_id: String,
+    pub generation: u64,
+    pub items: Vec<BrowserSemanticItem>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserSemanticItem {
+    /// Opaque only within `map_id`; it is deliberately not a page locator.
+    pub reference: String,
+    /// Fixed provider-neutral vocabulary such as heading, button or link.
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<u8>,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pressed: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct BrowserContextExtraction {
     text: String,
     selection_only: bool,
     truncated: bool,
+    #[serde(default)]
+    semantic_map: BrowserSemanticMapExtraction,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct BrowserSemanticMapExtraction {
+    #[serde(default)]
+    items: Vec<BrowserSemanticItemExtraction>,
+    #[serde(default)]
+    truncated: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct BrowserSemanticItemExtraction {
+    role: String,
+    level: Option<u8>,
+    name: String,
+    destination: Option<String>,
+    disabled: Option<bool>,
+    checked: Option<bool>,
+    selected: Option<bool>,
+    expanded: Option<bool>,
+    pressed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +179,21 @@ struct BrowserContext {
     /// URL whose finished load was observed for this scope. Context extraction
     /// is unavailable until it matches `expected_url` and the native URL.
     ready_url: Option<String>,
+    /// Changes on every navigation/load start, so a map can never survive a
+    /// page transition merely because the final URL happens to be identical.
+    page_load_revision: u64,
+    semantic_map_generation: u64,
+    semantic_map: Option<BrowserSemanticMapRecord>,
+}
+
+#[derive(Debug, Clone)]
+struct BrowserSemanticMapRecord {
+    scope: String,
+    map_id: String,
+    generation: u64,
+    lifecycle_token: u64,
+    url: String,
+    page_load_revision: u64,
 }
 
 /// Runtime state for the one browser child WebView. Context is keyed by the
@@ -215,23 +306,466 @@ pub fn normalize_browser_context_text(raw: &str, max_chars: usize) -> (String, b
     (text.trim().to_string(), truncated)
 }
 
+fn normalize_browser_semantic_text(raw: &str, max_chars: usize) -> (String, bool) {
+    let mut text = String::new();
+    let mut chars = 0usize;
+    let mut truncated = false;
+    let mut previous_space = false;
+    for character in raw.chars() {
+        let character = if character.is_control() || character.is_whitespace() {
+            ' '
+        } else {
+            character
+        };
+        if character == ' ' && previous_space {
+            continue;
+        }
+        if chars == max_chars {
+            truncated = true;
+            break;
+        }
+        previous_space = character == ' ';
+        text.push(character);
+        chars += 1;
+    }
+    (text.trim().to_string(), truncated)
+}
+
+/// Produces a display-only link destination. The page is untrusted, so the
+/// backend removes credentials, query strings and fragments even if the fixed
+/// extraction script was modified by page globals or returned hostile JSON.
+pub fn sanitize_browser_link_destination(raw: &str) -> (Option<String>, bool) {
+    let Ok(mut url) = Url::parse(raw.trim()) else {
+        return (None, !raw.trim().is_empty());
+    };
+    if !matches!(url.scheme().to_ascii_lowercase().as_str(), "https" | "http")
+        || url.host_str().is_none()
+    {
+        return (None, true);
+    }
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    let destination = url.to_string();
+    let (destination, truncated) =
+        normalize_browser_semantic_text(&destination, MAX_BROWSER_SEMANTIC_DESTINATION_CHARS);
+    if truncated || destination.is_empty() {
+        (None, true)
+    } else {
+        (Some(destination), false)
+    }
+}
+
+fn canonical_semantic_role(raw: &str) -> Option<&'static str> {
+    match raw {
+        "heading" => Some("heading"),
+        "button" => Some("button"),
+        "link" => Some("link"),
+        "textbox" => Some("textbox"),
+        "select" => Some("select"),
+        "checkbox" => Some("checkbox"),
+        "radio" => Some("radio"),
+        "switch" => Some("switch"),
+        "slider" => Some("slider"),
+        "spinbutton" => Some("spinbutton"),
+        "option" => Some("option"),
+        "file-input" => Some("file-input"),
+        _ => None,
+    }
+}
+
+fn semantic_item_serialized_chars(items: &[BrowserSemanticItem]) -> usize {
+    serde_json::to_string(items)
+        .map(|serialized| serialized.chars().count())
+        .unwrap_or(usize::MAX)
+}
+
+fn normalize_browser_semantic_map(
+    extracted: BrowserSemanticMapExtraction,
+    max_serialized_chars: usize,
+) -> (Vec<BrowserSemanticItem>, bool) {
+    let mut truncated = extracted.truncated || extracted.items.len() > MAX_BROWSER_SEMANTIC_ITEMS;
+    let mut items = Vec::new();
+    for extracted in extracted.items.into_iter().take(MAX_BROWSER_SEMANTIC_ITEMS) {
+        let Some(role) = canonical_semantic_role(extracted.role.as_str()) else {
+            // A malformed page response must not smuggle an arbitrary schema
+            // into a future provider/MCP contract.
+            truncated = true;
+            continue;
+        };
+        let (name, name_truncated) =
+            normalize_browser_semantic_text(&extracted.name, MAX_BROWSER_SEMANTIC_NAME_CHARS);
+        let (destination, destination_truncated) = if role == "link" {
+            extracted
+                .destination
+                .as_deref()
+                .map(sanitize_browser_link_destination)
+                .unwrap_or((None, false))
+        } else {
+            (None, extracted.destination.is_some())
+        };
+        let supports_checked = matches!(role, "checkbox" | "radio" | "switch");
+        let supports_selected = matches!(role, "select" | "option");
+        let level = if role == "heading" {
+            match extracted.level {
+                Some(level @ 1..=6) => Some(level),
+                _ => {
+                    truncated = true;
+                    continue;
+                }
+            }
+        } else {
+            if extracted.level.is_some() {
+                truncated = true;
+            }
+            None
+        };
+        let item = BrowserSemanticItem {
+            reference: format!("e{}", items.len() + 1),
+            role: role.to_string(),
+            level,
+            name,
+            destination,
+            disabled: extracted.disabled,
+            checked: supports_checked.then_some(extracted.checked).flatten(),
+            selected: supports_selected.then_some(extracted.selected).flatten(),
+            expanded: extracted.expanded,
+            pressed: (role == "button").then_some(extracted.pressed).flatten(),
+        };
+        if name_truncated || destination_truncated {
+            truncated = true;
+        }
+        if item.name.is_empty() && item.destination.is_none() {
+            truncated = true;
+            continue;
+        }
+        let mut candidate_items = items.clone();
+        candidate_items.push(item);
+        if semantic_item_serialized_chars(&candidate_items) > max_serialized_chars {
+            truncated = true;
+            break;
+        }
+        items = candidate_items;
+    }
+    (items, truncated)
+}
+
+fn issue_semantic_map(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    lifecycle_token: u64,
+    url: &str,
+    expected_page_load_revision: u64,
+    items: Vec<BrowserSemanticItem>,
+    truncated: bool,
+) -> Result<BrowserSemanticMap, String> {
+    let scope = scope_key(workspace_id, session_id);
+    let mut contexts = state
+        .contexts
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let context = contexts
+        .get_mut(&scope)
+        .ok_or_else(|| "browser page context is unavailable".to_string())?;
+    if !context_is_ready_for_url(context, url)
+        || !page_load_revision_is_current(context.page_load_revision, expected_page_load_revision)
+    {
+        return Err("browser page changed while building semantic map".to_string());
+    }
+    context.semantic_map_generation = context.semantic_map_generation.wrapping_add(1).max(1);
+    let generation = context.semantic_map_generation;
+    let map_id = format!("m-{lifecycle_token}-{generation}");
+    context.semantic_map = Some(BrowserSemanticMapRecord {
+        scope: scope.clone(),
+        map_id: map_id.clone(),
+        generation,
+        lifecycle_token,
+        url: url.to_string(),
+        page_load_revision: expected_page_load_revision,
+    });
+    if !semantic_map_record_is_current(
+        context.semantic_map.as_ref(),
+        &scope,
+        lifecycle_token,
+        url,
+        expected_page_load_revision,
+        &map_id,
+        generation,
+    ) {
+        return Err("browser semantic map became stale".to_string());
+    }
+    Ok(BrowserSemanticMap {
+        map_id,
+        generation,
+        items,
+        truncated,
+    })
+}
+
+fn current_page_load_revision(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    url: &str,
+) -> Result<u64, String> {
+    let contexts = state
+        .contexts
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let context = contexts
+        .get(&scope_key(workspace_id, session_id))
+        .ok_or_else(|| "browser page context is unavailable".to_string())?;
+    if !context_is_ready_for_url(context, url) {
+        return Err("browser page changed while reading context".to_string());
+    }
+    Ok(context.page_load_revision)
+}
+
 fn browser_context_script() -> String {
     // This code is initiated by the Rust command after scope validation. It
     // does not expose an IPC bridge or a callable DCC API to the remote page.
     format!(
         r#"(() => {{
   try {{
-    const maxChars = {MAX_BROWSER_CONTEXT_CHARS};
-    const clean = (value) => String(value ?? "").replace(/\u0000/g, "").trim();
-    const selection = clean(window.getSelection?.().toString());
-    const visibleText = selection || clean(document.body?.innerText);
+    const maxTextChars = {MAX_BROWSER_CONTEXT_CHARS};
+    const maxCandidates = {MAX_BROWSER_SEMANTIC_CANDIDATES};
+    const maxScanNodes = {MAX_BROWSER_SEMANTIC_SCAN_NODES};
+    const maxAncestors = {MAX_BROWSER_SEMANTIC_ANCESTORS};
+    const maxTextNodes = {MAX_BROWSER_CONTEXT_TEXT_NODES};
+    const maxNameTextNodes = {MAX_BROWSER_SEMANTIC_NAME_TEXT_NODES};
+    const maxItems = {MAX_BROWSER_SEMANTIC_ITEMS};
+    const maxNameChars = {MAX_BROWSER_SEMANTIC_NAME_CHARS};
+    const maxDestinationChars = {MAX_BROWSER_SEMANTIC_DESTINATION_CHARS};
+    const maxMapChars = {MAX_BROWSER_SEMANTIC_SERIALIZED_CHARS};
+    const clean = (value, max = maxNameChars) => String(value ?? "").slice(0, Math.max(max * 4, max))
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, max);
+    let visibilityLimitReached = false;
+    const isVisible = (element) => {{
+      let node = element;
+      for (let depth = 0; node && depth < maxAncestors; depth += 1, node = node.parentElement) {{
+        if (node.hidden || node.inert || node.getAttribute("aria-hidden") === "true") return false;
+        const style = window.getComputedStyle(node);
+        if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity) === 0) return false;
+      }}
+      if (node) {{ visibilityLimitReached = true; return false; }}
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0
+        && rect.right > 0 && rect.bottom > 0
+        && rect.left < window.innerWidth && rect.top < window.innerHeight;
+    }};
+    let semanticTextTruncated = false;
+    const semanticValue = (value, max = maxNameChars) => {{
+      const raw = String(value ?? "");
+      const text = clean(raw, max);
+      if (raw.length > max || text.length >= max) semanticTextTruncated = true;
+      return text;
+    }};
+    // Text nodes can expose authored defaults or live user input from controls.
+    // Walk only a bounded ancestor chain and omit the node unless it can be
+    // proven outside every value-bearing or editable subtree.
+    const textNodeSafety = (node) => {{
+      let element = node?.parentElement || null;
+      for (let depth = 0; depth < maxAncestors; depth += 1) {{
+        if (!element) return {{ safe: false, truncated: true }};
+        const tag = element.tagName.toLowerCase();
+        if (["input", "textarea", "select", "option"].includes(tag) || element.isContentEditable) {{
+          return {{ safe: false, truncated: false }};
+        }}
+        if (element === document.body) return {{ safe: true, truncated: false }};
+        element = element.parentElement;
+      }}
+      return {{ safe: false, truncated: true }};
+    }};
+    const boundedText = (root, maxChars, nodeBudget) => {{
+      if (!root) return {{ text: "", truncated: false }};
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const parts = [];
+      let used = 0;
+      let seen = 0;
+      let truncated = false;
+      let node;
+      while (seen < nodeBudget && (node = walker.nextNode())) {{
+        seen += 1;
+        const safety = textNodeSafety(node);
+        if (!safety.safe) {{
+          if (safety.truncated) truncated = true;
+          continue;
+        }}
+        const parent = node.parentElement;
+        if (!parent || !isVisible(parent)) continue;
+        const remaining = Math.max(0, maxChars - used);
+        const raw = String(node.data ?? "");
+        const part = clean(raw, remaining);
+        if (!part) continue;
+        parts.push(part);
+        used += part.length + 1;
+        if (raw.length > remaining || used >= maxChars) {{ truncated = true; break; }}
+      }}
+      if (seen >= nodeBudget) truncated = true;
+      return {{ text: clean(parts.join(" "), maxChars), truncated }};
+    }};
+    let selectionPolicyTruncated = false;
+    const safeSelection = (() => {{
+      try {{
+        const selection = window.getSelection?.();
+        if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
+        const range = selection.getRangeAt(0);
+        // A multi-node range could cross an editable/control subtree even if
+        // both endpoints look safe, so only one verified text node is allowed.
+        if (range.startContainer !== range.endContainer || range.startContainer.nodeType !== Node.TEXT_NODE) return null;
+        const selectionSafety = textNodeSafety(range.startContainer);
+        if (!selectionSafety.safe) {{
+          if (selectionSafety.truncated) selectionPolicyTruncated = true;
+          return null;
+        }}
+        const raw = selection.toString();
+        return {{ text: clean(raw, maxTextChars), truncated: raw.length > maxTextChars }};
+      }} catch (_) {{
+        selectionPolicyTruncated = true;
+        return null;
+      }}
+    }})();
+    // Visible text is bounded independently. The semantic map never reads a
+    // body-wide text property and never uses a value-bearing control as text.
+    const visibleText = safeSelection
+      ? safeSelection
+      : boundedText(document.body, maxTextChars, maxTextNodes);
+    const labelledByName = (element) => {{
+      const ids = (element.getAttribute("aria-labelledby") || "").trim().split(/\s+/).filter(Boolean).slice(0, 4);
+      const parts = [];
+      for (const id of ids) {{
+        const label = document.getElementById(id);
+        if (label && label !== element && isVisible(label)) {{
+          const text = boundedText(label, maxNameChars, maxNameTextNodes);
+          if (text.truncated) semanticTextTruncated = true;
+          parts.push(text.text);
+        }}
+      }}
+      return semanticValue(parts.filter(Boolean).join(" "));
+    }};
+    const accessibleName = (element) => {{
+      const ariaLabel = semanticValue(element.getAttribute("aria-label"));
+      if (ariaLabel) return ariaLabel;
+      const labelledBy = labelledByName(element);
+      if (labelledBy) return labelledBy;
+      const labels = "labels" in element && element.labels ? Array.from(element.labels).slice(0, 3) : [];
+      const associated = semanticValue(labels.map((label) => {{
+        const text = boundedText(label, maxNameChars, maxNameTextNodes);
+        if (text.truncated) semanticTextTruncated = true;
+        return text.text;
+      }}).join(" "));
+      if (associated) return associated;
+      // These are bounded author-provided labels, never runtime control values.
+      const alt = semanticValue(element.getAttribute("alt"));
+      if (alt) return alt;
+      const title = semanticValue(element.getAttribute("title"));
+      if (title) return title;
+      const placeholder = semanticValue(element.getAttribute("placeholder"));
+      if (placeholder) return placeholder;
+      if (element.isContentEditable || ["input", "textarea", "select"].includes(element.tagName.toLowerCase())) return "";
+      const text = boundedText(element, maxNameChars, maxNameTextNodes);
+      if (text.truncated) semanticTextTruncated = true;
+      return text.text;
+    }};
+    const canonicalRole = (element) => {{
+      const tag = element.tagName.toLowerCase();
+      const explicit = (element.getAttribute("role") || "").toLowerCase();
+      if (/^h[1-6]$/.test(tag)) return "heading";
+      if (explicit === "heading") {{
+        const level = Number.parseInt(element.getAttribute("aria-level") || "", 10);
+        return level >= 1 && level <= 6 ? "heading" : null;
+      }}
+      if (tag === "button" || explicit === "button") return "button";
+      if ((tag === "a" && element.hasAttribute("href")) || explicit === "link") return "link";
+      if (tag === "textarea" || ["textbox", "searchbox"].includes(explicit)) return "textbox";
+      if (tag === "select" || ["combobox", "listbox"].includes(explicit)) return "select";
+      if (explicit === "checkbox") return "checkbox";
+      if (explicit === "radio") return "radio";
+      if (explicit === "switch") return "switch";
+      if (explicit === "slider") return "slider";
+      if (explicit === "spinbutton") return "spinbutton";
+      if (explicit === "option") return "option";
+      if (tag !== "input") return null;
+      const type = (element.getAttribute("type") || "text").toLowerCase();
+      if (type === "hidden" || type === "password") return null;
+      if (["button", "submit", "reset", "image"].includes(type)) return "button";
+      if (type === "checkbox") return "checkbox";
+      if (type === "radio") return "radio";
+      if (type === "range") return "slider";
+      if (type === "number") return "spinbutton";
+      if (type === "file") return "file-input";
+      return "textbox";
+    }};
+    const booleanState = (element, property, ariaName) => {{
+      try {{
+        const aria = element.getAttribute(ariaName);
+        if (aria === "true") return true;
+        if (aria === "false") return false;
+        return typeof element[property] === "boolean" ? element[property] : undefined;
+      }} catch (_) {{ return undefined; }}
+    }};
+    const isCandidate = (element) => {{
+      const tag = element.tagName.toLowerCase();
+      if (["button", "input", "textarea", "select"].includes(tag) || (tag === "a" && element.hasAttribute("href")) || /^h[1-6]$/.test(tag)) return true;
+      return ["heading", "button", "link", "textbox", "searchbox", "combobox", "listbox", "checkbox", "radio", "switch", "slider", "spinbutton", "option"].includes((element.getAttribute("role") || "").toLowerCase());
+    }};
+    const map = {{ items: [], truncated: false }};
+    // This first map intentionally stays in the document tree: closed/open
+    // Shadow DOM and iframe documents need their own scoped budgets and are
+    // not represented by this human-context extraction.
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    let scanned = 0;
+    let candidates = 0;
+    let element;
+    while (scanned < maxScanNodes && (element = walker.nextNode())) {{
+      scanned += 1;
+      if (!isCandidate(element)) continue;
+      candidates += 1;
+      if (candidates > maxCandidates) {{ map.truncated = true; break; }}
+      if (map.items.length >= maxItems) {{ map.truncated = true; break; }}
+      if (!isVisible(element)) continue;
+      const role = canonicalRole(element);
+      if (!role) continue;
+      const item = {{ role, name: accessibleName(element) }};
+      if (role === "heading") {{
+        const tag = element.tagName.toLowerCase();
+        const level = /^h[1-6]$/.test(tag)
+          ? Number.parseInt(tag.slice(1), 10)
+          : Number.parseInt(element.getAttribute("aria-level") || "", 10);
+        if (level < 1 || level > 6) {{ map.truncated = true; continue; }}
+        item.level = level;
+      }}
+      if (role === "link") {{
+        try {{ item.destination = semanticValue(new URL(element.href, window.location.href).toString(), maxDestinationChars); }} catch (_) {{}}
+      }}
+      const disabled = role === "heading" ? undefined : booleanState(element, "disabled", "aria-disabled");
+      const checked = ["checkbox", "radio", "switch"].includes(role) ? booleanState(element, "checked", "aria-checked") : undefined;
+      const selected = ["select", "option"].includes(role) ? booleanState(element, "selected", "aria-selected") : undefined;
+      const expanded = booleanState(element, "ariaExpanded", "aria-expanded");
+      const pressed = role === "button" ? booleanState(element, "ariaPressed", "aria-pressed") : undefined;
+      if (disabled !== undefined) item.disabled = disabled;
+      if (checked !== undefined) item.checked = checked;
+      if (selected !== undefined) item.selected = selected;
+      if (expanded !== undefined) item.expanded = expanded;
+      if (pressed !== undefined) item.pressed = pressed;
+      if (!item.name && !item.destination) continue;
+      if (JSON.stringify([...map.items, item]).length > maxMapChars) {{ map.truncated = true; break; }}
+      map.items.push(item);
+    }}
+    if (scanned >= maxScanNodes || visibilityLimitReached || semanticTextTruncated) map.truncated = true;
     return {{
-      text: visibleText.slice(0, maxChars),
-      selectionOnly: selection.length > 0,
-      truncated: visibleText.length > maxChars,
+      text: visibleText.text,
+      selectionOnly: Boolean(safeSelection),
+      truncated: visibleText.truncated || selectionPolicyTruncated,
+      semanticMap: map,
     }};
   }} catch (_) {{
-    return {{ text: "", selectionOnly: false, truncated: false }};
+    return {{ text: "", selectionOnly: false, truncated: false, semanticMap: {{ items: [], truncated: true }} }};
   }}
 }})()"#,
     )
@@ -391,6 +925,24 @@ fn mark_context_loading(context: &mut BrowserContext, expected_url: String) {
     context.expected_url = Some(expected_url);
     context.ready_url = None;
     context.title = None;
+    context.page_load_revision = context.page_load_revision.wrapping_add(1).max(1);
+    context.semantic_map = None;
+}
+
+fn invalidate_semantic_map(context: &mut BrowserContext) {
+    context.semantic_map = None;
+}
+
+fn invalidate_semantic_map_for_scope(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+) {
+    if let Ok(mut contexts) = state.contexts.lock() {
+        if let Some(context) = contexts.get_mut(&scope_key(workspace_id, session_id)) {
+            invalidate_semantic_map(context);
+        }
+    }
 }
 
 fn context_is_ready_for_url(context: &BrowserContext, url: &str) -> bool {
@@ -399,6 +951,29 @@ fn context_is_ready_for_url(context: &BrowserContext, url: &str) -> bool {
 
 fn should_persist_context_url(context: &BrowserContext, native_url: Option<&str>) -> bool {
     native_url.is_some_and(|url| context_is_ready_for_url(context, url))
+}
+
+fn semantic_map_record_is_current(
+    record: Option<&BrowserSemanticMapRecord>,
+    scope: &str,
+    lifecycle_token: u64,
+    url: &str,
+    page_load_revision: u64,
+    map_id: &str,
+    generation: u64,
+) -> bool {
+    record.is_some_and(|record| {
+        record.scope == scope
+            && record.lifecycle_token == lifecycle_token
+            && record.url == url
+            && record.page_load_revision == page_load_revision
+            && record.map_id == map_id
+            && record.generation == generation
+    })
+}
+
+fn page_load_revision_is_current(current: u64, expected: u64) -> bool {
+    current == expected
 }
 
 fn page_load_matches_expected(
@@ -588,6 +1163,9 @@ fn build_browser(
                         if context.expected_url.as_deref() == Some(payload_url.as_str()) {
                             context.ready_url = None;
                             context.title = None;
+                            context.page_load_revision =
+                                context.page_load_revision.wrapping_add(1).max(1);
+                            invalidate_semantic_map(context);
                         }
                     }
                 }
@@ -699,6 +1277,8 @@ pub async fn browser_open(
             .map_err(|_| "browser state lock poisoned".to_string())?;
         advance_lifecycle_token(&mut token);
     }
+    // Even a reopen to the same URL is a distinct surface lifecycle.
+    invalidate_semantic_map_for_scope(&state, &workspace_id, session_id.as_deref());
     *state
         .lifecycle_open
         .lock()
@@ -873,6 +1453,8 @@ pub async fn browser_extract_context(
     if !context_ready_for_scope(&state, &workspace_id, session_id.as_deref(), &initial_url)? {
         return Err("browser page is still loading".to_string());
     }
+    let initial_page_load_revision =
+        current_page_load_revision(&state, &workspace_id, session_id.as_deref(), &initial_url)?;
 
     let (sender, receiver) = oneshot::channel();
     let sender = Arc::new(Mutex::new(Some(sender)));
@@ -918,18 +1500,67 @@ pub async fn browser_extract_context(
         .map_err(|_| "browser page context response was invalid".to_string())?;
     let (text, text_truncated) =
         normalize_browser_context_text(&extracted.text, MAX_BROWSER_CONTEXT_CHARS);
-    let title = snapshot
+    let (title, title_truncated) = snapshot
         .title
-        .map(|title| normalize_browser_context_text(&title, MAX_BROWSER_TITLE_CHARS).0);
+        .as_deref()
+        .map(|title| normalize_browser_context_text(title, MAX_BROWSER_TITLE_CHARS))
+        .unwrap_or_default();
+    let (display_url, url_truncated) =
+        normalize_browser_context_text(&initial_url, MAX_BROWSER_CONTEXT_URL_CHARS);
+    let fixed_envelope_chars =
+        text.chars().count() + title.chars().count() + display_url.chars().count();
+    let semantic_budget = MAX_BROWSER_SEMANTIC_SERIALIZED_CHARS
+        .min(MAX_BROWSER_CONTEXT_ENVELOPE_CHARS.saturating_sub(fixed_envelope_chars));
+    let (semantic_items, semantic_truncated) =
+        normalize_browser_semantic_map(extracted.semantic_map, semantic_budget);
+
+    // Page-load callbacks do not take the operation lock. Repeat the complete
+    // validity check after parsing untrusted JSON and immediately before the
+    // backend issues the map id/generation.
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser context lifecycle is stale",
+    )?;
+    let final_snapshot = current_snapshot(&state)?;
+    if !final_snapshot.visible || final_snapshot.url.as_deref() != Some(initial_url.as_str()) {
+        return Err("browser page changed while building semantic map".to_string());
+    }
+    if !context_ready_for_scope(&state, &workspace_id, session_id.as_deref(), &initial_url)? {
+        return Err("browser page changed while building semantic map".to_string());
+    }
+    if !page_load_revision_is_current(
+        current_page_load_revision(&state, &workspace_id, session_id.as_deref(), &initial_url)?,
+        initial_page_load_revision,
+    ) {
+        return Err("browser page changed while building semantic map".to_string());
+    }
+    let semantic_map = issue_semantic_map(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        &initial_url,
+        initial_page_load_revision,
+        semantic_items,
+        semantic_truncated,
+    )?;
 
     Ok(BrowserAgentContext {
         workspace_id,
         session_id,
-        url: initial_url,
-        title: title.filter(|title| !title.is_empty()),
+        url: display_url,
+        title: (!title.is_empty()).then_some(title),
         text,
         selection_only: extracted.selection_only,
-        truncated: extracted.truncated || text_truncated,
+        truncated: extracted.truncated
+            || text_truncated
+            || title_truncated
+            || url_truncated
+            || semantic_map.truncated,
+        semantic_map,
     })
 }
 
@@ -1076,6 +1707,7 @@ pub async fn browser_hide(
         .occluded
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    invalidate_semantic_map_for_scope(&state, &workspace_id, session_id.as_deref());
     state
         .lifecycle_token
         .lock()
@@ -1099,9 +1731,12 @@ pub fn shutdown(state: &BrowserState) {
 mod tests {
     use super::{
         advance_lifecycle_token, context_is_ready_for_url, mark_context_loading,
-        normalize_browser_bounds, normalize_browser_context_text, occlusion_request_is_current,
-        page_load_matches_expected, should_persist_context_url, validate_browser_url,
-        BrowserBounds, BrowserContext,
+        normalize_browser_bounds, normalize_browser_context_text, normalize_browser_semantic_map,
+        occlusion_request_is_current, page_load_matches_expected, page_load_revision_is_current,
+        sanitize_browser_link_destination, semantic_item_serialized_chars,
+        semantic_map_record_is_current, should_persist_context_url, validate_browser_url,
+        BrowserBounds, BrowserContext, BrowserSemanticItemExtraction, BrowserSemanticMapExtraction,
+        BrowserSemanticMapRecord, MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
     #[test]
@@ -1181,6 +1816,29 @@ mod tests {
     }
 
     #[test]
+    fn semantic_extraction_script_uses_only_bounded_incremental_walks() {
+        let script = super::browser_context_script();
+        assert!(script.contains("createTreeWalker"));
+        assert!(script.contains("maxScanNodes"));
+        assert!(script.contains("maxTextNodes"));
+        assert!(script.contains("maxCandidates"));
+        assert!(script.contains("maxMapChars"));
+        assert!(script.contains("const textNodeSafety"));
+        assert!(script.contains("[\"input\", \"textarea\", \"select\", \"option\"].includes(tag)"));
+        assert!(script.contains("element.isContentEditable"));
+        assert!(script.contains("const safety = textNodeSafety(node)"));
+        assert!(script.contains("range.startContainer !== range.endContainer"));
+        assert!(script.contains("const selectionSafety = textNodeSafety(range.startContainer)"));
+        assert!(!script.contains("querySelectorAll"));
+        assert!(!script.contains(".innerText"));
+        assert!(!script.contains(".outerHTML"));
+        assert!(!script.contains("document.cookie"));
+        assert!(!script.contains("localStorage"));
+        assert!(!script.contains("sessionStorage"));
+        assert!(!script.contains(".value"));
+    }
+
+    #[test]
     fn only_accepts_finished_loads_for_the_active_expected_url() {
         let scope = "workspace\u{1f}|session-b";
         let mut context = BrowserContext::default();
@@ -1236,6 +1894,188 @@ mod tests {
             &context,
             Some("https://example.test/b"),
         ));
+    }
+
+    #[test]
+    fn sanitizes_semantic_link_destinations_at_the_backend_boundary() {
+        let (destination, truncated) = sanitize_browser_link_destination(
+            "https://user:secret@example.test:8443/a/path?token=secret#private",
+        );
+        assert_eq!(
+            destination.as_deref(),
+            Some("https://example.test:8443/a/path")
+        );
+        assert!(!truncated);
+        assert_eq!(
+            sanitize_browser_link_destination("javascript:alert(1)"),
+            (None, true)
+        );
+        assert_eq!(
+            sanitize_browser_link_destination("mailto:person@example.test"),
+            (None, true)
+        );
+    }
+
+    #[test]
+    fn normalizes_hostile_semantic_payloads_with_budgets_and_boolean_states() {
+        let extracted = BrowserSemanticMapExtraction {
+            truncated: false,
+            items: vec![
+                BrowserSemanticItemExtraction {
+                    role: "checkbox".to_string(),
+                    level: None,
+                    name: format!("Name {}", "x".repeat(500)),
+                    destination: Some(
+                        "https://user:secret@example.test/a?secret=1#fragment".to_string(),
+                    ),
+                    disabled: Some(false),
+                    checked: Some(false),
+                    selected: Some(true),
+                    expanded: Some(false),
+                    pressed: Some(true),
+                },
+                BrowserSemanticItemExtraction {
+                    role: "<script>evil</script>".to_string(),
+                    name: "attempted schema injection".to_string(),
+                    ..Default::default()
+                },
+            ],
+        };
+        let (items, truncated) = normalize_browser_semantic_map(extracted, 500);
+        assert!(truncated);
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.reference, "e1");
+        assert_eq!(item.role, "checkbox");
+        assert_eq!(item.disabled, Some(false));
+        assert_eq!(item.checked, Some(false));
+        assert_eq!(item.selected, None);
+        assert_eq!(item.pressed, None);
+        assert_eq!(item.destination, None);
+        assert!(semantic_item_serialized_chars(&items) <= 500);
+
+        let oversized = BrowserSemanticMapExtraction {
+            items: (0..MAX_BROWSER_SEMANTIC_ITEMS + 1)
+                .map(|_| BrowserSemanticItemExtraction {
+                    role: "button".to_string(),
+                    name: "safe".to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let (_, truncated) = normalize_browser_semantic_map(oversized, 5_000);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn retains_only_valid_heading_levels() {
+        let extracted = BrowserSemanticMapExtraction {
+            items: vec![
+                BrowserSemanticItemExtraction {
+                    role: "heading".to_string(),
+                    level: Some(2),
+                    name: "Section".to_string(),
+                    ..Default::default()
+                },
+                BrowserSemanticItemExtraction {
+                    role: "heading".to_string(),
+                    level: Some(9),
+                    name: "Invalid".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let (items, truncated) = normalize_browser_semantic_map(extracted, 5_000);
+        assert!(truncated);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].role, "heading");
+        assert_eq!(items[0].level, Some(2));
+    }
+
+    #[test]
+    fn semantic_map_records_bind_scope_lifecycle_url_and_page_revision() {
+        let record = BrowserSemanticMapRecord {
+            scope: "workspace\u{1f}|session".to_string(),
+            map_id: "m-8-2".to_string(),
+            generation: 2,
+            lifecycle_token: 8,
+            url: "https://example.test/page".to_string(),
+            page_load_revision: 4,
+        };
+        assert!(semantic_map_record_is_current(
+            Some(&record),
+            "workspace\u{1f}|session",
+            8,
+            "https://example.test/page",
+            4,
+            "m-8-2",
+            2,
+        ));
+        assert!(!semantic_map_record_is_current(
+            Some(&record),
+            "workspace\u{1f}|session",
+            8,
+            "https://example.test/page",
+            5,
+            "m-8-2",
+            2,
+        ));
+        assert!(!semantic_map_record_is_current(
+            Some(&record),
+            "workspace\u{1f}|other-session",
+            8,
+            "https://example.test/page",
+            4,
+            "m-8-2",
+            2,
+        ));
+    }
+
+    #[test]
+    fn rejects_a_same_url_response_after_page_load_revision_changes() {
+        let url = "https://example.test/same-url";
+        assert!(page_load_revision_is_current(4, 4));
+        // Reloading or navigating back to an identical URL still invalidates
+        // the old eval callback because PageLoad Started advanced 4 -> 5.
+        assert!(!page_load_revision_is_current(5, 4));
+        let record = BrowserSemanticMapRecord {
+            scope: "workspace\u{1f}|session".to_string(),
+            map_id: "m-3-1".to_string(),
+            generation: 1,
+            lifecycle_token: 3,
+            url: url.to_string(),
+            page_load_revision: 4,
+        };
+        assert!(!semantic_map_record_is_current(
+            Some(&record),
+            "workspace\u{1f}|session",
+            3,
+            url,
+            5,
+            "m-3-1",
+            1,
+        ));
+    }
+
+    #[test]
+    fn loading_invalidates_semantic_maps_and_advances_page_revision() {
+        let mut context = BrowserContext {
+            semantic_map: Some(BrowserSemanticMapRecord {
+                scope: "workspace\u{1f}|".to_string(),
+                map_id: "m-1-1".to_string(),
+                generation: 1,
+                lifecycle_token: 1,
+                url: "https://example.test/old".to_string(),
+                page_load_revision: 1,
+            }),
+            page_load_revision: 1,
+            ..BrowserContext::default()
+        };
+        mark_context_loading(&mut context, "https://example.test/new".to_string());
+        assert_eq!(context.page_load_revision, 2);
+        assert!(context.semantic_map.is_none());
     }
 
     #[test]
