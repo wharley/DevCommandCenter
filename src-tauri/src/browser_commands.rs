@@ -31,6 +31,7 @@ const BROWSER_CONTEXT_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct BrowserSnapshot {
     pub workspace_id: String,
     pub session_id: Option<String>,
+    pub lifecycle_token: u64,
     pub visible: bool,
     pub url: Option<String>,
     pub title: Option<String>,
@@ -113,6 +114,11 @@ pub struct BrowserState {
     active_workspace: Arc<Mutex<Option<String>>>,
     active_session: Arc<Mutex<Option<String>>>,
     visible: Arc<Mutex<bool>>,
+    /// Monotonically identifies one intentional browser-open lifecycle. A
+    /// stale temporary-occlusion restore can never affect a later reopen.
+    lifecycle_token: Arc<Mutex<u64>>,
+    lifecycle_open: Arc<Mutex<bool>>,
+    occluded: Arc<Mutex<bool>>,
     /// Serializes native child-WebView operations in IPC arrival order, also
     /// across async scope validation. Context extraction keeps it through its
     /// short, bounded native callback wait so a new command cannot change its
@@ -129,6 +135,9 @@ impl Default for BrowserState {
             active_workspace: Arc::new(Mutex::new(None)),
             active_session: Arc::new(Mutex::new(None)),
             visible: Arc::new(Mutex::new(false)),
+            lifecycle_token: Arc::new(Mutex::new(0)),
+            lifecycle_open: Arc::new(Mutex::new(false)),
+            occluded: Arc::new(Mutex::new(false)),
             operation_lock: Arc::new(AsyncMutex::new(())),
         }
     }
@@ -248,6 +257,10 @@ fn current_snapshot(state: &BrowserState) -> Result<BrowserSnapshot, String> {
         .visible
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())?;
+    let lifecycle_token = *state
+        .lifecycle_token
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
     let url = state
         .webview
         .lock()
@@ -262,6 +275,7 @@ fn current_snapshot(state: &BrowserState) -> Result<BrowserSnapshot, String> {
     Ok(BrowserSnapshot {
         workspace_id,
         session_id,
+        lifecycle_token,
         visible,
         url,
         title,
@@ -421,6 +435,40 @@ fn callback_matches_scope(
         .is_some_and(|expected| expected == observed_url)
 }
 
+fn occlusion_request_is_current(
+    lifecycle_open: bool,
+    current_token: u64,
+    requested_token: u64,
+) -> bool {
+    lifecycle_open && current_token == requested_token
+}
+
+fn advance_lifecycle_token(token: &mut u64) {
+    *token = token.wrapping_add(1).max(1);
+}
+
+fn require_current_lifecycle(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    requested_token: u64,
+    stale_message: &str,
+) -> Result<(), String> {
+    require_active_scope(state, workspace_id, session_id)?;
+    let current_token = *state
+        .lifecycle_token
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let lifecycle_open = *state
+        .lifecycle_open
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    if !occlusion_request_is_current(lifecycle_open, current_token, requested_token) {
+        return Err(stale_message.to_string());
+    }
+    Ok(())
+}
+
 fn context_ready_for_scope(
     state: &BrowserState,
     workspace_id: &str,
@@ -441,6 +489,7 @@ fn build_browser(
     state: &BrowserState,
     url: Url,
     bounds: BrowserBounds,
+    initial_occluded: bool,
 ) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
@@ -458,6 +507,7 @@ fn build_browser(
     let page_load_workspace = state.active_workspace.clone();
     let page_load_session = state.active_session.clone();
     let page_load_visible = state.visible.clone();
+    let page_load_token = state.lifecycle_token.clone();
     let builder = WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(url))
         .on_navigation(move |url| {
             if validate_browser_url(url.as_str()).is_err() {
@@ -576,6 +626,7 @@ fn build_browser(
                 BrowserSnapshot {
                     workspace_id,
                     session_id,
+                    lifecycle_token: page_load_token.lock().map(|token| *token).unwrap_or(0),
                     visible: page_load_visible
                         .lock()
                         .map(|visible| *visible)
@@ -593,13 +644,18 @@ fn build_browser(
             tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
         )
         .map_err(|error| format!("failed to create browser WebView: {error}"))?;
+    if initial_occluded {
+        webview
+            .hide()
+            .map_err(|error| format!("failed to hide browser during initial occlusion: {error}"))?;
+    }
     *state
         .webview
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())? = Some(webview);
     *state_visible
         .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = true;
+        .map_err(|_| "browser state lock poisoned".to_string())? = !initial_occluded;
     Ok(())
 }
 
@@ -612,12 +668,14 @@ pub async fn browser_open(
     session_id: Option<String>,
     initial_url: Option<String>,
     bounds: BrowserBounds,
+    initial_occluded: Option<bool>,
 ) -> Result<BrowserSnapshot, String> {
     let _operation = state.operation_lock.lock().await;
     validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
     let bounds = normalize_browser_bounds(bounds)?;
     let key = scope_key(&workspace_id, session_id.as_deref());
     let requested_url = initial_url.is_some();
+    let initial_occluded = initial_occluded.unwrap_or(false);
     let existing = state
         .webview
         .lock()
@@ -628,12 +686,27 @@ pub async fn browser_open(
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())?
         .clone();
-    set_active_scope(&state, &workspace_id, session_id.as_deref())?;
     let desired = initial_url
         .or_else(|| context_url(&state, &workspace_id, session_id.as_deref()))
         .unwrap_or_else(|| DEFAULT_URL.to_string());
     let desired = validate_browser_url(&desired)?;
+    set_active_scope(&state, &workspace_id, session_id.as_deref())?;
     let should_navigate = requested_url || previous_scope.as_deref() != Some(key.as_str());
+    {
+        let mut token = state
+            .lifecycle_token
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        advance_lifecycle_token(&mut token);
+    }
+    *state
+        .lifecycle_open
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = true;
+    *state
+        .occluded
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = initial_occluded;
     if should_navigate || !existing {
         if let Ok(mut contexts) = state.contexts.lock() {
             mark_context_loading(
@@ -643,7 +716,7 @@ pub async fn browser_open(
         }
     }
     if !existing {
-        build_browser(&app, &state, desired, bounds)?;
+        build_browser(&app, &state, desired, bounds, initial_occluded)?;
     } else {
         let webview = state
             .webview
@@ -667,13 +740,17 @@ pub async fn browser_open(
                     bounds.height.max(1.0),
                 ))
                 .map_err(|error| error.to_string())?;
-            webview.show().map_err(|error| error.to_string())?;
+            if initial_occluded {
+                webview.hide().map_err(|error| error.to_string())?;
+            } else {
+                webview.show().map_err(|error| error.to_string())?;
+            }
         }
     }
     *state
         .visible
         .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = true;
+        .map_err(|_| "browser state lock poisoned".to_string())? = !initial_occluded;
     let snapshot = current_snapshot(&state)?;
     emit_snapshot(&app, snapshot.clone());
     Ok(snapshot)
@@ -686,12 +763,19 @@ pub async fn browser_navigate(
     sessions: State<'_, SessionCommandState>,
     workspace_id: String,
     session_id: Option<String>,
+    lifecycle_token: u64,
     url: String,
 ) -> Result<BrowserSnapshot, String> {
     let _operation = state.operation_lock.lock().await;
     validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
     let url = validate_browser_url(&url)?;
-    require_active_scope(&state, &workspace_id, session_id.as_deref())?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser navigation lifecycle is stale",
+    )?;
     if let Ok(mut contexts) = state.contexts.lock() {
         mark_context_loading(
             contexts
@@ -723,9 +807,16 @@ pub async fn browser_reload(
     state: State<'_, BrowserState>,
     workspace_id: String,
     session_id: Option<String>,
+    lifecycle_token: u64,
 ) -> Result<BrowserSnapshot, String> {
     let _operation = state.operation_lock.lock().await;
-    require_active_scope(&state, &workspace_id, session_id.as_deref())?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser reload lifecycle is stale",
+    )?;
     {
         let webview = state
             .webview
@@ -761,10 +852,17 @@ pub async fn browser_extract_context(
     sessions: State<'_, SessionCommandState>,
     workspace_id: String,
     session_id: Option<String>,
+    lifecycle_token: u64,
 ) -> Result<BrowserAgentContext, String> {
     let _operation = state.operation_lock.lock().await;
     validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
-    require_active_scope(&state, &workspace_id, session_id.as_deref())?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser context lifecycle is stale",
+    )?;
     let initial_snapshot = current_snapshot(&state)?;
     if !initial_snapshot.visible {
         return Err("browser is not visible".to_string());
@@ -802,7 +900,13 @@ pub async fn browser_extract_context(
         .await
         .map_err(|_| "browser page context timed out".to_string())?
         .map_err(|_| "browser page context response was cancelled".to_string())?;
-    require_active_scope(&state, &workspace_id, session_id.as_deref())?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser context lifecycle is stale",
+    )?;
     let snapshot = current_snapshot(&state)?;
     if !snapshot.visible || snapshot.url.as_deref() != Some(initial_url.as_str()) {
         return Err("browser page changed while reading context".to_string());
@@ -834,10 +938,17 @@ pub async fn browser_set_bounds(
     state: State<'_, BrowserState>,
     workspace_id: String,
     session_id: Option<String>,
+    lifecycle_token: u64,
     bounds: BrowserBounds,
 ) -> Result<(), String> {
     let _operation = state.operation_lock.lock().await;
-    require_active_scope(&state, &workspace_id, session_id.as_deref())?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser layout lifecycle is stale",
+    )?;
     let bounds = normalize_browser_bounds(bounds)?;
     let webview = state
         .webview
@@ -860,15 +971,88 @@ pub async fn browser_set_bounds(
         .map_err(|error| error.to_string())
 }
 
+/// Hide/show the child WebView for a short-lived DCC surface. This lifecycle
+/// is intentionally separate from `browser_hide`, which closes the Browser
+/// surface. The token makes a delayed restore from an old mount harmless.
+#[tauri::command]
+pub async fn browser_set_occluded(
+    app: AppHandle<Wry>,
+    state: State<'_, BrowserState>,
+    workspace_id: String,
+    session_id: Option<String>,
+    lifecycle_token: u64,
+    occluded: bool,
+    bounds: Option<BrowserBounds>,
+) -> Result<BrowserSnapshot, String> {
+    let _operation = state.operation_lock.lock().await;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser visibility lifecycle is stale",
+    )?;
+    let currently_occluded = *state
+        .occluded
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let bounds = bounds.map(normalize_browser_bounds).transpose()?;
+    {
+        let webview = state
+            .webview
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        let webview = webview
+            .as_ref()
+            .ok_or_else(|| "browser is not open".to_string())?;
+        if let Some(bounds) = bounds {
+            webview
+                .set_position(tauri::LogicalPosition::new(bounds.x, bounds.y))
+                .and_then(|_| {
+                    webview.set_size(tauri::LogicalSize::new(bounds.width, bounds.height))
+                })
+                .map_err(|error| error.to_string())?;
+        }
+        if currently_occluded != occluded {
+            if occluded {
+                webview.hide().map_err(|error| error.to_string())?;
+            } else {
+                webview.show().map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    if currently_occluded == occluded {
+        return current_snapshot(&state);
+    }
+    *state
+        .occluded
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = occluded;
+    *state
+        .visible
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = !occluded;
+    let snapshot = current_snapshot(&state)?;
+    emit_snapshot(&app, snapshot.clone());
+    Ok(snapshot)
+}
+
 #[tauri::command]
 pub async fn browser_hide(
     app: AppHandle<Wry>,
     state: State<'_, BrowserState>,
     workspace_id: String,
     session_id: Option<String>,
+    lifecycle_token: u64,
 ) -> Result<BrowserSnapshot, String> {
     let _operation = state.operation_lock.lock().await;
-    require_active_scope(&state, &workspace_id, session_id.as_deref())?;
+    require_current_lifecycle(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        lifecycle_token,
+        "browser close lifecycle is stale",
+    )?;
     {
         let webview = state
             .webview
@@ -884,6 +1068,19 @@ pub async fn browser_hide(
         .visible
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    *state
+        .lifecycle_open
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    *state
+        .occluded
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    state
+        .lifecycle_token
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())
+        .map(|mut token| advance_lifecycle_token(&mut token))?;
     persist_current_context(&state);
     let snapshot = current_snapshot(&state)?;
     emit_snapshot(&app, snapshot.clone());
@@ -901,9 +1098,10 @@ pub fn shutdown(state: &BrowserState) {
 #[cfg(test)]
 mod tests {
     use super::{
-        context_is_ready_for_url, mark_context_loading, normalize_browser_bounds,
-        normalize_browser_context_text, page_load_matches_expected, should_persist_context_url,
-        validate_browser_url, BrowserBounds, BrowserContext,
+        advance_lifecycle_token, context_is_ready_for_url, mark_context_loading,
+        normalize_browser_bounds, normalize_browser_context_text, occlusion_request_is_current,
+        page_load_matches_expected, should_persist_context_url, validate_browser_url,
+        BrowserBounds, BrowserContext,
     };
 
     #[test]
@@ -1038,5 +1236,21 @@ mod tests {
             &context,
             Some("https://example.test/b"),
         ));
+    }
+
+    #[test]
+    fn rejects_occlusion_restores_from_closed_or_previous_lifecycles() {
+        assert!(occlusion_request_is_current(true, 7, 7));
+        assert!(!occlusion_request_is_current(false, 7, 7));
+        assert!(!occlusion_request_is_current(true, 8, 7));
+    }
+
+    #[test]
+    fn advances_token_for_each_open_even_when_scope_is_reused() {
+        let mut token = 1;
+        advance_lifecycle_token(&mut token);
+        assert_eq!(token, 2);
+        advance_lifecycle_token(&mut token);
+        assert_eq!(token, 3);
     }
 }

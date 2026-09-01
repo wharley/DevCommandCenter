@@ -11,6 +11,7 @@ export type BrowserBounds = {
 export type BrowserSnapshot = {
 	workspaceId: string;
 	sessionId: string | null;
+	lifecycleToken: number;
 	visible: boolean;
 	url: string | null;
 	title: string | null;
@@ -32,23 +33,27 @@ export function openBrowser(input: {
 	sessionId: string | null;
 	initialUrl?: string | null;
 	bounds: BrowserBounds;
+	initialOccluded?: boolean;
 }) {
 	return invoke<BrowserSnapshot>("browser_open", {
 		workspaceId: input.workspaceId,
 		sessionId: input.sessionId,
 		initialUrl: input.initialUrl ?? null,
 		bounds: input.bounds,
+		...(input.initialOccluded ? { initialOccluded: true } : {}),
 	});
 }
 
 export function navigateBrowser(input: {
 	workspaceId: string;
 	sessionId: string | null;
+	lifecycleToken: number;
 	url: string;
 }) {
 	return invoke<BrowserSnapshot>("browser_navigate", {
 		workspaceId: input.workspaceId,
 		sessionId: input.sessionId,
+		lifecycleToken: input.lifecycleToken,
 		url: input.url,
 	});
 }
@@ -56,31 +61,37 @@ export function navigateBrowser(input: {
 export function reloadBrowser(input: {
 	workspaceId: string;
 	sessionId: string | null;
+	lifecycleToken: number;
 }) {
 	return invoke<BrowserSnapshot>("browser_reload", {
 		workspaceId: input.workspaceId,
 		sessionId: input.sessionId,
+		lifecycleToken: input.lifecycleToken,
 	});
 }
 
 export function extractBrowserContext(input: {
 	workspaceId: string;
 	sessionId: string | null;
+	lifecycleToken: number;
 }) {
 	return invoke<BrowserAgentContext>("browser_extract_context", {
 		workspaceId: input.workspaceId,
 		sessionId: input.sessionId,
+		lifecycleToken: input.lifecycleToken,
 	});
 }
 
 export function setBrowserBounds(input: {
 	workspaceId: string;
 	sessionId: string | null;
+	lifecycleToken: number;
 	bounds: BrowserBounds;
 }) {
 	return invoke<void>("browser_set_bounds", {
 		workspaceId: input.workspaceId,
 		sessionId: input.sessionId,
+		lifecycleToken: input.lifecycleToken,
 		bounds: input.bounds,
 	});
 }
@@ -88,10 +99,29 @@ export function setBrowserBounds(input: {
 export function hideBrowser(input: {
 	workspaceId: string;
 	sessionId: string | null;
+	lifecycleToken: number;
 }) {
 	return invoke<BrowserSnapshot>("browser_hide", {
 		workspaceId: input.workspaceId,
 		sessionId: input.sessionId,
+		lifecycleToken: input.lifecycleToken,
+	});
+}
+
+/** Temporarily occludes the native child view while a marked DCC portal overlaps it. */
+export function setBrowserOccluded(input: {
+	workspaceId: string;
+	sessionId: string | null;
+	lifecycleToken: number;
+	occluded: boolean;
+	bounds?: BrowserBounds;
+}) {
+	return invoke<BrowserSnapshot>("browser_set_occluded", {
+		workspaceId: input.workspaceId,
+		sessionId: input.sessionId,
+		lifecycleToken: input.lifecycleToken,
+		occluded: input.occluded,
+		...(input.bounds ? { bounds: input.bounds } : {}),
 	});
 }
 

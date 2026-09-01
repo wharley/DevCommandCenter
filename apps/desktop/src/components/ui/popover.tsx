@@ -26,6 +26,7 @@ function PopoverContent({
 		<PopoverPrimitive.Portal>
 			<PopoverPrimitive.Content
 				data-slot="popover-content"
+				data-dcc-browser-occluder="true"
 				align={align}
 				sideOffset={sideOffset}
 				className={cn(

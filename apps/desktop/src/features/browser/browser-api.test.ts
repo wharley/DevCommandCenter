@@ -11,6 +11,7 @@ import {
 	navigateBrowser,
 	openBrowser,
 	setBrowserBounds,
+	setBrowserOccluded,
 } from "./browser-api";
 import {
 	readBrowserBounds,
@@ -46,31 +47,64 @@ describe("browser-api", () => {
 		});
 	});
 
+	it("can start hidden when a marked overlay already covers the viewport", async () => {
+		await openBrowser({
+			workspaceId: "workspace-1",
+			sessionId: null,
+			bounds: { x: 0, y: 0, width: 800, height: 600 },
+			initialOccluded: true,
+		});
+
+		expect(invokeMock).toHaveBeenCalledWith("browser_open", expect.objectContaining({
+			initialOccluded: true,
+		}));
+	});
+
 	it("does not expose arbitrary native webview operations", async () => {
-		await navigateBrowser({ workspaceId: "workspace-1", sessionId: null, url: "https://example.com" });
+		await navigateBrowser({ workspaceId: "workspace-1", sessionId: null, lifecycleToken: 1, url: "https://example.com" });
 		await setBrowserBounds({
 			workspaceId: "workspace-1",
 			sessionId: null,
+			lifecycleToken: 1,
 			bounds: { x: 0, y: 0, width: 1, height: 1 },
 		});
 
 		expect(invokeMock).toHaveBeenNthCalledWith(2, "browser_set_bounds", {
 			workspaceId: "workspace-1",
 			sessionId: null,
+			lifecycleToken: 1,
 			bounds: { x: 0, y: 0, width: 1, height: 1 },
 		});
 		expect(invokeMock).not.toHaveBeenCalledWith("webview_create", expect.anything());
+	});
+
+	it("keeps temporary occlusion scoped to the current browser lifecycle", async () => {
+		await setBrowserOccluded({
+			workspaceId: "workspace-1",
+			sessionId: "session-1",
+			lifecycleToken: 12,
+			occluded: true,
+		});
+
+		expect(invokeMock).toHaveBeenCalledWith("browser_set_occluded", {
+			workspaceId: "workspace-1",
+			sessionId: "session-1",
+			lifecycleToken: 12,
+			occluded: true,
+		});
 	});
 
 	it("requests page context only through the scoped backend command", async () => {
 		await extractBrowserContext({
 			workspaceId: "workspace-1",
 			sessionId: "session-1",
+			lifecycleToken: 1,
 		});
 
 		expect(invokeMock).toHaveBeenCalledWith("browser_extract_context", {
 			workspaceId: "workspace-1",
 			sessionId: "session-1",
+			lifecycleToken: 1,
 		});
 		expect(invokeMock).not.toHaveBeenCalledWith("webview_eval", expect.anything());
 	});

@@ -14,12 +14,15 @@ import {
 	type BrowserBounds,
 	type BrowserSnapshot,
 } from "./browser-api";
+import { isBrowserOccluded, useBrowserOcclusion } from "./browser-occlusion";
 
 type WorkspaceBrowserSurfaceProps = {
 	workspaceId: string;
 	sessionId: string | null;
 	onClose: () => void;
 	onSendToAgent?: (context: BrowserAgentContext) => void;
+	/** Splitter drags hide the native view for the duration of the resize. */
+	forceOccluded?: boolean;
 };
 
 /**
@@ -69,6 +72,7 @@ export function WorkspaceBrowserSurface({
 	sessionId,
 	onClose,
 	onSendToAgent,
+	forceOccluded = false,
 }: WorkspaceBrowserSurfaceProps) {
 	const viewportRef = useRef<HTMLDivElement | null>(null);
 	const boundsFrameRef = useRef<number | null>(null);
@@ -78,11 +82,27 @@ export function WorkspaceBrowserSurface({
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [sendingContext, setSendingContext] = useState(false);
+	const [lifecycleToken, setLifecycleToken] = useState<number | null>(null);
+	const lifecycleTokenRef = useRef<number | null>(null);
+	const updateLifecycleToken = useCallback((next: number) => {
+		lifecycleTokenRef.current = next;
+		setLifecycleToken(next);
+	}, []);
+
+	useBrowserOcclusion({
+		viewportRef,
+		workspaceId,
+		sessionId,
+		lifecycleToken,
+		forceOccluded,
+	});
 
 	const updateBounds = useCallback(() => {
 		const viewport = viewportRef.current;
 		if (!viewport) return;
-		void setBrowserBounds({ workspaceId, sessionId, bounds: readBrowserBounds(viewport) }).catch(() => {
+		const token = lifecycleTokenRef.current;
+		if (token === null) return;
+		void setBrowserBounds({ workspaceId, sessionId, lifecycleToken: token, bounds: readBrowserBounds(viewport) }).catch(() => {
 			// The child may not exist yet during the first layout frame.
 		});
 	}, [sessionId, workspaceId]);
@@ -102,10 +122,18 @@ export function WorkspaceBrowserSurface({
 		const bounds = readBrowserBounds(viewport);
 		setLoading(true);
 		setError(null);
-		void openBrowser({ workspaceId, sessionId, bounds })
+		void openBrowser({ workspaceId, sessionId, bounds, initialOccluded: isBrowserOccluded(viewport) })
 			.then((next) => {
-				if (cancelled) return;
+				if (cancelled) {
+					void hideBrowser({
+						workspaceId,
+						sessionId,
+						lifecycleToken: next.lifecycleToken,
+					}).catch(() => {});
+					return;
+				}
 				setSnapshot(next);
+				updateLifecycleToken(next.lifecycleToken);
 				setAddress(next.url ?? "");
 				setLoading(false);
 				scheduleBoundsUpdate();
@@ -124,8 +152,11 @@ export function WorkspaceBrowserSurface({
 		let unlisten: (() => void) | undefined;
 		let disposed = false;
 		void listenBrowserState((next) => {
+			if (disposed) return;
 			if (next.workspaceId !== workspaceId || next.sessionId !== sessionId) return;
+			if (next.lifecycleToken < (lifecycleTokenRef.current ?? 0)) return;
 			setSnapshot(next);
+			updateLifecycleToken(next.lifecycleToken);
 			if (next.url) setAddress(next.url);
 			setLoading(false);
 		})
@@ -141,11 +172,13 @@ export function WorkspaceBrowserSurface({
 			disposed = true;
 			unlisten?.();
 		};
-	}, [sessionId, workspaceId]);
+	}, [sessionId, updateLifecycleToken, workspaceId]);
 
 	useEffect(() => {
 		return () => {
-			void hideBrowser({ workspaceId, sessionId }).catch(() => {});
+			const lifecycleToken = lifecycleTokenRef.current;
+			if (lifecycleToken === null) return;
+			void hideBrowser({ workspaceId, sessionId, lifecycleToken }).catch(() => {});
 		};
 	}, [sessionId, workspaceId]);
 
@@ -168,11 +201,13 @@ export function WorkspaceBrowserSurface({
 	}, [scheduleBoundsUpdate]);
 
 	const handleNavigate = useCallback(() => {
+		const lifecycleToken = lifecycleTokenRef.current;
+		if (lifecycleToken === null) return;
 		const url = address.trim();
 		if (!url) return;
 		setError(null);
 		setLoading(true);
-		void navigateBrowser({ workspaceId, sessionId, url })
+		void navigateBrowser({ workspaceId, sessionId, lifecycleToken, url })
 			.then((next) => {
 				setSnapshot(next);
 				setAddress(next.url ?? url);
@@ -184,9 +219,11 @@ export function WorkspaceBrowserSurface({
 	}, [address, sessionId, workspaceId]);
 
 	const handleReload = useCallback(() => {
+		const lifecycleToken = lifecycleTokenRef.current;
+		if (lifecycleToken === null) return;
 		setError(null);
 		setLoading(true);
-		void reloadBrowser({ workspaceId, sessionId })
+		void reloadBrowser({ workspaceId, sessionId, lifecycleToken })
 			.catch((reason: unknown) => {
 				setError(reason instanceof Error ? reason.message : String(reason));
 			})
@@ -194,10 +231,12 @@ export function WorkspaceBrowserSurface({
 	}, [sessionId, workspaceId]);
 
 	const handleSendToAgent = useCallback(() => {
+		const lifecycleToken = lifecycleTokenRef.current;
+		if (lifecycleToken === null) return;
 		if (!onSendToAgent || sendingContext) return;
 		setError(null);
 		setSendingContext(true);
-		void extractBrowserContext({ workspaceId, sessionId })
+		void extractBrowserContext({ workspaceId, sessionId, lifecycleToken })
 			.then(onSendToAgent)
 			.catch((reason: unknown) => {
 				setError(reason instanceof Error ? reason.message : String(reason));
@@ -206,7 +245,12 @@ export function WorkspaceBrowserSurface({
 	}, [onSendToAgent, sendingContext, sessionId, workspaceId]);
 
 	const handleClose = useCallback(() => {
-		void hideBrowser({ workspaceId, sessionId }).catch(() => {}).finally(onClose);
+		const lifecycleToken = lifecycleTokenRef.current;
+		if (lifecycleToken === null) {
+			onClose();
+			return;
+		}
+		void hideBrowser({ workspaceId, sessionId, lifecycleToken }).catch(() => {}).finally(onClose);
 	}, [onClose, sessionId, workspaceId]);
 
 	return (

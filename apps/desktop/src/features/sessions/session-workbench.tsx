@@ -1004,6 +1004,7 @@ export function SessionWorkbench({
 							sessionId={sessionId}
 							onClose={handleCloseBrowser}
 							onSendToAgent={handleSendBrowserToAgent}
+							forceOccluded={browserResizing}
 						/>
 					</div>
 				</div>

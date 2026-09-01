@@ -142,11 +142,13 @@ export function DiffAnnotationPopover({
 		<>
 			<div
 				className="fixed inset-0 z-[70] bg-black/5 supports-backdrop-filter:backdrop-blur-[1px] animate-in fade-in-0 duration-100"
+				data-dcc-browser-occluder="true"
 				onMouseDown={onCancel}
 				aria-hidden
 			/>
 			<div
 				ref={cardRef}
+				data-dcc-browser-occluder="true"
 				role="dialog"
 				aria-modal="true"
 				aria-label={t("diffAnnotate.dialogLabel")}

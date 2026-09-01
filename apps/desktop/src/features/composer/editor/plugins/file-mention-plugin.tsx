@@ -168,6 +168,7 @@ export function FileMentionPlugin({
 				return createPortal(
 					<div
 						data-typeahead-popup="mention"
+						data-dcc-browser-occluder="true"
 						className="pointer-events-auto absolute bottom-full left-0 isolate z-[9999] mb-2 w-[min(640px,calc(100vw-2rem))]"
 					>
 						<Command

@@ -3222,6 +3222,7 @@ export function WorkspaceInspectorSidebar({
 				ref={rootRef}
 				className="dcc-inspector flex h-full min-h-0 flex-col overflow-hidden text-foreground"
 				data-dcc-inspector-root
+				data-dcc-browser-occluder="true"
 			>
 				<InspectorModeDock
 					mode={inspectorMode}
