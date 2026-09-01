@@ -5,10 +5,10 @@
 //! The MVP keeps context in memory; durable browser metadata and automation are
 //! separate follow-up features.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::Ipv6Addr;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -57,6 +57,78 @@ const MAX_BROWSER_EVIDENCE_CALLBACK_CHARS: usize = 24_000;
 const MAX_BROWSER_EVIDENCE_LINE: u32 = 1_000_000;
 const BROWSER_EVIDENCE_TTL: Duration = Duration::from_secs(60);
 const BROWSER_EVIDENCE_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_BROWSER_AUDIT_ENTRIES: usize = 256;
+const MAX_BROWSER_AUDIT_SCOPE_CHARS: usize = 128;
+const MAX_BROWSER_AUDIT_PROVIDER_CHARS: usize = 128;
+const MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS: usize = 64;
+#[allow(dead_code)] // Used by the future trusted audit reader above.
+const MAX_BROWSER_AUDIT_READ_LIMIT: usize = 100;
+
+#[allow(dead_code)] // Constructed by the MCP bridge integration in its next slice.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum BrowserAuditOrigin {
+    Ui,
+    Mcp,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum BrowserAuditTool {
+    #[serde(rename = "dcc_browser_context")]
+    Context,
+    #[serde(rename = "dcc_browser_navigate")]
+    Navigate,
+    #[serde(rename = "dcc_browser_reload")]
+    Reload,
+    #[serde(rename = "dcc_browser_scroll")]
+    Scroll,
+    #[serde(rename = "dcc_browser_click")]
+    Click,
+    #[serde(rename = "dcc_browser_fill")]
+    Fill,
+    #[serde(rename = "dcc_browser_evidence_start")]
+    EvidenceStart,
+    #[serde(rename = "dcc_browser_evidence_read")]
+    EvidenceRead,
+    #[serde(rename = "browser_arm_control")]
+    ArmControl,
+    #[serde(rename = "browser_disarm_control")]
+    DisarmControl,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum BrowserAuditGrantState {
+    Armed,
+    Expired,
+    Missing,
+    NotApplicable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum BrowserAuditOutcome {
+    Executed,
+    Rejected,
+    Stale,
+    NotArmed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserAuditRecord {
+    pub origin: BrowserAuditOrigin,
+    pub provider_id: Option<String>,
+    pub lease_fingerprint: Option<String>,
+    pub workspace_id: String,
+    pub session_id: Option<String>,
+    pub tool: BrowserAuditTool,
+    pub grant_state: BrowserAuditGrantState,
+    pub outcome: BrowserAuditOutcome,
+    pub timestamp_ms: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -394,6 +466,9 @@ pub struct BrowserState {
     /// owns only a random, non-enumerable key; the backend owns this record and
     /// consumes it before draining the page-side ring.
     evidence_captures: Arc<Mutex<HashMap<String, BrowserEvidenceCaptureRecord>>>,
+    /// Content-free runtime audit records. This is intentionally not persisted
+    /// or emitted; restart and the bounded ring naturally clear this telemetry.
+    browser_audit: Arc<Mutex<VecDeque<BrowserAuditRecord>>>,
     /// Serializes native child-WebView operations in IPC arrival order, also
     /// across async scope validation. Context extraction keeps it through its
     /// short, bounded native callback wait so a new command cannot change its
@@ -415,6 +490,9 @@ impl Default for BrowserState {
             occluded: Arc::new(Mutex::new(false)),
             control_grant: Arc::new(Mutex::new(None)),
             evidence_captures: Arc::new(Mutex::new(HashMap::new())),
+            browser_audit: Arc::new(Mutex::new(VecDeque::with_capacity(
+                MAX_BROWSER_AUDIT_ENTRIES,
+            ))),
             operation_lock: Arc::new(AsyncMutex::new(())),
         }
     }
@@ -422,6 +500,237 @@ impl Default for BrowserState {
 
 fn scope_key(workspace_id: &str, session_id: Option<&str>) -> String {
     format!("{}\u{1f}|{}", workspace_id, session_id.unwrap_or(""))
+}
+
+fn bounded_browser_audit_field(value: &str, max_chars: usize) -> Option<String> {
+    if value.is_empty() || value.chars().count() > max_chars || value.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn bounded_browser_audit_lease_fingerprint(value: &str) -> Option<String> {
+    let value = bounded_browser_audit_field(value, MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS)?;
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || byte.is_ascii_hexdigit())
+        .then_some(value)
+}
+
+/// Provider identity originates in the trusted session registry, but MCP
+/// audit must still be bounded even if an imported provider id is hostile.
+/// Unlike scope identity, a malformed provider falls back to a fixed label so
+/// an otherwise admissible MCP call still gets exactly one audit record.
+pub(crate) fn bounded_browser_audit_provider_id(value: &str) -> String {
+    let bounded = value
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(MAX_BROWSER_AUDIT_PROVIDER_CHARS)
+        .collect::<String>();
+    if bounded.is_empty() {
+        "unknown".to_string()
+    } else {
+        bounded
+    }
+}
+
+fn browser_audit_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+        .unwrap_or(u64::MAX)
+}
+
+/// Appends only closed, content-free Browser telemetry. Audit failure is
+/// deliberately best-effort: it must never turn a valid Browser operation
+/// into an operation failure or expose a lock/error payload to the caller.
+pub(crate) fn append_browser_audit(
+    state: &BrowserState,
+    origin: BrowserAuditOrigin,
+    provider_id: Option<&str>,
+    lease_fingerprint: Option<&str>,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    tool: BrowserAuditTool,
+    grant_state: BrowserAuditGrantState,
+    outcome: BrowserAuditOutcome,
+) {
+    let Some(workspace_id) =
+        bounded_browser_audit_field(workspace_id, MAX_BROWSER_AUDIT_SCOPE_CHARS)
+    else {
+        return;
+    };
+    let session_id = match session_id {
+        Some(session_id) => Some(
+            match bounded_browser_audit_field(session_id, MAX_BROWSER_AUDIT_SCOPE_CHARS) {
+                Some(session_id) => session_id,
+                None => return,
+            },
+        ),
+        None => None,
+    };
+    let provider_id = match provider_id {
+        Some(provider_id) => Some(bounded_browser_audit_provider_id(provider_id)),
+        None => None,
+    };
+    let lease_fingerprint = match lease_fingerprint {
+        Some(lease_fingerprint) => Some(
+            match bounded_browser_audit_lease_fingerprint(lease_fingerprint) {
+                Some(lease_fingerprint) => lease_fingerprint,
+                None => return,
+            },
+        ),
+        None => None,
+    };
+    if matches!(origin, BrowserAuditOrigin::Ui)
+        && (provider_id.is_some() || lease_fingerprint.is_some())
+    {
+        return;
+    }
+    if matches!(origin, BrowserAuditOrigin::Mcp)
+        && (provider_id.is_none() || lease_fingerprint.is_none())
+    {
+        return;
+    }
+    let record = BrowserAuditRecord {
+        origin,
+        provider_id,
+        lease_fingerprint,
+        workspace_id,
+        session_id,
+        tool,
+        grant_state,
+        outcome,
+        timestamp_ms: browser_audit_timestamp_ms(),
+    };
+    if let Ok(mut audit) = state.browser_audit.lock() {
+        if audit.len() >= MAX_BROWSER_AUDIT_ENTRIES {
+            audit.pop_front();
+        }
+        audit.push_back(record);
+    }
+}
+
+/// Reads a bounded newest-first snapshot for trusted in-process UI code. No
+/// Tauri/MCP command exposes this yet, so there is no new remote query surface.
+#[allow(dead_code)] // Reserved for a future trusted Browser diagnostics view.
+pub(crate) fn read_browser_audit(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    limit: usize,
+) -> Result<Vec<BrowserAuditRecord>, String> {
+    if limit == 0 || limit > MAX_BROWSER_AUDIT_READ_LIMIT {
+        return Err("browser audit limit is invalid".to_string());
+    }
+    if bounded_browser_audit_field(workspace_id, MAX_BROWSER_AUDIT_SCOPE_CHARS).is_none() {
+        return Err("browser audit workspace is invalid".to_string());
+    }
+    if session_id.is_some_and(|session| {
+        bounded_browser_audit_field(session, MAX_BROWSER_AUDIT_SCOPE_CHARS).is_none()
+    }) {
+        return Err("browser audit session is invalid".to_string());
+    }
+    let audit = state
+        .browser_audit
+        .lock()
+        .map_err(|_| "browser audit is unavailable".to_string())?;
+    Ok(audit
+        .iter()
+        .rev()
+        .filter(|record| {
+            record.workspace_id == workspace_id && record.session_id.as_deref() == session_id
+        })
+        .take(limit)
+        .cloned()
+        .collect())
+}
+
+pub(crate) fn browser_audit_grant_state(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    lifecycle_token: Option<u64>,
+) -> BrowserAuditGrantState {
+    let Ok(mut grant) = state.control_grant.lock() else {
+        return BrowserAuditGrantState::Missing;
+    };
+    let now = Instant::now();
+    if grant.as_ref().is_some_and(|grant| grant.expires_at <= now) {
+        *grant = None;
+        return BrowserAuditGrantState::Expired;
+    }
+    let Some(grant) = grant.as_ref() else {
+        return BrowserAuditGrantState::Missing;
+    };
+    if grant.scope != scope_key(workspace_id, session_id)
+        || lifecycle_token.is_some_and(|token| grant.lifecycle_token != token)
+    {
+        return BrowserAuditGrantState::Missing;
+    }
+    BrowserAuditGrantState::Armed
+}
+
+/// Captures the grant state for a controlled read whose lifecycle is owned by
+/// the active native Browser surface. The snapshot is audit metadata only: the
+/// controlled helper still validates scope, lifecycle, visibility, and grant
+/// under its operation lock before it can read or act.
+pub(crate) fn browser_audit_active_grant_state(
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+) -> BrowserAuditGrantState {
+    let expected_scope = scope_key(workspace_id, session_id);
+    let active_scope = match state.active_scope.lock() {
+        Ok(scope) => scope.clone(),
+        Err(_) => return BrowserAuditGrantState::Missing,
+    };
+    if active_scope.as_deref() != Some(expected_scope.as_str()) {
+        return BrowserAuditGrantState::Missing;
+    }
+    let lifecycle_open = match state.lifecycle_open.lock() {
+        Ok(open) => *open,
+        Err(_) => return BrowserAuditGrantState::Missing,
+    };
+    if !lifecycle_open {
+        return BrowserAuditGrantState::Missing;
+    }
+    let lifecycle_token = match state.lifecycle_token.lock() {
+        Ok(token) => *token,
+        Err(_) => return BrowserAuditGrantState::Missing,
+    };
+    browser_audit_grant_state(state, workspace_id, session_id, Some(lifecycle_token))
+}
+
+pub(crate) fn browser_audit_outcome(error: Option<&str>) -> BrowserAuditOutcome {
+    let Some(error) = error else {
+        return BrowserAuditOutcome::Executed;
+    };
+    if error.contains("not armed") {
+        BrowserAuditOutcome::NotArmed
+    } else if error.contains("stale") || error.contains("changed") {
+        BrowserAuditOutcome::Stale
+    } else if error.contains("invalid")
+        || error.contains("incompatible")
+        || error.contains("visible")
+        || error.contains("disabled")
+    {
+        BrowserAuditOutcome::Rejected
+    } else {
+        BrowserAuditOutcome::Failed
+    }
+}
+
+fn browser_audit_tool_for_action(action: &BrowserControlAction) -> BrowserAuditTool {
+    match action {
+        BrowserControlAction::Navigate { .. } => BrowserAuditTool::Navigate,
+        BrowserControlAction::Reload => BrowserAuditTool::Reload,
+        BrowserControlAction::Scroll { .. } => BrowserAuditTool::Scroll,
+        BrowserControlAction::Click { .. } => BrowserAuditTool::Click,
+        BrowserControlAction::Fill { .. } => BrowserAuditTool::Fill,
+    }
 }
 
 /// Browser allowlist used both by commands and by the native navigation hook.
@@ -2798,24 +3107,45 @@ pub async fn browser_arm_control(
     lifecycle_token: u64,
 ) -> Result<BrowserControlStatus, String> {
     let _operation = state.operation_lock.lock().await;
-    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
-    require_current_lifecycle(
-        &state,
-        &workspace_id,
-        session_id.as_deref(),
-        lifecycle_token,
-        "browser control lifecycle is stale",
-    )?;
-    if !current_snapshot(&state)?.visible {
-        return Err("browser is not visible".to_string());
+    let result = async {
+        validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
+        require_current_lifecycle(
+            &state,
+            &workspace_id,
+            session_id.as_deref(),
+            lifecycle_token,
+            "browser control lifecycle is stale",
+        )?;
+        if !current_snapshot(&state)?.visible {
+            return Err("browser is not visible".to_string());
+        }
+        arm_browser_control_grant(
+            &state,
+            &workspace_id,
+            session_id.as_deref(),
+            lifecycle_token,
+            Instant::now(),
+        )
     }
-    arm_browser_control_grant(
+    .await;
+    let grant_state = browser_audit_grant_state(
         &state,
         &workspace_id,
         session_id.as_deref(),
-        lifecycle_token,
-        Instant::now(),
-    )
+        Some(lifecycle_token),
+    );
+    append_browser_audit(
+        &state,
+        BrowserAuditOrigin::Ui,
+        None,
+        None,
+        &workspace_id,
+        session_id.as_deref(),
+        BrowserAuditTool::ArmControl,
+        grant_state,
+        browser_audit_outcome(result.as_ref().err().map(String::as_str)),
+    );
+    result
 }
 
 /// Reports the current in-memory Browser-control grant for the active scope.
@@ -2860,20 +3190,45 @@ pub async fn browser_disarm_control(
     lifecycle_token: u64,
 ) -> Result<BrowserControlStatus, String> {
     let _operation = state.operation_lock.lock().await;
-    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
-    require_current_lifecycle(
+    let result = async {
+        validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
+        require_current_lifecycle(
+            &state,
+            &workspace_id,
+            session_id.as_deref(),
+            lifecycle_token,
+            "browser control lifecycle is stale",
+        )?;
+        clear_browser_control_grant(&state);
+        invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
+        Ok(BrowserControlStatus {
+            armed: false,
+            remaining_ms: 0,
+        })
+    }
+    .await;
+    let grant_state = if result.is_ok() {
+        BrowserAuditGrantState::NotApplicable
+    } else {
+        browser_audit_grant_state(
+            &state,
+            &workspace_id,
+            session_id.as_deref(),
+            Some(lifecycle_token),
+        )
+    };
+    append_browser_audit(
         &state,
+        BrowserAuditOrigin::Ui,
+        None,
+        None,
         &workspace_id,
         session_id.as_deref(),
-        lifecycle_token,
-        "browser control lifecycle is stale",
-    )?;
-    clear_browser_control_grant(&state);
-    invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
-    Ok(BrowserControlStatus {
-        armed: false,
-        remaining_ms: 0,
-    })
+        BrowserAuditTool::DisarmControl,
+        grant_state,
+        browser_audit_outcome(result.as_ref().err().map(String::as_str)),
+    );
+    result
 }
 
 /// Executes only a small allowlist of page-level actions. This is an internal
@@ -2885,7 +3240,29 @@ pub async fn browser_execute_action(
     anchor: BrowserActionAnchor,
     action: BrowserControlAction,
 ) -> Result<BrowserActionResult, String> {
-    execute_browser_control_action(&state, &sessions, anchor, action).await
+    let tool = browser_audit_tool_for_action(&action);
+    let workspace_id = anchor.workspace_id.clone();
+    let session_id = anchor.session_id.clone();
+    let lifecycle_token = anchor.lifecycle_token;
+    let grant_state = browser_audit_grant_state(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        Some(lifecycle_token),
+    );
+    let result = execute_browser_control_action(&state, &sessions, anchor, action).await;
+    append_browser_audit(
+        &state,
+        BrowserAuditOrigin::Ui,
+        None,
+        None,
+        &workspace_id,
+        session_id.as_deref(),
+        tool,
+        grant_state,
+        browser_audit_outcome(result.as_ref().err().map(String::as_str)),
+    );
+    result
 }
 
 /// Shared by the Tauri command and the app-owned MCP listener. It owns the
@@ -3137,7 +3514,28 @@ pub async fn browser_start_evidence_capture(
     sessions: State<'_, SessionCommandState>,
     anchor: BrowserActionAnchor,
 ) -> Result<BrowserEvidenceCaptureHandle, String> {
-    start_browser_evidence_capture(&state, &sessions, anchor).await
+    let workspace_id = anchor.workspace_id.clone();
+    let session_id = anchor.session_id.clone();
+    let lifecycle_token = anchor.lifecycle_token;
+    let grant_state = browser_audit_grant_state(
+        &state,
+        &workspace_id,
+        session_id.as_deref(),
+        Some(lifecycle_token),
+    );
+    let result = start_browser_evidence_capture(&state, &sessions, anchor).await;
+    append_browser_audit(
+        &state,
+        BrowserAuditOrigin::Ui,
+        None,
+        None,
+        &workspace_id,
+        session_id.as_deref(),
+        BrowserAuditTool::EvidenceStart,
+        grant_state,
+        browser_audit_outcome(result.as_ref().err().map(String::as_str)),
+    );
+    result
 }
 
 /// Shared by the Tauri command and app-owned MCP projection. It consumes a
@@ -3269,7 +3667,25 @@ pub async fn browser_read_evidence_capture(
     session_id: Option<String>,
     capture_id: String,
 ) -> Result<BrowserEvidenceResult, String> {
-    read_browser_evidence_capture(&state, &sessions, workspace_id, session_id, capture_id).await
+    let audit_workspace_id = workspace_id.clone();
+    let audit_session_id = session_id.clone();
+    let grant_state =
+        browser_audit_active_grant_state(&state, &audit_workspace_id, audit_session_id.as_deref());
+    let result =
+        read_browser_evidence_capture(&state, &sessions, workspace_id, session_id, capture_id)
+            .await;
+    append_browser_audit(
+        &state,
+        BrowserAuditOrigin::Ui,
+        None,
+        None,
+        &audit_workspace_id,
+        audit_session_id.as_deref(),
+        BrowserAuditTool::EvidenceRead,
+        grant_state,
+        browser_audit_outcome(result.as_ref().err().map(String::as_str)),
+    );
+    result
 }
 
 /// Shared one-shot evidence drain. The binding owns workspace/session; callers
@@ -3410,8 +3826,28 @@ pub async fn browser_extract_context(
     session_id: Option<String>,
     lifecycle_token: u64,
 ) -> Result<BrowserAgentContext, String> {
-    extract_browser_context_for_scope(&state, &sessions, workspace_id, session_id, lifecycle_token)
-        .await
+    let audit_workspace_id = workspace_id.clone();
+    let audit_session_id = session_id.clone();
+    let result = extract_browser_context_for_scope(
+        &state,
+        &sessions,
+        workspace_id,
+        session_id,
+        lifecycle_token,
+    )
+    .await;
+    append_browser_audit(
+        &state,
+        BrowserAuditOrigin::Ui,
+        None,
+        None,
+        &audit_workspace_id,
+        audit_session_id.as_deref(),
+        BrowserAuditTool::Context,
+        BrowserAuditGrantState::NotApplicable,
+        browser_audit_outcome(result.as_ref().err().map(String::as_str)),
+    );
+    result
 }
 
 pub(crate) async fn extract_browser_context_for_scope(
@@ -3803,7 +4239,8 @@ mod tests {
     use std::time::{Duration as StdDuration, Instant};
 
     use super::{
-        advance_lifecycle_token, arm_browser_control_grant, browser_action_anchor_matches_context,
+        advance_lifecycle_token, append_browser_audit, arm_browser_control_grant,
+        browser_action_anchor_matches_context, browser_audit_outcome,
         browser_evidence_cleanup_script, browser_evidence_read_script,
         browser_evidence_start_script, browser_scroll_script, browser_semantic_action_script,
         clear_browser_control_grant, click_target_is_compatible, consume_semantic_map_for_anchor,
@@ -3814,15 +4251,19 @@ mod tests {
         normalize_browser_semantic_map, occlusion_request_is_current, page_load_matches_expected,
         page_load_revision_is_current, parse_browser_action_callback,
         parse_browser_evidence_callback, parse_browser_evidence_cleanup_callback,
-        prepare_browser_control_action, require_action_native_url, require_browser_control_grant,
-        sanitize_browser_evidence_url, sanitize_browser_link_destination,
-        semantic_item_serialized_chars, semantic_map_record_is_current, should_persist_context_url,
+        prepare_browser_control_action, read_browser_audit, require_action_native_url,
+        require_browser_control_grant, sanitize_browser_evidence_url,
+        sanitize_browser_link_destination, semantic_item_serialized_chars,
+        semantic_map_record_is_current, should_persist_context_url,
         validate_browser_document_identity, validate_browser_evidence_capture_id,
         validate_browser_reference, validate_browser_url, BrowserActionAnchor, BrowserActionResult,
-        BrowserBounds, BrowserContext, BrowserControlAction, BrowserControlGrant,
+        BrowserAuditGrantState, BrowserAuditOrigin, BrowserAuditOutcome, BrowserAuditRecord,
+        BrowserAuditTool, BrowserBounds, BrowserContext, BrowserControlAction, BrowserControlGrant,
         BrowserControlStatus, BrowserEvidenceCaptureRecord, BrowserEvidenceEventRaw,
         BrowserSemanticItemExtraction, BrowserSemanticMap, BrowserSemanticMapExtraction,
         BrowserSemanticMapRecord, BrowserSemanticTargetRecord, BrowserState,
+        MAX_BROWSER_AUDIT_ENTRIES, MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS,
+        MAX_BROWSER_AUDIT_PROVIDER_CHARS, MAX_BROWSER_AUDIT_SCOPE_CHARS,
         MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS, MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
@@ -4920,5 +5361,199 @@ mod tests {
             "c-0123456789abcdef0123456789abcdef",
         );
         assert!(state.evidence_captures.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn browser_audit_is_closed_bounded_ordered_and_scope_filtered() {
+        let state = BrowserState::default();
+        for index in 0..(MAX_BROWSER_AUDIT_ENTRIES + 4) {
+            append_browser_audit(
+                &state,
+                BrowserAuditOrigin::Ui,
+                None,
+                None,
+                "workspace",
+                Some("session"),
+                BrowserAuditTool::Context,
+                BrowserAuditGrantState::Armed,
+                if index + 1 == MAX_BROWSER_AUDIT_ENTRIES + 4 {
+                    BrowserAuditOutcome::Failed
+                } else {
+                    BrowserAuditOutcome::Executed
+                },
+            );
+        }
+        append_browser_audit(
+            &state,
+            BrowserAuditOrigin::Ui,
+            None,
+            None,
+            "other-workspace",
+            Some("session"),
+            BrowserAuditTool::Navigate,
+            BrowserAuditGrantState::Missing,
+            BrowserAuditOutcome::Rejected,
+        );
+
+        assert_eq!(
+            state.browser_audit.lock().unwrap().len(),
+            MAX_BROWSER_AUDIT_ENTRIES
+        );
+        let newest = read_browser_audit(&state, "workspace", Some("session"), 1).unwrap();
+        assert_eq!(newest.len(), 1);
+        assert_eq!(newest[0].outcome, BrowserAuditOutcome::Failed);
+        assert_eq!(
+            read_browser_audit(&state, "other-workspace", Some("session"), 1)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            read_browser_audit(&state, "workspace", Some("session"), 100)
+                .unwrap()
+                .len(),
+            100
+        );
+        assert!(read_browser_audit(&state, "workspace", Some("session"), 0).is_err());
+        assert!(read_browser_audit(&state, "workspace", Some("session"), 101).is_err());
+    }
+
+    #[test]
+    fn browser_audit_outcome_classifies_disabled_target_as_rejected() {
+        assert_eq!(
+            browser_audit_outcome(Some("browser action target is disabled")),
+            BrowserAuditOutcome::Rejected
+        );
+    }
+
+    #[test]
+    fn browser_audit_rejects_unsafe_provenance_and_bounds_provider_identity() {
+        let state = BrowserState::default();
+        let long = "x".repeat(MAX_BROWSER_AUDIT_SCOPE_CHARS + 1);
+        append_browser_audit(
+            &state,
+            BrowserAuditOrigin::Ui,
+            Some("provider"),
+            None,
+            "workspace",
+            Some("session"),
+            BrowserAuditTool::Fill,
+            BrowserAuditGrantState::Armed,
+            BrowserAuditOutcome::Executed,
+        );
+        append_browser_audit(
+            &state,
+            BrowserAuditOrigin::Mcp,
+            None,
+            Some("0123456789abcdef"),
+            "workspace",
+            Some("session"),
+            BrowserAuditTool::EvidenceRead,
+            BrowserAuditGrantState::Armed,
+            BrowserAuditOutcome::Executed,
+        );
+        append_browser_audit(
+            &state,
+            BrowserAuditOrigin::Mcp,
+            Some("provider"),
+            Some("not-a-fingerprint"),
+            "workspace",
+            Some("session"),
+            BrowserAuditTool::EvidenceRead,
+            BrowserAuditGrantState::Armed,
+            BrowserAuditOutcome::Executed,
+        );
+        append_browser_audit(
+            &state,
+            BrowserAuditOrigin::Ui,
+            None,
+            None,
+            &long,
+            Some("session"),
+            BrowserAuditTool::Context,
+            BrowserAuditGrantState::Missing,
+            BrowserAuditOutcome::Rejected,
+        );
+        append_browser_audit(
+            &state,
+            BrowserAuditOrigin::Mcp,
+            Some(&"p".repeat(MAX_BROWSER_AUDIT_PROVIDER_CHARS + 1)),
+            Some("0123456789abcdef"),
+            "workspace",
+            Some("session"),
+            BrowserAuditTool::Navigate,
+            BrowserAuditGrantState::Armed,
+            BrowserAuditOutcome::Executed,
+        );
+        append_browser_audit(
+            &state,
+            BrowserAuditOrigin::Mcp,
+            Some("provider"),
+            Some(&"a".repeat(MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS + 1)),
+            "workspace",
+            Some("session"),
+            BrowserAuditTool::Navigate,
+            BrowserAuditGrantState::Armed,
+            BrowserAuditOutcome::Executed,
+        );
+        let audit = state.browser_audit.lock().unwrap();
+        assert_eq!(audit.len(), 1);
+        assert_eq!(
+            audit
+                .front()
+                .and_then(|record| record.provider_id.as_ref())
+                .unwrap(),
+            &"p".repeat(MAX_BROWSER_AUDIT_PROVIDER_CHARS)
+        );
+    }
+
+    #[test]
+    fn browser_audit_serialization_has_only_bounded_safe_fields() {
+        let record = BrowserAuditRecord {
+            origin: BrowserAuditOrigin::Mcp,
+            provider_id: Some("provider".to_string()),
+            lease_fingerprint: Some("0123456789abcdef".to_string()),
+            workspace_id: "workspace".to_string(),
+            session_id: Some("session".to_string()),
+            tool: BrowserAuditTool::Fill,
+            grant_state: BrowserAuditGrantState::NotApplicable,
+            outcome: BrowserAuditOutcome::NotArmed,
+            timestamp_ms: 123,
+        };
+        let serialized = serde_json::to_string(&record).unwrap();
+        for forbidden in ["url", "ref", "text", "message", "events", "token", "error"] {
+            assert!(
+                !serialized.contains(forbidden),
+                "unexpected field: {forbidden}"
+            );
+        }
+        assert!(serialized.contains("leaseFingerprint"));
+        assert!(serialized.contains("notArmed"));
+        assert!(serialized.contains("dcc_browser_fill"));
+        assert!(serialized.contains("mcp"));
+    }
+
+    #[test]
+    fn browser_audit_append_is_best_effort_when_its_lock_is_poisoned() {
+        let state = BrowserState::default();
+        let audit = state.browser_audit.clone();
+        let poisoned = std::thread::spawn(move || {
+            let _guard = audit.lock().unwrap();
+            panic!("poison audit lock for test");
+        })
+        .join();
+        assert!(poisoned.is_err());
+        append_browser_audit(
+            &state,
+            BrowserAuditOrigin::Ui,
+            None,
+            None,
+            "workspace",
+            None,
+            BrowserAuditTool::DisarmControl,
+            BrowserAuditGrantState::NotApplicable,
+            BrowserAuditOutcome::Failed,
+        );
+        assert!(read_browser_audit(&state, "workspace", None, 1).is_err());
     }
 }

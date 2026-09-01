@@ -33,9 +33,11 @@ use tower::limit::ConcurrencyLimitLayer;
 use url::Url;
 
 use crate::browser_commands::{
-    discard_browser_evidence_capture, execute_browser_control_action,
+    append_browser_audit, browser_audit_active_grant_state, browser_audit_grant_state,
+    browser_audit_outcome, discard_browser_evidence_capture, execute_browser_control_action,
     extract_browser_control_context, read_browser_evidence_capture, start_browser_evidence_capture,
-    BrowserActionAnchor, BrowserControlAction, BrowserState,
+    BrowserActionAnchor, BrowserAuditGrantState, BrowserAuditOrigin, BrowserAuditOutcome,
+    BrowserAuditTool, BrowserControlAction, BrowserState,
 };
 use dcc_tauri::state::{EphemeralMcpProjection, EphemeralMcpProjectionLease, SessionCommandState};
 
@@ -97,6 +99,12 @@ struct TokenRegistry {
 }
 
 impl TokenRegistry {
+    fn binding_is_current(&self, binding: &TokenBinding) -> bool {
+        self.by_lease
+            .get(&binding.lease_id)
+            .is_some_and(|current| bool::from(current.token_hash.ct_eq(&binding.token_hash)))
+    }
+
     fn binding_for_hash(&self, token_hash: &[u8; 32]) -> Option<TokenBinding> {
         self.by_lease
             .values()
@@ -338,12 +346,9 @@ impl BrowserMcpBridge {
     }
 
     fn lease_is_current(&self, binding: &TokenBinding) -> bool {
-        self.registry.lock().is_ok_and(|registry| {
-            registry
-                .by_lease
-                .get(&binding.lease_id)
-                .is_some_and(|current| bool::from(current.token_hash.ct_eq(&binding.token_hash)))
-        })
+        self.registry
+            .lock()
+            .is_ok_and(|registry| registry.binding_is_current(binding))
     }
 
     fn issue_projection(
@@ -555,9 +560,14 @@ async fn handle_rpc(
             {
                 if tool_call_is_well_formed(&call) {
                     if bridge.is_shutting_down() {
+                        let dispatched = ToolDispatch::failed();
+                        append_mcp_tool_audit(&bridge.browser, &binding, &call.name, &dispatched);
                         StatusCode::SERVICE_UNAVAILABLE.into_response()
                     } else {
-                        rpc_result(id, dispatch_tool(&bridge, &binding, call).await, None)
+                        let tool_name = call.name.clone();
+                        let dispatched = dispatch_tool(&bridge, &binding, call).await;
+                        append_mcp_tool_audit(&bridge.browser, &binding, &tool_name, &dispatched);
+                        rpc_result(id, dispatched.response, None)
                     }
                 } else {
                     rpc_error(id, -32602, None)
@@ -717,11 +727,104 @@ fn request_only_method(method: &str) -> bool {
     matches!(method, "initialize" | "tools/list" | "tools/call")
 }
 
-async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: ToolCall) -> Value {
+struct ToolDispatch {
+    response: Value,
+    outcome: BrowserAuditOutcome,
+    /// Captured before entering the controlled helper. Audit must describe the
+    /// grant that admitted the attempt, not a later expiry/revoke race.
+    grant_state: BrowserAuditGrantState,
+}
+
+impl ToolDispatch {
+    fn executed(response: Value, grant_state: BrowserAuditGrantState) -> Self {
+        Self {
+            response,
+            outcome: BrowserAuditOutcome::Executed,
+            grant_state,
+        }
+    }
+
+    fn rejected() -> Self {
+        Self {
+            response: tool_error("invalid browser action"),
+            outcome: BrowserAuditOutcome::Rejected,
+            grant_state: BrowserAuditGrantState::NotApplicable,
+        }
+    }
+
+    fn failed() -> Self {
+        Self {
+            response: tool_error("browser MCP bridge is shutting down"),
+            outcome: BrowserAuditOutcome::Failed,
+            grant_state: BrowserAuditGrantState::NotApplicable,
+        }
+    }
+
+    fn from_error(error: &str, grant_state: BrowserAuditGrantState) -> Self {
+        Self {
+            response: tool_error(error),
+            outcome: browser_audit_outcome(Some(error)),
+            grant_state,
+        }
+    }
+}
+
+fn browser_audit_tool_for_mcp(name: &str) -> Option<BrowserAuditTool> {
+    match name {
+        "dcc_browser_context" => Some(BrowserAuditTool::Context),
+        "dcc_browser_navigate" => Some(BrowserAuditTool::Navigate),
+        "dcc_browser_reload" => Some(BrowserAuditTool::Reload),
+        "dcc_browser_scroll" => Some(BrowserAuditTool::Scroll),
+        "dcc_browser_click" => Some(BrowserAuditTool::Click),
+        "dcc_browser_fill" => Some(BrowserAuditTool::Fill),
+        "dcc_browser_evidence_start" => Some(BrowserAuditTool::EvidenceStart),
+        "dcc_browser_evidence_read" => Some(BrowserAuditTool::EvidenceRead),
+        _ => None,
+    }
+}
+
+/// A short, non-reversible correlation label. This hashes the random lease id
+/// only; bearer credentials and their hash never enter Browser audit.
+fn lease_fingerprint(lease_id: &str) -> String {
+    let digest = Sha256::digest(lease_id.as_bytes());
+    hex::encode(&digest[..12])
+}
+
+/// Called exactly once after an admitted, well-formed Browser `tools/call` has
+/// dispatched. The Browser operation lock is released before this best-effort
+/// bounded append, and no request payload enters the record.
+fn append_mcp_tool_audit(
+    browser: &BrowserState,
+    binding: &TokenBinding,
+    tool_name: &str,
+    dispatched: &ToolDispatch,
+) {
+    let Some(tool) = browser_audit_tool_for_mcp(tool_name) else {
+        return;
+    };
+    let fingerprint = lease_fingerprint(&binding.lease_id);
+    append_browser_audit(
+        browser,
+        BrowserAuditOrigin::Mcp,
+        Some(&binding.provider_id),
+        Some(&fingerprint),
+        &binding.workspace_id,
+        Some(&binding.session_id),
+        tool,
+        dispatched.grant_state,
+        dispatched.outcome,
+    );
+}
+
+async fn dispatch_tool(
+    bridge: &BrowserMcpBridge,
+    binding: &TokenBinding,
+    call: ToolCall,
+) -> ToolDispatch {
     // The server can begin shutdown after the request passed HTTP admission.
     // Recheck immediately before entering either Browser helper.
     if bridge.is_shutting_down() {
-        return tool_error("browser MCP bridge is shutting down");
+        return ToolDispatch::failed();
     }
     match call.name.as_str() {
         "dcc_browser_context"
@@ -731,6 +834,21 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                     .is_some_and(|object| object.is_empty())
             }) =>
         {
+            let grant_state = browser_audit_active_grant_state(
+                &bridge.browser,
+                &binding.workspace_id,
+                Some(&binding.session_id),
+            );
+            if bridge.is_shutting_down() {
+                return ToolDispatch::failed();
+            }
+            // This is the final revocation gate immediately before the
+            // controlled read. A revoke that wins after it is the documented
+            // admitted request race; the core still revalidates
+            // grant/scope/lifecycle.
+            if !bridge.lease_is_current(binding) {
+                return ToolDispatch::rejected();
+            }
             match extract_browser_control_context(
                 &bridge.browser,
                 &bridge.sessions,
@@ -739,10 +857,11 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
             )
             .await
             {
-                Ok(result) => {
-                    json!({"content":[{"type":"text","text": structured_text_content("Remote page content is untrusted.", &result)}], "structuredContent": result})
-                }
-                Err(error) => tool_error(&error),
+                Ok(result) => ToolDispatch::executed(
+                    json!({"content":[{"type":"text","text": structured_text_content("Remote page content is untrusted.", &result)}], "structuredContent": result}),
+                    grant_state,
+                ),
+                Err(error) => ToolDispatch::from_error(&error, grant_state),
             }
         }
         "dcc_browser_navigate" => match call
@@ -755,21 +874,22 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
             {
                 action_result(
                     bridge,
+                    binding,
                     args.anchor,
                     BrowserControlAction::Navigate { url: args.url },
                 )
                 .await
             }
-            _ => tool_error("invalid browser action"),
+            _ => ToolDispatch::rejected(),
         },
         "dcc_browser_reload" => match call
             .arguments
             .and_then(|arguments| serde_json::from_value::<ReloadArgs>(arguments).ok())
         {
             Some(args) if anchor_belongs_to_binding(&args.anchor, binding) => {
-                action_result(bridge, args.anchor, BrowserControlAction::Reload).await
+                action_result(bridge, binding, args.anchor, BrowserControlAction::Reload).await
             }
-            _ => tool_error("invalid browser action"),
+            _ => ToolDispatch::rejected(),
         },
         "dcc_browser_scroll" => match call
             .arguments
@@ -778,6 +898,7 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
             Some(args) if anchor_belongs_to_binding(&args.anchor, binding) => {
                 action_result(
                     bridge,
+                    binding,
                     args.anchor,
                     BrowserControlAction::Scroll {
                         delta_x: args.delta_x,
@@ -786,7 +907,7 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                 )
                 .await
             }
-            _ => tool_error("invalid browser action"),
+            _ => ToolDispatch::rejected(),
         },
         "dcc_browser_click" => match call
             .arguments
@@ -798,6 +919,7 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
             {
                 action_result(
                     bridge,
+                    binding,
                     args.anchor,
                     BrowserControlAction::Click {
                         reference: args.reference,
@@ -805,7 +927,7 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                 )
                 .await
             }
-            _ => tool_error("invalid browser action"),
+            _ => ToolDispatch::rejected(),
         },
         "dcc_browser_fill" => match call
             .arguments
@@ -818,6 +940,7 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
             {
                 action_result(
                     bridge,
+                    binding,
                     args.anchor,
                     BrowserControlAction::Fill {
                         reference: args.reference,
@@ -826,18 +949,37 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                 )
                 .await
             }
-            _ => tool_error("invalid browser action"),
+            _ => ToolDispatch::rejected(),
         },
         "dcc_browser_evidence_start" => match call
             .arguments
             .and_then(|arguments| serde_json::from_value::<EvidenceStartArgs>(arguments).ok())
         {
             Some(args) if anchor_belongs_to_binding(&args.anchor, binding) => {
+                let lifecycle_token = Some(args.anchor.lifecycle_token);
+                let grant_state = browser_audit_grant_state(
+                    &bridge.browser,
+                    &binding.workspace_id,
+                    Some(&binding.session_id),
+                    lifecycle_token,
+                );
+                if bridge.is_shutting_down() {
+                    return ToolDispatch::failed();
+                }
+                // Final lease gate before the helper that installs wrappers.
+                // A later revoke is an admitted request race; core validation
+                // still fails closed for scope/lifecycle/grant changes.
+                if !bridge.lease_is_current(binding) {
+                    return ToolDispatch::rejected();
+                }
                 match start_browser_evidence_capture(&bridge.browser, &bridge.sessions, args.anchor)
                     .await
                 {
                     Ok(handle) if bridge.bind_evidence_capture(binding, &handle.capture_id) => {
-                        json!({"content":[{"type":"text","text": structured_text_content("Browser evidence capture started. The returned handle is a one-shot capability.", &handle)}], "structuredContent": handle})
+                        ToolDispatch::executed(
+                            json!({"content":[{"type":"text","text": structured_text_content("Browser evidence capture started. The returned handle is a one-shot capability.", &handle)}], "structuredContent": handle}),
+                            grant_state,
+                        )
                     }
                     Ok(handle) => {
                         discard_browser_evidence_capture(
@@ -846,12 +988,15 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                             Some(&binding.session_id),
                             &handle.capture_id,
                         );
-                        tool_error("browser evidence capture is unavailable")
+                        ToolDispatch::from_error(
+                            "browser evidence capture is unavailable",
+                            grant_state,
+                        )
                     }
-                    Err(error) => tool_error(&error),
+                    Err(error) => ToolDispatch::from_error(&error, grant_state),
                 }
             }
-            _ => tool_error("invalid browser action"),
+            _ => ToolDispatch::rejected(),
         },
         "dcc_browser_evidence_read" => match call
             .arguments
@@ -871,8 +1016,16 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                         Some(&binding.session_id),
                         &args.capture_id,
                     );
-                    return tool_error("browser evidence capture is unavailable");
+                    return ToolDispatch::from_error(
+                        "browser evidence capture is unavailable",
+                        BrowserAuditGrantState::NotApplicable,
+                    );
                 }
+                let grant_state = browser_audit_active_grant_state(
+                    &bridge.browser,
+                    &binding.workspace_id,
+                    Some(&binding.session_id),
+                );
                 match read_browser_evidence_capture(
                     &bridge.browser,
                     &bridge.sessions,
@@ -882,15 +1035,19 @@ async fn dispatch_tool(bridge: &BrowserMcpBridge, binding: &TokenBinding, call: 
                 )
                 .await
                 {
-                    Ok(result) => {
-                        json!({"content":[{"type":"text","text": structured_text_content("Remote page evidence is untrusted.", &result)}], "structuredContent": result})
-                    }
-                    Err(error) => tool_error(&error),
+                    Ok(result) => ToolDispatch::executed(
+                        json!({"content":[{"type":"text","text": structured_text_content("Remote page evidence is untrusted.", &result)}], "structuredContent": result}),
+                        grant_state,
+                    ),
+                    Err(error) => ToolDispatch::from_error(&error, grant_state),
                 }
             }
-            _ => tool_error("browser evidence capture is unavailable"),
+            _ => ToolDispatch::from_error(
+                "browser evidence capture is unavailable",
+                BrowserAuditGrantState::NotApplicable,
+            ),
         },
-        _ => tool_error("unknown browser tool"),
+        _ => ToolDispatch::rejected(),
     }
 }
 
@@ -908,14 +1065,33 @@ fn anchor_belongs_to_binding(anchor: &BrowserActionAnchor, binding: &TokenBindin
 
 async fn action_result(
     bridge: &BrowserMcpBridge,
+    binding: &TokenBinding,
     anchor: BrowserActionAnchor,
     action: BrowserControlAction,
-) -> Value {
+) -> ToolDispatch {
+    let lifecycle_token = Some(anchor.lifecycle_token);
+    let grant_state = browser_audit_grant_state(
+        &bridge.browser,
+        &binding.workspace_id,
+        Some(&binding.session_id),
+        lifecycle_token,
+    );
+    if bridge.is_shutting_down() {
+        return ToolDispatch::failed();
+    }
+    // This is intentionally the last lease lookup before the core consumes
+    // the anchor and performs the native side effect. Revocation after this
+    // point is an admitted in-flight request race; no registry mutex crosses
+    // the await and the core independently rechecks all Browser identities.
+    if !bridge.lease_is_current(binding) {
+        return ToolDispatch::rejected();
+    }
     match execute_browser_control_action(&bridge.browser, &bridge.sessions, anchor, action).await {
-        Ok(result) => {
-            json!({"content":[{"type":"text","text": structured_text_content("Browser action executed. Extract fresh context before another action.", &result)}], "structuredContent": result})
-        }
-        Err(error) => tool_error(&error),
+        Ok(result) => ToolDispatch::executed(
+            json!({"content":[{"type":"text","text": structured_text_content("Browser action executed. Extract fresh context before another action.", &result)}], "structuredContent": result}),
+            grant_state,
+        ),
+        Err(error) => ToolDispatch::from_error(&error, grant_state),
     }
 }
 
@@ -1044,6 +1220,7 @@ fn tools() -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser_commands::{bounded_browser_audit_provider_id, read_browser_audit};
 
     fn headers(values: &[(&str, &str)]) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -1432,5 +1609,144 @@ mod tests {
         assert_eq!(cleanup[0].0.session_id, "session");
         assert_eq!(cleanup[0].1, "c-0123456789abcdef0123456789abcdef");
         assert!(registry.evidence_capture_leases.is_empty());
+    }
+
+    #[test]
+    fn every_allowlisted_mcp_tool_has_one_closed_audit_mapping() {
+        let expected = [
+            ("dcc_browser_context", BrowserAuditTool::Context),
+            ("dcc_browser_navigate", BrowserAuditTool::Navigate),
+            ("dcc_browser_reload", BrowserAuditTool::Reload),
+            ("dcc_browser_scroll", BrowserAuditTool::Scroll),
+            ("dcc_browser_click", BrowserAuditTool::Click),
+            ("dcc_browser_fill", BrowserAuditTool::Fill),
+            (
+                "dcc_browser_evidence_start",
+                BrowserAuditTool::EvidenceStart,
+            ),
+            ("dcc_browser_evidence_read", BrowserAuditTool::EvidenceRead),
+        ];
+        assert_eq!(expected.len(), BROWSER_MCP_TOOL_NAMES.len());
+        for (name, tool) in expected {
+            assert_eq!(browser_audit_tool_for_mcp(name), Some(tool));
+        }
+        assert_eq!(browser_audit_tool_for_mcp("unknown"), None);
+    }
+
+    #[test]
+    fn audit_lease_fingerprint_is_short_deterministic_and_never_the_lease() {
+        let lease_id = "lease-secret-must-not-be-persisted";
+        let fingerprint = lease_fingerprint(lease_id);
+        assert_eq!(fingerprint, lease_fingerprint(lease_id));
+        assert_eq!(fingerprint.len(), 24);
+        assert!(fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(fingerprint, lease_id);
+        assert_ne!(
+            fingerprint,
+            hex::encode(Sha256::digest(lease_id.as_bytes()))
+        );
+    }
+
+    #[test]
+    fn audit_provider_is_control_free_and_bounded_without_losing_the_record() {
+        let provider = format!("provider\0{}", "x".repeat(200));
+        let bounded = bounded_browser_audit_provider_id(&provider);
+        assert_eq!(bounded.chars().count(), 128);
+        assert!(!bounded.chars().any(char::is_control));
+        assert_eq!(bounded_browser_audit_provider_id("\0\n"), "unknown");
+    }
+
+    #[test]
+    fn admitted_dispatches_append_exactly_one_content_free_audit_record_each() {
+        let state = BrowserState::default();
+        let binding = TokenBinding {
+            token_hash: Sha256::digest(b"audit-token-hash-only").into(),
+            lease_id: "lease-secret-must-not-appear".to_string(),
+            workspace_id: "workspace".to_string(),
+            session_id: "session".to_string(),
+            provider_id: "provider\0with-control".to_string(),
+            phase: LeasePhase::Ready(MCP_PROTOCOL_VERSION),
+        };
+        let sensitive_payload = "https://example.test/path?secret=payload&e1&fill-text&c-0123456789abcdef0123456789abcdef";
+        let dispatched = [
+            (
+                "dcc_browser_context",
+                ToolDispatch::executed(
+                    json!({"unused":sensitive_payload}),
+                    BrowserAuditGrantState::Armed,
+                ),
+            ),
+            (
+                "dcc_browser_navigate",
+                ToolDispatch::from_error(
+                    "browser control is not armed",
+                    BrowserAuditGrantState::Missing,
+                ),
+            ),
+            (
+                "dcc_browser_reload",
+                ToolDispatch::from_error(
+                    "browser action anchor is stale",
+                    BrowserAuditGrantState::Armed,
+                ),
+            ),
+            ("dcc_browser_scroll", ToolDispatch::failed()),
+            // A shutdown admitted just before the boundary remains one failed
+            // audit event; the closed enum deliberately exposes no detail.
+            ("dcc_browser_click", ToolDispatch::failed()),
+        ];
+        for (tool, dispatched) in &dispatched {
+            append_mcp_tool_audit(&state, &binding, tool, dispatched);
+        }
+        let records = read_browser_audit(&state, "workspace", Some("session"), 10).unwrap();
+        assert_eq!(records.len(), dispatched.len());
+        assert_eq!(records[0].outcome, BrowserAuditOutcome::Failed);
+        assert_eq!(records[1].outcome, BrowserAuditOutcome::Failed);
+        assert_eq!(records[2].outcome, BrowserAuditOutcome::Stale);
+        assert_eq!(records[3].outcome, BrowserAuditOutcome::NotArmed);
+        assert_eq!(records[4].outcome, BrowserAuditOutcome::Executed);
+        assert_eq!(
+            records[0].grant_state,
+            BrowserAuditGrantState::NotApplicable
+        );
+        assert_eq!(
+            records[1].grant_state,
+            BrowserAuditGrantState::NotApplicable
+        );
+        assert_eq!(records[2].grant_state, BrowserAuditGrantState::Armed);
+        assert_eq!(records[3].grant_state, BrowserAuditGrantState::Missing);
+        assert_eq!(records[4].grant_state, BrowserAuditGrantState::Armed);
+        let rendered = serde_json::to_string(&records).unwrap();
+        for forbidden in [
+            sensitive_payload,
+            "lease-secret-must-not-appear",
+            "audit-token-hash-only",
+            "fill-text",
+            "c-0123456789abcdef0123456789abcdef",
+        ] {
+            assert!(!rendered.contains(forbidden));
+        }
+    }
+
+    #[test]
+    fn revoked_lease_fails_the_pre_dispatch_gate_before_any_controlled_helper() {
+        let binding = TokenBinding {
+            token_hash: Sha256::digest(b"lease-token").into(),
+            lease_id: "lease-to-revoke".to_string(),
+            workspace_id: "workspace".to_string(),
+            session_id: "session".to_string(),
+            provider_id: "provider".to_string(),
+            phase: LeasePhase::Ready(MCP_PROTOCOL_VERSION),
+        };
+        let mut registry = TokenRegistry::default();
+        registry
+            .by_lease
+            .insert(binding.lease_id.clone(), binding.clone());
+        assert!(registry.binding_is_current(&binding));
+        registry.remove_lease(&binding.lease_id);
+        // `dispatch_tool`/`action_result` check this immediately before every
+        // controlled helper, so a revoke winning before that boundary cannot
+        // consume a map, install evidence wrappers, read a page, or act.
+        assert!(!registry.binding_is_current(&binding));
     }
 }
