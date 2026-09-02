@@ -108,6 +108,9 @@ use dcc_providers::{
 };
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
+/// A dynamic-model snapshot older than this is re-asked before a miss is
+/// treated as an unknown model.
+const DYNAMIC_MODEL_SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 const EPHEMERAL_MCP_LEASE_ID_MAX_CHARS: usize = 128;
 
 fn registered_provider(provider_id: &str) -> Result<ProviderRegistration> {
@@ -3754,12 +3757,12 @@ impl SessionCommandState {
         self.provider_runtime_config(&candidate.provider_id, candidate.provider_runtime.as_ref())?;
         // Model authority follows the static catalog unless the adapter
         // discovers models at runtime (Cursor); aliases resolve.
-        validate_provider_model(
+        self.validate_model_authority(
             &candidate.provider_id,
-            &registration.capabilities,
+            &registration,
             candidate.model.as_deref(),
         )
-        .map_err(dcc_core::CoreError::InvalidInput)?;
+        .await?;
         if !candidate.additional_workspace_ids.is_empty()
             && !supports_provider_capability(
                 &registration.capabilities,
@@ -4085,14 +4088,72 @@ impl SessionCommandState {
         Ok(())
     }
 
+    /// Model authority for every provider. Static catalogs are checked in the
+    /// registry; dynamic runtimes are checked against the last complete list
+    /// the runtime reported, refreshed on a miss or when stale, and a runtime
+    /// that cannot be consulted never validates a model by assumption.
+    pub(crate) async fn validate_model_authority(
+        &self,
+        provider_id: &str,
+        registration: &ProviderRegistration,
+        model: Option<&str>,
+    ) -> Result<()> {
+        validate_provider_model(provider_id, &registration.capabilities, model)
+            .map_err(dcc_core::CoreError::InvalidInput)?;
+        let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) else {
+            return Ok(());
+        };
+        if !supports_provider_capability(
+            &registration.capabilities,
+            ProviderCapability::DynamicModels,
+        ) {
+            return Ok(());
+        }
+        let fresh = self
+            .runtime
+            .dynamic_models(provider_id)
+            .filter(|snapshot| snapshot.refreshed_at.elapsed() <= DYNAMIC_MODEL_SNAPSHOT_TTL);
+        if fresh
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.ids.contains(model))
+        {
+            return Ok(());
+        }
+        // Miss or stale: ask the runtime once more before deciding.
+        let discovered = registration
+            .runtime
+            .discover_models()
+            .await
+            .map_err(|error| {
+                dcc_core::CoreError::InvalidInput(format!(
+                    "model {model} could not be verified against the {provider_id} runtime: {error}"
+                ))
+            })?;
+        let Some(discovered) = discovered else {
+            return Ok(());
+        };
+        let ids: HashSet<String> = discovered.into_iter().map(|entry| entry.id).collect();
+        let known = ids.contains(model);
+        self.runtime.store_dynamic_models(provider_id, ids);
+        if known {
+            Ok(())
+        } else {
+            Err(dcc_core::CoreError::InvalidInput(format!(
+                "model {model} is not offered by the {provider_id} runtime"
+            )))
+        }
+    }
+
+    /// Seeds the dynamic-model snapshot from a catalog listing, so validation
+    /// rarely needs to spawn the runtime again.
+    pub(crate) fn seed_dynamic_models(&self, provider_id: &str, ids: HashSet<String>) {
+        self.runtime.store_dynamic_models(provider_id, ids);
+    }
+
     pub async fn validate_start_thread_scope(&self, input: &StartThreadInput) -> Result<()> {
         let registration = self.require_provider_available(&input.provider_id)?;
-        validate_provider_model(
-            &input.provider_id,
-            &registration.capabilities,
-            input.model.as_deref(),
-        )
-        .map_err(dcc_core::CoreError::InvalidInput)?;
+        self.validate_model_authority(&input.provider_id, &registration, input.model.as_deref())
+            .await?;
         if input.additional_workspace_ids.is_empty() {
             return Ok(());
         }
@@ -6551,13 +6612,33 @@ mod tests {
             .expect("save session");
         save_active_session_thread(&state, &session).await;
         let mut input = selection_input(session.id.clone(), Some("cursor"), None);
-        // Cursor models are discovered dynamically; validation must not apply
-        // a stale static model list before the adapter is attached.
+        // Cursor models are discovered dynamically; the runtime's last complete
+        // list is the authority, not the static registry.
+        state.seed_dynamic_models(
+            "cursor",
+            HashSet::from([
+                "auto".to_string(),
+                "runtime-discovered-cursor-model".to_string(),
+            ]),
+        );
         input.model = Some("runtime-discovered-cursor-model".to_string());
         state
             .validate_provider_turn_selection(&session, &input)
             .await
             .expect("registered dynamic provider selection");
+        // A model the runtime never reported is re-checked against the runtime
+        // and rejected either way: no binary, a failing binary, or a real list
+        // that does not contain it.
+        input.model = Some("model-the-cursor-runtime-never-offered".to_string());
+        let error = state
+            .validate_provider_turn_selection(&session, &input)
+            .await
+            .expect_err("unknown dynamic model");
+        let message = error.to_string();
+        assert!(
+            message.contains("could not be verified") || message.contains("is not offered"),
+            "{message}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -62,6 +62,20 @@ pub async fn list_providers_for_state(
 ) -> Result<ListProvidersOutput, String> {
     let mut catalog = dcc_providers::provider_catalog().await;
     apply_provider_availability_overlay(&mut catalog, state)?;
+    for descriptor in &catalog.providers {
+        if descriptor.capabilities.supports_dynamic_models {
+            // The catalog just consulted the runtime; reuse that list as the
+            // model authority instead of spawning it again on the next turn.
+            state.seed_dynamic_models(
+                &descriptor.id.0,
+                descriptor
+                    .models
+                    .iter()
+                    .map(|model| model.id.clone())
+                    .collect(),
+            );
+        }
+    }
     Ok(ListProvidersOutput { catalog })
 }
 

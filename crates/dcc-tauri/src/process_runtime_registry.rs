@@ -13,7 +13,7 @@
 //! authorization or security boundary.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     path::{Path, PathBuf},
     sync::{
@@ -161,6 +161,14 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for AcquireAfterOpenError<E
 /// unrelated State instances never create parallel arbiters. Guarded Undo
 /// must retain its own stronger store/lease validation and must never inherit
 /// filesystem authorization from this registry.
+/// Complete model list a dynamic-model runtime reported, with the moment it
+/// was observed so validation can decide whether to ask again.
+#[derive(Clone, Debug)]
+pub(crate) struct DynamicModelSnapshot {
+    pub ids: HashSet<String>,
+    pub refreshed_at: std::time::Instant,
+}
+
 pub struct ProcessRuntime {
     #[allow(dead_code)] // Retained even when capture-v2 is compiled out.
     scope: RuntimeScopeKey,
@@ -180,6 +188,9 @@ pub struct ProcessRuntime {
     /// fixed, small set; weak entries retain no historical identifiers.
     provider_availability_locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
     provider_availability: Mutex<HashMap<String, ProviderAvailabilityRuntimeState>>,
+    /// Last complete model list observed from each dynamic-model runtime.
+    /// Process-local, never persisted; validation refreshes it on a miss.
+    dynamic_models: Mutex<HashMap<String, DynamicModelSnapshot>>,
     event_buses: Mutex<Vec<Weak<dyn EventBus>>>,
     /// Public process-local identifier, never persisted or used as authority.
     runtime_generation: String,
@@ -215,6 +226,7 @@ impl ProcessRuntime {
             provider_transition_locks: Mutex::new(HashMap::new()),
             provider_availability_locks: Mutex::new(HashMap::new()),
             provider_availability: Mutex::new(HashMap::new()),
+            dynamic_models: Mutex::new(HashMap::new()),
             event_buses: Mutex::new(Vec::new()),
             runtime_generation: Uuid::new_v4().to_string(),
             next_live_sequence: AtomicU64::new(0),
@@ -638,6 +650,25 @@ impl ProcessRuntime {
             .is_some_and(|current| Arc::ptr_eq(&current, lock) && Arc::strong_count(lock) == 2);
         if is_same_idle_lock {
             locks.remove(provider_id);
+        }
+    }
+
+    pub(crate) fn dynamic_models(&self, provider_id: &str) -> Option<DynamicModelSnapshot> {
+        self.dynamic_models
+            .lock()
+            .ok()
+            .and_then(|snapshots| snapshots.get(provider_id).cloned())
+    }
+
+    pub(crate) fn store_dynamic_models(&self, provider_id: &str, ids: HashSet<String>) {
+        if let Ok(mut snapshots) = self.dynamic_models.lock() {
+            snapshots.insert(
+                provider_id.to_string(),
+                DynamicModelSnapshot {
+                    ids,
+                    refreshed_at: std::time::Instant::now(),
+                },
+            );
         }
     }
 

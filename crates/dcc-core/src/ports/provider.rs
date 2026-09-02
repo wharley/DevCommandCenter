@@ -1,3 +1,4 @@
+use crate::domain::provider::ProviderModelDescriptor;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -311,6 +312,13 @@ pub trait Provider: Send + Sync {
         &self,
         _runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<Option<ProviderAccountUsage>> {
+        Ok(None)
+    }
+    /// Runtime model discovery for adapters whose catalog is not static.
+    /// `Ok(None)` means the static registry is authoritative; `Ok(Some)` is
+    /// the complete list the installed runtime offers right now; `Err` means
+    /// the runtime could not be consulted and nothing should be assumed.
+    async fn discover_models(&self) -> Result<Option<Vec<ProviderModelDescriptor>>> {
         Ok(None)
     }
 }

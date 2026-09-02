@@ -1375,6 +1375,12 @@ impl Provider for CursorBridgeProvider {
         }
     }
 
+    async fn discover_models(
+        &self,
+    ) -> Result<Option<Vec<dcc_core::domain::provider::ProviderModelDescriptor>>> {
+        self.legacy.discover_models().await
+    }
+
     async fn healthcheck(&self) -> Result<HealthStatus> {
         self.legacy.healthcheck().await
     }

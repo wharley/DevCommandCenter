@@ -941,18 +941,46 @@ struct CursorAuth {
     _email: Option<String>,
 }
 
-pub async fn discover_models() -> Vec<ProviderModelDescriptor> {
+fn cursor_auto_model() -> ProviderModelDescriptor {
+    ProviderModelDescriptor {
+        id: CURSOR_AUTODETECT_MODEL_ID.to_string(),
+        label: "Auto".to_string(),
+        description: "Use Cursor's recommended model for this account.".to_string(),
+        recommended: true,
+        effort_levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
+    }
+}
+
+/// Asks the installed runtime for its model list. A non-zero exit or a
+/// spawn failure is an error: callers must not treat it as an empty catalog.
+async fn discover_models_with_binary(binary: &str) -> Result<Vec<ProviderModelDescriptor>> {
     let cwd = CursorProvider::current_working_dir();
-    let result = run_cursor_models_command("cursor-agent", &cwd).await;
-    match result {
-        Ok(result) if result.code == 0 => parse_cursor_models_to_descriptors(&result.stdout),
-        _ => vec![ProviderModelDescriptor {
-            id: CURSOR_AUTODETECT_MODEL_ID.to_string(),
-            label: "Auto".to_string(),
-            description: "Use Cursor's recommended model for this account.".to_string(),
-            recommended: true,
-            effort_levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
-        }],
+    let result = run_cursor_models_command(binary, &cwd).await?;
+    if result.code != 0 {
+        return Err(CoreError::Provider(format!(
+            "{binary} models exited with code {}: {}",
+            result.code,
+            result.stderr.trim()
+        )));
+    }
+    let mut models = vec![cursor_auto_model()];
+    let mut seen = HashSet::from([CURSOR_AUTODETECT_MODEL_ID.to_string()]);
+    for model in parse_cursor_models_to_descriptors(&result.stdout) {
+        let id = model.id.trim().to_string();
+        if id.is_empty() || !seen.insert(id.clone()) {
+            continue;
+        }
+        models.push(ProviderModelDescriptor { id, ..model });
+    }
+    Ok(models)
+}
+
+/// Catalog helper: on failure the descriptor still shows `auto` so the UI can
+/// select the account default; authority checks use the trait method instead.
+pub async fn discover_models() -> Vec<ProviderModelDescriptor> {
+    match discover_models_with_binary("cursor-agent").await {
+        Ok(models) => models,
+        Err(_) => vec![cursor_auto_model()],
     }
 }
 
@@ -986,6 +1014,10 @@ impl Provider for CursorProvider {
 
     fn capabilities(&self) -> Capabilities {
         self.capabilities.clone()
+    }
+
+    async fn discover_models(&self) -> Result<Option<Vec<ProviderModelDescriptor>>> {
+        discover_models_with_binary(&self.binary).await.map(Some)
     }
 
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
