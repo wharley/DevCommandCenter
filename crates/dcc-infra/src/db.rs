@@ -4006,6 +4006,7 @@ impl SqliteSessionRepo {
                 | SessionEventKind::DelegationCancelled { .. }
                 | SessionEventKind::PlanApproved { .. }
                 | SessionEventKind::PlanHandedOff { .. }
+                | SessionEventKind::ObjectivePaused { .. }
                 | SessionEventKind::SessionResumed => {}
             }
         }

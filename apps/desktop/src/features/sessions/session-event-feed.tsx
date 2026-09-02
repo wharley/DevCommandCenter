@@ -15,6 +15,7 @@ function eventSessionId(event: CoreEvent): string | null {
 		("sessionCompleted" in event && event.sessionCompleted) ||
 		("sessionAborted" in event && event.sessionAborted) ||
 		("sessionResumed" in event && event.sessionResumed) ||
+		("sessionObjectivePaused" in event && event.sessionObjectivePaused) ||
 		("sessionMcpRuntimeStatusChanged" in event &&
 			event.sessionMcpRuntimeStatusChanged) ||
 		("sessionTurnStarted" in event && event.sessionTurnStarted) ||
@@ -50,6 +51,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionCompleted" in event) return "session.completed";
 	if ("sessionAborted" in event) return "session.aborted";
 	if ("sessionResumed" in event) return "session.resumed";
+	if ("sessionObjectivePaused" in event) return "session.objective.paused";
 	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnDelta" in event) return "session.turn.delta";
@@ -131,6 +133,18 @@ function semanticEventPresentation(
 		return {
 			title: t("sessionEventFeed.milestones.sessionResumed"),
 			description: t("sessionEventFeed.details.sessionResumed"),
+		};
+	}
+	if ("sessionObjectivePaused" in event && event.sessionObjectivePaused) {
+		return {
+			title: t("sessionEventFeed.milestones.objectivePaused"),
+			description: t(
+				`sessionEventFeed.details.objectivePaused.${event.sessionObjectivePaused.reason}`,
+				{
+					failures: event.sessionObjectivePaused.consecutive_failures,
+					turns: event.sessionObjectivePaused.turns_used,
+				},
+			),
 		};
 	}
 	if ("sessionTurnStarted" in event && event.sessionTurnStarted) {

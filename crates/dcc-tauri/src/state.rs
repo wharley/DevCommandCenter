@@ -2871,9 +2871,39 @@ impl SessionCommandState {
                 _ => None,
             };
             if let Some(outcome) = objective_outcome {
-                if let Err(error) = self.record_objective_turn_outcome(session_id, turn_id, outcome)
-                {
-                    eprintln!("[DCC] objective outcome accounting failed: {error}");
+                match self.record_objective_turn_outcome(session_id, turn_id, outcome) {
+                    Ok(Some(objective))
+                        if objective.status
+                            == dcc_core::domain::objective::ObjectiveStatus::Paused
+                            && objective.pause_reason.is_some_and(|reason| {
+                                reason != dcc_core::domain::objective::ObjectivePauseReason::Manual
+                            }) =>
+                    {
+                        // The pause was decided by this very outcome; record it
+                        // durably so the timeline can explain the stop.
+                        let reason = objective.pause_reason.expect("checked above");
+                        if let Err(error) = self
+                            .append_and_publish_session_event(
+                                session_id,
+                                SessionEventKind::ObjectivePaused {
+                                    reason,
+                                    consecutive_failures: objective.consecutive_failures,
+                                    turns_used: objective.turns_used,
+                                },
+                                dcc_core::ports::events::CoreEvent::SessionObjectivePaused {
+                                    session_id: session_id.0.clone(),
+                                    reason,
+                                    consecutive_failures: objective.consecutive_failures,
+                                    turns_used: objective.turns_used,
+                                },
+                            )
+                            .await
+                        {
+                            eprintln!("[DCC] objective pause event failed: {error}");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => eprintln!("[DCC] objective outcome accounting failed: {error}"),
                 }
             }
         }
@@ -5178,16 +5208,16 @@ impl SessionCommandState {
         session_id: &SessionId,
         turn_id: &TurnId,
         outcome: ObjectiveTurnOutcome,
-    ) -> Result<bool> {
+    ) -> Result<Option<SessionObjective>> {
         for _attempt in 0..3 {
             let Some(mut objective) = self.session_repo.load_session_objective(session_id)? else {
-                return Ok(false);
+                return Ok(None);
             };
             if !objective.record_turn_outcome(&turn_id.0, outcome, &Utc::now().to_rfc3339()) {
-                return Ok(false);
+                return Ok(None);
             }
             match self.persist_objective(&mut objective) {
-                Ok(()) => return Ok(true),
+                Ok(()) => return Ok(Some(objective)),
                 Err(dcc_core::CoreError::Repository(message))
                     if message.contains("generation is stale") =>
                 {
@@ -6579,14 +6609,18 @@ mod tests {
         let turn = TurnId("turn-1".to_string());
         assert!(state
             .record_objective_turn_outcome(&session.id, &turn, ObjectiveTurnOutcome::Failed)
-            .unwrap());
-        assert!(!state
-            .record_objective_turn_outcome(&session.id, &turn, ObjectiveTurnOutcome::Failed)
-            .unwrap());
-        let turn2 = TurnId("turn-2".to_string());
+            .unwrap()
+            .is_some());
         assert!(state
+            .record_objective_turn_outcome(&session.id, &turn, ObjectiveTurnOutcome::Failed)
+            .unwrap()
+            .is_none());
+        let turn2 = TurnId("turn-2".to_string());
+        let paused_now = state
             .record_objective_turn_outcome(&session.id, &turn2, ObjectiveTurnOutcome::Failed)
-            .unwrap());
+            .unwrap()
+            .expect("changed");
+        assert_eq!(paused_now.status, ObjectiveStatus::Paused);
         let paused = state
             .session_objective(&session.id)
             .unwrap()

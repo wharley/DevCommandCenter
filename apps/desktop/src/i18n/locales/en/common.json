@@ -2237,6 +2237,7 @@
       "workspacePrepared": "Workspace prepared",
       "workspaceReady": "Workspace ready",
       "sessionStarted": "Session started",
+      "objectivePaused": "Objective paused",
       "sessionResumed": "Session resumed",
       "turnStarted": "Task started",
       "toolFailed": "Tool failed",
@@ -2253,6 +2254,11 @@
       "workspacePrepared": "Worktree prepared at {{path}}.",
       "workspaceReady": "Worktree ready at {{path}}.",
       "sessionStarted": "Connected to {{provider}} and ready for instructions.",
+      "objectivePaused": {
+        "consecutive_failures": "Consecutive failures reached the limit ({{failures}}). Queued follow-ups stop until you resume.",
+        "turn_budget": "Turn budget reached ({{turns}} turns). Queued follow-ups stop until you resume.",
+        "manual": "Paused by you."
+      },
       "sessionResumed": "Previous session context restored.",
       "turnCompleted": "The assistant finished the current response.",
       "planApproved": "Version {{version}} was approved for implementation.",

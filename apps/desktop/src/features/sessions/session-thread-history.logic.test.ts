@@ -993,6 +993,30 @@ describe("projectWorkspaceMessages", () => {
 		);
 	});
 
+	it("projects an automatic objective pause as a system message", () => {
+		const record: SessionEventRecord = {
+			eventId: "evt-pause",
+			sessionId: "session-a",
+			sequence: 2,
+			occurredAt: "2026-05-01T12:01:00Z",
+			kind: {
+				type: "objective_paused",
+				reason: "consecutive_failures",
+				consecutiveFailures: 3,
+				turnsUsed: 5,
+			},
+		};
+		const messages = projectWorkspaceMessages(
+			[sessionTurnStarted("session-a", "turn-1", "Alpha"), record],
+			[],
+			"session-a",
+		);
+		const system = messages.find((message) => message.role === "system");
+		expect(system?.label).toBe("session.objective.paused");
+		expect(system?.content).toContain("consecutive failures reached the limit (3)");
+		expect(system?.content).toContain("resume");
+	});
+
 	it("gives a turn aborted before any output a placeholder incomplete message", () => {
 		const messages = projectWorkspaceMessages(
 			[

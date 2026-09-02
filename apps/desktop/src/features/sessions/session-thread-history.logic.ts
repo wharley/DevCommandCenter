@@ -423,6 +423,15 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					session_id: record.sessionId,
 				},
 			};
+		case "objective_paused":
+			return {
+				sessionObjectivePaused: {
+					session_id: record.sessionId,
+					reason: record.kind.reason,
+					consecutive_failures: record.kind.consecutiveFailures,
+					turns_used: record.kind.turnsUsed,
+				},
+			};
 		default:
 			return null;
 	}
@@ -440,6 +449,9 @@ function getEventSessionId(event: CoreEvent): string | null {
 	}
 	if ("sessionResumed" in event && event.sessionResumed) {
 		return event.sessionResumed.session_id;
+	}
+	if ("sessionObjectivePaused" in event && event.sessionObjectivePaused) {
+		return event.sessionObjectivePaused.session_id;
 	}
 	if (
 		"sessionMcpRuntimeStatusChanged" in event &&
@@ -569,6 +581,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionCompleted" in event) return "session.completed";
 	if ("sessionAborted" in event) return "session.aborted";
 	if ("sessionResumed" in event) return "session.resumed";
+	if ("sessionObjectivePaused" in event) return "session.objective.paused";
 	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnSteered" in event) return "session.turn.steered";
@@ -739,6 +752,16 @@ function eventSummary(event: CoreEvent): string {
 	}
 	if ("sessionResumed" in event && event.sessionResumed) {
 		return event.sessionResumed.session_id;
+	}
+	if ("sessionObjectivePaused" in event && event.sessionObjectivePaused) {
+		const paused = event.sessionObjectivePaused;
+		const why =
+			paused.reason === "consecutive_failures"
+				? `consecutive failures reached the limit (${paused.consecutive_failures})`
+				: paused.reason === "turn_budget"
+					? `turn budget reached (${paused.turns_used})`
+					: "paused";
+		return `Objective paused automatically: ${why}. Queued follow-ups stop until you resume it.`;
 	}
 	return "No payload summary";
 }
@@ -1692,7 +1715,7 @@ export function projectWorkspaceMessages(
 			continue;
 		}
 
-		if ("sessionCompleted" in event || "sessionAborted" in event || "sessionResumed" in event || "sessionCheckpointCreated" in event || "workspacePrepared" in event || "workspaceReady" in event) {
+		if ("sessionCompleted" in event || "sessionAborted" in event || "sessionResumed" in event || "sessionObjectivePaused" in event || "sessionCheckpointCreated" in event || "workspacePrepared" in event || "workspaceReady" in event) {
 			messages.push({
 				id: `${eventLabel(event)}-${messages.length}`,
 				role: "system",

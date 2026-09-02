@@ -2237,6 +2237,7 @@
       "workspacePrepared": "Workspace preparado",
       "workspaceReady": "Workspace pronto",
       "sessionStarted": "Sessão iniciada",
+      "objectivePaused": "Objetivo pausado",
       "sessionResumed": "Sessão retomada",
       "turnStarted": "Tarefa iniciada",
       "toolFailed": "Ferramenta falhou",
@@ -2253,6 +2254,11 @@
       "workspacePrepared": "Worktree preparada em {{path}}.",
       "workspaceReady": "Worktree pronta em {{path}}.",
       "sessionStarted": "Conectado ao {{provider}} e pronto para receber instruções.",
+      "objectivePaused": {
+        "consecutive_failures": "Falhas consecutivas atingiram o limite ({{failures}}). Follow-ups enfileirados param até você retomar.",
+        "turn_budget": "Orçamento de turnos atingido ({{turns}} turnos). Follow-ups enfileirados param até você retomar.",
+        "manual": "Pausado por você."
+      },
       "sessionResumed": "O contexto da sessão anterior foi restaurado.",
       "turnCompleted": "O assistente concluiu a resposta atual.",
       "planApproved": "A versão {{version}} foi aprovada para implementação.",

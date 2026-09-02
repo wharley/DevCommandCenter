@@ -462,6 +462,15 @@ pub enum SessionEventKind {
         reason: Option<String>,
     },
     SessionResumed,
+    /// The durable objective paused itself (budget or failure limit). Metadata
+    /// only, so the timeline can explain why automatic follow-ups stopped.
+    ObjectivePaused {
+        reason: super::objective::ObjectivePauseReason,
+        #[serde(rename = "consecutiveFailures")]
+        consecutive_failures: u32,
+        #[serde(rename = "turnsUsed")]
+        turns_used: u32,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -648,6 +657,7 @@ impl SessionProjection {
             SessionEventKind::SessionResumed => {
                 self.state = SessionState::Active;
             }
+            SessionEventKind::ObjectivePaused { .. } => {}
         }
     }
 
