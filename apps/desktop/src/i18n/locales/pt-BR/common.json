@@ -2948,6 +2948,16 @@
     "controlInactive": "Controle do agente desativado",
     "armControlShort": "Agente 60s",
     "controlOnShort": "Agente ativo",
+    "evidence": {
+      "start": "Capturar evidência de console e rede",
+      "requiresControl": "Permita o controle do agente antes de capturar evidência",
+      "active": "Capturando evidência · {{seconds}}s restantes. Reproduza o problema e depois colete.",
+      "collect": "Coletar",
+      "discard": "Descartar",
+      "expired": "A captura de evidência expirou antes de ser coletada.",
+      "noEvents": "nenhum evento capturado",
+      "label": "console e rede"
+    },
     "audit": {
       "open": "Abrir atividade do navegador",
       "title": "Atividade do navegador",

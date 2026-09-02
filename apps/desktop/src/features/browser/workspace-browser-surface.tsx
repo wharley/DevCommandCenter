@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Globe2, History, LoaderCircle, RefreshCw, Shield, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Activity, Globe2, History, LoaderCircle, RefreshCw, Shield, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -15,18 +15,24 @@ import {
 	reloadBrowser,
 	setBrowserBounds,
 	extractBrowserContext,
+	anchorFromBrowserContext,
+	startBrowserEvidenceCapture,
+	readBrowserEvidenceCapture,
 	type BrowserAgentContext,
 	type BrowserAuditRecord,
 	type BrowserBounds,
 	type BrowserSnapshot,
 } from "./browser-api";
 import { isBrowserOccluded, useBrowserOcclusion } from "./browser-occlusion";
+import type { BrowserEvidenceCapture } from "./browser-agent-context";
 
 type WorkspaceBrowserSurfaceProps = {
 	workspaceId: string;
 	sessionId: string | null;
 	onClose: () => void;
 	onSendToAgent?: (context: BrowserAgentContext) => void;
+	/** Receives a drained console/resource capture started by an explicit gesture. */
+	onSendEvidenceToAgent?: (capture: BrowserEvidenceCapture) => void;
 	/** Splitter drags hide the native view for the duration of the resize. */
 	forceOccluded?: boolean;
 };
@@ -118,6 +124,7 @@ export function WorkspaceBrowserSurface({
 	sessionId,
 	onClose,
 	onSendToAgent,
+	onSendEvidenceToAgent,
 	forceOccluded = false,
 }: WorkspaceBrowserSurfaceProps) {
 	const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -130,6 +137,19 @@ export function WorkspaceBrowserSurface({
 	const [sendingContext, setSendingContext] = useState(false);
 	const [controlStatus, setControlStatus] = useState<{ armed: boolean; remainingMs: number }>({ armed: false, remainingMs: 0 });
 	const [controlBusy, setControlBusy] = useState(false);
+	// One human-started evidence capture at a time. The backend owns the page
+	// token and expiry; this state only remembers the opaque handle so the
+	// person can collect it, and it is dropped on any scope/lifecycle change.
+	const [evidenceCapture, setEvidenceCapture] = useState<{
+		captureId: string;
+		lifecycleToken: number;
+		url: string;
+		title: string | null;
+		startedAtMs: number;
+		expiresAtMs: number;
+	} | null>(null);
+	const [evidenceBusy, setEvidenceBusy] = useState(false);
+	const [evidenceSecondsLeft, setEvidenceSecondsLeft] = useState(0);
 	const [auditOpen, setAuditOpen] = useState(false);
 	const [auditRecords, setAuditRecords] = useState<BrowserAuditRecord[] | null>(null);
 	const [auditLoading, setAuditLoading] = useState(false);
@@ -368,6 +388,101 @@ export function WorkspaceBrowserSurface({
 			.finally(() => setControlBusy(false));
 	}, [controlBusy, controlStatus.armed, sessionId, workspaceId]);
 
+	useEffect(() => {
+		// A capture is bound to the page, lifecycle and grant it was started on.
+		setEvidenceCapture(null);
+	}, [lifecycleToken, sessionId, workspaceId]);
+
+	useEffect(() => {
+		if (!evidenceCapture) {
+			setEvidenceSecondsLeft(0);
+			return;
+		}
+		if (!controlStatus.armed) {
+			// Reading requires the grant that started the capture.
+			setEvidenceCapture(null);
+			setError(t("browser.evidence.expired"));
+			return;
+		}
+		const tick = () => {
+			const remainingMs = evidenceCapture.expiresAtMs - Date.now();
+			if (remainingMs <= 0) {
+				setEvidenceCapture(null);
+				setError(t("browser.evidence.expired"));
+				return;
+			}
+			setEvidenceSecondsLeft(Math.ceil(remainingMs / 1000));
+		};
+		tick();
+		// Only runs while a capture is active; no idle polling.
+		const interval = window.setInterval(tick, 1_000);
+		return () => window.clearInterval(interval);
+	}, [controlStatus.armed, evidenceCapture, t]);
+
+	const handleStartEvidence = useCallback(() => {
+		const lifecycleToken = lifecycleTokenRef.current;
+		if (lifecycleToken === null || !sessionId) return;
+		if (!onSendEvidenceToAgent || evidenceBusy || evidenceCapture || !controlStatus.armed) return;
+		setError(null);
+		setEvidenceBusy(true);
+		void extractBrowserContext({ workspaceId, sessionId, lifecycleToken })
+			.then(async (context) => {
+				const handle = await startBrowserEvidenceCapture(
+					anchorFromBrowserContext(context, lifecycleToken),
+				);
+				if (lifecycleTokenRef.current !== lifecycleToken) return;
+				const now = Date.now();
+				setEvidenceCapture({
+					captureId: handle.captureId,
+					lifecycleToken,
+					url: context.url,
+					title: context.title,
+					startedAtMs: now,
+					expiresAtMs: now + handle.remainingMs,
+				});
+			})
+			.catch((reason: unknown) => {
+				setError(reason instanceof Error ? reason.message : String(reason));
+			})
+			.finally(() => setEvidenceBusy(false));
+	}, [controlStatus.armed, evidenceBusy, evidenceCapture, onSendEvidenceToAgent, sessionId, workspaceId]);
+
+	const handleCollectEvidence = useCallback(() => {
+		const capture = evidenceCapture;
+		if (!capture || !onSendEvidenceToAgent || evidenceBusy) return;
+		if (lifecycleTokenRef.current !== capture.lifecycleToken) {
+			setEvidenceCapture(null);
+			return;
+		}
+		setError(null);
+		setEvidenceBusy(true);
+		void readBrowserEvidenceCapture({ workspaceId, sessionId, captureId: capture.captureId })
+			.then((result) => {
+				onSendEvidenceToAgent({
+					workspaceId,
+					sessionId,
+					url: capture.url,
+					title: capture.title,
+					startedAt: new Date(capture.startedAtMs).toISOString(),
+					windowMs: Date.now() - capture.startedAtMs,
+					result,
+				});
+			})
+			.catch((reason: unknown) => {
+				setError(reason instanceof Error ? reason.message : String(reason));
+			})
+			.finally(() => {
+				// The handle is one-shot either way.
+				setEvidenceCapture(null);
+				setEvidenceBusy(false);
+			});
+	}, [evidenceBusy, evidenceCapture, onSendEvidenceToAgent, sessionId, workspaceId]);
+
+	const handleDiscardEvidence = useCallback(() => {
+		// The backend wrapper unwinds itself at expiry; nothing is read.
+		setEvidenceCapture(null);
+	}, []);
+
 	const loadAudit = useCallback((token: number) => {
 		const expected = { workspaceId, sessionId, lifecycleToken: token };
 		const requestId = auditRequestRef.current + 1;
@@ -484,6 +599,34 @@ export function WorkspaceBrowserSurface({
 						<Sparkles className="size-3.5" />
 					)}
 				</Button>
+				{sessionId ? (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						onClick={handleStartEvidence}
+						aria-label={t("browser.evidence.start")}
+						title={
+							controlStatus.armed
+								? t("browser.evidence.start")
+								: t("browser.evidence.requiresControl")
+						}
+						disabled={
+							!onSendEvidenceToAgent ||
+							loading ||
+							evidenceBusy ||
+							evidenceCapture !== null ||
+							!controlStatus.armed
+						}
+						className={evidenceCapture ? "text-cyan-500" : undefined}
+					>
+						{evidenceBusy ? (
+							<LoaderCircle className="size-3.5 animate-spin" />
+						) : (
+							<Activity className="size-3.5" />
+						)}
+					</Button>
+				) : null}
 				<Popover open={auditOpen} onOpenChange={handleAuditOpenChange}>
 					<PopoverTrigger asChild>
 						<Button
@@ -574,6 +717,33 @@ export function WorkspaceBrowserSurface({
 			<div className="flex min-h-7 shrink-0 items-center border-b border-border/50 bg-background px-3 text-xs" aria-live="polite">
 				{error ? (
 					<span className="truncate text-destructive">{t("browser.error", { error })}</span>
+				) : evidenceCapture ? (
+					<span className="flex min-w-0 flex-1 items-center gap-2 text-cyan-600 dark:text-cyan-400">
+						<Activity className="size-3 shrink-0" />
+						<span className="truncate">
+							{t("browser.evidence.active", { seconds: evidenceSecondsLeft })}
+						</span>
+						<Button
+							type="button"
+							variant="outline"
+							size="xs"
+							className="ml-auto h-5 shrink-0 px-2"
+							onClick={handleCollectEvidence}
+							disabled={evidenceBusy}
+						>
+							{t("browser.evidence.collect")}
+						</Button>
+						<Button
+							type="button"
+							variant="ghost"
+							size="xs"
+							className="h-5 shrink-0 px-2 text-muted-foreground"
+							onClick={handleDiscardEvidence}
+							disabled={evidenceBusy}
+						>
+							{t("browser.evidence.discard")}
+						</Button>
+					</span>
 				) : loading ? (
 					<span className="flex items-center gap-1.5 text-muted-foreground">
 						<LoaderCircle className="size-3 animate-spin text-cyan-500" />

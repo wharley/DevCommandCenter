@@ -1,6 +1,8 @@
-import type { BrowserAgentContext } from "./browser-api";
+import type { BrowserAgentContext, BrowserEvidenceResult } from "./browser-api";
 
 const BROWSER_PAGE_TAG = "browser_page";
+const BROWSER_EVIDENCE_TAG = "browser_evidence";
+export const MAX_FORMATTED_BROWSER_EVIDENCE_CHARS = 14_000;
 export const MAX_FORMATTED_BROWSER_CONTEXT_CHARS = 15_000;
 
 export type BrowserScope = {
@@ -129,4 +131,60 @@ export function formatBrowserAgentContext(
 		envelope = buildEnvelope();
 	}
 	return envelope;
+}
+
+/** A drained console/resource capture, scoped to the page it was started on. */
+export type BrowserEvidenceCapture = {
+	workspaceId: string;
+	sessionId: string | null;
+	url: string;
+	title: string | null;
+	startedAt: string;
+	windowMs: number;
+	result: BrowserEvidenceResult;
+};
+
+/**
+ * Formats a drained capture as one delimited block. Event text is remote and
+ * untrusted, so it is escaped and stays bounded; the backend already redacts
+ * credentials, query strings, fragments and sensitive terms.
+ */
+export function formatBrowserEvidence(
+	capture: BrowserEvidenceCapture,
+	labels: { noEvents: string; yes: string; no: string },
+) {
+	const escape = escapeBrowserAgentContext;
+	const lines = capture.result.events.map((event, index) => {
+		const parts = [`${index + 1}. [${escape(event.kind)}] ${escape(event.message)}`];
+		if (event.url) parts.push(`url=${escape(event.url)}`);
+		if (event.line !== undefined) {
+			parts.push(`at=${event.line}${event.column !== undefined ? `:${event.column}` : ""}`);
+		}
+		if (event.initiatorType) parts.push(`initiator=${escape(event.initiatorType)}`);
+		if (event.durationMs !== undefined) parts.push(`duration=${event.durationMs}ms`);
+		if (event.status !== undefined) parts.push(`status=${event.status}`);
+		return parts.join(" | ");
+	});
+	let included = lines;
+	let truncated = capture.result.truncated;
+	const build = () =>
+		[
+			`<${BROWSER_EVIDENCE_TAG}>`,
+			`url: ${escape(capture.url)}`,
+			`title: ${escape(capture.title ?? "")}`,
+			`started_at: ${capture.startedAt}`,
+			`window_ms: ${Math.max(0, Math.floor(capture.windowMs))}`,
+			`events: ${included.length}`,
+			`truncated: ${truncated ? labels.yes : labels.no}`,
+			"---",
+			...(included.length > 0 ? included : [labels.noEvents]),
+			`</${BROWSER_EVIDENCE_TAG}>`,
+		].join("\n");
+	let envelope = build();
+	while (envelope.length > MAX_FORMATTED_BROWSER_EVIDENCE_CHARS && included.length > 0) {
+		included = included.slice(0, -1);
+		truncated = true;
+		envelope = build();
+	}
+	return { text: envelope, truncated };
 }

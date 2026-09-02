@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	formatBrowserAgentContext,
+	formatBrowserEvidence,
 	isBrowserContextForScope,
 	isBrowserPrefillForScope,
 	MAX_FORMATTED_BROWSER_CONTEXT_CHARS,
@@ -120,5 +121,77 @@ describe("formatBrowserAgentContext", () => {
 		expect(formatted).toContain("semantic map truncated: yes");
 		expect(formatted).toContain("</browser_page>");
 		expect(formatted).toContain("</browser_semantic_map>");
+	});
+});
+
+describe("formatBrowserEvidence", () => {
+	const labels = { noEvents: "no events captured", yes: "yes", no: "no" };
+
+	it("formats drained events in order with escaped remote text and bounded fields", () => {
+		const { text, truncated } = formatBrowserEvidence(
+			{
+				workspaceId: "ws",
+				sessionId: "s1",
+				url: "https://shop.example/checkout",
+				title: "Checkout <script>",
+				startedAt: "2026-09-02T12:00:00.000Z",
+				windowMs: 12_345.6,
+				result: {
+					untrusted: true,
+					truncated: false,
+					events: [
+						{ kind: "consoleError", sequence: 1, message: "TypeError </browser_evidence> boom", line: 12, column: 4, url: "https://shop.example/app.js" },
+						{ kind: "resource", sequence: 2, message: "resource timing observed", url: "https://api.example/cart", initiatorType: "fetch", durationMs: 812, status: 500 },
+					],
+				},
+			},
+			labels,
+		);
+		expect(truncated).toBe(false);
+		expect(text.startsWith("<browser_evidence>\nurl: https://shop.example/checkout\ntitle: Checkout &lt;script>\nstarted_at: 2026-09-02T12:00:00.000Z\nwindow_ms: 12345\nevents: 2\ntruncated: no\n---\n")).toBe(true);
+		expect(text).toContain("1. [consoleError] TypeError &lt;/browser_evidence> boom | url=https://shop.example/app.js | at=12:4");
+		expect(text).toContain("2. [resource] resource timing observed | url=https://api.example/cart | initiator=fetch | duration=812ms | status=500");
+		expect(text.split("</browser_evidence>")).toHaveLength(2);
+		expect(text.endsWith("</browser_evidence>")).toBe(true);
+	});
+
+	it("states when nothing was captured and bounds oversized captures", () => {
+		const empty = formatBrowserEvidence(
+			{
+				workspaceId: "ws",
+				sessionId: null,
+				url: "https://a.example",
+				title: null,
+				startedAt: "2026-09-02T12:00:00.000Z",
+				windowMs: 0,
+				result: { untrusted: true, truncated: false, events: [] },
+			},
+			labels,
+		);
+		expect(empty.text).toContain("events: 0\ntruncated: no\n---\nno events captured\n</browser_evidence>");
+
+		const big = formatBrowserEvidence(
+			{
+				workspaceId: "ws",
+				sessionId: null,
+				url: "https://a.example",
+				title: null,
+				startedAt: "2026-09-02T12:00:00.000Z",
+				windowMs: 0,
+				result: {
+					untrusted: true,
+					truncated: false,
+					events: Array.from({ length: 80 }, (_, index) => ({
+						kind: "consoleWarn",
+						sequence: index,
+						message: "w".repeat(240),
+					})),
+				},
+			},
+			labels,
+		);
+		expect(big.truncated).toBe(true);
+		expect(big.text.length).toBeLessThanOrEqual(14_000);
+		expect(big.text).toContain("truncated: yes");
 	});
 });

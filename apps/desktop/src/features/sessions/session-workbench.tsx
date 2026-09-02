@@ -29,7 +29,9 @@ import { WorkspacePanel } from "@/features/panel";
 import { WorkspaceBrowserSurface } from "@/features/browser/workspace-browser-surface";
 import {
 	formatBrowserAgentContext,
+	formatBrowserEvidence,
 	isBrowserContextForScope,
+	type BrowserEvidenceCapture,
 } from "@/features/browser/browser-agent-context";
 import type { BrowserAgentContext } from "@/features/browser/browser-api";
 import {
@@ -827,6 +829,41 @@ export function SessionWorkbench({
 		},
 		[browserSplit, handleCloseBrowser, pushDebugEvidence, t],
 	);
+	const handleSendBrowserEvidenceToAgent = useCallback(
+		(capture: BrowserEvidenceCapture) => {
+			const activeScope = browserScopeRef.current;
+			if (!isBrowserContextForScope(capture, activeScope)) {
+				return;
+			}
+			const formatted = formatBrowserEvidence(capture, {
+				noEvents: t("browser.evidence.noEvents"),
+				yes: t("browser.agentContext.yes"),
+				no: t("browser.agentContext.no"),
+			});
+			const attachmentId = contextAttachmentLedgerRef.current.issue({
+				source: "browser",
+				workspaceId: activeScope.workspaceId,
+				sessionId: activeScope.sessionId,
+				chars: formatted.text.length,
+				truncated: formatted.truncated,
+				trust: "remote_untrusted",
+			});
+			const title = capture.title?.trim() ?? "";
+			const added = pushDebugEvidence({
+				source: "browser",
+				trust: "remote_untrusted",
+				label: `${t("browser.evidence.label")} · ${title || capture.url}`,
+				body: formatted.text,
+				truncated: formatted.truncated,
+				attachment: attachmentId,
+			});
+			if (!added) return;
+			if (browserSplit) {
+				requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
+			}
+		},
+		[browserSplit, pushDebugEvidence, t],
+	);
 
 	useEffect(
 		() => () => {
@@ -1111,6 +1148,7 @@ export function SessionWorkbench({
 							sessionId={sessionId}
 							onClose={handleCloseBrowser}
 							onSendToAgent={handleSendBrowserToAgent}
+							onSendEvidenceToAgent={handleSendBrowserEvidenceToAgent}
 							forceOccluded={browserResizing}
 						/>
 					</div>

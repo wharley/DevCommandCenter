@@ -2948,6 +2948,16 @@
     "controlInactive": "Agent control disabled",
     "armControlShort": "Agent 60s",
     "controlOnShort": "Agent on",
+    "evidence": {
+      "start": "Capture console and network evidence",
+      "requiresControl": "Allow agent control first to capture evidence",
+      "active": "Capturing evidence · {{seconds}}s left. Reproduce the problem, then collect.",
+      "collect": "Collect",
+      "discard": "Discard",
+      "expired": "The evidence capture expired before it was collected.",
+      "noEvents": "no events captured",
+      "label": "console & network"
+    },
     "audit": {
       "open": "Open browser activity",
       "title": "Browser activity",

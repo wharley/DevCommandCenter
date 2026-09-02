@@ -84,6 +84,80 @@ export type BrowserSemanticItem = {
 	pressed?: boolean;
 };
 
+/**
+ * Complete identity of a fresh semantic map. It is consumed by the backend
+ * before any effect, so a capture can never reuse a stale page anchor.
+ */
+export type BrowserActionAnchor = {
+	workspaceId: string;
+	sessionId: string | null;
+	lifecycleToken: number;
+	mapId: string;
+	generation: number;
+	url: string;
+	pageLoadRevision: number;
+};
+
+/** One-shot, short-lived capture handle; the page token never leaves the backend. */
+export type BrowserEvidenceCaptureHandle = {
+	captureId: string;
+	remainingMs: number;
+};
+
+/** Bounded, redacted, untrusted page events drained exactly once. */
+export type BrowserEvidenceEvent = {
+	kind: string;
+	sequence: number;
+	message: string;
+	url?: string;
+	line?: number;
+	column?: number;
+	initiatorType?: string;
+	durationMs?: number;
+	status?: number;
+};
+
+export type BrowserEvidenceResult = {
+	events: BrowserEvidenceEvent[];
+	truncated: boolean;
+	untrusted: boolean;
+};
+
+export function anchorFromBrowserContext(
+	context: BrowserAgentContext,
+	lifecycleToken: number,
+): BrowserActionAnchor {
+	return {
+		workspaceId: context.workspaceId,
+		sessionId: context.sessionId,
+		lifecycleToken,
+		mapId: context.semanticMap.mapId,
+		generation: context.semanticMap.generation,
+		url: context.url,
+		pageLoadRevision: context.semanticMap.pageLoadRevision,
+	};
+}
+
+/** Starts a console/resource evidence capture; requires armed control and a fresh anchor. */
+export function startBrowserEvidenceCapture(anchor: BrowserActionAnchor) {
+	return invoke<BrowserEvidenceCaptureHandle>("browser_start_evidence_capture", {
+		anchor,
+	});
+}
+
+/** Drains one capture; a second read, expiry, close or navigation fails closed. */
+export function readBrowserEvidenceCapture(input: {
+	workspaceId: string;
+	sessionId: string | null;
+	captureId: string;
+}) {
+	return invoke<BrowserEvidenceResult>("browser_read_evidence_capture", {
+		workspaceId: input.workspaceId,
+		sessionId: input.sessionId,
+		captureId: input.captureId,
+	});
+}
+
 export function openBrowser(input: {
 	workspaceId: string;
 	sessionId: string | null;
