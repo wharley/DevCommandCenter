@@ -46,6 +46,7 @@ import { DiffReviewTray, type ReviewAnnotation } from "./diff-review-tray";
 import { collectPendingPermissionRequests } from "./pending-permissions";
 import { PendingPermissionPanel } from "./message-components";
 import { WorkspaceComposer } from "@/features/composer";
+import type { DebugEvidenceController } from "@/features/composer/DebugEvidenceTray";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
 import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
 import {
@@ -271,6 +272,8 @@ type WorkspacePanelProps = {
 	onExternalComposerPrefillConsumed?: (
 		prefill: ComposerPrefillConsumption,
 	) => void;
+	/** Evidence-first debugging tray owned by the workbench scope. */
+	debugEvidence?: DebugEvidenceController | null;
 	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
@@ -349,6 +352,7 @@ export function WorkspacePanel({
 	browserOpen,
 	externalComposerPrefill,
 	onExternalComposerPrefillConsumed,
+	debugEvidence = null,
 	composerFocusRequestKey = null,
 	inspectorCollapsed,
 	onToggleInspector,
@@ -1314,6 +1318,7 @@ export function WorkspacePanel({
 						turnQueueEventKey={turnQueueEventKey}
 						pendingPrompt={pendingPrompt}
 						prefill={composerPrefill}
+						debugEvidence={debugEvidence}
 						focusRequestKey={composerFocusRequestKey}
 						workspacePath={workspacePath}
 						workspaceSetupReport={workspaceSetupReport}

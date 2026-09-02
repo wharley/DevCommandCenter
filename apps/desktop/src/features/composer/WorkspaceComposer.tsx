@@ -24,6 +24,11 @@ import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import { Button } from "@/components/ui/button";
 import {
+	DebugEvidenceTray,
+	type DebugEvidenceController,
+} from "./DebugEvidenceTray";
+import { buildDebugEvidencePrompt } from "@/features/sessions/debug-evidence";
+import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuGroup,
@@ -137,6 +142,8 @@ type WorkspaceComposerProps = {
 		mode?: "append" | "replace";
 	} | null;
 	focusRequestKey?: number | null;
+	/** Evidence-first debugging tray; the person reviews what travels with the next message. */
+	debugEvidence?: DebugEvidenceController | null;
 	workspacePath: string | null;
 	workspaceSetupReport?: WorkspaceSetupReport | null;
 	workspaceBranch: string | null;
@@ -183,6 +190,7 @@ export function WorkspaceComposer({
 	pendingPrompt,
 	prefill,
 	focusRequestKey = null,
+	debugEvidence = null,
 	workspacePath,
 	workspaceSetupReport = null,
 	workspaceBranch,
@@ -382,8 +390,31 @@ export function WorkspaceComposer({
 				ultrathinkSelected,
 				rawPrompt,
 			});
+			// Evidence is composed at the send boundary so the person can still
+			// remove items until the very last moment; it is settled only after
+			// the turn is actually accepted.
+			const evidenceItems = debugEvidence?.items ?? [];
+			const evidenceStage = debugEvidence?.stage ?? "observe";
+			const prompt =
+				evidenceItems.length > 0
+					? buildDebugEvidencePrompt({
+							message: rawPrompt,
+							stage: evidenceStage,
+							items: evidenceItems,
+							labels: {
+								stageGuidance: t(`composer.evidence.stageGuidance.${evidenceStage}`),
+								trustNotice: t("composer.evidence.trustNotice"),
+								defaultMessage: t("composer.evidence.defaultMessage"),
+							},
+						})
+					: rawPrompt;
+			const settleEvidence = () => {
+				if (evidenceItems.length > 0) {
+					debugEvidence?.onConsumed(evidenceItems.map((item) => item.id));
+				}
+			};
 			const turn = {
-				rawPrompt,
+				rawPrompt: prompt,
 				envelope: {
 					planMode: isPlanMode,
 					effort: effectiveEffort,
@@ -400,14 +431,18 @@ export function WorkspaceComposer({
 					await onQueuePrompt(turn);
 					await refreshTurnQueue();
 				}
+				settleEvidence();
 				return true;
 			}
-			return onSubmitPrompt(turn);
+			const accepted = await onSubmitPrompt(turn);
+			if (accepted) settleEvidence();
+			return accepted;
 		},
 		[
 			availableEffortLevels,
 			canSteerActiveTurn,
 			canQueueActiveTurn,
+			debugEvidence,
 			effort,
 			hasActiveTurn,
 			approvalPolicy,
@@ -417,6 +452,7 @@ export function WorkspaceComposer({
 			onQueuePrompt,
 			onSubmitPrompt,
 			refreshTurnQueue,
+			t,
 			ultrathinkSelected,
 		],
 	);
@@ -433,7 +469,8 @@ export function WorkspaceComposer({
 			}
 
 			const prompt = readComposerPrompt(editor).trim();
-			if (prompt.length === 0) {
+			// Evidence alone is a valid message: the stage guidance carries the ask.
+			if (prompt.length === 0 && (debugEvidence?.items.length ?? 0) === 0) {
 				return;
 			}
 
@@ -471,7 +508,7 @@ export function WorkspaceComposer({
 				setIsSubmitting(false);
 			}
 		},
-		[composerDraftKey, submitFromComposer],
+		[composerDraftKey, debugEvidence, submitFromComposer],
 	);
 
 	const handleRemoveQueuedTurn = useCallback(
@@ -847,6 +884,12 @@ export function WorkspaceComposer({
 				<div className="mt-2 rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive">
 					{selectedProviderBlockReason}
 				</div>
+			) : null}
+			{debugEvidence ? (
+				<DebugEvidenceTray
+					controller={debugEvidence}
+					disabled={inputDisabled || isSubmitting}
+				/>
 			) : null}
 			{queuedTurns.length > 0 ? (
 				<div className="mb-2 rounded-xl border border-border/45 bg-background/30 px-2.5 py-2">

@@ -30,7 +30,6 @@ import { WorkspaceBrowserSurface } from "@/features/browser/workspace-browser-su
 import {
 	formatBrowserAgentContext,
 	isBrowserContextForScope,
-	isBrowserPrefillForScope,
 } from "@/features/browser/browser-agent-context";
 import type { BrowserAgentContext } from "@/features/browser/browser-api";
 import {
@@ -61,6 +60,19 @@ import {
 	ContextAttachmentLedger,
 	MAX_CONTEXT_ATTACHMENT_CHARS,
 } from "./context-attachment-ledger";
+import { toast } from "sonner";
+import type { DebugEvidenceController } from "@/features/composer/DebugEvidenceTray";
+import {
+	addDebugEvidence,
+	clearDebugEvidence,
+	emptyDebugEvidenceTray,
+	removeDebugEvidence,
+	setDebugStage,
+	MAX_DEBUG_EVIDENCE_ITEMS,
+	MAX_DEBUG_EVIDENCE_TOTAL_CHARS,
+	type DebugEvidenceInput,
+	type DebugEvidenceTray as DebugEvidenceTrayState,
+} from "./debug-evidence";
 import { sanitizeAndBoundTerminalOutput } from "@/features/terminal/terminal-selection";
 import type {
 	OpenTerminalRequest,
@@ -313,42 +325,19 @@ export function SessionWorkbench({
 	} | null>(null);
 	const browserCycleRef = useRef(0);
 	browserSurfaceWidthRef.current = browserSurfaceWidth;
-	const [terminalComposerPrefill, setTerminalComposerPrefill] = useState<{
-		workspaceId: string;
-		sessionId: string | null;
-		text: string;
-		nonce: number;
-		mode: "append";
-	} | null>(null);
-	const [browserComposerPrefill, setBrowserComposerPrefill] = useState<{
-		workspaceId: string;
-		sessionId: string | null;
-		text: string;
-		nonce: number;
-		mode: "append";
-	} | null>(null);
-	const terminalPrefillNonceRef = useRef(0);
 	const contextAttachmentLedgerRef = useRef(new ContextAttachmentLedger());
-	const handleComposerPrefillConsumed = useCallback(
-		(prefill: { text: string; nonce: number }) => {
-			if (
-				terminalComposerPrefill?.nonce === prefill.nonce &&
-				terminalComposerPrefill.text === prefill.text
-			) {
-				setTerminalComposerPrefill(null);
-				return;
-			}
-			if (
-				browserComposerPrefill?.nonce === prefill.nonce &&
-				browserComposerPrefill.text === prefill.text
-			) {
-				setBrowserComposerPrefill(null);
-				return;
-			}
-			onComposerPrefillConsumed?.(prefill);
-		},
-		[onComposerPrefillConsumed, browserComposerPrefill, terminalComposerPrefill],
+	// Evidence-first debugging: explicit Browser/Terminal gestures land in a
+	// bounded tray for this exact workspace+session and travel only with the
+	// next accepted message. The ref mirrors state so gestures can report
+	// rejections synchronously.
+	const [debugEvidenceTray, setDebugEvidenceTray] = useState<DebugEvidenceTrayState>(
+		() => emptyDebugEvidenceTray(),
 	);
+	const debugEvidenceTrayRef = useRef(debugEvidenceTray);
+	const updateDebugEvidence = useCallback((next: DebugEvidenceTrayState) => {
+		debugEvidenceTrayRef.current = next;
+		setDebugEvidenceTray(next);
+	}, []);
 	useEffect(() => {
 		setBrowserOpen(false);
 		setBrowserSurfaceWidth(readBrowserSurfaceWidth(workspaceId));
@@ -378,16 +367,60 @@ export function SessionWorkbench({
 	useEffect(() => {
 		const scope = { workspaceId, sessionId };
 		contextAttachmentLedgerRef.current.syncScope(scope);
-		// Terminal context belongs to the exact workspace/session where it was
-		// collected and must not leak into the next composer's scope.
-		setTerminalComposerPrefill(null);
+		// Evidence belongs to the exact workspace/session where it was collected
+		// and must not leak into the next conversation; the stage preference
+		// survives because it is a working mode, not context.
+		updateDebugEvidence(emptyDebugEvidenceTray(debugEvidenceTrayRef.current.stage));
 		return () => contextAttachmentLedgerRef.current.invalidate(scope);
-	}, [sessionId, workspaceId]);
-	useEffect(() => {
-		// Browser callbacks can resolve after switching conversations. A prefill
-		// is valid only for the exact session that requested it.
-		setBrowserComposerPrefill(null);
-	}, [sessionId, workspaceId]);
+	}, [sessionId, updateDebugEvidence, workspaceId]);
+	const pushDebugEvidence = useCallback(
+		(input: DebugEvidenceInput) => {
+			const result = addDebugEvidence(debugEvidenceTrayRef.current, input);
+			if (result.rejection) {
+				toast.error(
+					t(`composer.evidence.rejected.${result.rejection}`, {
+						max:
+							result.rejection === "too_many_items"
+								? MAX_DEBUG_EVIDENCE_ITEMS
+								: MAX_DEBUG_EVIDENCE_TOTAL_CHARS,
+					}),
+				);
+				return false;
+			}
+			updateDebugEvidence(result.tray);
+			toast.success(t("composer.evidence.added"), {
+				description: t(`composer.evidence.sources.${input.source}`),
+			});
+			return true;
+		},
+		[t, updateDebugEvidence],
+	);
+	const debugEvidenceController = useMemo<DebugEvidenceController>(
+		() => ({
+			items: debugEvidenceTray.items,
+			stage: debugEvidenceTray.stage,
+			onRemove: (id) =>
+				updateDebugEvidence(removeDebugEvidence(debugEvidenceTrayRef.current, [id])),
+			onClear: () => updateDebugEvidence(clearDebugEvidence(debugEvidenceTrayRef.current)),
+			onStageChange: (stage) =>
+				updateDebugEvidence(setDebugStage(debugEvidenceTrayRef.current, stage)),
+			onConsumed: (ids) => {
+				const current = debugEvidenceTrayRef.current;
+				const scope = contextAttachmentScopeRef.current;
+				const consumed = new Set(ids);
+				for (const item of current.items) {
+					if (!consumed.has(item.id) || !item.attachment) continue;
+					// Ledger metadata is best-effort and never blocks the turn.
+					void (
+						contextAttachmentLedgerRef.current.validateCurrent(item.attachment, scope) &&
+						contextAttachmentLedgerRef.current.consume(item.attachment, scope)
+					);
+				}
+				updateDebugEvidence(removeDebugEvidence(current, ids));
+			},
+		}),
+		[debugEvidenceTray, updateDebugEvidence],
+	);
 	useEffect(() => {
 		const element = workbenchRef.current;
 		if (!element) return;
@@ -678,7 +711,6 @@ export function SessionWorkbench({
 			) {
 				return;
 			}
-			terminalPrefillNonceRef.current += 1;
 			const branch = context.branchLabel ? ` · ${context.branchLabel}` : "";
 			const boundedTerminalOutput = sanitizeAndBoundTerminalOutput(
 				context.content,
@@ -696,33 +728,30 @@ export function SessionWorkbench({
 				truncated: boundedTerminalOutput.truncated,
 				trust: "local_terminal",
 			});
-			// Metadata recording is best-effort; the existing prefill behavior must
-			// not depend on the ledger.
-			void (
-				attachmentId !== null &&
-				contextAttachmentLedgerRef.current.validateCurrent(attachmentId, activeScope) &&
-				contextAttachmentLedgerRef.current.consume(attachmentId, activeScope)
-			);
-			setTerminalComposerPrefill({
-				workspaceId,
-				sessionId: activeScope.sessionId,
-				nonce: terminalPrefillNonceRef.current,
-				mode: "append",
-				text: [
-					t("terminalDock.agentContext.prompt", { source }),
-					"",
+			// The ledger entry is consumed only when the turn that carries this
+			// evidence is accepted; until then the person can still remove it.
+			const added = pushDebugEvidence({
+				source: "terminal",
+				trust: "local_terminal",
+				label: `${context.projectLabel} · ${context.scopeLabel}${branch} · ${context.cwd}`,
+				body: [
 					"<terminal_output>",
 					`project: ${context.projectLabel}`,
 					`scope: ${context.scopeLabel}${branch}`,
 					`cwd: ${context.cwd}`,
+					`source: ${source}`,
 					"---",
 					safeContent,
 					"</terminal_output>",
 				].join("\n"),
+				truncated: boundedTerminalOutput.truncated,
+				attachment: attachmentId,
 			});
+			if (!added) return;
 			handleTerminalOpenChange(false);
+			requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
 		},
-		[handleTerminalOpenChange, t],
+		[handleTerminalOpenChange, pushDebugEvidence, t],
 	);
 	const handleSendBrowserToAgent = useCallback(
 		(context: BrowserAgentContext) => {
@@ -733,7 +762,8 @@ export function SessionWorkbench({
 				return;
 			}
 			const text = formatBrowserAgentContext(context, {
-				prompt: t("browser.agentContext.prompt"),
+				// The evidence envelope carries the trust notice once for every item.
+				prompt: "",
 				url: t("browser.agentContext.url"),
 				title: t("browser.agentContext.title"),
 				source: t("browser.agentContext.source"),
@@ -763,27 +793,27 @@ export function SessionWorkbench({
 				trust: "remote_untrusted",
 			});
 			// The scope check above remains authoritative for stale callbacks;
-			// metadata recording must not block the prefill.
-			void (
-				attachmentId !== null &&
-				contextAttachmentLedgerRef.current.validateCurrent(attachmentId, activeScope) &&
-				contextAttachmentLedgerRef.current.consume(attachmentId, activeScope)
-			);
-			terminalPrefillNonceRef.current += 1;
-			setBrowserComposerPrefill({
-				workspaceId: activeScope.workspaceId,
-				sessionId: activeScope.sessionId,
-				nonce: terminalPrefillNonceRef.current,
-				mode: "append",
-				text,
+			// the ledger entry is consumed when the carrying turn is accepted.
+			const title = context.title?.trim() ?? "";
+			const added = pushDebugEvidence({
+				source: "browser",
+				trust: "remote_untrusted",
+				label: title ? `${title} — ${context.url}` : context.url,
+				body: text.replace(/^\n+/, ""),
+				truncated:
+					context.truncated ||
+					context.semanticMap.truncated ||
+					text.length >= MAX_CONTEXT_ATTACHMENT_CHARS,
+				attachment: attachmentId,
 			});
+			if (!added) return;
 			if (browserSplit) {
 				requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
 			} else {
 				handleCloseBrowser();
 			}
 		},
-		[browserSplit, handleCloseBrowser, t],
+		[browserSplit, handleCloseBrowser, pushDebugEvidence, t],
 	);
 
 	useEffect(
@@ -1008,18 +1038,9 @@ export function SessionWorkbench({
 						onOpenTerminal={handleOpenTerminal}
 						onOpenBrowser={handleOpenBrowser}
 						browserOpen={browserOpen && !browserTakeover}
-						externalComposerPrefill={
-							isBrowserPrefillForScope(browserComposerPrefill, {
-								workspaceId,
-								sessionId,
-							})
-								? browserComposerPrefill
-								: terminalComposerPrefill?.workspaceId === workspaceId &&
-										terminalComposerPrefill.sessionId === sessionId
-									? terminalComposerPrefill
-									: composerPrefill
-						}
-						onExternalComposerPrefillConsumed={handleComposerPrefillConsumed}
+						externalComposerPrefill={composerPrefill}
+						onExternalComposerPrefillConsumed={onComposerPrefillConsumed}
+						debugEvidence={debugEvidenceController}
 						composerFocusRequestKey={composerFocusRequestKey}
 						inspectorCollapsed={inspectorCollapsed}
 						onToggleInspector={onToggleInspector}
