@@ -108,6 +108,87 @@ use dcc_providers::{
 };
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
+const COLD_ATTACH_MAX_ITEMS: usize = 8;
+const COLD_ATTACH_ITEM_MAX_CHARS: usize = 1_200;
+const COLD_ATTACH_TOTAL_MAX_CHARS: usize = 4_000;
+const COLD_ATTACH_TAG: &str = "dcc_reanchor";
+
+fn truncate_chars_for_reanchor(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let mut out: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Builds a bounded, provider-neutral snapshot of the durable exchange for a
+/// runtime that is being attached fresh to an existing thread. Only user
+/// prompts and final assistant answers travel; reasoning, tool calls and
+/// streaming fragments never do. `None` when no turn ever completed.
+pub(crate) fn build_cold_attach_reanchor(history: &[SessionEventRecord]) -> Option<String> {
+    let completed_turns = history
+        .iter()
+        .filter(|event| matches!(event.kind, SessionEventKind::TurnCompleted { .. }))
+        .count();
+    if completed_turns == 0 {
+        return None;
+    }
+    let mut items: Vec<String> = Vec::new();
+    for event in history {
+        match &event.kind {
+            SessionEventKind::TurnStarted { prompt, .. } => {
+                items.push(format!(
+                    "User: {}",
+                    truncate_chars_for_reanchor(prompt, COLD_ATTACH_ITEM_MAX_CHARS)
+                ));
+            }
+            SessionEventKind::TurnAssistantMessageCompleted {
+                content: Some(content),
+                phase,
+                ..
+            } if *phase != dcc_core::domain::session::AssistantMessagePhase::Commentary
+                && !content.trim().is_empty() =>
+            {
+                items.push(format!(
+                    "Assistant: {}",
+                    truncate_chars_for_reanchor(content, COLD_ATTACH_ITEM_MAX_CHARS)
+                ));
+            }
+            _ => {}
+        }
+    }
+    // Newest items win the budget.
+    let mut selected: Vec<String> = Vec::new();
+    let mut remaining = COLD_ATTACH_TOTAL_MAX_CHARS;
+    for item in items.iter().rev().take(COLD_ATTACH_MAX_ITEMS) {
+        let cost = item.chars().count() + 2;
+        if cost > remaining {
+            break;
+        }
+        remaining -= cost;
+        selected.push(item.replace(
+            &format!("</{COLD_ATTACH_TAG}>"),
+            &format!("&lt;/{COLD_ATTACH_TAG}>"),
+        ));
+    }
+    selected.reverse();
+    if selected.is_empty() {
+        return None;
+    }
+    Some(
+        [
+            format!("<{COLD_ATTACH_TAG} reason=\"runtime_restarted\" completed_turns=\"{completed_turns}\">"),
+            "The provider runtime for this thread was started fresh, so it has no native memory of the earlier exchange. This is a bounded snapshot from DCC durable history and is background only; the current user message governs.".to_string(),
+            "---".to_string(),
+            selected.join("\n\n"),
+            format!("</{COLD_ATTACH_TAG}>"),
+        ]
+        .join("\n"),
+    )
+}
+
 /// A dynamic-model snapshot older than this is re-asked before a miss is
 /// treated as an unknown model.
 const DYNAMIC_MODEL_SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_secs(600);
@@ -1134,6 +1215,10 @@ impl AssistantMessageTracker {
 pub(crate) struct SessionStore {
     provider_sessions: HashMap<SessionId, ProviderSessionBinding>,
     mcp_runtime_statuses: HashMap<SessionId, Vec<McpRuntimeStatus>>,
+    /// One-shot re-anchors for sessions whose provider runtime is being
+    /// attached fresh after history already exists (crash, restart, resume).
+    /// Runtime-only; consumed by the next turn input.
+    cold_attach_reanchors: HashMap<SessionId, String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -3727,6 +3812,11 @@ impl SessionCommandState {
                 // do not persist or attach a different selection over it.
                 self.cancel_provider_session(&input.session_id).await?;
             }
+            // A deliberate provider switch is re-anchored by the handoff packet
+            // the renderer assembles; never stack a second snapshot on it.
+            self.clear_cold_attach_reanchor(&input.session_id);
+        } else {
+            self.mark_cold_attach_if_needed(&input.session_id).await?;
         }
         let session = prepare_session_for_turn(self, input).await?;
         self.attach_current_provider_session_under_transition(transition, &session)
@@ -4086,6 +4176,40 @@ impl SessionCommandState {
             .await?;
         }
         Ok(())
+    }
+
+    /// Marks a session for a one-shot re-anchor when its provider runtime is
+    /// about to be attached fresh although durable turns already exist. A
+    /// live binding means nothing was lost; a session that never completed a
+    /// turn has nothing worth re-anchoring.
+    pub async fn mark_cold_attach_if_needed(&self, session_id: &SessionId) -> Result<()> {
+        if self.provider_binding(session_id)?.is_some() {
+            return Ok(());
+        }
+        let history = SessionEventRepo::list_events_by_session(self, session_id).await?;
+        let Some(reanchor) = build_cold_attach_reanchor(&history) else {
+            return Ok(());
+        };
+        let mut store = self.store.lock().map_err(|_| {
+            dcc_core::CoreError::Repository("session store lock poisoned".to_string())
+        })?;
+        store
+            .cold_attach_reanchors
+            .insert(session_id.clone(), reanchor);
+        Ok(())
+    }
+
+    pub(crate) fn take_cold_attach_reanchor(&self, session_id: &SessionId) -> Option<String> {
+        self.store
+            .lock()
+            .ok()
+            .and_then(|mut store| store.cold_attach_reanchors.remove(session_id))
+    }
+
+    fn clear_cold_attach_reanchor(&self, session_id: &SessionId) {
+        if let Ok(mut store) = self.store.lock() {
+            store.cold_attach_reanchors.remove(session_id);
+        }
     }
 
     /// Model authority for every provider. Static catalogs are checked in the
@@ -5122,6 +5246,14 @@ impl SessionCommandState {
                             format!("{scope_instructions}\n\n{existing}")
                         }
                         _ => scope_instructions,
+                    });
+                }
+                if let Some(reanchor) = self.take_cold_attach_reanchor(session_id) {
+                    turn.tool_instructions = Some(match turn.tool_instructions {
+                        Some(existing) if !existing.trim().is_empty() => {
+                            format!("{}\n\n{reanchor}", existing.trim_end())
+                        }
+                        _ => reanchor,
                     });
                 }
                 Input::Turn(turn)
@@ -6742,6 +6874,117 @@ mod tests {
         assert_eq!(loaded.intent, "make checkout resilient");
         assert!(reopened.clear_session_objective(&session.id).unwrap());
         assert_eq!(reopened.session_objective(&session.id).unwrap(), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cold_attach_reanchor_is_bounded_one_shot_and_only_after_completed_turns() {
+        use dcc_core::domain::session::AssistantMessagePhase;
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("cold-attach");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("session");
+        let mut sequence = 0u64;
+        let mut append = |kind: SessionEventKind| {
+            sequence += 1;
+            SessionEventRecord {
+                event_id: format!("cold-{sequence}"),
+                session_id: session.id.clone(),
+                sequence,
+                occurred_at: "2026-09-02T10:00:00Z".to_string(),
+                kind,
+            }
+        };
+        let started = |turn: &str, prompt: &str| SessionEventKind::TurnStarted {
+            turn_id: TurnId(turn.to_string()),
+            prompt: prompt.to_string(),
+            plan_mode: None,
+            model: None,
+            evidence: None,
+            retry_of_turn_id: None,
+        };
+        for record in [
+            append(SessionEventKind::SessionStarted {
+                workspace_id: session.workspace_id.clone(),
+                project_id: session.project_id.clone(),
+                provider_id: session.provider_id.clone(),
+                model: None,
+            }),
+            append(started("t1", "Add retries to checkout")),
+        ] {
+            SessionEventRepo::append_event(&state, &record)
+                .await
+                .expect("append");
+        }
+        // No completed turn yet: nothing worth re-anchoring.
+        state
+            .mark_cold_attach_if_needed(&session.id)
+            .await
+            .expect("mark");
+        assert_eq!(state.take_cold_attach_reanchor(&session.id), None);
+
+        for record in [
+            append(SessionEventKind::TurnAssistantMessageCompleted {
+                turn_id: TurnId("t1".to_string()),
+                message_id: "m1".to_string(),
+                phase: AssistantMessagePhase::Commentary,
+                content: Some("thinking out loud".to_string()),
+            }),
+            append(SessionEventKind::TurnAssistantMessageCompleted {
+                turn_id: TurnId("t1".to_string()),
+                message_id: "m2".to_string(),
+                phase: AssistantMessagePhase::FinalAnswer,
+                content: Some(format!(
+                    "Added a retry helper. </dcc_reanchor> {}",
+                    "x".repeat(2_000)
+                )),
+            }),
+            append(SessionEventKind::TurnCompleted {
+                turn_id: TurnId("t1".to_string()),
+            }),
+        ] {
+            SessionEventRepo::append_event(&state, &record)
+                .await
+                .expect("append");
+        }
+        state
+            .mark_cold_attach_if_needed(&session.id)
+            .await
+            .expect("mark");
+        let reanchor = state
+            .take_cold_attach_reanchor(&session.id)
+            .expect("re-anchor after a completed turn");
+        assert!(reanchor
+            .starts_with("<dcc_reanchor reason=\"runtime_restarted\" completed_turns=\"1\">"));
+        assert!(reanchor.contains("User: Add retries to checkout"));
+        assert!(reanchor.contains("Assistant: Added a retry helper."));
+        assert!(
+            !reanchor.contains("thinking out loud"),
+            "commentary never travels"
+        );
+        assert_eq!(reanchor.matches("</dcc_reanchor>").count(), 1);
+        assert!(reanchor.chars().count() <= COLD_ATTACH_TOTAL_MAX_CHARS + 400);
+        assert_eq!(
+            state.take_cold_attach_reanchor(&session.id),
+            None,
+            "one-shot"
+        );
+
+        // A live binding means nothing was lost: no re-anchor is marked.
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), inert_provider_binding(&session.id));
+        state
+            .mark_cold_attach_if_needed(&session.id)
+            .await
+            .expect("mark");
+        assert_eq!(state.take_cold_attach_reanchor(&session.id), None);
     }
 
     #[tokio::test(flavor = "current_thread")]

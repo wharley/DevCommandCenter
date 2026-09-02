@@ -1112,6 +1112,12 @@ pub async fn resume_session(
     let output = run_resume_session(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
+    // An explicit resume attaches a fresh runtime; give it a bounded snapshot
+    // of the durable exchange on its first turn.
+    state
+        .mark_cold_attach_if_needed(&output.session.id)
+        .await
+        .map_err(|error| error.to_string())?;
     state
         .attach_current_provider_session_under_transition(&transition, &output.session)
         .await
