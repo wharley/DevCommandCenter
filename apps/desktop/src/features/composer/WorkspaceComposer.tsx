@@ -935,11 +935,6 @@ export function WorkspaceComposer({
 					{selectedProviderBlockReason}
 				</div>
 			) : null}
-			<SessionObjectiveControl
-				sessionId={sessionId}
-				refreshKey={`${turnCount}:${sessionSnapshot?.state ?? "idle"}:${activeTurnId ?? ""}`}
-				disabled={inputDisabled}
-			/>
 			{debugEvidence ? (
 				<DebugEvidenceTray
 					controller={debugEvidence}
@@ -1143,6 +1138,11 @@ export function WorkspaceComposer({
 								: ""}
 						</TooltipContent>
 					</Tooltip>
+					<SessionObjectiveControl
+						sessionId={sessionId}
+						refreshKey={`${turnCount}:${sessionSnapshot?.state ?? "idle"}:${activeTurnId ?? ""}`}
+						disabled={inputDisabled}
+					/>
 				</div>
 
 				<div className="flex shrink-0 items-center gap-1.5">

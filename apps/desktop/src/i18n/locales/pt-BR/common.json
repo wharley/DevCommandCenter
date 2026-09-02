@@ -1187,7 +1187,10 @@
   "composer": {
     "objective": {
       "open": "Objetivo da tarefa",
+      "compact": "Objetivo",
       "title": "Objetivo da tarefa",
+      "tooltipTitle": "Mantenha o agente focado no resultado",
+      "tooltipDescription": "Defina a intenção, os critérios de conclusão e os limites da tarefa. O DCC reapresenta esse objetivo ao agente em todos os turnos, inclusive após compactação, troca de modelo ou reinício.",
       "hint": "Guardado pelo DCC e reenviado a cada turno como contexto de fundo, então sobrevive a troca de provider, compactação e restart. Sua mensagem atual sempre tem prioridade.",
       "empty": "Sem objetivo ainda. Defina a intenção e o que significa \"pronto\".",
       "loading": "Carregando objetivo…",

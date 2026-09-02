@@ -21,8 +21,8 @@ const event = (value: object) => value as CoreEvent;
 
 describe("WorkspaceComposer.logic", () => {
 	it("removes only the redundant Claude brand from the compact model label", () => {
-		expect(getCompactComposerModelLabel("claude_code", "Claude Fable 5")).toBe(
-			"Fable 5",
+		expect(getCompactComposerModelLabel("claude_code", "Claude Fable 5.1")).toBe(
+			"Fable 5.1",
 		);
 		expect(getCompactComposerModelLabel("codex", "GPT-5.6 Terra")).toBe(
 			"GPT-5.6 Terra",

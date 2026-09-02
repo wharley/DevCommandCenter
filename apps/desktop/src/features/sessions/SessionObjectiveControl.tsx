@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { composerToolbarTriggerClassName } from "@/features/composer/WorkspaceComposer.logic";
 import { cn } from "@/lib/utils";
 import {
 	clearSessionObjective,
@@ -163,46 +165,46 @@ export function SessionObjectiveControl({
 
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
-			<PopoverTrigger asChild>
-				<button
-					type="button"
-					className={cn(
-						"mb-2 flex w-full min-w-0 items-center gap-2 rounded-xl border border-border/45 bg-background/30 px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-accent/40",
-						disabled && "cursor-not-allowed opacity-60",
-					)}
-					disabled={disabled}
-					aria-label={t("composer.objective.open")}
-					data-testid="session-objective-control"
-				>
-					<Target className={cn("size-3 shrink-0", statusTone)} strokeWidth={2} />
-					{objective && summary ? (
-						<>
-							<span className="min-w-0 flex-1 truncate text-foreground" title={objective.intent}>
-								{objective.intent}
+			<Tooltip>
+				<TooltipTrigger asChild>
+					<PopoverTrigger asChild>
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className={cn(
+								composerToolbarTriggerClassName,
+								"inline-flex h-7 items-center gap-1 rounded-[9px] px-1.5 text-[var(--dcc-daily-meta-size)]",
+								objective
+									? "bg-accent/60 text-foreground"
+									: "text-muted-foreground/70 hover:text-muted-foreground/70",
+							)}
+							disabled={disabled}
+							aria-label={t("composer.objective.open")}
+							aria-busy={query.isLoading}
+							data-testid="session-objective-control"
+						>
+							{query.isLoading && !objective ? (
+								<LoaderCircle className="size-[13px] shrink-0 animate-spin" strokeWidth={1.8} />
+							) : (
+								<Target
+									className={cn("size-[13px] shrink-0", statusTone)}
+									strokeWidth={1.8}
+								/>
+							)}
+							<span className="dcc-composer-objective-label text-[12px] font-medium leading-4">
+								{t("composer.objective.compact")}
 							</span>
-							<span className={cn("shrink-0 font-medium", statusTone)}>
-								{t(`composer.objective.status.${summary.status}`)}
-								{summary.pauseReason
-									? ` · ${t(`composer.objective.pauseReason.${summary.pauseReason}`)}`
-									: ""}
-							</span>
-							<span className="shrink-0 tabular-nums text-muted-foreground/80">
-								{t("composer.objective.counters", {
-									turns: summary.turnsLabel,
-									failures: summary.failuresLabel,
-								})}
-								{summary.retries > 0
-									? ` · ${t("composer.objective.retries", { count: summary.retries })}`
-									: ""}
-							</span>
-						</>
-					) : (
-						<span className="min-w-0 flex-1 truncate text-muted-foreground">
-							{query.isLoading ? t("composer.objective.loading") : t("composer.objective.empty")}
-						</span>
-					)}
-				</button>
-			</PopoverTrigger>
+						</Button>
+					</PopoverTrigger>
+				</TooltipTrigger>
+				<TooltipContent side="top" className="max-w-80 flex-col items-start gap-0">
+					<p className="font-medium">{t("composer.objective.tooltipTitle")}</p>
+					<p className="mt-1 text-[11px] leading-4 text-background/75">
+						{t("composer.objective.tooltipDescription")}
+					</p>
+				</TooltipContent>
+			</Tooltip>
 			<PopoverContent side="top" align="start" className="w-[26rem] max-w-[calc(100vw-1rem)] p-3">
 				<div className="mb-2 flex items-center justify-between gap-2">
 					<p className="text-[12px] font-medium">{t("composer.objective.title")}</p>

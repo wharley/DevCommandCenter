@@ -1187,7 +1187,10 @@
   "composer": {
     "objective": {
       "open": "Task objective",
+      "compact": "Objective",
       "title": "Task objective",
+      "tooltipTitle": "Keep the agent focused on the outcome",
+      "tooltipDescription": "Define the task intent, completion criteria and limits. DCC presents this objective to the agent on every turn, including after compaction, model switches or restarts.",
       "hint": "Kept by DCC and re-sent with every turn as background context, so it survives provider switches, compaction and restarts. Your current message always takes precedence.",
       "empty": "No objective yet. Set the intent and what \"done\" means.",
       "loading": "Loading objective…",

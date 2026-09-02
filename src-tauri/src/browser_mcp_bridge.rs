@@ -16,7 +16,7 @@ use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
-use dcc_core::domain::mcp::{McpDefinitionId, McpToolPolicyDecision};
+use dcc_core::domain::mcp::McpDefinitionId;
 use dcc_core::domain::session::{Session, SessionId};
 use dcc_core::ports::{
     ProviderMcpSecret, ProviderMcpServerConfig, ProviderMcpToolPolicy, ProviderMcpTransport,
@@ -64,13 +64,10 @@ const BROWSER_MCP_TOOL_NAMES: [&str; 8] = [
 ];
 
 fn browser_mcp_tool_policies() -> Vec<ProviderMcpToolPolicy> {
-    BROWSER_MCP_TOOL_NAMES
-        .into_iter()
-        .map(|tool_name| ProviderMcpToolPolicy {
-            tool_name: tool_name.to_string(),
-            decision: McpToolPolicyDecision::Ask,
-        })
-        .collect()
+    // ProviderMcpServerConfig carries explicit overrides only. Missing tools
+    // already default to Ask, which preserves Browser consent without sending
+    // an Ask override that some adapters (including Claude) cannot represent.
+    Vec::new()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,9 +266,15 @@ impl BrowserMcpBridge {
         let Some(current) = registry.by_lease.get_mut(&binding.lease_id) else {
             return false;
         };
-        if !bool::from(current.token_hash.ct_eq(&binding.token_hash))
-            || current.phase != LeasePhase::Issued
-        {
+        if !bool::from(current.token_hash.ct_eq(&binding.token_hash)) {
+            return false;
+        }
+        // Claude creates a fresh MCP client for each SDK query, including
+        // resumed chat turns. The credential is leased to the provider
+        // session, so an authenticated client may begin a new handshake once
+        // the previous one reached Ready. An in-flight initialization remains
+        // exclusive and is never reset by a duplicate request.
+        if !matches!(current.phase, LeasePhase::Issued | LeasePhase::Ready(_)) {
             return false;
         }
         current.phase = LeasePhase::Initialized(protocol);
@@ -1528,6 +1531,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_process_router_allows_reinitialization_for_a_follow_up_turn() {
+        let (app, _bridge, _binding, _temp) = ready_router(MCP_PROTOCOL_VERSION).await;
+
+        // Claude resumes the conversation but starts a new SDK query and MCP
+        // client, so the same session-bound lease receives another handshake.
+        let initialize = router_call(
+            &app,
+            mcp_request(Body::from(
+                initialize_request(MCP_PROTOCOL_VERSION).to_string(),
+            )),
+        )
+        .await;
+        assert_eq!(initialize.status(), StatusCode::OK);
+
+        let mut initialized = mcp_request(Body::from(
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string(),
+        ));
+        initialized.headers_mut().insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static(MCP_PROTOCOL_VERSION),
+        );
+        assert_eq!(
+            router_call(&app, initialized).await.status(),
+            StatusCode::ACCEPTED
+        );
+
+        let mut list = mcp_request(Body::from(
+            json!({"jsonrpc":"2.0","id":"follow-up-list","method":"tools/list"}).to_string(),
+        ));
+        list.headers_mut().insert(
+            "MCP-Protocol-Version",
+            HeaderValue::from_static(MCP_PROTOCOL_VERSION),
+        );
+        let list = router_call(&app, list).await;
+        assert_eq!(list.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(list).await["result"]["tools"]
+                .as_array()
+                .map(Vec::len),
+            Some(BROWSER_MCP_TOOL_NAMES.len())
+        );
+    }
+
+    #[tokio::test]
     async fn in_process_router_drops_notifications_and_bad_tools_without_audit_or_payload_echo() {
         let (app, bridge, _binding, _temp) = ready_router(MCP_PROTOCOL_VERSION).await;
         let private_fill = "private-fill-text-must-not-escape";
@@ -1805,11 +1852,7 @@ mod tests {
             json!("^c-[a-f0-9]{32}$")
         );
         assert_eq!(BROWSER_MCP_TOOL_NAMES.len(), tools.len());
-        let policies = browser_mcp_tool_policies();
-        assert_eq!(policies.len(), tools.len());
-        assert!(policies
-            .iter()
-            .all(|policy| policy.decision == McpToolPolicyDecision::Ask));
+        assert!(browser_mcp_tool_policies().is_empty());
     }
 
     #[test]

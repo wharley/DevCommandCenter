@@ -50,8 +50,11 @@ pub fn is_known_model(provider_id: &str, model: &str) -> Option<bool> {
 /// Alias tables: (short_alias_or_old_id, canonical_id).
 /// When a new model version ships, add the old ID as an alias pointing to the new canonical.
 pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
-    ("fable", "claude-fable-5"),
-    ("fable-5", "claude-fable-5"),
+    ("fable", "claude-fable-5-1"),
+    ("fable-5.1", "claude-fable-5-1"),
+    ("fable-5-1", "claude-fable-5-1"),
+    ("fable-5", "claude-fable-5-1"),
+    ("claude-fable-5", "claude-fable-5-1"),
     ("opus", "claude-opus-5"),
     ("opus-5", "claude-opus-5"),
     ("opus-4.8", "claude-opus-5"),
@@ -89,15 +92,18 @@ pub const CODEX_ALIASES: &[(&str, &str)] = &[
 
 pub const GEMINI_ALIASES: &[(&str, &str)] = &[
     ("pro", "gemini-2.5-pro"),
-    ("flash", "gemini-2.5-flash"),
-    ("3-flash-preview", "gemini-3-flash-preview"),
-    ("gemini-3-flash-preview", "gemini-3-flash-preview"),
+    ("flash", "gemini-3.8-flash"),
+    ("3.8-flash", "gemini-3.8-flash"),
+    ("gemini-3.8-flash", "gemini-3.8-flash"),
+    ("3-flash-preview", "gemini-3.8-flash"),
+    ("gemini-3-flash-preview", "gemini-3.8-flash"),
     ("3.1-pro", "gemini-2.5-pro"),
-    ("3-flash", "gemini-2.5-flash"),
+    ("3-flash", "gemini-3.8-flash"),
     ("gemini-3.1-pro", "gemini-2.5-pro"),
-    ("gemini-3-flash", "gemini-2.5-flash"),
+    ("gemini-3-flash", "gemini-3.8-flash"),
     ("2.5-pro", "gemini-2.5-pro"),
-    ("2.5-flash", "gemini-2.5-flash"),
+    ("2.5-flash", "gemini-3.8-flash"),
+    ("gemini-2.5-flash", "gemini-3.8-flash"),
 ];
 
 pub const DROID_ALIASES: &[(&str, &str)] = &[
@@ -140,9 +146,10 @@ pub fn resolve_alias(provider_id: &str, model: &str) -> String {
 
 pub const CLAUDE_CODE: &[ModelEntry] = &[
     ModelEntry {
-        id: "claude-fable-5",
-        label: "Claude Fable 5",
-        description: "Most capable widely available Claude model for demanding reasoning and long-horizon agentic work.",
+        id: "claude-fable-5-1",
+        label: "Claude Fable 5.1",
+        description:
+            "Most capable Claude model for demanding reasoning and long-horizon agentic work.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
@@ -223,25 +230,18 @@ pub const CODEX: &[ModelEntry] = &[
 
 pub const GEMINI: &[ModelEntry] = &[
     ModelEntry {
+        id: "gemini-3.8-flash",
+        label: "Gemini 3.8 Flash",
+        description: "Latest stable model for long-horizon coding and agentic workflows. CLI availability depends on the account rollout.",
+        recommended: true,
+        effort_levels: &["low", "medium", "high"],
+    },
+    ModelEntry {
         id: "gemini-2.5-pro",
         label: "Gemini 2.5 Pro",
         description: "Stable long-context model with the broadest CLI compatibility.",
-        recommended: true,
+        recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh"],
-    },
-    ModelEntry {
-        id: "gemini-2.5-flash",
-        label: "Gemini 2.5 Flash",
-        description: "Fast stable variant.",
-        recommended: false,
-        effort_levels: &["low", "medium", "high"],
-    },
-    ModelEntry {
-        id: "gemini-3-flash-preview",
-        label: "Gemini 3 Flash Preview",
-        description: "Preview Gemini 3 coding model. Availability may vary by account.",
-        recommended: false,
-        effort_levels: &["low", "medium", "high"],
     },
 ];
 
@@ -293,7 +293,7 @@ pub const GROK: &[ModelEntry] = &[ModelEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_alias, CLAUDE_CODE, CODEX, GROK};
+    use super::{resolve_alias, CLAUDE_CODE, CODEX, GEMINI, GROK};
 
     #[test]
     fn codex_registers_gpt_56_preview_models() {
@@ -306,6 +306,23 @@ mod tests {
     }
 
     #[test]
+    fn gemini_catalog_promotes_38_flash_and_migrates_removed_flash_models() {
+        assert_eq!(GEMINI.len(), 2);
+        assert_eq!(GEMINI[0].id, "gemini-3.8-flash");
+        assert!(GEMINI[0].recommended);
+        assert_eq!(GEMINI[1].id, "gemini-2.5-pro");
+        assert_eq!(resolve_alias("gemini", "flash"), "gemini-3.8-flash");
+        assert_eq!(
+            resolve_alias("gemini", "gemini-2.5-flash"),
+            "gemini-3.8-flash"
+        );
+        assert_eq!(
+            resolve_alias("gemini", "gemini-3-flash-preview"),
+            "gemini-3.8-flash"
+        );
+    }
+
+    #[test]
     fn grok_aliases_resolve_to_grok_45() {
         assert_eq!(resolve_alias("grok", "grok"), "grok-4.5");
         assert_eq!(resolve_alias("grok", "4.5"), "grok-4.5");
@@ -313,9 +330,14 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_aliases_resolve_fable_5() {
-        assert_eq!(resolve_alias("claude_code", "fable"), "claude-fable-5");
-        assert_eq!(resolve_alias("claude_code", "fable-5"), "claude-fable-5");
+    fn claude_code_aliases_resolve_fable_51() {
+        for alias in ["fable", "fable-5.1", "fable-5", "claude-fable-5"] {
+            assert_eq!(resolve_alias("claude_code", alias), "claude-fable-5-1");
+        }
+        assert!(CLAUDE_CODE
+            .iter()
+            .any(|model| model.id == "claude-fable-5-1"));
+        assert!(!CLAUDE_CODE.iter().any(|model| model.id == "claude-fable-5"));
     }
 
     #[test]

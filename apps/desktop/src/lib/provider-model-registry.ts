@@ -14,10 +14,10 @@ export type ModelEntry = {
 export const PROVIDER_MODEL_REGISTRY = {
 	claude_code: [
 		{
-			id: "claude-fable-5",
-			label: "Claude Fable 5",
+			id: "claude-fable-5-1",
+			label: "Claude Fable 5.1",
 			description:
-				"Most capable widely available Claude model for demanding reasoning and long-horizon agentic work.",
+				"Most capable Claude model for demanding reasoning and long-horizon agentic work.",
 			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
@@ -102,25 +102,19 @@ export const PROVIDER_MODEL_REGISTRY = {
 
 	gemini: [
 		{
+			id: "gemini-3.8-flash",
+			label: "Gemini 3.8 Flash",
+			description:
+				"Latest stable model for long-horizon coding and agentic workflows. CLI availability depends on the account rollout.",
+			recommended: true,
+			effortLevels: ["low", "medium", "high"],
+		},
+		{
 			id: "gemini-2.5-pro",
 			label: "Gemini 2.5 Pro",
 			description: "Stable long-context model with the broadest CLI compatibility.",
-			recommended: true,
+			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh"],
-		},
-		{
-			id: "gemini-2.5-flash",
-			label: "Gemini 2.5 Flash",
-			description: "Fast stable variant.",
-			recommended: false,
-			effortLevels: ["low", "medium", "high"],
-		},
-		{
-			id: "gemini-3-flash-preview",
-			label: "Gemini 3 Flash Preview",
-			description: "Preview Gemini 3 coding model. Availability may vary by account.",
-			recommended: false,
-			effortLevels: ["low", "medium", "high"],
 		},
 	] satisfies ModelEntry[],
 
@@ -195,8 +189,11 @@ export type ProviderRegistryKey = keyof typeof PROVIDER_MODEL_REGISTRY;
  */
 export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, string>>> = {
 	claude_code: {
-		fable: "claude-fable-5",
-		"fable-5": "claude-fable-5",
+		fable: "claude-fable-5-1",
+		"fable-5.1": "claude-fable-5-1",
+		"fable-5-1": "claude-fable-5-1",
+		"fable-5": "claude-fable-5-1",
+		"claude-fable-5": "claude-fable-5-1",
 		opus: "claude-opus-5",
 		"opus-5": "claude-opus-5",
 		"opus-4.8": "claude-opus-5",
@@ -231,15 +228,18 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 	},
 	gemini: {
 		pro: "gemini-2.5-pro",
-		flash: "gemini-2.5-flash",
-		"3-flash-preview": "gemini-3-flash-preview",
-		"gemini-3-flash-preview": "gemini-3-flash-preview",
+		flash: "gemini-3.8-flash",
+		"3.8-flash": "gemini-3.8-flash",
+		"gemini-3.8-flash": "gemini-3.8-flash",
+		"3-flash-preview": "gemini-3.8-flash",
+		"gemini-3-flash-preview": "gemini-3.8-flash",
 		"3.1-pro": "gemini-2.5-pro",
-		"3-flash": "gemini-2.5-flash",
+		"3-flash": "gemini-3.8-flash",
 		"gemini-3.1-pro": "gemini-2.5-pro",
-		"gemini-3-flash": "gemini-2.5-flash",
+		"gemini-3-flash": "gemini-3.8-flash",
 		"2.5-pro": "gemini-2.5-pro",
-		"2.5-flash": "gemini-2.5-flash",
+		"2.5-flash": "gemini-3.8-flash",
+		"gemini-2.5-flash": "gemini-3.8-flash",
 	},
 	droid: {
 		auto: "auto",

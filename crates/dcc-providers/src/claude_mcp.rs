@@ -31,7 +31,7 @@ const MAX_ARGUMENT_COUNT: usize = 128;
 const MAX_SECRET_COUNT: usize = 64;
 const MAX_TOOL_COUNT: usize = 256;
 
-pub(crate) const CLAUDE_MCP_RUNTIME_VERSION: &str = "claude-agent-sdk@0.2.126+claude-code@2.1.126";
+pub(crate) const CLAUDE_MCP_RUNTIME_VERSION: &str = "claude-agent-sdk@0.2.126+claude-code@2.1.258";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -500,6 +500,23 @@ mod tests {
                 )],
             },
             oauth_state: None,
+            tool_policies: Vec::new(),
+        };
+
+        assert!(encode_mcp_configuration(&[server]).is_ok());
+    }
+
+    #[test]
+    fn accepts_browser_projection_with_implicit_ask_policies() {
+        let server = ProviderMcpServerConfig {
+            definition_id: McpDefinitionId("dcc-browser-webview-internal".to_string()),
+            server_name: "dcc-browser-webview".to_string(),
+            transport: ProviderMcpTransport::Http {
+                url: "http://127.0.0.1:43127/mcp".to_string(),
+                headers: vec![secret("Authorization", "Bearer browser-session-token")],
+            },
+            oauth_state: None,
+            // Missing overrides default to Ask in the sidecar permission hook.
             tool_policies: Vec::new(),
         };
 

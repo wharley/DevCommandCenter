@@ -9,9 +9,20 @@ import {
 } from "./provider-model-registry";
 
 describe("provider-model-registry", () => {
-	it("resolves Claude Fable aliases to Claude Fable 5", () => {
-		expect(resolveModelAlias("claude_code", "fable")).toBe("claude-fable-5");
-		expect(resolveModelAlias("claude_code", "fable-5")).toBe("claude-fable-5");
+	it("resolves current and legacy Claude Fable aliases to Claude Fable 5.1", () => {
+		expect(resolveModelAlias("claude_code", "fable")).toBe("claude-fable-5-1");
+		expect(resolveModelAlias("claude_code", "fable-5.1")).toBe(
+			"claude-fable-5-1",
+		);
+		expect(resolveModelAlias("claude_code", "fable-5")).toBe(
+			"claude-fable-5-1",
+		);
+		expect(resolveModelAlias("claude_code", "claude-fable-5")).toBe(
+			"claude-fable-5-1",
+		);
+		expect(PROVIDER_MODEL_REGISTRY.claude_code.map((model) => model.id)).not.toContain(
+			"claude-fable-5",
+		);
 	});
 
 	it("upgrades Claude Opus aliases to Claude Opus 5", () => {
@@ -60,6 +71,21 @@ describe("provider-model-registry", () => {
 		expect(resolveModelAlias("codex", "sol")).toBe("gpt-5.6-sol");
 		expect(resolveModelAlias("codex", "5.6-terra")).toBe("gpt-5.6-terra");
 		expect(resolveModelAlias("codex", "luna")).toBe("gpt-5.6-luna");
+	});
+
+	it("keeps the Gemini catalog focused on 3.8 Flash and the 2.5 Pro fallback", () => {
+		expect(PROVIDER_MODEL_REGISTRY.gemini.map((model) => model.id)).toEqual([
+			"gemini-3.8-flash",
+			"gemini-2.5-pro",
+		]);
+		expect(getDefaultModelId("gemini")).toBe("gemini-3.8-flash");
+		expect(resolveModelAlias("gemini", "flash")).toBe("gemini-3.8-flash");
+		expect(resolveModelAlias("gemini", "gemini-2.5-flash")).toBe(
+			"gemini-3.8-flash",
+		);
+		expect(resolveModelAlias("gemini", "gemini-3-flash-preview")).toBe(
+			"gemini-3.8-flash",
+		);
 	});
 
 	it("registers Grok 4.5 and resolves its aliases", () => {

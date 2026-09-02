@@ -155,7 +155,8 @@
 
 @layer utilities {
 	@container header-actions (max-width: 720px) {
-		.dcc-composer-plan-label {
+		.dcc-composer-plan-label,
+		.dcc-composer-objective-label {
 			display: none;
 		}
 	}

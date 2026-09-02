@@ -117,8 +117,8 @@ describe("resolveSelectedModelId", () => {
 		description: "",
 		models: [
 			{
-				id: "claude-fable-5",
-				label: "Claude Fable 5",
+				id: "claude-fable-5-1",
+				label: "Claude Fable 5.1",
 				description: "",
 				recommended: false,
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
@@ -164,6 +164,12 @@ describe("resolveSelectedModelId", () => {
 		);
 		expect(resolveSelectedModelId(claudeProvider, "claude-opus-4-7")).toBe(
 			"claude-opus-5",
+		);
+	});
+
+	it("upgrades legacy Claude Fable 5 selections to Claude Fable 5.1", () => {
+		expect(resolveSelectedModelId(claudeProvider, "claude-fable-5")).toBe(
+			"claude-fable-5-1",
 		);
 	});
 

@@ -63,7 +63,7 @@ const claudeRuntimeMcpCapabilities = {
 	mcpOauthSupport: "managedDuringTurn",
 	mcpSupport: {
 		runtimeBridge: {
-			providerVersion: "claude-agent-sdk@0.2.126+claude-code@2.1.126",
+			providerVersion: "claude-agent-sdk@0.2.126+claude-code@2.1.258",
 		},
 	},
 } as const;
