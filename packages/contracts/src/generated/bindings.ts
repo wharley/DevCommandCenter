@@ -1875,6 +1875,10 @@ export type SessionObjective = {
 	consecutiveFailures: number,
 	// Makes outcome accounting idempotent across replays and restarts.
 	lastCountedTurnId?: string | null,
+	// Explicit retries the person requested while this objective was active.
+	retries?: number,
+	// Makes retry accounting idempotent per retrying turn.
+	lastRetryTurnId?: string | null,
 	// Monotonic; every persisted mutation advances it so stale writers lose.
 	generation: number,
 	updatedAt: string,

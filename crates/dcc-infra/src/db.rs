@@ -1256,6 +1256,18 @@ impl SqliteSessionRepo {
         )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
+            "dcc_session_objectives",
+            "retries",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_session_objectives",
+            "last_retry_turn_id",
+            "TEXT NULL",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
             "dcc_delegation_worktree_operations",
             "recovery_owner",
             "TEXT NULL",
@@ -5784,7 +5796,7 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let row = conn
             .query_row(
-                "SELECT intent, done_when, status, pause_reason, max_consecutive_failures, max_turns, turns_used, consecutive_failures, last_counted_turn_id, generation, updated_at FROM dcc_session_objectives WHERE session_id = ?1",
+                "SELECT intent, done_when, status, pause_reason, max_consecutive_failures, max_turns, turns_used, consecutive_failures, last_counted_turn_id, generation, updated_at, retries, last_retry_turn_id FROM dcc_session_objectives WHERE session_id = ?1",
                 params![session_id.0],
                 |row| {
                     Ok((
@@ -5799,6 +5811,8 @@ impl SqliteSessionRepo {
                         row.get::<_, Option<String>>(8)?,
                         row.get::<_, i64>(9)?,
                         row.get::<_, String>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, Option<String>>(12)?,
                     ))
                 },
             )
@@ -5816,6 +5830,8 @@ impl SqliteSessionRepo {
             last_counted_turn_id,
             generation,
             updated_at,
+            retries,
+            last_retry_turn_id,
         )) = row
         else {
             return Ok(None);
@@ -5850,6 +5866,8 @@ impl SqliteSessionRepo {
             turns_used: u32::try_from(turns_used).map_err(|_| invalid())?,
             consecutive_failures: u32::try_from(consecutive_failures).map_err(|_| invalid())?,
             last_counted_turn_id,
+            retries: u32::try_from(retries).map_err(|_| invalid())?,
+            last_retry_turn_id,
             generation: u64::try_from(generation).map_err(|_| invalid())?,
             updated_at,
         }))
@@ -5881,8 +5899,8 @@ impl SqliteSessionRepo {
             .execute(
                 r#"
             INSERT INTO dcc_session_objectives
-                (session_id, intent, done_when, status, pause_reason, max_consecutive_failures, max_turns, turns_used, consecutive_failures, last_counted_turn_id, generation, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                (session_id, intent, done_when, status, pause_reason, max_consecutive_failures, max_turns, turns_used, consecutive_failures, last_counted_turn_id, generation, updated_at, retries, last_retry_turn_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             ON CONFLICT(session_id) DO UPDATE SET
                 intent = excluded.intent,
                 done_when = excluded.done_when,
@@ -5894,7 +5912,9 @@ impl SqliteSessionRepo {
                 consecutive_failures = excluded.consecutive_failures,
                 last_counted_turn_id = excluded.last_counted_turn_id,
                 generation = excluded.generation,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                retries = excluded.retries,
+                last_retry_turn_id = excluded.last_retry_turn_id
             WHERE excluded.generation > dcc_session_objectives.generation
             "#,
                 params![
@@ -5910,6 +5930,8 @@ impl SqliteSessionRepo {
                     &objective.last_counted_turn_id,
                     generation,
                     &objective.updated_at,
+                    i64::from(objective.retries),
+                    &objective.last_retry_turn_id,
                 ],
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -11691,6 +11713,8 @@ mod tests {
             turns_used: 4,
             consecutive_failures: 3,
             last_counted_turn_id: Some("turn-4".to_string()),
+            retries: 2,
+            last_retry_turn_id: Some("turn-4".to_string()),
             generation: 5,
             updated_at: "2026-09-02T12:00:00Z".to_string(),
         };

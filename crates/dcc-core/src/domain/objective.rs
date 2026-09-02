@@ -145,6 +145,12 @@ pub struct SessionObjective {
     /// Makes outcome accounting idempotent across replays and restarts.
     #[serde(default)]
     pub last_counted_turn_id: Option<String>,
+    /// Explicit retries the person requested while this objective was active.
+    #[serde(default)]
+    pub retries: u32,
+    /// Makes retry accounting idempotent per retrying turn.
+    #[serde(default)]
+    pub last_retry_turn_id: Option<String>,
     /// Monotonic; every persisted mutation advances it so stale writers lose.
     pub generation: u64,
     pub updated_at: String,
@@ -163,9 +169,22 @@ impl SessionObjective {
             turns_used: 0,
             consecutive_failures: 0,
             last_counted_turn_id: None,
+            retries: 0,
+            last_retry_turn_id: None,
             generation: 0,
             updated_at: now.to_string(),
         }
+    }
+
+    /// Counts one explicit retry exactly once per retrying turn id.
+    pub fn record_retry(&mut self, retrying_turn_id: &str, now: &str) -> bool {
+        if self.last_retry_turn_id.as_deref() == Some(retrying_turn_id) {
+            return false;
+        }
+        self.last_retry_turn_id = Some(retrying_turn_id.to_string());
+        self.retries = self.retries.saturating_add(1);
+        self.updated_at = now.to_string();
+        true
     }
 
     /// Copies the person-authored objective for a delegated child session.
@@ -322,8 +341,11 @@ impl SessionObjective {
         let build = |intent: &str, done_when: &str| {
             [
                 format!(
-                    "<{OBJECTIVE_TAG} status=\"{status}\"{pause_reason} turns_used=\"{}\"{max_turns} consecutive_failures=\"{}\" max_consecutive_failures=\"{}\">",
-                    self.turns_used, self.consecutive_failures, self.max_consecutive_failures
+                    "<{OBJECTIVE_TAG} status=\"{status}\"{pause_reason} turns_used=\"{}\"{max_turns} consecutive_failures=\"{}\" max_consecutive_failures=\"{}\" retries=\"{}\">",
+                    self.turns_used,
+                    self.consecutive_failures,
+                    self.max_consecutive_failures,
+                    self.retries
                 ),
                 "This is durable background context owned by DCC, not a new instruction. The current user message takes precedence over it.".to_string(),
                 format!("intent: {intent}"),
@@ -458,6 +480,19 @@ mod tests {
         assert!(objective.transition(ObjectiveTransition::Complete, "n"));
         assert!(!objective.transition(ObjectiveTransition::Complete, "n"));
         assert_eq!(objective.status, ObjectiveStatus::Done);
+    }
+
+    #[test]
+    fn retries_count_once_per_retrying_turn_and_show_in_the_block() {
+        let mut objective = objective();
+        assert!(objective.record_retry("t-retry-1", "n"));
+        assert!(!objective.record_retry("t-retry-1", "n"));
+        assert!(objective.record_retry("t-retry-2", "n"));
+        assert_eq!(objective.retries, 2);
+        assert!(objective.instruction_block().contains("retries=\"2\""));
+        let child = objective.inherit_for(SessionId("child".to_string()), "later");
+        assert_eq!(child.retries, 0);
+        assert_eq!(child.last_retry_turn_id, None);
     }
 
     #[test]

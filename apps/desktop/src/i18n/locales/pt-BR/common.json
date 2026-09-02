@@ -1204,6 +1204,7 @@
       "saved": "Objetivo salvo",
       "failed": "Não foi possível atualizar o objetivo",
       "generation": "rev {{generation}}",
+      "retries": "retries {{count}}",
       "counters": "turnos {{turns}} · falhas {{failures}}",
       "status": {
         "active": "Ativo",

@@ -103,6 +103,8 @@ export type ObjectiveSummary = {
 	pauseReason: SessionObjective["pauseReason"];
 	turnsLabel: string;
 	failuresLabel: string;
+	/** Explicit retries counted on this objective; 0 when none. */
+	retries: number;
 	/** True when automatic follow-ups are blocked until the person acts. */
 	blocksAutomaticDispatch: boolean;
 };
@@ -116,6 +118,7 @@ export function summarizeObjective(objective: SessionObjective): ObjectiveSummar
 				? String(objective.turnsUsed)
 				: `${objective.turnsUsed}/${objective.maxTurns}`,
 		failuresLabel: `${objective.consecutiveFailures}/${objective.maxConsecutiveFailures}`,
+		retries: objective.retries ?? 0,
 		blocksAutomaticDispatch: objective.status !== "active",
 	};
 }

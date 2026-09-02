@@ -799,6 +799,7 @@ pub async fn send_turn(
         fast_mode: input.fast_mode,
         approval_policy: input.approval_policy,
     };
+    let retry_of_turn_id = input.retry_of_turn_id.clone();
     let output = run_send_turn(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
@@ -806,6 +807,11 @@ pub async fn send_turn(
     // Turn is now recorded in the event store. Any failure from here must emit
     // TurnAborted so the UI does not get stuck on session.turn.started.
     let turn_id = output.turn.id.clone();
+    if retry_of_turn_id.is_some() {
+        if let Err(error) = state.record_objective_retry(&output.session.id, &turn_id) {
+            eprintln!("[DCC] objective retry accounting failed: {error}");
+        }
+    }
     let session_id = output.session.id.clone();
     let abort_turn = |reason: String| {
         let state = &state;

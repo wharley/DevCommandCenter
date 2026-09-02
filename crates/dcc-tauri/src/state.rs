@@ -5424,6 +5424,35 @@ impl SessionCommandState {
         ))
     }
 
+    /// Counts an explicit retry on the objective, once per retrying turn.
+    /// Best-effort: never blocks the turn that already started.
+    pub fn record_objective_retry(
+        &self,
+        session_id: &SessionId,
+        retrying_turn_id: &TurnId,
+    ) -> Result<bool> {
+        for _attempt in 0..3 {
+            let Some(mut objective) = self.session_repo.load_session_objective(session_id)? else {
+                return Ok(false);
+            };
+            if !objective.record_retry(&retrying_turn_id.0, &Utc::now().to_rfc3339()) {
+                return Ok(false);
+            }
+            match self.persist_objective(&mut objective) {
+                Ok(()) => return Ok(true),
+                Err(dcc_core::CoreError::Repository(message))
+                    if message.contains("generation is stale") =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(dcc_core::CoreError::Repository(
+            "session objective retry could not be recorded".to_string(),
+        ))
+    }
+
     /// Automatic follow-ups respect the objective: a paused or done objective
     /// stops the queue until the person resumes it. Direct turns and manual
     /// dispatch stay available because a new instruction has priority.
@@ -6852,6 +6881,22 @@ mod tests {
             .await
             .unwrap());
 
+        assert!(state
+            .record_objective_retry(&session.id, &TurnId("retry-1".to_string()))
+            .unwrap());
+        assert!(!state
+            .record_objective_retry(&session.id, &TurnId("retry-1".to_string()))
+            .unwrap());
+        let paused = state
+            .session_objective(&session.id)
+            .unwrap()
+            .expect("objective");
+        assert_eq!(paused.retries, 1);
+        assert!(state
+            .objective_tool_instructions(&session.id, None)
+            .unwrap()
+            .expect("block")
+            .contains("retries=\"1\""));
         let resumed = state
             .transition_session_objective(
                 &session.id,

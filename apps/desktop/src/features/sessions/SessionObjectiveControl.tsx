@@ -191,6 +191,9 @@ export function SessionObjectiveControl({
 									turns: summary.turnsLabel,
 									failures: summary.failuresLabel,
 								})}
+								{summary.retries > 0
+									? ` · ${t("composer.objective.retries", { count: summary.retries })}`
+									: ""}
 							</span>
 						</>
 					) : (

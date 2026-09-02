@@ -21,6 +21,8 @@ function objective(overrides: Partial<SessionObjective> = {}): SessionObjective 
 		turnsUsed: 4,
 		consecutiveFailures: 1,
 		lastCountedTurnId: "t4",
+		retries: 2,
+		lastRetryTurnId: "t4",
 		generation: 7,
 		updatedAt: "2026-09-02T12:00:00Z",
 		...overrides,
@@ -86,6 +88,7 @@ describe("session objective logic", () => {
 			pauseReason: null,
 			turnsLabel: "4/20",
 			failuresLabel: "1/3",
+			retries: 2,
 			blocksAutomaticDispatch: false,
 		});
 		expect(

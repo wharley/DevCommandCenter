@@ -2085,10 +2085,16 @@ async fn send_turn_handler(
         fast_mode: input.fast_mode,
         approval_policy: input.approval_policy,
     };
+    let retry_of_turn_id = input.retry_of_turn_id.clone();
     let output = send_turn(&*state, &*state, &*state, input)
         .await
         .map_err(|error| classify_session_error(error.to_string()))?;
     let turn_id = output.turn.id.clone();
+    if retry_of_turn_id.is_some() {
+        if let Err(error) = state.record_objective_retry(&output.session.id, &turn_id) {
+            eprintln!("[DCC] objective retry accounting failed: {error}");
+        }
+    }
     if let Err(error) = state
         .set_active_turn(&output.session.id, Some(turn_id.0.clone()))
         .await
