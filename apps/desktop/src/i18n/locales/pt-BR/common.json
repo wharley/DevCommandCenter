@@ -1266,6 +1266,11 @@
       "clear": "Limpar tudo",
       "hint": "Segue com a sua próxima mensagem como um bloco delimitado, nesta ordem. Remova o que não deve chegar ao provider.",
       "added": "Evidência adicionada ao composer",
+      "followUp": {
+        "prompt": "Turno de {{from}} concluído com {{count}} evidência(s). Próxima etapa: {{next}}.",
+        "accept": "Reanexar para {{next}}",
+        "dismiss": "Dispensar"
+      },
       "rejected": {
         "empty": "Nada para anexar.",
         "too_many_items": "Limite de evidências atingido ({{max}} itens). Remova uma antes de adicionar outra.",

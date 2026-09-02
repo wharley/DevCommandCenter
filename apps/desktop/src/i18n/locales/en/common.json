@@ -1266,6 +1266,11 @@
       "clear": "Clear all",
       "hint": "Travels with your next message as one delimited block, in this order. Remove anything that should not reach the provider.",
       "added": "Evidence added to the composer",
+      "followUp": {
+        "prompt": "{{from}} turn finished with {{count}} evidence item(s). Next stage: {{next}}.",
+        "accept": "Re-attach for {{next}}",
+        "dismiss": "Dismiss"
+      },
       "rejected": {
         "empty": "Nothing to attach.",
         "too_many_items": "Evidence limit reached ({{max}} items). Remove one before adding more.",

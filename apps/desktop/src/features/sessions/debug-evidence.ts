@@ -291,3 +291,48 @@ export function summarizeDebugEvidence(
 		})),
 	};
 }
+
+/** The natural next stage of the evidence-first loop, if any. */
+export function nextDebugStage(stage: DebugStage): DebugStage | null {
+	const index = DEBUG_STAGES.indexOf(stage);
+	if (index < 0 || index >= DEBUG_STAGES.length - 1) return null;
+	return DEBUG_STAGES[index + 1] ?? null;
+}
+
+/**
+ * What the last accepted turn of a conversation carried. Kept only in the
+ * renderer's memory so the person can re-attach the same evidence by gesture
+ * for the next stage; bodies are never persisted.
+ */
+export type EvidenceFollowUpRecord = {
+	stage: DebugStage;
+	items: DebugEvidenceItem[];
+	/** Session turn count observed right before the carrying turn started. */
+	turnCountAtSend: number;
+	dismissed: boolean;
+};
+
+export type EvidenceFollowUp = {
+	fromStage: DebugStage;
+	nextStage: DebugStage;
+	items: DebugEvidenceItem[];
+};
+
+/**
+ * A follow-up is offered exactly for the turn that carried the evidence,
+ * once it completed, while the tray is empty and the person has not
+ * dismissed it. Later turns never resurrect an old suggestion.
+ */
+export function evidenceFollowUpFor(
+	record: EvidenceFollowUpRecord | null | undefined,
+	snapshot: { turnCount: number; lastTurnState?: string | null } | null | undefined,
+	trayEmpty: boolean,
+): EvidenceFollowUp | null {
+	if (!record || record.dismissed || !trayEmpty || !snapshot) return null;
+	if (record.items.length === 0) return null;
+	if (snapshot.turnCount !== record.turnCountAtSend + 1) return null;
+	if (snapshot.lastTurnState !== "completed") return null;
+	const nextStage = nextDebugStage(record.stage);
+	if (!nextStage) return null;
+	return { fromStage: record.stage, nextStage, items: record.items };
+}

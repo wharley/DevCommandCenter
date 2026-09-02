@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Bug, Eye, EyeOff, FileDiff, Globe, Terminal, Trash2, X } from "lucide-react";
+import { ArrowRight, Bug, Eye, EyeOff, FileDiff, Globe, Terminal, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -12,6 +12,7 @@ import {
 	type DebugEvidenceInput,
 	type DebugEvidenceItem,
 	type DebugStage,
+	type EvidenceFollowUp,
 } from "@/features/sessions/debug-evidence";
 
 /**
@@ -29,6 +30,11 @@ export type DebugEvidenceController = {
 	onAdd: (input: DebugEvidenceInput) => boolean;
 	/** Called once the turn is accepted so ledger metadata and the tray are settled. */
 	onConsumed: (ids: string[]) => void;
+	/** Suggested next stage for the turn that just completed with evidence. */
+	followUp?: EvidenceFollowUp | null;
+	/** Re-attaches the same evidence and moves the tray to the next stage. */
+	onAcceptFollowUp?: () => void;
+	onDismissFollowUp?: () => void;
 };
 
 function formatChars(value: number) {
@@ -44,8 +50,48 @@ export function DebugEvidenceTray({
 }) {
 	const { t } = useTranslation("common");
 	const [expandedId, setExpandedId] = useState<string | null>(null);
-	const { items, stage } = controller;
-	if (items.length === 0) return null;
+	const { items, stage, followUp } = controller;
+	if (items.length === 0) {
+		if (!followUp) return null;
+		return (
+			<div
+				className="mb-2 flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-border/45 bg-background/30 px-2.5 py-1.5 text-[11px]"
+				data-testid="debug-evidence-follow-up"
+			>
+				<Bug className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} />
+				<span className="min-w-0 flex-1 truncate text-muted-foreground">
+					{t("composer.evidence.followUp.prompt", {
+						from: t(`composer.evidence.stages.${followUp.fromStage}`),
+						next: t(`composer.evidence.stages.${followUp.nextStage}`),
+						count: followUp.items.length,
+					})}
+				</span>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="h-6 gap-1 px-2 text-[11px]"
+					disabled={disabled}
+					onClick={controller.onAcceptFollowUp}
+				>
+					<ArrowRight className="size-3" />
+					{t("composer.evidence.followUp.accept", {
+						next: t(`composer.evidence.stages.${followUp.nextStage}`),
+					})}
+				</Button>
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					className="h-6 px-2 text-[11px] text-muted-foreground"
+					disabled={disabled}
+					onClick={controller.onDismissFollowUp}
+				>
+					{t("composer.evidence.followUp.dismiss")}
+				</Button>
+			</div>
+		);
+	}
 	const totalChars = debugEvidenceTotalChars(items);
 
 	return (

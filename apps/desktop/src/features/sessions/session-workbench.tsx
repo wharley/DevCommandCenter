@@ -72,8 +72,10 @@ import {
 	setDebugStage,
 	MAX_DEBUG_EVIDENCE_ITEMS,
 	MAX_DEBUG_EVIDENCE_TOTAL_CHARS,
+	evidenceFollowUpFor,
 	type DebugEvidenceInput,
 	type DebugEvidenceTray as DebugEvidenceTrayState,
+	type EvidenceFollowUpRecord,
 } from "./debug-evidence";
 import { sanitizeAndBoundTerminalOutput } from "@/features/terminal/terminal-selection";
 import type {
@@ -342,6 +344,11 @@ export function SessionWorkbench({
 		debugEvidenceTrayRef.current = next;
 		setDebugEvidenceTray(next);
 	}, []);
+	// What the last accepted turn of each conversation carried, so the person
+	// can re-attach it by gesture for the next stage. Renderer memory only,
+	// bounded to the conversations of this workbench mount.
+	const lastSentEvidenceRef = useRef(new Map<string, EvidenceFollowUpRecord>());
+	const [followUpVersion, setFollowUpVersion] = useState(0);
 	useEffect(() => {
 		setBrowserOpen(false);
 		setBrowserSurfaceWidth(readBrowserSurfaceWidth(workspaceId));
@@ -424,18 +431,76 @@ export function SessionWorkbench({
 				const current = debugEvidenceTrayRef.current;
 				const scope = contextAttachmentScopeRef.current;
 				const consumed = new Set(ids);
-				for (const item of current.items) {
-					if (!consumed.has(item.id) || !item.attachment) continue;
+				const sentItems = current.items.filter((item) => consumed.has(item.id));
+				for (const item of sentItems) {
+					if (!item.attachment) continue;
 					// Ledger metadata is best-effort and never blocks the turn.
 					void (
 						contextAttachmentLedgerRef.current.validateCurrent(item.attachment, scope) &&
 						contextAttachmentLedgerRef.current.consume(item.attachment, scope)
 					);
 				}
+				if (scope.sessionId && sentItems.length > 0) {
+					lastSentEvidenceRef.current.set(scope.sessionId, {
+						stage: current.stage,
+						items: sentItems.map((item) => ({ ...item, attachment: null })),
+						turnCountAtSend: sessionSnapshot?.turnCount ?? 0,
+						dismissed: false,
+					});
+					setFollowUpVersion((version) => version + 1);
+				}
 				updateDebugEvidence(removeDebugEvidence(current, ids));
 			},
+			followUp: evidenceFollowUpFor(
+				sessionId ? lastSentEvidenceRef.current.get(sessionId) : null,
+				sessionSnapshot,
+				debugEvidenceTray.items.length === 0,
+			),
+			onAcceptFollowUp: () => {
+				const record = sessionId ? lastSentEvidenceRef.current.get(sessionId) : null;
+				const offered = evidenceFollowUpFor(
+					record,
+					sessionSnapshot,
+					debugEvidenceTrayRef.current.items.length === 0,
+				);
+				if (!record || !offered) return;
+				record.dismissed = true;
+				updateDebugEvidence(setDebugStage(debugEvidenceTrayRef.current, offered.nextStage));
+				for (const item of offered.items) {
+					// Re-attaching is a fresh explicit gesture: new ledger entry, same body.
+					const attachment = contextAttachmentLedgerRef.current.issue({
+						source: item.source,
+						workspaceId: contextAttachmentScopeRef.current.workspaceId,
+						sessionId: contextAttachmentScopeRef.current.sessionId,
+						chars: item.chars,
+						truncated: item.truncated,
+						trust: item.trust,
+					});
+					if (
+						!pushDebugEvidence({
+							source: item.source,
+							trust: item.trust,
+							label: item.label,
+							body: item.body,
+							truncated: item.truncated,
+							capturedAt: item.capturedAt,
+							attachment,
+						})
+					) {
+						break;
+					}
+				}
+				setFollowUpVersion((version) => version + 1);
+			},
+			onDismissFollowUp: () => {
+				const record = sessionId ? lastSentEvidenceRef.current.get(sessionId) : null;
+				if (record) record.dismissed = true;
+				setFollowUpVersion((version) => version + 1);
+			},
 		}),
-		[debugEvidenceTray, pushDebugEvidence, updateDebugEvidence],
+		// followUpVersion re-derives the suggestion after consume/accept/dismiss.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[debugEvidenceTray, followUpVersion, pushDebugEvidence, sessionId, sessionSnapshot, updateDebugEvidence],
 	);
 	useEffect(() => {
 		const element = workbenchRef.current;
