@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -68,6 +68,28 @@ export function SessionObjectiveControl({
 	useEffect(() => {
 		if (!dirty) setForm(objectiveFormFromRecord(objective));
 	}, [dirty, objective]);
+	// An automatic pause (budget or failure limit) must be visible even when
+	// the popover is closed: it is the moment the person has to decide.
+	const previousStatusRef = useRef<{ sessionId: string | null; status: string | null }>({
+		sessionId: null,
+		status: null,
+	});
+	useEffect(() => {
+		const previous = previousStatusRef.current;
+		const status = objective?.status ?? null;
+		if (
+			previous.sessionId === sessionId &&
+			previous.status === "active" &&
+			status === "paused" &&
+			objective?.pauseReason &&
+			objective.pauseReason !== "manual"
+		) {
+			toast.warning(t("composer.objective.autoPaused"), {
+				description: t(`composer.objective.pauseReason.${objective.pauseReason}`),
+			});
+		}
+		previousStatusRef.current = { sessionId, status };
+	}, [objective, sessionId, t]);
 	useEffect(() => {
 		setDirty(false);
 		setForm(EMPTY_OBJECTIVE_FORM);

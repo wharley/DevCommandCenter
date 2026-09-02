@@ -168,6 +168,22 @@ impl SessionObjective {
         }
     }
 
+    /// Copies the person-authored objective for a delegated child session.
+    /// Counters, pauses and the generation start fresh: the child has its own
+    /// budget and its own failures, but shares what "done" means.
+    pub fn inherit_for(&self, child_session_id: SessionId, now: &str) -> Self {
+        Self::new(
+            child_session_id,
+            ValidatedObjectiveDraft {
+                intent: self.intent.clone(),
+                done_when: self.done_when.clone(),
+                max_consecutive_failures: self.max_consecutive_failures,
+                max_turns: self.max_turns,
+            },
+            now,
+        )
+    }
+
     /// Rewrites the person-authored fields. Counters are preserved; a `Done`
     /// or budget-paused objective becomes active again because the person
     /// deliberately changed what "done" means. A manual pause is kept.
@@ -442,6 +458,29 @@ mod tests {
         assert!(objective.transition(ObjectiveTransition::Complete, "n"));
         assert!(!objective.transition(ObjectiveTransition::Complete, "n"));
         assert_eq!(objective.status, ObjectiveStatus::Done);
+    }
+
+    #[test]
+    fn inherited_objective_shares_intent_but_starts_fresh() {
+        let mut parent = objective();
+        parent.record_turn_outcome("t1", ObjectiveTurnOutcome::Failed, "n");
+        parent.record_turn_outcome("t2", ObjectiveTurnOutcome::Completed, "n");
+        parent.generation = 9;
+        let child = parent.inherit_for(SessionId("child".to_string()), "later");
+        assert_eq!(child.session_id.0, "child");
+        assert_eq!(child.intent, parent.intent);
+        assert_eq!(child.done_when, parent.done_when);
+        assert_eq!(child.max_turns, parent.max_turns);
+        assert_eq!(
+            child.max_consecutive_failures,
+            parent.max_consecutive_failures
+        );
+        assert_eq!(child.status, ObjectiveStatus::Active);
+        assert_eq!(child.turns_used, 0);
+        assert_eq!(child.consecutive_failures, 0);
+        assert_eq!(child.last_counted_turn_id, None);
+        assert_eq!(child.generation, 0);
+        assert_eq!(child.updated_at, "later");
     }
 
     #[test]

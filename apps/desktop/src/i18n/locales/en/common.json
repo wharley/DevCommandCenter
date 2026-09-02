@@ -1220,6 +1220,7 @@
         "resume": "Resume",
         "complete": "Mark done"
       },
+      "autoPaused": "Objective paused automatically. Review it and resume when ready.",
       "dispatchBlocked": "Queued follow-ups will not run automatically until the objective is resumed. Your own messages still go through.",
       "errors": {
         "intent_required": "Intent is required.",

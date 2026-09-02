@@ -5093,6 +5093,42 @@ impl SessionCommandState {
         Ok(objective)
     }
 
+    /// Gives a delegated child session its own copy of the parent's objective.
+    /// Idempotent: an existing child objective is kept, and a parent objective
+    /// already marked done is not propagated. Returns the child's objective.
+    pub fn inherit_session_objective(
+        &self,
+        parent_session_id: &SessionId,
+        child_session_id: &SessionId,
+    ) -> Result<Option<SessionObjective>> {
+        if parent_session_id == child_session_id {
+            return self.session_repo.load_session_objective(child_session_id);
+        }
+        if let Some(existing) = self.session_repo.load_session_objective(child_session_id)? {
+            return Ok(Some(existing));
+        }
+        let Some(parent) = self
+            .session_repo
+            .load_session_objective(parent_session_id)?
+        else {
+            return Ok(None);
+        };
+        if parent.status == dcc_core::domain::objective::ObjectiveStatus::Done {
+            return Ok(None);
+        }
+        let mut child = parent.inherit_for(child_session_id.clone(), &Utc::now().to_rfc3339());
+        match self.persist_objective(&mut child) {
+            Ok(()) => Ok(Some(child)),
+            // A concurrent writer already created the child's objective.
+            Err(dcc_core::CoreError::Repository(message))
+                if message.contains("generation is stale") =>
+            {
+                self.session_repo.load_session_objective(child_session_id)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn clear_session_objective(&self, session_id: &SessionId) -> Result<bool> {
         self.session_repo.delete_session_objective(session_id)
     }
@@ -6562,6 +6598,78 @@ mod tests {
         assert_eq!(loaded.intent, "make checkout resilient");
         assert!(reopened.clear_session_objective(&session.id).unwrap());
         assert_eq!(reopened.session_objective(&session.id).unwrap(), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn delegated_child_inherits_parent_objective_once_with_fresh_counters() {
+        use dcc_core::domain::objective::ObjectiveStatus;
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let parent = sample_session("objective-parent");
+        let child = sample_session("objective-child");
+        SessionRepo::save_session(&state, &parent)
+            .await
+            .expect("parent");
+        SessionRepo::save_session(&state, &child)
+            .await
+            .expect("child");
+        assert_eq!(
+            state
+                .inherit_session_objective(&parent.id, &child.id)
+                .unwrap(),
+            None,
+            "no parent objective, nothing to inherit"
+        );
+        let draft = SessionObjectiveDraft {
+            intent: "keep the API contract".to_string(),
+            done_when: "contract tests pass".to_string(),
+            max_consecutive_failures: Some(2),
+            max_turns: Some(5),
+        };
+        state
+            .set_session_objective(&parent.id, draft, None)
+            .await
+            .expect("parent objective");
+        state
+            .record_objective_turn_outcome(
+                &parent.id,
+                &TurnId("p-1".to_string()),
+                ObjectiveTurnOutcome::Failed,
+            )
+            .unwrap();
+        let inherited = state
+            .inherit_session_objective(&parent.id, &child.id)
+            .unwrap()
+            .expect("child objective");
+        assert_eq!(inherited.session_id, child.id);
+        assert_eq!(inherited.intent, "keep the API contract");
+        assert_eq!(inherited.max_turns, Some(5));
+        assert_eq!(inherited.consecutive_failures, 0);
+        assert_eq!(inherited.turns_used, 0);
+        assert_eq!(inherited.status, ObjectiveStatus::Active);
+        assert_eq!(inherited.generation, 1);
+        // Idempotent: the child's own record is kept afterwards.
+        let again = state
+            .inherit_session_objective(&parent.id, &child.id)
+            .unwrap()
+            .expect("kept");
+        assert_eq!(again.generation, inherited.generation);
+        // A done parent objective is not propagated to a new child.
+        let done_child = sample_session("objective-child-2");
+        SessionRepo::save_session(&state, &done_child)
+            .await
+            .expect("child 2");
+        state
+            .transition_session_objective(&parent.id, ObjectiveTransition::Complete, None)
+            .unwrap();
+        assert_eq!(
+            state
+                .inherit_session_objective(&parent.id, &done_child.id)
+                .unwrap(),
+            None
+        );
     }
 
     #[test]

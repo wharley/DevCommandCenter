@@ -1220,6 +1220,7 @@
         "resume": "Retomar",
         "complete": "Marcar concluído"
       },
+      "autoPaused": "Objetivo pausado automaticamente. Revise e retome quando estiver pronto.",
       "dispatchBlocked": "Follow-ups enfileirados não rodam automaticamente até o objetivo ser retomado. Suas próprias mensagens continuam passando.",
       "errors": {
         "intent_required": "A intenção é obrigatória.",
