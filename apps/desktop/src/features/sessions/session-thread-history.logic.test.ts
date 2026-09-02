@@ -993,6 +993,26 @@ describe("projectWorkspaceMessages", () => {
 		);
 	});
 
+	it("gives a turn aborted before any output a placeholder incomplete message", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				sessionTurnAborted("session-a", "turn-1", "Interrupted by a DCC restart"),
+			],
+			[],
+			"session-a",
+		);
+		expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+		const placeholder = messages[1];
+		expect(placeholder.id).toBe("assistant-session-a-turn-1");
+		expect(placeholder.content).toBe("");
+		expect(placeholder.streaming).toBe(false);
+		expect(placeholder.status).toEqual({
+			type: "incomplete",
+			reason: "Interrupted by a DCC restart",
+		});
+	});
+
 	it("marks aborted assistant messages as incomplete", () => {
 		expect(
 			projectWorkspaceMessages(

@@ -1575,9 +1575,22 @@ export function projectWorkspaceMessages(
 		if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
 			const key = event.sessionTurnAborted.turn_id;
 			abortedTurns.set(key, event.sessionTurnAborted.reason ?? "Turn aborted");
-			const turnMessages = assistantMessagesByTurn.get(key) ?? [assistantBuckets.get(key)].filter(
+			let turnMessages = assistantMessagesByTurn.get(key) ?? [assistantBuckets.get(key)].filter(
 				(message): message is WorkspaceMessage => Boolean(message),
 			);
+			if (turnMessages.length === 0 && turnStartedAtByTurnId.has(key)) {
+				// A turn that died before any output (provider crash, DCC restart)
+				// still needs a visible place for its reason and retry/continue.
+				turnMessages = [
+					ensureAssistantMessage(
+						messages,
+						assistantBuckets,
+						event.sessionTurnAborted.session_id,
+						key,
+						turnStartedAtByTurnId.get(key) ?? occurredAt,
+					),
+				];
+			}
 			for (const existing of turnMessages) {
 				existing.streaming = false;
 				existing.status = {

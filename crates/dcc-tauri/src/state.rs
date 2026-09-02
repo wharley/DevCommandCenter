@@ -1225,9 +1225,22 @@ impl SessionCommandState {
         }
         if recover_interrupted {
             cleanup_all_snapshot_quarantines(&app_data_dir.join("turn-review").join("snapshots"));
+            let now = Utc::now().to_rfc3339();
             let _ = session_repo
-                .recover_interrupted_turn_change_sets(&Utc::now().to_rfc3339())
+                .recover_interrupted_turn_change_sets(&now)
                 .unwrap_or_default();
+            // A turn left running by a dead process must end in durable
+            // history, otherwise the session stays blocked forever.
+            match session_repo.recover_orphaned_running_turns(&now) {
+                Ok(recovered) if !recovered.is_empty() => {
+                    eprintln!(
+                        "[DCC] recovered {} turn(s) interrupted by the previous process",
+                        recovered.len()
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => eprintln!("[DCC] orphaned turn recovery failed: {error}"),
+            }
         }
         Self {
             app_data_dir,

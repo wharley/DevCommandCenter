@@ -1647,6 +1647,108 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
     }
 
+    /// Terminalizes turns that were still running when the previous process
+    /// died: every `turn_started` of an active session without a terminal
+    /// row gets a `turn_aborted` appended in the same transaction. Returns
+    /// the affected (session, turn) pairs; a second run finds nothing. The
+    /// reason is explicit so the timeline offers retry/continue instead of
+    /// a turn that streams forever.
+    pub fn recover_orphaned_running_turns(&self, now: &str) -> Result<Vec<(SessionId, TurnId)>> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let candidates = {
+            let mut statement = transaction
+                .prepare(
+                    r#"
+                SELECT e.session_id, e.kind_json
+                  FROM dcc_session_events e
+                  JOIN dcc_sessions s ON s.id = e.session_id
+                 WHERE s.state = 'active'
+                   AND e.kind_json LIKE '%"type":"turn_started"%'
+                 ORDER BY e.session_id, e.sequence
+                "#,
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            rows
+        };
+        let mut recovered = Vec::new();
+        for (session_id, kind_json) in candidates {
+            let Ok(SessionEventKind::TurnStarted { turn_id, .. }) =
+                from_str::<SessionEventKind>(&kind_json)
+            else {
+                continue;
+            };
+            let terminal_exists = transaction
+                .query_row(
+                    "SELECT 1 FROM dcc_session_events WHERE session_id = ?1 AND terminal_turn_id = ?2 LIMIT 1",
+                    params![session_id, turn_id.0],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+                .is_some();
+            if terminal_exists {
+                continue;
+            }
+            let next_sequence = transaction
+                .query_row(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM dcc_session_events WHERE session_id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let kind = SessionEventKind::TurnAborted {
+                turn_id: turn_id.clone(),
+                reason: Some(
+                    "Interrupted by a DCC restart before the provider finished".to_string(),
+                ),
+            };
+            let aborted_json = to_string(&kind)
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            transaction
+                .execute(
+                    r#"
+                INSERT INTO dcc_session_events (
+                    event_id, session_id, sequence, occurred_at, kind_json,
+                    terminal_turn_id, terminal_kind
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'aborted')
+                "#,
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        session_id,
+                        next_sequence,
+                        now,
+                        aborted_json,
+                        turn_id.0,
+                    ],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            transaction
+                .execute(
+                    "UPDATE dcc_sessions SET updated_at = ?1 WHERE id = ?2",
+                    params![now, session_id],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            recovered.push((SessionId(session_id), turn_id));
+        }
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(recovered)
+    }
+
     pub fn recover_interrupted_turn_change_sets(&self, completed_at: &str) -> Result<Vec<String>> {
         let conn = self
             .conn
@@ -11479,6 +11581,91 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn restart_recovery_aborts_only_orphaned_running_turns_once() {
+        use dcc_core::domain::session::{SessionProjection, TurnId};
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        let session_id = SessionId("session-orphan".to_string());
+        let started = |turn: &str| SessionEventKind::TurnStarted {
+            turn_id: TurnId(turn.to_string()),
+            prompt: "work".to_string(),
+            plan_mode: None,
+            model: None,
+            evidence: None,
+            retry_of_turn_id: None,
+        };
+        let session = Session {
+            id: session_id.clone(),
+            project_id: ProjectId("project".to_string()),
+            workspace_id: WorkspaceId("workspace".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-09-02T10:00:00Z".to_string(),
+            updated_at: "2026-09-02T10:00:00Z".to_string(),
+        };
+        futures::executor::block_on(SessionRepo::save_session(&repo, &session)).unwrap();
+        let mut sequence = 0;
+        let mut append = |kind: SessionEventKind| {
+            sequence += 1;
+            futures::executor::block_on(SessionEventRepo::append_event(
+                &repo,
+                &SessionEventRecord {
+                    event_id: format!("orphan-{sequence}"),
+                    session_id: session_id.clone(),
+                    sequence,
+                    occurred_at: "2026-09-02T10:00:00Z".to_string(),
+                    kind,
+                },
+            ))
+            .unwrap();
+        };
+        append(SessionEventKind::SessionStarted {
+            workspace_id: WorkspaceId("workspace".to_string()),
+            project_id: ProjectId("project".to_string()),
+            provider_id: "codex".to_string(),
+            model: None,
+        });
+        append(started("turn-done"));
+        append(SessionEventKind::TurnCompleted {
+            turn_id: TurnId("turn-done".to_string()),
+        });
+        append(started("turn-orphan"));
+
+        let recovered = repo
+            .recover_orphaned_running_turns("2026-09-02T11:00:00Z")
+            .unwrap();
+        assert_eq!(
+            recovered,
+            vec![(session_id.clone(), TurnId("turn-orphan".to_string()))]
+        );
+        let history = futures::executor::block_on(SessionEventRepo::list_events_by_session(
+            &repo,
+            &session_id,
+        ))
+        .unwrap();
+        let projection = SessionProjection::fold(&history).unwrap();
+        assert_eq!(projection.active_turn_id, None);
+        assert_eq!(
+            projection.turn_count, 1,
+            "a recovered turn is not a completion"
+        );
+        match &history.last().unwrap().kind {
+            SessionEventKind::TurnAborted { turn_id, reason } => {
+                assert_eq!(turn_id.0, "turn-orphan");
+                assert!(reason.as_deref().unwrap_or("").contains("restart"));
+            }
+            other => panic!("expected aborted, got {other:?}"),
+        }
+        assert!(repo
+            .recover_orphaned_running_turns("2026-09-02T12:00:00Z")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
