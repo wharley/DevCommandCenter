@@ -624,15 +624,33 @@ export function WorkspaceComposer({
 				return;
 			}
 			const rawPrompt = readComposerPrompt(editor).trim();
-			if (rawPrompt.length === 0) {
+			// Evidence travels with a delegation the same way it travels with a
+			// turn: reviewed here, composed at the boundary, settled only once the
+			// delegation actually started.
+			const evidenceItems = debugEvidence?.items ?? [];
+			const evidenceStage = debugEvidence?.stage ?? "observe";
+			if (rawPrompt.length === 0 && evidenceItems.length === 0) {
 				return;
 			}
+			const delegatedPrompt =
+				evidenceItems.length > 0
+					? buildDebugEvidencePrompt({
+							message: rawPrompt,
+							stage: evidenceStage,
+							items: evidenceItems,
+							labels: {
+								stageGuidance: t(`composer.evidence.stageGuidance.${evidenceStage}`),
+								trustNotice: t("composer.evidence.trustNotice"),
+								defaultMessage: t("composer.evidence.defaultMessage"),
+							},
+						})
+					: rawPrompt;
 			isSubmittingRef.current = true;
 			setSendMenuOpen(false);
 			setIsSubmitting(true);
 			try {
 				await onDelegatePrompt({
-					rawPrompt,
+					rawPrompt: delegatedPrompt,
 					targetProviderIds,
 					targetModelId: targetProviderIds.length === 1 ? targetModelId : null,
 					// Edit delegations stay single-target, matching the backend guard.
@@ -649,6 +667,9 @@ export function WorkspaceComposer({
 				clearDraft(composerDraftKey);
 				setEditorText(editor, "");
 				setFanOutSelection(null);
+				if (evidenceItems.length > 0) {
+					debugEvidence?.onConsumed(evidenceItems.map((item) => item.id));
+				}
 			} catch {
 				// Delegation failures are already surfaced as a toast upstream. Swallow
 				// the rejection so it does not go unhandled, and leave the draft in
@@ -662,10 +683,12 @@ export function WorkspaceComposer({
 		[
 			availableEffortLevels,
 			composerDraftKey,
+			debugEvidence,
 			delegateAllowFileEdits,
 			effort,
 			isFastMode,
 			onDelegatePrompt,
+			t,
 			ultrathinkSelected,
 		],
 	);
@@ -833,10 +856,12 @@ export function WorkspaceComposer({
 	const canStopRun =
 		canAbortRun(sessionSnapshot, pendingPrompt) || isSubmitting;
 
+	// Evidence alone is sendable: the stage guidance carries the ask.
+	const hasSendableContent = hasContent || (debugEvidence?.items.length ?? 0) > 0;
 	const submitEnabled = isComposerSubmitEnabled({
 		disabled: toolbarDisabled || (hasActiveTurn && !canQueueActiveTurn),
 		hasProvider,
-		hasContent,
+		hasContent: hasSendableContent,
 	});
 	const sendDisabled = isSendDisabled(submitEnabled, isSubmitting);
 	const steerDisabled = !submitEnabled || isSubmitting;
@@ -1155,7 +1180,7 @@ export function WorkspaceComposer({
 							>
 								<Square className="size-3 fill-current" strokeWidth={0} />
 							</Button>
-							{hasContent && canQueueActiveTurn ? (
+							{hasSendableContent && canQueueActiveTurn ? (
 								<Button
 									type="button"
 									variant="outline"
@@ -1170,7 +1195,7 @@ export function WorkspaceComposer({
 									<ListPlus className="size-[15px]" strokeWidth={2.2} />
 								</Button>
 							) : null}
-							{hasContent && canSteerActiveTurn ? (
+							{hasSendableContent && canSteerActiveTurn ? (
 								<Tooltip>
 									<TooltipTrigger asChild>
 										<Button
