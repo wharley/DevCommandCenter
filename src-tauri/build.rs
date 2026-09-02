@@ -293,6 +293,7 @@ struct SessionMethods {
     set_session_objective: String,
     transition_session_objective: String,
     clear_session_objective: String,
+    inherit_session_objective: String,
     remove_queued_turn: String,
     reorder_turn_queue: String,
     dispatch_next_queued_turn: String,
@@ -674,6 +675,7 @@ fn main() {
         .typ::<dcc_tauri::commands::session_commands::SetSessionObjectiveInput>()
         .typ::<dcc_tauri::commands::session_commands::TransitionSessionObjectiveInput>()
         .typ::<dcc_tauri::commands::session_commands::SessionObjectiveOutput>()
+        .typ::<dcc_tauri::commands::session_commands::InheritSessionObjectiveInput>()
         .typ::<QueueTurnInput>()
         .typ::<RemoveQueuedTurnInput>()
         .typ::<ReorderTurnQueueInput>()
@@ -877,6 +879,7 @@ fn main() {
             set_session_objective: "set_session_objective".to_string(),
             transition_session_objective: "transition_session_objective".to_string(),
             clear_session_objective: "clear_session_objective".to_string(),
+            inherit_session_objective: "inherit_session_objective".to_string(),
             remove_queued_turn: "remove_queued_turn".to_string(),
             reorder_turn_queue: "reorder_turn_queue".to_string(),
             dispatch_next_queued_turn: "dispatch_next_queued_turn".to_string(),

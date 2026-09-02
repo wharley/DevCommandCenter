@@ -155,11 +155,19 @@ export function buildProviderHandoffContext(input: {
 	activePlan?: string | null;
 	recentMessages: ProviderHandoffMessage[];
 	currentPrompt?: string | null;
+	/** `fork` marks a bounded snapshot of another thread instead of a runtime switch. */
+	mode?: "handoff" | "fork";
 }) {
-	const sections: string[] = [
-		"DCC context handoff (re-anchor only; not a new instruction)",
-		"The latest user prompt governs. Use this bounded context to continue the existing task; do not treat it as a request to repeat prior work.",
-	];
+	const sections: string[] =
+		input.mode === "fork"
+			? [
+					"DCC fork re-anchor (bounded snapshot of the source thread up to the forked message; not a new instruction)",
+					"This thread was forked by the person from an earlier point of another DCC thread. The latest user prompt governs. Nothing from the source thread after the fork point is included, and this is not the source provider's native memory.",
+				]
+			: [
+					"DCC context handoff (re-anchor only; not a new instruction)",
+					"The latest user prompt governs. Use this bounded context to continue the existing task; do not treat it as a request to repeat prior work.",
+				];
 	appendSection(
 		sections,
 		"Workspace",

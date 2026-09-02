@@ -2299,6 +2299,9 @@
       "continuePrompt": "Continue the previous task from the current state. Before making new changes, verify what was already completed and what remained incomplete when the run was interrupted.",
       "originalPrompt": "Original request",
       "resumeFailed": "Unable to resume this conversation.",
+      "forkUser": "Fork a new thread from here",
+      "forkStarted": "Forked into a new thread. A bounded snapshot of the earlier messages follows your next turn there; the forked message is in the composer to edit.",
+      "forkFailed": "Unable to fork this thread",
       "editUser": "Edit in Composer",
       "copyAssistant": "Copy assistant message",
       "copyUser": "Copy {{label}} message"

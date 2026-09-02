@@ -7147,6 +7147,7 @@ pub fn run() {
             session_commands::set_session_objective,
             session_commands::transition_session_objective,
             session_commands::clear_session_objective,
+            session_commands::inherit_session_objective,
             session_commands::remove_queued_turn,
             session_commands::reorder_turn_queue,
             session_commands::dispatch_next_queued_turn,

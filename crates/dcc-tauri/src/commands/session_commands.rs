@@ -1007,6 +1007,28 @@ pub async fn clear_session_objective(
     Ok(SessionObjectiveOutput { objective: None })
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InheritSessionObjectiveInput {
+    pub parent_session_id: SessionId,
+    pub child_session_id: SessionId,
+}
+
+/// Used by fork-by-message: the new thread keeps working toward the source
+/// thread's objective with its own counters. Idempotent, done objectives are
+/// not propagated, and the response is the child's current record.
+#[tauri::command]
+pub async fn inherit_session_objective(
+    state: State<'_, SessionCommandState>,
+    input: InheritSessionObjectiveInput,
+) -> Result<SessionObjectiveOutput, String> {
+    Ok(SessionObjectiveOutput {
+        objective: state
+            .inherit_session_objective(&input.parent_session_id, &input.child_session_id)
+            .map_err(|error| error.to_string())?,
+    })
+}
+
 #[tauri::command]
 pub async fn list_turn_queue(
     state: State<'_, SessionCommandState>,

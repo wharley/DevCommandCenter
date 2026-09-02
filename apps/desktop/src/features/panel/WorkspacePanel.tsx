@@ -217,6 +217,8 @@ type WorkspacePanelProps = {
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
 	onOpenSessionSearch: () => void;
+	/** Fork-by-message: a new thread re-anchored on the history before a user message. */
+	onForkFromMessage?: (messageId: string) => void;
 	onSubmitPrompt: (
 		turn: ComposerSubmittedTurn,
 		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
@@ -309,6 +311,7 @@ export function WorkspacePanel({
 	onCloseSession,
 	onRestoreSession,
 	onOpenSessionSearch,
+	onForkFromMessage,
 	onSubmitPrompt,
 	onSteerPrompt,
 	onQueuePrompt,
@@ -1263,6 +1266,7 @@ export function WorkspacePanel({
 					onRerunDelegation={onRerunDelegation}
 					onDelegateTaskApprove={onAgentDelegate}
 					onEditPrompt={replaceComposerDraft}
+					onForkFromMessage={onForkFromMessage}
 					onContinueInterrupted={handleContinueInterrupted}
 					onOpenPlan={onOpenPlanSurface}
 					onOpenFileReference={onOpenFileReference}

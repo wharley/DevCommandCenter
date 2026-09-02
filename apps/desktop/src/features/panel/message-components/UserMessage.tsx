@@ -1,4 +1,4 @@
-import { Bug, Copy, Pencil } from "lucide-react";
+import { Bug, Copy, GitFork, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TurnEvidenceSummary } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
@@ -41,12 +41,15 @@ export function UserMessage({
 	createdAt,
 	evidence = null,
 	onEdit,
+	onFork,
 }: {
 	content: string;
 	label: string;
 	createdAt?: string;
 	evidence?: TurnEvidenceSummary | null;
 	onEdit?: () => void;
+	/** Starts a new thread re-anchored on everything before this message. */
+	onFork?: () => void;
 }) {
 	const { t } = useTranslation("common");
 	return (
@@ -67,6 +70,22 @@ export function UserMessage({
 					<MessageTimestamp createdAt={createdAt} />
 				</div>
 				<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/user:pointer-events-auto group-hover/user:opacity-100 group-focus-within/user:pointer-events-auto group-focus-within/user:opacity-100">
+					{onFork ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							aria-label={t("conversation.message.forkUser")}
+							title={t("conversation.message.forkUser")}
+							className={cn(
+								"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
+								"bg-transparent hover:bg-transparent",
+							)}
+							onClick={onFork}
+						>
+							<GitFork className="size-3.5" aria-hidden />
+						</Button>
+					) : null}
 					{onEdit ? (
 						<Button
 							type="button"

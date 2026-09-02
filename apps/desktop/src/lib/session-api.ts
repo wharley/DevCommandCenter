@@ -19,6 +19,7 @@ import type {
 	TurnReviewFileDiffOutput,
 	ExecuteGuardedUndoInput,
 	ExecuteGuardedUndoOutput,
+	InheritSessionObjectiveInput,
 	SessionObjectiveOutput,
 	SetSessionObjectiveInput,
 	TransitionSessionObjectiveInput,
@@ -355,5 +356,11 @@ export function transitionSessionObjective(input: TransitionSessionObjectiveInpu
 export function clearSessionObjective(sessionId: string) {
 	return invoke<SessionObjectiveOutput>(SESSION_METHODS.clearSessionObjective, {
 		sessionId,
+	});
+}
+
+export function inheritSessionObjective(input: InheritSessionObjectiveInput) {
+	return invoke<SessionObjectiveOutput>(SESSION_METHODS.inheritSessionObjective, {
+		input,
 	});
 }

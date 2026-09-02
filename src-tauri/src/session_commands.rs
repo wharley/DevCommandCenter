@@ -14,15 +14,16 @@ use dcc_core::domain::usage::{UsageDashboard, UsageDashboardInput};
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, ApplyTaskTitleInput, ApplyTaskTitleOutput,
-        ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput, InterruptNativeSubagentInput,
-        LastTurnReviewInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
-        NativeSubagentControlOutput, PrepareGuardedUndoInput, PrepareGuardedUndoOutput,
-        PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
-        RespondToUserInputInput, RespondToUserInputOutput, RunPullRequestReviewAgentInput,
-        RunPullRequestReviewAgentOutput, SearchSessionsInput, SessionLiveSnapshot,
-        SessionObjectiveOutput, SetSessionObjectiveInput, StartMcpOauthInput, StartMcpOauthOutput,
-        SteerNativeSubagentInput, TransitionSessionObjectiveInput, TurnReviewFileDiffInput,
-        TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
+        ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput, InheritSessionObjectiveInput,
+        InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
+        ListMcpRuntimeStatusesOutput, NativeSubagentControlOutput, PrepareGuardedUndoInput,
+        PrepareGuardedUndoOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
+        SessionLiveSnapshot, SessionObjectiveOutput, SetSessionObjectiveInput, StartMcpOauthInput,
+        StartMcpOauthOutput, SteerNativeSubagentInput, TransitionSessionObjectiveInput,
+        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
+        WaitMcpOauthOutput,
     },
     state::SessionCommandState,
 };
@@ -139,6 +140,14 @@ pub async fn transition_session_objective(
     input: TransitionSessionObjectiveInput,
 ) -> Result<SessionObjectiveOutput, String> {
     session_command_impl::transition_session_objective(state, input).await
+}
+
+#[tauri::command]
+pub async fn inherit_session_objective(
+    state: State<'_, SessionCommandState>,
+    input: InheritSessionObjectiveInput,
+) -> Result<SessionObjectiveOutput, String> {
+    session_command_impl::inherit_session_objective(state, input).await
 }
 
 #[tauri::command]

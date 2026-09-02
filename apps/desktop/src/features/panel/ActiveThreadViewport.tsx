@@ -63,6 +63,7 @@ type ActiveThreadViewportProps = {
 	}) => Promise<void>;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	onEditPrompt?: (prompt: string) => void;
+	onForkFromMessage?: (messageId: string) => void;
 	onContinueInterrupted?: (originalPrompt: string | null) => Promise<void> | void;
 	onOpenPlan: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
@@ -93,6 +94,7 @@ export function ActiveThreadViewport({
 	onRerunDelegation,
 	onDelegateTaskApprove,
 	onEditPrompt,
+	onForkFromMessage,
 	onContinueInterrupted,
 	onOpenPlan,
 	onOpenFileReference,
@@ -281,6 +283,11 @@ export function ActiveThreadViewport({
 												content={message.content}
 												createdAt={message.createdAt}
 												evidence={message.evidence ?? null}
+												onFork={
+													onForkFromMessage
+														? () => onForkFromMessage(message.id)
+														: undefined
+												}
 												onEdit={
 													onEditPrompt
 														? () => onEditPrompt(message.content)

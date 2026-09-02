@@ -177,6 +177,7 @@ type SessionWorkbenchProps = {
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
 	onOpenSessionSearch: () => void;
+	onForkFromMessage?: (messageId: string) => void;
 	onSubmitPrompt: (
 		turn: ComposerSubmittedTurn,
 		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
@@ -273,6 +274,7 @@ export function SessionWorkbench({
 	onCloseSession,
 	onRestoreSession,
 	onOpenSessionSearch,
+	onForkFromMessage,
 	onSubmitPrompt,
 	onSteerPrompt,
 	onQueuePrompt,
@@ -1065,6 +1067,7 @@ export function SessionWorkbench({
 						onCloseSession={onCloseSession}
 						onRestoreSession={onRestoreSession}
 						onOpenSessionSearch={onOpenSessionSearch}
+						onForkFromMessage={onForkFromMessage}
 						onSubmitPrompt={onSubmitPrompt}
 						onSteerPrompt={onSteerPrompt}
 						onQueuePrompt={onQueuePrompt}

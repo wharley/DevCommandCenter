@@ -136,6 +136,7 @@ import {
 	abortRun,
 	applyTaskTitle,
 	closeSession,
+	inheritSessionObjective,
 	loadSessionThreadEvents,
 	queueTurn,
 	resumeSession,
@@ -186,6 +187,10 @@ import {
 	PROVIDER_HANDOFF_MAX_CHARS,
 	shouldCreateProviderHandoff,
 } from "./features/sessions/provider-handoff-context";
+import {
+	PendingForkReanchors,
+	selectForkPoint,
+} from "./features/sessions/fork-from-message.logic";
 import { ContextAttachmentLedger } from "./features/sessions/context-attachment-ledger";
 import {
 	canRerunDelegation,
@@ -1134,6 +1139,9 @@ export default function App() {
 		new Map(),
 	);
 	const contextAttachmentLedgerRef = useRef(new ContextAttachmentLedger());
+	// Fork-by-message snapshots wait for the first turn the person sends in
+	// the new thread; they are consumed exactly once and never persisted.
+	const pendingForkReanchorsRef = useRef(new PendingForkReanchors());
 	useEffect(() => {
 		const scope = {
 			workspaceId: selectedWorkspaceId ?? "",
@@ -3384,8 +3392,9 @@ export default function App() {
 					console.warn("[dcc] provider handoff context unavailable:", error);
 				}
 			}
+			const pendingForkReanchor = pendingForkReanchorsRef.current.peek(currentSessionId);
 			const toolInstructions = mergeProviderHandoffToolInstructions(
-				baseToolInstructions,
+				mergeProviderHandoffToolInstructions(baseToolInstructions, pendingForkReanchor),
 				providerHandoffContext,
 			);
 
@@ -3403,6 +3412,7 @@ export default function App() {
 				evidence: turn.envelope.evidence ?? null,
 			});
 			promptAccepted = true;
+			pendingForkReanchorsRef.current.consume(currentSessionId);
 			recordUxMetric("first_prompt");
 
 			if (automaticTaskTitle && selectedWorkspace) {
@@ -3866,6 +3876,157 @@ export default function App() {
 	const handleOpenSessionSearch = useCallback(() => {
 		setIsSessionSearchOpen(true);
 	}, []);
+
+	/**
+	 * Fork by message: a new thread in the same workspace, on the provider
+	 * currently selected in the composer, re-anchored on a bounded snapshot of
+	 * the durable history before the chosen user message. The forked message is
+	 * placed in the composer for editing instead of being re-sent silently.
+	 */
+	const handleForkFromMessage = useCallback(
+		async (messageId: string) => {
+			const sourceSessionId = effectiveSelectedSessionId;
+			const sourceSession = selectedSessionSnapshot;
+			if (!sourceSessionId || !sourceSession || !selectedWorkspace || !selectedProvider) {
+				return;
+			}
+			if (selectedProviderBlockReason) {
+				toast.error(selectedProviderBlockReason);
+				return;
+			}
+			try {
+				const historyEvents = await loadSessionThreadEvents(sourceSessionId);
+				const messages = projectWorkspaceMessages(
+					historyEvents,
+					timelineSessionEvents,
+					sourceSessionId,
+					null,
+				);
+				const forkPoint = selectForkPoint(messages, messageId);
+				if (!forkPoint) {
+					toast.error(t("conversation.message.forkFailed"));
+					return;
+				}
+				const [git, specs] = await Promise.all([
+					selectedLocalWorkspacePath
+						? Promise.all([
+								workspaceGitStatus({ workspaceRoot: selectedLocalWorkspacePath }),
+								workspaceGitBranchDiff({ workspaceRoot: selectedLocalWorkspacePath }),
+							])
+								.then(([status, branchDiff]) => ({
+									currentBranch: status.currentBranch,
+									baseBranch: branchDiff.baseBranch,
+									staged: status.staged,
+									unstaged: status.unstaged,
+									branchDiff: branchDiff.changes,
+								}))
+								.catch(() => null)
+						: Promise.resolve(null),
+					selectedLocalWorkspacePath
+						? listMissionSpecs({ workspaceRoot: selectedLocalWorkspacePath }).catch(() => null)
+						: Promise.resolve(null),
+				]);
+				const activePlanState = derivePlanFollowUpState(forkPoint.priorMessages);
+				const reanchor = buildProviderHandoffContext({
+					mode: "fork",
+					sourceProviderId: sourceSession.providerId ?? "unknown",
+					destinationProviderId: selectedProvider.id,
+					workspaceName: selectedWorkspace.name,
+					workspacePath: selectedLocalWorkspacePath,
+					branch: selectedWorkspace.branch,
+					git,
+					missionSpec: specs?.specs[0]?.content ?? null,
+					activePlan:
+						activePlanState.activePlanMessage?.plan?.markdown ??
+						activePlanState.activePlanMessage?.content ??
+						null,
+					recentMessages: forkPoint.priorMessages,
+					currentPrompt: forkPoint.forkedPrompt,
+				});
+
+				const result = await startThread({
+					workspaceId: selectedWorkspace.id,
+					additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
+					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
+					providerId: selectedProvider.id,
+					model: selectedModel?.id ?? null,
+					providerRuntime: selectedProviderRuntime,
+					title: `${selectedWorkspace.name} · fork`,
+				});
+				const forkedSessionId = result.session.id;
+				pendingForkReanchorsRef.current.set(forkedSessionId, reanchor);
+				// The new thread keeps working toward the source objective with
+				// its own budget; failure here must not block the fork.
+				void inheritSessionObjective({
+					parentSessionId: sourceSessionId,
+					childSessionId: forkedSessionId,
+				}).catch((error) => {
+					console.warn("[dcc] fork objective inheritance failed:", error);
+				});
+
+				const snapshot: RuntimeSessionSnapshot = {
+					sessionId: forkedSessionId,
+					projectId: result.session.projectId,
+					workspaceId: result.session.workspaceId,
+					providerId: result.session.providerId,
+					model: result.session.model,
+					state: result.projection.state,
+					turnCount: result.projection.turnCount,
+					checkpointCount: result.projection.checkpointCount,
+					activeTurnId: result.projection.activeTurnId ?? null,
+					lastTurnPrompt: null,
+					lastTurnState: result.projection.activeTurnId ? "running" : null,
+				};
+				setSessionSnapshotsById((current) => ({
+					...current,
+					[forkedSessionId]: snapshot,
+				}));
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(
+					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
+					(current = []) => [
+						{
+							session: result.session,
+							thread: result.thread,
+							projection: result.projection,
+							lastTurnPrompt: null,
+							lastTurnState: result.projection.activeTurnId ? "running" : null,
+							lastTurnStartedAt: null,
+							lastTurnCompletedAt: null,
+						},
+						...current.filter((summary) => summary.session.id !== forkedSessionId),
+					],
+				);
+				setSelectedSessionId(forkedSessionId);
+				setWorkspaceComposerPrefill((previous) => ({
+					workspaceId: selectedWorkspace.id,
+					text: forkPoint.forkedPrompt,
+					nonce: (previous?.nonce ?? 0) + 1,
+					mode: "replace",
+				}));
+				toast.success(t("conversation.message.forkStarted"));
+			} catch (error) {
+				console.error("[dcc] fork from message failed:", error);
+				toast.error(t("conversation.message.forkFailed"), {
+					description: error instanceof Error ? error.message : undefined,
+				});
+			}
+		},
+		[
+			backendCacheKey,
+			effectiveSelectedSessionId,
+			queryClient,
+			selectedLocalWorkspacePath,
+			selectedModel,
+			selectedProvider,
+			selectedProviderBlockReason,
+			selectedProviderRuntime,
+			selectedSessionSnapshot,
+			selectedWorkspace,
+			selectedWorkspaceAdditionalWorkspaceIds,
+			t,
+			timelineSessionEvents,
+		],
+	);
 
 	const handleOpenQuickOpen = useCallback(() => {
 		setIsQuickOpenOpen(true);
@@ -5133,6 +5294,7 @@ export default function App() {
 									onCloseSession={handleCloseSession}
 									onRestoreSession={handleRestoreSession}
 									onOpenSessionSearch={handleOpenSessionSearch}
+									onForkFromMessage={handleForkFromMessage}
 									onSubmitPrompt={handleSubmitPrompt}
 									onSteerPrompt={handleSteerPrompt}
 									onQueuePrompt={handleQueuePrompt}
