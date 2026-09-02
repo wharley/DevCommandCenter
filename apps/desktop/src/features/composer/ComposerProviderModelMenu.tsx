@@ -213,7 +213,7 @@ export function ComposerProviderModelMenu({
 							</CommandGroup>
 						))}
 					</CommandList>
-					{supportsProviderAccountUsage(selectedProvider?.id ?? null) ? (
+					{supportsProviderAccountUsage(selectedProvider) ? (
 						<div className="border-t border-border/60 px-3 py-2.5">
 							<div className="mb-1.5 flex items-center justify-between gap-3">
 								<span className="text-[11px] font-medium text-foreground">

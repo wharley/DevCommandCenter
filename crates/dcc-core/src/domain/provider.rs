@@ -142,6 +142,22 @@ pub struct Capabilities {
     /// User-selectable approval policies that this adapter can enforce natively.
     #[serde(default)]
     pub approval_policies: Vec<ProviderApprovalPolicy>,
+    /// The adapter applies a DCC-managed `home_path` from the runtime config
+    /// to the provider process. Adapters without this ignore the field, so the
+    /// backend rejects it instead of silently dropping the preference.
+    #[serde(default)]
+    pub supports_runtime_home: bool,
+    /// The adapter materializes a DCC-managed `shadow_home_path` (isolated
+    /// auth/config copy) from the runtime config.
+    #[serde(default)]
+    pub supports_shadow_home: bool,
+    /// The adapter enforces `max_concurrent_subagents` from the runtime config.
+    #[serde(default)]
+    pub supports_subagent_concurrency: bool,
+    /// The adapter can report account usage windows through `account_usage`.
+    /// Providers without this never spawn a runtime to answer usage queries.
+    #[serde(default)]
+    pub supports_account_usage: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]

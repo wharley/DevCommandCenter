@@ -383,7 +383,7 @@ export function ComposerExecutionMenu({
 					</DropdownMenuSubContent>
 				</DropdownMenuSub>
 
-				{supportsProviderAccountUsage(selectedProvider?.id ?? null) ? (
+				{supportsProviderAccountUsage(selectedProvider) ? (
 					<>
 						<DropdownMenuSeparator />
 						<div className="px-1.5 py-1.5">

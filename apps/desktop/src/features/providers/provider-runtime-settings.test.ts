@@ -5,6 +5,8 @@ import {
 	getProviderRuntimeDraft,
 	readProviderRuntimeSettings,
 	setProviderRuntimeDraft,
+	supportsProviderRuntime,
+	supportsProviderSubagentConcurrency,
 } from "./provider-runtime-settings";
 
 function createStorage() {
@@ -67,6 +69,64 @@ describe("provider runtime settings", () => {
 				maxConcurrentSubagents: "",
 			}),
 		).toEqual({});
+	});
+
+	it("projects only the runtime fields the provider capability declares", () => {
+		const draft = {
+			homePath: "~/dcc-home",
+			shadowHomePath: "~/dcc-shadow",
+			maxConcurrentSubagents: "4",
+		};
+
+		expect(
+			draftToProviderRuntimeConfig(draft, {
+				supportsRuntimeHome: true,
+				supportsShadowHome: true,
+				supportsSubagentConcurrency: true,
+			}),
+		).toEqual({
+			homePath: "~/dcc-home",
+			shadowHomePath: "~/dcc-shadow",
+			maxConcurrentSubagents: 4,
+		});
+
+		expect(
+			draftToProviderRuntimeConfig(draft, {
+				supportsRuntimeHome: true,
+				supportsShadowHome: false,
+				supportsSubagentConcurrency: false,
+			}),
+		).toEqual({
+			homePath: "~/dcc-home",
+			shadowHomePath: null,
+			maxConcurrentSubagents: null,
+		});
+
+		// Stale local drafts for an adapter that honors nothing never reach the backend.
+		expect(
+			draftToProviderRuntimeConfig(draft, {
+				supportsRuntimeHome: false,
+				supportsShadowHome: false,
+				supportsSubagentConcurrency: false,
+			}),
+		).toBeNull();
+		// Legacy catalogs without the fields behave as unsupported.
+		expect(draftToProviderRuntimeConfig(draft, {})).toBeNull();
+	});
+
+	it("derives runtime settings visibility from backend capabilities", () => {
+		expect(supportsProviderRuntime({ supportsRuntimeHome: true })).toBe(true);
+		expect(supportsProviderRuntime({ supportsSubagentConcurrency: true })).toBe(
+			true,
+		);
+		expect(supportsProviderRuntime({})).toBe(false);
+		expect(supportsProviderRuntime(null)).toBe(false);
+		expect(
+			supportsProviderSubagentConcurrency({ supportsSubagentConcurrency: true }),
+		).toBe(true);
+		expect(supportsProviderSubagentConcurrency({ supportsRuntimeHome: true })).toBe(
+			false,
+		);
 	});
 
 	it("ignores unsupported persisted limits", () => {

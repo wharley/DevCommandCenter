@@ -775,19 +775,17 @@ export function WorkspaceComposer({
 	const hasProvider = Boolean(selectedProviderId);
 	const turnCount = sessionSnapshot?.turnCount ?? 0;
 	const accountUsageQuery = useProviderAccountUsage(
-		selectedProviderId,
+		selectedProvider,
 		selectedProviderRuntime,
 	);
+	const accountUsageSupported = supportsProviderAccountUsage(selectedProvider);
 	useEffect(() => {
-		if (
-			turnCount > 0 &&
-			activeTurnId === null &&
-			supportsProviderAccountUsage(selectedProviderId)
-		) {
+		if (turnCount > 0 && activeTurnId === null && accountUsageSupported) {
 			void accountUsageQuery.refetch();
 		}
 	}, [
 		accountUsageQuery.refetch,
+		accountUsageSupported,
 		activeTurnId,
 		selectedProviderId,
 		turnCount,
@@ -1071,7 +1069,7 @@ export function WorkspaceComposer({
 						isAccountUsageFetching={accountUsageQuery.isFetching}
 						hasAccountUsageError={accountUsageQuery.isError}
 						onRefreshAccountUsage={() => {
-							if (supportsProviderAccountUsage(selectedProviderId)) {
+							if (accountUsageSupported) {
 								void accountUsageQuery.refetch();
 							}
 						}}

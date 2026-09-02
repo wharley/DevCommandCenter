@@ -99,7 +99,8 @@ use crate::terminal_arbiter::{
 };
 use dcc_providers::{
     provider_registration, provider_runtime, supports_provider_approval_policy,
-    supports_provider_capability, ProviderCapability, ProviderRegistration, PROVIDER_IDS,
+    supports_provider_capability, validate_provider_runtime_config, ProviderCapability,
+    ProviderRegistration, PROVIDER_IDS,
 };
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
@@ -1482,7 +1483,11 @@ impl SessionCommandState {
         Ok(store.provider_sessions.get(session_id).cloned())
     }
 
-    fn provider_runtime_config(
+    /// Normalizes and validates a runtime config against the registered
+    /// adapter contract. Fields the adapter would silently ignore are rejected
+    /// so attach, turn selection, delegation, review runs, and usage lookups
+    /// all fail closed instead of pretending a preference took effect.
+    pub(crate) fn provider_runtime_config(
         &self,
         provider_id: &str,
         runtime: Option<&ProviderRuntimeConfig>,
@@ -1491,6 +1496,9 @@ impl SessionCommandState {
         if self.is_legacy_managed_provider_home(provider_id, &runtime) {
             return Ok(ProviderRuntimeConfig::default());
         }
+        let registration = registered_provider(provider_id)?;
+        validate_provider_runtime_config(provider_id, &registration.capabilities, &runtime)
+            .map_err(dcc_core::CoreError::Provider)?;
         Ok(runtime)
     }
 
@@ -3373,7 +3381,10 @@ impl SessionCommandState {
     /// The single server-side gate for work that can create or attach a
     /// provider runtime. Existing bindings retain their cleanup/steering
     /// paths even while this gate is closed.
-    fn require_provider_available(&self, provider_id: &str) -> Result<ProviderRegistration> {
+    pub(crate) fn require_provider_available(
+        &self,
+        provider_id: &str,
+    ) -> Result<ProviderRegistration> {
         let registration = registered_provider(provider_id)?;
         let availability = self.provider_availability_snapshot(provider_id)?;
         if !availability.enabled {
@@ -3670,6 +3681,7 @@ impl SessionCommandState {
             provider_runtime,
             ..current.clone()
         };
+        self.provider_runtime_config(&candidate.provider_id, candidate.provider_runtime.as_ref())?;
         if !candidate.additional_workspace_ids.is_empty()
             && !supports_provider_capability(
                 &registration.capabilities,
@@ -6278,6 +6290,114 @@ mod tests {
             .validate_provider_turn_selection(&session, &input)
             .await
             .expect("registered dynamic provider selection");
+    }
+
+    #[test]
+    fn runtime_config_authority_rejects_fields_the_adapter_ignores() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+
+        let concurrency = ProviderRuntimeConfig {
+            max_concurrent_subagents: Some(2),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert_eq!(
+            state
+                .provider_runtime_config("codex", Some(&concurrency))
+                .expect("codex enforces subagent limits"),
+            concurrency
+        );
+        let error = state
+            .provider_runtime_config("droid", Some(&concurrency))
+            .expect_err("droid ignores subagent limits");
+        assert!(error
+            .to_string()
+            .contains("does not support subagent concurrency limits"));
+
+        let home = ProviderRuntimeConfig {
+            home_path: Some(root.join("custom-home").display().to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert!(state.provider_runtime_config("gemini", Some(&home)).is_ok());
+        assert!(state
+            .provider_runtime_config("cursor", Some(&home))
+            .is_err());
+
+        let shadow = ProviderRuntimeConfig {
+            shadow_home_path: Some(root.join("shadow").display().to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert!(state
+            .provider_runtime_config("codex", Some(&shadow))
+            .is_ok());
+        assert!(state
+            .provider_runtime_config("claude_code", Some(&shadow))
+            .is_err());
+
+        // A legacy DCC-managed home is still normalized away before checks.
+        let legacy = ProviderRuntimeConfig {
+            home_path: Some(
+                state
+                    .provider_home_root()
+                    .join("claude_code")
+                    .display()
+                    .to_string(),
+            ),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert_eq!(
+            state
+                .provider_runtime_config("claude_code", Some(&legacy))
+                .expect("legacy home"),
+            ProviderRuntimeConfig::default()
+        );
+        assert!(state
+            .provider_runtime_config("unknown-provider", None)
+            .is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn turn_selection_rejects_unsupported_runtime_config_before_attach() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let db_path = root.join("state.sqlite");
+        let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
+        let session = sample_session("runtime-capability");
+        let workspace = sample_workspace(&session.workspace_id.0, "/tmp/runtime-capability");
+        SqliteWorkspaceRepo::open(&db_path)
+            .expect("workspace repo")
+            .save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        save_active_session_thread(&state, &session).await;
+
+        let mut input = selection_input(session.id.clone(), Some("droid"), None);
+        input.provider_runtime = Some(ProviderRuntimeConfig {
+            max_concurrent_subagents: Some(4),
+            ..ProviderRuntimeConfig::default()
+        });
+        let error = state
+            .validate_provider_turn_selection(&session, &input)
+            .await
+            .expect_err("droid cannot accept subagent limits");
+        assert!(error
+            .to_string()
+            .contains("does not support subagent concurrency limits"));
+
+        let mut input = selection_input(session.id.clone(), Some("codex"), None);
+        input.provider_runtime = Some(ProviderRuntimeConfig {
+            max_concurrent_subagents: Some(4),
+            ..ProviderRuntimeConfig::default()
+        });
+        state
+            .validate_provider_turn_selection(&session, &input)
+            .await
+            .expect("codex enforces subagent limits");
     }
 
     #[tokio::test(flavor = "current_thread")]

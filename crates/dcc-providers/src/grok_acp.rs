@@ -682,6 +682,14 @@ impl Provider for GrokAcpAdapter {
     }
 }
 
+/// Registered Grok runtime contract. The ACP adapter honors a DCC-managed
+/// runtime home (`GROK_HOME`) but no shadow home, subagent limits, or usage.
+pub fn stable_grok_capabilities() -> Capabilities {
+    let mut capabilities = crate::common::stable_cli_capabilities();
+    capabilities.supports_runtime_home = true;
+    capabilities
+}
+
 pub fn descriptor(
     health: HealthStatus,
     capabilities: Capabilities,

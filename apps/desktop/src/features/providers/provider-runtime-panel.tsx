@@ -15,9 +15,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
-	CODEX_SUBAGENT_CONCURRENCY_OPTIONS,
+	SUBAGENT_CONCURRENCY_OPTIONS,
 	getProviderRuntimeDraft,
 	supportsProviderRuntime,
+	supportsProviderRuntimeHome,
+	supportsProviderShadowHome,
+	supportsProviderSubagentConcurrency,
 	type ProviderRuntimeDraft,
 	type ProviderRuntimeSettings,
 } from "./provider-runtime-settings";
@@ -74,7 +77,7 @@ function ProviderRuntimeCard({
 				</Button>
 			</CardHeader>
 			<CardContent className="space-y-3 px-4 py-4">
-				{provider.id === "codex" ? (
+				{supportsProviderSubagentConcurrency(provider.capabilities) ? (
 					<div className="space-y-1.5 rounded-xl border border-border/50 bg-background/60 p-3">
 						<Label
 							htmlFor="codex-max-concurrent-subagents"
@@ -96,7 +99,7 @@ function ProviderRuntimeCard({
 							<option value="">
 								{t("settings.model.runtimeSubagentConcurrencyAuto")}
 							</option>
-							{CODEX_SUBAGENT_CONCURRENCY_OPTIONS.map((option) => (
+							{SUBAGENT_CONCURRENCY_OPTIONS.map((option) => (
 								<option key={option} value={String(option)}>
 									{option}
 								</option>
@@ -108,41 +111,45 @@ function ProviderRuntimeCard({
 					</div>
 				) : null}
 
-				<div className="space-y-1.5">
-					<Label htmlFor={`provider-home-${provider.id}`} className="text-[12px]">
-						{t("settings.model.runtimeHomePath")}
-					</Label>
-					<Input
-						id={`provider-home-${provider.id}`}
-						value={draft.homePath}
-						onChange={(event) =>
-							onChangeRuntime(provider.id, {
-								...draft,
-								homePath: event.target.value,
-							})
-						}
-						placeholder={t("settings.model.runtimeHomePlaceholder")}
-						autoComplete="off"
-					/>
-				</div>
+				{supportsProviderRuntimeHome(provider.capabilities) ? (
+					<div className="space-y-1.5">
+						<Label htmlFor={`provider-home-${provider.id}`} className="text-[12px]">
+							{t("settings.model.runtimeHomePath")}
+						</Label>
+						<Input
+							id={`provider-home-${provider.id}`}
+							value={draft.homePath}
+							onChange={(event) =>
+								onChangeRuntime(provider.id, {
+									...draft,
+									homePath: event.target.value,
+								})
+							}
+							placeholder={t("settings.model.runtimeHomePlaceholder")}
+							autoComplete="off"
+						/>
+					</div>
+				) : null}
 
-				<div className="space-y-1.5">
-					<Label htmlFor={`provider-shadow-${provider.id}`} className="text-[12px]">
-						{t("settings.model.runtimeShadowHomePath")}
-					</Label>
-					<Input
-						id={`provider-shadow-${provider.id}`}
-						value={draft.shadowHomePath}
-						onChange={(event) =>
-							onChangeRuntime(provider.id, {
-								...draft,
-								shadowHomePath: event.target.value,
-							})
-						}
-						placeholder={t("settings.model.runtimeShadowHomePlaceholder")}
-						autoComplete="off"
-					/>
-				</div>
+				{supportsProviderShadowHome(provider.capabilities) ? (
+					<div className="space-y-1.5">
+						<Label htmlFor={`provider-shadow-${provider.id}`} className="text-[12px]">
+							{t("settings.model.runtimeShadowHomePath")}
+						</Label>
+						<Input
+							id={`provider-shadow-${provider.id}`}
+							value={draft.shadowHomePath}
+							onChange={(event) =>
+								onChangeRuntime(provider.id, {
+									...draft,
+									shadowHomePath: event.target.value,
+								})
+							}
+							placeholder={t("settings.model.runtimeShadowHomePlaceholder")}
+							autoComplete="off"
+						/>
+					</div>
+				) : null}
 			</CardContent>
 		</Card>
 	);
@@ -157,7 +164,10 @@ export function ProviderRuntimePanel({
 }: ProviderRuntimePanelProps) {
 	const { t } = useTranslation("common");
 	const supportedProviders = useMemo(
-		() => providers.filter((provider) => supportsProviderRuntime(provider.id)),
+		() =>
+			providers.filter((provider) =>
+				supportsProviderRuntime(provider.capabilities),
+			),
 		[providers],
 	);
 

@@ -1,15 +1,20 @@
-import type { ProviderRuntimeConfig } from "@dcc/contracts";
+import type { Capabilities, ProviderRuntimeConfig } from "@dcc/contracts";
 
 export const PROVIDER_RUNTIME_STORAGE_KEY = "dcc.providerRuntimeConfigs";
 
-export const PROVIDER_RUNTIME_SUPPORTED_IDS = new Set([
-	"claude_code",
-	"codex",
-	"gemini",
-	"grok",
-]);
+export const SUBAGENT_CONCURRENCY_OPTIONS = [1, 2, 4, 6, 8] as const;
+/** @deprecated Use SUBAGENT_CONCURRENCY_OPTIONS; the limit is capability-gated, not Codex-specific. */
+export const CODEX_SUBAGENT_CONCURRENCY_OPTIONS = SUBAGENT_CONCURRENCY_OPTIONS;
 
-export const CODEX_SUBAGENT_CONCURRENCY_OPTIONS = [1, 2, 4, 6, 8] as const;
+/**
+ * Runtime-config capabilities are declared by the backend registry and
+ * projected through the catalog. The backend rejects any field an adapter
+ * would ignore, so the renderer must project the same subset.
+ */
+export type ProviderRuntimeCapabilities = Pick<
+	Capabilities,
+	"supportsRuntimeHome" | "supportsShadowHome" | "supportsSubagentConcurrency"
+>;
 
 export type ProviderRuntimeDraft = {
 	homePath: string;
@@ -28,7 +33,7 @@ const EMPTY_DRAFT: ProviderRuntimeDraft = {
 function normalizeMaxConcurrentSubagents(value: unknown): string {
 	const normalized = typeof value === "number" ? String(value) : value;
 	return typeof normalized === "string" &&
-		CODEX_SUBAGENT_CONCURRENCY_OPTIONS.some(
+		SUBAGENT_CONCURRENCY_OPTIONS.some(
 			(option) => String(option) === normalized,
 		)
 		? normalized
@@ -51,8 +56,33 @@ function normalizeDraftEntry(value: unknown): ProviderRuntimeDraft | null {
 	};
 }
 
-export function supportsProviderRuntime(providerId: string): boolean {
-	return PROVIDER_RUNTIME_SUPPORTED_IDS.has(providerId);
+export function supportsProviderRuntimeHome(
+	capabilities: ProviderRuntimeCapabilities | null | undefined,
+): boolean {
+	return capabilities?.supportsRuntimeHome === true;
+}
+
+export function supportsProviderShadowHome(
+	capabilities: ProviderRuntimeCapabilities | null | undefined,
+): boolean {
+	return capabilities?.supportsShadowHome === true;
+}
+
+export function supportsProviderSubagentConcurrency(
+	capabilities: ProviderRuntimeCapabilities | null | undefined,
+): boolean {
+	return capabilities?.supportsSubagentConcurrency === true;
+}
+
+/** A provider exposes runtime settings when it honors at least one field. */
+export function supportsProviderRuntime(
+	capabilities: ProviderRuntimeCapabilities | null | undefined,
+): boolean {
+	return (
+		supportsProviderRuntimeHome(capabilities) ||
+		supportsProviderShadowHome(capabilities) ||
+		supportsProviderSubagentConcurrency(capabilities)
+	);
 }
 
 export function readProviderRuntimeSettings(): ProviderRuntimeSettings {
@@ -143,18 +173,31 @@ export function clearProviderRuntimeDraft(
 	return next;
 }
 
+/**
+ * Projects a persisted draft into the session runtime config. When the
+ * provider capabilities are known, fields the adapter does not honor are
+ * dropped here so a stale local draft never reaches the backend authority,
+ * which rejects them.
+ */
 export function draftToProviderRuntimeConfig(
 	draft: ProviderRuntimeDraft | null | undefined,
+	capabilities?: ProviderRuntimeCapabilities | null,
 ): ProviderRuntimeConfig | null {
 	if (!draft) {
 		return null;
 	}
 
-	const homePath = draft.homePath.trim();
-	const shadowHomePath = draft.shadowHomePath.trim();
-	const maxConcurrentSubagents = normalizeMaxConcurrentSubagents(
-		draft.maxConcurrentSubagents,
-	);
+	const gated = capabilities !== undefined;
+	const homePath =
+		!gated || supportsProviderRuntimeHome(capabilities) ? draft.homePath.trim() : "";
+	const shadowHomePath =
+		!gated || supportsProviderShadowHome(capabilities)
+			? draft.shadowHomePath.trim()
+			: "";
+	const maxConcurrentSubagents =
+		!gated || supportsProviderSubagentConcurrency(capabilities)
+			? normalizeMaxConcurrentSubagents(draft.maxConcurrentSubagents)
+			: "";
 
 	if (!homePath && !shadowHomePath && !maxConcurrentSubagents) {
 		return null;

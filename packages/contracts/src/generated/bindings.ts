@@ -117,6 +117,24 @@ export type Capabilities = {
 	supportsMultiRoot?: boolean,
 	// User-selectable approval policies that this adapter can enforce natively.
 	approvalPolicies?: ProviderApprovalPolicy[],
+	/**
+	 *  The adapter applies a DCC-managed `home_path` from the runtime config
+	 *  to the provider process. Adapters without this ignore the field, so the
+	 *  backend rejects it instead of silently dropping the preference.
+	 */
+	supportsRuntimeHome?: boolean,
+	/**
+	 *  The adapter materializes a DCC-managed `shadow_home_path` (isolated
+	 *  auth/config copy) from the runtime config.
+	 */
+	supportsShadowHome?: boolean,
+	// The adapter enforces `max_concurrent_subagents` from the runtime config.
+	supportsSubagentConcurrency?: boolean,
+	/**
+	 *  The adapter can report account usage windows through `account_usage`.
+	 *  Providers without this never spawn a runtime to answer usage queries.
+	 */
+	supportsAccountUsage?: boolean,
 };
 
 export type Checkpoint = {

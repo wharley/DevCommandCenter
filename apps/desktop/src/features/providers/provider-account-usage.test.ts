@@ -3,6 +3,7 @@ import type { ProviderAccountUsage, ProviderUsageWindow } from "@dcc/contracts";
 import {
 	mostConstrainedUsageWindow,
 	providerUsageSeverity,
+	supportsProviderAccountUsage,
 } from "./provider-account-usage";
 
 function window(remainingPercent: number): ProviderUsageWindow {
@@ -25,6 +26,26 @@ function usage(windows: ProviderUsageWindow[]): ProviderAccountUsage {
 }
 
 describe("provider account usage", () => {
+	it("derives usage support from the backend capability, never the provider id", () => {
+		expect(
+			supportsProviderAccountUsage({
+				id: "codex",
+				capabilities: { supportsAccountUsage: true },
+			}),
+		).toBe(true);
+		expect(
+			supportsProviderAccountUsage({
+				id: "codex",
+				capabilities: { supportsAccountUsage: false },
+			}),
+		).toBe(false);
+		// Legacy catalogs without the field are treated as unsupported.
+		expect(
+			supportsProviderAccountUsage({ id: "claude_code", capabilities: {} }),
+		).toBe(false);
+		expect(supportsProviderAccountUsage(null)).toBe(false);
+	});
+
 	it("uses the window with the least remaining quota", () => {
 		expect(
 			mostConstrainedUsageWindow(usage([window(75), window(18)]))

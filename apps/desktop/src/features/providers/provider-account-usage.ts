@@ -1,17 +1,27 @@
 import { useQuery } from "@tanstack/react-query";
 import type {
+	Capabilities,
 	ProviderAccountUsage,
 	ProviderRuntimeConfig,
 	ProviderUsageWindow,
 } from "@dcc/contracts";
 import { getProviderAccountUsage } from "@/lib/provider-api";
 
-const SUPPORTED_PROVIDER_IDS = new Set(["codex", "claude_code"]);
-
 export type ProviderUsageSeverity = "warning" | "critical" | null;
 
-export function supportsProviderAccountUsage(providerId: string | null): boolean {
-	return Boolean(providerId && SUPPORTED_PROVIDER_IDS.has(providerId));
+export type ProviderUsageCandidate = {
+	id: string;
+	capabilities: Pick<Capabilities, "supportsAccountUsage">;
+};
+
+/**
+ * Account usage is a backend-declared capability projected through the
+ * provider catalog. The renderer never infers it from the provider id.
+ */
+export function supportsProviderAccountUsage(
+	provider: ProviderUsageCandidate | null | undefined,
+): boolean {
+	return provider?.capabilities.supportsAccountUsage === true;
 }
 
 export function mostConstrainedUsageWindow(
@@ -40,13 +50,15 @@ export function providerUsageSeverity(
 }
 
 export function useProviderAccountUsage(
-	providerId: string | null,
+	provider: ProviderUsageCandidate | null | undefined,
 	providerRuntime: ProviderRuntimeConfig | null,
 ) {
+	const providerId = provider?.id ?? null;
+	const supported = supportsProviderAccountUsage(provider);
 	return useQuery({
-		queryKey: ["provider-account-usage", providerId, providerRuntime],
+		queryKey: ["provider-account-usage", providerId, supported, providerRuntime],
 		queryFn: async () => {
-			if (!providerId || !supportsProviderAccountUsage(providerId)) {
+			if (!providerId || !supported) {
 				return null;
 			}
 			return (await getProviderAccountUsage(providerId, providerRuntime)).usage;

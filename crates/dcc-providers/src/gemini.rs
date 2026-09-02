@@ -16,6 +16,7 @@ fn gemini_capabilities() -> dcc_core::domain::provider::Capabilities {
         ProviderApprovalPolicy::Auto,
         ProviderApprovalPolicy::FullAccess,
     ];
+    capabilities.supports_runtime_home = true;
     capabilities
 }
 

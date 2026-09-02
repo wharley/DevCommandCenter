@@ -29,6 +29,8 @@ fn claude_code_capabilities() -> Capabilities {
         ProviderApprovalPolicy::Auto,
         ProviderApprovalPolicy::FullAccess,
     ];
+    capabilities.supports_runtime_home = true;
+    capabilities.supports_account_usage = true;
     capabilities
 }
 

@@ -100,8 +100,9 @@ function ProviderUsageCard({
 	const { t, i18n } = useTranslation("common");
 	const runtime = draftToProviderRuntimeConfig(
 		getProviderRuntimeDraft(runtimeSettings, provider.id),
+		provider.capabilities,
 	);
-	const usageQuery = useProviderAccountUsage(provider.id, runtime);
+	const usageQuery = useProviderAccountUsage(provider, runtime);
 
 	useEffect(() => {
 		void usageQuery.refetch();
@@ -175,7 +176,7 @@ export function ProviderAccountUsagePanel({
 }: ProviderAccountUsagePanelProps) {
 	const { t } = useTranslation("common");
 	const supported = providers.filter((provider) =>
-		supportsProviderAccountUsage(provider.id),
+		supportsProviderAccountUsage(provider),
 	);
 	if (supported.length === 0) return null;
 

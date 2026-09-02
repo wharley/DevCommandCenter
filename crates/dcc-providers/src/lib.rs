@@ -50,7 +50,7 @@ fn provider_registry() -> &'static HashMap<String, Arc<dyn Provider>> {
             Arc::new(droid::adapter()),
             Arc::new(cursor::adapter()),
             Arc::new(grok_acp::GrokAcpAdapter::new(
-                common::stable_cli_capabilities(),
+                grok_acp::stable_grok_capabilities(),
             )),
         ];
 
@@ -82,6 +82,10 @@ pub enum ProviderCapability {
     DelegationTarget,
     DelegationRequest,
     MultiRoot,
+    RuntimeHome,
+    ShadowHome,
+    SubagentConcurrency,
+    AccountUsage,
 }
 
 pub fn supports_provider_capability(
@@ -101,7 +105,42 @@ pub fn supports_provider_capability(
         ProviderCapability::DelegationTarget => capabilities.can_be_delegation_target,
         ProviderCapability::DelegationRequest => capabilities.can_request_delegation,
         ProviderCapability::MultiRoot => capabilities.supports_multi_root,
+        ProviderCapability::RuntimeHome => capabilities.supports_runtime_home,
+        ProviderCapability::ShadowHome => capabilities.supports_shadow_home,
+        ProviderCapability::SubagentConcurrency => capabilities.supports_subagent_concurrency,
+        ProviderCapability::AccountUsage => capabilities.supports_account_usage,
     }
+}
+
+/// Runtime-config fields that an adapter would silently ignore are rejected
+/// here so a persisted preference never pretends to take effect.
+pub fn validate_provider_runtime_config(
+    provider_id: &str,
+    capabilities: &Capabilities,
+    runtime: &dcc_core::ports::ProviderRuntimeConfig,
+) -> Result<(), String> {
+    if runtime.home_path.is_some()
+        && !supports_provider_capability(capabilities, ProviderCapability::RuntimeHome)
+    {
+        return Err(format!(
+            "provider {provider_id} does not support a DCC-managed runtime home"
+        ));
+    }
+    if runtime.shadow_home_path.is_some()
+        && !supports_provider_capability(capabilities, ProviderCapability::ShadowHome)
+    {
+        return Err(format!(
+            "provider {provider_id} does not support a DCC-managed shadow home"
+        ));
+    }
+    if runtime.max_concurrent_subagents.is_some()
+        && !supports_provider_capability(capabilities, ProviderCapability::SubagentConcurrency)
+    {
+        return Err(format!(
+            "provider {provider_id} does not support subagent concurrency limits"
+        ));
+    }
+    Ok(())
 }
 
 pub fn supports_provider_approval_policy(
@@ -178,7 +217,7 @@ pub async fn provider_catalog() -> ProviderCatalog {
     providers.push(cursor::descriptor(health[4].clone(), cursor_models));
     providers.push(grok_acp::descriptor(
         health[5].clone(),
-        common::stable_cli_capabilities(),
+        grok_acp::stable_grok_capabilities(),
     ));
     for descriptor in &mut providers {
         // Labels/models stay adapter descriptors, while every capability comes
@@ -202,8 +241,8 @@ mod tests {
     use super::{
         claude_code, codex, common::stable_cli_capabilities, droid, expose_runtime_mcp_bridge,
         gemini, grok_acp, project_catalog_capabilities, provider_registration, provider_runtime,
-        supports_provider_approval_policy, supports_provider_capability, ProviderCapability,
-        PROVIDER_IDS,
+        supports_provider_approval_policy, supports_provider_capability,
+        validate_provider_runtime_config, ProviderCapability, PROVIDER_IDS,
     };
     use crate::cursor_mcp::CURSOR_MCP_RUNTIME_VERSION;
 
@@ -308,6 +347,106 @@ mod tests {
     }
 
     #[test]
+    fn runtime_usage_and_concurrency_capabilities_match_each_adapter_contract() {
+        let expectations: [(&str, bool, bool, bool, bool); 6] = [
+            // provider, runtime home, shadow home, subagent concurrency, usage
+            ("claude_code", true, false, false, true),
+            ("codex", true, true, true, true),
+            ("gemini", true, false, false, false),
+            ("droid", false, false, false, false),
+            ("cursor", false, false, false, false),
+            ("grok", true, false, false, false),
+        ];
+        for (provider_id, runtime_home, shadow_home, concurrency, usage) in expectations {
+            let registration = provider_registration(provider_id).expect("registered provider");
+            let capabilities = &registration.capabilities;
+            assert_eq!(
+                supports_provider_capability(capabilities, ProviderCapability::RuntimeHome),
+                runtime_home,
+                "{provider_id} runtime home"
+            );
+            assert_eq!(
+                supports_provider_capability(capabilities, ProviderCapability::ShadowHome),
+                shadow_home,
+                "{provider_id} shadow home"
+            );
+            assert_eq!(
+                supports_provider_capability(capabilities, ProviderCapability::SubagentConcurrency),
+                concurrency,
+                "{provider_id} subagent concurrency"
+            );
+            assert_eq!(
+                supports_provider_capability(capabilities, ProviderCapability::AccountUsage),
+                usage,
+                "{provider_id} account usage"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_config_validation_rejects_fields_an_adapter_would_ignore() {
+        use dcc_core::ports::ProviderRuntimeConfig;
+
+        let droid = provider_registration("droid").expect("Droid provider");
+        assert!(validate_provider_runtime_config(
+            "droid",
+            &droid.capabilities,
+            &ProviderRuntimeConfig::default()
+        )
+        .is_ok());
+        assert!(validate_provider_runtime_config(
+            "droid",
+            &droid.capabilities,
+            &ProviderRuntimeConfig {
+                home_path: Some("/tmp/home".to_string()),
+                ..ProviderRuntimeConfig::default()
+            }
+        )
+        .is_err());
+        assert!(validate_provider_runtime_config(
+            "droid",
+            &droid.capabilities,
+            &ProviderRuntimeConfig {
+                max_concurrent_subagents: Some(2),
+                ..ProviderRuntimeConfig::default()
+            }
+        )
+        .is_err());
+
+        let claude = provider_registration("claude_code").expect("Claude provider");
+        assert!(validate_provider_runtime_config(
+            "claude_code",
+            &claude.capabilities,
+            &ProviderRuntimeConfig {
+                home_path: Some("/tmp/home".to_string()),
+                ..ProviderRuntimeConfig::default()
+            }
+        )
+        .is_ok());
+        assert!(validate_provider_runtime_config(
+            "claude_code",
+            &claude.capabilities,
+            &ProviderRuntimeConfig {
+                shadow_home_path: Some("/tmp/shadow".to_string()),
+                ..ProviderRuntimeConfig::default()
+            }
+        )
+        .is_err());
+
+        let codex = provider_registration("codex").expect("Codex provider");
+        assert!(validate_provider_runtime_config(
+            "codex",
+            &codex.capabilities,
+            &ProviderRuntimeConfig {
+                home_path: Some("/tmp/home".to_string()),
+                shadow_home_path: Some("/tmp/shadow".to_string()),
+                max_concurrent_subagents: Some(4),
+            }
+        )
+        .is_ok());
+    }
+
+    #[test]
     fn stable_preset_does_not_claim_mcp_attachment() {
         assert_eq!(
             stable_cli_capabilities().mcp_support,
@@ -344,7 +483,7 @@ mod tests {
             McpSupportLevel::NativeConfig
         );
         assert_eq!(
-            grok_acp::descriptor(healthy, stable_cli_capabilities())
+            grok_acp::descriptor(healthy, grok_acp::stable_grok_capabilities())
                 .capabilities
                 .mcp_support,
             McpSupportLevel::Unsupported

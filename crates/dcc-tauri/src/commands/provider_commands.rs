@@ -7,6 +7,8 @@ use dcc_core::{
     ports::ProviderRuntimeConfig,
 };
 
+use dcc_providers::{supports_provider_capability, ProviderCapability};
+
 use crate::state::{ProviderAvailability, SessionCommandState};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -104,13 +106,37 @@ pub async fn set_provider_availability(
 
 #[tauri::command]
 pub async fn provider_account_usage(
+    state: State<'_, SessionCommandState>,
     input: ProviderAccountUsageInput,
 ) -> Result<ProviderAccountUsageOutput, String> {
-    let Some(provider) = dcc_providers::provider_runtime(&input.provider_id) else {
-        return Ok(ProviderAccountUsageOutput { usage: None });
-    };
-    let usage = provider
-        .account_usage(input.provider_runtime.as_ref())
+    provider_account_usage_for_state(&state, input).await
+}
+
+/// Account usage is gated by the registered capability and by server-backed
+/// availability before any adapter code runs: a provider without the
+/// capability, or a disabled one, must never spawn a runtime to answer.
+pub async fn provider_account_usage_for_state(
+    state: &SessionCommandState,
+    input: ProviderAccountUsageInput,
+) -> Result<ProviderAccountUsageOutput, String> {
+    let provider_id = input.provider_id.trim();
+    let registration = state
+        .require_provider_available(provider_id)
+        .map_err(|error| error.to_string())?;
+    if !supports_provider_capability(&registration.capabilities, ProviderCapability::AccountUsage) {
+        return Err(format!(
+            "provider {provider_id} does not support account usage"
+        ));
+    }
+    let runtime = input
+        .provider_runtime
+        .as_ref()
+        .map(|runtime| state.provider_runtime_config(provider_id, Some(runtime)))
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let usage = registration
+        .runtime
+        .account_usage(runtime.as_ref())
         .await
         .map_err(|error| error.to_string())?;
     Ok(ProviderAccountUsageOutput { usage })
@@ -120,6 +146,69 @@ pub async fn provider_account_usage(
 mod tests {
     use super::*;
     use dcc_core::domain::provider::HealthStatus;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn account_usage_is_refused_before_any_runtime_for_unsupported_or_disabled_providers() {
+        let root = tempfile::tempdir().expect("provider command root");
+        let root = std::fs::canonicalize(root.path()).expect("physical provider command root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+
+        let unsupported = provider_account_usage_for_state(
+            &state,
+            ProviderAccountUsageInput {
+                provider_id: "droid".to_string(),
+                provider_runtime: None,
+            },
+        )
+        .await
+        .expect_err("droid has no usage capability");
+        assert!(unsupported.contains("does not support account usage"));
+
+        let unknown = provider_account_usage_for_state(
+            &state,
+            ProviderAccountUsageInput {
+                provider_id: "unknown-provider".to_string(),
+                provider_runtime: None,
+            },
+        )
+        .await
+        .expect_err("unknown provider");
+        assert!(unknown.contains("unknown provider runtime"));
+
+        state
+            .set_provider_enabled("codex", false)
+            .await
+            .expect("disable codex");
+        let disabled = provider_account_usage_for_state(
+            &state,
+            ProviderAccountUsageInput {
+                provider_id: "codex".to_string(),
+                provider_runtime: None,
+            },
+        )
+        .await
+        .expect_err("disabled codex must not spawn a runtime for usage");
+        assert!(disabled.contains("is disabled"));
+
+        state
+            .set_provider_enabled("codex", true)
+            .await
+            .expect("enable codex");
+        let invalid_runtime = provider_account_usage_for_state(
+            &state,
+            ProviderAccountUsageInput {
+                provider_id: "claude_code".to_string(),
+                provider_runtime: Some(ProviderRuntimeConfig {
+                    max_concurrent_subagents: Some(2),
+                    ..ProviderRuntimeConfig::default()
+                }),
+            },
+        )
+        .await
+        .expect_err("claude ignores subagent limits");
+        assert!(invalid_runtime.contains("does not support subagent concurrency limits"));
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn availability_overlay_preserves_runtime_health_models_and_capabilities() {

@@ -1804,6 +1804,7 @@ export default function App() {
 				selectedProvider
 					? getProviderRuntimeDraft(providerRuntimeSettings, selectedProvider.id)
 					: null,
+				selectedProvider?.capabilities ?? null,
 			),
 		[providerRuntimeSettings, selectedProvider],
 	);
@@ -2649,6 +2650,7 @@ export default function App() {
 							null);
 				const targetRuntime = draftToProviderRuntimeConfig(
 					getProviderRuntimeDraft(providerRuntimeSettings, targetProvider.id),
+					targetProvider.capabilities,
 				);
 				let delegationId: string | null = null;
 				let childSessionId: string | null = null;

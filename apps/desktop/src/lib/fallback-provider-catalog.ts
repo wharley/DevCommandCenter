@@ -32,6 +32,10 @@ const stableCapabilities = {
 	supportsReadOnlyDelegation: true,
 	supportsEditDelegation: true,
 	supportsMultiRoot: false,
+	supportsRuntimeHome: false,
+	supportsShadowHome: false,
+	supportsSubagentConcurrency: false,
+	supportsAccountUsage: false,
 } as const;
 
 const delegationRequesterCapabilities = {
@@ -47,6 +51,8 @@ const multiRootDelegationRequesterCapabilities = {
 const claudeRuntimeMcpCapabilities = {
 	...multiRootDelegationRequesterCapabilities,
 	approvalPolicies: interactiveApprovalPolicies,
+	supportsRuntimeHome: true,
+	supportsAccountUsage: true,
 	mcpOauthSupport: "managedDuringTurn",
 	mcpSupport: {
 		runtimeBridge: {
@@ -58,6 +64,10 @@ const claudeRuntimeMcpCapabilities = {
 const codexRuntimeMcpCapabilities = {
 	...multiRootDelegationRequesterCapabilities,
 	approvalPolicies: interactiveApprovalPolicies,
+	supportsRuntimeHome: true,
+	supportsShadowHome: true,
+	supportsSubagentConcurrency: true,
+	supportsAccountUsage: true,
 	mcpOauthSupport: "interactivePreflight",
 	mcpSupport: {
 		runtimeBridge: {
@@ -79,6 +89,10 @@ const experimentalCapabilities = {
 	supportsReadOnlyDelegation: true,
 	supportsEditDelegation: true,
 	supportsMultiRoot: false,
+	supportsRuntimeHome: false,
+	supportsShadowHome: false,
+	supportsSubagentConcurrency: false,
+	supportsAccountUsage: false,
 } as const;
 
 const experimentalMultiRootCapabilities = {
@@ -136,6 +150,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				...stableCapabilities,
 				supportsMultiRoot: true,
 				approvalPolicies: interactiveApprovalPolicies,
+				supportsRuntimeHome: true,
 			},
 			health: stableHealth,
 			stable: true,
@@ -184,7 +199,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...stableCapabilities },
+			capabilities: { ...stableCapabilities, supportsRuntimeHome: true },
 			health: stableHealth,
 			stable: true,
 		},

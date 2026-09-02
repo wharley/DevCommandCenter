@@ -30,7 +30,8 @@ pub async fn set_provider_availability(
 
 #[tauri::command]
 pub async fn provider_account_usage(
+    state: State<'_, SessionCommandState>,
     input: ProviderAccountUsageInput,
 ) -> Result<ProviderAccountUsageOutput, String> {
-    dcc_tauri::commands::provider_commands::provider_account_usage(input).await
+    dcc_tauri::commands::provider_commands::provider_account_usage(state, input).await
 }

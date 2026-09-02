@@ -1911,6 +1911,10 @@ pub fn stable_cli_capabilities() -> Capabilities {
         supports_edit_delegation: true,
         supports_multi_root: false,
         approval_policies: Vec::new(),
+        supports_runtime_home: false,
+        supports_shadow_home: false,
+        supports_subagent_concurrency: false,
+        supports_account_usage: false,
     }
 }
 
@@ -1932,6 +1936,10 @@ pub fn experimental_cli_capabilities() -> Capabilities {
         supports_edit_delegation: true,
         supports_multi_root: false,
         approval_policies: Vec::new(),
+        supports_runtime_home: false,
+        supports_shadow_home: false,
+        supports_subagent_concurrency: false,
+        supports_account_usage: false,
     }
 }
 
