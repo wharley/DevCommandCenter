@@ -404,6 +404,18 @@ export function SessionWorkbench({
 			onClear: () => updateDebugEvidence(clearDebugEvidence(debugEvidenceTrayRef.current)),
 			onStageChange: (stage) =>
 				updateDebugEvidence(setDebugStage(debugEvidenceTrayRef.current, stage)),
+			onAdd: (input) => {
+				const scope = contextAttachmentScopeRef.current;
+				const attachment = contextAttachmentLedgerRef.current.issue({
+					source: input.source,
+					workspaceId: scope.workspaceId,
+					sessionId: scope.sessionId,
+					chars: input.body.length,
+					truncated: input.truncated,
+					trust: input.trust,
+				});
+				return pushDebugEvidence({ ...input, attachment });
+			},
 			onConsumed: (ids) => {
 				const current = debugEvidenceTrayRef.current;
 				const scope = contextAttachmentScopeRef.current;
@@ -419,7 +431,7 @@ export function SessionWorkbench({
 				updateDebugEvidence(removeDebugEvidence(current, ids));
 			},
 		}),
-		[debugEvidenceTray, updateDebugEvidence],
+		[debugEvidenceTray, pushDebugEvidence, updateDebugEvidence],
 	);
 	useEffect(() => {
 		const element = workbenchRef.current;

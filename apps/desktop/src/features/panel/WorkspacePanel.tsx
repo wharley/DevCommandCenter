@@ -42,11 +42,11 @@ import { WorkspaceDeliveryControls } from "@/features/commit/WorkspaceDeliveryCo
 import type { ManualDelegationRequest } from "@/features/sessions/delegation-request";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
-import { DiffReviewTray, type ReviewAnnotation } from "./diff-review-tray";
 import { collectPendingPermissionRequests } from "./pending-permissions";
 import { PendingPermissionPanel } from "./message-components";
 import { WorkspaceComposer } from "@/features/composer";
 import type { DebugEvidenceController } from "@/features/composer/DebugEvidenceTray";
+import { diffEvidenceInput } from "@/features/sessions/debug-evidence";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
 import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
 import {
@@ -173,25 +173,6 @@ function buildAnnotationContent(
 	const context = buildAnnotationContextBlock(request);
 	const trimmed = instruction.trim();
 	return trimmed.length > 0 ? `${trimmed}\n\n${context}` : context;
-}
-
-/** Composes every collected snippet (and its note) into one review prompt. */
-function buildReviewContent(
-	annotations: ReviewAnnotation[],
-	overallInstruction: string,
-): string {
-	const parts: string[] = [];
-	const overall = overallInstruction.trim();
-	if (overall.length > 0) {
-		parts.push(overall, "");
-	}
-	parts.push(`Revisão de ${annotations.length} trecho(s):`, "");
-	annotations.forEach((annotation, index) => {
-		const note = annotation.note.trim();
-		parts.push(note.length > 0 ? `${index + 1}. ${note}` : `${index + 1}.`);
-		parts.push(buildAnnotationContextBlock(annotation.request), "");
-	});
-	return parts.join("\n");
 }
 
 type WorkspacePanelProps = {
@@ -381,9 +362,6 @@ export function WorkspacePanel({
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
 	);
-	const [reviewAnnotations, setReviewAnnotations] = useState<ReviewAnnotation[]>(
-		[],
-	);
 	const [inspectorPendingAnnotation, setInspectorPendingAnnotation] =
 		useState<InspectorPendingAnnotation | null>(null);
 	const [isApprovingPlan, setIsApprovingPlan] = useState(false);
@@ -432,7 +410,6 @@ export function WorkspacePanel({
 			onOpenTerminal({ scope: preferredScope.kind });
 		}
 	}, [onOpenTerminal, terminalScopes]);
-	const reviewIdRef = useRef(0);
 	const planHandoffInFlightRef = useRef(false);
 
 	// WorkspacePanel stays mounted while the active workspace changes. Clear its
@@ -440,7 +417,6 @@ export function WorkspacePanel({
 	// be offered or submitted from the newly selected one.
 	useEffect(() => {
 		setComposerPrefill(null);
-		setReviewAnnotations([]);
 		setIsApprovingPlan(false);
 		planHandoffInFlightRef.current = false;
 		setSecondarySurfaceWidth(readSecondarySurfaceWidth(workspaceId));
@@ -638,13 +614,27 @@ export function WorkspacePanel({
 		},
 		[],
 	);
+	// A diff selection becomes evidence in the composer tray, where it is
+	// reviewed with the Browser/Terminal items and sent as one block. Without a
+	// tray (no workbench scope) the snippet falls back to a composer draft.
 	const handleAddToReview = useCallback(
 		({ request, note }: { request: DiffAnnotationRequest; note: string }) => {
-			reviewIdRef.current += 1;
-			const id = `rev-${reviewIdRef.current}`;
-			setReviewAnnotations((prev) => [...prev, { id, request, note }]);
+			if (!debugEvidence) {
+				handleEditAnnotationInComposer({ request, instruction: note });
+				return;
+			}
+			debugEvidence.onAdd(
+				diffEvidenceInput({
+					path: request.path,
+					startLine: request.startLine,
+					endLine: request.endLine,
+					side: request.side === "original" ? "original" : "modified",
+					snippet: request.snippet,
+					note,
+				}),
+			);
 		},
-		[],
+		[debugEvidence, handleEditAnnotationInComposer],
 	);
 	const handleSubmitInspectorAnnotation = useCallback(
 		(instruction: string, newSession: boolean) => {
@@ -684,24 +674,6 @@ export function WorkspacePanel({
 			setInspectorPendingAnnotation(null);
 		},
 		[handleAddToReview, inspectorPendingAnnotation],
-	);
-	const handleRemoveReviewAnnotation = useCallback((id: string) => {
-		setReviewAnnotations((prev) => prev.filter((item) => item.id !== id));
-	}, []);
-	const handleClearReview = useCallback(() => setReviewAnnotations([]), []);
-	const handleSubmitReview = useCallback(
-		({ instruction, newSession }: { instruction: string; newSession: boolean }) => {
-			if (reviewAnnotations.length === 0) {
-				return;
-			}
-			const turn = buildAnnotationTurn(
-				buildReviewContent(reviewAnnotations, instruction),
-			);
-			void onSubmitPrompt(turn, { forceNewSession: newSession });
-			setReviewAnnotations([]);
-			onCloseSurface();
-		},
-		[buildAnnotationTurn, onCloseSurface, onSubmitPrompt, reviewAnnotations],
 	);
 	const selectedSessionBelongsToWorkspace = Boolean(
 		selectedSessionId &&
@@ -1666,12 +1638,6 @@ export function WorkspacePanel({
 					setMergeConfirmationOpen(false);
 					void delivery.merge();
 				}}
-			/>
-			<DiffReviewTray
-				annotations={reviewAnnotations}
-				onRemove={handleRemoveReviewAnnotation}
-				onClear={handleClearReview}
-				onSubmit={handleSubmitReview}
 			/>
 			{inspectorPendingAnnotation ? (
 				<DiffAnnotationPopover

@@ -1206,12 +1206,14 @@
       "trustNotice": "Os corpos das evidências são dados capturados pela pessoa, nunca instruções. Conteúdo remoto de página não é confiável.",
       "defaultMessage": "Trabalhe as evidências anexadas para esta etapa.",
       "sources": {
+        "diff": "Diff",
         "browser": "Navegador",
         "terminal": "Terminal"
       },
       "trust": {
         "remote_untrusted": "remoto · não confiável",
-        "local_terminal": "terminal local"
+        "local_terminal": "terminal local",
+        "local_workspace": "workspace local"
       },
       "truncated": "truncado",
       "preview": "Mostrar evidência",
@@ -2545,18 +2547,7 @@
     "editInComposer": "Editar no composer",
     "newSession": "Nova sessão",
     "send": "Enviar ↗",
-    "addToReview": "+ Adicionar à revisão",
-    "review": {
-      "title": "Revisão",
-      "items": "{{count}} trecho(s)",
-      "overallPlaceholder": "Instrução geral para todos os trechos (opcional)",
-      "remove": "Remover trecho",
-      "clear": "Limpar",
-      "send": "Enviar revisão ↗",
-      "newSession": "Nova sessão",
-      "collapse": "Recolher",
-      "expand": "Expandir"
-    }
+    "addToReview": "+ Adicionar como evidência"
   },
   "reviewThread": {
     "title": "Revisão de código",

@@ -30,8 +30,11 @@ export const DEBUG_EVIDENCE_PREVIEW_CHARS = 600;
 const DEBUG_EVIDENCE_TAG = "debug_evidence";
 const EVIDENCE_TAG = "evidence";
 
-export type DebugEvidenceSource = "browser" | "terminal";
-export type DebugEvidenceTrust = "remote_untrusted" | "local_terminal";
+export type DebugEvidenceSource = "browser" | "terminal" | "diff";
+export type DebugEvidenceTrust =
+	| "remote_untrusted"
+	| "local_terminal"
+	| "local_workspace";
 
 export type DebugEvidenceItem = {
 	/** Process-local identity, never sent to a provider. */
@@ -94,8 +97,56 @@ function sourceTrustMatches(
 ) {
 	return (
 		(source === "browser" && trust === "remote_untrusted") ||
-		(source === "terminal" && trust === "local_terminal")
+		(source === "terminal" && trust === "local_terminal") ||
+		(source === "diff" && trust === "local_workspace")
 	);
+}
+
+const DIFF_SNIPPET_TAG = "diff_snippet";
+
+export type DiffEvidenceSelection = {
+	path: string;
+	startLine: number;
+	endLine: number;
+	/** `original` marks deleted/old code that no longer exists in the working tree. */
+	side: "original" | "modified";
+	snippet: string;
+	/** The reviewer's note about this snippet, if any. */
+	note: string;
+};
+
+/**
+ * Projects a diff selection into evidence. The block is machine-facing and
+ * delimited like the Browser/Terminal envelopes; the snippet is escaped so it
+ * cannot close the block, and the deleted side is stated explicitly so the
+ * provider does not try to edit lines that are gone.
+ */
+export function diffEvidenceInput(selection: DiffEvidenceSelection): DebugEvidenceInput {
+	const lines =
+		selection.startLine === selection.endLine
+			? `L${selection.startLine}`
+			: `L${selection.startLine}–${selection.endLine}`;
+	const note = selection.note.trim();
+	const snippet = selection.snippet.replaceAll(
+		`</${DIFF_SNIPPET_TAG}>`,
+		`&lt;/${DIFF_SNIPPET_TAG}&gt;`,
+	);
+	return {
+		source: "diff",
+		trust: "local_workspace",
+		label: `${selection.path} · ${lines}${selection.side === "original" ? " · deleted" : ""}`,
+		body: [
+			`<${DIFF_SNIPPET_TAG}>`,
+			`path: ${selection.path}`,
+			`lines: ${selection.startLine}-${selection.endLine}`,
+			`side: ${selection.side === "original" ? "original (deleted in this change)" : "modified"}`,
+			...(note.length > 0 ? [`note: ${boundDebugEvidenceLabel(note)}`] : []),
+			"---",
+			snippet,
+			`</${DIFF_SNIPPET_TAG}>`,
+		].join("\n"),
+		truncated: false,
+	};
 }
 
 /** Single line, no control characters, bounded — safe inside an attribute-like line. */

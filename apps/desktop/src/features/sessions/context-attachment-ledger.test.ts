@@ -117,6 +117,24 @@ describe("ContextAttachmentLedger", () => {
 				trust: "local_terminal",
 			}),
 		).toBeNull();
+		expect(
+			ledger.issue({
+				source: "diff",
+				...scope,
+				chars: 1,
+				truncated: false,
+				trust: "remote_untrusted",
+			}),
+		).toBeNull();
+		expect(
+			ledger.issue({
+				source: "diff",
+				...scope,
+				chars: 1,
+				truncated: false,
+				trust: "local_workspace",
+			}),
+		).not.toBeNull();
 	});
 
 	it("clears all ephemeral records without affecting callers", () => {

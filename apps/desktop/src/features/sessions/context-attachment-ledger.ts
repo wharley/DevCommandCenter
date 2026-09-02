@@ -18,11 +18,13 @@ const MAX_CONTEXT_EPOCH = Number.MAX_SAFE_INTEGER;
 export type ContextAttachmentSource =
 	| "browser"
 	| "terminal"
+	| "diff"
 	| "provider_handoff";
 
 export type ContextAttachmentTrust =
 	| "remote_untrusted"
 	| "local_terminal"
+	| "local_workspace"
 	| "derived_context";
 
 export type ContextAttachmentScope = {
@@ -97,6 +99,7 @@ function sourceTrustMatches(
 	return (
 		(source === "browser" && trust === "remote_untrusted") ||
 		(source === "terminal" && trust === "local_terminal") ||
+		(source === "diff" && trust === "local_workspace") ||
 		(source === "provider_handoff" && trust === "derived_context")
 	);
 }

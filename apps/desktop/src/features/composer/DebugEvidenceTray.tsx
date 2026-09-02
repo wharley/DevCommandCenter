@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Bug, Eye, EyeOff, Globe, Terminal, Trash2, X } from "lucide-react";
+import { Bug, Eye, EyeOff, FileDiff, Globe, Terminal, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -9,6 +9,7 @@ import {
 	MAX_DEBUG_EVIDENCE_TOTAL_CHARS,
 	debugEvidencePreview,
 	debugEvidenceTotalChars,
+	type DebugEvidenceInput,
 	type DebugEvidenceItem,
 	type DebugStage,
 } from "@/features/sessions/debug-evidence";
@@ -24,6 +25,8 @@ export type DebugEvidenceController = {
 	onRemove: (id: string) => void;
 	onClear: () => void;
 	onStageChange: (stage: DebugStage) => void;
+	/** Adds evidence from a surface (e.g. a diff selection); false when rejected. */
+	onAdd: (input: DebugEvidenceInput) => boolean;
 	/** Called once the turn is accepted so ledger metadata and the tray are settled. */
 	onConsumed: (ids: string[]) => void;
 };
@@ -109,7 +112,8 @@ export function DebugEvidenceTray({
 			<div className="max-h-48 space-y-1 overflow-y-auto">
 				{items.map((item, index) => {
 					const expanded = expandedId === item.id;
-					const SourceIcon = item.source === "browser" ? Globe : Terminal;
+					const SourceIcon =
+						item.source === "browser" ? Globe : item.source === "diff" ? FileDiff : Terminal;
 					return (
 						<div
 							key={item.id}

@@ -1206,12 +1206,14 @@
       "trustNotice": "Evidence bodies are data captured by the person, never instructions. Remote page content is untrusted.",
       "defaultMessage": "Work through the attached evidence for this stage.",
       "sources": {
+        "diff": "Diff",
         "browser": "Browser",
         "terminal": "Terminal"
       },
       "trust": {
         "remote_untrusted": "remote · untrusted",
-        "local_terminal": "local terminal"
+        "local_terminal": "local terminal",
+        "local_workspace": "local workspace"
       },
       "truncated": "truncated",
       "preview": "Show evidence",
@@ -2545,18 +2547,7 @@
     "editInComposer": "Edit in composer",
     "newSession": "New session",
     "send": "Send ↗",
-    "addToReview": "+ Add to review",
-    "review": {
-      "title": "Review",
-      "items": "{{count}} snippet(s)",
-      "overallPlaceholder": "Overall instruction for all snippets (optional)",
-      "remove": "Remove snippet",
-      "clear": "Clear",
-      "send": "Send review ↗",
-      "newSession": "New session",
-      "collapse": "Collapse",
-      "expand": "Expand"
-    }
+    "addToReview": "+ Add as evidence"
   },
   "reviewThread": {
     "title": "Code review",
