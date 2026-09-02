@@ -2230,6 +2230,10 @@
     "copyBranchNameError": "Não foi possível copiar o nome do branch"
   },
   "conversation": {
+    "evidence": {
+      "chip": "Evidências · {{count}} · {{stage}}",
+      "chars": "caracteres"
+    },
     "scrollToBottom": "Rolar para o fim",
     "loadEarlier": "Carregar {{count}} mensagens anteriores",
     "modelLabel": "Modelo",

@@ -399,6 +399,25 @@ describe("projectWorkspaceMessages", () => {
 		]);
 	});
 
+	it("carries evidence metadata from the turn record to the user message", () => {
+		const record = sessionTurnStarted("session-a", "turn-1", "Why?");
+		const evidence = {
+			stage: "investigate" as const,
+			items: [
+				{ source: "browser" as const, trust: "remote_untrusted" as const, chars: 900, truncated: false },
+			],
+		};
+		const withEvidence: SessionEventRecord = {
+			...record,
+			kind: { ...record.kind, evidence } as SessionEventRecord["kind"],
+		};
+		const [message] = projectWorkspaceMessages([withEvidence], [], "session-a");
+		expect(message.role).toBe("user");
+		expect(message.evidence).toEqual(evidence);
+		const [plain] = projectWorkspaceMessages([record], [], "session-a");
+		expect("evidence" in plain).toBe(false);
+	});
+
 	it("merges live assistant deltas into a streamed assistant message", () => {
 		expect(
 			projectWorkspaceMessages(

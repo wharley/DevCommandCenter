@@ -2744,6 +2744,7 @@ mod tests {
             effort: None,
             fast_mode: None,
             approval_policy: None,
+            evidence: None,
         };
 
         let transition = state

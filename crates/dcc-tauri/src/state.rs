@@ -5004,6 +5004,7 @@ impl SessionCommandState {
             effort: queued.effort.clone(),
             fast_mode: queued.fast_mode,
             approval_policy: queued.approval_policy,
+            evidence: queued.evidence.clone(),
         };
         // Recheck before `run_send_turn`: persisted queues from before this
         // guard must never create TurnStarted or remove themselves on failure.
@@ -5837,6 +5838,7 @@ mod tests {
             effort: None,
             fast_mode: None,
             approval_policy,
+            evidence: None,
         }
     }
 

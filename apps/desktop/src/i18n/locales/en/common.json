@@ -2230,6 +2230,10 @@
     "copyBranchNameError": "Could not copy the branch name"
   },
   "conversation": {
+    "evidence": {
+      "chip": "Evidence · {{count}} · {{stage}}",
+      "chars": "chars"
+    },
     "scrollToBottom": "Scroll to bottom",
     "loadEarlier": "Load {{count}} earlier messages",
     "modelLabel": "Model",

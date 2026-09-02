@@ -294,6 +294,7 @@ export type CoreEvent = ({ workspacePrepared: {
 	prompt: string,
 	plan_mode: boolean | null,
 	model: string | null,
+	evidence?: TurnEvidenceSummary | null,
 } }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionDelegationCancelled?: never; sessionDelegationCompleted?: never; sessionDelegationDelta?: never; sessionDelegationFailed?: never; sessionDelegationRequested?: never; sessionDelegationStarted?: never; sessionMcpRuntimeStatusChanged?: never; sessionPlanApproved?: never; sessionPlanHandedOff?: never; sessionQueuedTurnDispatched?: never; sessionQueuedTurnRemoved?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnAssistantMessageCompleted?: never; sessionTurnAssistantMessageDelta?: never; sessionTurnAssistantMessageStarted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnModelEffective?: never; sessionTurnNativeSubagentActivity?: never; sessionTurnNativeSubagentModelConfirmed?: never; sessionTurnNativeSubagentModelRequested?: never; sessionTurnPermissionRequested?: never; sessionTurnPermissionResolved?: never; sessionTurnQueueReordered?: never; sessionTurnQueued?: never; sessionTurnReasoningCompleted?: never; sessionTurnReasoningDelta?: never; sessionTurnReasoningStarted?: never; sessionTurnSteered?: never; sessionTurnToolCallCompleted?: never; sessionTurnToolCallDelta?: never; sessionTurnToolCallFailed?: never; sessionTurnToolCallStarted?: never; sessionTurnUserInputRequested?: never; sessionTurnUserInputResolved?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnSteered: {
 	session_id: string,
 	turn_id: string,
@@ -1498,6 +1499,7 @@ export type QueuedTurn = {
 	effort?: string | null,
 	fastMode?: boolean | null,
 	approvalPolicy?: ProviderApprovalPolicy | null,
+	evidence?: TurnEvidenceSummary | null,
 	createdAt: string,
 };
 
@@ -1686,6 +1688,11 @@ export type SendTurnInput = {
 	fastMode?: boolean | null,
 	// Normalized user intent; each adapter maps this to its native mechanism.
 	approvalPolicy?: ProviderApprovalPolicy | null,
+	/**
+	 *  Metadata-only summary of the explicit evidence composed into `prompt`.
+	 *  Never carries bodies; validated and persisted with the TurnStarted record.
+	 */
+	evidence?: TurnEvidenceSummary | null,
 };
 
 export type SendTurnOutput = {
@@ -1712,7 +1719,12 @@ export type Session = {
 	updatedAt: string,
 };
 
-export type SessionEventKind = { type: "session_started"; workspaceId: WorkspaceId; projectId: ProjectId; providerId: string; model: string | null } | { type: "turn_started"; turnId: TurnId; prompt: string; planMode?: boolean | null; model?: string | null } | { type: "turn_steered"; turnId: TurnId; prompt: string } | { type: "turn_queued"; queuedTurn: QueuedTurn } | { type: "queued_turn_removed"; queuedTurnId: string } | { type: "turn_queue_reordered"; queuedTurnIds: string[] } | { type: "queued_turn_dispatched"; queuedTurnId: string; turnId: TurnId } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_assistant_message_started"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase } | { type: "turn_assistant_message_delta"; turnId: TurnId; messageId: string; content: string } | { type: "turn_assistant_message_completed"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase;
+export type SessionEventKind = { type: "session_started"; workspaceId: WorkspaceId; projectId: ProjectId; providerId: string; model: string | null } | { type: "turn_started"; turnId: TurnId; prompt: string; planMode?: boolean | null; model?: string | null;
+/**
+ *  Metadata-only evidence linkage; absent for turns without evidence
+ *  and for records persisted before this field existed.
+ */
+evidence?: TurnEvidenceSummary | null } | { type: "turn_steered"; turnId: TurnId; prompt: string } | { type: "turn_queued"; queuedTurn: QueuedTurn } | { type: "queued_turn_removed"; queuedTurnId: string } | { type: "turn_queue_reordered"; queuedTurnIds: string[] } | { type: "queued_turn_dispatched"; queuedTurnId: string; turnId: TurnId } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_assistant_message_started"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase } | { type: "turn_assistant_message_delta"; turnId: TurnId; messageId: string; content: string } | { type: "turn_assistant_message_completed"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase;
 /**
  *  Final provider snapshot. When present this replaces accumulated
  *  deltas and is authoritative for replay.
@@ -1922,6 +1934,33 @@ export type Turn = {
 	createdAt: string,
 	updatedAt: string,
 };
+
+// One evidence item as metadata only: no body, URL, path, ref, note or text.
+export type TurnEvidenceItemSummary = {
+	source: TurnEvidenceSource,
+	trust: TurnEvidenceTrust,
+	chars: number,
+	truncated: boolean,
+};
+
+// Closed vocabulary of explicit evidence sources.
+export type TurnEvidenceSource = "browser" | "terminal" | "diff";
+
+// Debug stage the person selected for the evidence carried by a turn.
+export type TurnEvidenceStage = "observe" | "reproduce" | "investigate" | "fix" | "verify";
+
+/**
+ *  Metadata-only linkage between a turn and the explicit evidence it carried.
+ *  The evidence bodies already live inside the prompt text; this record lets
+ *  the timeline explain what was attached and why without duplicating or
+ *  retaining any content.
+ */
+export type TurnEvidenceSummary = {
+	stage: TurnEvidenceStage,
+	items: TurnEvidenceItemSummary[],
+};
+
+export type TurnEvidenceTrust = "remote_untrusted" | "local_terminal" | "local_workspace";
 
 export type TurnId = string;
 

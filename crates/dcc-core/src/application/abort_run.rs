@@ -354,6 +354,7 @@ mod tests {
                     prompt: "prompt".to_owned(),
                     plan_mode: None,
                     model: None,
+                    evidence: None,
                 },
             },
         ];
@@ -498,6 +499,7 @@ mod tests {
                 prompt: "next".to_owned(),
                 plan_mode: None,
                 model: None,
+                evidence: None,
             },
         }))
         .expect("new turn");

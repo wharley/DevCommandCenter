@@ -101,6 +101,7 @@ where
         effort: input.turn.effort,
         fast_mode: input.turn.fast_mode,
         approval_policy: input.turn.approval_policy,
+        evidence: input.turn.evidence,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     let (event, inserted) = append(
@@ -316,6 +317,7 @@ mod tests {
             effort: None,
             fast_mode: None,
             approval_policy: None,
+            evidence: None,
             created_at: "2026-08-02T10:00:00Z".to_string(),
         }
     }
@@ -395,6 +397,7 @@ mod tests {
                 effort: None,
                 fast_mode: None,
                 approval_policy: None,
+                evidence: None,
             },
         };
         let _ = futures::executor::block_on(queue_turn(&repo, &bus, input))

@@ -27,7 +27,10 @@ import {
 	DebugEvidenceTray,
 	type DebugEvidenceController,
 } from "./DebugEvidenceTray";
-import { buildDebugEvidencePrompt } from "@/features/sessions/debug-evidence";
+import {
+	buildDebugEvidencePrompt,
+	summarizeDebugEvidence,
+} from "@/features/sessions/debug-evidence";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -420,6 +423,7 @@ export function WorkspaceComposer({
 					effort: effectiveEffort,
 					fastMode: isFastMode,
 					approvalPolicy,
+					evidence: summarizeDebugEvidence(evidenceItems, evidenceStage),
 				},
 			};
 			if (hasActiveTurn) {

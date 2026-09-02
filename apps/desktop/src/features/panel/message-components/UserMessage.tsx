@@ -1,18 +1,51 @@
-import { Copy, Pencil } from "lucide-react";
+import { Bug, Copy, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { TurnEvidenceSummary } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { MessageTimestamp } from "./message-metadata";
+
+/** Explains what explicit evidence travelled with this turn, from metadata only. */
+function UserMessageEvidenceChip({ evidence }: { evidence: TurnEvidenceSummary }) {
+	const { t } = useTranslation("common");
+	const detail = evidence.items
+		.map((item, index) =>
+			[
+				`${index + 1}. ${t(`composer.evidence.sources.${item.source}`)}`,
+				t(`composer.evidence.trust.${item.trust}`),
+				`${item.chars} ${t("conversation.evidence.chars")}`,
+				item.truncated ? t("composer.evidence.truncated") : null,
+			]
+				.filter(Boolean)
+				.join(" · "),
+		)
+		.join("\n");
+	return (
+		<span
+			className="inline-flex items-center gap-1 rounded-full border border-border/60 px-1.5 py-px text-[10px] leading-4 text-muted-foreground"
+			title={detail}
+			data-testid="user-message-evidence"
+		>
+			<Bug className="size-3" aria-hidden />
+			{t("conversation.evidence.chip", {
+				count: evidence.items.length,
+				stage: t(`composer.evidence.stages.${evidence.stage}`),
+			})}
+		</span>
+	);
+}
 
 export function UserMessage({
 	content,
 	label,
 	createdAt,
+	evidence = null,
 	onEdit,
 }: {
 	content: string;
 	label: string;
 	createdAt?: string;
+	evidence?: TurnEvidenceSummary | null;
 	onEdit?: () => void;
 }) {
 	const { t } = useTranslation("common");
@@ -28,6 +61,9 @@ export function UserMessage({
 					</p>
 				</div>
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
+					{evidence && evidence.items.length > 0 ? (
+						<UserMessageEvidenceChip evidence={evidence} />
+					) : null}
 					<MessageTimestamp createdAt={createdAt} />
 				</div>
 				<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/user:pointer-events-auto group-hover/user:opacity-100 group-focus-within/user:pointer-events-auto group-focus-within/user:opacity-100">

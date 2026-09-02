@@ -3400,6 +3400,7 @@ export default function App() {
 				effort: turn.envelope.effort,
 				fastMode: turn.envelope.fastMode,
 				approvalPolicy: turn.envelope.approvalPolicy,
+				evidence: turn.envelope.evidence ?? null,
 			});
 			promptAccepted = true;
 			recordUxMetric("first_prompt");
@@ -3671,6 +3672,7 @@ export default function App() {
 						effort: turn.envelope.effort,
 						fastMode: turn.envelope.fastMode,
 						approvalPolicy: turn.envelope.approvalPolicy,
+						evidence: turn.envelope.evidence ?? null,
 					},
 				});
 				recordUxMetric("queue_prompt");

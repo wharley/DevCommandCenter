@@ -4,6 +4,7 @@ import type {
 	ProviderUserInputAnswer,
 	ProviderUserInputQuestion,
 	SessionEventRecord,
+	TurnEvidenceSummary,
 } from "@dcc/contracts";
 import { parsePlanContent, type ParsedPlanContent } from "@/features/panel/plan-content";
 
@@ -101,6 +102,8 @@ export type WorkspaceMessage = {
 	annotations?: WorkspaceMessageAnnotation[];
 	plan?: ParsedPlanContent | null;
 	planMode?: boolean;
+	/** Metadata-only evidence linkage recorded with the turn (no bodies). */
+	evidence?: TurnEvidenceSummary;
 	action?: {
 		type: "open-session";
 		sessionId: string;
@@ -135,6 +138,7 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					prompt: record.kind.prompt,
 					plan_mode: record.kind.planMode ?? null,
 					model: record.kind.model ?? null,
+					...(record.kind.evidence ? { evidence: record.kind.evidence } : {}),
 				},
 			};
 		case "turn_steered":
@@ -1104,6 +1108,9 @@ export function projectWorkspaceMessages(
 				content: event.sessionTurnStarted.prompt,
 				createdAt: occurredAt,
 				planMode: event.sessionTurnStarted.plan_mode === true,
+				...(event.sessionTurnStarted.evidence
+					? { evidence: event.sessionTurnStarted.evidence }
+					: {}),
 			});
 			continue;
 		}

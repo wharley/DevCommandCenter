@@ -14,6 +14,8 @@ export type ComposerTurnEnvelope = {
 	fastMode: boolean;
 	/** User-selected approval boundary, normalized across supported providers. */
 	approvalPolicy: ProviderApprovalPolicy | null;
+	/** Metadata-only summary of the evidence composed into `rawPrompt`; never bodies. */
+	evidence?: TurnEvidenceSummary | null;
 };
 
 export type ComposerSubmittedTurn = {
@@ -53,4 +55,4 @@ export function composerTurnFromRaw(
 		envelope: { ...DEFAULT_COMPOSER_ENVELOPE, ...overrides },
 	};
 }
-import type { ProviderApprovalPolicy } from "@dcc/contracts";
+import type { ProviderApprovalPolicy, TurnEvidenceSummary } from "@dcc/contracts";

@@ -8218,6 +8218,7 @@ mod tests {
                     prompt: "Implement the workspace recap".to_string(),
                     plan_mode: Some(false),
                     model: None,
+                    evidence: None,
                 },
             },
             SessionEventRecord {
@@ -8575,6 +8576,7 @@ mod tests {
                     prompt: "Find the authentication race condition in login".to_string(),
                     plan_mode: Some(false),
                     model: None,
+                    evidence: None,
                 },
             },
             SessionEventRecord {

@@ -280,6 +280,7 @@ export function ActiveThreadViewport({
 												label={message.label}
 												content={message.content}
 												createdAt={message.createdAt}
+												evidence={message.evidence ?? null}
 												onEdit={
 													onEditPrompt
 														? () => onEditPrompt(message.content)

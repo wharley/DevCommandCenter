@@ -8,7 +8,7 @@ use crate::{
         provider::ProviderApprovalPolicy,
         session::{
             Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
-            SessionState, Turn, TurnId, TurnState,
+            SessionState, Turn, TurnEvidenceSummary, TurnId, TurnState,
         },
     },
     ports::{
@@ -47,6 +47,10 @@ pub struct SendTurnInput {
     /// Normalized user intent; each adapter maps this to its native mechanism.
     #[serde(default)]
     pub approval_policy: Option<ProviderApprovalPolicy>,
+    /// Metadata-only summary of the explicit evidence composed into `prompt`.
+    /// Never carries bodies; validated and persisted with the TurnStarted record.
+    #[serde(default)]
+    pub evidence: Option<TurnEvidenceSummary>,
 }
 
 /// Merge UI selection into session fields for per-turn model routing.
@@ -143,6 +147,11 @@ where
     E: SessionEventRepo + Sync,
     B: EventBus + Sync,
 {
+    if let Some(evidence) = &input.evidence {
+        evidence
+            .validate()
+            .map_err(crate::CoreError::InvalidInput)?;
+    }
     let mut session = prepare_session_for_turn(sessions, &input).await?;
 
     let history = session_events
@@ -179,6 +188,7 @@ where
             prompt: input.prompt.clone(),
             plan_mode: input.plan_mode,
             model: session.model.clone(),
+            evidence: input.evidence.clone(),
         },
     };
 
@@ -199,6 +209,7 @@ where
                     prompt: input.prompt,
                     plan_mode: input.plan_mode,
                     model: session.model.clone(),
+                    evidence: input.evidence,
                 },
             )
             .await?;
@@ -370,6 +381,7 @@ mod tests {
                 effort: None,
                 fast_mode: None,
                 approval_policy: None,
+                evidence: None,
             },
         ))
         .expect("send_turn should succeed");
@@ -454,6 +466,7 @@ mod tests {
                 effort: None,
                 fast_mode: None,
                 approval_policy: None,
+                evidence: None,
             },
         ))
         .expect("send_turn should succeed");
@@ -508,6 +521,7 @@ mod tests {
                 effort: None,
                 fast_mode: None,
                 approval_policy: None,
+                evidence: None,
             },
         ))
         .expect("preflight should update the provider selection");

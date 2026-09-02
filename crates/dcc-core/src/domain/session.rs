@@ -70,6 +70,92 @@ pub struct Checkpoint {
     pub created_at: String,
 }
 
+pub const MAX_TURN_EVIDENCE_ITEMS: usize = 8;
+pub const MAX_TURN_EVIDENCE_ITEM_CHARS: u32 = 32_000;
+
+/// Debug stage the person selected for the evidence carried by a turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnEvidenceStage {
+    Observe,
+    Reproduce,
+    Investigate,
+    Fix,
+    Verify,
+}
+
+/// Closed vocabulary of explicit evidence sources.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnEvidenceSource {
+    Browser,
+    Terminal,
+    Diff,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnEvidenceTrust {
+    RemoteUntrusted,
+    LocalTerminal,
+    LocalWorkspace,
+}
+
+/// One evidence item as metadata only: no body, URL, path, ref, note or text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnEvidenceItemSummary {
+    pub source: TurnEvidenceSource,
+    pub trust: TurnEvidenceTrust,
+    pub chars: u32,
+    pub truncated: bool,
+}
+
+/// Metadata-only linkage between a turn and the explicit evidence it carried.
+/// The evidence bodies already live inside the prompt text; this record lets
+/// the timeline explain what was attached and why without duplicating or
+/// retaining any content.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnEvidenceSummary {
+    pub stage: TurnEvidenceStage,
+    pub items: Vec<TurnEvidenceItemSummary>,
+}
+
+impl TurnEvidenceSummary {
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        if self.items.is_empty() {
+            return Err("turn evidence summary has no items".to_string());
+        }
+        if self.items.len() > MAX_TURN_EVIDENCE_ITEMS {
+            return Err(format!(
+                "turn evidence summary exceeds {MAX_TURN_EVIDENCE_ITEMS} items"
+            ));
+        }
+        for item in &self.items {
+            if item.chars > MAX_TURN_EVIDENCE_ITEM_CHARS {
+                return Err(format!(
+                    "turn evidence item exceeds {MAX_TURN_EVIDENCE_ITEM_CHARS} chars"
+                ));
+            }
+            let coherent = matches!(
+                (item.source, item.trust),
+                (
+                    TurnEvidenceSource::Browser,
+                    TurnEvidenceTrust::RemoteUntrusted
+                ) | (
+                    TurnEvidenceSource::Terminal,
+                    TurnEvidenceTrust::LocalTerminal
+                ) | (TurnEvidenceSource::Diff, TurnEvidenceTrust::LocalWorkspace)
+            );
+            if !coherent {
+                return Err("turn evidence item has a mismatched source and trust".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct QueuedTurn {
@@ -86,6 +172,8 @@ pub struct QueuedTurn {
     pub fast_mode: Option<bool>,
     #[serde(default)]
     pub approval_policy: Option<ProviderApprovalPolicy>,
+    #[serde(default)]
+    pub evidence: Option<TurnEvidenceSummary>,
     pub created_at: String,
 }
 
@@ -130,6 +218,10 @@ pub enum SessionEventKind {
         plan_mode: Option<bool>,
         #[serde(default)]
         model: Option<String>,
+        /// Metadata-only evidence linkage; absent for turns without evidence
+        /// and for records persisted before this field existed.
+        #[serde(default)]
+        evidence: Option<TurnEvidenceSummary>,
     },
     TurnSteered {
         #[serde(rename = "turnId")]
@@ -655,6 +747,7 @@ mod tests {
                     prompt: "Create shell".to_string(),
                     plan_mode: None,
                     model: None,
+                    evidence: None,
                 },
             ),
             event(
@@ -748,5 +841,114 @@ mod tests {
             kind,
             SessionEventKind::TurnNativeSubagentActivity { path: None, .. }
         ));
+    }
+}
+
+#[cfg(test)]
+mod turn_evidence_tests {
+    use super::{
+        SessionEventKind, TurnEvidenceItemSummary, TurnEvidenceSource, TurnEvidenceStage,
+        TurnEvidenceSummary, TurnEvidenceTrust, TurnId, MAX_TURN_EVIDENCE_ITEMS,
+        MAX_TURN_EVIDENCE_ITEM_CHARS,
+    };
+
+    fn item(source: TurnEvidenceSource, trust: TurnEvidenceTrust) -> TurnEvidenceItemSummary {
+        TurnEvidenceItemSummary {
+            source,
+            trust,
+            chars: 120,
+            truncated: false,
+        }
+    }
+
+    #[test]
+    fn evidence_summary_validation_is_bounded_and_source_trust_coherent() {
+        let valid = TurnEvidenceSummary {
+            stage: TurnEvidenceStage::Investigate,
+            items: vec![
+                item(
+                    TurnEvidenceSource::Browser,
+                    TurnEvidenceTrust::RemoteUntrusted,
+                ),
+                item(
+                    TurnEvidenceSource::Terminal,
+                    TurnEvidenceTrust::LocalTerminal,
+                ),
+                item(TurnEvidenceSource::Diff, TurnEvidenceTrust::LocalWorkspace),
+            ],
+        };
+        valid.validate().expect("coherent summary");
+
+        let empty = TurnEvidenceSummary {
+            stage: TurnEvidenceStage::Observe,
+            items: Vec::new(),
+        };
+        assert!(empty.validate().is_err());
+
+        let too_many = TurnEvidenceSummary {
+            stage: TurnEvidenceStage::Observe,
+            items: vec![
+                item(
+                    TurnEvidenceSource::Terminal,
+                    TurnEvidenceTrust::LocalTerminal
+                );
+                MAX_TURN_EVIDENCE_ITEMS + 1
+            ],
+        };
+        assert!(too_many.validate().is_err());
+
+        let mismatched = TurnEvidenceSummary {
+            stage: TurnEvidenceStage::Fix,
+            items: vec![item(
+                TurnEvidenceSource::Browser,
+                TurnEvidenceTrust::LocalTerminal,
+            )],
+        };
+        assert!(mismatched.validate().is_err());
+
+        let oversized = TurnEvidenceSummary {
+            stage: TurnEvidenceStage::Verify,
+            items: vec![TurnEvidenceItemSummary {
+                chars: MAX_TURN_EVIDENCE_ITEM_CHARS + 1,
+                ..item(TurnEvidenceSource::Diff, TurnEvidenceTrust::LocalWorkspace)
+            }],
+        };
+        assert!(oversized.validate().is_err());
+    }
+
+    #[test]
+    fn turn_started_records_stay_compatible_without_evidence() {
+        let legacy = serde_json::json!({
+            "type": "turn_started",
+            "turnId": "turn-1",
+            "prompt": "hello",
+            "planMode": true
+        });
+        let kind: SessionEventKind = serde_json::from_value(legacy).expect("legacy record");
+        match &kind {
+            SessionEventKind::TurnStarted { evidence, .. } => assert!(evidence.is_none()),
+            _ => panic!("expected turn started"),
+        }
+        let serialized = serde_json::to_value(&kind).expect("serialize");
+        assert!(serialized["evidence"].is_null());
+
+        let with_evidence = SessionEventKind::TurnStarted {
+            turn_id: TurnId("turn-2".to_string()),
+            prompt: "why".to_string(),
+            plan_mode: None,
+            model: None,
+            evidence: Some(TurnEvidenceSummary {
+                stage: TurnEvidenceStage::Reproduce,
+                items: vec![item(
+                    TurnEvidenceSource::Browser,
+                    TurnEvidenceTrust::RemoteUntrusted,
+                )],
+            }),
+        };
+        let value = serde_json::to_value(&with_evidence).expect("serialize evidence");
+        assert_eq!(value["evidence"]["stage"], "reproduce");
+        assert_eq!(value["evidence"]["items"][0]["source"], "browser");
+        assert_eq!(value["evidence"]["items"][0]["trust"], "remote_untrusted");
+        assert!(value["evidence"]["items"][0].get("body").is_none());
     }
 }

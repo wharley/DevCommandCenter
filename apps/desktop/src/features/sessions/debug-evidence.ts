@@ -9,6 +9,7 @@
  * injected automatically.
  */
 
+import type { TurnEvidenceSummary } from "@dcc/contracts";
 import type { ContextAttachmentId } from "./context-attachment-ledger";
 
 export const DEBUG_STAGES = [
@@ -269,4 +270,24 @@ export function buildDebugEvidencePrompt(input: {
 	});
 	lines.push(`</${DEBUG_EVIDENCE_TAG}>`);
 	return lines.join("\n");
+}
+
+/**
+ * Metadata-only linkage persisted with the turn: sources, trust, sizes and
+ * the stage. Bodies, labels, URLs, paths and notes never leave the tray here.
+ */
+export function summarizeDebugEvidence(
+	items: readonly DebugEvidenceItem[],
+	stage: DebugStage,
+): TurnEvidenceSummary | null {
+	if (items.length === 0) return null;
+	return {
+		stage,
+		items: items.map((item) => ({
+			source: item.source,
+			trust: item.trust,
+			chars: item.chars,
+			truncated: item.truncated,
+		})),
+	};
 }
