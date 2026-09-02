@@ -167,8 +167,10 @@ import { frontendMemorySnapshot } from "./lib/frontend-memory-observability";
 import {
 	SELECTED_PROVIDER_STORAGE_KEY,
 	SELECTED_MODEL_STORAGE_KEY,
+	getProviderActionBlockReason,
 	getProviderUnhealthyReason,
 	getSessionComposerSelection,
+	isProviderEnabled,
 	resolveSelectedProviderId,
 	resolveSelectedModelId,
 	setSessionComposerSelection,
@@ -1774,6 +1776,11 @@ export default function App() {
 	);
 	const selectedProviderBlockReason = useMemo(
 		() => {
+			if (selectedProvider && !isProviderEnabled(selectedProvider)) {
+				return t("settings.model.disabledBlockReason", {
+					provider: selectedProvider.label,
+				});
+			}
 			const healthReason = getProviderUnhealthyReason(selectedProvider);
 			if (healthReason) {
 				return healthReason;
@@ -2614,7 +2621,11 @@ export default function App() {
 					failures.push(`${targetProviderId}: unavailable`);
 					continue;
 				}
-				const targetProviderBlockReason = getProviderUnhealthyReason(targetProvider);
+				const targetProviderBlockReason = !isProviderEnabled(targetProvider)
+					? t("settings.model.disabledBlockReason", {
+							provider: targetProvider.label,
+					  })
+					: getProviderUnhealthyReason(targetProvider);
 				if (targetProviderBlockReason) {
 					failures.push(`${targetProvider.label}: ${targetProviderBlockReason}`);
 					continue;
@@ -2834,6 +2845,7 @@ export default function App() {
 			selectedSessionSummary,
 			selectedWorkspace,
 			legacySessionEvents,
+			t,
 		],
 	);
 
@@ -2925,6 +2937,7 @@ export default function App() {
 			const needsEdit = request.mode === "implement";
 			const candidates = providerChoices.filter(
 				(provider) =>
+					isProviderEnabled(provider) &&
 					provider.capabilities.canBeDelegationTarget &&
 					provider.capabilities.supportsReadOnlyDelegation &&
 					(!needsEdit || provider.capabilities.supportsEditDelegation),
@@ -3149,7 +3162,11 @@ export default function App() {
 					) ?? null
 				: null;
 		const targetProviderBlockReason = targetSessionProvider
-			? getProviderUnhealthyReason(targetSessionProvider)
+			? !isProviderEnabled(targetSessionProvider)
+				? t("settings.model.disabledBlockReason", {
+						provider: targetSessionProvider.label,
+				  })
+				: getProviderUnhealthyReason(targetSessionProvider)
 			: null;
 		const effectiveProviderBlockReason =
 			targetProviderBlockReason ?? (targetSessionSummary ? null : selectedProviderBlockReason);
@@ -3621,9 +3638,21 @@ export default function App() {
 			if (!snapshot?.activeTurnId || prompt.length === 0) {
 				throw new Error(t("composer.followUp.noActiveTurn"));
 			}
-			const provider = providerChoices.find(
-				(candidate) => candidate.id === snapshot.providerId,
-			) ?? selectedProvider;
+			const provider =
+				providerChoices.find((candidate) => candidate.id === snapshot.providerId) ?? null;
+			const availabilityBlockReason = getProviderActionBlockReason(
+				provider ?? null,
+				t("settings.model.disabledBlockReason", {
+					provider: provider?.label ?? snapshot.providerId,
+				}),
+				t("settings.model.availabilityError"),
+			);
+			if (provider === null || availabilityBlockReason) {
+				const reason =
+					availabilityBlockReason ?? t("settings.model.availabilityError");
+				toast.error(reason);
+				throw new Error(reason);
+			}
 			try {
 				await queueTurn({
 					turn: {
@@ -3652,7 +3681,7 @@ export default function App() {
 				throw error;
 			}
 		},
-		[providerChoices, selectedProvider, selectedSessionSnapshot, t],
+		[providerChoices, selectedSessionSnapshot, t],
 	);
 
 	const handleGeneratePlanFromSpec = useCallback(
@@ -3779,8 +3808,16 @@ export default function App() {
 
 	const handleSelectProvider = useCallback(
 		(providerId: string) => {
-			setSelectedProviderId(providerId);
 			const provider = providerChoices.find((candidate) => candidate.id === providerId);
+			if (!provider || !isProviderEnabled(provider)) {
+				if (provider) {
+					toast.error(
+						t("settings.model.disabledBlockReason", { provider: provider.label }),
+					);
+				}
+				return;
+			}
+			setSelectedProviderId(providerId);
 			setSelectedModelId(resolveSelectedModelId(provider ?? null, null));
 			if (
 				selectedSessionSnapshot &&

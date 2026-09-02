@@ -1660,7 +1660,17 @@
       "runtimeSubagentConcurrencyHint": "Limita os subagentes abertos ao mesmo tempo, sem contar o agente principal. Vale para novas sessões e não altera o config.toml.",
       "runtimeHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex",
       "runtimeShadowHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex-shadow",
-      "runtimeNoSupportedProviders": "Nenhum provedor suportado está disponível no catálogo atual."
+      "runtimeNoSupportedProviders": "Nenhum provedor suportado está disponível no catálogo atual.",
+      "availabilityTitle": "Disponibilidade dos provedores",
+      "availabilityHint": "Provedores desativados continuam visíveis no histórico e nos rótulos, mas não podem iniciar trabalho novo até serem ativados novamente.",
+      "availabilityToggle": "Alternar disponibilidade de {{provider}}",
+      "enabled": "Ativado",
+      "disabled": "Desativado",
+      "pending": "Salvando disponibilidade…",
+      "availabilityError": "Não foi possível atualizar a disponibilidade do provedor.",
+      "enabledToast": "{{provider}} está ativado para novos trabalhos.",
+      "disabledToast": "{{provider}} está desativado para novos trabalhos.",
+      "disabledBlockReason": "{{provider}} está desativado. Ative-o em Configurações → Provedores antes de enviar ou iniciar trabalho novo."
     },
     "integrations": {
       "title": "Integrações MCP externas",

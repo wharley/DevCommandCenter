@@ -39,7 +39,12 @@ const notATarget = provider("local", {
 	supportsReadOnlyDelegation: true,
 	supportsEditDelegation: true,
 });
-const catalog = [readOnly, editCapable, notATarget];
+const disabled = {
+	...editCapable,
+	id: "disabled",
+	enabled: false,
+};
+const catalog = [readOnly, editCapable, notATarget, disabled];
 
 describe("eligibleDelegationTargets", () => {
 	it("drops providers that cannot receive delegated work", () => {

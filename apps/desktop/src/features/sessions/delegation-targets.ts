@@ -1,4 +1,5 @@
 import type { ProviderCatalog } from "@dcc/contracts";
+import { isProviderEnabled } from "@/features/providers/provider-selection.logic";
 
 export type DelegationTarget = ProviderCatalog["providers"][number];
 
@@ -11,6 +12,7 @@ export function eligibleDelegationTargets(
 ): DelegationTarget[] {
 	return providers.filter(
 		(provider) =>
+			isProviderEnabled(provider) &&
 			provider.capabilities.canBeDelegationTarget &&
 			provider.capabilities.supportsReadOnlyDelegation,
 	);

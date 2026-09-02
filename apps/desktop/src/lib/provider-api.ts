@@ -2,9 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { PROVIDER_METHODS } from "@dcc/contracts";
 import type {
 	ListProvidersOutput,
+	ProviderAvailabilityInput,
+	ProviderAvailabilityOutput,
 	ProviderAccountUsageOutput,
 	ProviderCatalog,
 	ProviderRuntimeConfig,
+	SetProviderAvailabilityInput,
 } from "@dcc/contracts";
 import { FALLBACK_PROVIDER_CATALOG } from "./fallback-provider-catalog";
 
@@ -46,6 +49,30 @@ export async function listProviders(): Promise<ListProvidersOutput> {
 		console.warn("[dcc] list_providers failed, using bundled catalog", error);
 		return { catalog: FALLBACK_PROVIDER_CATALOG };
 	}
+}
+
+export async function getProviderAvailability(
+	input: ProviderAvailabilityInput,
+): Promise<ProviderAvailabilityOutput> {
+	if (!isTauriRuntime()) {
+		throw new Error("Provider availability requires the desktop runtime.");
+	}
+	return invoke<ProviderAvailabilityOutput>(
+		PROVIDER_METHODS.getProviderAvailability,
+		{ input },
+	);
+}
+
+export async function setProviderAvailability(
+	input: SetProviderAvailabilityInput,
+): Promise<ProviderAvailabilityOutput> {
+	if (!isTauriRuntime()) {
+		throw new Error("Provider availability can only be changed in the desktop runtime.");
+	}
+	return invoke<ProviderAvailabilityOutput>(
+		PROVIDER_METHODS.setProviderAvailability,
+		{ input },
+	);
 }
 
 export async function getProviderAccountUsage(

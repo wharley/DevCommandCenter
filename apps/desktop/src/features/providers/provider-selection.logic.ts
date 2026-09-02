@@ -18,6 +18,24 @@ export type SessionComposerSelection = {
 	modelId: string;
 };
 
+export function isProviderEnabled(
+	provider: ProviderCatalog["providers"][number],
+): boolean {
+	return provider.enabled !== false;
+}
+
+/** Gate used before actions that create or enqueue new work. */
+export function getProviderActionBlockReason(
+	provider: ProviderCatalog["providers"][number] | null,
+	disabledReason: string,
+	missingReason: string,
+): string | null {
+	if (!provider) {
+		return missingReason;
+	}
+	return isProviderEnabled(provider) ? null : disabledReason;
+}
+
 function readSessionComposerMap(): Record<string, SessionComposerSelection> {
 	if (typeof window === "undefined") {
 		return {};
@@ -74,12 +92,13 @@ export function resolveSelectedProviderId(
 		}
 	}
 
-	const stableProvider = providers.find((provider) => provider.stable);
+	const selectableProviders = providers.filter(isProviderEnabled);
+	const stableProvider = selectableProviders.find((provider) => provider.stable);
 	if (stableProvider) {
 		return stableProvider.id;
 	}
 
-	return providers[0]?.id ?? null;
+	return selectableProviders[0]?.id ?? null;
 }
 
 export function resolveSelectedModelId(

@@ -33,6 +33,7 @@ import {
 	providerUsageSeverity,
 	supportsProviderAccountUsage,
 } from "@/features/providers/provider-account-usage";
+import { isProviderEnabled } from "@/features/providers/provider-selection.logic";
 import {
 	composerToolbarTriggerClassName,
 	getCompactComposerModelLabel,
@@ -157,7 +158,7 @@ export function ComposerExecutionMenu({
 			<CommandItem
 				key={`${provider.id}-${model.id}`}
 				value={`${provider.label} ${model.label} ${model.id} ${model.description}`}
-				disabled={disabled}
+				disabled={disabled || !isProviderEnabled(provider)}
 				onSelect={() => {
 					if (provider.id !== selectedProviderId) {
 						onSelectProvider(provider.id);
@@ -170,6 +171,11 @@ export function ComposerExecutionMenu({
 			>
 				<ProviderIcon provider={provider.id} className="size-4" />
 				<span className="min-w-0 flex-1 truncate">{model.label}</span>
+				{!isProviderEnabled(provider) ? (
+					<span className="text-[10px] text-muted-foreground">
+						{t("settings.model.disabled")}
+					</span>
+				) : null}
 				{isActive ? (
 					<Check className="size-4 shrink-0" strokeWidth={2} />
 				) : (

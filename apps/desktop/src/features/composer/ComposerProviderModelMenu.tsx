@@ -21,6 +21,7 @@ import {
 	providerUsageSeverity,
 	supportsProviderAccountUsage,
 } from "@/features/providers/provider-account-usage";
+import { isProviderEnabled } from "@/features/providers/provider-selection.logic";
 import { composerToolbarTriggerClassName } from "./WorkspaceComposer.logic";
 
 export const DCC_OPEN_MODEL_PICKER_EVENT = "dcc:open-model-picker";
@@ -177,7 +178,7 @@ export function ComposerProviderModelMenu({
 										<CommandItem
 											key={`${provider.id}-${model.id}`}
 											value={searchBlob}
-											disabled={disabled}
+											disabled={disabled || !isProviderEnabled(provider)}
 											onSelect={() => {
 												if (provider.id !== selectedProviderId) {
 													onSelectProvider(provider.id);
@@ -192,6 +193,11 @@ export function ComposerProviderModelMenu({
 												className="size-4"
 											/>
 											<span className="min-w-0 flex-1 truncate">{model.label}</span>
+											{!isProviderEnabled(provider) ? (
+												<span className="text-[10px] text-muted-foreground">
+													{t("settings.model.disabled")}
+												</span>
+											) : null}
 											{isActive ? (
 												<CheckIcon
 													className="size-4 shrink-0 text-foreground"

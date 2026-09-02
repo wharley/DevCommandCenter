@@ -1,4 +1,5 @@
 import { Check, ChevronDown } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { ProviderIcon } from "./provider-icons";
@@ -17,6 +18,7 @@ import {
 	getRecommendedProviderModel,
 	summarizeProviderHealth,
 } from "./provider-display";
+import { isProviderEnabled } from "./provider-selection.logic";
 
 type ProviderSelectionPanelProps = {
 	title?: string;
@@ -58,6 +60,8 @@ function ProviderModelCards({
 	selectedModelId: string | null;
 	onSelectModel: (modelId: string) => void;
 }) {
+	const { t } = useTranslation("common");
+	const enabled = isProviderEnabled(provider);
 	if (provider.models.length === 0) {
 		return (
 			<div className="rounded-lg border border-dashed border-border/60 bg-background/60 p-3 text-[12px] text-muted-foreground">
@@ -72,7 +76,11 @@ function ProviderModelCards({
 				<button
 					key={`${provider.id}-${model.id}`}
 					type="button"
-					onClick={() => onSelectModel(model.id)}
+					onClick={() => {
+						if (enabled) onSelectModel(model.id);
+					}}
+					disabled={!enabled}
+					aria-disabled={!enabled}
 					className={cn(
 						"flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
 						model.id === selectedModelId
@@ -80,6 +88,7 @@ function ProviderModelCards({
 							: model.recommended
 								? "border-border/80 bg-background hover:bg-accent/30"
 								: "border-border/60 bg-muted/10 hover:bg-accent/20",
+						!enabled && "cursor-not-allowed opacity-60 hover:bg-muted/10",
 					)}
 				>
 					<div className="min-w-0">
@@ -92,6 +101,9 @@ function ProviderModelCards({
 							) : null}
 							{model.id === selectedModelId ? (
 								<Badge variant="outline">selected</Badge>
+							) : null}
+							{!enabled ? (
+								<Badge variant="outline">{t("settings.model.disabled")}</Badge>
 							) : null}
 						</div>
 						<p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
@@ -118,6 +130,7 @@ function CompactProviderPicker({
 	selectedModel: ProviderCatalog["providers"][number]["models"][number] | null;
 	onSelectProvider: (providerId: string) => void;
 }) {
+	const { t } = useTranslation("common");
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
@@ -154,6 +167,7 @@ function CompactProviderPicker({
 				{providers.map((provider) => {
 					const health = summarizeProviderHealth(provider.health);
 					const isSelected = provider.id === (selectedProvider?.id ?? null);
+					const enabled = isProviderEnabled(provider);
 					return (
 						<DropdownMenuItem
 							key={provider.id}
@@ -161,9 +175,10 @@ function CompactProviderPicker({
 								"flex flex-col items-stretch gap-2 rounded-lg px-2 py-2.5",
 								isSelected && "bg-accent/70 text-accent-foreground",
 							)}
+							disabled={!enabled}
 							onSelect={(event) => {
 								event.preventDefault();
-								onSelectProvider(provider.id);
+								if (enabled) onSelectProvider(provider.id);
 							}}
 						>
 							<div className="flex items-start justify-between gap-3">
@@ -186,6 +201,9 @@ function CompactProviderPicker({
 										{provider.stable ? "stable" : "experimental"}
 									</Badge>
 									<Badge variant={health.variant}>{health.label}</Badge>
+									{!enabled ? (
+										<Badge variant="outline">{t("settings.model.disabled")}</Badge>
+									) : null}
 								</div>
 							</div>
 							<ProviderChipRow provider={provider} />
@@ -208,6 +226,7 @@ export function ProviderSelectionPanel({
 	compact = false,
 	className,
 }: ProviderSelectionPanelProps) {
+	const { t } = useTranslation("common");
 	const selectedProvider =
 		providers.find((provider) => provider.id === selectedProviderId) ??
 		providers[0] ??
@@ -248,9 +267,12 @@ export function ProviderSelectionPanel({
 									{selectedProvider.description}
 								</p>
 							</div>
-							<Badge variant="outline" className="shrink-0">
-								{selectedProvider.id}
-							</Badge>
+							<div className="flex shrink-0 flex-col items-end gap-1">
+								<Badge variant="outline">{selectedProvider.id}</Badge>
+								{!isProviderEnabled(selectedProvider) ? (
+									<Badge variant="outline">{t("settings.model.disabled")}</Badge>
+								) : null}
+							</div>
 						</div>
 						<div className="mt-3 flex flex-wrap gap-1.5">
 							{getProviderChips(selectedProvider).map((chip) => (
@@ -294,16 +316,22 @@ export function ProviderSelectionPanel({
 						) : null}
 						{providers.map((provider) => {
 							const isSelected = provider.id === selectedProvider?.id;
+							const enabled = isProviderEnabled(provider);
 							return (
 								<button
 									key={provider.id}
 									type="button"
-									onClick={() => onSelectProvider(provider.id)}
+									onClick={() => {
+										if (enabled) onSelectProvider(provider.id);
+									}}
+									disabled={!enabled}
+									aria-disabled={!enabled}
 									className={cn(
 										"flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
 										isSelected
 											? "bg-accent/80 text-foreground"
 											: "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+										!enabled && "cursor-not-allowed opacity-60 hover:bg-transparent",
 									)}
 								>
 									<ProviderIcon provider={provider.id} className="mt-0.5 size-4" />
@@ -325,6 +353,9 @@ export function ProviderSelectionPanel({
 									<Badge variant={provider.stable ? "success" : "outline"}>
 										{provider.stable ? "stable" : "experimental"}
 									</Badge>
+									{!enabled ? (
+										<Badge variant="outline">{t("settings.model.disabled")}</Badge>
+									) : null}
 								</button>
 							);
 						})}
@@ -348,6 +379,9 @@ export function ProviderSelectionPanel({
 								</div>
 								<div className="flex shrink-0 flex-col items-end gap-1">
 									<Badge variant="outline">{selectedProvider.id}</Badge>
+									{!isProviderEnabled(selectedProvider) ? (
+										<Badge variant="outline">{t("settings.model.disabled")}</Badge>
+									) : null}
 									<Badge variant={selectedProvider.stable ? "success" : "outline"}>
 										{selectedProvider.stable ? "stable" : "experimental"}
 									</Badge>

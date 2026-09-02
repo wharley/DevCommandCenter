@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -84,6 +84,12 @@ import { WORKSPACE_GIT_STATUS_QUERY_KEY } from "@/features/inspector/use-workspa
 import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "@/features/inspector/use-workspace-git-branch-diff";
 import { disconnectCodeRabbitCli } from "@/lib/coderabbit-cli";
 import { McpIntegrationsPanel } from "@/features/settings/mcp-integrations-panel";
+import { ProviderAvailabilityPanel } from "@/features/providers/provider-availability-panel";
+import {
+	isProviderAvailabilityRequestCurrent,
+	persistProviderAvailability,
+} from "@/features/providers/provider-availability.logic";
+import { setProviderAvailability } from "@/lib/provider-api";
 
 type SettingsDialogProps = {
 	open: boolean;
@@ -695,7 +701,102 @@ export function SettingsDialog({
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
 	const [automationOpen, setAutomationOpen] = useState(false);
 	const [uxMetricsVersion, setUxMetricsVersion] = useState(0);
+	const [pendingAvailabilityProviderIds, setPendingAvailabilityProviderIds] =
+		useState<Set<string>>(() => new Set());
+	const [availabilityErrors, setAvailabilityErrors] = useState<Record<string, string>>(
+		{},
+	);
+	const mountedRef = useRef(true);
+	const openRef = useRef(open);
+	const availabilityGenerationRef = useRef(0);
+	const availabilityRequestIdsRef = useRef(new Map<string, number>());
+	openRef.current = open;
+
+	useEffect(() => {
+		availabilityGenerationRef.current += 1;
+		availabilityRequestIdsRef.current.clear();
+		if (!open) {
+			setPendingAvailabilityProviderIds(new Set());
+			setAvailabilityErrors({});
+		}
+	}, [open]);
+
+	useEffect(() => {
+		return () => {
+			mountedRef.current = false;
+			availabilityGenerationRef.current += 1;
+			availabilityRequestIdsRef.current.clear();
+		};
+	}, []);
 	const providers = providerCatalog?.providers ?? [];
+	const handleProviderAvailabilityChange = async (
+		providerId: string,
+		enabled: boolean,
+	) => {
+		if (!openRef.current || !mountedRef.current) {
+			return;
+		}
+		const generation = availabilityGenerationRef.current;
+		const requestId =
+			(availabilityRequestIdsRef.current.get(providerId) ?? 0) + 1;
+		availabilityRequestIdsRef.current.set(providerId, requestId);
+		const requestToken = { generation, requestId };
+		const isCurrentRequest = () =>
+			isProviderAvailabilityRequestCurrent(requestToken, {
+				generation: availabilityGenerationRef.current,
+				requestId: availabilityRequestIdsRef.current.get(providerId),
+				mounted: mountedRef.current,
+				open: openRef.current,
+			});
+		const providerLabel =
+			providers.find((provider) => provider.id === providerId)?.label ?? providerId;
+		setPendingAvailabilityProviderIds((current) => {
+			const next = new Set(current);
+			next.add(providerId);
+			return next;
+		});
+		setAvailabilityErrors((current) => {
+			const next = { ...current };
+			delete next[providerId];
+			return next;
+		});
+		try {
+			await persistProviderAvailability(
+				{ providerId, enabled },
+				{
+					setAvailability: setProviderAvailability,
+					invalidateCatalog: () =>
+						queryClient.invalidateQueries({ queryKey: ["providers", "catalog"] }),
+				},
+			);
+			if (isCurrentRequest()) {
+				toast.success(
+					enabled
+						? t("settings.model.enabledToast", { provider: providerLabel })
+						: t("settings.model.disabledToast", { provider: providerLabel }),
+				);
+			}
+		} catch (error) {
+			if (!isCurrentRequest()) {
+				return;
+			}
+			const message =
+				error instanceof Error
+					? error.message
+					: t("settings.model.availabilityError");
+			setAvailabilityErrors((current) => ({ ...current, [providerId]: message }));
+			toast.error(message);
+		} finally {
+			if (isCurrentRequest()) {
+				availabilityRequestIdsRef.current.delete(providerId);
+				setPendingAvailabilityProviderIds((current) => {
+					const next = new Set(current);
+					next.delete(providerId);
+					return next;
+				});
+			}
+		}
+	};
 	const shortcutBadges = useMemo(
 		() => [
 			getCommandPaletteShortcutKeys().join("+"),
@@ -1059,6 +1160,14 @@ export function SettingsDialog({
 
 							{activeSection === "model" ? (
 								<section className="space-y-4">
+									<ProviderAvailabilityPanel
+										providers={providers}
+										pendingProviderIds={pendingAvailabilityProviderIds}
+										errors={availabilityErrors}
+										onChange={(providerId, enabled) => {
+											void handleProviderAvailabilityChange(providerId, enabled);
+										}}
+									/>
 									<ProviderAccountUsagePanel
 										providers={providers}
 										runtimeSettings={providerRuntimeSettings}

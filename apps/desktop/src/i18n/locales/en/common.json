@@ -1660,7 +1660,17 @@
       "runtimeSubagentConcurrencyHint": "Limits subagent threads open at once, excluding the primary agent. Applies to new sessions and does not edit config.toml.",
       "runtimeHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex",
       "runtimeShadowHomePlaceholder": "~/Library/Application Support/DevCommandCenter/provider-homes/codex-shadow",
-      "runtimeNoSupportedProviders": "No supported providers are available in the current catalog."
+      "runtimeNoSupportedProviders": "No supported providers are available in the current catalog.",
+      "availabilityTitle": "Provider availability",
+      "availabilityHint": "Disabled providers remain visible for history and labels, but cannot start new work until enabled again.",
+      "availabilityToggle": "Toggle availability for {{provider}}",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "pending": "Saving availability…",
+      "availabilityError": "Provider availability could not be updated.",
+      "enabledToast": "{{provider}} is enabled for new work.",
+      "disabledToast": "{{provider}} is disabled for new work.",
+      "disabledBlockReason": "{{provider}} is disabled. Enable it in Settings → Providers before sending or starting new work."
     },
     "integrations": {
       "title": "External MCP integrations",
