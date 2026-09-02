@@ -13,9 +13,9 @@ function message(
 }
 
 const thread: WorkspaceMessage[] = [
-	message("u1", "user", "Add retries to checkout"),
+	message("u1", "user", "Add retries to checkout", { turnId: "turn-1" }),
 	message("a1", "assistant", "Added a retry helper."),
-	message("u2", "user", "Now cover the timeout case"),
+	message("u2", "user", "Now cover the timeout case", { turnId: "turn-2" }),
 	message("a2", "assistant", "Working…", { streaming: true }),
 	message("u3", "user", "Also log failures"),
 ];
@@ -27,6 +27,7 @@ describe("selectForkPoint", () => {
 		expect(point?.priorMessages.map((entry) => entry.id)).toEqual(["u1", "a1"]);
 		expect(point?.forkedPrompt).toBe("Now cover the timeout case");
 		expect(point?.excludedUserTurns).toBe(2);
+		expect(point?.anchorTurnId).toBe("turn-2");
 	});
 
 	it("drops streaming or status messages from the snapshot and refuses unknown points", () => {
@@ -40,6 +41,7 @@ describe("selectForkPoint", () => {
 		expect(point?.priorMessages.map((entry) => entry.id)).toEqual(["u1", "a1"]);
 		expect(point?.forkedPrompt).toBe("");
 		expect(point?.excludedUserTurns).toBe(2);
+		expect(point?.anchorTurnId).toBe("turn-1");
 		// A streaming or incomplete reply is not a stable anchor.
 		expect(selectForkPoint(thread, "a2")).toBeNull();
 		expect(

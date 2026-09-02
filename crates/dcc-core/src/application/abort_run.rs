@@ -342,6 +342,7 @@ mod tests {
                     project_id,
                     provider_id: "codex".to_owned(),
                     model: None,
+                    forked_from: None,
                 },
             },
             SessionEventRecord {

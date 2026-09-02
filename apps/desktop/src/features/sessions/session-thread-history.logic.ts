@@ -130,6 +130,7 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					project_id: record.kind.projectId,
 					provider_id: record.kind.providerId,
 					model: record.kind.model,
+					...(record.kind.forkedFrom ? { forked_from: record.kind.forkedFrom } : {}),
 				},
 			};
 		case "turn_started":
@@ -1628,12 +1629,24 @@ export function projectWorkspaceMessages(
 		}
 
 		if ("sessionStarted" in event) {
+			const forkedFrom = event.sessionStarted?.forked_from ?? null;
 			messages.push({
 				id: `${eventLabel(event)}-${messages.length}`,
 				role: "system",
-				label: eventLabel(event),
-				content: eventSummary(event),
+				label: forkedFrom ? "session.forked" : eventLabel(event),
+				content: forkedFrom
+					? `Forked from an earlier thread${forkedFrom.turnId ? " at one of its turns" : ""}. A bounded snapshot of that thread up to the fork point follows the first turn here; nothing after it was carried over.`
+					: eventSummary(event),
 				createdAt: occurredAt,
+				...(forkedFrom
+					? {
+							action: {
+								type: "open-session" as const,
+								sessionId: forkedFrom.sessionId,
+								label: "Open source thread",
+							},
+						}
+					: {}),
 			});
 			continue;
 		}

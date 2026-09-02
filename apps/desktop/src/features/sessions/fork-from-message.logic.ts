@@ -13,6 +13,8 @@ export type ForkPoint = {
 	forkedPrompt: string;
 	/** Count of user turns excluded (the forked one and everything after). */
 	excludedUserTurns: number;
+	/** Durable user turn the fork is anchored on, for the origin record. */
+	anchorTurnId: string | null;
 };
 
 /**
@@ -37,7 +39,15 @@ export function selectForkPoint(
 		const excludedUserTurns = messages
 			.slice(index + 1)
 			.filter((message) => message.role === "user").length;
-		return { priorMessages, forkedPrompt: "", excludedUserTurns };
+		let anchorTurnId: string | null = null;
+		for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+			const candidate = messages[cursor];
+			if (candidate?.role === "user") {
+				anchorTurnId = candidate.turnId ?? null;
+				break;
+			}
+		}
+		return { priorMessages, forkedPrompt: "", excludedUserTurns, anchorTurnId };
 	}
 	if (target.role !== "user") return null;
 	const priorMessages = messages
@@ -46,7 +56,12 @@ export function selectForkPoint(
 	const excludedUserTurns = messages
 		.slice(index)
 		.filter((message) => message.role === "user").length;
-	return { priorMessages, forkedPrompt: target.content, excludedUserTurns };
+	return {
+		priorMessages,
+		forkedPrompt: target.content,
+		excludedUserTurns,
+		anchorTurnId: target.turnId ?? null,
+	};
 }
 
 /**

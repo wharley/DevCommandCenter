@@ -287,6 +287,7 @@ export type CoreEvent = ({ workspacePrepared: {
 	project_id: string,
 	provider_id: string,
 	model: string | null,
+	forked_from?: ForkOrigin | null,
 } }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionDelegationCancelled?: never; sessionDelegationCompleted?: never; sessionDelegationDelta?: never; sessionDelegationFailed?: never; sessionDelegationRequested?: never; sessionDelegationStarted?: never; sessionMcpRuntimeStatusChanged?: never; sessionObjectivePaused?: never; sessionPlanApproved?: never; sessionPlanHandedOff?: never; sessionQueuedTurnDispatched?: never; sessionQueuedTurnRemoved?: never; sessionResumed?: never; sessionTurnAborted?: never; sessionTurnAssistantMessageCompleted?: never; sessionTurnAssistantMessageDelta?: never; sessionTurnAssistantMessageStarted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnModelEffective?: never; sessionTurnNativeSubagentActivity?: never; sessionTurnNativeSubagentModelConfirmed?: never; sessionTurnNativeSubagentModelRequested?: never; sessionTurnPermissionRequested?: never; sessionTurnPermissionResolved?: never; sessionTurnQueueReordered?: never; sessionTurnQueued?: never; sessionTurnReasoningCompleted?: never; sessionTurnReasoningDelta?: never; sessionTurnReasoningStarted?: never; sessionTurnStarted?: never; sessionTurnSteered?: never; sessionTurnToolCallCompleted?: never; sessionTurnToolCallDelta?: never; sessionTurnToolCallFailed?: never; sessionTurnToolCallStarted?: never; sessionTurnUserInputRequested?: never; sessionTurnUserInputResolved?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionCompleted: {
 	session_id: string,
 } }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionDelegationCancelled?: never; sessionDelegationCompleted?: never; sessionDelegationDelta?: never; sessionDelegationFailed?: never; sessionDelegationRequested?: never; sessionDelegationStarted?: never; sessionMcpRuntimeStatusChanged?: never; sessionObjectivePaused?: never; sessionPlanApproved?: never; sessionPlanHandedOff?: never; sessionQueuedTurnDispatched?: never; sessionQueuedTurnRemoved?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnAssistantMessageCompleted?: never; sessionTurnAssistantMessageDelta?: never; sessionTurnAssistantMessageStarted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnModelEffective?: never; sessionTurnNativeSubagentActivity?: never; sessionTurnNativeSubagentModelConfirmed?: never; sessionTurnNativeSubagentModelRequested?: never; sessionTurnPermissionRequested?: never; sessionTurnPermissionResolved?: never; sessionTurnQueueReordered?: never; sessionTurnQueued?: never; sessionTurnReasoningCompleted?: never; sessionTurnReasoningDelta?: never; sessionTurnReasoningStarted?: never; sessionTurnStarted?: never; sessionTurnSteered?: never; sessionTurnToolCallCompleted?: never; sessionTurnToolCallDelta?: never; sessionTurnToolCallFailed?: never; sessionTurnToolCallStarted?: never; sessionTurnUserInputRequested?: never; sessionTurnUserInputResolved?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionAborted: {
@@ -718,6 +719,16 @@ export type ForgeCliStatusOutput = {
 };
 
 export type ForgeCliStatusState = "ready" | "error";
+
+/**
+ *  Where a forked thread came from. Metadata only: the fork snapshot itself
+ *  travels with the first turn and is never stored here.
+ */
+export type ForkOrigin = {
+	sessionId: SessionId,
+	// The user turn the fork was anchored on, when known.
+	turnId?: TurnId | null,
+};
 
 export type GetDelegationInput = {
 	delegationId: DelegationId,
@@ -1755,7 +1766,9 @@ export type Session = {
 	updatedAt: string,
 };
 
-export type SessionEventKind = { type: "session_started"; workspaceId: WorkspaceId; projectId: ProjectId; providerId: string; model: string | null } | { type: "turn_started"; turnId: TurnId; prompt: string; planMode?: boolean | null; model?: string | null;
+export type SessionEventKind = { type: "session_started"; workspaceId: WorkspaceId; projectId: ProjectId; providerId: string; model: string | null;
+// Present only for threads created by fork-by-message.
+forkedFrom?: ForkOrigin | null } | { type: "turn_started"; turnId: TurnId; prompt: string; planMode?: boolean | null; model?: string | null;
 /**
  *  Metadata-only evidence linkage; absent for turns without evidence
  *  and for records persisted before this field existed.
@@ -1970,6 +1983,8 @@ export type StartThreadInput = {
 	providerRuntime?: ProviderRuntimeConfig | null,
 	workingDirectoryOverride?: string | null,
 	title: string | null,
+	// Fork-by-message origin, validated against durable history.
+	forkedFrom?: ForkOrigin | null,
 };
 
 export type StartThreadOutput = {

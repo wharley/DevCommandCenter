@@ -1628,6 +1628,7 @@ mod tests {
                 provider_runtime: None,
                 working_directory_override: None,
                 title: Some("Nova tarefa".to_string()),
+                forked_from: None,
             },
         )
         .await

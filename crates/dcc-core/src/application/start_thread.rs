@@ -6,8 +6,8 @@ use crate::{
     domain::{
         project::ProjectId,
         session::{
-            Session, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
-            SessionState,
+            ForkOrigin, Session, SessionEventKind, SessionEventRecord, SessionId,
+            SessionProjection, SessionState,
         },
         thread::{Thread, ThreadId},
         workspace::WorkspaceId,
@@ -33,6 +33,9 @@ pub struct StartThreadInput {
     #[serde(default)]
     pub working_directory_override: Option<String>,
     pub title: Option<String>,
+    /// Fork-by-message origin, validated against durable history.
+    #[serde(default)]
+    pub forked_from: Option<ForkOrigin>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -41,6 +44,39 @@ pub struct StartThreadOutput {
     pub session: Session,
     pub thread: Thread,
     pub projection: SessionProjection,
+}
+
+/// A fork origin must name a real session and, when given, a user turn that
+/// really started there. Anything else would put a fabricated link in the
+/// timeline.
+async fn validate_fork_origin<S, E>(
+    sessions: &S,
+    session_events: &E,
+    origin: &ForkOrigin,
+) -> Result<()>
+where
+    S: SessionRepo + Sync,
+    E: SessionEventRepo + Sync,
+{
+    if sessions.get_session(&origin.session_id).await?.is_none() {
+        return Err(crate::CoreError::InvalidInput(
+            "fork origin session does not exist".to_string(),
+        ));
+    }
+    if let Some(turn_id) = &origin.turn_id {
+        let history = session_events
+            .list_events_by_session(&origin.session_id)
+            .await?;
+        let known = history.iter().any(|event| {
+            matches!(&event.kind, SessionEventKind::TurnStarted { turn_id: started, .. } if started == turn_id)
+        });
+        if !known {
+            return Err(crate::CoreError::InvalidInput(
+                "fork origin turn does not exist in the source session".to_string(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn now_iso() -> String {
@@ -59,6 +95,9 @@ where
     T: ThreadRepo + Sync,
     B: EventBus + SessionEventRepo + Sync,
 {
+    if let Some(origin) = &input.forked_from {
+        validate_fork_origin(sessions, session_events, origin).await?;
+    }
     if input.provider_id.trim().is_empty() {
         return Err(crate::CoreError::InvalidInput(
             "provider_id cannot be empty".to_string(),
@@ -128,6 +167,7 @@ where
             project_id: input.project_id.clone(),
             provider_id: input.provider_id.clone(),
             model: input.model.clone(),
+            forked_from: input.forked_from.clone(),
         },
     };
     let outcome = session_events.append_event(&started_event).await?;
@@ -145,6 +185,7 @@ where
                     project_id: input.project_id.0.clone(),
                     provider_id: input.provider_id.clone(),
                     model: input.model,
+                    forked_from: input.forked_from,
                 },
             )
             .await?;
@@ -323,6 +364,7 @@ mod tests {
                 provider_runtime: None,
                 working_directory_override: None,
                 title: Some("Launch session".to_string()),
+                forked_from: None,
             },
         ))
         .expect("start_thread should succeed");
@@ -381,6 +423,7 @@ mod tests {
                 provider_runtime: None,
                 working_directory_override: None,
                 title: None,
+                forked_from: None,
             },
         ));
         assert!(matches!(result, Err(crate::CoreError::InvalidInput(_))));

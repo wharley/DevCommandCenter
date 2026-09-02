@@ -29,6 +29,8 @@ pub enum CoreEvent {
         project_id: String,
         provider_id: String,
         model: Option<String>,
+        #[serde(default)]
+        forked_from: Option<crate::domain::session::ForkOrigin>,
     },
     SessionCompleted {
         session_id: String,
@@ -335,16 +337,19 @@ impl CoreEvent {
                     project_id,
                     provider_id,
                     model,
+                    forked_from,
                 },
                 Self::SessionStarted {
                     workspace_id: actual_workspace_id,
                     project_id: actual_project_id,
                     provider_id: actual_provider_id,
                     model: actual_model,
+                    forked_from: actual_forked_from,
                     ..
                 },
             ) => {
                 workspace_id.0 == *actual_workspace_id
+                    && forked_from == actual_forked_from
                     && project_id.0 == *actual_project_id
                     && provider_id == actual_provider_id
                     && model == actual_model

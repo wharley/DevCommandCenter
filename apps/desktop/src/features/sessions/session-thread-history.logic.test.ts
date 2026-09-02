@@ -993,6 +993,32 @@ describe("projectWorkspaceMessages", () => {
 		);
 	});
 
+	it("shows the fork origin on the session start with a link to the source thread", () => {
+		const record: SessionEventRecord = {
+			eventId: "evt-start",
+			sessionId: "session-b",
+			sequence: 1,
+			occurredAt: "2026-05-01T12:00:00Z",
+			kind: {
+				type: "session_started",
+				workspaceId: "ws",
+				projectId: "proj",
+				providerId: "codex",
+				model: null,
+				forkedFrom: { sessionId: "session-a", turnId: "turn-3" },
+			},
+		};
+		const [started] = projectWorkspaceMessages([record], [], "session-b");
+		expect(started.role).toBe("system");
+		expect(started.label).toBe("session.forked");
+		expect(started.content).toContain("Forked from an earlier thread");
+		expect(started.action).toEqual({
+			type: "open-session",
+			sessionId: "session-a",
+			label: "Open source thread",
+		});
+	});
+
 	it("projects an automatic objective pause as a system message", () => {
 		const record: SessionEventRecord = {
 			eventId: "evt-pause",

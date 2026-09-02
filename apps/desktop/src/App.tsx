@@ -3969,6 +3969,10 @@ export default function App() {
 					model: selectedModel?.id ?? null,
 					providerRuntime: selectedProviderRuntime,
 					title: `${selectedWorkspace.name} · fork`,
+					forkedFrom: {
+						sessionId: sourceSessionId,
+						turnId: forkPoint.anchorTurnId,
+					},
 				});
 				const forkedSessionId = result.session.id;
 				pendingForkReanchorsRef.current.set(forkedSessionId, reanchor);

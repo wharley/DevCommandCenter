@@ -438,6 +438,7 @@ mod tests {
                     project_id: crate::domain::project::ProjectId("project-1".to_string()),
                     provider_id: "codex".to_string(),
                     model: Some("gpt-5-codex".to_string()),
+                    forked_from: None,
                 },
             });
 
@@ -520,6 +521,7 @@ mod tests {
                     project_id: crate::domain::project::ProjectId("project-1".to_string()),
                     provider_id: "codex".to_string(),
                     model: Some("gpt-5-codex".to_string()),
+                    forked_from: None,
                 },
             });
 

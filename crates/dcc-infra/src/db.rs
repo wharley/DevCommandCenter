@@ -8491,6 +8491,7 @@ mod tests {
                     project_id: ProjectId("project-1".to_string()),
                     provider_id: "codex".to_string(),
                     model: Some("gpt-5".to_string()),
+                    forked_from: None,
                 },
             },
             SessionEventRecord {
@@ -8850,6 +8851,7 @@ mod tests {
                     project_id: ProjectId("project-1".to_string()),
                     provider_id: "codex".to_string(),
                     model: Some("gpt-5".to_string()),
+                    forked_from: None,
                 },
             },
             SessionEventRecord {
@@ -11631,6 +11633,7 @@ mod tests {
             project_id: ProjectId("project".to_string()),
             provider_id: "codex".to_string(),
             model: None,
+            forked_from: None,
         });
         append(started("turn-done"));
         append(SessionEventKind::TurnCompleted {

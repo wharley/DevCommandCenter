@@ -332,6 +332,7 @@ mod tests {
                     project_id: ProjectId("project-1".into()),
                     provider_id: "codex".into(),
                     model: None,
+                    forked_from: None,
                 },
             ),
             event(
@@ -375,6 +376,7 @@ mod tests {
                 project_id: ProjectId("project-1".into()),
                 provider_id: "codex".into(),
                 model: None,
+                forked_from: None,
             },
         )];
         let canonical = event(

@@ -6660,6 +6660,7 @@ mod tests {
             provider_runtime: None,
             working_directory_override: None,
             title: None,
+            forked_from: None,
         };
         assert!(state
             .validate_start_thread_scope(&initial_unknown)
@@ -6877,6 +6878,123 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn fork_origin_is_validated_and_persisted_on_session_start() {
+        use dcc_core::application::start_thread as run_start_thread;
+        use dcc_core::domain::session::ForkOrigin;
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let db_path = root.join("state.sqlite");
+        let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
+        let source = sample_session("fork-source");
+        let workspace = sample_workspace(&source.workspace_id.0, "/tmp/fork-source");
+        SqliteWorkspaceRepo::open(&db_path)
+            .expect("workspace repo")
+            .save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+        SessionRepo::save_session(&state, &source)
+            .await
+            .expect("source");
+        for (sequence, kind) in [
+            (
+                1,
+                SessionEventKind::SessionStarted {
+                    workspace_id: source.workspace_id.clone(),
+                    project_id: source.project_id.clone(),
+                    provider_id: source.provider_id.clone(),
+                    model: None,
+                    forked_from: None,
+                },
+            ),
+            (
+                2,
+                SessionEventKind::TurnStarted {
+                    turn_id: TurnId("source-turn".to_string()),
+                    prompt: "first".to_string(),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                },
+            ),
+        ] {
+            SessionEventRepo::append_event(
+                &state,
+                &SessionEventRecord {
+                    event_id: format!("fork-src-{sequence}"),
+                    session_id: source.id.clone(),
+                    sequence,
+                    occurred_at: "2026-09-02T10:00:00Z".to_string(),
+                    kind,
+                },
+            )
+            .await
+            .expect("append");
+        }
+        let input = |origin: Option<ForkOrigin>| StartThreadInput {
+            workspace_id: source.workspace_id.clone(),
+            additional_workspace_ids: Vec::new(),
+            project_id: source.project_id.clone(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            title: Some("fork".to_string()),
+            forked_from: origin,
+        };
+        assert!(run_start_thread(
+            &state,
+            &state,
+            &state,
+            &state,
+            input(Some(ForkOrigin {
+                session_id: SessionId("missing".to_string()),
+                turn_id: None,
+            })),
+        )
+        .await
+        .is_err());
+        assert!(run_start_thread(
+            &state,
+            &state,
+            &state,
+            &state,
+            input(Some(ForkOrigin {
+                session_id: source.id.clone(),
+                turn_id: Some(TurnId("not-a-turn".to_string())),
+            })),
+        )
+        .await
+        .is_err());
+        let started = run_start_thread(
+            &state,
+            &state,
+            &state,
+            &state,
+            input(Some(ForkOrigin {
+                session_id: source.id.clone(),
+                turn_id: Some(TurnId("source-turn".to_string())),
+            })),
+        )
+        .await
+        .expect("valid fork origin");
+        let history = SessionEventRepo::list_events_by_session(&state, &started.session.id)
+            .await
+            .expect("history");
+        match &history[0].kind {
+            SessionEventKind::SessionStarted { forked_from, .. } => {
+                let origin = forked_from.as_ref().expect("origin persisted");
+                assert_eq!(origin.session_id, source.id);
+                assert_eq!(
+                    origin.turn_id.as_ref().map(|turn| turn.0.as_str()),
+                    Some("source-turn")
+                );
+            }
+            other => panic!("expected session started, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn cold_attach_reanchor_is_bounded_one_shot_and_only_after_completed_turns() {
         use dcc_core::domain::session::AssistantMessagePhase;
         let root = tempfile::tempdir().expect("state root");
@@ -6912,6 +7030,7 @@ mod tests {
                 project_id: session.project_id.clone(),
                 provider_id: session.provider_id.clone(),
                 model: None,
+                forked_from: None,
             }),
             append(started("t1", "Add retries to checkout")),
         ] {
@@ -7167,6 +7286,7 @@ mod tests {
             provider_runtime: None,
             working_directory_override: None,
             title: None,
+            forked_from: None,
         };
         assert!(state.validate_start_thread_scope(&thread).await.is_err());
     }
@@ -7373,6 +7493,7 @@ mod tests {
                 provider_runtime: None,
                 working_directory_override: None,
                 title: None,
+                forked_from: None,
             })
             .await
             .is_err());

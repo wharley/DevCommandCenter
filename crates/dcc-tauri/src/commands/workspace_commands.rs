@@ -8694,6 +8694,7 @@ mod editor_workspace_file_tests {
                 project_id: repository.project_id.clone(),
                 provider_id: "codex".to_string(),
                 model: Some("gpt-5".to_string()),
+                forked_from: None,
             },
         }))
         .expect("save session event");

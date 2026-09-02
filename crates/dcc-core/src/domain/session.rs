@@ -198,6 +198,17 @@ pub struct Session {
     pub updated_at: String,
 }
 
+/// Where a forked thread came from. Metadata only: the fork snapshot itself
+/// travels with the first turn and is never stored here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkOrigin {
+    pub session_id: SessionId,
+    /// The user turn the fork was anchored on, when known.
+    #[serde(default)]
+    pub turn_id: Option<TurnId>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEventKind {
@@ -209,6 +220,9 @@ pub enum SessionEventKind {
         #[serde(rename = "providerId")]
         provider_id: String,
         model: Option<String>,
+        /// Present only for threads created by fork-by-message.
+        #[serde(rename = "forkedFrom", default)]
+        forked_from: Option<ForkOrigin>,
     },
     TurnStarted {
         #[serde(rename = "turnId")]
@@ -589,6 +603,7 @@ impl SessionProjection {
                 project_id,
                 provider_id,
                 model,
+                ..
             } => {
                 self.workspace_id = workspace_id.clone();
                 self.project_id = project_id.clone();
@@ -669,6 +684,7 @@ impl SessionProjection {
                 project_id,
                 provider_id,
                 model,
+                ..
             } => Self::new(
                 first.session_id.clone(),
                 project_id.clone(),
@@ -750,6 +766,7 @@ mod tests {
                     project_id: ProjectId("project-1".to_string()),
                     provider_id: "codex".to_string(),
                     model: Some("gpt-5-codex".to_string()),
+                    forked_from: None,
                 },
             ),
             event(
@@ -814,6 +831,7 @@ mod tests {
                     project_id: ProjectId("project-1".to_string()),
                     provider_id: "codex".to_string(),
                     model: Some("gpt-5-codex".to_string()),
+                    forked_from: None,
                 },
             ),
             event(
