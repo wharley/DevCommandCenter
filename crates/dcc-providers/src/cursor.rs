@@ -122,6 +122,8 @@ pub fn descriptor(
         models,
         capabilities: cursor_capabilities(),
         health,
+        enabled: true,
+        availability_generation: 0,
         stable: false,
     }
 }

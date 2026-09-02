@@ -7130,6 +7130,8 @@ pub fn run() {
             mcp_commands::disconnect_mcp_oauth,
             mcp_commands::set_mcp_tool_policy,
             provider_commands::list_providers,
+            provider_commands::get_provider_availability,
+            provider_commands::set_provider_availability,
             provider_commands::provider_account_usage,
             session_commands::start_thread,
             session_commands::apply_task_title,

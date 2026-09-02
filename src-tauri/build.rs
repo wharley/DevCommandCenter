@@ -104,6 +104,7 @@ use dcc_tauri::commands::{
     },
     provider_commands::{
         ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
+        ProviderAvailabilityInput, ProviderAvailabilityOutput, SetProviderAvailabilityInput,
     },
     session_commands::{
         ApplyTaskTitleInput, ApplyTaskTitleOutput, ExecuteGuardedUndoInput,
@@ -161,6 +162,7 @@ use dcc_tauri::delivery_failure::{
     WorkspaceDeliveryFailureSnapshot, WorkspaceDeliveryPushTarget, WorkspaceDeliveryRecoveryAction,
     WorkspaceDeliveryRecoveryInput, WorkspaceDeliveryRecoveryOutput,
 };
+use dcc_tauri::state::{ProviderAvailability, ProviderAvailabilityState};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use specta_typescript::Typescript;
@@ -316,6 +318,8 @@ struct SessionMethods {
 #[serde(rename_all = "camelCase")]
 struct ProviderMethods {
     list_providers: String,
+    get_provider_availability: String,
+    set_provider_availability: String,
     provider_account_usage: String,
 }
 
@@ -622,6 +626,11 @@ fn main() {
         .typ::<ListProvidersOutput>()
         .typ::<ProviderAccountUsageInput>()
         .typ::<ProviderAccountUsageOutput>()
+        .typ::<ProviderAvailability>()
+        .typ::<ProviderAvailabilityState>()
+        .typ::<ProviderAvailabilityInput>()
+        .typ::<ProviderAvailabilityOutput>()
+        .typ::<SetProviderAvailabilityInput>()
         .typ::<McpIntegrationRecord>()
         .typ::<McpToolPolicy>()
         .typ::<McpToolPolicyDecision>()
@@ -882,6 +891,8 @@ fn main() {
         "PROVIDER_METHODS",
         ProviderMethods {
             list_providers: "list_providers".to_string(),
+            get_provider_availability: "get_provider_availability".to_string(),
+            set_provider_availability: "set_provider_availability".to_string(),
             provider_account_usage: "provider_account_usage".to_string(),
         },
     );

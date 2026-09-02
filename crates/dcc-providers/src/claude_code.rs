@@ -43,6 +43,8 @@ pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
             .collect(),
         capabilities: claude_code_capabilities(),
         health,
+        enabled: true,
+        availability_generation: 0,
         stable: true,
     }
 }

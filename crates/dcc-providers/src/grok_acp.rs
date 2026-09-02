@@ -696,6 +696,8 @@ pub fn descriptor(
             .collect(),
         capabilities,
         health,
+        enabled: true,
+        availability_generation: 0,
         stable: true,
     }
 }

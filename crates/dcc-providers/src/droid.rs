@@ -84,6 +84,8 @@ pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
             .collect(),
         capabilities: stable_cli_capabilities(),
         health,
+        enabled: true,
+        availability_generation: 0,
         stable: true,
     }
 }

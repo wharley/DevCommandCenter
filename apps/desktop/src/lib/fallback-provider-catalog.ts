@@ -7,6 +7,12 @@ import { PROVIDER_MODEL_REGISTRY } from "./provider-model-registry";
  * Model lists are sourced from provider-model-registry — update there, not here.
  */
 const stableHealth = "Healthy" as const;
+// Browser-only fallback has no server authority. Preserve the backend's
+// compatibility default without rendering or mutating provider availability.
+const serverBackedAvailabilityDefault = {
+	enabled: true,
+	availabilityGeneration: 0,
+} as const;
 const interactiveApprovalPolicies: ProviderApprovalPolicy[] = [
 	"ask",
 	"auto",
@@ -83,6 +89,7 @@ const experimentalMultiRootCapabilities = {
 export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 	providers: [
 		{
+			...serverBackedAvailabilityDefault,
 			id: "claude_code",
 			label: "Claude Code",
 			description: "Stable Claude CLI provider for agentic coding and tool use.",
@@ -98,6 +105,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 			stable: true,
 		},
 		{
+			...serverBackedAvailabilityDefault,
 			id: "codex",
 			label: "Codex",
 			description: "Stable OpenAI Codex provider for repo-aware coding workflows.",
@@ -113,6 +121,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 			stable: true,
 		},
 		{
+			...serverBackedAvailabilityDefault,
 			id: "gemini",
 			label: "Gemini",
 			description: "Stable Gemini CLI provider for workspace tasks.",
@@ -132,6 +141,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 			stable: true,
 		},
 		{
+			...serverBackedAvailabilityDefault,
 			id: "droid",
 			label: "Droid",
 			description: "Factory Droid exec provider for workspace coding workflows.",
@@ -147,6 +157,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 			stable: true,
 		},
 		{
+			...serverBackedAvailabilityDefault,
 			id: "cursor",
 			label: "Cursor",
 			description: "Cursor Agent CLI provider with CLI-native session resume.",
@@ -162,6 +173,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 			stable: false,
 		},
 		{
+			...serverBackedAvailabilityDefault,
 			id: "grok",
 			label: "Grok Build",
 			description: "Grok Build provider through the Agent Client Protocol.",

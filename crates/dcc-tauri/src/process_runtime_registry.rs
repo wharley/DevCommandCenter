@@ -39,6 +39,22 @@ use dcc_core::{
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
+/// Process-shared availability phase for a registered provider. This is
+/// intentionally distinct from adapter health/authentication and is never
+/// persisted directly; the state facade commits its durable record first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProviderAvailabilityPhase {
+    Enabled,
+    Disabling,
+    Disabled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProviderAvailabilityRuntimeState {
+    pub phase: ProviderAvailabilityPhase,
+    pub generation: u64,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PhysicalIdentity {
     device: u64,
@@ -160,6 +176,10 @@ pub struct ProcessRuntime {
     /// The synchronous map lock is held only while finding/creating a lock;
     /// callers await the per-session lock after it has been released.
     provider_transition_locks: Mutex<HashMap<SessionId, Weak<AsyncMutex<()>>>>,
+    /// Per-provider availability transitions. Registered provider ids are a
+    /// fixed, small set; weak entries retain no historical identifiers.
+    provider_availability_locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
+    provider_availability: Mutex<HashMap<String, ProviderAvailabilityRuntimeState>>,
     event_buses: Mutex<Vec<Weak<dyn EventBus>>>,
     /// Public process-local identifier, never persisted or used as authority.
     runtime_generation: String,
@@ -193,6 +213,8 @@ impl ProcessRuntime {
             workspace_mutations,
             session_store: Arc::new(Mutex::new(crate::state::SessionStore::default())),
             provider_transition_locks: Mutex::new(HashMap::new()),
+            provider_availability_locks: Mutex::new(HashMap::new()),
+            provider_availability: Mutex::new(HashMap::new()),
             event_buses: Mutex::new(Vec::new()),
             runtime_generation: Uuid::new_v4().to_string(),
             next_live_sequence: AtomicU64::new(0),
@@ -574,6 +596,99 @@ impl ProcessRuntime {
             .lock()
             .expect("provider transition lock registry")
             .len()
+    }
+
+    /// Returns the one short-lived transition lock for an already-registered
+    /// provider. The authority layer performs registration before calling
+    /// this method, and the hard cap keeps a malformed caller from retaining
+    /// arbitrary provider identifiers in the shared runtime.
+    pub(crate) fn provider_availability_lock(
+        &self,
+        provider_id: &str,
+    ) -> CoreResult<Arc<AsyncMutex<()>>> {
+        const MAX_REGISTERED_PROVIDER_LOCKS: usize = 16;
+        let mut locks = self.provider_availability_locks.lock().map_err(|_| {
+            dcc_core::CoreError::Repository("provider availability state unavailable".to_string())
+        })?;
+        locks.retain(|_, lock| lock.strong_count() != 0);
+        if let Some(lock) = locks.get(provider_id).and_then(Weak::upgrade) {
+            return Ok(lock);
+        }
+        if locks.len() >= MAX_REGISTERED_PROVIDER_LOCKS {
+            return Err(dcc_core::CoreError::Repository(
+                "provider availability lock capacity exceeded".to_string(),
+            ));
+        }
+        let lock = Arc::new(AsyncMutex::new(()));
+        locks.insert(provider_id.to_string(), Arc::downgrade(&lock));
+        Ok(lock)
+    }
+
+    pub(crate) fn remove_provider_availability_lock_if_idle(
+        &self,
+        provider_id: &str,
+        lock: &Arc<AsyncMutex<()>>,
+    ) {
+        let Ok(mut locks) = self.provider_availability_locks.lock() else {
+            return;
+        };
+        let is_same_idle_lock = locks
+            .get(provider_id)
+            .and_then(Weak::upgrade)
+            .is_some_and(|current| Arc::ptr_eq(&current, lock) && Arc::strong_count(lock) == 2);
+        if is_same_idle_lock {
+            locks.remove(provider_id);
+        }
+    }
+
+    pub(crate) fn provider_availability_state(
+        &self,
+        provider_id: &str,
+    ) -> CoreResult<Option<ProviderAvailabilityRuntimeState>> {
+        self.provider_availability
+            .lock()
+            .map_err(|_| {
+                dcc_core::CoreError::Repository(
+                    "provider availability state unavailable".to_string(),
+                )
+            })
+            .map(|states| states.get(provider_id).copied())
+    }
+
+    pub(crate) fn set_provider_availability_state(
+        &self,
+        provider_id: &str,
+        state: ProviderAvailabilityRuntimeState,
+    ) -> CoreResult<()> {
+        self.provider_availability
+            .lock()
+            .map_err(|_| {
+                dcc_core::CoreError::Repository(
+                    "provider availability state unavailable".to_string(),
+                )
+            })?
+            .insert(provider_id.to_string(), state);
+        Ok(())
+    }
+
+    /// Seeds a durable value when this physical runtime first observes a
+    /// provider. A concurrent clone must never overwrite an in-progress
+    /// disabling transition with an older SQLite snapshot.
+    pub(crate) fn initialize_provider_availability_state(
+        &self,
+        provider_id: &str,
+        state: ProviderAvailabilityRuntimeState,
+    ) -> CoreResult<()> {
+        self.provider_availability
+            .lock()
+            .map_err(|_| {
+                dcc_core::CoreError::Repository(
+                    "provider availability state unavailable".to_string(),
+                )
+            })?
+            .entry(provider_id.to_string())
+            .or_insert(state);
+        Ok(())
     }
 }
 

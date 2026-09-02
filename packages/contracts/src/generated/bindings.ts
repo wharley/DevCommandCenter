@@ -6,7 +6,7 @@ export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","can
 
 export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
-export const PROVIDER_METHODS = {"listProviders":"list_providers","providerAccountUsage":"provider_account_usage"} as const;
+export const PROVIDER_METHODS = {"getProviderAvailability":"get_provider_availability","listProviders":"list_providers","providerAccountUsage":"provider_account_usage","setProviderAvailability":"set_provider_availability"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","applyTaskTitle":"apply_task_title","approvePlan":"approve_plan","closeSession":"close_session","dispatchNextQueuedTurn":"dispatch_next_queued_turn","executeGuardedUndo":"execute_guarded_undo","interruptNativeSubagent":"interrupt_native_subagent","lastTurnReview":"last_turn_review","listMcpRuntimeStatuses":"list_mcp_runtime_statuses","listThreadEvents":"list_thread_events","listTurnQueue":"list_turn_queue","listWorkspaceSessions":"list_workspace_sessions","prepareGuardedUndo":"prepare_guarded_undo","prepareTurn":"prepare_turn","queueTurn":"queue_turn","recordPlanHandoff":"record_plan_handoff","removeQueuedTurn":"remove_queued_turn","reorderTurnQueue":"reorder_turn_queue","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","runPullRequestReviewAgent":"run_pull_request_review_agent","searchSessions":"search_sessions","sendTurn":"send_turn","sessionLiveSnapshot":"session_live_snapshot","startMcpOauth":"start_mcp_oauth","startThread":"start_thread","steerNativeSubagent":"steer_native_subagent","steerTurn":"steer_turn","turnReviewFileDiff":"turn_review_file_diff","usageDashboard":"usage_dashboard","waitMcpOauth":"wait_mcp_oauth"} as const;
 
@@ -1155,6 +1155,28 @@ export type ProviderAccountUsageState = "available" | "awaitingActivity";
 
 export type ProviderApprovalPolicy = "ask" | "auto" | "full_access";
 
+export type ProviderAvailability = {
+	providerId: string,
+	enabled: boolean,
+	state: ProviderAvailabilityState,
+	generation: number,
+};
+
+export type ProviderAvailabilityInput = {
+	providerId: string,
+};
+
+export type ProviderAvailabilityOutput = {
+	availability: ProviderAvailability,
+};
+
+/**
+ *  Public, server-backed availability for a registered DCC provider. It is
+ *  separate from adapter health and credentials: disabled means new work is
+ *  refused even if the installed adapter is otherwise healthy.
+ */
+export type ProviderAvailabilityState = "enabled" | "disabling" | "disabled";
+
 export type ProviderCatalog = {
 	providers: ProviderDescriptor[],
 };
@@ -1166,6 +1188,16 @@ export type ProviderDescriptor = {
 	models: ProviderModelDescriptor[],
 	capabilities: Capabilities,
 	health: HealthStatus,
+	/**
+	 *  Server-backed DCC runtime authority. This is independent from health:
+	 *  a healthy adapter may be disabled deliberately.
+	 */
+	enabled?: boolean,
+	/**
+	 *  Monotonic server-backed availability generation, zero for legacy
+	 *  catalogs that predate the availability table.
+	 */
+	availabilityGeneration?: number,
 	stable: boolean,
 };
 
@@ -1785,6 +1817,11 @@ export type SetMcpToolPolicyInput = {
 
 export type SetMcpToolPolicyOutput = {
 	integration: McpIntegrationRecord,
+};
+
+export type SetProviderAvailabilityInput = {
+	providerId: string,
+	enabled: boolean,
 };
 
 export type SetRepositoryPinnedInput = {

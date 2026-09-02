@@ -229,6 +229,30 @@ CREATE INDEX IF NOT EXISTS idx_dcc_browser_locations_expires_at
 	ON dcc_browser_locations(expires_at_ms);
 "#;
 
+/// Provider enablement is independent from the legacy application-level
+/// `providers.is_active` table. This row only controls DCC's registered
+/// runtime authority for one physical session database.
+const PROVIDER_AVAILABILITY_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_provider_availability (
+	provider_id TEXT PRIMARY KEY NOT NULL CHECK(length(provider_id) BETWEEN 1 AND 128),
+	enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+	generation INTEGER NOT NULL CHECK(generation >= 0),
+	updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms >= 0)
+);
+"#;
+
+const PROVIDER_AVAILABILITY_MAX_PROVIDER_ID_CHARS: usize = 128;
+
+/// Typed durable provider availability. The absence of a record represents
+/// the backwards-compatible enabled state at generation zero.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderAvailabilityRecord {
+    pub provider_id: String,
+    pub enabled: bool,
+    pub generation: u64,
+    pub updated_at_ms: u64,
+}
+
 pub const DEFAULT_BROWSER_LOCATION_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 const BROWSER_LOCATION_MAX_SCOPE_CHARS: usize = 128;
 const BROWSER_LOCATION_MAX_URL_CHARS: usize = 2048;
@@ -1201,7 +1225,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
@@ -5524,7 +5548,108 @@ fn browser_location_session_id(session_id: Option<&str>) -> &str {
     session_id.unwrap_or("")
 }
 
+fn validate_provider_availability_provider_id(provider_id: &str) -> Result<()> {
+    if provider_id.trim().is_empty()
+        || provider_id.chars().count() > PROVIDER_AVAILABILITY_MAX_PROVIDER_ID_CHARS
+        || provider_id.chars().any(char::is_control)
+    {
+        return Err(dcc_core::CoreError::InvalidInput(
+            "provider availability provider id is invalid".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 impl SqliteSessionRepo {
+    /// Reads DCC runtime availability. A missing row deliberately remains
+    /// enabled for compatibility with existing session databases.
+    pub fn load_provider_availability(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<ProviderAvailabilityRecord>> {
+        validate_provider_availability_provider_id(provider_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let row = conn
+            .query_row(
+                "SELECT enabled, generation, updated_at_ms FROM dcc_provider_availability WHERE provider_id = ?1",
+                params![provider_id],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some((enabled, generation, updated_at_ms)) = row else {
+            return Ok(None);
+        };
+        if !matches!(enabled, 0 | 1) || generation < 0 || updated_at_ms < 0 {
+            return Err(dcc_core::CoreError::Repository(
+                "provider availability record is invalid".to_string(),
+            ));
+        }
+        Ok(Some(ProviderAvailabilityRecord {
+            provider_id: provider_id.to_string(),
+            enabled: enabled == 1,
+            generation: generation as u64,
+            updated_at_ms: updated_at_ms as u64,
+        }))
+    }
+
+    /// Persists a complete, bounded availability record. Generation is owned
+    /// by the runtime transition layer and may never move backwards.
+    pub fn save_provider_availability(&self, record: &ProviderAvailabilityRecord) -> Result<()> {
+        validate_provider_availability_provider_id(&record.provider_id)?;
+        let generation = i64::try_from(record.generation).map_err(|_| {
+            dcc_core::CoreError::InvalidInput(
+                "provider availability generation is invalid".to_string(),
+            )
+        })?;
+        let updated_at_ms = i64::try_from(record.updated_at_ms).map_err(|_| {
+            dcc_core::CoreError::InvalidInput("provider availability time is invalid".to_string())
+        })?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                r#"
+            INSERT INTO dcc_provider_availability
+                (provider_id, enabled, generation, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(provider_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                generation = excluded.generation,
+                updated_at_ms = excluded.updated_at_ms
+            WHERE excluded.generation > dcc_provider_availability.generation
+               OR (
+                    excluded.generation = dcc_provider_availability.generation
+                AND excluded.enabled = dcc_provider_availability.enabled
+               )
+            "#,
+                params![
+                    &record.provider_id,
+                    if record.enabled { 1_i64 } else { 0_i64 },
+                    generation,
+                    updated_at_ms,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if changed != 1 {
+            return Err(dcc_core::CoreError::Repository(
+                "provider availability generation is stale".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Stores a caller-sanitized browser URL for one workspace/session scope.
     /// The repository enforces a bounded lifetime but does not parse URLs;
     /// URL policy remains owned by the Browser command layer.
@@ -11167,6 +11292,92 @@ mod tests {
             repo.load_browser_location("other", Some("session"), 1)
                 .unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn provider_availability_defaults_enabled_and_migrates_without_touching_legacy_table() {
+        let conn = in_memory_conn();
+        conn.lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE providers (id TEXT PRIMARY KEY, is_active INTEGER NOT NULL);\
+                 INSERT INTO providers (id, is_active) VALUES ('codex', 0);",
+            )
+            .unwrap();
+        let repo = SqliteSessionRepo::from_connection(Arc::clone(&conn)).unwrap();
+        assert_eq!(repo.load_provider_availability("codex").unwrap(), None);
+        repo.save_provider_availability(&ProviderAvailabilityRecord {
+            provider_id: "codex".to_string(),
+            enabled: false,
+            generation: 7,
+            updated_at_ms: 42,
+        })
+        .unwrap();
+        assert_eq!(
+            repo.load_provider_availability("codex").unwrap(),
+            Some(ProviderAvailabilityRecord {
+                provider_id: "codex".to_string(),
+                enabled: false,
+                generation: 7,
+                updated_at_ms: 42,
+            })
+        );
+        assert_eq!(
+            conn.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT is_active FROM providers WHERE id = 'codex'",
+                    [],
+                    |row| { row.get::<_, i64>(0) }
+                )
+                .unwrap(),
+            0,
+            "the legacy application provider table is not authority for DCC runtime availability"
+        );
+        SqliteSessionRepo::from_connection(conn).expect("migration remains idempotent");
+    }
+
+    #[test]
+    fn provider_availability_rejects_unbounded_or_regressing_records() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        assert!(repo.load_provider_availability("\n").is_err());
+        assert!(repo
+            .save_provider_availability(&ProviderAvailabilityRecord {
+                provider_id: "x".repeat(PROVIDER_AVAILABILITY_MAX_PROVIDER_ID_CHARS + 1),
+                enabled: true,
+                generation: 0,
+                updated_at_ms: 0,
+            })
+            .is_err());
+        repo.save_provider_availability(&ProviderAvailabilityRecord {
+            provider_id: "codex".to_string(),
+            enabled: false,
+            generation: 3,
+            updated_at_ms: 30,
+        })
+        .unwrap();
+        repo.save_provider_availability(&ProviderAvailabilityRecord {
+            provider_id: "codex".to_string(),
+            enabled: true,
+            generation: 2,
+            updated_at_ms: 40,
+        })
+        .expect_err("a stale generation must not silently overwrite availability");
+        repo.save_provider_availability(&ProviderAvailabilityRecord {
+            provider_id: "codex".to_string(),
+            enabled: true,
+            generation: 3,
+            updated_at_ms: 40,
+        })
+        .expect_err("the same generation cannot reverse availability");
+        assert_eq!(
+            repo.load_provider_availability("codex")
+                .unwrap()
+                .expect("record")
+                .enabled,
+            false,
+            "a stale writer cannot re-enable a newer disabled record"
         );
     }
 }

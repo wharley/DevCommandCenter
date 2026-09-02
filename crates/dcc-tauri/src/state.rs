@@ -10,7 +10,9 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use specta::Type;
 use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
@@ -63,7 +65,7 @@ use dcc_core::{
 };
 use dcc_infra::{
     credential_store::SystemCredentialStore,
-    db::{SqliteSessionRepo, SqliteWorkspaceRepo},
+    db::{ProviderAvailabilityRecord, SqliteSessionRepo, SqliteWorkspaceRepo},
     mcp_db::SqliteMcpRepo,
 };
 
@@ -88,13 +90,16 @@ use crate::guarded_undo_runtime::{
     CaptureTerminalMode, FinalizeTurnOutcome, GuardedUndoExecuteResult, GuardedUndoPrepareResult,
     WorkspaceMutationRunError,
 };
-use crate::process_runtime_registry::{ProcessRuntime, ProcessRuntimeRegistry};
+use crate::process_runtime_registry::{
+    ProcessRuntime, ProcessRuntimeRegistry, ProviderAvailabilityPhase,
+    ProviderAvailabilityRuntimeState,
+};
 use crate::terminal_arbiter::{
     PersistThenCommitError, TerminalArbiterError, TerminalClaimResult, TerminalIntent, TerminalKey,
 };
 use dcc_providers::{
     provider_registration, provider_runtime, supports_provider_approval_policy,
-    supports_provider_capability, ProviderCapability, ProviderRegistration,
+    supports_provider_capability, ProviderCapability, ProviderRegistration, PROVIDER_IDS,
 };
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
@@ -958,6 +963,45 @@ pub struct ProviderTransitionGuard {
     guard: Option<tokio::sync::OwnedMutexGuard<()>>,
 }
 
+/// Public, server-backed availability for a registered DCC provider. It is
+/// separate from adapter health and credentials: disabled means new work is
+/// refused even if the installed adapter is otherwise healthy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderAvailabilityState {
+    Enabled,
+    Disabling,
+    Disabled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAvailability {
+    pub provider_id: String,
+    pub enabled: bool,
+    pub state: ProviderAvailabilityState,
+    pub generation: u64,
+}
+
+/// Serializes durable availability changes for one registered provider. It is
+/// intentionally independent of per-session transitions: readers only take a
+/// synchronous snapshot, preventing a provider-disable/session-start ABBA
+/// deadlock.
+pub struct ProviderAvailabilityTransitionGuard {
+    provider_id: String,
+    runtime: Arc<ProcessRuntime>,
+    lock: Arc<AsyncMutex<()>>,
+    guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for ProviderAvailabilityTransitionGuard {
+    fn drop(&mut self) {
+        drop(self.guard.take());
+        self.runtime
+            .remove_provider_availability_lock_if_idle(&self.provider_id, &self.lock);
+    }
+}
+
 impl Drop for ProviderTransitionGuard {
     fn drop(&mut self) {
         // Release the session mutex before inspecting the weak registry. A
@@ -1143,6 +1187,37 @@ impl SessionCommandState {
         runtime
             .register_event_bus(&event_bus)
             .unwrap_or_else(|_| panic!("failed to initialize session runtime"));
+        // Absence is explicitly enabled for backwards compatibility. Seed
+        // only once per physical runtime so a clone cannot overwrite an
+        // in-flight Disabling state with an older on-disk snapshot.
+        for provider_id in PROVIDER_IDS {
+            let state = match session_repo.load_provider_availability(provider_id) {
+                Ok(Some(record)) => ProviderAvailabilityRuntimeState {
+                    phase: if record.enabled {
+                        ProviderAvailabilityPhase::Enabled
+                    } else {
+                        ProviderAvailabilityPhase::Disabled
+                    },
+                    generation: record.generation,
+                },
+                Ok(None) => ProviderAvailabilityRuntimeState {
+                    phase: ProviderAvailabilityPhase::Enabled,
+                    generation: 0,
+                },
+                // The availability table is server authority. A corrupted or
+                // temporarily unreadable row must refuse new provider work,
+                // never crash initialization or silently reopen adapters.
+                Err(_) => ProviderAvailabilityRuntimeState {
+                    phase: ProviderAvailabilityPhase::Disabled,
+                    generation: 0,
+                },
+            };
+            // ProcessRuntime was already acquired successfully. If its small
+            // in-memory cache is poisoned, keep the existing constructor's
+            // fail-closed runtime behavior rather than introducing a second
+            // panic path for availability initialization.
+            let _ = runtime.initialize_provider_availability_state(provider_id, state);
+        }
         if recover_interrupted {
             cleanup_all_snapshot_quarantines(&app_data_dir.join("turn-review").join("snapshots"));
             let _ = session_repo
@@ -1433,6 +1508,21 @@ impl SessionCommandState {
             "read-only review runs",
         )?
         .runtime;
+        // This work has no durable ProviderSessionBinding for disable to
+        // drain. Hold the provider availability transition through the first
+        // accepted input so disable orders entirely before or after runtime
+        // initialization. Once input is accepted the review may finish: the
+        // availability contract cancels tracked bindings and blocks new
+        // starts, rather than retroactively terminating this isolated run.
+        let availability_transition = self
+            .acquire_provider_availability_transition(&provider_id)
+            .await?;
+        let availability = self.provider_availability_snapshot(&provider_id)?;
+        if !availability.enabled {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {provider_id} is disabled"
+            )));
+        }
         let runtime = self.provider_runtime_config(&provider_id, runtime_config.as_ref())?;
         let ephemeral_id = Uuid::new_v4().to_string();
         let handle = provider
@@ -1447,7 +1537,7 @@ impl SessionCommandState {
             })
             .await?;
         let mut events = provider.stream_events(&handle);
-        provider
+        if let Err(error) = provider
             .send_input(
                 &handle,
                 Input::Turn(dcc_core::ports::ProviderTurnInput {
@@ -1462,7 +1552,19 @@ impl SessionCommandState {
                     approval_policy: None,
                 }),
             )
-            .await?;
+            .await
+        {
+            return match provider.cancel(&handle).await {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => Err(dcc_core::CoreError::Provider(format!(
+                    "read-only review input failed: {error}; prepared handle cleanup failed: {cleanup_error}"
+                ))),
+            };
+        }
+        // Do not hold availability through the five-minute stream. A disable
+        // that wins after input was accepted deliberately does not abort this
+        // untracked, read-only review.
+        drop(availability_transition);
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(300), async {
             let mut response = String::new();
@@ -1499,8 +1601,26 @@ impl SessionCommandState {
         .map_err(|_| {
             dcc_core::CoreError::Provider("The review agent timed out after 5 minutes.".to_string())
         });
-        let _ = provider.cancel(&handle).await;
-        let response = result??;
+        // Preserve the timeout error while still disposing the prepared
+        // handle; a timeout is also a post-prepare failure.
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => Err(error),
+        };
+        let response = match (result, provider.cancel(&handle).await) {
+            (Ok(response), Ok(())) => response,
+            (Err(error), Ok(())) => return Err(error),
+            (Ok(_), Err(cleanup_error)) => {
+                return Err(dcc_core::CoreError::Provider(format!(
+                    "read-only review completed but handle cleanup failed: {cleanup_error}"
+                )));
+            }
+            (Err(error), Err(cleanup_error)) => {
+                return Err(dcc_core::CoreError::Provider(format!(
+                    "read-only review failed: {error}; prepared handle cleanup failed: {cleanup_error}"
+                )));
+            }
+        };
         if response.trim().is_empty() {
             return Err(dcc_core::CoreError::Provider(
                 "The review agent returned an empty response.".to_string(),
@@ -2951,7 +3071,14 @@ impl SessionCommandState {
             return Ok(());
         }
 
-        let registration = registered_provider(&session.provider_id)?;
+        let registration = self.require_provider_available(&session.provider_id)?;
+        let expected_availability = self.provider_availability_snapshot(&session.provider_id)?;
+        if !expected_availability.enabled {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {} is disabled",
+                session.provider_id
+            )));
+        }
         let supports_multi_root = registration.capabilities.supports_multi_root;
         let provider = registration.runtime;
         let (working_directory, additional_working_directories) = self
@@ -3053,6 +3180,24 @@ impl SessionCommandState {
             ephemeral_mcp_lease_id: ephemeral_lease_id.clone(),
         };
 
+        // A disable can begin while `prepare_session` awaits. Recheck the
+        // exact enabled generation immediately before publishing the binding;
+        // otherwise a handle omitted from disable's initial snapshot could be
+        // installed after the provider became Disabling.
+        if !self
+            .provider_availability_matches(&session.provider_id, expected_availability.generation)?
+        {
+            self.revoke_ephemeral_mcp_projection(&session.id, ephemeral_lease_id.as_deref());
+            return match provider.cancel(&handle).await {
+                Ok(()) => Err(dcc_core::CoreError::Provider(
+                    "provider availability changed while attaching".to_string(),
+                )),
+                Err(cleanup_error) => Err(dcc_core::CoreError::Provider(format!(
+                    "provider availability changed while attaching; prepared handle cleanup failed: {cleanup_error}"
+                ))),
+            };
+        }
+
         let binding_result = self.lock_store().map(|mut store| {
             match store.provider_sessions.entry(session.id.clone()) {
                 Entry::Vacant(entry) => {
@@ -3084,6 +3229,23 @@ impl SessionCommandState {
                     "provider binding lost its attach race and prepared handle cleanup failed: {cleanup_error}"
                 ))
             });
+        }
+
+        // The availability transition may have started after the pre-insert
+        // check but before the store mutex was acquired. This binding is
+        // still owned by the current session transition, so canceling it here
+        // cannot touch a successor selected after re-enable.
+        if !self
+            .provider_availability_matches(&session.provider_id, expected_availability.generation)?
+        {
+            return match self.cancel_provider_session(&session.id).await {
+                Ok(()) => Err(dcc_core::CoreError::Provider(
+                    "provider availability changed while attaching".to_string(),
+                )),
+                Err(cleanup_error) => Err(dcc_core::CoreError::Provider(format!(
+                    "provider availability changed while attaching; binding cleanup failed: {cleanup_error}"
+                ))),
+            };
         }
 
         if let Some(provider_version) = mcp_projection_version {
@@ -3143,6 +3305,241 @@ impl SessionCommandState {
         })
     }
 
+    async fn acquire_provider_availability_transition(
+        &self,
+        provider_id: &str,
+    ) -> Result<ProviderAvailabilityTransitionGuard> {
+        // Registration is the authority boundary: only its fixed provider set
+        // may allocate a process-runtime availability lock.
+        registered_provider(provider_id)?;
+        let lock = self.runtime.provider_availability_lock(provider_id)?;
+        Ok(ProviderAvailabilityTransitionGuard {
+            provider_id: provider_id.to_string(),
+            runtime: Arc::clone(&self.runtime),
+            guard: Some(Arc::clone(&lock).lock_owned().await),
+            lock,
+        })
+    }
+
+    /// MCP OAuth is the only flow that needs both provider-wide availability
+    /// and a stable session binding. Keep acquisition centralized in the same
+    /// order as disable draining: provider availability first, then session.
+    async fn acquire_mcp_oauth_transitions(
+        &self,
+        provider_id: &str,
+        session_id: &SessionId,
+    ) -> Result<(ProviderAvailabilityTransitionGuard, ProviderTransitionGuard)> {
+        let availability = self
+            .acquire_provider_availability_transition(provider_id)
+            .await?;
+        let session = self.acquire_provider_transition(session_id).await?;
+        Ok((availability, session))
+    }
+
+    fn provider_availability_snapshot(&self, provider_id: &str) -> Result<ProviderAvailability> {
+        registered_provider(provider_id)?;
+        let runtime_state = self
+            .runtime
+            .provider_availability_state(provider_id)?
+            .ok_or_else(|| {
+                dcc_core::CoreError::Repository(
+                    "provider availability was not initialized".to_string(),
+                )
+            })?;
+        let state = match runtime_state.phase {
+            ProviderAvailabilityPhase::Enabled => ProviderAvailabilityState::Enabled,
+            ProviderAvailabilityPhase::Disabling => ProviderAvailabilityState::Disabling,
+            ProviderAvailabilityPhase::Disabled => ProviderAvailabilityState::Disabled,
+        };
+        Ok(ProviderAvailability {
+            provider_id: provider_id.to_string(),
+            enabled: matches!(state, ProviderAvailabilityState::Enabled),
+            state,
+            generation: runtime_state.generation,
+        })
+    }
+
+    /// Returns availability for a registered provider. This never runs a
+    /// healthcheck and never starts an adapter.
+    pub fn provider_availability(&self, provider_id: &str) -> Result<ProviderAvailability> {
+        self.provider_availability_snapshot(provider_id)
+    }
+
+    fn provider_availability_matches(&self, provider_id: &str, generation: u64) -> Result<bool> {
+        let current = self.provider_availability_snapshot(provider_id)?;
+        Ok(current.enabled && current.generation == generation)
+    }
+
+    /// The single server-side gate for work that can create or attach a
+    /// provider runtime. Existing bindings retain their cleanup/steering
+    /// paths even while this gate is closed.
+    fn require_provider_available(&self, provider_id: &str) -> Result<ProviderRegistration> {
+        let registration = registered_provider(provider_id)?;
+        let availability = self.provider_availability_snapshot(provider_id)?;
+        if !availability.enabled {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {provider_id} is disabled"
+            )));
+        }
+        Ok(registration)
+    }
+
+    /// Changes server-backed availability. Disable first closes the runtime
+    /// gate, persists the disabled record, then drains matching bindings. A
+    /// persistence failure restores the exact prior in-memory state before
+    /// any provider cancellation can begin.
+    pub async fn set_provider_enabled(
+        &self,
+        provider_id: &str,
+        enabled: bool,
+    ) -> Result<ProviderAvailability> {
+        registered_provider(provider_id)?;
+        let transition = self
+            .acquire_provider_availability_transition(provider_id)
+            .await?;
+        let previous = self.provider_availability_snapshot(provider_id)?;
+        let previous_runtime = self
+            .runtime
+            .provider_availability_state(provider_id)?
+            .ok_or_else(|| {
+                dcc_core::CoreError::Repository(
+                    "provider availability was not initialized".to_string(),
+                )
+            })?;
+
+        if enabled && previous.state == ProviderAvailabilityState::Enabled {
+            return Ok(previous);
+        }
+        let generation = if !enabled && previous.state == ProviderAvailabilityState::Disabled {
+            previous.generation
+        } else {
+            previous.generation.checked_add(1).ok_or_else(|| {
+                dcc_core::CoreError::Repository(
+                    "provider availability generation exhausted".to_string(),
+                )
+            })?
+        };
+        let updated_at_ms = u64::try_from(Utc::now().timestamp_millis()).map_err(|_| {
+            dcc_core::CoreError::Repository("provider availability clock is invalid".to_string())
+        })?;
+
+        if !enabled {
+            self.runtime.set_provider_availability_state(
+                provider_id,
+                ProviderAvailabilityRuntimeState {
+                    phase: ProviderAvailabilityPhase::Disabling,
+                    generation,
+                },
+            )?;
+        }
+        let record = ProviderAvailabilityRecord {
+            provider_id: provider_id.to_string(),
+            enabled,
+            generation,
+            updated_at_ms,
+        };
+        if let Err(error) = self.session_repo.save_provider_availability(&record) {
+            // A different process may have committed a newer generation
+            // between our local snapshot and conditional upsert. Project that
+            // durable authority instead of restoring a stale Enabled cache.
+            // For an unreadable/ordinary database failure retain the exact
+            // previous runtime state, so no cleanup starts on a failed write.
+            let replacement = match self.session_repo.load_provider_availability(provider_id) {
+                Ok(Some(durable))
+                    if durable.generation > record.generation
+                        || (durable.generation == record.generation
+                            && durable.enabled != record.enabled) =>
+                {
+                    ProviderAvailabilityRuntimeState {
+                        phase: if durable.enabled {
+                            ProviderAvailabilityPhase::Enabled
+                        } else {
+                            ProviderAvailabilityPhase::Disabled
+                        },
+                        generation: durable.generation,
+                    }
+                }
+                _ => previous_runtime,
+            };
+            let _ = self
+                .runtime
+                .set_provider_availability_state(provider_id, replacement);
+            return Err(error);
+        }
+
+        self.runtime.set_provider_availability_state(
+            provider_id,
+            ProviderAvailabilityRuntimeState {
+                phase: if enabled {
+                    ProviderAvailabilityPhase::Enabled
+                } else {
+                    ProviderAvailabilityPhase::Disabled
+                },
+                generation,
+            },
+        )?;
+
+        if !enabled {
+            if let Err(error) = self
+                .drain_disabled_provider_bindings(provider_id, generation)
+                .await
+            {
+                // The durable/in-memory gate remains Disabled. Returning this
+                // bounded error lets a caller retry cleanup without reopening
+                // the provider or risking a newly attached successor.
+                return Err(dcc_core::CoreError::Provider(format!(
+                    "provider disabled but runtime cleanup failed: {error}"
+                )));
+            }
+        }
+        drop(transition);
+        self.provider_availability_snapshot(provider_id)
+    }
+
+    async fn drain_disabled_provider_bindings(
+        &self,
+        provider_id: &str,
+        generation: u64,
+    ) -> Result<()> {
+        let candidates = self
+            .lock_store()?
+            .provider_sessions
+            .iter()
+            .filter_map(|(session_id, binding)| {
+                (binding.provider_id == provider_id).then(|| {
+                    (
+                        session_id.clone(),
+                        binding.handle.handle_id.clone(),
+                        Arc::clone(&binding.current_turn_id),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        for (session_id, expected_handle_id, expected_turn) in candidates {
+            let transition = self.acquire_provider_transition(&session_id).await?;
+            let still_disabled = self
+                .runtime
+                .provider_availability_state(provider_id)?
+                .is_some_and(|state| {
+                    state.phase == ProviderAvailabilityPhase::Disabled
+                        && state.generation == generation
+                });
+            if !still_disabled {
+                return Ok(());
+            }
+            let matches = self.provider_binding(&session_id)?.is_some_and(|binding| {
+                binding.provider_id == provider_id
+                    && binding.handle.handle_id == expected_handle_id
+                    && Arc::ptr_eq(&binding.current_turn_id, &expected_turn)
+            });
+            if matches {
+                self.cancel_provider_session(&session_id).await?;
+            }
+            drop(transition);
+        }
+        Ok(())
+    }
+
     fn validate_provider_transition(
         &self,
         transition: &ProviderTransitionGuard,
@@ -3174,7 +3571,7 @@ impl SessionCommandState {
 
     async fn validate_provider_session_attachment(&self, session: &Session) -> Result<()> {
         self.require_active_session_thread(&session.id).await?;
-        let registration = registered_provider(&session.provider_id)?;
+        let registration = self.require_provider_available(&session.provider_id)?;
         self.resolve_session_working_directories(
             session,
             registration.capabilities.supports_multi_root,
@@ -3262,9 +3659,10 @@ impl SessionCommandState {
         let (provider_id, model, provider_runtime) =
             merge_send_turn_session_selection(current, input);
         let registration = if let Some(policy) = input.approval_policy {
-            require_provider_approval_policy(&provider_id, policy)?
+            require_provider_approval_policy(&provider_id, policy)?;
+            self.require_provider_available(&provider_id)?
         } else {
-            registered_provider(&provider_id)?
+            self.require_provider_available(&provider_id)?
         };
         let candidate = Session {
             provider_id,
@@ -3305,9 +3703,13 @@ impl SessionCommandState {
             .ok_or_else(|| dcc_core::CoreError::Repository("session not found".to_string()))?;
         match approval_policy {
             Some(approval_policy) => {
-                require_provider_approval_policy(&session.provider_id, approval_policy).map(|_| ())
+                require_provider_approval_policy(&session.provider_id, approval_policy)?;
+                self.require_provider_available(&session.provider_id)
+                    .map(|_| ())
             }
-            None => registered_provider(&session.provider_id).map(|_| ()),
+            None => self
+                .require_provider_available(&session.provider_id)
+                .map(|_| ()),
         }
     }
 
@@ -3341,6 +3743,7 @@ impl SessionCommandState {
                 target_provider_id.0
             )));
         }
+        self.require_provider_available(&target_provider_id.0)?;
         Ok(())
     }
 
@@ -3593,7 +3996,7 @@ impl SessionCommandState {
     }
 
     pub async fn validate_start_thread_scope(&self, input: &StartThreadInput) -> Result<()> {
-        let registration = registered_provider(&input.provider_id)?;
+        let registration = self.require_provider_available(&input.provider_id)?;
         if input.additional_workspace_ids.is_empty() {
             return Ok(());
         }
@@ -4718,10 +5121,38 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
-        let provider = registered_provider(&binding.provider_id)?.runtime;
-        provider
-            .start_mcp_oauth(&binding.handle, definition_id)
-            .await
+        // OAuth starts new adapter work. The disable drain takes these locks
+        // in exactly this order (availability, then session), so preserve it
+        // here to avoid ABBA with close/switch/send. Re-read the binding only
+        // after both guards are held; it stays stable through adapter
+        // acceptance below.
+        let (availability_transition, session_transition) = self
+            .acquire_mcp_oauth_transitions(&binding.provider_id, session_id)
+            .await?;
+        let current_binding = self.provider_binding(session_id)?.ok_or_else(|| {
+            dcc_core::CoreError::Provider(format!(
+                "no provider binding for session {}",
+                session_id.0
+            ))
+        })?;
+        if current_binding.provider_id != binding.provider_id
+            || current_binding.handle.handle_id != binding.handle.handle_id
+        {
+            return Err(dcc_core::CoreError::Provider(
+                "provider binding changed before MCP OAuth could start".to_string(),
+            ));
+        }
+        let provider = self
+            .require_provider_available(&current_binding.provider_id)?
+            .runtime;
+        let result = provider
+            .start_mcp_oauth(&current_binding.handle, definition_id)
+            .await;
+        // Keep both transitions through adapter acceptance, then release the
+        // session before availability, mirroring the acquisition order.
+        drop(session_transition);
+        drop(availability_transition);
+        result
     }
 
     async fn multi_workspace_scope_instructions(
@@ -5398,10 +5829,17 @@ mod tests {
     }
 
     fn inert_provider_binding(session_id: &SessionId) -> ProviderSessionBinding {
+        inert_provider_binding_for(session_id, "codex")
+    }
+
+    fn inert_provider_binding_for(
+        session_id: &SessionId,
+        provider_id: &str,
+    ) -> ProviderSessionBinding {
         ProviderSessionBinding {
-            provider_id: "codex".to_string(),
+            provider_id: provider_id.to_string(),
             handle: SessionHandle {
-                provider_id: ProviderId("codex".to_string()),
+                provider_id: ProviderId(provider_id.to_string()),
                 session_id: session_id.clone(),
                 handle_id: "capability-validation-binding".to_string(),
             },
@@ -5894,6 +6332,317 @@ mod tests {
                 .expect("session events")
                 .is_empty()
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_availability_defaults_enabled_persists_and_is_shared_by_runtime_scope() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let db_path = root.join("state.sqlite");
+        let app_data = root.join("app-data");
+        let first = SessionCommandState::new_headless(db_path.clone(), app_data.clone());
+        assert_eq!(
+            first
+                .provider_availability("droid")
+                .expect("default availability"),
+            ProviderAvailability {
+                provider_id: "droid".to_string(),
+                enabled: true,
+                state: ProviderAvailabilityState::Enabled,
+                generation: 0,
+            }
+        );
+        let disabled = first
+            .set_provider_enabled("droid", false)
+            .await
+            .expect("disable provider without bindings");
+        assert!(!disabled.enabled);
+        assert_eq!(disabled.state, ProviderAvailabilityState::Disabled);
+        let clone = SessionCommandState::new_headless(db_path.clone(), app_data.clone());
+        assert_eq!(
+            clone
+                .provider_availability("droid")
+                .expect("shared availability"),
+            disabled
+        );
+        drop(clone);
+        drop(first);
+
+        let reopened = SessionCommandState::new_headless(db_path, app_data);
+        assert_eq!(
+            reopened
+                .provider_availability("droid")
+                .expect("durable availability"),
+            disabled
+        );
+        let enabled = reopened
+            .set_provider_enabled("droid", true)
+            .await
+            .expect("re-enable provider");
+        assert!(enabled.enabled);
+        assert_eq!(enabled.state, ProviderAvailabilityState::Enabled);
+        assert_eq!(enabled.generation, disabled.generation + 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn disabled_provider_fails_before_start_or_selection_mutates_existing_binding() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("availability-selection");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        save_active_session_thread(&state, &session).await;
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), inert_provider_binding(&session.id));
+        state
+            .set_provider_enabled("droid", false)
+            .await
+            .expect("disable provider without droid binding");
+
+        let input = selection_input(session.id.clone(), Some("droid"), None);
+        assert!(state
+            .prepare_provider_session_for_turn(&input)
+            .await
+            .is_err());
+        assert!(state
+            .provider_binding(&session.id)
+            .expect("binding")
+            .is_some());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("reload")
+                .expect("session")
+                .provider_id,
+            "codex"
+        );
+        assert!(
+            SessionEventRepo::list_events_by_session(&state, &session.id)
+                .await
+                .expect("events")
+                .is_empty()
+        );
+        assert!(state
+            .validate_start_thread_scope(&StartThreadInput {
+                workspace_id: session.workspace_id.clone(),
+                additional_workspace_ids: Vec::new(),
+                project_id: session.project_id.clone(),
+                provider_id: "droid".to_string(),
+                model: None,
+                provider_runtime: None,
+                working_directory_override: None,
+                title: None,
+            })
+            .await
+            .is_err());
+        assert!(state
+            .validate_delegation_target(
+                &ProviderId("droid".to_string()),
+                &DelegationMode::Review,
+                &DelegationBudget::default(),
+            )
+            .is_err());
+        assert!(state.set_provider_enabled("unknown", false).await.is_err());
+        assert!(state
+            .session_repo
+            .load_provider_availability("unknown")
+            .expect("unknown row")
+            .is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_availability_persistence_rolls_back_disabling_gate_before_cleanup() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let db_path = root.join("state.sqlite");
+        let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
+        // Model another process committing a newer generation after this
+        // runtime seeded its cache. The stale conditional upsert fails, so no
+        // local cleanup can begin and the durable authority wins the cache.
+        let external = SqliteSessionRepo::open(&db_path).expect("external repo");
+        external
+            .save_provider_availability(&ProviderAvailabilityRecord {
+                provider_id: "droid".to_string(),
+                enabled: false,
+                generation: 9,
+                updated_at_ms: 9,
+            })
+            .expect("external newer generation");
+
+        assert!(state.set_provider_enabled("droid", false).await.is_err());
+        assert_eq!(
+            state
+                .provider_availability("droid")
+                .expect("reconciled availability")
+                .state,
+            ProviderAvailabilityState::Disabled
+        );
+        assert_eq!(
+            state
+                .provider_availability("droid")
+                .expect("reconciled generation")
+                .generation,
+            9
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn availability_guard_orders_new_work_before_a_disable_transition() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+
+        // Ephemeral review and MCP OAuth use this same per-provider guard
+        // through their first provider call. A disable cannot publish
+        // Disabling/Disabled until that short initialization section exits.
+        let guard = state
+            .acquire_provider_availability_transition("droid")
+            .await
+            .expect("availability guard");
+        let (completed, mut result) = tokio::sync::oneshot::channel();
+        let contender = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let _ = completed.send(state.set_provider_enabled("droid", false).await);
+            })
+        };
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), &mut result)
+                .await
+                .is_err()
+        );
+        drop(guard);
+
+        // The queued request proves no waiter was stranded when the guard
+        // dropped and reaches Disabled only after the holder's critical work.
+        let disabled = tokio::time::timeout(std::time::Duration::from_secs(1), &mut result)
+            .await
+            .expect("disable unblocked")
+            .expect("disable task")
+            .expect("disable after guard release");
+        assert_eq!(disabled.state, ProviderAvailabilityState::Disabled);
+        contender.await.expect("disable join");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mcp_oauth_lock_order_stabilizes_binding_without_abba() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session_id = SessionId("oauth-availability-order".to_string());
+        state.store.lock().expect("store").provider_sessions.insert(
+            session_id.clone(),
+            inert_provider_binding_for(&session_id, "droid"),
+        );
+        let initial = state
+            .provider_binding(&session_id)
+            .expect("initial binding")
+            .expect("binding exists");
+
+        // This is the exact lock pair used by start_mcp_oauth. It proves the
+        // binding identity while both guards are held and makes a concurrent
+        // session transition wait. The disable contender waits on the same
+        // provider guard, so both paths share availability -> session order.
+        let (availability, session) = state
+            .acquire_mcp_oauth_transitions(&initial.provider_id, &session_id)
+            .await
+            .expect("oauth transitions");
+        let current = state
+            .provider_binding(&session_id)
+            .expect("current binding")
+            .expect("binding remains");
+        assert_eq!(current.provider_id, initial.provider_id);
+        assert_eq!(current.handle.handle_id, initial.handle.handle_id);
+
+        let (session_done, mut session_result) = tokio::sync::oneshot::channel();
+        let session_waiter = {
+            let state = state.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move {
+                let result = state.acquire_provider_transition(&session_id).await;
+                let _ = session_done.send(result.is_ok());
+            })
+        };
+        let (disable_done, mut disable_result) = tokio::sync::oneshot::channel();
+        let disable_waiter = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let _ = disable_done.send(state.set_provider_enabled("droid", false).await);
+            })
+        };
+        tokio::task::yield_now().await;
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), &mut session_result)
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), &mut disable_result)
+                .await
+                .is_err()
+        );
+
+        // Release in reverse acquisition order. The session waiter may now
+        // finish, while disable remains blocked on availability. Once OAuth's
+        // availability guard drops, disable can take the session lock and
+        // complete, demonstrating there is no ABBA cycle.
+        drop(session);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), &mut session_result)
+                .await
+                .expect("session transition unblocked")
+                .expect("session result")
+        );
+        drop(availability);
+        let disable = tokio::time::timeout(std::time::Duration::from_secs(1), &mut disable_result)
+            .await
+            .expect("disable unblocked")
+            .expect("disable result");
+        // The inert adapter intentionally makes cancellation fail, but the
+        // durable disable must still finish fail-closed rather than deadlock.
+        assert!(disable.is_err());
+        session_waiter.await.expect("session waiter join");
+        disable_waiter.await.expect("disable waiter join");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_provider_cancel_keeps_the_durable_gate_disabled_for_retry() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let mut session = sample_session("availability-cancel-failure");
+        session.provider_id = "droid".to_string();
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save droid session");
+        state.store.lock().expect("store").provider_sessions.insert(
+            session.id.clone(),
+            inert_provider_binding_for(&session.id, "droid"),
+        );
+
+        assert!(state.set_provider_enabled("droid", false).await.is_err());
+        assert_eq!(
+            state
+                .provider_availability("droid")
+                .expect("fail-closed availability")
+                .state,
+            ProviderAvailabilityState::Disabled
+        );
+        assert!(state
+            .provider_binding(&session.id)
+            .expect("binding")
+            .is_some());
     }
 
     #[tokio::test(flavor = "current_thread")]

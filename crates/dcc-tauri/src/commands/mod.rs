@@ -38,7 +38,9 @@ pub use mcp_commands::{
     activate_mcp_integration, create_mcp_integration, disable_mcp_integration,
     disconnect_mcp_oauth, list_mcp_integrations, remove_mcp_integration, set_mcp_tool_policy,
 };
-pub use provider_commands::{list_providers, provider_account_usage};
+pub use provider_commands::{
+    get_provider_availability, list_providers, provider_account_usage, set_provider_availability,
+};
 pub use session_commands::{
     abort_run, apply_task_title, approve_plan, execute_guarded_undo, interrupt_native_subagent,
     last_turn_review, list_mcp_runtime_statuses, list_thread_events, prepare_guarded_undo,

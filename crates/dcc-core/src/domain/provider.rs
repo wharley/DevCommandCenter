@@ -173,7 +173,19 @@ pub struct ProviderDescriptor {
     pub models: Vec<ProviderModelDescriptor>,
     pub capabilities: Capabilities,
     pub health: HealthStatus,
+    /// Server-backed DCC runtime authority. This is independent from health:
+    /// a healthy adapter may be disabled deliberately.
+    #[serde(default = "provider_enabled_by_default")]
+    pub enabled: bool,
+    /// Monotonic server-backed availability generation, zero for legacy
+    /// catalogs that predate the availability table.
+    #[serde(default)]
+    pub availability_generation: u64,
     pub stable: bool,
+}
+
+fn provider_enabled_by_default() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
