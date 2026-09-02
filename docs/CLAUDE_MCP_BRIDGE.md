@@ -20,7 +20,7 @@ independent `.mcp.json`/`settingSources` path in the
 The bundled versions for this slice are:
 
 - `@anthropic-ai/claude-agent-sdk` `0.2.126`;
-- `@anthropic-ai/claude-code` `2.1.126`;
+- `@anthropic-ai/claude-code` `2.1.258`;
 - `mcp-remote` `0.1.38`, pinned for the Claude remote-OAuth transport bridge.
 
 The installed TypeScript contract also exposes `mcpServerStatus()` and defines
@@ -190,7 +190,7 @@ is discarded. Missing booleans remain unknown rather than receiving inferred
 defaults.
 
 The Claude adapter declares the exact runtime key
-`claude-agent-sdk@0.2.126+claude-code@2.1.126`. A test binds that key to the
+`claude-agent-sdk@0.2.126+claude-code@2.1.258`. A test binds that key to the
 pinned package dependencies, so a dependency upgrade cannot silently retain
 old runtime identity.
 

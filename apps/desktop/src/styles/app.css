@@ -368,6 +368,7 @@
 		position: relative;
 		width: 100%;
 		max-height: 80%;
+		cursor: pointer;
 		overflow-y: auto;
 		overscroll-behavior: contain;
 		contain: layout;
