@@ -7,6 +7,7 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import { ChevronDown } from "lucide-react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,8 @@ type ActiveThreadViewportProps = {
 	onRetryInterrupted?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
 	onOpenPlan: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
+	/** Reveals and highlights one message (find-in-thread); nonce re-fires the same id. */
+	focusRequest?: { messageId: string; nonce: number } | null;
 };
 
 export function ActiveThreadViewport({
@@ -99,6 +102,7 @@ export function ActiveThreadViewport({
 	onRetryInterrupted,
 	onOpenPlan,
 	onOpenFileReference,
+	focusRequest = null,
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
 	const [hasNewActivity, setHasNewActivity] = useState(false);
@@ -190,6 +194,27 @@ export function ActiveThreadViewport({
 		void scrollToBottom("smooth");
 	}, [scrollToBottom]);
 
+	// Find-in-thread: make the target visible (the window only grows, never
+	// shrinks) and scroll it into view once it is rendered.
+	const focusedMessageId = focusRequest?.messageId ?? null;
+	useEffect(() => {
+		if (!focusRequest) return;
+		const index = messages.findIndex((message) => message.id === focusRequest.messageId);
+		if (index < 0) return;
+		if (index < visibleStart) {
+			setConversationWindow({ sessionId, messageLimit: messages.length });
+		}
+	}, [focusRequest, messages, sessionId, visibleStart]);
+	useLayoutEffect(() => {
+		if (!focusRequest) return;
+		const scrollElement = scrollRef.current;
+		if (!scrollElement) return;
+		const target = scrollElement.querySelector<HTMLElement>(
+			`[data-conversation-trail-id="${CSS.escape(focusRequest.messageId)}"]`,
+		);
+		target?.scrollIntoView({ block: "center" });
+	}, [focusRequest, scrollRef, visibleStart]);
+
 	const handleLoadEarlier = useCallback(() => {
 		const scrollElement = scrollRef.current;
 		if (scrollElement) {
@@ -277,7 +302,10 @@ export function ActiveThreadViewport({
 										<div
 											key={message.id}
 											data-conversation-trail-id={message.id}
-											className="scroll-mt-6 pb-4"
+											className={cn(
+												"scroll-mt-6 pb-4",
+												focusedMessageId === message.id && "dcc-thread-find-focus",
+											)}
 										>
 											<UserMessage
 												label={message.label}
@@ -301,7 +329,14 @@ export function ActiveThreadViewport({
 								}
 								if (message.role === "assistant") {
 									return (
-										<div key={message.id} className="pb-4">
+										<div
+											key={message.id}
+											data-conversation-trail-id={message.id}
+											className={cn(
+												"scroll-mt-6 pb-4",
+												focusedMessageId === message.id && "dcc-thread-find-focus",
+											)}
+										>
 											<AssistantMessage
 												content={message.content}
 												streaming={message.streaming}
@@ -367,7 +402,7 @@ export function ActiveThreadViewport({
 								}
 								if (message.delegation) {
 									return (
-										<div key={message.id} className="pb-4">
+										<div key={message.id} data-conversation-trail-id={message.id} className="scroll-mt-6 pb-4">
 											<DelegationCard
 												delegation={message.delegation}
 												fallbackContent={message.content}
@@ -383,7 +418,14 @@ export function ActiveThreadViewport({
 									);
 								}
 								return (
-									<div key={message.id} className="pb-4">
+									<div
+										key={message.id}
+										data-conversation-trail-id={message.id}
+										className={cn(
+											"scroll-mt-6 pb-4",
+											focusedMessageId === message.id && "dcc-thread-find-focus",
+										)}
+									>
 										<SystemMessage
 											label={message.label}
 											content={message.content}

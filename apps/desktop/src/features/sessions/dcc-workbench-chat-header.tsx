@@ -1,4 +1,4 @@
-import { Globe2, History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, X } from "lucide-react";
+import { Globe2, History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
 import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
@@ -28,6 +28,8 @@ export type DccWorkbenchChatHeaderProps = {
 	onCloseSession: (sessionId: string) => void;
 	onRestoreSession: (sessionId: string) => void;
 	onOpenSessionSearch: () => void;
+	/** Find in the current conversation (renderer-side). */
+	onOpenThreadFind?: () => void;
 	onResumeSession: () => void;
 	sessionActionSessionId: string | null;
 	onOpenTerminal?: () => void;
@@ -41,7 +43,7 @@ export type DccWorkbenchChatHeaderProps = {
 export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	threadTitle, projectLabel, workspacePath, sessions, selectedSessionId,
 	isLoadingSessions, sessionSnapshot, onSelectSession, onStartSession,
-	onCloseSession, onRestoreSession, onOpenSessionSearch, onResumeSession,
+	onCloseSession, onRestoreSession, onOpenSessionSearch, onOpenThreadFind, onResumeSession,
 	sessionActionSessionId, onOpenTerminal, onOpenBrowser, browserOpen = false, terminalScopes, workspaceActions,
 }: DccWorkbenchChatHeaderProps) {
 	const { t } = useTranslation("common");
@@ -98,6 +100,12 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onStartSession} aria-label={t("workbench.newSessionAria")} className="text-muted-foreground hover:text-foreground"><Plus className="size-3.5" /></Button></TooltipTrigger>
 					<TooltipContent side="bottom">{t("workbench.newSessionTooltip")}</TooltipContent>
 				</Tooltip>
+				{onOpenThreadFind ? (
+					<Tooltip>
+						<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onOpenThreadFind} aria-label={t("conversation.find.open")} className="text-muted-foreground hover:text-foreground"><TextSearch className="size-3.5" /></Button></TooltipTrigger>
+						<TooltipContent side="bottom">{t("conversation.find.openTooltip")}</TooltipContent>
+					</Tooltip>
+				) : null}
 				<Tooltip>
 					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onOpenSessionSearch} aria-label={t("workbench.sessionSearch.buttonAria")} className="text-muted-foreground hover:text-foreground"><Search className="size-3.5" /></Button></TooltipTrigger>
 					<TooltipContent side="bottom">{t("workbench.sessionSearch.buttonTooltip")}</TooltipContent>

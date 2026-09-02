@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { LoaderCircle } from "lucide-react";
+import { ThreadFindBar } from "./ThreadFindBar";
 import type {
 	SessionEventRecord,
 	WorkspaceSessionSummary,
@@ -367,6 +368,45 @@ export function WorkspacePanel({
 		[onFileSurfaceClosed, onCloseSurface],
 	);
 	const queryClient = useQueryClient();
+	// Find-in-thread is per conversation; a focus request carries a nonce so
+	// re-selecting the same match still re-scrolls.
+	const [threadFindOpen, setThreadFindOpen] = useState(false);
+	const [threadFocusRequest, setThreadFocusRequest] = useState<{
+		messageId: string;
+		nonce: number;
+	} | null>(null);
+	const handleFocusThreadMessage = useCallback((messageId: string) => {
+		setThreadFocusRequest((previous) => ({ messageId, nonce: (previous?.nonce ?? 0) + 1 }));
+	}, []);
+	const handleCloseThreadFind = useCallback(() => {
+		setThreadFindOpen(false);
+		setThreadFocusRequest(null);
+	}, []);
+	useEffect(() => {
+		setThreadFindOpen(false);
+		setThreadFocusRequest(null);
+	}, [selectedSessionId, workspaceId]);
+	useEffect(() => {
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f" || event.altKey) {
+				return;
+			}
+			const target = event.target as HTMLElement | null;
+			// Native find inside editors and inputs keeps its meaning.
+			if (
+				target &&
+				(target.isContentEditable ||
+					target.tagName === "INPUT" ||
+					target.tagName === "TEXTAREA")
+			) {
+				return;
+			}
+			event.preventDefault();
+			setThreadFindOpen(true);
+		};
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, []);
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
 	);
@@ -1227,6 +1267,7 @@ export function WorkspacePanel({
 				].join(" ")}
 			>
 				<DccWorkbenchChatHeader
+					onOpenThreadFind={() => setThreadFindOpen(true)}
 					threadTitle={selectedSessionTitle}
 					projectLabel={projectLabel}
 					sessions={sessions}
@@ -1263,7 +1304,15 @@ export function WorkspacePanel({
 			</header>
 
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+				{threadFindOpen ? (
+					<ThreadFindBar
+						messages={messages}
+						onFocusMessage={handleFocusThreadMessage}
+						onClose={handleCloseThreadFind}
+					/>
+				) : null}
 				<ActiveThreadViewport
+					focusRequest={threadFocusRequest}
 					messages={messages}
 					hasLoaded={hasLoaded}
 					isEmpty={hasEmptyThread}

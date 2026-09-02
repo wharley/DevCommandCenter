@@ -2288,6 +2288,18 @@
     "copyBranchNameError": "Could not copy the branch name"
   },
   "conversation": {
+    "find": {
+      "open": "Find in conversation",
+      "openTooltip": "Find in this conversation (⌘F / Ctrl+F)",
+      "label": "Find in conversation",
+      "placeholder": "Find in this conversation…",
+      "hint": "Type at least 2 characters. Enter: next, Shift+Enter: previous, Esc: close.",
+      "empty": "No matches in this conversation.",
+      "count": "{{current}} of {{total}}",
+      "previous": "Previous match",
+      "next": "Next match",
+      "close": "Close find"
+    },
     "compactUnsupported": "{{provider}} does not treat /compact as compaction. The message was sent as text and no re-anchor will follow.",
     "evidence": {
       "chip": "Evidence · {{count}} · {{stage}}",

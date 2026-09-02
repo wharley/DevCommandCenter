@@ -2288,6 +2288,18 @@
     "copyBranchNameError": "Não foi possível copiar o nome do branch"
   },
   "conversation": {
+    "find": {
+      "open": "Buscar na conversa",
+      "openTooltip": "Buscar nesta conversa (⌘F / Ctrl+F)",
+      "label": "Buscar na conversa",
+      "placeholder": "Buscar nesta conversa…",
+      "hint": "Digite ao menos 2 caracteres. Enter: próximo, Shift+Enter: anterior, Esc: fechar.",
+      "empty": "Nenhuma ocorrência nesta conversa.",
+      "count": "{{current}} de {{total}}",
+      "previous": "Ocorrência anterior",
+      "next": "Próxima ocorrência",
+      "close": "Fechar busca"
+    },
     "compactUnsupported": "{{provider}} não trata /compact como compactação. A mensagem foi enviada como texto e nenhum re-anchor seguirá.",
     "evidence": {
       "chip": "Evidências · {{count}} · {{stage}}",

@@ -461,3 +461,10 @@
 		transition: none;
 	}
 }
+
+/* Find-in-thread: the focused match gets a transient ring, never a layout change. */
+.dcc-thread-find-focus > * {
+	outline: 2px solid color-mix(in oklab, var(--ring) 55%, transparent);
+	outline-offset: 4px;
+	border-radius: 0.5rem;
+}
