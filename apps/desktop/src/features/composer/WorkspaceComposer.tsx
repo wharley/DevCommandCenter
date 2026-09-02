@@ -81,7 +81,7 @@ import {
 	setPlanModeState,
 	submitComposerDraftOptimistically,
 } from "./WorkspaceComposer.logic";
-import { DEFAULT_SLASH_COMMANDS } from "./default-slash-commands";
+import { DEFAULT_SLASH_COMMANDS, availableSlashCommands } from "./default-slash-commands";
 import { $createFileBadgeNode, FileBadgeNode } from "./editor/file-badge-node";
 import { $createImageBadgeNode, ImageBadgeNode } from "./editor/image-badge-node";
 import { PastedSnippetBadgeNode } from "./editor/pasted-snippet-badge-node";
@@ -888,14 +888,26 @@ export function WorkspaceComposer({
 	const selectedEffortId = ultrathinkSelected ? "ultrathink" : effort;
 	const slashCommands = useMemo(
 		() =>
-			DEFAULT_SLASH_COMMANDS.map((command) => ({
-				...command,
-				description: t(`composer.slashCommands.${command.name}`, {
-					defaultValue: command.description,
+			availableSlashCommands(DEFAULT_SLASH_COMMANDS, selectedProvider?.capabilities).map(
+				(command) => ({
+					...command,
+					description: t(`composer.slashCommands.${command.name}`, {
+						defaultValue: command.description,
+					}),
 				}),
-			})),
-		[t],
+			),
+		[selectedProvider, t],
 	);
+	// `/compact` is a DCC-owned action: it clears the draft and sends the
+	// runtime's compaction command as its own turn, so the post-compact
+	// re-anchor can follow. It is only listed for runtimes that understand it.
+	const runCompactCommand = useCallback(() => {
+		const editor = editorRef.current;
+		if (!editor || isSubmittingRef.current) return;
+		clearDraft(composerDraftKey);
+		setEditorText(editor, "");
+		void submitFromComposer("/compact");
+	}, [composerDraftKey, submitFromComposer]);
 	return [
 		<div
 			key="composer-surface"
@@ -1042,6 +1054,7 @@ export function WorkspaceComposer({
 					clientActionHandlers={{
 						clear: clearComposerDraft,
 						spec: insertSpecDraftPrompt,
+						compact: runCompactCommand,
 					}}
 				/>
 				<FileMentionPlugin

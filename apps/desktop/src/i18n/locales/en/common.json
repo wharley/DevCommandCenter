@@ -1287,6 +1287,7 @@
       "error": "Unable to attach the selected file"
     },
     "slashCommands": {
+      "compact": "Compact the provider context and re-anchor the mission spec",
       "spec": "Draft or update this task's mission spec",
       "clear": "Clear the current composer draft"
     },

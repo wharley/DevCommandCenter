@@ -1287,6 +1287,7 @@
       "error": "Não foi possível anexar o arquivo selecionado"
     },
     "slashCommands": {
+      "compact": "Compactar o contexto do provider e reancorar a spec da missão",
       "spec": "Criar ou atualizar a mission spec desta tarefa",
       "clear": "Limpar o rascunho atual do composer"
     },
