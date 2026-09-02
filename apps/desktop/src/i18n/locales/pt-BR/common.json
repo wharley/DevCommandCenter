@@ -1185,6 +1185,49 @@
     }
   },
   "composer": {
+    "objective": {
+      "open": "Objetivo da tarefa",
+      "title": "Objetivo da tarefa",
+      "hint": "Guardado pelo DCC e reenviado a cada turno como contexto de fundo, então sobrevive a troca de provider, compactação e restart. Sua mensagem atual sempre tem prioridade.",
+      "empty": "Sem objetivo ainda. Defina a intenção e o que significa \"pronto\".",
+      "loading": "Carregando objetivo…",
+      "intent": "Intenção",
+      "intentPlaceholder": "O que esta tarefa deve alcançar?",
+      "doneWhen": "Pronto quando",
+      "doneWhenPlaceholder": "Como você saberá que terminou? (opcional)",
+      "maxFailures": "Pausar após falhas consecutivas",
+      "maxTurns": "Orçamento de turnos",
+      "unlimited": "sem limite",
+      "create": "Definir objetivo",
+      "save": "Salvar",
+      "clear": "Limpar",
+      "saved": "Objetivo salvo",
+      "failed": "Não foi possível atualizar o objetivo",
+      "generation": "rev {{generation}}",
+      "counters": "turnos {{turns}} · falhas {{failures}}",
+      "status": {
+        "active": "Ativo",
+        "paused": "Pausado",
+        "done": "Concluído"
+      },
+      "pauseReason": {
+        "manual": "por você",
+        "consecutive_failures": "limite de falhas",
+        "turn_budget": "orçamento de turnos"
+      },
+      "transition": {
+        "pause": "Pausar",
+        "resume": "Retomar",
+        "complete": "Marcar concluído"
+      },
+      "dispatchBlocked": "Follow-ups enfileirados não rodam automaticamente até o objetivo ser retomado. Suas próprias mensagens continuam passando.",
+      "errors": {
+        "intent_required": "A intenção é obrigatória.",
+        "text_too_long": "Intenção e critério de pronto têm limite de 2.000 caracteres.",
+        "failures_out_of_range": "O limite de falhas deve ficar entre 1 e 20.",
+        "turns_out_of_range": "O orçamento de turnos deve ficar entre 1 e 10.000, ou vazio."
+      }
+    },
     "evidence": {
       "title": "Evidências · {{count}}",
       "budget": "{{items}}/{{maxItems}} itens · {{used}}/{{max}} caracteres",

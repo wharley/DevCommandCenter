@@ -8,7 +8,7 @@ export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration",
 
 export const PROVIDER_METHODS = {"getProviderAvailability":"get_provider_availability","listProviders":"list_providers","providerAccountUsage":"provider_account_usage","setProviderAvailability":"set_provider_availability"} as const;
 
-export const SESSION_METHODS = {"abortRun":"abort_run","applyTaskTitle":"apply_task_title","approvePlan":"approve_plan","closeSession":"close_session","dispatchNextQueuedTurn":"dispatch_next_queued_turn","executeGuardedUndo":"execute_guarded_undo","interruptNativeSubagent":"interrupt_native_subagent","lastTurnReview":"last_turn_review","listMcpRuntimeStatuses":"list_mcp_runtime_statuses","listThreadEvents":"list_thread_events","listTurnQueue":"list_turn_queue","listWorkspaceSessions":"list_workspace_sessions","prepareGuardedUndo":"prepare_guarded_undo","prepareTurn":"prepare_turn","queueTurn":"queue_turn","recordPlanHandoff":"record_plan_handoff","removeQueuedTurn":"remove_queued_turn","reorderTurnQueue":"reorder_turn_queue","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","runPullRequestReviewAgent":"run_pull_request_review_agent","searchSessions":"search_sessions","sendTurn":"send_turn","sessionLiveSnapshot":"session_live_snapshot","startMcpOauth":"start_mcp_oauth","startThread":"start_thread","steerNativeSubagent":"steer_native_subagent","steerTurn":"steer_turn","turnReviewFileDiff":"turn_review_file_diff","usageDashboard":"usage_dashboard","waitMcpOauth":"wait_mcp_oauth"} as const;
+export const SESSION_METHODS = {"abortRun":"abort_run","applyTaskTitle":"apply_task_title","approvePlan":"approve_plan","clearSessionObjective":"clear_session_objective","closeSession":"close_session","dispatchNextQueuedTurn":"dispatch_next_queued_turn","executeGuardedUndo":"execute_guarded_undo","getSessionObjective":"get_session_objective","interruptNativeSubagent":"interrupt_native_subagent","lastTurnReview":"last_turn_review","listMcpRuntimeStatuses":"list_mcp_runtime_statuses","listThreadEvents":"list_thread_events","listTurnQueue":"list_turn_queue","listWorkspaceSessions":"list_workspace_sessions","prepareGuardedUndo":"prepare_guarded_undo","prepareTurn":"prepare_turn","queueTurn":"queue_turn","recordPlanHandoff":"record_plan_handoff","removeQueuedTurn":"remove_queued_turn","reorderTurnQueue":"reorder_turn_queue","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","runPullRequestReviewAgent":"run_pull_request_review_agent","searchSessions":"search_sessions","sendTurn":"send_turn","sessionLiveSnapshot":"session_live_snapshot","setSessionObjective":"set_session_objective","startMcpOauth":"start_mcp_oauth","startThread":"start_thread","steerNativeSubagent":"steer_native_subagent","steerTurn":"steer_turn","transitionSessionObjective":"transition_session_objective","turnReviewFileDiff":"turn_review_file_diff","usageDashboard":"usage_dashboard","waitMcpOauth":"wait_mcp_oauth"} as const;
 
 export const WORKSPACE_METHODS = {"archiveWorkspace":"archive_workspace","archiveWorkspaceBundle":"archive_workspace_bundle","compileMissionSpecContext":"compile_mission_spec_context","completeWorkspace":"complete_workspace","completeWorkspaceBundle":"complete_workspace_bundle","createWorkspaceBundleForRepos":"create_workspace_bundle_for_repos","createWorkspaceForRepo":"create_workspace_for_repo","createWorkspaceFromSourceUrl":"create_workspace_from_source_url","createWorkspaceFromUrl":"create_workspace_from_url","deleteRepository":"delete_repository","deleteWorkspace":"delete_workspace","deleteWorkspaceBundle":"delete_workspace_bundle","listChildDirectories":"list_child_directories","listGitTrackedFiles":"list_git_tracked_files","listLocalBranches":"list_local_branches","listMissionSpecs":"list_mission_specs","listRepositories":"list_repositories","listWorkspaceBundles":"list_workspace_bundles","listWorkspaces":"list_workspaces","missionSpecContextStatus":"mission_spec_context_status","pullRequestHubComment":"pull_request_hub_comment","pullRequestHubDetail":"pull_request_hub_detail","pullRequestHubList":"pull_request_hub_list","pullRequestHubMerge":"pull_request_hub_merge","pullRequestHubReplyThread":"pull_request_hub_reply_thread","pullRequestHubResolveThread":"pull_request_hub_resolve_thread","pullRequestHubSubmitReview":"pull_request_hub_submit_review","readWorkspaceFile":"read_workspace_file","renameWorkspace":"rename_workspace","resolveWorkspaceSourceUrl":"resolve_workspace_source_url","restoreWorkspace":"restore_workspace","restoreWorkspaceBundle":"restore_workspace_bundle","saveMissionValidation":"save_mission_validation","searchWorkspace":"search_workspace","setRepositoryPinned":"set_repository_pinned","setWorkspacePinned":"set_workspace_pinned","updateRepositoryIdentity":"update_repository_identity","workspaceApplyDelegationWorktree":"workspace_apply_delegation_worktree","workspaceBackfillForgeRepoBindings":"workspace_backfill_forge_repo_bindings","workspaceChangeRequestContext":"workspace_change_request_context","workspaceChangeRequestCreate":"workspace_change_request_create","workspaceChangeRequestMerge":"workspace_change_request_merge","workspaceChangeRequestViewWeb":"workspace_change_request_view_web","workspaceCoderabbitCliStatus":"workspace_coderabbit_cli_status","workspaceCoderabbitDiffFingerprint":"workspace_coderabbit_diff_fingerprint","workspaceCoderabbitDoctor":"workspace_coderabbit_doctor","workspaceCoderabbitLogout":"workspace_coderabbit_logout","workspaceCoderabbitReview":"workspace_coderabbit_review","workspaceCoderabbitReviewCancel":"workspace_coderabbit_review_cancel","workspaceCoderabbitReviewClear":"workspace_coderabbit_review_clear","workspaceCoderabbitReviewHistory":"workspace_coderabbit_review_history","workspaceCoderabbitReviewJob":"workspace_coderabbit_review_job","workspaceCoderabbitReviewLoad":"workspace_coderabbit_review_load","workspaceCoderabbitReviewSave":"workspace_coderabbit_review_save","workspaceCoderabbitReviewStart":"workspace_coderabbit_review_start","workspaceContinueFromBaseBranch":"workspace_continue_from_base_branch","workspaceDeliveryFailureSnapshot":"workspace_delivery_failure_snapshot","workspaceDeliveryRecoveryExecute":"workspace_delivery_recovery_execute","workspaceDiskUsage":"workspace_disk_usage","workspaceForgeCliAccounts":"workspace_forge_cli_accounts","workspaceForgeCliHosts":"workspace_forge_cli_hosts","workspaceForgeCliSelectLogin":"workspace_forge_cli_select_login","workspaceForgeCliStatus":"workspace_forge_cli_status","workspaceForgeContext":"workspace_forge_context","workspaceGhPrCreateFill":"workspace_gh_pr_create_fill","workspaceGhPrMerge":"workspace_gh_pr_merge","workspaceGhPrViewWeb":"workspace_gh_pr_view_web","workspaceGitAbortMerge":"workspace_git_abort_merge","workspaceGitAcceptConflict":"workspace_git_accept_conflict","workspaceGitBranchDiff":"workspace_git_branch_diff","workspaceGitCommit":"workspace_git_commit","workspaceGitCommitPush":"workspace_git_commit_push","workspaceGitCommitSuggestion":"workspace_git_commit_suggestion","workspaceGitCompleteMerge":"workspace_git_complete_merge","workspaceGitConflictState":"workspace_git_conflict_state","workspaceGitDiscardFile":"workspace_git_discard_file","workspaceGitFilePreview":"workspace_git_file_preview","workspaceGitFilePreviewContent":"workspace_git_file_preview_content","workspaceGitMarkConflictResolved":"workspace_git_mark_conflict_resolved","workspaceGitPush":"workspace_git_push","workspaceGitStageAll":"workspace_git_stage_all","workspaceGitStageFile":"workspace_git_stage_file","workspaceGitStatus":"workspace_git_status","workspaceGitSyncBase":"workspace_git_sync_base","workspaceGitUnstageFile":"workspace_git_unstage_file","workspaceGitValidationConfig":"workspace_git_validation_config","workspaceGithubCliStatus":"workspace_github_cli_status","workspacePipelineJobLog":"workspace_pipeline_job_log","workspacePipelineJobRetry":"workspace_pipeline_job_retry","workspacePipelineStatus":"workspace_pipeline_status","workspacePrReviewComments":"workspace_pr_review_comments","workspacePrStatus":"workspace_pr_status","workspacePrepareDelegationWorktree":"workspace_prepare_delegation_worktree","workspaceProjectAutomationConfig":"workspace_project_automation_config","workspaceRecordSetupOutcome":"workspace_record_setup_outcome","workspaceRemoveDelegationWorktree":"workspace_remove_delegation_worktree","workspaceRetryRepositoryForgeBinding":"workspace_retry_repository_forge_binding","workspaceReviewState":"workspace_review_state","workspaceRunProjectTasks":"workspace_run_project_tasks","workspaceRunSetup":"workspace_run_setup","workspaceSaveProjectAutomation":"workspace_save_project_automation","workspaceSkipSetup":"workspace_skip_setup","writeWorkspaceFile":"write_workspace_file"} as const;
 
@@ -1140,6 +1140,12 @@ export type NativeSubagentControlOutput = {
  */
 export type NativeSubagentStatus = "running" | "completed" | "failed";
 
+export type ObjectivePauseReason = "manual" | "consecutive_failures" | "turn_budget";
+
+export type ObjectiveStatus = "active" | "paused" | "done";
+
+export type ObjectiveTransition = "pause" | "resume" | "complete";
+
 export type PrepareGuardedUndoInput = {
 	snapshotId: string,
 };
@@ -1807,6 +1813,37 @@ export type SessionLiveSnapshot = {
 	runtimeGeneration: string,
 };
 
+export type SessionObjective = {
+	sessionId: SessionId,
+	intent: string,
+	doneWhen: string,
+	status: ObjectiveStatus,
+	pauseReason?: ObjectivePauseReason | null,
+	maxConsecutiveFailures: number,
+	maxTurns?: number | null,
+	turnsUsed: number,
+	consecutiveFailures: number,
+	// Makes outcome accounting idempotent across replays and restarts.
+	lastCountedTurnId?: string | null,
+	// Monotonic; every persisted mutation advances it so stale writers lose.
+	generation: number,
+	updatedAt: string,
+};
+
+// Person-authored fields. Everything else is derived by the backend.
+export type SessionObjectiveDraft = {
+	intent: string,
+	doneWhen?: string,
+	// `None` keeps the default; the value is clamped to a closed range.
+	maxConsecutiveFailures?: number | null,
+	// `None` means no turn budget.
+	maxTurns?: number | null,
+};
+
+export type SessionObjectiveOutput = {
+	objective: SessionObjective | null,
+};
+
 export type SessionProjection = {
 	sessionId: SessionId,
 	projectId: ProjectId,
@@ -1857,6 +1894,12 @@ export type SetProviderAvailabilityInput = {
 export type SetRepositoryPinnedInput = {
 	repositoryId: string,
 	pinned: boolean,
+};
+
+export type SetSessionObjectiveInput = {
+	sessionId: SessionId,
+	draft: SessionObjectiveDraft,
+	expectedGeneration?: number | null,
 };
 
 export type SetWorkspacePinnedInput = {
@@ -1924,6 +1967,12 @@ export type Thread = {
 };
 
 export type ThreadId = string;
+
+export type TransitionSessionObjectiveInput = {
+	sessionId: SessionId,
+	transition: ObjectiveTransition,
+	expectedGeneration?: number | null,
+};
 
 export type Turn = {
 	id: TurnId,

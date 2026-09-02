@@ -11,6 +11,7 @@ use serde_json::{from_str, to_string};
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
 
+use dcc_core::domain::objective::{ObjectivePauseReason, ObjectiveStatus, SessionObjective};
 use dcc_core::{
     domain::{
         delegation::{
@@ -242,6 +243,25 @@ CREATE TABLE IF NOT EXISTS dcc_provider_availability (
 "#;
 
 const PROVIDER_AVAILABILITY_MAX_PROVIDER_ID_CHARS: usize = 128;
+
+/// One durable objective per session. Text is bounded at the domain layer;
+/// the row stores only what the person wrote plus derived counters.
+const SESSION_OBJECTIVE_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_session_objectives (
+	session_id TEXT PRIMARY KEY NOT NULL CHECK(length(session_id) BETWEEN 1 AND 256),
+	intent TEXT NOT NULL,
+	done_when TEXT NOT NULL,
+	status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'done')),
+	pause_reason TEXT NULL CHECK(pause_reason IS NULL OR pause_reason IN ('manual', 'consecutive_failures', 'turn_budget')),
+	max_consecutive_failures INTEGER NOT NULL CHECK(max_consecutive_failures >= 1),
+	max_turns INTEGER NULL CHECK(max_turns IS NULL OR max_turns >= 1),
+	turns_used INTEGER NOT NULL CHECK(turns_used >= 0),
+	consecutive_failures INTEGER NOT NULL CHECK(consecutive_failures >= 0),
+	last_counted_turn_id TEXT NULL,
+	generation INTEGER NOT NULL CHECK(generation >= 0),
+	updated_at TEXT NOT NULL
+);
+"#;
 
 /// Typed durable provider availability. The absence of a record represents
 /// the backwards-compatible enabled state at generation zero.
@@ -1225,7 +1245,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
@@ -5648,6 +5668,168 @@ impl SqliteSessionRepo {
             ));
         }
         Ok(())
+    }
+
+    /// Loads the durable objective for a session, if the person defined one.
+    pub fn load_session_objective(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionObjective>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let row = conn
+            .query_row(
+                "SELECT intent, done_when, status, pause_reason, max_consecutive_failures, max_turns, turns_used, consecutive_failures, last_counted_turn_id, generation, updated_at FROM dcc_session_objectives WHERE session_id = ?1",
+                params![session_id.0],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, String>(10)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let Some((
+            intent,
+            done_when,
+            status,
+            pause_reason,
+            max_consecutive_failures,
+            max_turns,
+            turns_used,
+            consecutive_failures,
+            last_counted_turn_id,
+            generation,
+            updated_at,
+        )) = row
+        else {
+            return Ok(None);
+        };
+        let invalid =
+            || dcc_core::CoreError::Repository("session objective record is invalid".to_string());
+        let status = match status.as_str() {
+            "active" => ObjectiveStatus::Active,
+            "paused" => ObjectiveStatus::Paused,
+            "done" => ObjectiveStatus::Done,
+            _ => return Err(invalid()),
+        };
+        let pause_reason = match pause_reason.as_deref() {
+            None => None,
+            Some("manual") => Some(ObjectivePauseReason::Manual),
+            Some("consecutive_failures") => Some(ObjectivePauseReason::ConsecutiveFailures),
+            Some("turn_budget") => Some(ObjectivePauseReason::TurnBudget),
+            Some(_) => return Err(invalid()),
+        };
+        Ok(Some(SessionObjective {
+            session_id: session_id.clone(),
+            intent,
+            done_when,
+            status,
+            pause_reason,
+            max_consecutive_failures: u32::try_from(max_consecutive_failures)
+                .map_err(|_| invalid())?,
+            max_turns: max_turns
+                .map(u32::try_from)
+                .transpose()
+                .map_err(|_| invalid())?,
+            turns_used: u32::try_from(turns_used).map_err(|_| invalid())?,
+            consecutive_failures: u32::try_from(consecutive_failures).map_err(|_| invalid())?,
+            last_counted_turn_id,
+            generation: u64::try_from(generation).map_err(|_| invalid())?,
+            updated_at,
+        }))
+    }
+
+    /// Persists a complete objective. The generation must strictly advance
+    /// past the stored one (or the row must not exist), so a stale writer
+    /// never overwrites a newer record.
+    pub fn save_session_objective(&self, objective: &SessionObjective) -> Result<()> {
+        let generation = i64::try_from(objective.generation).map_err(|_| {
+            dcc_core::CoreError::InvalidInput("session objective generation is invalid".to_string())
+        })?;
+        let status = match objective.status {
+            ObjectiveStatus::Active => "active",
+            ObjectiveStatus::Paused => "paused",
+            ObjectiveStatus::Done => "done",
+        };
+        let pause_reason = match objective.pause_reason {
+            None => None,
+            Some(ObjectivePauseReason::Manual) => Some("manual"),
+            Some(ObjectivePauseReason::ConsecutiveFailures) => Some("consecutive_failures"),
+            Some(ObjectivePauseReason::TurnBudget) => Some("turn_budget"),
+        };
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                r#"
+            INSERT INTO dcc_session_objectives
+                (session_id, intent, done_when, status, pause_reason, max_consecutive_failures, max_turns, turns_used, consecutive_failures, last_counted_turn_id, generation, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(session_id) DO UPDATE SET
+                intent = excluded.intent,
+                done_when = excluded.done_when,
+                status = excluded.status,
+                pause_reason = excluded.pause_reason,
+                max_consecutive_failures = excluded.max_consecutive_failures,
+                max_turns = excluded.max_turns,
+                turns_used = excluded.turns_used,
+                consecutive_failures = excluded.consecutive_failures,
+                last_counted_turn_id = excluded.last_counted_turn_id,
+                generation = excluded.generation,
+                updated_at = excluded.updated_at
+            WHERE excluded.generation > dcc_session_objectives.generation
+            "#,
+                params![
+                    &objective.session_id.0,
+                    &objective.intent,
+                    &objective.done_when,
+                    status,
+                    pause_reason,
+                    i64::from(objective.max_consecutive_failures),
+                    objective.max_turns.map(i64::from),
+                    i64::from(objective.turns_used),
+                    i64::from(objective.consecutive_failures),
+                    &objective.last_counted_turn_id,
+                    generation,
+                    &objective.updated_at,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if changed != 1 {
+            return Err(dcc_core::CoreError::Repository(
+                "session objective generation is stale".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn delete_session_objective(&self, session_id: &SessionId) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let removed = conn
+            .execute(
+                "DELETE FROM dcc_session_objectives WHERE session_id = ?1",
+                params![session_id.0],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(removed == 1)
     }
 
     /// Stores a caller-sanitized browser URL for one workspace/session scope.
@@ -11295,6 +11477,54 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn session_objective_round_trips_and_rejects_stale_generations() {
+        use dcc_core::domain::objective::{
+            ObjectivePauseReason, ObjectiveStatus, SessionObjective,
+        };
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        let session_id = SessionId("session-objective".to_string());
+        assert_eq!(repo.load_session_objective(&session_id).unwrap(), None);
+        let mut objective = SessionObjective {
+            session_id: session_id.clone(),
+            intent: "ship the fix".to_string(),
+            done_when: "tests pass".to_string(),
+            status: ObjectiveStatus::Paused,
+            pause_reason: Some(ObjectivePauseReason::ConsecutiveFailures),
+            max_consecutive_failures: 3,
+            max_turns: Some(20),
+            turns_used: 4,
+            consecutive_failures: 3,
+            last_counted_turn_id: Some("turn-4".to_string()),
+            generation: 5,
+            updated_at: "2026-09-02T12:00:00Z".to_string(),
+        };
+        repo.save_session_objective(&objective).unwrap();
+        assert_eq!(
+            repo.load_session_objective(&session_id).unwrap(),
+            Some(objective.clone())
+        );
+        objective.generation = 5;
+        objective.intent = "stale".to_string();
+        repo.save_session_objective(&objective)
+            .expect_err("same generation must not overwrite");
+        objective.generation = 4;
+        repo.save_session_objective(&objective)
+            .expect_err("older generation must not overwrite");
+        objective.generation = 6;
+        objective.status = ObjectiveStatus::Active;
+        objective.pause_reason = None;
+        objective.max_turns = None;
+        repo.save_session_objective(&objective).unwrap();
+        let loaded = repo.load_session_objective(&session_id).unwrap().unwrap();
+        assert_eq!(loaded.generation, 6);
+        assert_eq!(loaded.max_turns, None);
+        assert_eq!(loaded.pause_reason, None);
+        assert!(repo.delete_session_objective(&session_id).unwrap());
+        assert!(!repo.delete_session_objective(&session_id).unwrap());
+        assert_eq!(repo.load_session_objective(&session_id).unwrap(), None);
     }
 
     #[test]

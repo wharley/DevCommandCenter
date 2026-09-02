@@ -31,6 +31,7 @@ import {
 	buildDebugEvidencePrompt,
 	summarizeDebugEvidence,
 } from "@/features/sessions/debug-evidence";
+import { SessionObjectiveControl } from "@/features/sessions/SessionObjectiveControl";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -914,6 +915,11 @@ export function WorkspaceComposer({
 					{selectedProviderBlockReason}
 				</div>
 			) : null}
+			<SessionObjectiveControl
+				sessionId={sessionId}
+				refreshKey={`${turnCount}:${sessionSnapshot?.state ?? "idle"}:${activeTurnId ?? ""}`}
+				disabled={inputDisabled}
+			/>
 			{debugEvidence ? (
 				<DebugEvidenceTray
 					controller={debugEvidence}

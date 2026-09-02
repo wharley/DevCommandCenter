@@ -1185,6 +1185,49 @@
     }
   },
   "composer": {
+    "objective": {
+      "open": "Task objective",
+      "title": "Task objective",
+      "hint": "Kept by DCC and re-sent with every turn as background context, so it survives provider switches, compaction and restarts. Your current message always takes precedence.",
+      "empty": "No objective yet. Set the intent and what \"done\" means.",
+      "loading": "Loading objective…",
+      "intent": "Intent",
+      "intentPlaceholder": "What should this task achieve?",
+      "doneWhen": "Done when",
+      "doneWhenPlaceholder": "How will you know it is finished? (optional)",
+      "maxFailures": "Pause after consecutive failures",
+      "maxTurns": "Turn budget",
+      "unlimited": "unlimited",
+      "create": "Set objective",
+      "save": "Save",
+      "clear": "Clear",
+      "saved": "Objective saved",
+      "failed": "Unable to update the objective",
+      "generation": "rev {{generation}}",
+      "counters": "turns {{turns}} · failures {{failures}}",
+      "status": {
+        "active": "Active",
+        "paused": "Paused",
+        "done": "Done"
+      },
+      "pauseReason": {
+        "manual": "by you",
+        "consecutive_failures": "failure limit",
+        "turn_budget": "turn budget"
+      },
+      "transition": {
+        "pause": "Pause",
+        "resume": "Resume",
+        "complete": "Mark done"
+      },
+      "dispatchBlocked": "Queued follow-ups will not run automatically until the objective is resumed. Your own messages still go through.",
+      "errors": {
+        "intent_required": "Intent is required.",
+        "text_too_long": "Intent and done-when are limited to 2,000 characters.",
+        "failures_out_of_range": "Failure limit must be between 1 and 20.",
+        "turns_out_of_range": "Turn budget must be between 1 and 10,000, or empty."
+      }
+    },
     "evidence": {
       "title": "Evidence · {{count}}",
       "budget": "{{items}}/{{maxItems}} items · {{used}}/{{max}} chars",

@@ -97,6 +97,10 @@ use crate::process_runtime_registry::{
 use crate::terminal_arbiter::{
     PersistThenCommitError, TerminalArbiterError, TerminalClaimResult, TerminalIntent, TerminalKey,
 };
+use dcc_core::domain::objective::{
+    merge_objective_instructions, ObjectiveTransition, ObjectiveTurnOutcome, SessionObjective,
+    SessionObjectiveDraft,
+};
 use dcc_providers::{
     provider_registration, provider_runtime, supports_provider_approval_policy,
     supports_provider_capability, validate_provider_runtime_config, ProviderCapability,
@@ -2837,6 +2841,29 @@ impl SessionCommandState {
         } else {
             Ok(())
         };
+        if payload.inserted {
+            let objective_outcome = match (&payload.record.kind, &request) {
+                (SessionEventKind::TurnCompleted { .. }, _) => {
+                    Some(ObjectiveTurnOutcome::Completed)
+                }
+                (
+                    SessionEventKind::TurnAborted { .. },
+                    TerminalRequest::Aborted {
+                        source: TerminalSource::ProviderFailed,
+                        ..
+                    },
+                ) => Some(ObjectiveTurnOutcome::Failed),
+                // A deliberate cancel or an unbound start is not a provider
+                // failure and must not consume the failure budget.
+                _ => None,
+            };
+            if let Some(outcome) = objective_outcome {
+                if let Err(error) = self.record_objective_turn_outcome(session_id, turn_id, outcome)
+                {
+                    eprintln!("[DCC] objective outcome accounting failed: {error}");
+                }
+            }
+        }
         let remove_binding = matches!(
             (&request, outcome),
             (
@@ -4822,7 +4849,10 @@ impl SessionCommandState {
                             }
                         }
                         if completed {
-                            if let Err(error) = state.dispatch_next_queued_turn(&session_id).await {
+                            if let Err(error) = state
+                                .dispatch_next_queued_turn_if_objective_allows(&session_id)
+                                .await
+                            {
                                 eprintln!("[DCC] queued turn dispatch failed: {error}");
                             }
                         }
@@ -4983,6 +5013,146 @@ impl SessionCommandState {
         provider.send_input(&binding.handle, input).await
     }
 
+    // ---- Durable task objective -------------------------------------------
+
+    pub fn session_objective(&self, session_id: &SessionId) -> Result<Option<SessionObjective>> {
+        self.session_repo.load_session_objective(session_id)
+    }
+
+    fn persist_objective(&self, objective: &mut SessionObjective) -> Result<()> {
+        objective.generation = objective.generation.checked_add(1).ok_or_else(|| {
+            dcc_core::CoreError::Repository("session objective generation exhausted".to_string())
+        })?;
+        self.session_repo.save_session_objective(objective)
+    }
+
+    fn require_objective_generation(
+        objective: &SessionObjective,
+        expected_generation: Option<u64>,
+    ) -> Result<()> {
+        if expected_generation.is_some_and(|expected| expected != objective.generation) {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "session objective changed since it was loaded".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Creates or rewrites the person-authored objective of an existing
+    /// session. `expected_generation` makes concurrent edits fail closed.
+    pub async fn set_session_objective(
+        &self,
+        session_id: &SessionId,
+        draft: SessionObjectiveDraft,
+        expected_generation: Option<u64>,
+    ) -> Result<SessionObjective> {
+        let validated = draft
+            .validate()
+            .map_err(dcc_core::CoreError::InvalidInput)?;
+        if self.peek_session(session_id).await?.is_none() {
+            return Err(dcc_core::CoreError::Repository(
+                "session not found".to_string(),
+            ));
+        }
+        let now = Utc::now().to_rfc3339();
+        let mut objective = match self.session_repo.load_session_objective(session_id)? {
+            Some(mut existing) => {
+                Self::require_objective_generation(&existing, expected_generation)?;
+                existing.apply_draft(validated, &now);
+                existing
+            }
+            None => {
+                if expected_generation.is_some() {
+                    return Err(dcc_core::CoreError::InvalidInput(
+                        "session objective no longer exists".to_string(),
+                    ));
+                }
+                SessionObjective::new(session_id.clone(), validated, &now)
+            }
+        };
+        self.persist_objective(&mut objective)?;
+        Ok(objective)
+    }
+
+    pub fn transition_session_objective(
+        &self,
+        session_id: &SessionId,
+        transition: ObjectiveTransition,
+        expected_generation: Option<u64>,
+    ) -> Result<SessionObjective> {
+        let mut objective = self
+            .session_repo
+            .load_session_objective(session_id)?
+            .ok_or_else(|| {
+                dcc_core::CoreError::Repository("session objective not found".to_string())
+            })?;
+        Self::require_objective_generation(&objective, expected_generation)?;
+        if objective.transition(transition, &Utc::now().to_rfc3339()) {
+            self.persist_objective(&mut objective)?;
+        }
+        Ok(objective)
+    }
+
+    pub fn clear_session_objective(&self, session_id: &SessionId) -> Result<bool> {
+        self.session_repo.delete_session_objective(session_id)
+    }
+
+    /// Bounded background context appended to every turn's instructions so
+    /// the objective survives provider switches, compaction and restarts.
+    pub fn objective_tool_instructions(
+        &self,
+        session_id: &SessionId,
+        base: Option<String>,
+    ) -> Result<Option<String>> {
+        let objective = self.session_repo.load_session_objective(session_id)?;
+        Ok(merge_objective_instructions(base, objective.as_ref()))
+    }
+
+    /// Idempotent per turn. Retries once on a generation race with a
+    /// concurrent person edit; never blocks the turn pipeline.
+    pub(crate) fn record_objective_turn_outcome(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        outcome: ObjectiveTurnOutcome,
+    ) -> Result<bool> {
+        for _attempt in 0..3 {
+            let Some(mut objective) = self.session_repo.load_session_objective(session_id)? else {
+                return Ok(false);
+            };
+            if !objective.record_turn_outcome(&turn_id.0, outcome, &Utc::now().to_rfc3339()) {
+                return Ok(false);
+            }
+            match self.persist_objective(&mut objective) {
+                Ok(()) => return Ok(true),
+                Err(dcc_core::CoreError::Repository(message))
+                    if message.contains("generation is stale") =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(dcc_core::CoreError::Repository(
+            "session objective outcome could not be recorded".to_string(),
+        ))
+    }
+
+    /// Automatic follow-ups respect the objective: a paused or done objective
+    /// stops the queue until the person resumes it. Direct turns and manual
+    /// dispatch stay available because a new instruction has priority.
+    pub async fn dispatch_next_queued_turn_if_objective_allows(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<bool> {
+        if let Some(objective) = self.session_repo.load_session_objective(session_id)? {
+            if !objective.allows_automatic_dispatch() {
+                return Ok(false);
+            }
+        }
+        self.dispatch_next_queued_turn(session_id).await
+    }
+
     /// Dispatch the oldest durable follow-up after a provider completes. The
     /// queue is projected from session events, so it survives UI remounts and
     /// app restarts instead of living in composer state.
@@ -5012,7 +5182,8 @@ impl SessionCommandState {
             .await?;
         let provider_input = dcc_core::ports::ProviderTurnInput {
             prompt: input.prompt.clone(),
-            tool_instructions: input.tool_instructions.clone(),
+            tool_instructions: self
+                .objective_tool_instructions(session_id, input.tool_instructions.clone())?,
             plan_mode: input.plan_mode,
             effort: input.effort.clone(),
             fast_mode: input.fast_mode,
@@ -6292,6 +6463,105 @@ mod tests {
             .validate_provider_turn_selection(&session, &input)
             .await
             .expect("registered dynamic provider selection");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_objective_is_durable_idempotent_and_gates_automatic_dispatch() {
+        use dcc_core::domain::objective::{ObjectivePauseReason, ObjectiveStatus};
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let db_path = root.join("state.sqlite");
+        let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
+        let session = sample_session("objective");
+        let missing = SessionId("missing".to_string());
+        let draft = SessionObjectiveDraft {
+            intent: "make checkout resilient".to_string(),
+            done_when: "retry test passes".to_string(),
+            max_consecutive_failures: Some(2),
+            max_turns: None,
+        };
+        assert!(state
+            .set_session_objective(&missing, draft.clone(), None)
+            .await
+            .is_err());
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        assert_eq!(
+            state
+                .objective_tool_instructions(&session.id, Some("base".to_string()))
+                .unwrap(),
+            Some("base".to_string())
+        );
+        let objective = state
+            .set_session_objective(&session.id, draft.clone(), None)
+            .await
+            .expect("create objective");
+        assert_eq!(objective.generation, 1);
+        let instructions = state
+            .objective_tool_instructions(&session.id, Some("base".to_string()))
+            .unwrap()
+            .expect("merged instructions");
+        assert!(instructions.starts_with("base\n\n<dcc_objective status=\"active\""));
+        assert!(instructions.contains("intent: make checkout resilient"));
+
+        // Stale expected generation fails closed.
+        assert!(state
+            .set_session_objective(&session.id, draft.clone(), Some(0))
+            .await
+            .is_err());
+
+        let turn = TurnId("turn-1".to_string());
+        assert!(state
+            .record_objective_turn_outcome(&session.id, &turn, ObjectiveTurnOutcome::Failed)
+            .unwrap());
+        assert!(!state
+            .record_objective_turn_outcome(&session.id, &turn, ObjectiveTurnOutcome::Failed)
+            .unwrap());
+        let turn2 = TurnId("turn-2".to_string());
+        assert!(state
+            .record_objective_turn_outcome(&session.id, &turn2, ObjectiveTurnOutcome::Failed)
+            .unwrap());
+        let paused = state
+            .session_objective(&session.id)
+            .unwrap()
+            .expect("objective");
+        assert_eq!(paused.status, ObjectiveStatus::Paused);
+        assert_eq!(
+            paused.pause_reason,
+            Some(ObjectivePauseReason::ConsecutiveFailures)
+        );
+        assert_eq!(paused.consecutive_failures, 2);
+        assert!(!paused.allows_automatic_dispatch());
+        // A paused objective stops automatic dispatch without touching the queue.
+        assert!(!state
+            .dispatch_next_queued_turn_if_objective_allows(&session.id)
+            .await
+            .unwrap());
+
+        let resumed = state
+            .transition_session_objective(
+                &session.id,
+                ObjectiveTransition::Resume,
+                Some(paused.generation),
+            )
+            .unwrap();
+        assert_eq!(resumed.status, ObjectiveStatus::Active);
+        assert_eq!(resumed.consecutive_failures, 0);
+        assert!(state
+            .transition_session_objective(&session.id, ObjectiveTransition::Resume, Some(0))
+            .is_err());
+
+        // Survives a fresh state over the same database.
+        let reopened = SessionCommandState::new_headless(db_path, root.join("app-data"));
+        let loaded = reopened
+            .session_objective(&session.id)
+            .unwrap()
+            .expect("durable");
+        assert_eq!(loaded.generation, resumed.generation);
+        assert_eq!(loaded.intent, "make checkout resilient");
+        assert!(reopened.clear_session_objective(&session.id).unwrap());
+        assert_eq!(reopened.session_objective(&session.id).unwrap(), None);
     }
 
     #[test]

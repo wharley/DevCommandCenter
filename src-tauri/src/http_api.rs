@@ -2077,7 +2077,9 @@ async fn send_turn_handler(
 
     let provider_turn_input = ProviderTurnInput {
         prompt: input.prompt.clone(),
-        tool_instructions: input.tool_instructions.clone(),
+        tool_instructions: state
+            .objective_tool_instructions(&input.session_id, input.tool_instructions.clone())
+            .map_err(|error| classify_session_error(error.to_string()))?,
         plan_mode: input.plan_mode,
         effort: input.effort.clone(),
         fast_mode: input.fast_mode,

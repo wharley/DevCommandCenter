@@ -5,6 +5,7 @@ pub mod guarded_undo;
 pub mod mcp;
 pub mod mcp_conformance;
 pub mod model_registry;
+pub mod objective;
 pub mod project;
 pub mod provider;
 pub mod repository;
@@ -44,6 +45,10 @@ pub use mcp_conformance::{
     McpConformanceCheck, McpConformanceEvidence, McpConformanceEvidenceError,
     McpConformanceTransportEvidence, MCP_CONFORMANCE_ECHO_TOOL, MCP_CONFORMANCE_FIXTURE_VERSION,
     MCP_CONFORMANCE_MUTATING_TOOL, MCP_CONFORMANCE_SUITE_VERSION, REQUIRED_MCP_CONFORMANCE_CHECKS,
+};
+pub use objective::{
+    merge_objective_instructions, ObjectivePauseReason, ObjectiveStatus, ObjectiveTransition,
+    ObjectiveTurnOutcome, SessionObjective, SessionObjectiveDraft,
 };
 pub use project::{Project, ProjectId};
 pub use provider::{

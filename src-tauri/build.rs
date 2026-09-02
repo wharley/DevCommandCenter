@@ -289,6 +289,10 @@ struct SessionMethods {
     interrupt_native_subagent: String,
     queue_turn: String,
     list_turn_queue: String,
+    get_session_objective: String,
+    set_session_objective: String,
+    transition_session_objective: String,
+    clear_session_objective: String,
     remove_queued_turn: String,
     reorder_turn_queue: String,
     dispatch_next_queued_turn: String,
@@ -662,6 +666,14 @@ fn main() {
         .typ::<InterruptNativeSubagentInput>()
         .typ::<NativeSubagentControlOutput>()
         .typ::<QueuedTurn>()
+        .typ::<dcc_core::domain::objective::ObjectiveStatus>()
+        .typ::<dcc_core::domain::objective::ObjectivePauseReason>()
+        .typ::<dcc_core::domain::objective::ObjectiveTransition>()
+        .typ::<dcc_core::domain::objective::SessionObjectiveDraft>()
+        .typ::<dcc_core::domain::objective::SessionObjective>()
+        .typ::<dcc_tauri::commands::session_commands::SetSessionObjectiveInput>()
+        .typ::<dcc_tauri::commands::session_commands::TransitionSessionObjectiveInput>()
+        .typ::<dcc_tauri::commands::session_commands::SessionObjectiveOutput>()
         .typ::<QueueTurnInput>()
         .typ::<RemoveQueuedTurnInput>()
         .typ::<ReorderTurnQueueInput>()
@@ -861,6 +873,10 @@ fn main() {
             interrupt_native_subagent: "interrupt_native_subagent".to_string(),
             queue_turn: "queue_turn".to_string(),
             list_turn_queue: "list_turn_queue".to_string(),
+            get_session_objective: "get_session_objective".to_string(),
+            set_session_objective: "set_session_objective".to_string(),
+            transition_session_objective: "transition_session_objective".to_string(),
+            clear_session_objective: "clear_session_objective".to_string(),
             remove_queued_turn: "remove_queued_turn".to_string(),
             reorder_turn_queue: "reorder_turn_queue".to_string(),
             dispatch_next_queued_turn: "dispatch_next_queued_turn".to_string(),

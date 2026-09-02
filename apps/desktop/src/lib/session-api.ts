@@ -19,6 +19,9 @@ import type {
 	TurnReviewFileDiffOutput,
 	ExecuteGuardedUndoInput,
 	ExecuteGuardedUndoOutput,
+	SessionObjectiveOutput,
+	SetSessionObjectiveInput,
+	TransitionSessionObjectiveInput,
 } from "@dcc/contracts";
 import type {
 	AbortRunInput,
@@ -325,5 +328,32 @@ export async function listenSessionLiveEvents(
 ) {
 	return listen<SessionLiveEventEnvelope>("dcc/session/live", (event) => {
 		handler(event.payload);
+	});
+}
+
+// ---- Durable task objective -------------------------------------------------
+
+export function getSessionObjective(sessionId: string) {
+	return invoke<SessionObjectiveOutput>(SESSION_METHODS.getSessionObjective, {
+		sessionId,
+	});
+}
+
+export function setSessionObjective(input: SetSessionObjectiveInput) {
+	return invoke<SessionObjectiveOutput>(SESSION_METHODS.setSessionObjective, {
+		input,
+	});
+}
+
+export function transitionSessionObjective(input: TransitionSessionObjectiveInput) {
+	return invoke<SessionObjectiveOutput>(
+		SESSION_METHODS.transitionSessionObjective,
+		{ input },
+	);
+}
+
+export function clearSessionObjective(sessionId: string) {
+	return invoke<SessionObjectiveOutput>(SESSION_METHODS.clearSessionObjective, {
+		sessionId,
 	});
 }

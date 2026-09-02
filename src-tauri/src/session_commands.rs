@@ -20,7 +20,8 @@ use dcc_tauri::{
         PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
         RespondToUserInputInput, RespondToUserInputOutput, RunPullRequestReviewAgentInput,
         RunPullRequestReviewAgentOutput, SearchSessionsInput, SessionLiveSnapshot,
-        StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput, TurnReviewFileDiffInput,
+        SessionObjectiveOutput, SetSessionObjectiveInput, StartMcpOauthInput, StartMcpOauthOutput,
+        SteerNativeSubagentInput, TransitionSessionObjectiveInput, TurnReviewFileDiffInput,
         TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     state::SessionCommandState,
@@ -114,6 +115,38 @@ pub async fn list_turn_queue(
     session_id: String,
 ) -> Result<Vec<QueuedTurn>, String> {
     session_command_impl::list_turn_queue(state, session_id).await
+}
+
+#[tauri::command]
+pub async fn get_session_objective(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<SessionObjectiveOutput, String> {
+    session_command_impl::get_session_objective(state, session_id).await
+}
+
+#[tauri::command]
+pub async fn set_session_objective(
+    state: State<'_, SessionCommandState>,
+    input: SetSessionObjectiveInput,
+) -> Result<SessionObjectiveOutput, String> {
+    session_command_impl::set_session_objective(state, input).await
+}
+
+#[tauri::command]
+pub async fn transition_session_objective(
+    state: State<'_, SessionCommandState>,
+    input: TransitionSessionObjectiveInput,
+) -> Result<SessionObjectiveOutput, String> {
+    session_command_impl::transition_session_objective(state, input).await
+}
+
+#[tauri::command]
+pub async fn clear_session_objective(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<SessionObjectiveOutput, String> {
+    session_command_impl::clear_session_objective(state, session_id).await
 }
 
 #[tauri::command]

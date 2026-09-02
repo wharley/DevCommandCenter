@@ -5,6 +5,7 @@ use specta::Type;
 use tauri::{AppHandle, State};
 use tokio::time::sleep;
 
+use dcc_core::domain::objective::{ObjectiveTransition, SessionObjective, SessionObjectiveDraft};
 use dcc_core::{
     application::{
         abort_run as run_abort_run, active_turn_for_steer, approve_plan as run_approve_plan,
@@ -789,7 +790,10 @@ pub async fn send_turn(
 
     let provider_turn_input = ProviderTurnInput {
         prompt: input.prompt.clone(),
-        tool_instructions: input.tool_instructions.clone(),
+        // The durable objective rides along as bounded background context.
+        tool_instructions: state
+            .objective_tool_instructions(&input.session_id, input.tool_instructions.clone())
+            .map_err(|error| error.to_string())?,
         plan_mode: input.plan_mode,
         effort: input.effort.clone(),
         fast_mode: input.fast_mode,
@@ -923,6 +927,84 @@ pub async fn queue_turn(
     run_queue_turn(&*state, &*state, input)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSessionObjectiveInput {
+    pub session_id: SessionId,
+    pub draft: SessionObjectiveDraft,
+    #[serde(default)]
+    pub expected_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionSessionObjectiveInput {
+    pub session_id: SessionId,
+    pub transition: ObjectiveTransition,
+    #[serde(default)]
+    pub expected_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionObjectiveOutput {
+    pub objective: Option<SessionObjective>,
+}
+
+#[tauri::command]
+pub async fn get_session_objective(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<SessionObjectiveOutput, String> {
+    Ok(SessionObjectiveOutput {
+        objective: state
+            .session_objective(&SessionId(session_id))
+            .map_err(|error| error.to_string())?,
+    })
+}
+
+#[tauri::command]
+pub async fn set_session_objective(
+    state: State<'_, SessionCommandState>,
+    input: SetSessionObjectiveInput,
+) -> Result<SessionObjectiveOutput, String> {
+    let objective = state
+        .set_session_objective(&input.session_id, input.draft, input.expected_generation)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(SessionObjectiveOutput {
+        objective: Some(objective),
+    })
+}
+
+#[tauri::command]
+pub async fn transition_session_objective(
+    state: State<'_, SessionCommandState>,
+    input: TransitionSessionObjectiveInput,
+) -> Result<SessionObjectiveOutput, String> {
+    let objective = state
+        .transition_session_objective(
+            &input.session_id,
+            input.transition,
+            input.expected_generation,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(SessionObjectiveOutput {
+        objective: Some(objective),
+    })
+}
+
+#[tauri::command]
+pub async fn clear_session_objective(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<SessionObjectiveOutput, String> {
+    state
+        .clear_session_objective(&SessionId(session_id))
+        .map_err(|error| error.to_string())?;
+    Ok(SessionObjectiveOutput { objective: None })
 }
 
 #[tauri::command]
