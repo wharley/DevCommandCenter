@@ -222,6 +222,9 @@ pub enum SessionEventKind {
         /// and for records persisted before this field existed.
         #[serde(default)]
         evidence: Option<TurnEvidenceSummary>,
+        /// Explicit retry linkage: the aborted turn this one re-runs.
+        #[serde(rename = "retryOfTurnId", default)]
+        retry_of_turn_id: Option<TurnId>,
     },
     TurnSteered {
         #[serde(rename = "turnId")]
@@ -748,6 +751,7 @@ mod tests {
                     plan_mode: None,
                     model: None,
                     evidence: None,
+                    retry_of_turn_id: None,
                 },
             ),
             event(
@@ -944,6 +948,7 @@ mod turn_evidence_tests {
                     TurnEvidenceTrust::RemoteUntrusted,
                 )],
             }),
+            retry_of_turn_id: None,
         };
         let value = serde_json::to_value(&with_evidence).expect("serialize evidence");
         assert_eq!(value["evidence"]["stage"], "reproduce");

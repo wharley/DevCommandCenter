@@ -182,7 +182,11 @@ type SessionWorkbenchProps = {
 	onForkFromMessage?: (messageId: string) => void;
 	onSubmitPrompt: (
 		turn: ComposerSubmittedTurn,
-		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
+		options?: {
+			forceNewSession?: boolean;
+			targetSessionId?: string | null;
+			retryOfTurnId?: string | null;
+		},
 	) => Promise<boolean>;
 	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onQueuePrompt: (turn: ComposerSubmittedTurn) => Promise<void>;

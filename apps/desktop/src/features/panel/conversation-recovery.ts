@@ -37,6 +37,20 @@ export function latestConversationActivitySignature(
 	return `${latest.id}:${(hash >>> 0).toString(36)}`;
 }
 
+/** The nearest user turn before `messageIndex`, with its durable turn id when known. */
+export function precedingUserTurn(
+	messages: WorkspaceMessage[],
+	messageIndex: number,
+): { prompt: string; turnId: string | null } | null {
+	for (let index = messageIndex - 1; index >= 0; index -= 1) {
+		const candidate = messages[index];
+		if (candidate?.role === "user") {
+			return { prompt: candidate.content, turnId: candidate.turnId ?? null };
+		}
+	}
+	return null;
+}
+
 export function precedingUserPrompt(
 	messages: WorkspaceMessage[],
 	messageIndex: number,

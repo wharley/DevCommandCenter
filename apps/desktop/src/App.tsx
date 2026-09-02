@@ -3144,7 +3144,11 @@ export default function App() {
 
 	const handleSubmitPrompt = useCallback(async (
 		turn: ComposerSubmittedTurn,
-		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
+		options?: {
+			forceNewSession?: boolean;
+			targetSessionId?: string | null;
+			retryOfTurnId?: string | null;
+		},
 	) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
 		if (trimmedPrompt.length === 0) {
@@ -3421,6 +3425,7 @@ export default function App() {
 				fastMode: turn.envelope.fastMode,
 				approvalPolicy: turn.envelope.approvalPolicy,
 				evidence: turn.envelope.evidence ?? null,
+				retryOfTurnId: options?.retryOfTurnId ?? null,
 			});
 			promptAccepted = true;
 			pendingForkReanchorsRef.current.consume(currentSessionId);

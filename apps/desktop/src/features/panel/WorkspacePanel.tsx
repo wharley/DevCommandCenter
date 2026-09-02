@@ -221,7 +221,12 @@ type WorkspacePanelProps = {
 	onForkFromMessage?: (messageId: string) => void;
 	onSubmitPrompt: (
 		turn: ComposerSubmittedTurn,
-		options?: { forceNewSession?: boolean; targetSessionId?: string | null },
+		options?: {
+			forceNewSession?: boolean;
+			targetSessionId?: string | null;
+			/** Explicit retry linkage to an aborted turn of the same session. */
+			retryOfTurnId?: string | null;
+		},
 	) => Promise<boolean>;
 	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onQueuePrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
@@ -905,6 +910,23 @@ export function WorkspacePanel({
 		},
 		[onResumeSession, replaceComposerDraft, sessionState, t],
 	);
+	// An explicit retry re-sends the same prompt immediately, linked to the
+	// aborted turn; budgets treat it as a normal turn.
+	const handleRetryInterrupted = useCallback(
+		async ({ prompt, turnId }: { prompt: string; turnId: string }) => {
+			try {
+				if (sessionState === "aborted") {
+					await onResumeSession();
+				}
+				await onSubmitPrompt(buildAnnotationTurn(prompt), { retryOfTurnId: turnId });
+			} catch (error) {
+				toast.error(t("conversation.message.retryFailed"), {
+					description: error instanceof Error ? error.message : undefined,
+				});
+			}
+		},
+		[buildAnnotationTurn, onResumeSession, onSubmitPrompt, sessionState, t],
+	);
 	const pendingPermissionRequests = useMemo(
 		() => collectPendingPermissionRequests(messages),
 		[messages],
@@ -1268,6 +1290,7 @@ export function WorkspacePanel({
 					onEditPrompt={replaceComposerDraft}
 					onForkFromMessage={onForkFromMessage}
 					onContinueInterrupted={handleContinueInterrupted}
+					onRetryInterrupted={handleRetryInterrupted}
 					onOpenPlan={onOpenPlanSurface}
 					onOpenFileReference={onOpenFileReference}
 				/>

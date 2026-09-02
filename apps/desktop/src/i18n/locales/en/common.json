@@ -2304,6 +2304,11 @@
     "message": {
       "incomplete": "Incomplete",
       "interrupted": "Run interrupted",
+      "retry": "Retry",
+      "retryHint": "Re-run the same prompt now, linked to the interrupted turn. It counts toward the objective budgets like any turn.",
+      "retryFailed": "Unable to retry this turn.",
+      "retryChip": "retry",
+      "retryChipHint": "This turn explicitly re-ran an interrupted turn.",
       "continue": "Continue",
       "continuePrompt": "Continue the previous task from the current state. Before making new changes, verify what was already completed and what remained incomplete when the run was interrupted.",
       "originalPrompt": "Original request",

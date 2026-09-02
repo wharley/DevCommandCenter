@@ -4,6 +4,7 @@ import {
 	buildSafeContinuationPrompt,
 	latestConversationActivitySignature,
 	precedingUserPrompt,
+	precedingUserTurn,
 } from "./conversation-recovery";
 
 function message(overrides: Partial<WorkspaceMessage>): WorkspaceMessage {
@@ -47,5 +48,19 @@ describe("conversation recovery", () => {
 		expect(latestConversationActivitySignature([before])).not.toBe(
 			latestConversationActivitySignature([after]),
 		);
+	});
+});
+
+describe("precedingUserTurn", () => {
+	it("returns the nearest earlier user turn with its id", () => {
+		const messages = [
+			{ id: "u1", role: "user" as const, turnId: "turn-1", label: "User", content: "first" },
+			{ id: "a1", role: "assistant" as const, label: "Assistant", content: "reply" },
+			{ id: "u2", role: "user" as const, label: "User", content: "second" },
+			{ id: "a2", role: "assistant" as const, label: "Assistant", content: "…" },
+		];
+		expect(precedingUserTurn(messages, 3)).toEqual({ prompt: "second", turnId: null });
+		expect(precedingUserTurn(messages, 1)).toEqual({ prompt: "first", turnId: "turn-1" });
+		expect(precedingUserTurn(messages, 0)).toBeNull();
 	});
 });

@@ -104,6 +104,8 @@ export type WorkspaceMessage = {
 	planMode?: boolean;
 	/** Metadata-only evidence linkage recorded with the turn (no bodies). */
 	evidence?: TurnEvidenceSummary;
+	/** Explicit retry linkage: the aborted turn this user turn re-ran. */
+	retryOfTurnId?: string;
 	action?: {
 		type: "open-session";
 		sessionId: string;
@@ -139,6 +141,9 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					plan_mode: record.kind.planMode ?? null,
 					model: record.kind.model ?? null,
 					...(record.kind.evidence ? { evidence: record.kind.evidence } : {}),
+					...(record.kind.retryOfTurnId
+						? { retry_of_turn_id: record.kind.retryOfTurnId }
+						: {}),
 				},
 			};
 		case "turn_steered":
@@ -1104,12 +1109,16 @@ export function projectWorkspaceMessages(
 			messages.push({
 				id: `user-${event.sessionTurnStarted.session_id}-${event.sessionTurnStarted.turn_id}`,
 				role: "user",
+				turnId: event.sessionTurnStarted.turn_id,
 				label: "User",
 				content: event.sessionTurnStarted.prompt,
 				createdAt: occurredAt,
 				planMode: event.sessionTurnStarted.plan_mode === true,
 				...(event.sessionTurnStarted.evidence
 					? { evidence: event.sessionTurnStarted.evidence }
+					: {}),
+				...(event.sessionTurnStarted.retry_of_turn_id
+					? { retryOfTurnId: event.sessionTurnStarted.retry_of_turn_id }
 					: {}),
 			});
 			continue;

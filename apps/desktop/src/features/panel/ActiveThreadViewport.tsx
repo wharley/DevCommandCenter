@@ -24,8 +24,7 @@ import { EmptyState } from "./EmptyState";
 import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import {
 	latestConversationActivitySignature,
-	precedingUserPrompt,
-} from "./conversation-recovery";
+	precedingUserPrompt, precedingUserTurn } from "./conversation-recovery";
 import { ConversationTrail } from "./ConversationTrail";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import {
@@ -65,6 +64,7 @@ type ActiveThreadViewportProps = {
 	onEditPrompt?: (prompt: string) => void;
 	onForkFromMessage?: (messageId: string) => void;
 	onContinueInterrupted?: (originalPrompt: string | null) => Promise<void> | void;
+	onRetryInterrupted?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
 	onOpenPlan: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 };
@@ -96,6 +96,7 @@ export function ActiveThreadViewport({
 	onEditPrompt,
 	onForkFromMessage,
 	onContinueInterrupted,
+	onRetryInterrupted,
 	onOpenPlan,
 	onOpenFileReference,
 }: ActiveThreadViewportProps) {
@@ -283,6 +284,7 @@ export function ActiveThreadViewport({
 												content={message.content}
 												createdAt={message.createdAt}
 												evidence={message.evidence ?? null}
+												retryOfTurnId={message.retryOfTurnId ?? null}
 												onFork={
 													onForkFromMessage
 														? () => onForkFromMessage(message.id)
@@ -334,6 +336,21 @@ export function ActiveThreadViewport({
 															}
 														: undefined
 												}
+												onRetry={(() => {
+													if (
+														message.id !== latestAssistantMessageId ||
+														message.status?.type !== "incomplete" ||
+														!onRetryInterrupted
+													) {
+														return undefined;
+													}
+													const turn = precedingUserTurn(messages, messageIndex);
+													if (!turn?.turnId) return undefined;
+													const { prompt, turnId } = turn;
+													return () => {
+														void onRetryInterrupted({ prompt, turnId });
+													};
+												})()}
 												onOpenPlan={onOpenPlan}
 												onOpenFileReference={onOpenFileReference}
 												hidePendingApprovals

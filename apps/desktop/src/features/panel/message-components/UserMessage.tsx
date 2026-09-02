@@ -1,4 +1,4 @@
-import { Bug, Copy, GitFork, Pencil } from "lucide-react";
+import { Bug, Copy, GitFork, Pencil, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TurnEvidenceSummary } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ export function UserMessage({
 	label,
 	createdAt,
 	evidence = null,
+	retryOfTurnId = null,
 	onEdit,
 	onFork,
 }: {
@@ -47,6 +48,8 @@ export function UserMessage({
 	label: string;
 	createdAt?: string;
 	evidence?: TurnEvidenceSummary | null;
+	/** Set when this turn explicitly re-ran an aborted turn. */
+	retryOfTurnId?: string | null;
 	onEdit?: () => void;
 	/** Starts a new thread re-anchored on everything before this message. */
 	onFork?: () => void;
@@ -64,6 +67,16 @@ export function UserMessage({
 					</p>
 				</div>
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
+					{retryOfTurnId ? (
+						<span
+							className="inline-flex items-center gap-1 rounded-full border border-border/60 px-1.5 py-px text-[10px] leading-4 text-muted-foreground"
+							title={t("conversation.message.retryChipHint")}
+							data-testid="user-message-retry"
+						>
+							<RotateCcw className="size-3" aria-hidden />
+							{t("conversation.message.retryChip")}
+						</span>
+					) : null}
 					{evidence && evidence.items.length > 0 ? (
 						<UserMessageEvidenceChip evidence={evidence} />
 					) : null}

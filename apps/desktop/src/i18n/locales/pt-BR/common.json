@@ -2304,6 +2304,11 @@
     "message": {
       "incomplete": "Incompleta",
       "interrupted": "Execução interrompida",
+      "retry": "Tentar de novo",
+      "retryHint": "Reenvia o mesmo prompt agora, vinculado ao turno interrompido. Conta nos orçamentos do objetivo como qualquer turno.",
+      "retryFailed": "Não foi possível repetir este turno.",
+      "retryChip": "retry",
+      "retryChipHint": "Este turno repetiu explicitamente um turno interrompido.",
       "continue": "Continuar",
       "continuePrompt": "Continue a tarefa anterior a partir do estado atual. Antes de fazer novas alterações, verifique o que já foi concluído e o que ficou incompleto durante a interrupção.",
       "originalPrompt": "Pedido original",

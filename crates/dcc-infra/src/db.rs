@@ -8401,6 +8401,7 @@ mod tests {
                     plan_mode: Some(false),
                     model: None,
                     evidence: None,
+                    retry_of_turn_id: None,
                 },
             },
             SessionEventRecord {
@@ -8759,6 +8760,7 @@ mod tests {
                     plan_mode: Some(false),
                     model: None,
                     evidence: None,
+                    retry_of_turn_id: None,
                 },
             },
             SessionEventRecord {

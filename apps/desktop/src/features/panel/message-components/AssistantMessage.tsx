@@ -508,6 +508,7 @@ export function AssistantMessage({
 	autoSaveMissionValidation,
 	onDelegateTaskApprove,
 	onContinue,
+	onRetry,
 	onOpenPlan,
 	onOpenFileReference,
 	hidePendingApprovals = false,
@@ -531,6 +532,8 @@ export function AssistantMessage({
 	autoSaveMissionValidation?: boolean;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	onContinue?: () => void;
+	/** Re-runs the aborted turn with the same prompt, linked as an explicit retry. */
+	onRetry?: () => void;
 	onOpenPlan?: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	hidePendingApprovals?: boolean;
@@ -802,6 +805,19 @@ export function AssistantMessage({
 								{status.reason ?? t("conversation.message.incomplete")}
 							</div>
 						</div>
+						{onRetry ? (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="h-7 shrink-0 gap-1.5 px-2 text-[11px]"
+								onClick={onRetry}
+								title={t("conversation.message.retryHint")}
+							>
+								<RotateCcw className="size-3" aria-hidden />
+								{t("conversation.message.retry")}
+							</Button>
+						) : null}
 						{onContinue ? (
 							<Button
 								type="button"

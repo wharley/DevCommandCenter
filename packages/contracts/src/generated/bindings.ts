@@ -309,6 +309,7 @@ export type CoreEvent = ({ workspacePrepared: {
 	plan_mode: boolean | null,
 	model: string | null,
 	evidence?: TurnEvidenceSummary | null,
+	retry_of_turn_id?: string | null,
 } }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionDelegationCancelled?: never; sessionDelegationCompleted?: never; sessionDelegationDelta?: never; sessionDelegationFailed?: never; sessionDelegationRequested?: never; sessionDelegationStarted?: never; sessionMcpRuntimeStatusChanged?: never; sessionPlanApproved?: never; sessionPlanHandedOff?: never; sessionQueuedTurnDispatched?: never; sessionQueuedTurnRemoved?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnAssistantMessageCompleted?: never; sessionTurnAssistantMessageDelta?: never; sessionTurnAssistantMessageStarted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnModelEffective?: never; sessionTurnNativeSubagentActivity?: never; sessionTurnNativeSubagentModelConfirmed?: never; sessionTurnNativeSubagentModelRequested?: never; sessionTurnPermissionRequested?: never; sessionTurnPermissionResolved?: never; sessionTurnQueueReordered?: never; sessionTurnQueued?: never; sessionTurnReasoningCompleted?: never; sessionTurnReasoningDelta?: never; sessionTurnReasoningStarted?: never; sessionTurnSteered?: never; sessionTurnToolCallCompleted?: never; sessionTurnToolCallDelta?: never; sessionTurnToolCallFailed?: never; sessionTurnToolCallStarted?: never; sessionTurnUserInputRequested?: never; sessionTurnUserInputResolved?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionTurnSteered: {
 	session_id: string,
 	turn_id: string,
@@ -1718,6 +1719,11 @@ export type SendTurnInput = {
 	 *  Never carries bodies; validated and persisted with the TurnStarted record.
 	 */
 	evidence?: TurnEvidenceSummary | null,
+	/**
+	 *  Explicit retry of an aborted turn in this session. Validated against
+	 *  durable history; the retry is a normal turn for every budget.
+	 */
+	retryOfTurnId?: TurnId | null,
 };
 
 export type SendTurnOutput = {
@@ -1749,7 +1755,9 @@ export type SessionEventKind = { type: "session_started"; workspaceId: Workspace
  *  Metadata-only evidence linkage; absent for turns without evidence
  *  and for records persisted before this field existed.
  */
-evidence?: TurnEvidenceSummary | null } | { type: "turn_steered"; turnId: TurnId; prompt: string } | { type: "turn_queued"; queuedTurn: QueuedTurn } | { type: "queued_turn_removed"; queuedTurnId: string } | { type: "turn_queue_reordered"; queuedTurnIds: string[] } | { type: "queued_turn_dispatched"; queuedTurnId: string; turnId: TurnId } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_assistant_message_started"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase } | { type: "turn_assistant_message_delta"; turnId: TurnId; messageId: string; content: string } | { type: "turn_assistant_message_completed"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase;
+evidence?: TurnEvidenceSummary | null;
+// Explicit retry linkage: the aborted turn this one re-runs.
+retryOfTurnId?: TurnId | null } | { type: "turn_steered"; turnId: TurnId; prompt: string } | { type: "turn_queued"; queuedTurn: QueuedTurn } | { type: "queued_turn_removed"; queuedTurnId: string } | { type: "turn_queue_reordered"; queuedTurnIds: string[] } | { type: "queued_turn_dispatched"; queuedTurnId: string; turnId: TurnId } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_assistant_message_started"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase } | { type: "turn_assistant_message_delta"; turnId: TurnId; messageId: string; content: string } | { type: "turn_assistant_message_completed"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase;
 /**
  *  Final provider snapshot. When present this replaces accumulated
  *  deltas and is authoritative for replay.

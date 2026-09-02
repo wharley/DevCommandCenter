@@ -51,6 +51,10 @@ pub struct SendTurnInput {
     /// Never carries bodies; validated and persisted with the TurnStarted record.
     #[serde(default)]
     pub evidence: Option<TurnEvidenceSummary>,
+    /// Explicit retry of an aborted turn in this session. Validated against
+    /// durable history; the retry is a normal turn for every budget.
+    #[serde(default)]
+    pub retry_of_turn_id: Option<TurnId>,
 }
 
 /// Merge UI selection into session fields for per-turn model routing.
@@ -132,6 +136,29 @@ pub struct SendTurnOutput {
     pub projection: SessionProjection,
 }
 
+/// A retry may only reference a turn of this session that started and was
+/// aborted. Completed turns are not retried (use a new prompt), and unknown
+/// ids are rejected so the linkage in the timeline is always real.
+fn validate_retry_target(history: &[SessionEventRecord], retry_of: &TurnId) -> Result<()> {
+    let started = history.iter().any(|event| {
+        matches!(&event.kind, SessionEventKind::TurnStarted { turn_id, .. } if turn_id == retry_of)
+    });
+    if !started {
+        return Err(crate::CoreError::InvalidInput(
+            "retry target turn does not exist in this session".to_string(),
+        ));
+    }
+    let aborted = history.iter().any(|event| {
+        matches!(&event.kind, SessionEventKind::TurnAborted { turn_id, .. } if turn_id == retry_of)
+    });
+    if !aborted {
+        return Err(crate::CoreError::InvalidInput(
+            "only an aborted turn can be retried".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -165,6 +192,9 @@ where
             "session already has an active turn".to_string(),
         ));
     }
+    if let Some(retry_of) = &input.retry_of_turn_id {
+        validate_retry_target(&history, retry_of)?;
+    }
 
     let now = now_iso();
     let turn_id = TurnId(Uuid::new_v4().to_string());
@@ -189,6 +219,7 @@ where
             plan_mode: input.plan_mode,
             model: session.model.clone(),
             evidence: input.evidence.clone(),
+            retry_of_turn_id: input.retry_of_turn_id.clone(),
         },
     };
 
@@ -210,6 +241,7 @@ where
                     plan_mode: input.plan_mode,
                     model: session.model.clone(),
                     evidence: input.evidence,
+                    retry_of_turn_id: input.retry_of_turn_id.map(|turn_id| turn_id.0),
                 },
             )
             .await?;
@@ -326,6 +358,49 @@ mod tests {
     }
 
     #[test]
+    fn retry_targets_must_be_aborted_turns_of_the_session() {
+        fn record(sequence: u64, kind: SessionEventKind) -> SessionEventRecord {
+            SessionEventRecord {
+                event_id: format!("event-{sequence}"),
+                session_id: SessionId("session-1".to_string()),
+                sequence,
+                occurred_at: "2026-09-02T10:00:00Z".to_string(),
+                kind,
+            }
+        }
+        let started = |turn: &str| SessionEventKind::TurnStarted {
+            turn_id: TurnId(turn.to_string()),
+            prompt: "do it".to_string(),
+            plan_mode: None,
+            model: None,
+            evidence: None,
+            retry_of_turn_id: None,
+        };
+        let history = vec![
+            record(1, started("t-aborted")),
+            record(
+                2,
+                SessionEventKind::TurnAborted {
+                    turn_id: TurnId("t-aborted".to_string()),
+                    reason: Some("provider crashed".to_string()),
+                },
+            ),
+            record(3, started("t-completed")),
+            record(
+                4,
+                SessionEventKind::TurnCompleted {
+                    turn_id: TurnId("t-completed".to_string()),
+                },
+            ),
+        ];
+        assert!(super::validate_retry_target(&history, &TurnId("t-aborted".to_string())).is_ok());
+        assert!(
+            super::validate_retry_target(&history, &TurnId("t-completed".to_string())).is_err()
+        );
+        assert!(super::validate_retry_target(&history, &TurnId("t-missing".to_string())).is_err());
+    }
+
+    #[test]
     fn send_turn_creates_running_turn_and_projection() {
         let sessions = FakeSessionRepo::default();
         let session_events = FakeSessionEventRepo::default();
@@ -382,6 +457,7 @@ mod tests {
                 fast_mode: None,
                 approval_policy: None,
                 evidence: None,
+                retry_of_turn_id: None,
             },
         ))
         .expect("send_turn should succeed");
@@ -467,6 +543,7 @@ mod tests {
                 fast_mode: None,
                 approval_policy: None,
                 evidence: None,
+                retry_of_turn_id: None,
             },
         ))
         .expect("send_turn should succeed");
@@ -522,6 +599,7 @@ mod tests {
                 fast_mode: None,
                 approval_policy: None,
                 evidence: None,
+                retry_of_turn_id: None,
             },
         ))
         .expect("preflight should update the provider selection");

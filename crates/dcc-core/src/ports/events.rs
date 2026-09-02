@@ -54,6 +54,8 @@ pub enum CoreEvent {
         model: Option<String>,
         #[serde(default)]
         evidence: Option<crate::domain::session::TurnEvidenceSummary>,
+        #[serde(default)]
+        retry_of_turn_id: Option<String>,
     },
     SessionTurnSteered {
         session_id: String,
@@ -347,6 +349,7 @@ impl CoreEvent {
                     plan_mode,
                     model,
                     evidence,
+                    retry_of_turn_id,
                 },
                 Self::SessionTurnStarted {
                     turn_id: actual_turn_id,
@@ -354,6 +357,7 @@ impl CoreEvent {
                     plan_mode: actual_plan_mode,
                     model: actual_model,
                     evidence: actual_evidence,
+                    retry_of_turn_id: actual_retry_of_turn_id,
                     ..
                 },
             ) => {
@@ -362,6 +366,8 @@ impl CoreEvent {
                     && plan_mode == actual_plan_mode
                     && model == actual_model
                     && evidence == actual_evidence
+                    && retry_of_turn_id.as_ref().map(|id| id.0.as_str())
+                        == actual_retry_of_turn_id.as_deref()
             }
             (
                 SessionEventKind::TurnSteered { turn_id, prompt },

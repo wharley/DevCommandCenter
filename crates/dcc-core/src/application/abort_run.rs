@@ -355,6 +355,7 @@ mod tests {
                     plan_mode: None,
                     model: None,
                     evidence: None,
+                    retry_of_turn_id: None,
                 },
             },
         ];
@@ -500,6 +501,7 @@ mod tests {
                 plan_mode: None,
                 model: None,
                 evidence: None,
+                retry_of_turn_id: None,
             },
         }))
         .expect("new turn");

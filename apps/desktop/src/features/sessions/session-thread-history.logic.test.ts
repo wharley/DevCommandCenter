@@ -391,6 +391,7 @@ describe("projectWorkspaceMessages", () => {
 			{
 				id: "user-session-a-turn-1",
 				role: "user",
+				turnId: "turn-1",
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
@@ -416,6 +417,14 @@ describe("projectWorkspaceMessages", () => {
 		expect(message.evidence).toEqual(evidence);
 		const [plain] = projectWorkspaceMessages([record], [], "session-a");
 		expect("evidence" in plain).toBe(false);
+		expect("retryOfTurnId" in plain).toBe(false);
+		const retried: SessionEventRecord = {
+			...record,
+			kind: { ...record.kind, retryOfTurnId: "turn-0" } as SessionEventRecord["kind"],
+		};
+		const [retry] = projectWorkspaceMessages([retried], [], "session-a");
+		expect(retry.retryOfTurnId).toBe("turn-0");
+		expect(retry.turnId).toBe("turn-1");
 	});
 
 	it("merges live assistant deltas into a streamed assistant message", () => {
@@ -432,6 +441,7 @@ describe("projectWorkspaceMessages", () => {
 			{
 				id: "user-session-a-turn-1",
 				role: "user",
+				turnId: "turn-1",
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
@@ -898,6 +908,7 @@ describe("projectWorkspaceMessages", () => {
 			{
 				id: "user-session-a-turn-1",
 				role: "user",
+				turnId: "turn-1",
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
@@ -996,6 +1007,7 @@ describe("projectWorkspaceMessages", () => {
 			{
 				id: "user-session-a-turn-1",
 				role: "user",
+				turnId: "turn-1",
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
@@ -1045,6 +1057,7 @@ describe("projectWorkspaceMessages", () => {
 			{
 				id: "user-session-a-turn-1",
 				role: "user",
+				turnId: "turn-1",
 				label: "User",
 				content: "Alpha",
 				createdAt: "2026-05-01T12:00:00Z",
@@ -1098,6 +1111,7 @@ describe("projectWorkspaceMessages", () => {
 			{
 				id: "user-session-a-turn-1",
 				role: "user",
+				turnId: "turn-1",
 				label: "User",
 				content: "Draft prompt",
 				createdAt: "2026-05-01T12:00:00Z",
