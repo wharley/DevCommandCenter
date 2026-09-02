@@ -2319,6 +2319,8 @@
       "continuePrompt": "Continue the previous task from the current state. Before making new changes, verify what was already completed and what remained incomplete when the run was interrupted.",
       "originalPrompt": "Original request",
       "resumeFailed": "Unable to resume this conversation.",
+      "forkAssistant": "Fork a new thread from this reply",
+      "forkStartedFromReply": "Forked into a new thread anchored on this reply. A bounded snapshot up to it follows your next turn there.",
       "forkUser": "Fork a new thread from here",
       "forkStarted": "Forked into a new thread. A bounded snapshot of the earlier messages follows your next turn there; the forked message is in the composer to edit.",
       "forkFailed": "Unable to fork this thread",

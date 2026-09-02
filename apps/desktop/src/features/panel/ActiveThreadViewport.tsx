@@ -336,6 +336,13 @@ export function ActiveThreadViewport({
 															}
 														: undefined
 												}
+												onFork={
+													onForkFromMessage &&
+													message.streaming !== true &&
+													!message.status
+														? () => onForkFromMessage(message.id)
+														: undefined
+												}
 												onRetry={(() => {
 													if (
 														message.id !== latestAssistantMessageId ||

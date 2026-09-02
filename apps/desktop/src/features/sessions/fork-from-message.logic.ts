@@ -15,6 +15,12 @@ export type ForkPoint = {
 	excludedUserTurns: number;
 };
 
+/**
+ * Forking from a user message re-offers that prompt for editing and keeps
+ * everything before it. Forking from an assistant message keeps that reply
+ * (the user→assistant pair is the anchor) and leaves the composer empty so
+ * the person writes the next instruction from that point.
+ */
 export function selectForkPoint(
 	messages: readonly WorkspaceMessage[],
 	messageId: string,
@@ -22,7 +28,18 @@ export function selectForkPoint(
 	const index = messages.findIndex((message) => message.id === messageId);
 	if (index < 0) return null;
 	const target = messages[index];
-	if (!target || target.role !== "user") return null;
+	if (!target) return null;
+	if (target.role === "assistant") {
+		if (target.streaming === true || target.status) return null;
+		const priorMessages = messages
+			.slice(0, index + 1)
+			.filter((message) => message.streaming !== true && !message.status);
+		const excludedUserTurns = messages
+			.slice(index + 1)
+			.filter((message) => message.role === "user").length;
+		return { priorMessages, forkedPrompt: "", excludedUserTurns };
+	}
+	if (target.role !== "user") return null;
 	const priorMessages = messages
 		.slice(0, index)
 		.filter((message) => message.streaming !== true && !message.status);

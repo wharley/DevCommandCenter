@@ -29,11 +29,25 @@ describe("selectForkPoint", () => {
 		expect(point?.excludedUserTurns).toBe(2);
 	});
 
-	it("drops streaming or status messages from the snapshot and refuses non-user points", () => {
+	it("drops streaming or status messages from the snapshot and refuses unknown points", () => {
 		const point = selectForkPoint(thread, "u3");
 		expect(point?.priorMessages.map((entry) => entry.id)).toEqual(["u1", "a1", "u2"]);
-		expect(selectForkPoint(thread, "a1")).toBeNull();
 		expect(selectForkPoint(thread, "missing")).toBeNull();
+	});
+
+	it("forks from an assistant reply keeping the pair and leaving the composer empty", () => {
+		const point = selectForkPoint(thread, "a1");
+		expect(point?.priorMessages.map((entry) => entry.id)).toEqual(["u1", "a1"]);
+		expect(point?.forkedPrompt).toBe("");
+		expect(point?.excludedUserTurns).toBe(2);
+		// A streaming or incomplete reply is not a stable anchor.
+		expect(selectForkPoint(thread, "a2")).toBeNull();
+		expect(
+			selectForkPoint(
+				[message("u1", "user", "x"), message("a1", "assistant", "y", { status: { type: "incomplete" } })],
+				"a1",
+			),
+		).toBeNull();
 	});
 });
 

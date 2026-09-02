@@ -4014,13 +4014,17 @@ export default function App() {
 					],
 				);
 				setSelectedSessionId(forkedSessionId);
-				setWorkspaceComposerPrefill((previous) => ({
-					workspaceId: selectedWorkspace.id,
-					text: forkPoint.forkedPrompt,
-					nonce: (previous?.nonce ?? 0) + 1,
-					mode: "replace",
-				}));
-				toast.success(t("conversation.message.forkStarted"));
+				if (forkPoint.forkedPrompt.trim().length > 0) {
+					setWorkspaceComposerPrefill((previous) => ({
+						workspaceId: selectedWorkspace.id,
+						text: forkPoint.forkedPrompt,
+						nonce: (previous?.nonce ?? 0) + 1,
+						mode: "replace",
+					}));
+					toast.success(t("conversation.message.forkStarted"));
+				} else {
+					toast.success(t("conversation.message.forkStartedFromReply"));
+				}
 			} catch (error) {
 				console.error("[dcc] fork from message failed:", error);
 				toast.error(t("conversation.message.forkFailed"), {

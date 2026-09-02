@@ -2319,6 +2319,8 @@
       "continuePrompt": "Continue a tarefa anterior a partir do estado atual. Antes de fazer novas alterações, verifique o que já foi concluído e o que ficou incompleto durante a interrupção.",
       "originalPrompt": "Pedido original",
       "resumeFailed": "Não foi possível retomar esta conversa.",
+      "forkAssistant": "Bifurcar uma nova thread a partir desta resposta",
+      "forkStartedFromReply": "Bifurcado em uma nova thread ancorada nesta resposta. Um snapshot delimitado até ela segue no seu próximo turno lá.",
       "forkUser": "Bifurcar uma nova thread a partir daqui",
       "forkStarted": "Bifurcado em uma nova thread. Um snapshot delimitado das mensagens anteriores segue no seu próximo turno lá; a mensagem bifurcada está no composer para editar.",
       "forkFailed": "Não foi possível bifurcar esta thread",

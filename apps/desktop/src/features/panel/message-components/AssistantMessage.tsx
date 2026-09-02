@@ -6,6 +6,7 @@ import {
 	ChevronRight,
 	Copy,
 	GitBranch,
+	GitFork,
 	MessageSquarePlus,
 	RotateCcw,
 	Square,
@@ -509,6 +510,7 @@ export function AssistantMessage({
 	onDelegateTaskApprove,
 	onContinue,
 	onRetry,
+	onFork,
 	onOpenPlan,
 	onOpenFileReference,
 	hidePendingApprovals = false,
@@ -534,6 +536,8 @@ export function AssistantMessage({
 	onContinue?: () => void;
 	/** Re-runs the aborted turn with the same prompt, linked as an explicit retry. */
 	onRetry?: () => void;
+	/** Starts a new thread anchored on this reply and everything before it. */
+	onFork?: () => void;
 	onOpenPlan?: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	hidePendingApprovals?: boolean;
@@ -834,6 +838,22 @@ export function AssistantMessage({
 				) : null}
 				{showPlanCard ? null : (
 					<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/assistant:pointer-events-auto group-hover/assistant:opacity-100 group-focus-within/assistant:pointer-events-auto group-focus-within/assistant:opacity-100">
+						{onFork ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								aria-label={t("conversation.message.forkAssistant")}
+								title={t("conversation.message.forkAssistant")}
+								className={cn(
+									"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
+									"bg-transparent hover:bg-transparent",
+								)}
+								onClick={onFork}
+							>
+								<GitFork className="size-3.5" aria-hidden />
+							</Button>
+						) : null}
 						<Button
 							type="button"
 							variant="ghost"
