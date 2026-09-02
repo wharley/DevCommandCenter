@@ -3392,6 +3392,17 @@ export default function App() {
 					console.warn("[dcc] provider handoff context unavailable:", error);
 				}
 			}
+			if (
+				isCompactCommandPrompt(trimmedPrompt) &&
+				turnProvider &&
+				turnProvider.capabilities.supportsCompactionCommand !== true
+			) {
+				// The prompt still goes through as text; DCC just does not pretend
+				// this runtime compacts or re-anchor on top of it.
+				toast.warning(
+					t("conversation.compactUnsupported", { provider: turnProvider.label }),
+				);
+			}
 			const pendingForkReanchor = pendingForkReanchorsRef.current.peek(currentSessionId);
 			const toolInstructions = mergeProviderHandoffToolInstructions(
 				mergeProviderHandoffToolInstructions(baseToolInstructions, pendingForkReanchor),
@@ -3468,6 +3479,7 @@ export default function App() {
 
 			if (
 				isCompactCommandPrompt(trimmedPrompt) &&
+				turnProvider?.capabilities.supportsCompactionCommand === true &&
 				result.turn.state === "completed" &&
 				selectedLocalWorkspacePath &&
 				selectedWorkspace

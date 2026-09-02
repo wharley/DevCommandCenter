@@ -69,8 +69,15 @@ struct DroidStreamState {
     reasoning_started: HashMap<String, bool>,
 }
 
+/// Droid honors plan mode as a native exec flag; fast mode is prompt text.
+pub fn stable_droid_capabilities() -> Capabilities {
+    let mut capabilities = stable_cli_capabilities();
+    capabilities.plan_mode_support = dcc_core::domain::provider::TurnControlSupport::Native;
+    capabilities
+}
+
 pub fn adapter() -> DroidProvider {
-    DroidProvider::new(PROVIDER_ID, "droid", stable_cli_capabilities())
+    DroidProvider::new(PROVIDER_ID, "droid", stable_droid_capabilities())
 }
 
 pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
@@ -82,7 +89,7 @@ pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
             .iter()
             .map(|m| m.to_descriptor())
             .collect(),
-        capabilities: stable_cli_capabilities(),
+        capabilities: stable_droid_capabilities(),
         health,
         enabled: true,
         availability_generation: 0,

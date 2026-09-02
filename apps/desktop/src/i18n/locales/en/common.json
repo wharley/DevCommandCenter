@@ -1275,6 +1275,7 @@
     "ariaLabel": "Workspace composer",
     "inputAriaLabel": "Workspace prompt",
     "attachments": {
+      "imagesUnsupported": "This provider has no image support; images were attached as file references.",
       "add": "Attach file or image",
       "pickerTitle": "Attach files to this message",
       "error": "Unable to attach the selected file"
@@ -1307,6 +1308,7 @@
       "planModeEnable": "Enable Plan mode",
       "planModeDisable": "Disable Plan mode",
       "planModeHint": "Analyze the task and propose a plan before making changes.",
+      "planModePromptFallback": "On this provider, plan mode is applied through prompt text (best effort), not a native switch.",
       "planModeActiveHint": "Active: analyze and propose a plan without making changes.",
       "send": "Send",
       "steer": "Send guidance",
@@ -1344,6 +1346,7 @@
         "standard": "Standard",
         "standardHint": "Adapts the level of detail to the task context.",
         "direct": "Direct",
+        "directPromptFallback": "On this provider this is applied through prompt text (best effort).",
         "directHint": "Prefers shorter, more concise responses."
       }
     },
@@ -2274,6 +2277,7 @@
     "copyBranchNameError": "Could not copy the branch name"
   },
   "conversation": {
+    "compactUnsupported": "{{provider}} does not treat /compact as compaction. The message was sent as text and no re-anchor will follow.",
     "evidence": {
       "chip": "Evidence · {{count}} · {{stage}}",
       "chars": "chars"

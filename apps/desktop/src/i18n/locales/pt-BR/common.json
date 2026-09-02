@@ -1275,6 +1275,7 @@
     "ariaLabel": "Composer do workspace",
     "inputAriaLabel": "Prompt do workspace",
     "attachments": {
+      "imagesUnsupported": "Este provider não suporta imagens; as imagens foram anexadas como referências de arquivo.",
       "add": "Anexar arquivo ou imagem",
       "pickerTitle": "Anexar arquivos a esta mensagem",
       "error": "Não foi possível anexar o arquivo selecionado"
@@ -1307,6 +1308,7 @@
       "planModeEnable": "Ativar modo de planejamento",
       "planModeDisable": "Desativar modo de planejamento",
       "planModeHint": "Analisa a tarefa e propõe um plano antes de executar alterações.",
+      "planModePromptFallback": "Neste provider, o modo plano é aplicado por texto no prompt (melhor esforço), não por um controle nativo.",
       "planModeActiveHint": "Ativo: analisa e propõe um plano sem executar alterações.",
       "send": "Enviar",
       "steer": "Enviar orientação",
@@ -1344,6 +1346,7 @@
         "standard": "Padrão",
         "standardHint": "Adapta o nível de detalhe ao contexto da tarefa.",
         "direct": "Direto",
+        "directPromptFallback": "Neste provider isso é aplicado por texto no prompt (melhor esforço).",
         "directHint": "Prefere respostas mais curtas e objetivas."
       }
     },
@@ -2274,6 +2277,7 @@
     "copyBranchNameError": "Não foi possível copiar o nome do branch"
   },
   "conversation": {
+    "compactUnsupported": "{{provider}} não trata /compact como compactação. A mensagem foi enviada como texto e nenhum re-anchor seguirá.",
     "evidence": {
       "chip": "Evidências · {{count}} · {{stage}}",
       "chars": "caracteres"

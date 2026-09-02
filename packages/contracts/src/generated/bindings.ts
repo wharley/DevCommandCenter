@@ -135,6 +135,20 @@ export type Capabilities = {
 	 *  Providers without this never spawn a runtime to answer usage queries.
 	 */
 	supportsAccountUsage?: boolean,
+	// Whether plan mode is a native runtime switch or prompt text.
+	planModeSupport?: TurnControlSupport,
+	// Whether fast/direct responses are a native runtime switch or prompt text.
+	fastModeSupport?: TurnControlSupport,
+	/**
+	 *  Models are discovered from the installed runtime; the static registry
+	 *  is not authoritative and the backend must not reject unknown ids.
+	 */
+	supportsDynamicModels?: boolean,
+	/**
+	 *  The runtime understands a `/compact` prompt as context compaction, so
+	 *  DCC may treat it as a compaction signal (post-compact re-anchor).
+	 */
+	supportsCompactionCommand?: boolean,
 };
 
 export type Checkpoint = {
@@ -1988,6 +2002,13 @@ export type Turn = {
 	createdAt: string,
 	updatedAt: string,
 };
+
+/**
+ *  How a turn control (plan mode, fast mode) actually reaches the runtime.
+ *  `PromptFallback` means DCC appends behavior text to the prompt because the
+ *  adapter has no native switch; it still works, but it is best-effort.
+ */
+export type TurnControlSupport = "native" | "prompt_fallback";
 
 // One evidence item as metadata only: no body, URL, path, ref, note or text.
 export type TurnEvidenceItemSummary = {

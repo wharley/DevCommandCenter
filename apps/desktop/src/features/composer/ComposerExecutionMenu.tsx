@@ -375,6 +375,10 @@ export function ComposerExecutionMenu({
 										{direct
 											? t("composer.execution.response.directHint")
 											: t("composer.execution.response.standardHint")}
+										{direct &&
+										selectedProvider?.capabilities.fastModeSupport === "prompt_fallback"
+											? ` ${t("composer.execution.response.directPromptFallback")}`
+											: ""}
 									</span>
 								</span>
 								{directResponse === direct ? <Check className="mt-0.5 size-4" /> : null}

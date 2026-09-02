@@ -85,6 +85,8 @@ fn cursor_capabilities() -> Capabilities {
     let mut capabilities = experimental_cli_capabilities();
     capabilities.mcp_support = McpSupportLevel::NativeConfig;
     capabilities.supports_multi_root = true;
+    capabilities.plan_mode_support = dcc_core::domain::provider::TurnControlSupport::Native;
+    capabilities.supports_dynamic_models = true;
     capabilities
 }
 

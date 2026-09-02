@@ -1893,6 +1893,8 @@ impl Provider for CliProviderAdapter {
     }
 }
 
+use dcc_core::domain::provider::TurnControlSupport;
+
 pub fn stable_cli_capabilities() -> Capabilities {
     Capabilities {
         streaming: true,
@@ -1915,6 +1917,10 @@ pub fn stable_cli_capabilities() -> Capabilities {
         supports_shadow_home: false,
         supports_subagent_concurrency: false,
         supports_account_usage: false,
+        plan_mode_support: TurnControlSupport::PromptFallback,
+        fast_mode_support: TurnControlSupport::PromptFallback,
+        supports_dynamic_models: false,
+        supports_compaction_command: false,
     }
 }
 
@@ -1940,6 +1946,10 @@ pub fn experimental_cli_capabilities() -> Capabilities {
         supports_shadow_home: false,
         supports_subagent_concurrency: false,
         supports_account_usage: false,
+        plan_mode_support: TurnControlSupport::PromptFallback,
+        fast_mode_support: TurnControlSupport::PromptFallback,
+        supports_dynamic_models: false,
+        supports_compaction_command: false,
     }
 }
 

@@ -2,7 +2,7 @@ use dcc_core::domain::{
     model_registry,
     provider::{
         Capabilities, HealthStatus, McpOauthSupport, McpSupportLevel, ProviderApprovalPolicy,
-        ProviderDescriptor, ProviderId,
+        ProviderDescriptor, ProviderId, TurnControlSupport,
     },
 };
 
@@ -31,6 +31,9 @@ fn claude_code_capabilities() -> Capabilities {
     ];
     capabilities.supports_runtime_home = true;
     capabilities.supports_account_usage = true;
+    capabilities.plan_mode_support = TurnControlSupport::Native;
+    capabilities.fast_mode_support = TurnControlSupport::Native;
+    capabilities.supports_compaction_command = true;
     capabilities
 }
 

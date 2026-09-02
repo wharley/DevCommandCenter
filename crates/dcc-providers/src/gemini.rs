@@ -17,6 +17,7 @@ fn gemini_capabilities() -> dcc_core::domain::provider::Capabilities {
         ProviderApprovalPolicy::FullAccess,
     ];
     capabilities.supports_runtime_home = true;
+    capabilities.plan_mode_support = dcc_core::domain::provider::TurnControlSupport::Native;
     capabilities
 }
 

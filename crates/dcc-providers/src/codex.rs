@@ -2,7 +2,7 @@ use dcc_core::domain::{
     model_registry,
     provider::{
         Capabilities, HealthStatus, McpOauthSupport, McpSupportLevel, ProviderApprovalPolicy,
-        ProviderDescriptor, ProviderId,
+        ProviderDescriptor, ProviderId, TurnControlSupport,
     },
 };
 
@@ -45,5 +45,7 @@ pub fn stable_codex_capabilities() -> Capabilities {
     capabilities.supports_shadow_home = true;
     capabilities.supports_subagent_concurrency = true;
     capabilities.supports_account_usage = true;
+    capabilities.plan_mode_support = TurnControlSupport::Native;
+    capabilities.fast_mode_support = TurnControlSupport::Native;
     capabilities
 }

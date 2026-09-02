@@ -41,8 +41,11 @@ function getClipboardData(event: unknown) {
  */
 export function PasteImagePlugin({
 	workspaceRootPath,
+	imagesSupported = true,
 }: {
 	workspaceRootPath: string | null;
+	/** When false, pasted clipboard images are ignored instead of attached. */
+	imagesSupported?: boolean;
 }) {
 	const [editor] = useLexicalComposerContext();
 
@@ -62,6 +65,10 @@ export function PasteImagePlugin({
 					}
 				}
 
+				if (imageFiles.length > 0 && !imagesSupported) {
+					event.preventDefault();
+					return true;
+				}
 				if (imageFiles.length > 0) {
 					event.preventDefault();
 

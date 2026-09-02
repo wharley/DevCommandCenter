@@ -36,6 +36,10 @@ const stableCapabilities = {
 	supportsShadowHome: false,
 	supportsSubagentConcurrency: false,
 	supportsAccountUsage: false,
+	planModeSupport: "prompt_fallback",
+	fastModeSupport: "prompt_fallback",
+	supportsDynamicModels: false,
+	supportsCompactionCommand: false,
 } as const;
 
 const delegationRequesterCapabilities = {
@@ -53,6 +57,9 @@ const claudeRuntimeMcpCapabilities = {
 	approvalPolicies: interactiveApprovalPolicies,
 	supportsRuntimeHome: true,
 	supportsAccountUsage: true,
+	planModeSupport: "native",
+	fastModeSupport: "native",
+	supportsCompactionCommand: true,
 	mcpOauthSupport: "managedDuringTurn",
 	mcpSupport: {
 		runtimeBridge: {
@@ -68,6 +75,8 @@ const codexRuntimeMcpCapabilities = {
 	supportsShadowHome: true,
 	supportsSubagentConcurrency: true,
 	supportsAccountUsage: true,
+	planModeSupport: "native",
+	fastModeSupport: "native",
 	mcpOauthSupport: "interactivePreflight",
 	mcpSupport: {
 		runtimeBridge: {
@@ -93,6 +102,10 @@ const experimentalCapabilities = {
 	supportsShadowHome: false,
 	supportsSubagentConcurrency: false,
 	supportsAccountUsage: false,
+	planModeSupport: "prompt_fallback",
+	fastModeSupport: "prompt_fallback",
+	supportsDynamicModels: false,
+	supportsCompactionCommand: false,
 } as const;
 
 const experimentalMultiRootCapabilities = {
@@ -151,6 +164,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				supportsMultiRoot: true,
 				approvalPolicies: interactiveApprovalPolicies,
 				supportsRuntimeHome: true,
+				planModeSupport: "native",
 			},
 			health: stableHealth,
 			stable: true,
@@ -167,7 +181,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...stableCapabilities },
+			capabilities: { ...stableCapabilities, planModeSupport: "native" },
 			health: stableHealth,
 			stable: true,
 		},
@@ -183,7 +197,11 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				recommended: m.recommended,
 				effortLevels: m.effortLevels,
 			})),
-			capabilities: { ...experimentalMultiRootCapabilities },
+			capabilities: {
+				...experimentalMultiRootCapabilities,
+				planModeSupport: "native",
+				supportsDynamicModels: true,
+			},
 			health: stableHealth,
 			stable: false,
 		},

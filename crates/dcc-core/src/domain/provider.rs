@@ -158,6 +158,31 @@ pub struct Capabilities {
     /// Providers without this never spawn a runtime to answer usage queries.
     #[serde(default)]
     pub supports_account_usage: bool,
+    /// Whether plan mode is a native runtime switch or prompt text.
+    #[serde(default)]
+    pub plan_mode_support: TurnControlSupport,
+    /// Whether fast/direct responses are a native runtime switch or prompt text.
+    #[serde(default)]
+    pub fast_mode_support: TurnControlSupport,
+    /// Models are discovered from the installed runtime; the static registry
+    /// is not authoritative and the backend must not reject unknown ids.
+    #[serde(default)]
+    pub supports_dynamic_models: bool,
+    /// The runtime understands a `/compact` prompt as context compaction, so
+    /// DCC may treat it as a compaction signal (post-compact re-anchor).
+    #[serde(default)]
+    pub supports_compaction_command: bool,
+}
+
+/// How a turn control (plan mode, fast mode) actually reaches the runtime.
+/// `PromptFallback` means DCC appends behavior text to the prompt because the
+/// adapter has no native switch; it still works, but it is best-effort.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnControlSupport {
+    Native,
+    #[default]
+    PromptFallback,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]

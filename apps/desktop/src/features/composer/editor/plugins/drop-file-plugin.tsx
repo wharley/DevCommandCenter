@@ -19,8 +19,11 @@ const DROP_DEDUP_MS = 500;
 
 export function DropFilePlugin({
 	workspaceRootPath,
+	imagesSupported = true,
 }: {
 	workspaceRootPath: string | null;
+	/** When false, dropped images become plain file references. */
+	imagesSupported?: boolean;
 }) {
 	const [editor] = useLexicalComposerContext();
 	const unlistenRef = useRef<(() => void) | null>(null);
@@ -78,7 +81,7 @@ export function DropFilePlugin({
 								workspaceRootPath,
 								absolutePath,
 							);
-							if (IMAGE_EXT_RE.test(absolutePath)) {
+							if (imagesSupported && IMAGE_EXT_RE.test(absolutePath)) {
 								paragraph.append($createImageBadgeNode(stored));
 							} else {
 								paragraph.append($createFileBadgeNode(stored));

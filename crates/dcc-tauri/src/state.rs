@@ -103,8 +103,8 @@ use dcc_core::domain::objective::{
 };
 use dcc_providers::{
     provider_registration, provider_runtime, supports_provider_approval_policy,
-    supports_provider_capability, validate_provider_runtime_config, ProviderCapability,
-    ProviderRegistration, PROVIDER_IDS,
+    supports_provider_capability, validate_provider_model, validate_provider_runtime_config,
+    ProviderCapability, ProviderRegistration, PROVIDER_IDS,
 };
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
@@ -3709,6 +3709,14 @@ impl SessionCommandState {
             ..current.clone()
         };
         self.provider_runtime_config(&candidate.provider_id, candidate.provider_runtime.as_ref())?;
+        // Model authority follows the static catalog unless the adapter
+        // discovers models at runtime (Cursor); aliases resolve.
+        validate_provider_model(
+            &candidate.provider_id,
+            &registration.capabilities,
+            candidate.model.as_deref(),
+        )
+        .map_err(dcc_core::CoreError::InvalidInput)?;
         if !candidate.additional_workspace_ids.is_empty()
             && !supports_provider_capability(
                 &registration.capabilities,
@@ -4036,6 +4044,12 @@ impl SessionCommandState {
 
     pub async fn validate_start_thread_scope(&self, input: &StartThreadInput) -> Result<()> {
         let registration = self.require_provider_available(&input.provider_id)?;
+        validate_provider_model(
+            &input.provider_id,
+            &registration.capabilities,
+            input.model.as_deref(),
+        )
+        .map_err(dcc_core::CoreError::InvalidInput)?;
         if input.additional_workspace_ids.is_empty() {
             return Ok(());
         }
@@ -6736,6 +6750,52 @@ mod tests {
         assert!(state
             .provider_runtime_config("unknown-provider", None)
             .is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn turn_selection_rejects_unknown_models_for_static_catalog_providers() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let db_path = root.join("state.sqlite");
+        let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
+        let session = sample_session("model-authority");
+        let workspace = sample_workspace(&session.workspace_id.0, "/tmp/model-authority");
+        SqliteWorkspaceRepo::open(&db_path)
+            .expect("workspace repo")
+            .save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        save_active_session_thread(&state, &session).await;
+
+        let mut input = selection_input(session.id.clone(), Some("codex"), None);
+        input.model = Some("not-a-real-codex-model".to_string());
+        let error = state
+            .validate_provider_turn_selection(&session, &input)
+            .await
+            .expect_err("static catalog rejects unknown model");
+        assert!(error.to_string().contains("not in the codex catalog"));
+
+        let mut input = selection_input(session.id.clone(), Some("codex"), None);
+        input.model = Some(dcc_core::domain::model_registry::CODEX[0].id.to_string());
+        state
+            .validate_provider_turn_selection(&session, &input)
+            .await
+            .expect("catalog model accepted");
+
+        let thread = StartThreadInput {
+            workspace_id: session.workspace_id.clone(),
+            additional_workspace_ids: Vec::new(),
+            project_id: session.project_id.clone(),
+            provider_id: "droid".to_string(),
+            model: Some("droid-does-not-have-this".to_string()),
+            provider_runtime: None,
+            working_directory_override: None,
+            title: None,
+        };
+        assert!(state.validate_start_thread_scope(&thread).await.is_err());
     }
 
     #[tokio::test(flavor = "current_thread")]

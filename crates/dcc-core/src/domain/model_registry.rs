@@ -22,6 +22,31 @@ impl ModelEntry {
     }
 }
 
+/// Static catalog for one provider, or `None` when the provider discovers its
+/// models at runtime and the registry is not authoritative.
+pub fn entries_for(provider_id: &str) -> Option<&'static [ModelEntry]> {
+    match provider_id {
+        "claude_code" => Some(CLAUDE_CODE),
+        "codex" => Some(CODEX),
+        "gemini" => Some(GEMINI),
+        "droid" => Some(DROID),
+        "grok" => Some(GROK),
+        _ => None,
+    }
+}
+
+/// True when `model` (or one of its aliases) is in the provider's static
+/// catalog. `None` when the provider has no static catalog.
+pub fn is_known_model(provider_id: &str, model: &str) -> Option<bool> {
+    let entries = entries_for(provider_id)?;
+    let canonical = resolve_alias(provider_id, model);
+    Some(
+        entries
+            .iter()
+            .any(|entry| entry.id == canonical || entry.id == model),
+    )
+}
+
 /// Alias tables: (short_alias_or_old_id, canonical_id).
 /// When a new model version ships, add the old ID as an alias pointing to the new canonical.
 pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[

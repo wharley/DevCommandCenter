@@ -86,6 +86,8 @@ pub enum ProviderCapability {
     ShadowHome,
     SubagentConcurrency,
     AccountUsage,
+    DynamicModels,
+    CompactionCommand,
 }
 
 pub fn supports_provider_capability(
@@ -109,6 +111,38 @@ pub fn supports_provider_capability(
         ProviderCapability::ShadowHome => capabilities.supports_shadow_home,
         ProviderCapability::SubagentConcurrency => capabilities.supports_subagent_concurrency,
         ProviderCapability::AccountUsage => capabilities.supports_account_usage,
+        ProviderCapability::DynamicModels => capabilities.supports_dynamic_models,
+        ProviderCapability::CompactionCommand => capabilities.supports_compaction_command,
+    }
+}
+
+pub const MAX_MODEL_ID_CHARS: usize = 128;
+
+/// Model authority: a bounded id, and membership in the provider's static
+/// catalog unless the adapter discovers models at runtime. Aliases resolve.
+pub fn validate_provider_model(
+    provider_id: &str,
+    capabilities: &Capabilities,
+    model: Option<&str>,
+) -> Result<(), String> {
+    let Some(model) = model else {
+        return Ok(());
+    };
+    let trimmed = model.trim();
+    if trimmed.is_empty()
+        || trimmed.chars().count() > MAX_MODEL_ID_CHARS
+        || trimmed.chars().any(char::is_control)
+    {
+        return Err(format!("model id for provider {provider_id} is invalid"));
+    }
+    if supports_provider_capability(capabilities, ProviderCapability::DynamicModels) {
+        return Ok(());
+    }
+    match dcc_core::domain::model_registry::is_known_model(provider_id, trimmed) {
+        Some(true) | None => Ok(()),
+        Some(false) => Err(format!(
+            "model {trimmed} is not in the {provider_id} catalog"
+        )),
     }
 }
 
@@ -241,8 +275,8 @@ mod tests {
     use super::{
         claude_code, codex, common::stable_cli_capabilities, droid, expose_runtime_mcp_bridge,
         gemini, grok_acp, project_catalog_capabilities, provider_registration, provider_runtime,
-        supports_provider_approval_policy, supports_provider_capability,
-        validate_provider_runtime_config, ProviderCapability, PROVIDER_IDS,
+        supports_provider_approval_policy, supports_provider_capability, validate_provider_model,
+        validate_provider_runtime_config, ProviderCapability, MAX_MODEL_ID_CHARS, PROVIDER_IDS,
     };
     use crate::cursor_mcp::CURSOR_MCP_RUNTIME_VERSION;
 
@@ -444,6 +478,74 @@ mod tests {
             }
         )
         .is_ok());
+    }
+
+    #[test]
+    fn model_authority_follows_the_static_catalog_unless_models_are_dynamic() {
+        let codex = provider_registration("codex").expect("Codex provider");
+        assert!(validate_provider_model("codex", &codex.capabilities, None).is_ok());
+        let known = dcc_core::domain::model_registry::CODEX[0].id;
+        assert!(validate_provider_model("codex", &codex.capabilities, Some(known)).is_ok());
+        assert!(
+            validate_provider_model("codex", &codex.capabilities, Some("made-up-model")).is_err()
+        );
+        assert!(validate_provider_model("codex", &codex.capabilities, Some("  ")).is_err());
+        assert!(validate_provider_model(
+            "codex",
+            &codex.capabilities,
+            Some(&"m".repeat(MAX_MODEL_ID_CHARS + 1))
+        )
+        .is_err());
+        let (alias, canonical) = dcc_core::domain::model_registry::CODEX_ALIASES[0];
+        assert!(validate_provider_model("codex", &codex.capabilities, Some(alias)).is_ok());
+        assert!(validate_provider_model("codex", &codex.capabilities, Some(canonical)).is_ok());
+
+        let cursor = provider_registration("cursor").expect("Cursor provider");
+        assert!(supports_provider_capability(
+            &cursor.capabilities,
+            ProviderCapability::DynamicModels
+        ));
+        assert!(validate_provider_model(
+            "cursor",
+            &cursor.capabilities,
+            Some("runtime-discovered")
+        )
+        .is_ok());
+        assert!(
+            validate_provider_model("cursor", &cursor.capabilities, Some("bad\u{0007}id")).is_err()
+        );
+    }
+
+    #[test]
+    fn plan_fast_and_compaction_support_match_each_adapter_contract() {
+        use dcc_core::domain::provider::TurnControlSupport::{Native, PromptFallback};
+        let expectations = [
+            ("claude_code", Native, Native, true),
+            ("codex", Native, Native, false),
+            ("gemini", Native, PromptFallback, false),
+            ("droid", Native, PromptFallback, false),
+            ("cursor", Native, PromptFallback, false),
+            ("grok", PromptFallback, PromptFallback, false),
+        ];
+        for (provider_id, plan, fast, compaction) in expectations {
+            let registration = provider_registration(provider_id).expect("registered provider");
+            assert_eq!(
+                registration.capabilities.plan_mode_support, plan,
+                "{provider_id} plan"
+            );
+            assert_eq!(
+                registration.capabilities.fast_mode_support, fast,
+                "{provider_id} fast"
+            );
+            assert_eq!(
+                supports_provider_capability(
+                    &registration.capabilities,
+                    ProviderCapability::CompactionCommand
+                ),
+                compaction,
+                "{provider_id} compaction"
+            );
+        }
     }
 
     #[test]

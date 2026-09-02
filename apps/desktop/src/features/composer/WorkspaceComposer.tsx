@@ -294,6 +294,9 @@ export function WorkspaceComposer({
 		() => selectedProvider?.capabilities.approvalPolicies ?? [],
 		[selectedProvider],
 	);
+	// Unknown providers keep the permissive default; a declared `vision: false`
+	// downgrades image attachments to file references.
+	const imagesSupported = selectedProvider?.capabilities.vision !== false;
 	const approvalPolicyKey = useMemo(
 		() => getComposerApprovalPolicyKey(draftKey, selectedProviderId),
 		[draftKey, selectedProviderId],
@@ -798,10 +801,15 @@ export function WorkspaceComposer({
 					: [];
 			if (paths.length === 0) return;
 
+			// Providers without vision receive images as plain file references;
+			// the person is told once instead of silently losing the attachment.
+			if (!imagesSupported && paths.some((absolutePath) => isImageFilePath(absolutePath))) {
+				toast.info(t("composer.attachments.imagesUnsupported"));
+			}
 			editor.update(() => {
 				const nodes = paths.map((absolutePath) => {
 					const storedPath = pathRelativeToWorkspace(workspacePath, absolutePath);
-					return isImageFilePath(absolutePath)
+					return imagesSupported && isImageFilePath(absolutePath)
 						? $createImageBadgeNode(storedPath)
 						: $createFileBadgeNode(storedPath);
 				});
@@ -814,7 +822,7 @@ export function WorkspaceComposer({
 		} finally {
 			editor.focus();
 		}
-	}, [t, workspacePath]);
+	}, [imagesSupported, t, workspacePath]);
 	useEffect(
 		() =>
 			subscribeWorkbenchCommand((command) => {
@@ -1040,9 +1048,9 @@ export function WorkspaceComposer({
 					workspaceRootPath={workspacePath}
 					popupAnchorRef={composerRootRef}
 				/>
-				<DropFilePlugin workspaceRootPath={workspacePath} />
+				<DropFilePlugin workspaceRootPath={workspacePath} imagesSupported={imagesSupported} />
 				<CompositionGuardPlugin />
-				<PasteImagePlugin workspaceRootPath={workspacePath} />
+				<PasteImagePlugin workspaceRootPath={workspacePath} imagesSupported={imagesSupported} />
 				<SubmitPlugin
 					isDisabled={submitDisabledForPlugin}
 					onSubmit={handleSubmitDraft}
@@ -1117,6 +1125,9 @@ export function WorkspaceComposer({
 									? "composer.controls.planModeActiveHint"
 									: "composer.controls.planModeHint",
 							)}
+							{selectedProvider?.capabilities.planModeSupport === "prompt_fallback"
+								? ` ${t("composer.controls.planModePromptFallback")}`
+								: ""}
 						</TooltipContent>
 					</Tooltip>
 				</div>
