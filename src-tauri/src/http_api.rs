@@ -29,7 +29,7 @@ use dcc_tauri::{
         RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
         RespondToUserInputOutput,
     },
-    state::SessionCommandState,
+    state::{ProviderTransitionGuard, SessionCommandState},
 };
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -2026,9 +2026,10 @@ async fn start_thread_handler(
     let output = start_thread(&*state, &*state, &*state, &*state, input)
         .await
         .map_err(|error| classify_session_error(error.to_string()))?;
-    if let Err(error) = state.attach_provider_session(&output.session).await {
-        eprintln!("[DCC HTTP] provider session attach failed: {error}");
-    }
+    state
+        .attach_provider_session(&output.session)
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
     Ok(Json(serde_json::to_value(output).map_err(|error| {
         HttpApiError::internal(error.to_string())
     })?))
@@ -2068,16 +2069,11 @@ async fn send_turn_handler(
 ) -> Result<Json<Value>, HttpApiError> {
     let state = headless_session_state(config).await?;
     input.session_id = SessionId(session_id);
-
-    if let Some(session) = state
-        .peek_session(&input.session_id)
+    let transition = state
+        .acquire_provider_transition(&input.session_id)
         .await
-        .map_err(|error| classify_session_error(error.to_string()))?
-    {
-        if dcc_core::application::send_turn_selection_differs_from_session(&session, &input) {
-            let _ = state.cancel_provider_session(&input.session_id).await;
-        }
-    }
+        .map_err(|error| classify_session_error(error.to_string()))?;
+    prepare_http_provider_turn(&state, &transition, &input).await?;
 
     let provider_turn_input = ProviderTurnInput {
         prompt: input.prompt.clone(),
@@ -2091,16 +2087,6 @@ async fn send_turn_handler(
         .await
         .map_err(|error| classify_session_error(error.to_string()))?;
     let turn_id = output.turn.id.clone();
-    if let Err(error) = state.attach_provider_session(&output.session).await {
-        let _ = state
-            .emit_unbound_started_turn_aborted(
-                &output.session.id,
-                &turn_id,
-                Some(error.to_string()),
-            )
-            .await;
-        return Err(classify_session_error(error.to_string()));
-    }
     if let Err(error) = state
         .set_active_turn(&output.session.id, Some(turn_id.0.clone()))
         .await
@@ -2139,6 +2125,21 @@ async fn send_turn_handler(
     Ok(Json(serde_json::to_value(output).map_err(|error| {
         HttpApiError::internal(error.to_string())
     })?))
+}
+
+/// The headless route intentionally shares the Tauri command's provider
+/// preflight, including its per-session transition lock. Keep this separate
+/// from `send_turn` so invalid input cannot create durable turn history.
+async fn prepare_http_provider_turn(
+    state: &SessionCommandState,
+    transition: &ProviderTransitionGuard,
+    input: &SendTurnInput,
+) -> Result<(), HttpApiError> {
+    state
+        .prepare_provider_session_for_turn_under_transition(transition, input)
+        .await
+        .map(|_| ())
+        .map_err(|error| classify_session_error(error.to_string()))
 }
 
 async fn list_session_events_handler(
@@ -2194,19 +2195,22 @@ async fn resume_session_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, HttpApiError> {
     let state = headless_session_state(config).await?;
-    let output = resume_session(
-        &*state,
-        &*state,
-        &*state,
-        ResumeSessionInput {
-            session_id: SessionId(session_id),
-        },
-    )
-    .await
-    .map_err(|error| classify_session_error(error.to_string()))?;
-    if let Err(error) = state.attach_provider_session(&output.session).await {
-        eprintln!("[DCC HTTP] provider session attach failed: {error}");
-    }
+    let session_id = SessionId(session_id);
+    let transition = state
+        .acquire_provider_transition(&session_id)
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
+    state
+        .validate_provider_resume_preflight_under_transition(&transition, &session_id)
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
+    let output = resume_session(&*state, &*state, &*state, ResumeSessionInput { session_id })
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
+    state
+        .attach_current_provider_session_under_transition(&transition, &output.session)
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
     Ok(Json(serde_json::to_value(output).map_err(|error| {
         HttpApiError::internal(error.to_string())
     })?))
@@ -2219,15 +2223,19 @@ async fn close_session_handler(
 ) -> Result<Json<Value>, HttpApiError> {
     let delete_history = body.map(|Json(body)| body.delete_history).unwrap_or(false);
     let state = headless_session_state(config).await?;
-    let _ = state
-        .cancel_provider_session(&SessionId(session_id.clone()))
-        .await;
+    let session_id = SessionId(session_id);
+    let transition = state.acquire_provider_transition(&session_id).await;
+    let transition = transition.map_err(|error| classify_session_error(error.to_string()))?;
+    state
+        .cancel_provider_session_if_attached_under_transition(&transition, &session_id)
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
     let output = close_session(
         &*state,
         &*state,
         &*state,
         CloseSessionInput {
-            session_id: SessionId(session_id),
+            session_id,
             delete_history,
         },
     )
@@ -2653,6 +2661,14 @@ async fn verify_signed_request_for_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dcc_core::{
+        domain::{
+            project::ProjectId,
+            session::{Session, SessionState},
+            workspace::WorkspaceId,
+        },
+        ports::SessionRepo,
+    };
 
     #[test]
     fn filters_arrays_by_string_field() {
@@ -2693,5 +2709,64 @@ mod tests {
         assert!(doc["paths"]["/rpc"].is_object());
         assert_eq!(doc["paths"]["/health"]["get"]["security"], json!([]));
         assert_eq!(doc["paths"]["/"]["get"]["security"], json!([]));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn http_turn_preflight_rejects_unknown_provider_without_persisting_selection() {
+        let root = tempfile::tempdir().expect("http state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical http state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = Session {
+            id: SessionId("http-preflight".to_string()),
+            project_id: ProjectId("project".to_string()),
+            workspace_id: WorkspaceId("workspace".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-09-01T00:00:00Z".to_string(),
+            updated_at: "2026-09-01T00:00:00Z".to_string(),
+        };
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save HTTP session");
+        let input = SendTurnInput {
+            session_id: session.id.clone(),
+            prompt: "must not become a turn".to_string(),
+            tool_instructions: None,
+            provider_id: Some("unknown-provider".to_string()),
+            model: None,
+            provider_runtime: None,
+            plan_mode: None,
+            effort: None,
+            fast_mode: None,
+            approval_policy: None,
+        };
+
+        let transition = state
+            .acquire_provider_transition(&input.session_id)
+            .await
+            .expect("HTTP transition");
+        assert!(prepare_http_provider_turn(&state, &transition, &input)
+            .await
+            .is_err());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("load HTTP session")
+                .expect("HTTP session")
+                .provider_id,
+            "codex"
+        );
+        assert!(
+            SessionEventRepo::list_events_by_session(&state, &session.id)
+                .await
+                .expect("HTTP session events")
+                .is_empty()
+        );
     }
 }

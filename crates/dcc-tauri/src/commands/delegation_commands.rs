@@ -196,6 +196,55 @@ fn status_label(status: DelegationStatus) -> &'static str {
     }
 }
 
+fn validate_child_provider_target(
+    child_session: &dcc_core::domain::session::Session,
+    target: &ProviderId,
+) -> Result<(), String> {
+    if child_session.provider_id != target.0 {
+        return Err("child session provider must match target_provider_id".to_string());
+    }
+    Ok(())
+}
+
+/// Rechecks the current provider authority before a legacy delegation is
+/// allowed to transition. Older durable rows may have predated capability
+/// validation, so this must run before status persistence or event fanout.
+async fn validate_stored_delegation_target(
+    state: &SessionCommandState,
+    delegation: &Delegation,
+) -> Result<(), String> {
+    let parent_session = SessionRepo::get_session(state, &delegation.parent_session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            format!(
+                "parent session not found: {}",
+                delegation.parent_session_id.0
+            )
+        })?;
+    if parent_session.workspace_id != delegation.workspace_id {
+        return Err("delegation workspace_id must match the parent session workspace".to_string());
+    }
+    state
+        .validate_delegation_target(
+            &delegation.target_provider_id,
+            &delegation.mode,
+            &delegation.budget,
+        )
+        .map_err(|error| error.to_string())?;
+    if let Some(child_session_id) = delegation.child_session_id.as_ref() {
+        let child_session = SessionRepo::get_session(state, child_session_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("child session not found: {}", child_session_id.0))?;
+        if child_session.workspace_id != delegation.workspace_id {
+            return Err("child session must belong to delegation workspace_id".to_string());
+        }
+        validate_child_provider_target(&child_session, &delegation.target_provider_id)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn create_delegation(
     state: State<'_, SessionCommandState>,
@@ -208,6 +257,9 @@ pub async fn create_delegation(
     if input.target_provider_id.0.trim().is_empty() {
         return Err("target_provider_id cannot be empty".to_string());
     }
+    state
+        .validate_delegation_target(&input.target_provider_id, &input.mode, &input.budget)
+        .map_err(|error| error.to_string())?;
 
     let parent_session = SessionRepo::get_session(&*state, &input.parent_session_id)
         .await
@@ -224,6 +276,7 @@ pub async fn create_delegation(
         if child_session.workspace_id != input.workspace_id {
             return Err("child session must belong to workspace_id".to_string());
         }
+        validate_child_provider_target(&child_session, &input.target_provider_id)?;
         Some(child_session)
     } else {
         None
@@ -466,6 +519,7 @@ pub async fn start_delegation(
             status_label(delegation.status)
         ));
     }
+    validate_stored_delegation_target(&state, &delegation).await?;
 
     let now = now_iso();
     let updated = DelegationRepo::update_delegation_status(
@@ -721,4 +775,211 @@ pub async fn fail_delegation(
     Ok(FailDelegationOutput {
         delegation: updated,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dcc_core::domain::{
+        project::ProjectId,
+        session::{Session, SessionState},
+        workspace::{Workspace, WorkspaceState},
+    };
+    use dcc_core::ports::WorkspaceRepo;
+    use dcc_infra::db::SqliteWorkspaceRepo;
+
+    fn child_session(provider_id: &str) -> Session {
+        Session {
+            id: SessionId("child".to_string()),
+            project_id: ProjectId("project".to_string()),
+            workspace_id: WorkspaceId("workspace".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: provider_id.to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-09-01T00:00:00Z".to_string(),
+            updated_at: "2026-09-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn legacy_delegation(
+        id: &str,
+        parent_session_id: SessionId,
+        child_session_id: Option<SessionId>,
+        target_provider_id: &str,
+    ) -> Delegation {
+        Delegation {
+            id: DelegationId(id.to_string()),
+            parent_session_id,
+            parent_turn_id: None,
+            child_session_id,
+            workspace_id: WorkspaceId("workspace".to_string()),
+            target_provider_id: ProviderId(target_provider_id.to_string()),
+            target_model_id: None,
+            mode: DelegationMode::Review,
+            status: DelegationStatus::Draft,
+            prompt: "legacy delegation".to_string(),
+            context_policy: DelegationContextPolicy::Minimal,
+            budget: DelegationBudget::default(),
+            result_summary: None,
+            touched_files: Vec::new(),
+            diff_summary: None,
+            validation_summary: None,
+            created_at: "2026-09-01T00:00:00Z".to_string(),
+            updated_at: "2026-09-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn child_session_provider_must_match_the_delegation_target() {
+        let child = child_session("codex");
+        assert!(validate_child_provider_target(&child, &ProviderId("codex".to_string())).is_ok());
+        assert!(validate_child_provider_target(&child, &ProviderId("droid".to_string())).is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn legacy_delegation_preflight_rejects_before_status_or_parent_history_changes() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let workspace = Workspace {
+            id: WorkspaceId("workspace".to_string()),
+            project_id: ProjectId("project".to_string()),
+            name: None,
+            root_path: "/workspace".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            created_at: "2026-09-01T00:00:00Z".to_string(),
+            updated_at: "2026-09-01T00:00:00Z".to_string(),
+        };
+        SqliteWorkspaceRepo::open(root.join("state.sqlite"))
+            .expect("workspace repo")
+            .save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+        let mut parent = child_session("codex");
+        parent.id = SessionId("parent".to_string());
+        SessionRepo::save_session(&state, &parent)
+            .await
+            .expect("save parent");
+
+        let unknown = legacy_delegation("legacy-unknown", parent.id.clone(), None, "unknown");
+        DelegationRepo::save_delegation(&state, &unknown)
+            .await
+            .expect("save legacy delegation");
+        assert!(validate_stored_delegation_target(&state, &unknown)
+            .await
+            .is_err());
+        assert_eq!(
+            DelegationRepo::get_delegation(&state, &unknown.id)
+                .await
+                .expect("load legacy delegation")
+                .expect("legacy delegation")
+                .status,
+            DelegationStatus::Draft
+        );
+        assert!(SessionEventRepo::list_events_by_session(&state, &parent.id)
+            .await
+            .expect("parent history")
+            .is_empty());
+
+        let other_workspace = Workspace {
+            id: WorkspaceId("other-workspace".to_string()),
+            ..workspace.clone()
+        };
+        SqliteWorkspaceRepo::open(root.join("state.sqlite"))
+            .expect("workspace repo")
+            .save_workspace(&other_workspace)
+            .await
+            .expect("save other workspace");
+        let mut parent_workspace_mismatch =
+            legacy_delegation("legacy-parent-workspace", parent.id.clone(), None, "codex");
+        parent_workspace_mismatch.workspace_id = other_workspace.id.clone();
+        DelegationRepo::save_delegation(&state, &parent_workspace_mismatch)
+            .await
+            .expect("save parent workspace mismatch");
+        assert!(
+            validate_stored_delegation_target(&state, &parent_workspace_mismatch)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            DelegationRepo::get_delegation(&state, &parent_workspace_mismatch.id)
+                .await
+                .expect("load parent workspace mismatch")
+                .expect("parent workspace mismatch")
+                .status,
+            DelegationStatus::Draft
+        );
+
+        let mut child = child_session("droid");
+        child.id = SessionId("legacy-child".to_string());
+        SessionRepo::save_session(&state, &child)
+            .await
+            .expect("save child");
+        let mismatch = legacy_delegation(
+            "legacy-child-mismatch",
+            parent.id.clone(),
+            Some(child.id.clone()),
+            "codex",
+        );
+        DelegationRepo::save_delegation(&state, &mismatch)
+            .await
+            .expect("save mismatch delegation");
+        assert!(validate_stored_delegation_target(&state, &mismatch)
+            .await
+            .is_err());
+        assert_eq!(
+            DelegationRepo::get_delegation(&state, &mismatch.id)
+                .await
+                .expect("load mismatch delegation")
+                .expect("mismatch delegation")
+                .status,
+            DelegationStatus::Draft
+        );
+        assert!(SessionEventRepo::list_events_by_session(&state, &parent.id)
+            .await
+            .expect("parent history")
+            .is_empty());
+
+        let mut wrong_workspace_child = child_session("droid");
+        wrong_workspace_child.id = SessionId("legacy-child-workspace".to_string());
+        wrong_workspace_child.workspace_id = other_workspace.id.clone();
+        SessionRepo::save_session(&state, &wrong_workspace_child)
+            .await
+            .expect("save child in another workspace");
+        let child_workspace_mismatch = legacy_delegation(
+            "legacy-child-workspace-mismatch",
+            parent.id.clone(),
+            Some(wrong_workspace_child.id.clone()),
+            "droid",
+        );
+        DelegationRepo::save_delegation(&state, &child_workspace_mismatch)
+            .await
+            .expect("save child workspace mismatch");
+        assert!(
+            validate_stored_delegation_target(&state, &child_workspace_mismatch)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            DelegationRepo::get_delegation(&state, &child_workspace_mismatch.id)
+                .await
+                .expect("load child workspace mismatch")
+                .expect("child workspace mismatch")
+                .status,
+            DelegationStatus::Draft
+        );
+        assert!(SessionEventRepo::list_events_by_session(&state, &parent.id)
+            .await
+            .expect("parent history")
+            .is_empty());
+    }
 }

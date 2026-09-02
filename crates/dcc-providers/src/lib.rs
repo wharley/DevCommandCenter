@@ -33,7 +33,8 @@ use std::{
 use futures::future::join_all;
 
 use dcc_core::domain::provider::{
-    HealthStatus, McpSupportLevel, ProviderCatalog, ProviderDescriptor,
+    Capabilities, HealthStatus, McpSupportLevel, ProviderApprovalPolicy, ProviderCatalog,
+    ProviderDescriptor,
 };
 use dcc_core::ports::Provider;
 
@@ -61,8 +62,68 @@ fn provider_registry() -> &'static HashMap<String, Arc<dyn Provider>> {
     })
 }
 
+/// Read-only view of exactly one registered adapter. Consumers use this
+/// registration rather than rebuilding provider capability tables in Tauri.
+#[derive(Clone)]
+pub struct ProviderRegistration {
+    pub runtime: Arc<dyn Provider>,
+    pub capabilities: Capabilities,
+}
+
+/// Capability checks are pure and derived from an adapter's registered runtime
+/// contract. They intentionally do not encode health/enabled policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderCapability {
+    Steering,
+    NativeSubagentSteering,
+    NativeSubagentInterrupt,
+    ReadOnlyDelegation,
+    EditDelegation,
+    DelegationTarget,
+    DelegationRequest,
+    MultiRoot,
+}
+
+pub fn supports_provider_capability(
+    capabilities: &Capabilities,
+    capability: ProviderCapability,
+) -> bool {
+    match capability {
+        ProviderCapability::Steering => capabilities.supports_steering,
+        ProviderCapability::NativeSubagentSteering => {
+            capabilities.supports_native_subagent_steering
+        }
+        ProviderCapability::NativeSubagentInterrupt => {
+            capabilities.supports_native_subagent_interrupt
+        }
+        ProviderCapability::ReadOnlyDelegation => capabilities.supports_read_only_delegation,
+        ProviderCapability::EditDelegation => capabilities.supports_edit_delegation,
+        ProviderCapability::DelegationTarget => capabilities.can_be_delegation_target,
+        ProviderCapability::DelegationRequest => capabilities.can_request_delegation,
+        ProviderCapability::MultiRoot => capabilities.supports_multi_root,
+    }
+}
+
+pub fn supports_provider_approval_policy(
+    capabilities: &Capabilities,
+    policy: ProviderApprovalPolicy,
+) -> bool {
+    capabilities.approval_policies.contains(&policy)
+}
+
+pub fn provider_registration(provider_id: &str) -> Option<ProviderRegistration> {
+    let runtime = provider_registry().get(provider_id).cloned()?;
+    let capabilities = runtime.capabilities();
+    Some(ProviderRegistration {
+        runtime,
+        capabilities,
+    })
+}
+
+/// Compatibility accessor for callers that require only the adapter object.
+/// New capability-sensitive code should use [`provider_registration`].
 pub fn provider_runtime(provider_id: &str) -> Option<Arc<dyn Provider>> {
-    provider_registry().get(provider_id).cloned()
+    provider_registration(provider_id).map(|registration| registration.runtime)
 }
 
 async fn provider_health_statuses() -> Vec<HealthStatus> {
@@ -83,18 +144,27 @@ async fn provider_health_statuses() -> Vec<HealthStatus> {
         .collect()
 }
 
-fn expose_runtime_mcp_bridge(descriptor: &mut ProviderDescriptor, provider_version: Option<&str>) {
+fn expose_runtime_mcp_bridge(capabilities: &mut Capabilities, provider_version: Option<&str>) {
     let Some(provider_version) = provider_version else {
         return;
     };
     if !matches!(
-        descriptor.capabilities.mcp_support,
+        capabilities.mcp_support,
         McpSupportLevel::VerifiedBridge { .. }
     ) {
-        descriptor.capabilities.mcp_support = McpSupportLevel::RuntimeBridge {
+        capabilities.mcp_support = McpSupportLevel::RuntimeBridge {
             provider_version: provider_version.to_string(),
         };
     }
+}
+
+fn project_catalog_capabilities(registration: &ProviderRegistration) -> Capabilities {
+    let mut capabilities = registration.capabilities.clone();
+    expose_runtime_mcp_bridge(
+        &mut capabilities,
+        registration.runtime.dcc_mcp_projection_version(),
+    );
+    capabilities
 }
 
 pub async fn provider_catalog() -> ProviderCatalog {
@@ -111,15 +181,11 @@ pub async fn provider_catalog() -> ProviderCatalog {
         common::stable_cli_capabilities(),
     ));
     for descriptor in &mut providers {
-        let runtime = provider_registry().get(&descriptor.id.0);
-        let runtime_version = runtime.and_then(|provider| provider.dcc_mcp_projection_version());
-        expose_runtime_mcp_bridge(descriptor, runtime_version);
-        if let Some(runtime) = runtime {
-            let capabilities = runtime.capabilities();
-            descriptor.capabilities.supports_native_subagent_steering =
-                capabilities.supports_native_subagent_steering;
-            descriptor.capabilities.supports_native_subagent_interrupt =
-                capabilities.supports_native_subagent_interrupt;
+        // Labels/models stay adapter descriptors, while every capability comes
+        // from the one canonical registered runtime. The sole catalog overlay
+        // is a versioned DCC MCP bridge projection.
+        if let Some(registration) = provider_registration(&descriptor.id.0) {
+            descriptor.capabilities = project_catalog_capabilities(&registration);
         }
     }
     ProviderCatalog { providers }
@@ -135,7 +201,9 @@ mod tests {
 
     use super::{
         claude_code, codex, common::stable_cli_capabilities, droid, expose_runtime_mcp_bridge,
-        gemini, grok_acp, provider_runtime, PROVIDER_IDS,
+        gemini, grok_acp, project_catalog_capabilities, provider_registration, provider_runtime,
+        supports_provider_approval_policy, supports_provider_capability, ProviderCapability,
+        PROVIDER_IDS,
     };
     use crate::cursor_mcp::CURSOR_MCP_RUNTIME_VERSION;
 
@@ -143,6 +211,67 @@ mod tests {
     fn registers_grok_runtime() {
         assert!(PROVIDER_IDS.contains(&"grok"));
         assert!(provider_runtime("grok").is_some());
+    }
+
+    #[test]
+    fn registration_is_the_single_canonical_lookup_for_known_provider_ids() {
+        for provider_id in PROVIDER_IDS {
+            let registration = provider_registration(provider_id).expect("registered provider");
+            assert_eq!(registration.runtime.id().0, provider_id);
+            assert_eq!(
+                serde_json::to_value(registration.runtime.capabilities()).expect("runtime caps"),
+                serde_json::to_value(registration.capabilities).expect("registration caps"),
+            );
+        }
+        assert!(provider_registration("unknown-provider").is_none());
+    }
+
+    #[test]
+    fn catalog_projection_preserves_every_runtime_capability_except_versioned_mcp_overlay() {
+        for provider_id in PROVIDER_IDS {
+            let registration = provider_registration(provider_id).expect("registered provider");
+            let mut expected = registration.capabilities.clone();
+            expose_runtime_mcp_bridge(
+                &mut expected,
+                registration.runtime.dcc_mcp_projection_version(),
+            );
+            assert_eq!(
+                serde_json::to_value(project_catalog_capabilities(&registration))
+                    .expect("catalog caps"),
+                serde_json::to_value(expected).expect("expected caps"),
+            );
+        }
+    }
+
+    #[test]
+    fn pure_capability_checks_cover_approval_and_existing_control_paths() {
+        let codex = provider_registration("codex").expect("Codex provider");
+        assert!(supports_provider_capability(
+            &codex.capabilities,
+            ProviderCapability::Steering
+        ));
+        assert!(supports_provider_capability(
+            &codex.capabilities,
+            ProviderCapability::MultiRoot
+        ));
+        assert!(supports_provider_approval_policy(
+            &codex.capabilities,
+            dcc_core::domain::provider::ProviderApprovalPolicy::Ask
+        ));
+
+        let droid = provider_registration("droid").expect("Droid provider");
+        assert!(!supports_provider_capability(
+            &droid.capabilities,
+            ProviderCapability::Steering
+        ));
+        assert!(!supports_provider_capability(
+            &droid.capabilities,
+            ProviderCapability::MultiRoot
+        ));
+        assert!(!supports_provider_approval_policy(
+            &droid.capabilities,
+            dcc_core::domain::provider::ProviderApprovalPolicy::Ask
+        ));
     }
 
     #[test]
@@ -244,21 +373,17 @@ mod tests {
 
     #[test]
     fn runtime_projection_is_visible_without_claiming_verified_conformance() {
-        let mut descriptor = codex::descriptor(HealthStatus::Healthy);
+        let mut capabilities = codex::descriptor(HealthStatus::Healthy).capabilities;
         expose_runtime_mcp_bridge(
-            &mut descriptor,
+            &mut capabilities,
             Some("codex-cli@0.146.0+app-server-protocol-v2"),
         );
         assert_eq!(
-            descriptor.capabilities.mcp_support,
+            capabilities.mcp_support,
             McpSupportLevel::RuntimeBridge {
                 provider_version: "codex-cli@0.146.0+app-server-protocol-v2".to_string(),
             }
         );
-        assert!(descriptor
-            .capabilities
-            .mcp_support
-            .verified_evidence()
-            .is_none());
+        assert!(capabilities.mcp_support.verified_evidence().is_none());
     }
 }

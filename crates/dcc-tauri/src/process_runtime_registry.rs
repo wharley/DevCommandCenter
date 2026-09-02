@@ -30,12 +30,13 @@ use crate::state::AuthorizedWorkspaceMutation;
 use crate::terminal_arbiter::TerminalArbiter;
 use dcc_core::Result as CoreResult;
 use dcc_core::{
-    domain::session::SessionEventRecord,
+    domain::session::{SessionEventRecord, SessionId},
     ports::{
         events::CoreEvent, EventBus, SessionLiveDurableIdentity, SessionLiveEventEnvelope,
         MAX_SESSION_LIVE_RUNTIME_SEQUENCE,
     },
 };
+use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -154,6 +155,11 @@ pub struct ProcessRuntime {
     #[allow(dead_code)] // Explicit ownership proof; runtime receives this same Arc.
     workspace_mutations: Arc<dcc_infra::guarded_undo::coordinator::WorkspaceMutationCoordinator>,
     session_store: Arc<Mutex<crate::state::SessionStore>>,
+    /// Per-session provider-selection transitions. Entries are weak so this
+    /// registry retains no historical session ids once a transition ends.
+    /// The synchronous map lock is held only while finding/creating a lock;
+    /// callers await the per-session lock after it has been released.
+    provider_transition_locks: Mutex<HashMap<SessionId, Weak<AsyncMutex<()>>>>,
     event_buses: Mutex<Vec<Weak<dyn EventBus>>>,
     /// Public process-local identifier, never persisted or used as authority.
     runtime_generation: String,
@@ -186,6 +192,7 @@ impl ProcessRuntime {
             #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
             workspace_mutations,
             session_store: Arc::new(Mutex::new(crate::state::SessionStore::default())),
+            provider_transition_locks: Mutex::new(HashMap::new()),
             event_buses: Mutex::new(Vec::new()),
             runtime_generation: Uuid::new_v4().to_string(),
             next_live_sequence: AtomicU64::new(0),
@@ -519,6 +526,54 @@ impl ProcessRuntime {
 
     pub(crate) fn session_store(&self) -> Arc<Mutex<crate::state::SessionStore>> {
         Arc::clone(&self.session_store)
+    }
+
+    /// Returns the one short-lived lock for provider selection/binding work
+    /// on this session. It coordinates all `SessionCommandState` instances
+    /// sharing this physical runtime without serializing unrelated sessions.
+    pub(crate) fn provider_transition_lock(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<Arc<AsyncMutex<()>>> {
+        let mut locks = self.provider_transition_locks.lock().map_err(|_| {
+            dcc_core::CoreError::Repository("provider transition state unavailable".to_string())
+        })?;
+        locks.retain(|_, lock| lock.strong_count() != 0);
+        if let Some(lock) = locks.get(session_id).and_then(Weak::upgrade) {
+            return Ok(lock);
+        }
+        let lock = Arc::new(AsyncMutex::new(()));
+        locks.insert(session_id.clone(), Arc::downgrade(&lock));
+        Ok(lock)
+    }
+
+    pub(crate) fn remove_provider_transition_lock_if_idle(
+        &self,
+        session_id: &SessionId,
+        lock: &Arc<AsyncMutex<()>>,
+    ) {
+        let Ok(mut locks) = self.provider_transition_locks.lock() else {
+            return;
+        };
+        let is_same_idle_lock = locks
+            .get(session_id)
+            .and_then(Weak::upgrade)
+            // `current` is the temporary Arc created by `upgrade`; the only
+            // other strong reference allowed for an idle entry is `lock` from
+            // the dropping guard. A queued waiter has already upgraded the
+            // Weak and therefore makes this count greater than two.
+            .is_some_and(|current| Arc::ptr_eq(&current, lock) && Arc::strong_count(lock) == 2);
+        if is_same_idle_lock {
+            locks.remove(session_id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn provider_transition_lock_entry_count(&self) -> usize {
+        self.provider_transition_locks
+            .lock()
+            .expect("provider transition lock registry")
+            .len()
     }
 }
 
@@ -975,6 +1030,24 @@ mod tests {
                 sequence: 41,
             }
         );
+    }
+
+    #[test]
+    fn provider_transition_lock_registry_discards_stale_weak_entries() {
+        let registry = ProcessRuntimeRegistry::isolated();
+        let scope = Scope::new();
+        let runtime = acquire(&registry, &scope.db, &scope.app_data).unwrap();
+        let stale_session = SessionId("stale-transition".to_string());
+        let live_session = SessionId("live-transition".to_string());
+
+        {
+            let _lock = runtime.provider_transition_lock(&stale_session).unwrap();
+            assert_eq!(runtime.provider_transition_lock_entry_count(), 1);
+        }
+        // The next acquisition performs opportunistic cleanup; stale session
+        // keys do not accumulate through sequential provider changes.
+        let _lock = runtime.provider_transition_lock(&live_session).unwrap();
+        assert_eq!(runtime.provider_transition_lock_entry_count(), 1);
     }
 
     #[tokio::test(flavor = "current_thread")]

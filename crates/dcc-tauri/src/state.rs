@@ -17,13 +17,15 @@ use uuid::Uuid;
 
 use dcc_core::{
     application::{
-        list_turn_queue, mark_queued_turn_dispatched, prepare_session_for_turn,
-        resolve_session_mcp_servers, send_turn as run_send_turn,
+        list_turn_queue, mark_queued_turn_dispatched, merge_send_turn_session_selection,
+        prepare_session_for_turn, resolve_session_mcp_servers, send_turn as run_send_turn,
         send_turn_selection_differs_from_session, ResolveSessionMcpInput, SendTurnInput,
         StartThreadInput,
     },
     domain::{
-        delegation::{Delegation, DelegationId, DelegationStatus},
+        delegation::{
+            Delegation, DelegationBudget, DelegationId, DelegationMode, DelegationStatus,
+        },
         delegation_apply::{
             DelegationApplyTransaction, DelegationApplyTransactionId,
             DelegationApplyTransactionState,
@@ -37,7 +39,9 @@ use dcc_core::{
             McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretReferenceId, McpTransport,
         },
         project::{Project, ProjectId},
-        provider::{McpOauthSupport, ProviderEvent, ProviderId, SessionHandle},
+        provider::{
+            McpOauthSupport, ProviderApprovalPolicy, ProviderEvent, ProviderId, SessionHandle,
+        },
         repository::{Repository, RepositoryId},
         session::{
             AssistantMessagePhase, Session, SessionEventKind, SessionEventRecord, SessionId,
@@ -88,10 +92,61 @@ use crate::process_runtime_registry::{ProcessRuntime, ProcessRuntimeRegistry};
 use crate::terminal_arbiter::{
     PersistThenCommitError, TerminalArbiterError, TerminalClaimResult, TerminalIntent, TerminalKey,
 };
-use dcc_providers::provider_runtime;
+use dcc_providers::{
+    provider_registration, provider_runtime, supports_provider_approval_policy,
+    supports_provider_capability, ProviderCapability, ProviderRegistration,
+};
 
 const DELIVERY_FAILURE_WORKSPACE_LIMIT: usize = 64;
 const EPHEMERAL_MCP_LEASE_ID_MAX_CHARS: usize = 128;
+
+fn registered_provider(provider_id: &str) -> Result<ProviderRegistration> {
+    provider_registration(provider_id).ok_or_else(|| {
+        dcc_core::CoreError::Provider(format!("unknown provider runtime: {provider_id}"))
+    })
+}
+
+fn require_provider_capability(
+    provider_id: &str,
+    capability: ProviderCapability,
+    operation: &str,
+) -> Result<ProviderRegistration> {
+    let registration = registered_provider(provider_id)?;
+    if !supports_provider_capability(&registration.capabilities, capability) {
+        return Err(dcc_core::CoreError::Provider(format!(
+            "provider {provider_id} does not support {operation}"
+        )));
+    }
+    Ok(registration)
+}
+
+fn require_provider_approval_policy(
+    provider_id: &str,
+    policy: ProviderApprovalPolicy,
+) -> Result<ProviderRegistration> {
+    let registration = registered_provider(provider_id)?;
+    if !supports_provider_approval_policy(&registration.capabilities, policy) {
+        return Err(dcc_core::CoreError::Provider(format!(
+            "provider {provider_id} does not support the requested approval policy"
+        )));
+    }
+    Ok(registration)
+}
+
+/// Fields that scope a provider handle. Timestamps are intentionally omitted:
+/// resume/preparation legitimately updates them without changing the runtime
+/// identity that an attach must verify.
+fn provider_attach_snapshot_matches(current: &Session, expected: &Session) -> bool {
+    current.id == expected.id
+        && current.project_id == expected.project_id
+        && current.workspace_id == expected.workspace_id
+        && current.additional_workspace_ids == expected.additional_workspace_ids
+        && current.provider_id == expected.provider_id
+        && current.model == expected.model
+        && current.provider_runtime == expected.provider_runtime
+        && current.working_directory_override == expected.working_directory_override
+        && current.state == expected.state
+}
 
 #[derive(Default)]
 struct DeliveryFailureStore {
@@ -892,6 +947,29 @@ pub struct SessionCommandState {
     runtime: Arc<ProcessRuntime>,
 }
 
+/// Owns the process-shared transition lock for one session's provider
+/// selection and binding. Command pipelines retain this through durable turn
+/// creation and provider input acceptance so a newer selection cannot receive
+/// a prompt prepared for the prior binding.
+pub struct ProviderTransitionGuard {
+    session_id: SessionId,
+    runtime: Arc<ProcessRuntime>,
+    lock: Arc<AsyncMutex<()>>,
+    guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for ProviderTransitionGuard {
+    fn drop(&mut self) {
+        // Release the session mutex before inspecting the weak registry. A
+        // waiter already holding an Arc keeps the entry alive, while a later
+        // acquirer after removal can only create a new mutex once no previous
+        // holder or waiter remains.
+        drop(self.guard.take());
+        self.runtime
+            .remove_provider_transition_lock_if_idle(&self.session_id, &self.lock);
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ProviderSessionBinding {
     provider_id: String,
@@ -1349,14 +1427,12 @@ impl SessionCommandState {
         runtime_config: Option<ProviderRuntimeConfig>,
         prompt: String,
     ) -> Result<String> {
-        let provider = provider_runtime(&provider_id).ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!("unknown provider runtime: {provider_id}"))
-        })?;
-        if !provider.capabilities().supports_read_only_delegation {
-            return Err(dcc_core::CoreError::InvalidInput(format!(
-                "provider {provider_id} does not support read-only review runs"
-            )));
-        }
+        let provider = require_provider_capability(
+            &provider_id,
+            ProviderCapability::ReadOnlyDelegation,
+            "read-only review runs",
+        )?
+        .runtime;
         let runtime = self.provider_runtime_config(&provider_id, runtime_config.as_ref())?;
         let ephemeral_id = Uuid::new_v4().to_string();
         let handle = provider
@@ -2532,9 +2608,17 @@ impl SessionCommandState {
                 if let TerminalRequest::Aborted { source, .. } = &request {
                     if matches!(source, TerminalSource::Quiesce | TerminalSource::Cancel) {
                         if let Some(binding) = expected_binding.as_ref() {
-                            if let Some(provider) = provider_runtime(&binding.provider_id) {
-                                let _ = provider.cancel(&binding.handle).await;
-                            }
+                            let provider =
+                                provider_runtime(&binding.provider_id).ok_or_else(|| {
+                                    dcc_core::CoreError::Provider(format!(
+                                        "unknown provider runtime: {}",
+                                        binding.provider_id
+                                    ))
+                                })?;
+                            // Do not commit an aborted terminal state or tear
+                            // down this binding if its provider rejects the
+                            // cancellation request. A retry remains possible.
+                            provider.cancel(&binding.handle).await?;
                         }
                     }
                 }
@@ -2815,22 +2899,63 @@ impl SessionCommandState {
         Ok(())
     }
 
+    /// Attaches through the same per-session transition used by turn start,
+    /// resume and HTTP lifecycle paths.
     pub async fn attach_provider_session(&self, session: &Session) -> Result<()> {
+        let transition = self.acquire_provider_transition(&session.id).await?;
+        self.attach_current_provider_session_under_transition(&transition, session)
+            .await
+    }
+
+    /// Re-reads the durable row after the transition is acquired. A caller
+    /// may hold an old output from start/resume while close/delete or another
+    /// selection won first; that snapshot must never create a new binding.
+    pub async fn attach_current_provider_session_under_transition(
+        &self,
+        transition: &ProviderTransitionGuard,
+        expected: &Session,
+    ) -> Result<()> {
+        self.validate_provider_transition(transition, &expected.id)?;
+        let current = SessionRepo::get_session(&self.session_repo, &expected.id)
+            .await?
+            .ok_or_else(|| {
+                dcc_core::CoreError::Repository(
+                    "session no longer exists while attaching provider".to_string(),
+                )
+            })?;
+        if current.state != dcc_core::domain::session::SessionState::Active {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "session is not active while attaching provider".to_string(),
+            ));
+        }
+        if !provider_attach_snapshot_matches(&current, expected) {
+            return Err(dcc_core::CoreError::Repository(
+                "session changed while attaching provider".to_string(),
+            ));
+        }
+        self.require_active_session_thread(&expected.id).await?;
+        self.attach_provider_session_under_transition(transition, &current)
+            .await
+    }
+
+    /// Attaches while the caller owns the matching provider transition. This
+    /// prevents a concurrent selection/attach from installing a loser binding
+    /// between session preparation and turn input.
+    pub async fn attach_provider_session_under_transition(
+        &self,
+        transition: &ProviderTransitionGuard,
+        session: &Session,
+    ) -> Result<()> {
+        self.validate_provider_transition(transition, &session.id)?;
         if self.provider_binding(&session.id)?.is_some() {
             return Ok(());
         }
 
-        let provider = provider_runtime(&session.provider_id).ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "unknown provider runtime: {}",
-                session.provider_id
-            ))
-        })?;
+        let registration = registered_provider(&session.provider_id)?;
+        let supports_multi_root = registration.capabilities.supports_multi_root;
+        let provider = registration.runtime;
         let (working_directory, additional_working_directories) = self
-            .resolve_session_working_directories(
-                session,
-                provider.capabilities().supports_multi_root,
-            )
+            .resolve_session_working_directories(session, supports_multi_root)
             .await?;
         let provider_runtime =
             self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
@@ -2940,18 +3065,25 @@ impl SessionCommandState {
         let won_binding = match binding_result {
             Ok(won_binding) => won_binding,
             Err(error) => {
-                let _ = provider.cancel(&handle).await;
                 self.revoke_ephemeral_mcp_projection(&session.id, ephemeral_lease_id.as_deref());
-                return Err(error);
+                return match provider.cancel(&handle).await {
+                    Ok(()) => Err(error),
+                    Err(cleanup_error) => Err(dcc_core::CoreError::Provider(format!(
+                        "provider binding state failed: {error}; prepared handle cleanup failed: {cleanup_error}"
+                    ))),
+                };
             }
         };
         if !won_binding {
             // Another state attached the same session while this adapter was
             // preparing. Do not overwrite its binding or publish loser
             // statuses; dispose only the handle we prepared.
-            let _ = provider.cancel(&handle).await;
             self.revoke_ephemeral_mcp_projection(&session.id, ephemeral_lease_id.as_deref());
-            return Ok(());
+            return provider.cancel(&handle).await.map_err(|cleanup_error| {
+                dcc_core::CoreError::Provider(format!(
+                    "provider binding lost its attach race and prepared handle cleanup failed: {cleanup_error}"
+                ))
+            });
         }
 
         if let Some(provider_version) = mcp_projection_version {
@@ -2991,16 +3123,225 @@ impl SessionCommandState {
         &self,
         input: &SendTurnInput,
     ) -> Result<Session> {
+        let transition = self.acquire_provider_transition(&input.session_id).await?;
+        self.prepare_provider_session_for_turn_under_transition(&transition, input)
+            .await
+    }
+
+    /// Acquires the process-shared provider transition for this session. Do
+    /// not hold unrelated synchronous locks while awaiting this guard.
+    pub async fn acquire_provider_transition(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<ProviderTransitionGuard> {
+        let lock = self.runtime.provider_transition_lock(session_id)?;
+        Ok(ProviderTransitionGuard {
+            session_id: session_id.clone(),
+            runtime: Arc::clone(&self.runtime),
+            guard: Some(Arc::clone(&lock).lock_owned().await),
+            lock,
+        })
+    }
+
+    fn validate_provider_transition(
+        &self,
+        transition: &ProviderTransitionGuard,
+        session_id: &SessionId,
+    ) -> Result<()> {
+        if transition.session_id != *session_id || !Arc::ptr_eq(&transition.runtime, &self.runtime)
+        {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "provider transition does not match session runtime".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Checks that the provider selection stored on a resumable session can
+    /// still be attached, without changing session state or binding. This is
+    /// deliberately performed before `resume_session` appends its event.
+    pub async fn validate_provider_resume_preflight_under_transition(
+        &self,
+        transition: &ProviderTransitionGuard,
+        session_id: &SessionId,
+    ) -> Result<()> {
+        self.validate_provider_transition(transition, session_id)?;
+        let session = SessionRepo::get_session(&self.session_repo, session_id)
+            .await?
+            .ok_or_else(|| dcc_core::CoreError::Repository("session not found".to_string()))?;
+        self.validate_provider_session_attachment(&session).await
+    }
+
+    async fn validate_provider_session_attachment(&self, session: &Session) -> Result<()> {
+        self.require_active_session_thread(&session.id).await?;
+        let registration = registered_provider(&session.provider_id)?;
+        self.resolve_session_working_directories(
+            session,
+            registration.capabilities.supports_multi_root,
+        )
+        .await?;
+        self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
+        Ok(())
+    }
+
+    /// A provider runtime can only be attached to a live, unarchived thread
+    /// that still points at the same session. Keep this proof centralized so
+    /// resume, selection changes, and late attach callbacks cannot diverge.
+    async fn require_active_session_thread(&self, session_id: &SessionId) -> Result<()> {
+        let thread = ThreadRepo::find_thread_by_session_id(&self.session_repo, session_id)
+            .await?
+            .ok_or_else(|| {
+                dcc_core::CoreError::Repository(
+                    "session thread no longer exists while preparing provider".to_string(),
+                )
+            })?;
+        if thread.session_id.as_ref() != Some(session_id) || thread.archived_at.is_some() {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "session thread is not active while preparing provider".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Cancels an attached provider, if any, while the matching transition is
+    /// held. A missing binding is normal for restored/legacy sessions; a
+    /// cancellation failure is intentionally returned before close/delete can
+    /// invalidate the only retryable provider handle.
+    pub async fn cancel_provider_session_if_attached_under_transition(
+        &self,
+        transition: &ProviderTransitionGuard,
+        session_id: &SessionId,
+    ) -> Result<()> {
+        self.validate_provider_transition(transition, session_id)?;
+        if self.provider_binding(session_id)?.is_some() {
+            self.cancel_provider_session(session_id).await?;
+        }
+        Ok(())
+    }
+
+    /// Validates, persists and attaches a selection while `transition` owns
+    /// the matching session lock. Turn-start pipelines must keep that guard
+    /// until their provider input has been accepted.
+    pub async fn prepare_provider_session_for_turn_under_transition(
+        &self,
+        transition: &ProviderTransitionGuard,
+        input: &SendTurnInput,
+    ) -> Result<Session> {
+        self.validate_provider_transition(transition, &input.session_id)?;
+        // Selection, binding cancellation, persistence, and attachment must
+        // move together for one session. The lock lives in ProcessRuntime, so
+        // cloned/independently constructed command states for this physical
+        // scope cannot leave a provider binding behind for a losing selection.
         let current = self
             .peek_session(&input.session_id)
             .await?
             .ok_or_else(|| dcc_core::CoreError::Repository("session not found".to_string()))?;
+        // Validate the selected runtime capability contract before changing a
+        // durable selection or cancelling a still-valid provider binding.
+        self.validate_provider_turn_selection(&current, input)
+            .await?;
         if send_turn_selection_differs_from_session(&current, input) {
-            let _ = self.cancel_provider_session(&input.session_id).await;
+            if self.provider_binding(&input.session_id)?.is_some() {
+                // A failed cancellation leaves the prior binding authoritative;
+                // do not persist or attach a different selection over it.
+                self.cancel_provider_session(&input.session_id).await?;
+            }
         }
         let session = prepare_session_for_turn(self, input).await?;
-        self.attach_provider_session(&session).await?;
+        self.attach_current_provider_session_under_transition(transition, &session)
+            .await?;
         Ok(session)
+    }
+
+    async fn validate_provider_turn_selection(
+        &self,
+        current: &Session,
+        input: &SendTurnInput,
+    ) -> Result<()> {
+        self.require_active_session_thread(&current.id).await?;
+        let (provider_id, model, provider_runtime) =
+            merge_send_turn_session_selection(current, input);
+        let registration = if let Some(policy) = input.approval_policy {
+            require_provider_approval_policy(&provider_id, policy)?
+        } else {
+            registered_provider(&provider_id)?
+        };
+        let candidate = Session {
+            provider_id,
+            model,
+            provider_runtime,
+            ..current.clone()
+        };
+        if !candidate.additional_workspace_ids.is_empty()
+            && !supports_provider_capability(
+                &registration.capabilities,
+                ProviderCapability::MultiRoot,
+            )
+        {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {} does not support isolated multi-workspace sessions yet",
+                candidate.provider_id
+            )));
+        }
+        self.resolve_session_working_directories(
+            &candidate,
+            registration.capabilities.supports_multi_root,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Validates a queued policy against the provider currently persisted on
+    /// the session. It is intentionally repeated at dispatch time because
+    /// older queue records may predate capability enforcement.
+    pub async fn validate_queued_turn_approval_policy(
+        &self,
+        session_id: &SessionId,
+        approval_policy: Option<ProviderApprovalPolicy>,
+    ) -> Result<()> {
+        let session = self
+            .peek_session(session_id)
+            .await?
+            .ok_or_else(|| dcc_core::CoreError::Repository("session not found".to_string()))?;
+        match approval_policy {
+            Some(approval_policy) => {
+                require_provider_approval_policy(&session.provider_id, approval_policy).map(|_| ())
+            }
+            None => registered_provider(&session.provider_id).map(|_| ()),
+        }
+    }
+
+    /// Preflights manual delegation target capabilities. This deliberately
+    /// does not require `can_request_delegation`: this flow has no trusted
+    /// provider-origin signal and is initiated by DCC itself.
+    pub fn validate_delegation_target(
+        &self,
+        target_provider_id: &ProviderId,
+        mode: &DelegationMode,
+        budget: &DelegationBudget,
+    ) -> Result<()> {
+        let registration = require_provider_capability(
+            &target_provider_id.0,
+            ProviderCapability::DelegationTarget,
+            "being a delegation target",
+        )?;
+        let required = if matches!(mode, DelegationMode::Implement) || budget.allow_file_edits {
+            ProviderCapability::EditDelegation
+        } else {
+            ProviderCapability::ReadOnlyDelegation
+        };
+        if !supports_provider_capability(&registration.capabilities, required) {
+            let operation = if required == ProviderCapability::EditDelegation {
+                "edit-capable delegation"
+            } else {
+                "read-only delegation"
+            };
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {} does not support {operation}",
+                target_provider_id.0
+            )));
+        }
+        Ok(())
     }
 
     pub fn session_mcp_oauth_support(&self, session_id: &SessionId) -> Result<McpOauthSupport> {
@@ -3010,13 +3351,9 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
-        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "unknown provider runtime: {}",
-                binding.provider_id
-            ))
-        })?;
-        Ok(provider.capabilities().mcp_oauth_support)
+        Ok(registered_provider(&binding.provider_id)?
+            .capabilities
+            .mcp_oauth_support)
     }
 
     async fn resolve_provider_mcp_servers(
@@ -3256,15 +3593,10 @@ impl SessionCommandState {
     }
 
     pub async fn validate_start_thread_scope(&self, input: &StartThreadInput) -> Result<()> {
+        let registration = registered_provider(&input.provider_id)?;
         if input.additional_workspace_ids.is_empty() {
             return Ok(());
         }
-        let provider = provider_runtime(&input.provider_id).ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "unknown provider runtime: {}",
-                input.provider_id
-            ))
-        })?;
         let candidate = Session {
             id: SessionId("scope-validation".to_string()),
             project_id: input.project_id.clone(),
@@ -3280,7 +3612,7 @@ impl SessionCommandState {
         };
         self.resolve_session_working_directories(
             &candidate,
-            provider.capabilities().supports_multi_root,
+            registration.capabilities.supports_multi_root,
         )
         .await
         .map(|_| ())
@@ -4240,6 +4572,9 @@ impl SessionCommandState {
     /// queue is projected from session events, so it survives UI remounts and
     /// app restarts instead of living in composer state.
     pub async fn dispatch_next_queued_turn(&self, session_id: &SessionId) -> Result<bool> {
+        // Keep the binding selected for this queued turn stable through its
+        // durable TurnStarted record and provider input acceptance.
+        let _transition = self.acquire_provider_transition(session_id).await?;
         let Some(queued) = list_turn_queue(self, session_id).await?.into_iter().next() else {
             return Ok(false);
         };
@@ -4255,6 +4590,10 @@ impl SessionCommandState {
             fast_mode: queued.fast_mode,
             approval_policy: queued.approval_policy,
         };
+        // Recheck before `run_send_turn`: persisted queues from before this
+        // guard must never create TurnStarted or remove themselves on failure.
+        self.validate_queued_turn_approval_policy(session_id, input.approval_policy)
+            .await?;
         let provider_input = dcc_core::ports::ProviderTurnInput {
             prompt: input.prompt.clone(),
             tool_instructions: input.tool_instructions.clone(),
@@ -4314,18 +4653,12 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
-        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "unknown provider runtime: {}",
-                binding.provider_id
-            ))
-        })?;
-        if !provider.capabilities().supports_steering {
-            return Err(dcc_core::CoreError::Provider(format!(
-                "provider {} does not support steering an active turn",
-                binding.provider_id
-            )));
-        }
+        let provider = require_provider_capability(
+            &binding.provider_id,
+            ProviderCapability::Steering,
+            "steering an active turn",
+        )?
+        .runtime;
         provider.steer(&binding.handle, prompt).await
     }
 
@@ -4341,18 +4674,12 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
-        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "unknown provider runtime: {}",
-                binding.provider_id
-            ))
-        })?;
-        if !provider.capabilities().supports_native_subagent_steering {
-            return Err(dcc_core::CoreError::Provider(format!(
-                "provider {} does not support steering native subagents",
-                binding.provider_id
-            )));
-        }
+        let provider = require_provider_capability(
+            &binding.provider_id,
+            ProviderCapability::NativeSubagentSteering,
+            "steering native subagents",
+        )?
+        .runtime;
         provider
             .steer_native_subagent(&binding.handle, agent_thread_id, prompt)
             .await
@@ -4369,18 +4696,12 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
-        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "unknown provider runtime: {}",
-                binding.provider_id
-            ))
-        })?;
-        if !provider.capabilities().supports_native_subagent_interrupt {
-            return Err(dcc_core::CoreError::Provider(format!(
-                "provider {} does not support interrupting native subagents",
-                binding.provider_id
-            )));
-        }
+        let provider = require_provider_capability(
+            &binding.provider_id,
+            ProviderCapability::NativeSubagentInterrupt,
+            "interrupting native subagents",
+        )?
+        .runtime;
         provider
             .interrupt_native_subagent(&binding.handle, agent_thread_id)
             .await
@@ -4397,12 +4718,7 @@ impl SessionCommandState {
                 session_id.0
             ))
         })?;
-        let provider = provider_runtime(&binding.provider_id).ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "unknown provider runtime: {}",
-                binding.provider_id
-            ))
-        })?;
+        let provider = registered_provider(&binding.provider_id)?.runtime;
         provider
             .start_mcp_oauth(&binding.handle, definition_id)
             .await
@@ -4496,7 +4812,9 @@ impl SessionCommandState {
                 .acquire_idle_terminal_token(session_id, &binding)
                 .await?
             {
-                let _ = provider.cancel(&binding.handle).await;
+                // Keep the binding installed if cancellation fails so callers
+                // can retry against the same authoritative handle.
+                provider.cancel(&binding.handle).await?;
                 self.remove_binding_if_same(session_id, &binding).await?;
             }
             Ok(())
@@ -5043,6 +5361,606 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    async fn save_active_session_thread(state: &SessionCommandState, session: &Session) {
+        ThreadRepo::save_thread(
+            state,
+            &Thread {
+                id: ThreadId(format!("active-thread-{}", session.id.0)),
+                project_id: session.project_id.clone(),
+                session_id: Some(session.id.clone()),
+                title: "active".to_string(),
+                archived_at: None,
+            },
+        )
+        .await
+        .expect("save active session thread");
+    }
+
+    fn selection_input(
+        session_id: SessionId,
+        provider_id: Option<&str>,
+        approval_policy: Option<ProviderApprovalPolicy>,
+    ) -> SendTurnInput {
+        SendTurnInput {
+            session_id,
+            prompt: "capability validation".to_string(),
+            tool_instructions: None,
+            provider_id: provider_id.map(str::to_string),
+            model: None,
+            provider_runtime: None,
+            plan_mode: None,
+            effort: None,
+            fast_mode: None,
+            approval_policy,
+        }
+    }
+
+    fn inert_provider_binding(session_id: &SessionId) -> ProviderSessionBinding {
+        ProviderSessionBinding {
+            provider_id: "codex".to_string(),
+            handle: SessionHandle {
+                provider_id: ProviderId("codex".to_string()),
+                session_id: session_id.clone(),
+                handle_id: "capability-validation-binding".to_string(),
+            },
+            current_turn_id: Arc::new(AsyncMutex::new(None)),
+            terminal_lock: Arc::new(AsyncMutex::new(())),
+            terminal_token: Arc::new(TerminalTokenState::default()),
+            usage_turn_id: Arc::new(AsyncMutex::new(None)),
+            assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
+            projected_mcp_definition_ids: Arc::new(HashSet::new()),
+            ephemeral_mcp_lease_id: None,
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_selection_transitions_share_one_lock_per_session() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let sibling = state.clone();
+        let session_id = SessionId("provider-transition".to_string());
+
+        let held_pipeline = state
+            .acquire_provider_transition(&session_id)
+            .await
+            .expect("pipeline transition lock");
+        let shared = sibling
+            .runtime
+            .provider_transition_lock(&session_id)
+            .expect("shared transition lock");
+        assert!(
+            shared.try_lock().is_err(),
+            "a competing selection cannot enter while a turn pipeline owns the guard"
+        );
+        drop(held_pipeline);
+        let _next_pipeline = sibling
+            .acquire_provider_transition(&session_id)
+            .await
+            .expect("transition releases after provider input pipeline ends");
+
+        let other = state
+            .acquire_provider_transition(&SessionId("other-transition".to_string()))
+            .await
+            .expect("other session transition lock");
+        assert!(other.session_id != session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_transition_guard_removes_idle_entry_without_stranding_waiters() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session_id = SessionId("transition-cleanup".to_string());
+
+        let guard = state
+            .acquire_provider_transition(&session_id)
+            .await
+            .expect("transition guard");
+        assert_eq!(state.runtime.provider_transition_lock_entry_count(), 1);
+        drop(guard);
+        assert_eq!(
+            state.runtime.provider_transition_lock_entry_count(),
+            0,
+            "the final guard removes its own weak entry"
+        );
+
+        let first = state
+            .acquire_provider_transition(&session_id)
+            .await
+            .expect("first transition");
+        // This Arc models a caller that has found the current mutex and is
+        // waiting to acquire it while the first pipeline still owns it.
+        let waiter = state
+            .runtime
+            .provider_transition_lock(&session_id)
+            .expect("waiter lock");
+        drop(first);
+        assert_eq!(
+            state.runtime.provider_transition_lock_entry_count(),
+            1,
+            "a waiter keeps the exact mutex registered"
+        );
+        let successor = state
+            .acquire_provider_transition(&session_id)
+            .await
+            .expect("successor transition");
+        drop(waiter);
+        drop(successor);
+        assert_eq!(state.runtime.provider_transition_lock_entry_count(), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn close_transition_accepts_a_session_without_provider_binding() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("close-without-binding");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        let transition = state
+            .acquire_provider_transition(&session.id)
+            .await
+            .expect("close transition");
+
+        state
+            .cancel_provider_session_if_attached_under_transition(&transition, &session.id)
+            .await
+            .expect("missing binding is not a close failure");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn attach_current_rejects_deleted_stale_or_closed_snapshot_before_binding() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+
+        // Models start -> close/delete winning before the attach wrapper gets
+        // its guard: no provider prepare/binding may occur for this snapshot.
+        let deleted = sample_session("attach-deleted");
+        let transition = state
+            .acquire_provider_transition(&deleted.id)
+            .await
+            .expect("deleted transition");
+        assert!(state
+            .attach_current_provider_session_under_transition(&transition, &deleted)
+            .await
+            .is_err());
+        assert!(state
+            .provider_binding(&deleted.id)
+            .expect("binding")
+            .is_none());
+        drop(transition);
+
+        let current = sample_session("attach-stale");
+        SessionRepo::save_session(&state, &current)
+            .await
+            .expect("save current session");
+        let mut stale = current.clone();
+        stale.provider_id = "droid".to_string();
+        let transition = state
+            .acquire_provider_transition(&current.id)
+            .await
+            .expect("stale transition");
+        assert!(state
+            .attach_current_provider_session_under_transition(&transition, &stale)
+            .await
+            .is_err());
+        assert!(state
+            .provider_binding(&current.id)
+            .expect("binding")
+            .is_none());
+        drop(transition);
+
+        let mut closed = sample_session("attach-closed");
+        closed.state = SessionState::Completed;
+        SessionRepo::save_session(&state, &closed)
+            .await
+            .expect("save closed session");
+        let transition = state
+            .acquire_provider_transition(&closed.id)
+            .await
+            .expect("closed transition");
+        assert!(state
+            .attach_current_provider_session_under_transition(&transition, &closed)
+            .await
+            .is_err());
+        assert!(state
+            .provider_binding(&closed.id)
+            .expect("binding")
+            .is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn attach_current_rejects_archived_session_thread_before_provider_prepare() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("attach-archived-thread");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        ThreadRepo::save_thread(
+            &state,
+            &Thread {
+                id: ThreadId("attach-archived-thread-record".to_string()),
+                project_id: session.project_id.clone(),
+                session_id: Some(session.id.clone()),
+                title: "archived".to_string(),
+                archived_at: Some("2026-09-01T00:00:00Z".to_string()),
+            },
+        )
+        .await
+        .expect("save archived thread");
+        let transition = state
+            .acquire_provider_transition(&session.id)
+            .await
+            .expect("attach transition");
+
+        assert!(state
+            .attach_current_provider_session_under_transition(&transition, &session)
+            .await
+            .is_err());
+        assert!(state
+            .provider_binding(&session.id)
+            .expect("binding")
+            .is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resume_preflight_rejects_legacy_unknown_provider_without_mutating_session() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let mut session = sample_session("resume-unknown-provider");
+        session.provider_id = "legacy-unknown-provider".to_string();
+        session.state = SessionState::Completed;
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save legacy session");
+        save_active_session_thread(&state, &session).await;
+        let transition = state
+            .acquire_provider_transition(&session.id)
+            .await
+            .expect("resume transition");
+
+        assert!(state
+            .validate_provider_resume_preflight_under_transition(&transition, &session.id)
+            .await
+            .is_err());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("reload session")
+                .expect("session")
+                .state,
+            SessionState::Completed
+        );
+        assert!(
+            SessionEventRepo::list_events_by_session(&state, &session.id)
+                .await
+                .expect("session events")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resume_preflight_rejects_archived_thread_without_mutating_session() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let mut session = sample_session("resume-archived-thread");
+        session.state = SessionState::Completed;
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save completed session");
+        ThreadRepo::save_thread(
+            &state,
+            &Thread {
+                id: ThreadId("resume-archived-thread-record".to_string()),
+                project_id: session.project_id.clone(),
+                session_id: Some(session.id.clone()),
+                title: "archived".to_string(),
+                archived_at: Some("2026-09-01T00:00:00Z".to_string()),
+            },
+        )
+        .await
+        .expect("save archived thread");
+        let transition = state
+            .acquire_provider_transition(&session.id)
+            .await
+            .expect("resume transition");
+
+        assert!(state
+            .validate_provider_resume_preflight_under_transition(&transition, &session.id)
+            .await
+            .is_err());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("reload session")
+                .expect("session")
+                .state,
+            SessionState::Completed
+        );
+        assert!(
+            SessionEventRepo::list_events_by_session(&state, &session.id)
+                .await
+                .expect("session events")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn invalid_provider_capabilities_do_not_cancel_bindings_or_persist_selection() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let mut session = sample_session("capability-validation");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        save_active_session_thread(&state, &session).await;
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), inert_provider_binding(&session.id));
+
+        let unknown = selection_input(session.id.clone(), Some("unknown-provider"), None);
+        assert!(state
+            .prepare_provider_session_for_turn(&unknown)
+            .await
+            .is_err());
+        assert!(state
+            .provider_binding(&session.id)
+            .expect("binding")
+            .is_some());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("load session")
+                .expect("session")
+                .provider_id,
+            "codex"
+        );
+
+        let initial_unknown = StartThreadInput {
+            workspace_id: session.workspace_id.clone(),
+            additional_workspace_ids: Vec::new(),
+            project_id: session.project_id.clone(),
+            provider_id: "unknown-provider".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            title: None,
+        };
+        assert!(state
+            .validate_start_thread_scope(&initial_unknown)
+            .await
+            .is_err());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("load session")
+                .expect("session")
+                .provider_id,
+            "codex"
+        );
+
+        session.additional_workspace_ids = vec![WorkspaceId("secondary".to_string())];
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save multi-root session");
+        let multi_root = selection_input(session.id.clone(), Some("droid"), None);
+        assert!(matches!(
+            state.prepare_provider_session_for_turn(&multi_root).await,
+            Err(dcc_core::CoreError::Provider(message)) if message.contains("multi-workspace")
+        ));
+        assert!(state
+            .provider_binding(&session.id)
+            .expect("binding")
+            .is_some());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("load session")
+                .expect("session")
+                .provider_id,
+            "codex"
+        );
+
+        session.additional_workspace_ids.clear();
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save single-root session");
+        let approval = selection_input(
+            session.id.clone(),
+            Some("droid"),
+            Some(ProviderApprovalPolicy::Ask),
+        );
+        assert!(matches!(
+            state.prepare_provider_session_for_turn(&approval).await,
+            Err(dcc_core::CoreError::Provider(message)) if message.contains("approval policy")
+        ));
+        assert!(state
+            .provider_binding(&session.id)
+            .expect("binding")
+            .is_some());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("load session")
+                .expect("session")
+                .provider_id,
+            "codex"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn valid_provider_selection_passes_preflight_without_static_model_rejection() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let db_path = root.join("state.sqlite");
+        let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
+        let session = sample_session("capability-valid");
+        let workspace = sample_workspace(&session.workspace_id.0, "/tmp/capability-valid");
+        SqliteWorkspaceRepo::open(&db_path)
+            .expect("workspace repo")
+            .save_workspace(&workspace)
+            .await
+            .expect("save workspace");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        save_active_session_thread(&state, &session).await;
+        let mut input = selection_input(session.id.clone(), Some("cursor"), None);
+        // Cursor models are discovered dynamically; validation must not apply
+        // a stale static model list before the adapter is attached.
+        input.model = Some("runtime-discovered-cursor-model".to_string());
+        state
+            .validate_provider_turn_selection(&session, &input)
+            .await
+            .expect("registered dynamic provider selection");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn archived_thread_rejects_provider_selection_before_cancelling_or_persisting() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("selection-archived-thread");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        ThreadRepo::save_thread(
+            &state,
+            &Thread {
+                id: ThreadId("selection-archived-thread-record".to_string()),
+                project_id: session.project_id.clone(),
+                session_id: Some(session.id.clone()),
+                title: "archived".to_string(),
+                archived_at: Some("2026-09-01T00:00:00Z".to_string()),
+            },
+        )
+        .await
+        .expect("save archived thread");
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), inert_provider_binding(&session.id));
+
+        let input = selection_input(session.id.clone(), Some("droid"), None);
+        assert!(state
+            .prepare_provider_session_for_turn(&input)
+            .await
+            .is_err());
+        assert!(state
+            .provider_binding(&session.id)
+            .expect("binding")
+            .is_some());
+        let persisted = state
+            .peek_session(&session.id)
+            .await
+            .expect("reload session")
+            .expect("session");
+        assert_eq!(persisted.provider_id, "codex");
+        assert_eq!(persisted.model, None);
+        assert_eq!(persisted.provider_runtime, None);
+        assert!(
+            SessionEventRepo::list_events_by_session(&state, &session.id)
+                .await
+                .expect("session events")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn queued_approval_and_delegation_preflights_reject_before_any_history_mutation() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let mut session = sample_session("capability-queue");
+        session.provider_id = "droid".to_string();
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+
+        assert!(state
+            .validate_queued_turn_approval_policy(&session.id, Some(ProviderApprovalPolicy::Ask))
+            .await
+            .is_err());
+        assert!(
+            SessionEventRepo::list_events_by_session(&state, &session.id)
+                .await
+                .expect("history")
+                .is_empty()
+        );
+        state
+            .validate_queued_turn_approval_policy(&session.id, None)
+            .await
+            .expect("empty policy remains compatible");
+        let mut legacy_session = session.clone();
+        legacy_session.id = SessionId("capability-queue-legacy".to_string());
+        legacy_session.provider_id = "unknown-provider".to_string();
+        SessionRepo::save_session(&state, &legacy_session)
+            .await
+            .expect("save legacy session");
+        assert!(state
+            .validate_queued_turn_approval_policy(&legacy_session.id, None)
+            .await
+            .is_err());
+
+        let review_budget = DelegationBudget::default();
+        state
+            .validate_delegation_target(
+                &ProviderId("droid".to_string()),
+                &DelegationMode::Review,
+                &review_budget,
+            )
+            .expect("registered read-only target");
+        state
+            .validate_delegation_target(
+                &ProviderId("droid".to_string()),
+                &DelegationMode::Implement,
+                &review_budget,
+            )
+            .expect("registered edit target");
+        assert!(state
+            .validate_delegation_target(
+                &ProviderId("unknown-provider".to_string()),
+                &DelegationMode::Review,
+                &review_budget,
+            )
+            .is_err());
+        assert!(
+            SessionEventRepo::list_events_by_session(&state, &session.id)
+                .await
+                .expect("history")
+                .is_empty()
+        );
     }
 
     #[test]

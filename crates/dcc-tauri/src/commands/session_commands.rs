@@ -751,9 +751,10 @@ pub async fn start_thread(
     let output = run_start_thread(&*state, &*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
-    if let Err(error) = state.attach_provider_session(&output.session).await {
-        eprintln!("[DCC] provider session attach failed: {}", error);
-    }
+    state
+        .attach_provider_session(&output.session)
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(output)
 }
 
@@ -763,8 +764,12 @@ pub async fn send_turn(
     _app: AppHandle,
     input: SendTurnInput,
 ) -> Result<SendTurnOutput, String> {
+    let transition = state
+        .acquire_provider_transition(&input.session_id)
+        .await
+        .map_err(|error| error.to_string())?;
     let session = state
-        .prepare_provider_session_for_turn(&input)
+        .prepare_provider_session_for_turn_under_transition(&transition, &input)
         .await
         .map_err(|error| error.to_string())?;
     if state
@@ -903,6 +908,10 @@ pub async fn queue_turn(
     state: State<'_, SessionCommandState>,
     input: QueueTurnInput,
 ) -> Result<QueuedTurn, String> {
+    state
+        .validate_queued_turn_approval_policy(&input.turn.session_id, input.turn.approval_policy)
+        .await
+        .map_err(|error| error.to_string())?;
     let history = SessionEventRepo::list_events_by_session(&*state, &input.turn.session_id)
         .await
         .map_err(|error| error.to_string())?;
@@ -988,12 +997,21 @@ pub async fn resume_session(
     _app: AppHandle,
     input: ResumeSessionInput,
 ) -> Result<ResumeSessionOutput, String> {
+    let transition = state
+        .acquire_provider_transition(&input.session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    state
+        .validate_provider_resume_preflight_under_transition(&transition, &input.session_id)
+        .await
+        .map_err(|error| error.to_string())?;
     let output = run_resume_session(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
-    if let Err(error) = state.attach_provider_session(&output.session).await {
-        eprintln!("[DCC] provider session attach failed: {}", error);
-    }
+    state
+        .attach_current_provider_session_under_transition(&transition, &output.session)
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(output)
 }
 
@@ -1003,7 +1021,14 @@ pub async fn close_session(
     _app: AppHandle,
     input: CloseSessionInput,
 ) -> Result<CloseSessionOutput, String> {
-    let _ = state.cancel_provider_session(&input.session_id).await;
+    let transition = state
+        .acquire_provider_transition(&input.session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    state
+        .cancel_provider_session_if_attached_under_transition(&transition, &input.session_id)
+        .await
+        .map_err(|error| error.to_string())?;
     run_close_session(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())
