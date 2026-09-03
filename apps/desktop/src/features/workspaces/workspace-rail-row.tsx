@@ -702,25 +702,59 @@ export const WorkspaceRailRowItem = memo(
 									</Button>
 								)
 							) : workspace.status === "completed" ? (
-								onDeleteWorkspace && (
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("sidebar.deleteWorkspace")}
-										className="text-muted-foreground/60 hover:text-destructive"
-										onClick={(event) => {
-											event.stopPropagation();
-											onDeleteWorkspace(workspace.id);
-										}}
-									>
-										<Trash2
-											className="size-3.5"
-											strokeWidth={2}
-											aria-hidden
-										/>
-									</Button>
-								)
+								<>
+									{onRestoreWorkspace ? (
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-xs"
+											aria-label={
+												pendingAction === "restore"
+													? t("sidebar.restoringWorkspace")
+													: t("sidebar.restoreWorkspace")
+											}
+											disabled={isPending}
+											className="text-muted-foreground/60 hover:text-foreground disabled:opacity-100"
+											onClick={(event) => {
+												event.stopPropagation();
+												runRowAction("restore", onRestoreWorkspace);
+											}}
+										>
+											{pendingAction === "restore" ? (
+												<Loader2
+													className="size-3.5 animate-spin"
+													strokeWidth={2}
+													aria-hidden
+												/>
+											) : (
+												<RotateCcw
+													className="size-3.5"
+													strokeWidth={2}
+													aria-hidden
+												/>
+											)}
+										</Button>
+									) : null}
+									{onDeleteWorkspace ? (
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-xs"
+											aria-label={t("sidebar.deleteWorkspace")}
+											className="text-muted-foreground/60 hover:text-destructive"
+											onClick={(event) => {
+												event.stopPropagation();
+												onDeleteWorkspace(workspace.id);
+											}}
+										>
+											<Trash2
+												className="size-3.5"
+												strokeWidth={2}
+												aria-hidden
+											/>
+										</Button>
+									) : null}
+								</>
 							) : (
 								<>
 									{workspace.status === "ready" && onCompleteWorkspace ? (

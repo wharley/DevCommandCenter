@@ -3,7 +3,10 @@ import type {
 	WorkspaceGitStatusOutput,
 	WorkspacePrStatusOutput,
 } from "@dcc/contracts";
-import { buildWorkspaceRailRecap } from "./use-workspace-rail-recap";
+import {
+	buildWorkspaceRailRecap,
+	isMergedPullRequestForBranch,
+} from "./use-workspace-rail-recap";
 
 const cleanGitStatus: WorkspaceGitStatusOutput = {
 	staged: [],
@@ -116,5 +119,50 @@ describe("buildWorkspaceRailRecap", () => {
 
 		expect(result?.recap.messageKey).toBe("readyForPr");
 		expect(result?.recap.params.count).toBe(2);
+	});
+});
+
+describe("isMergedPullRequestForBranch", () => {
+	it("rejects an old merged PR discovered by the base commit of a new task", () => {
+		expect(
+			isMergedPullRequestForBranch(
+				{
+					...noPr,
+					number: 676,
+					headBranch: "feature/already-delivered",
+					baseBranch: "main",
+					state: "merged",
+				},
+				"main",
+			),
+		).toBe(false);
+	});
+
+	it("accepts a merged PR only when its head branch is the workspace branch", () => {
+		expect(
+			isMergedPullRequestForBranch(
+				{
+					...noPr,
+					number: 677,
+					headBranch: "dcc/fix/task-completion",
+					baseBranch: "main",
+					state: "MERGED",
+				},
+				"dcc/fix/task-completion",
+			),
+		).toBe(true);
+	});
+
+	it("does not infer ownership when the forge omits the PR head branch", () => {
+		expect(
+			isMergedPullRequestForBranch(
+				{
+					...noPr,
+					number: 678,
+					state: "merged",
+				},
+				"dcc/fix/task-completion",
+			),
+		).toBe(false);
 	});
 });

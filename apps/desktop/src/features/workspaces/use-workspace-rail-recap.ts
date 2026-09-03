@@ -36,6 +36,19 @@ export type WorkspaceRailState = {
 	recap: WorkspaceRailRecap | null;
 };
 
+export function isMergedPullRequestForBranch(
+	prStatus: WorkspacePrStatusOutput | null | undefined,
+	branch: string,
+): boolean {
+	const currentBranch = branch.trim();
+	const pullRequestBranch = prStatus?.headBranch?.trim() ?? "";
+	return (
+		currentBranch.length > 0 &&
+		pullRequestBranch === currentBranch &&
+		prStatus?.state?.toLowerCase() === "merged"
+	);
+}
+
 export function buildWorkspaceRailRecap(input: {
 	branch: string;
 	activity: WorkspaceAgentActivity | null;
@@ -104,7 +117,14 @@ export function useWorkspaceRailRecap(input: {
 		RAIL_PROVIDER_QUERY_OPTIONS,
 	);
 	const completionAttemptedRef = useRef(false);
-	const pullRequestMerged = prStatusQuery.data?.state?.toLowerCase() === "merged";
+	// A fresh protected worktree starts detached at the base branch commit. Forge
+	// discovery can legitimately associate that SHA with an older merged PR, but
+	// that PR does not belong to the new task. Only an exact head-branch match is
+	// authoritative enough to complete a workspace automatically.
+	const pullRequestMerged = isMergedPullRequestForBranch(
+		prStatusQuery.data,
+		currentBranch,
+	);
 	useEffect(() => {
 		if (!pullRequestMerged) {
 			completionAttemptedRef.current = false;
