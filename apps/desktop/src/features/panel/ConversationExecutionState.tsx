@@ -26,11 +26,19 @@ export function ConversationExecutionState({
 					/>
 				</div>
 			) : null}
-			<div className="conversation-thread-enter conversation-fade-in flex min-w-0 justify-start">
-				<div className="flex min-w-0 items-center gap-2 py-2 text-[13px] text-muted-foreground">
-					<DccThinkingIndicator size={15} />
-					<span>{t("conversation.starting")}</span>
-				</div>
+			<ConversationStartingIndicator />
+		</div>
+	);
+}
+
+export function ConversationStartingIndicator() {
+	const { t } = useTranslation("common");
+
+	return (
+		<div className="conversation-thread-enter conversation-fade-in flex min-w-0 justify-start">
+			<div className="flex min-w-0 items-center gap-2 py-2 text-[13px] text-muted-foreground">
+				<DccThinkingIndicator size={15} />
+				<span>{t("conversation.starting")}</span>
 			</div>
 		</div>
 	);

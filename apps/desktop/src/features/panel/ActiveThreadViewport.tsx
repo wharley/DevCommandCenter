@@ -11,7 +11,10 @@ import { cn } from "@/lib/utils";
 import { ChevronDown } from "lucide-react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { Button } from "@/components/ui/button";
-import { ConversationExecutionState } from "./ConversationExecutionState";
+import {
+	ConversationExecutionState,
+	ConversationStartingIndicator,
+} from "./ConversationExecutionState";
 import { ConversationLaunchState } from "./ConversationLaunchState";
 import type { ProviderCatalog } from "@dcc/contracts";
 import type { WorkspaceMessage } from "./thread-projection";
@@ -33,6 +36,7 @@ import {
 	conversationWindowStart,
 	INITIAL_CONVERSATION_MESSAGE_LIMIT,
 } from "./conversation-window";
+import { shouldShowConversationStarting } from "./conversation-starting.logic";
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -140,6 +144,11 @@ export function ActiveThreadViewport({
 	);
 	const hasStreamingMessage = messages.some(
 		(message) => message.role === "assistant" && Boolean(message.streaming),
+	);
+	const showConversationStarting = shouldShowConversationStarting(
+		messages,
+		pendingPrompt,
+		lastTurnState,
 	);
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
 		initial: "instant",
@@ -443,6 +452,11 @@ export function ActiveThreadViewport({
 									</div>
 								);
 							})}
+							{showConversationStarting ? (
+								<div className="pb-4">
+									<ConversationStartingIndicator />
+								</div>
+							) : null}
 						</div>
 					)}
 					<div className="h-10 shrink-0" aria-hidden />
