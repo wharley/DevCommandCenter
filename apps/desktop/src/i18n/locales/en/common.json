@@ -2439,126 +2439,77 @@
   },
   "onboarding": {
     "steps": {
-      "intro": {
-        "title": "Welcome to Dev Command Center",
-        "body": "Start from the shell, keep your workspace visible, and let the thread stay in the center."
+      "project": {
+        "title": "Start with a project",
+        "body": "A project is a Git repository already on your machine. DCC copies nothing to the cloud: it follows the folder where the code lives."
       },
-      "workflows": {
-        "title": "Choose the right way to start",
-        "body": "In DCC you can send a direct prompt, ask for a plan before acting, or enter the Spec-Driven Development flow."
+      "task": {
+        "title": "Every task gets its own folder",
+        "body": "When you create a task, DCC opens a worktree: a real copy of the repository on its own branch. Whatever you were doing stays intact, running server included."
       },
-      "slashCommands": {
-        "title": "Type / to open local actions",
-        "body": "Slash commands shorten the path to action without relying on memory or long prompts."
-      },
-      "agents": {
-        "title": "Agents stay in the loop",
-        "body": "The inspector and composer are already primed for provider-driven sessions and runtime context."
-      },
-      "repoImport": {
-        "title": "Import a repository",
-        "body": "Point the shell at a local repo or clone from URL and the workspace opens around it."
-      },
-      "completeTransition": {
-        "title": "Ready to transition",
-        "body": "Finish onboarding and drop into the same main interface without a context switch."
+      "workbench": {
+        "title": "Chat, terminal and Inspector",
+        "body": "Inside the task you ask in the chat, run commands in the terminal and review what changed in the Inspector. All three point at the same folder."
       }
     },
     "chips": {
-      "intro": "intro",
-      "workflows": "flows",
-      "slashCommands": "slash /",
-      "agents": "agents",
-      "repoImport": "repoImport",
-      "completeTransition": "completeTransition"
+      "project": "project",
+      "task": "task",
+      "workbench": "workbench"
     },
-    "introCards": {
-      "workspace": {
-        "title": "Workspace stays visible",
-        "body": "DCC organizes the conversation around the active branch and worktree instead of a detached chat tab."
+    "project": {
+      "open": {
+        "title": "Open project",
+        "body": "Pick the folder of a local Git repository. This is the usual path."
       },
-      "thread": {
-        "title": "Thread stays central",
-        "body": "The composer, thread viewport, and inspector behave like one execution surface."
-      }
-    },
-    "workflows": {
-      "quickChat": {
-        "title": "Direct prompt",
-        "body": "Use it when you already know what to ask and do not need to formalize requirements first.",
-        "badge": "fast"
-      },
-      "planMode": {
-        "title": "Plan mode",
-        "body": "Turn it on when you want the agent to inspect first and return a plan before editing or executing.",
-        "badge": "plan"
-      },
-      "sdd": {
-        "title": "SDD flow",
-        "body": "Use it when the mission needs traceable requirements, explicit validation, and spec-driven resume.",
-        "badge": "spec"
-      },
-      "sddFlowTitle": "SDD flow in DCC",
-      "sddFlow": {
-        "spec": "/spec creates or updates the mission spec",
-        "plan": "Generate plan derives the plan from the spec",
-        "validate": "Validate audits the worktree against the criteria",
-        "continue": "Continue next resumes the next pending criterion"
-      },
-      "sddNote": "Important: `/spec` is the entry point into the SDD flow, but it does not automatically execute every later phase on its own."
-    },
-    "slashCommands": {
-      "title": "Composer slash commands",
-      "body": "When you type `/`, DCC offers actions it can execute consistently without depending on the selected provider.",
-      "items": {
-        "spec": "Writes the starter prompt used to create or update the mission spec.",
-        "clear": "Clears the current composer draft."
-      }
-    },
-    "agentsCards": {
-      "activity": {
-        "title": "Session activity",
-        "body": "The Activity tab shows thread events and progress without hiding the workspace."
-      },
-      "delegate": {
-        "title": "Delegate to another agent",
-        "body": "The fork button in the session header hands a scoped task to another provider — review, explain, or implement — and the result comes back as a card in the conversation."
-      },
-      "spec": {
-        "title": "Spec in the inspector",
-        "body": "The Spec tab centralizes criteria, saved validation, re-anchor, and continue next when the mission uses SDD."
-      },
-      "plan": {
-        "title": "Reviewable plan",
-        "body": "The Plan tab keeps the active plan visible and connects steps back to criteria declared in the spec."
-      }
-    },
-    "repoCards": {
-      "openLocal": {
-        "title": "Open a local project",
-        "body": "Point DCC at an existing repository and it builds the workspace around it."
-      },
-      "cloneRemote": {
+      "clone": {
         "title": "Clone from URL",
-        "body": "When the repo is not on disk yet, the clone flow creates the base for workspaces and sessions."
+        "body": "If the repository is not on the machine yet, DCC clones it and registers the project."
+      },
+      "cliTitle": "GitHub or GitLab, optional",
+      "cliBody": "To create PRs from DCC, log in to the CLI: gh auth login or glab auth login.",
+      "cliButton": "Open terminal",
+      "cliOpened": "Terminal opened. Run gh auth login to connect.",
+      "cliFailed": "Could not open the terminal."
+    },
+    "task": {
+      "worktree": {
+        "title": "Isolated worktree",
+        "body": "A real folder on disk, not an abstraction. You can open it in your editor and run the server there."
+      },
+      "branch": {
+        "title": "Its own branch",
+        "body": "Commits, tests and diffs stay with the task. No git stash to change subjects."
+      },
+      "done": {
+        "title": "Complete when done",
+        "body": "When you close the task, the worktree moves to Completed and can be cleaned up later."
       }
     },
-    "phase4Title": "What you leave with",
-    "phase4Body": "You have already seen how to open a repository, start with a direct prompt, use Plan mode, enter the SDD lane, and discover actions from `/`.",
-    "repoCliTitle": "GitHub CLI integration",
-    "repoCliBody": "Open the terminal and run `gh auth login` so DCC can create PRs and keep GitHub actions local.",
-    "repoCliButton": "Open terminal",
-    "repoCliOpened": "Terminal opened. Run `gh auth login` to connect.",
-    "repoCliFailed": "Could not open the terminal.",
-    "repoCodeRabbitTitle": "Local reviews with CodeRabbit",
-    "repoCodeRabbitBody": "Open the terminal and run `cr auth login` to enable local CodeRabbit reviews in the Inspector.",
-    "repoCodeRabbitButton": "Connect CodeRabbit",
-    "repoCodeRabbitOpened": "Terminal opened. Run `cr auth login` to connect CodeRabbit.",
-    "repoCodeRabbitFailed": "Could not open the CodeRabbit terminal.",
-    "laterSteps": "Later steps",
-    "conductorPreviewTitle": "Optional Conductor preview",
-    "conductorPreviewBody": "The optional integration pass stays separate for now, but the visual flow is already available.",
-    "previewConductor": "Preview conductor",
+    "workbench": {
+      "chat": {
+        "title": "Chat",
+        "body": "Ask for changes in the composer. Use @ to attach files and / for local commands."
+      },
+      "terminal": {
+        "title": "Terminal",
+        "body": "Shells already in the task folder. Select an error and send it to the agent."
+      },
+      "inspector": {
+        "title": "Inspector",
+        "body": "Agent activity and the task diff. Review before committing."
+      },
+      "helpTitle": "Questions later?",
+      "helpBody": "The help icon at the bottom of the sidebar opens a guide to every part of DCC, with examples and the exact button names.",
+      "openHelp": "Finish and open Help"
+    },
+    "mockup": {
+      "userMessage": "Add tax ID validation to checkout and cover it with tests.",
+      "agentMessage": "I read the checkout module. I will create the validator, wire it into the form and write the tests. Starting.",
+      "activityRead": "Read src/checkout/form.ts",
+      "activityEdit": "Edited src/checkout/stripe.ts",
+      "activityTest": "Ran yarn test, 12 passed"
+    },
     "back": "Back",
     "skip": "Skip for now",
     "next": "Next",

@@ -2439,126 +2439,77 @@
   },
   "onboarding": {
     "steps": {
-      "intro": {
-        "title": "Bem-vindo ao Dev Command Center",
-        "body": "Comece pelo shell, mantenha o workspace visível e deixe o thread no centro."
+      "project": {
+        "title": "Comece por um projeto",
+        "body": "Um projeto é um repositório Git que já está na sua máquina. O DCC não copia nada para a nuvem: ele acompanha a pasta onde o código vive."
       },
-      "workflows": {
-        "title": "Escolha o trilho certo para começar",
-        "body": "No DCC você pode mandar um prompt direto, pedir um plano antes de agir ou entrar no fluxo Spec-Driven Development."
+      "task": {
+        "title": "Cada tarefa tem a própria pasta",
+        "body": "Ao criar uma tarefa, o DCC abre um worktree: uma cópia real do repositório, na própria branch. O que você estava fazendo continua intacto, com servidor rodando e tudo."
       },
-      "slashCommands": {
-        "title": "Digite / para abrir ações locais",
-        "body": "Os slash commands aceleram o início do trabalho sem depender de memória ou de prompt longo."
-      },
-      "agents": {
-        "title": "Agentes sempre no circuito",
-        "body": "O inspetor e o composer já estão prontos para sessões com provedor e contexto em tempo real."
-      },
-      "repoImport": {
-        "title": "Importar um repositório",
-        "body": "Aponte o shell para um repo local ou faça clone pela URL — o workspace abre em volta dele."
-      },
-      "completeTransition": {
-        "title": "Pronto para entrar",
-        "body": "Conclua o onboarding e entre direto na mesma interface principal, sem trocar de contexto."
+      "workbench": {
+        "title": "Chat, terminal e Inspector",
+        "body": "Dentro da tarefa você pede no chat, roda comandos no terminal e revisa o que mudou no Inspector. Os três apontam para a mesma pasta."
       }
     },
     "chips": {
-      "intro": "intro",
-      "workflows": "fluxos",
-      "slashCommands": "comandos /",
-      "agents": "agentes",
-      "repoImport": "importar repo",
-      "completeTransition": "conclusão"
+      "project": "projeto",
+      "task": "tarefa",
+      "workbench": "bancada"
     },
-    "introCards": {
-      "workspace": {
-        "title": "Workspace sempre visível",
-        "body": "O DCC organiza a conversa ao redor do branch e do worktree ativos, não em uma aba solta."
+    "project": {
+      "open": {
+        "title": "Abrir projeto",
+        "body": "Escolha a pasta de um repositório Git local. É o caminho mais comum."
       },
-      "thread": {
-        "title": "Thread no centro",
-        "body": "Composer, viewport do chat e inspetor trabalham como uma única superfície de execução."
+      "clone": {
+        "title": "Clonar da URL",
+        "body": "Se o repositório ainda não está na máquina, o DCC clona e registra o projeto."
+      },
+      "cliTitle": "GitHub ou GitLab, opcional",
+      "cliBody": "Para criar PRs pelo DCC, faça login na CLI: gh auth login ou glab auth login.",
+      "cliButton": "Abrir terminal",
+      "cliOpened": "Terminal aberto. Rode gh auth login para conectar.",
+      "cliFailed": "Não foi possível abrir o terminal."
+    },
+    "task": {
+      "worktree": {
+        "title": "Worktree isolado",
+        "body": "Uma pasta real no disco, não uma abstração. Dá para abrir no editor e rodar o servidor nela."
+      },
+      "branch": {
+        "title": "Branch própria",
+        "body": "Commits, testes e diffs ficam na tarefa. Nada de git stash para trocar de assunto."
+      },
+      "done": {
+        "title": "Concluir quando terminar",
+        "body": "Ao fechar a tarefa, o worktree vai para Concluídos e pode ser limpo depois."
       }
     },
-    "workflows": {
-      "quickChat": {
-        "title": "Prompt direto",
-        "body": "Use quando você já sabe o que quer pedir e não precisa formalizar requisitos antes.",
-        "badge": "rápido"
+    "workbench": {
+      "chat": {
+        "title": "Chat",
+        "body": "Peça mudanças no composer. Use @ para anexar arquivos e / para comandos locais."
       },
-      "planMode": {
-        "title": "Plan mode",
-        "body": "Ative quando quiser que o agente inspecione primeiro e devolva um plano antes de editar ou executar.",
-        "badge": "planejar"
+      "terminal": {
+        "title": "Terminal",
+        "body": "Shells já na pasta da tarefa. Selecione um erro e envie ao agente."
       },
-      "sdd": {
-        "title": "Fluxo SDD",
-        "body": "Use quando a missão pede requisitos rastreáveis, validação explícita e retomada orientada por spec.",
-        "badge": "spec"
+      "inspector": {
+        "title": "Inspector",
+        "body": "Atividade do agente e o diff da tarefa. Revise antes de commitar."
       },
-      "sddFlowTitle": "Fluxo SDD no DCC",
-      "sddFlow": {
-        "spec": "/spec cria ou atualiza a mission spec",
-        "plan": "Generate plan deriva o plano da spec",
-        "validate": "Validate audita o worktree contra os critérios",
-        "continue": "Continue next retoma o próximo critério pendente"
-      },
-      "sddNote": "Importante: `/spec` é a porta de entrada do fluxo SDD, mas ele não executa automaticamente todas as fases sozinho."
+      "helpTitle": "Dúvidas depois?",
+      "helpBody": "O ícone de ajuda no rodapé da barra lateral abre um guia de cada parte do DCC, com exemplos e os nomes exatos dos botões.",
+      "openHelp": "Concluir e abrir a Ajuda"
     },
-    "slashCommands": {
-      "title": "Slash commands do composer",
-      "body": "Ao digitar `/`, o DCC oferece ações que consegue executar de forma consistente sem depender do provider selecionado.",
-      "items": {
-        "spec": "Escreve o prompt-base para criar ou atualizar a mission spec.",
-        "clear": "Limpa o rascunho atual do composer."
-      }
+    "mockup": {
+      "userMessage": "Adicione validação de CPF no checkout e cubra com testes.",
+      "agentMessage": "Li o módulo de checkout. Vou criar o validador, ligar no formulário e escrever os testes. Começando.",
+      "activityRead": "Leu src/checkout/form.ts",
+      "activityEdit": "Editou src/checkout/stripe.ts",
+      "activityTest": "Rodou yarn test, 12 passaram"
     },
-    "agentsCards": {
-      "activity": {
-        "title": "Atividade da sessão",
-        "body": "A aba de Activity mostra eventos e progresso do thread sem esconder o workspace."
-      },
-      "delegate": {
-        "title": "Delegue para outro agente",
-        "body": "O botão de fork no header da sessão envia uma tarefa delimitada para outro provider — review, explicar ou implementar — e o resultado volta como um card na conversa."
-      },
-      "spec": {
-        "title": "Spec no inspetor",
-        "body": "A aba Spec concentra critérios, validação salva, re-anchor e continue next quando a missão usa SDD."
-      },
-      "plan": {
-        "title": "Plano revisável",
-        "body": "A aba Plan mantém o plano ativo visível e relaciona steps aos critérios declarados na spec."
-      }
-    },
-    "repoCards": {
-      "openLocal": {
-        "title": "Abrir projeto local",
-        "body": "Aponte para um repositório existente e o DCC monta o workspace ao redor dele."
-      },
-      "cloneRemote": {
-        "title": "Clonar pela URL",
-        "body": "Quando o repo ainda não está na máquina, o fluxo de clone já cria a base para workspaces e sessões."
-      }
-    },
-    "phase4Title": "O que você leva daqui",
-    "phase4Body": "Você já viu como abrir um repositório, iniciar pelo prompt direto, usar Plan mode, entrar no trilho SDD e descobrir ações pelo `/`.",
-    "repoCliTitle": "Integração GitHub CLI",
-    "repoCliBody": "Abra o terminal e rode `gh auth login` para o DCC conseguir criar PRs e usar o fluxo local do GitHub.",
-    "repoCliButton": "Abrir terminal",
-    "repoCliOpened": "Terminal aberto. Rode `gh auth login` para conectar.",
-    "repoCliFailed": "Não foi possível abrir o terminal.",
-    "repoCodeRabbitTitle": "Review local com CodeRabbit",
-    "repoCodeRabbitBody": "Abra o terminal e rode `cr auth login` para liberar reviews locais do CodeRabbit no Inspector.",
-    "repoCodeRabbitButton": "Conectar CodeRabbit",
-    "repoCodeRabbitOpened": "Terminal aberto. Rode `cr auth login` para conectar o CodeRabbit.",
-    "repoCodeRabbitFailed": "Não foi possível abrir o terminal do CodeRabbit.",
-    "laterSteps": "Próximos passos",
-    "conductorPreviewTitle": "Prévia opcional do Conductor",
-    "conductorPreviewBody": "A integração opcional continua separada por enquanto, mas o fluxo visual já está disponível.",
-    "previewConductor": "Preview conductor",
     "back": "Voltar",
     "skip": "Pular por agora",
     "next": "Avançar",

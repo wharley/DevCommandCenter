@@ -2,31 +2,28 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
-	CheckCircle2,
 	ChevronLeft,
 	ChevronRight,
-	Command,
+	CircleCheckBig,
+	CircleQuestionMark,
+	FolderGit2,
+	FolderOpen,
 	GitBranch,
-	GitFork,
-	ListTree,
-	MessageSquare,
-	Rabbit,
-	Sparkles,
-	Wand2,
+	Link2,
+	MessageSquareText,
+	PanelRight,
+	SquareTerminal,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ConductorOnboarding } from "@/components/ConductorOnboarding";
 import { cn } from "@/lib/utils";
-import { DEFAULT_SLASH_COMMANDS } from "@/features/composer/default-slash-commands";
-import { openCodeRabbitCliAuthTerminal } from "@/lib/coderabbit-cli";
 import { openGithubCliAuthTerminal } from "@/lib/github-cli";
 import { OnboardingMockup } from "./mockup/OnboardingMockup";
 import {
-	futureOnboardingSteps,
 	getNextOnboardingStep,
 	getPreviousOnboardingStep,
+	isLastOnboardingStep,
 	onboardingSteps,
 	type OnboardingStep,
 } from "./OnboardingWizard.logic";
@@ -35,9 +32,9 @@ type OnboardingWizardProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onComplete: () => void;
+	/** Last step offers to finish straight into the Help panel. */
+	onOpenHelp?: () => void;
 };
-
-const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 
 function OnboardingDragBar() {
 	return (
@@ -79,46 +76,20 @@ function DetailCard({
 	title,
 	body,
 	icon,
-	badge,
 }: {
 	title: string;
 	body: string;
 	icon: ReactNode;
-	badge?: string;
 }) {
 	return (
 		<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-			<div className="flex items-start justify-between gap-3">
-				<div className="flex items-center gap-2">
-					<div className="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background/80 text-muted-foreground">
-						{icon}
-					</div>
-					<p className="text-[12px] font-medium text-foreground">{title}</p>
+			<div className="flex items-center gap-2">
+				<div className="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-background/80 text-muted-foreground">
+					{icon}
 				</div>
-				{badge ? (
-					<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
-						{badge}
-					</Badge>
-				) : null}
+				<p className="text-[12px] font-medium text-foreground">{title}</p>
 			</div>
 			<p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">{body}</p>
-		</div>
-	);
-}
-
-function CommandCard({
-	command,
-	description,
-}: {
-	command: string;
-	description: string;
-}) {
-	return (
-		<div className="rounded-xl border border-border/60 bg-muted/15 p-3">
-			<p className="font-mono text-[12px] font-medium text-foreground">/{command}</p>
-			<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-				{description}
-			</p>
 		</div>
 	);
 }
@@ -127,24 +98,12 @@ function WizardPanel({
 	step,
 	index,
 	activeIndex,
-	onPreviewConductor,
 }: {
 	step: OnboardingStep;
 	index: number;
 	activeIndex: number;
-	onPreviewConductor: () => void;
 }) {
 	const { t } = useTranslation("common");
-	const title = t(`onboarding.steps.${step}.title`);
-	const body = t(`onboarding.steps.${step}.body`);
-	const slashCommands = useMemo(
-		() =>
-			DEFAULT_SLASH_COMMANDS.map((command) => ({
-				name: command.name,
-				description: t(`onboarding.slashCommands.items.${command.name}`),
-			})),
-		[t],
-	);
 	const active = index === activeIndex;
 	const behind = index < activeIndex;
 	const motionClass = active
@@ -154,29 +113,32 @@ function WizardPanel({
 			: "translate-y-6 scale-[0.985] opacity-0";
 
 	return (
-		<div className="absolute inset-0 z-20 flex translate-y-6 items-center justify-center px-4 sm:translate-y-8 sm:px-6">
+		<div
+			className={cn(
+				"absolute inset-0 z-20 flex translate-y-6 items-center justify-center px-4 sm:translate-y-8 sm:px-6",
+				!active && "pointer-events-none",
+			)}
+			aria-hidden={!active}
+		>
 			<Card
 				className={cn(
-					"mx-auto max-h-[calc(100dvh-14rem)] w-[min(680px,calc(100vw-2rem))] overflow-y-auto border-border/60 bg-background/90 shadow-[0_24px_90px_rgba(0,0,0,0.18)] transition-transform duration-1000 ease-[cubic-bezier(.22,.82,.2,1)]",
+					"mx-auto max-h-[calc(100dvh-14rem)] w-[min(640px,calc(100vw-2rem))] overflow-y-auto border-border/60 bg-background/90 shadow-[0_24px_90px_rgba(0,0,0,0.18)] transition-transform duration-1000 ease-[cubic-bezier(.22,.82,.2,1)]",
 					motionClass,
 				)}
 				data-step={step}
 			>
 				<CardContent className="space-y-5 p-6">
-					<div className="flex items-center justify-between gap-4">
-						<div className="space-y-2">
-							<Badge variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
-								{String(index + 1).padStart(2, "0")} / {String(onboardingSteps.length).padStart(2, "0")}
-							</Badge>
-							<h2 className="text-[24px] font-semibold tracking-[-0.03em] text-foreground">
-								{title}
-							</h2>
-						</div>
-						<Sparkles className="size-5 shrink-0 text-muted-foreground" />
+					<div className="space-y-2">
+						<Badge variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
+							{index + 1} / {onboardingSteps.length}
+						</Badge>
+						<h2 className="text-[24px] font-semibold tracking-[-0.03em] text-foreground">
+							{t(`onboarding.steps.${step}.title`)}
+						</h2>
 					</div>
 
 					<p className="max-w-2xl text-[14px] leading-6 text-muted-foreground">
-						{body}
+						{t(`onboarding.steps.${step}.body`)}
 					</p>
 
 					<div className="flex flex-wrap gap-2">
@@ -190,173 +152,27 @@ function WizardPanel({
 						))}
 					</div>
 
-					{step === "intro" ? (
-						<div className="grid gap-3 sm:grid-cols-2">
-							<DetailCard
-								title={t("onboarding.introCards.workspace.title")}
-								body={t("onboarding.introCards.workspace.body")}
-								icon={<GitBranch className="size-4" />}
-							/>
-							<DetailCard
-								title={t("onboarding.introCards.thread.title")}
-								body={t("onboarding.introCards.thread.body")}
-								icon={<MessageSquare className="size-4" />}
-							/>
-						</div>
-					) : null}
-
-					{step === "workflows" ? (
+					{step === "project" ? (
 						<div className="grid gap-3">
-							<div className="grid gap-3 sm:grid-cols-3">
-								<DetailCard
-									title={t("onboarding.workflows.quickChat.title")}
-									body={t("onboarding.workflows.quickChat.body")}
-									icon={<MessageSquare className="size-4" />}
-									badge={t("onboarding.workflows.quickChat.badge")}
-								/>
-								<DetailCard
-									title={t("onboarding.workflows.planMode.title")}
-									body={t("onboarding.workflows.planMode.body")}
-									icon={<ListTree className="size-4" />}
-									badge={t("onboarding.workflows.planMode.badge")}
-								/>
-								<DetailCard
-									title={t("onboarding.workflows.sdd.title")}
-									body={t("onboarding.workflows.sdd.body")}
-									icon={<GitBranch className="size-4" />}
-									badge={t("onboarding.workflows.sdd.badge")}
-								/>
-							</div>
-							<div className="rounded-xl border border-border/60 bg-sidebar/40 p-3">
-								<p className="text-[12px] font-medium text-foreground">
-									{t("onboarding.workflows.sddFlowTitle")}
-								</p>
-								<div className="mt-2 flex flex-wrap gap-1.5">
-									{[
-										t("onboarding.workflows.sddFlow.spec"),
-										t("onboarding.workflows.sddFlow.plan"),
-										t("onboarding.workflows.sddFlow.validate"),
-										t("onboarding.workflows.sddFlow.continue"),
-									].map((item) => (
-										<Badge
-											key={item}
-											variant="outline"
-											className="h-7 px-2.5 text-[11px] font-normal"
-										>
-											{item}
-										</Badge>
-									))}
-								</div>
-								<p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-									{t("onboarding.workflows.sddNote")}
-								</p>
-							</div>
-						</div>
-					) : null}
-
-					{step === "slashCommands" ? (
-						<div className="grid gap-3">
-							<div className="rounded-xl border border-border/60 bg-sidebar/40 p-3">
-								<div className="flex items-center gap-2">
-									<Command className="size-4 text-muted-foreground" />
-									<p className="text-[12px] font-medium text-foreground">
-										{t("onboarding.slashCommands.title")}
-									</p>
-								</div>
-								<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-									{t("onboarding.slashCommands.body")}
-								</p>
-							</div>
 							<div className="grid gap-3 sm:grid-cols-2">
-								{slashCommands.map((command) => (
-									<CommandCard
-										key={command.name}
-										command={command.name}
-										description={command.description}
-									/>
-								))}
+								<DetailCard
+									title={t("onboarding.project.open.title")}
+									body={t("onboarding.project.open.body")}
+									icon={<FolderOpen className="size-4" />}
+								/>
+								<DetailCard
+									title={t("onboarding.project.clone.title")}
+									body={t("onboarding.project.clone.body")}
+									icon={<Link2 className="size-4" />}
+								/>
 							</div>
-						</div>
-					) : null}
-
-					{step === "agents" ? (
-						<div className="grid gap-3 sm:grid-cols-2">
-							<DetailCard
-								title={t("onboarding.agentsCards.activity.title")}
-								body={t("onboarding.agentsCards.activity.body")}
-								icon={<MessageSquare className="size-4" />}
-							/>
-							<DetailCard
-								title={t("onboarding.agentsCards.spec.title")}
-								body={t("onboarding.agentsCards.spec.body")}
-								icon={<GitBranch className="size-4" />}
-							/>
-							<DetailCard
-								title={t("onboarding.agentsCards.plan.title")}
-								body={t("onboarding.agentsCards.plan.body")}
-								icon={<ListTree className="size-4" />}
-							/>
-							<DetailCard
-								title={t("onboarding.agentsCards.delegate.title")}
-								body={t("onboarding.agentsCards.delegate.body")}
-								icon={<GitFork className="size-4" />}
-							/>
-						</div>
-					) : null}
-
-					{step === "repoImport" ? (
-						<div className="grid gap-3 sm:grid-cols-2">
-							<DetailCard
-								title={t("onboarding.repoCards.openLocal.title")}
-								body={t("onboarding.repoCards.openLocal.body")}
-								icon={<GitBranch className="size-4" />}
-							/>
-							<DetailCard
-								title={t("onboarding.repoCards.cloneRemote.title")}
-								body={t("onboarding.repoCards.cloneRemote.body")}
-								icon={<CheckCircle2 className="size-4" />}
-							/>
-						</div>
-					) : null}
-
-					{step === "completeTransition" ? (
-						<div className="grid gap-3 sm:grid-cols-2">
-							<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-								<p className="text-[12px] font-medium text-foreground">
-									{t("onboarding.phase4Title")}
-								</p>
-								<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-									{t("onboarding.phase4Body")}
-								</p>
-							</div>
-							<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-								<p className="text-[12px] font-medium text-foreground">
-									{t("onboarding.laterSteps")}
-								</p>
-								<div className="mt-2 flex flex-wrap gap-1.5">
-									{futureOnboardingSteps.map((item) => (
-										<Badge
-											key={item}
-											variant="outline"
-											className="h-7 px-2.5 text-[11px] font-normal"
-										>
-											{item}
-										</Badge>
-									))}
-								</div>
-							</div>
-						</div>
-					) : null}
-
-					{step === "repoImport" ? (
-						<div className="grid gap-3">
 							<div className="flex flex-col items-stretch gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3 sm:flex-row sm:items-center sm:justify-between">
 								<div className="min-w-0">
 									<p className="text-[12px] font-medium text-foreground">
-										{t("onboarding.repoCliTitle")}
+										{t("onboarding.project.cliTitle")}
 									</p>
 									<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-										{t("onboarding.repoCliBody")}
+										{t("onboarding.project.cliBody")}
 									</p>
 								</div>
 								<Button
@@ -367,68 +183,72 @@ function WizardPanel({
 									onClick={async () => {
 										const result = await openGithubCliAuthTerminal();
 										if (result.success) {
-											toast.success(t("onboarding.repoCliOpened"));
+											toast.success(t("onboarding.project.cliOpened"));
 											return;
 										}
-										toast.error(
-											result.error ?? t("onboarding.repoCliFailed"),
-										);
+										toast.error(result.error ?? t("onboarding.project.cliFailed"));
 									}}
 								>
-									{t("onboarding.repoCliButton")}
-								</Button>
-							</div>
-							<div className="flex flex-col items-stretch gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3 sm:flex-row sm:items-center sm:justify-between">
-								<div className="min-w-0">
-									<div className="flex items-center gap-1.5">
-										<Rabbit className="size-3.5 text-muted-foreground" />
-										<p className="text-[12px] font-medium text-foreground">
-											{t("onboarding.repoCodeRabbitTitle")}
-										</p>
-									</div>
-									<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-										{t("onboarding.repoCodeRabbitBody")}
-									</p>
-								</div>
-								<Button
-									type="button"
-									variant="outline"
-									size="sm"
-									className="h-8 self-start rounded-[9px] px-2.5 text-[12px] sm:self-auto"
-									onClick={async () => {
-										const result = await openCodeRabbitCliAuthTerminal();
-										if (result.success) {
-											toast.success(t("onboarding.repoCodeRabbitOpened"));
-											return;
-										}
-										toast.error(
-											result.error ?? t("onboarding.repoCodeRabbitFailed"),
-										);
-									}}
-								>
-									{t("onboarding.repoCodeRabbitButton")}
+									{t("onboarding.project.cliButton")}
 								</Button>
 							</div>
 						</div>
 					) : null}
 
-					<div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-sidebar/40 p-3">
-						<div className="min-w-0">
-							<p className="text-[12px] font-medium text-foreground">{t("onboarding.conductorPreviewTitle")}</p>
-							<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-								{t("onboarding.conductorPreviewBody")}
-							</p>
+					{step === "task" ? (
+						<div className="grid gap-3 sm:grid-cols-3">
+							<DetailCard
+								title={t("onboarding.task.worktree.title")}
+								body={t("onboarding.task.worktree.body")}
+								icon={<FolderGit2 className="size-4" />}
+							/>
+							<DetailCard
+								title={t("onboarding.task.branch.title")}
+								body={t("onboarding.task.branch.body")}
+								icon={<GitBranch className="size-4" />}
+							/>
+							<DetailCard
+								title={t("onboarding.task.done.title")}
+								body={t("onboarding.task.done.body")}
+								icon={<CircleCheckBig className="size-4" />}
+							/>
 						</div>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="h-8 rounded-[9px] px-2.5 text-[12px]"
-							onClick={onPreviewConductor}
-						>
-							{t("onboarding.previewConductor")}
-						</Button>
-					</div>
+					) : null}
+
+					{step === "workbench" ? (
+						<div className="grid gap-3">
+							<div className="grid gap-3 sm:grid-cols-3">
+								<DetailCard
+									title={t("onboarding.workbench.chat.title")}
+									body={t("onboarding.workbench.chat.body")}
+									icon={<MessageSquareText className="size-4" />}
+								/>
+								<DetailCard
+									title={t("onboarding.workbench.terminal.title")}
+									body={t("onboarding.workbench.terminal.body")}
+									icon={<SquareTerminal className="size-4" />}
+								/>
+								<DetailCard
+									title={t("onboarding.workbench.inspector.title")}
+									body={t("onboarding.workbench.inspector.body")}
+									icon={<PanelRight className="size-4" />}
+								/>
+							</div>
+							<div className="flex items-start gap-3 rounded-xl border border-foreground/20 bg-sidebar/40 p-3">
+								<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
+									<CircleQuestionMark className="size-4" strokeWidth={1.9} aria-hidden />
+								</div>
+								<div className="min-w-0">
+									<p className="text-[12px] font-medium text-foreground">
+										{t("onboarding.workbench.helpTitle")}
+									</p>
+									<p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+										{t("onboarding.workbench.helpBody")}
+									</p>
+								</div>
+							</div>
+						</div>
+					) : null}
 				</CardContent>
 			</Card>
 		</div>
@@ -439,16 +259,16 @@ export function OnboardingWizard({
 	open,
 	onOpenChange,
 	onComplete,
+	onOpenHelp,
 }: OnboardingWizardProps) {
 	const { t } = useTranslation("common");
-	const [step, setStep] = useState<OnboardingStep>("intro");
+	const [step, setStep] = useState<OnboardingStep>("project");
 	const [viewportScale, setViewportScale] = useState(1);
-	const [showConductorPreview, setShowConductorPreview] = useState(false);
 	const viewportRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
 		if (open) {
-			setStep("intro");
+			setStep("project");
 		}
 	}, [open]);
 
@@ -473,7 +293,7 @@ export function OnboardingWizard({
 
 	const activeIndex = useMemo(() => onboardingSteps.indexOf(step), [step]);
 	const canGoBack = activeIndex > 0;
-	const canGoNext = activeIndex < onboardingSteps.length - 1;
+	const lastStep = isLastOnboardingStep(step);
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -493,6 +313,11 @@ export function OnboardingWizard({
 	if (!open) {
 		return null;
 	}
+
+	const finish = () => {
+		onOpenChange(false);
+		onComplete();
+	};
 
 	return (
 		<div className="fixed inset-0 z-[90] overflow-hidden bg-background text-foreground">
@@ -516,29 +341,23 @@ export function OnboardingWizard({
 				ref={viewportRef}
 				className="absolute inset-x-0 bottom-0 top-11 overflow-hidden px-4 pb-6 pt-4 sm:px-6"
 			>
-					<div
-						className="pointer-events-none absolute inset-x-0 top-0 flex justify-center"
-						style={{ transform: `scale(${viewportScale})`, transformOrigin: "top center" }}
-					>
-						<div className="h-[900px] w-[1300px]">
-							<OnboardingMockup step={step} />
-						</div>
+				<div
+					className="pointer-events-none absolute inset-x-0 top-0 flex justify-center"
+					style={{ transform: `scale(${viewportScale})`, transformOrigin: "top center" }}
+				>
+					<div className="h-[900px] w-[1300px]">
+						<OnboardingMockup step={step} />
 					</div>
+				</div>
 
 				<div className="absolute inset-x-0 top-0 bottom-24">
 					{onboardingSteps.map((panel, index) => (
-						<WizardPanel
-							key={panel}
-							step={panel}
-							index={index}
-							activeIndex={activeIndex}
-							onPreviewConductor={() => setShowConductorPreview(true)}
-						/>
+						<WizardPanel key={panel} step={panel} index={index} activeIndex={activeIndex} />
 					))}
 				</div>
 
 				<div className="absolute inset-x-0 bottom-6 z-20 flex justify-center">
-					<div className="flex w-[min(680px,calc(100vw-2rem))] items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/90 px-4 py-3 shadow-[0_16px_48px_rgba(0,0,0,0.16)] backdrop-blur">
+					<div className="flex w-[min(640px,calc(100vw-2rem))] items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/90 px-4 py-3 shadow-[0_16px_48px_rgba(0,0,0,0.16)] backdrop-blur">
 						<div className="flex items-center gap-2">
 							<Button
 								type="button"
@@ -556,58 +375,66 @@ export function OnboardingWizard({
 								<ChevronLeft className="size-3.5" />
 								{t("onboarding.back")}
 							</Button>
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								className="h-8 rounded-[9px] px-2.5 text-[12px] text-muted-foreground"
-								onClick={() => {
-									onOpenChange(false);
-									onComplete();
-								}}
-							>
-								{t("onboarding.skip")}
-							</Button>
+							{!lastStep ? (
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-8 rounded-[9px] px-2.5 text-[12px] text-muted-foreground"
+									onClick={finish}
+								>
+									{t("onboarding.skip")}
+								</Button>
+							) : null}
 						</div>
 
 						<div className="flex items-center gap-2">
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px]"
-								onClick={() => {
-									const next = getNextOnboardingStep(step);
-									if (next) {
-										setStep(next);
-									}
-								}}
-								disabled={!canGoNext}
-							>
-								{t("onboarding.next")}
-								<ChevronRight className="size-3.5" />
-							</Button>
-							<Button
-								type="button"
-								size="sm"
-								className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px]"
-								onClick={() => {
-									onOpenChange(false);
-									onComplete();
-								}}
-							>
-								<Wand2 className="size-3.5" />
-								{t("onboarding.finish")}
-							</Button>
+							{lastStep ? (
+								<>
+									{onOpenHelp ? (
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px]"
+											onClick={() => {
+												finish();
+												onOpenHelp();
+											}}
+										>
+											<CircleQuestionMark className="size-3.5" />
+											{t("onboarding.workbench.openHelp")}
+										</Button>
+									) : null}
+									<Button
+										type="button"
+										size="sm"
+										className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px]"
+										onClick={finish}
+									>
+										{t("onboarding.finish")}
+									</Button>
+								</>
+							) : (
+								<Button
+									type="button"
+									size="sm"
+									className="h-8 gap-1.5 rounded-[9px] px-2.5 text-[12px]"
+									onClick={() => {
+										const next = getNextOnboardingStep(step);
+										if (next) {
+											setStep(next);
+										}
+									}}
+								>
+									{t("onboarding.next")}
+									<ChevronRight className="size-3.5" />
+								</Button>
+							)}
 						</div>
 					</div>
 				</div>
 			</div>
-
-			<ConductorOnboarding
-				open={showConductorPreview}
-				onOpenChange={setShowConductorPreview}
-			/>
 		</div>
 	);
 }

@@ -1,215 +1,271 @@
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+	BarChart3,
+	CircleQuestionMark,
+	FolderOpen,
+	Globe,
+	Plus,
+	Settings2,
+	Sparkles,
+	SquareTerminal,
+} from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import type { OnboardingStep } from "../OnboardingWizard.logic";
 
-function MockWindow({ title }: { title: string }) {
+/**
+ * A quiet, scaled-down sketch of the real shell. Labels come from the same
+ * i18n keys the app uses, so the sketch cannot drift into another language
+ * or into vocabulary the app no longer has. Each step lifts one region and
+ * dims the rest; that highlight is the only thing that moves.
+ */
+export function OnboardingMockup({ step }: { step: OnboardingStep }) {
+	const { t } = useTranslation("common");
+	const sidebarLit = step === "project" || step === "task";
+	const centerLit = step === "workbench";
+	const inspectorLit = step === "workbench";
+
 	return (
-		<Card className="border-border/60 bg-background/80 shadow-none">
-			<CardContent className="space-y-2 p-3">
-				<p className="text-[12px] font-medium text-foreground">{title}</p>
-				<div className="h-20 rounded-lg border border-border/60 bg-muted/25" />
-			</CardContent>
-		</Card>
+		<div className="relative h-full w-full overflow-hidden rounded-[28px] border border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklch,var(--background)_94%,transparent),color-mix(in_oklch,var(--sidebar)_96%,transparent))] p-4">
+			<div className="grid h-full grid-cols-[236px_minmax(0,1fr)_252px] gap-3">
+				<Region lit={sidebarLit}>
+					<div className="flex h-full flex-col">
+						<div className="flex items-center justify-between px-1">
+							<span className="text-[12px] font-medium text-foreground">{t("sidebar.title")}</span>
+							<Plus className="size-3.5 text-muted-foreground" aria-hidden />
+						</div>
+
+						<div className="mt-3 space-y-2">
+							<ProjectRow name="minha-api" lit={step === "project"} />
+							<div className="space-y-1 pl-3">
+								<TaskRow
+									name="feat/checkout-stripe"
+									status={t("sidebar.running")}
+									lit={step === "task"}
+									tone="running"
+								/>
+								<TaskRow name="fix/login-500" status={t("sidebar.waiting")} tone="waiting" />
+							</div>
+							<ProjectRow name="web-app" />
+						</div>
+
+						{step === "project" ? (
+							<Callout className="mt-4">
+								<FolderOpen className="size-3.5" aria-hidden />
+								{t("sidebar.openProject")}
+							</Callout>
+						) : null}
+						{step === "task" ? (
+							<Callout className="mt-4">
+								<Plus className="size-3.5" aria-hidden />
+								{t("sidebar.newWorkspace")}
+							</Callout>
+						) : null}
+
+						<div className="mt-auto flex items-center gap-2 px-1 pt-3 text-muted-foreground">
+							<BarChart3 className="size-4" strokeWidth={1.8} aria-hidden />
+							<Sparkles className="size-4" strokeWidth={1.8} aria-hidden />
+							<Settings2 className="size-4" strokeWidth={1.8} aria-hidden />
+							<span
+								className={cn(
+									"relative flex size-6 items-center justify-center rounded-md",
+									step === "workbench"
+										? "bg-foreground text-background shadow-[0_0_0_6px_color-mix(in_oklch,var(--foreground)_14%,transparent)]"
+										: "",
+								)}
+							>
+								<CircleQuestionMark className="size-4" strokeWidth={1.9} aria-hidden />
+							</span>
+						</div>
+					</div>
+				</Region>
+
+				<Region lit={centerLit}>
+					<div className="flex h-full min-h-0 flex-col">
+						<div className="flex items-center justify-between border-b border-border/50 pb-2">
+							<div className="min-w-0">
+								<p className="truncate text-[12px] font-medium text-foreground">feat/checkout-stripe</p>
+								<p className="text-[11px] text-muted-foreground">minha-api</p>
+							</div>
+							<div className="flex items-center gap-2 text-muted-foreground">
+								<SquareTerminal className="size-4" strokeWidth={1.8} aria-hidden />
+								<Globe className="size-4" strokeWidth={1.8} aria-hidden />
+							</div>
+						</div>
+
+						<div className="mt-3 flex-1 space-y-3 overflow-hidden">
+							<Bubble align="end">{t("onboarding.mockup.userMessage")}</Bubble>
+							<Bubble align="start">{t("onboarding.mockup.agentMessage")}</Bubble>
+						</div>
+
+						<div
+							className={cn(
+								"mt-3 rounded-xl border border-border/60 bg-background/80 px-3 py-2 text-[12px] text-muted-foreground",
+								step === "workbench" && "border-foreground/30",
+							)}
+						>
+							{t("composer.placeholder.default")}
+						</div>
+
+						<div
+							className={cn(
+								"mt-3 rounded-xl border border-border/60 bg-sidebar/60 p-3 font-mono text-[11px] leading-5 text-muted-foreground",
+								step === "workbench" && "border-foreground/30",
+							)}
+						>
+							<div className="mb-1 flex items-center gap-2 font-sans text-[11px]">
+								<SquareTerminal className="size-3.5" aria-hidden />
+								<span>{t("terminalDock.scopes.worktree")}</span>
+							</div>
+							<p>$ yarn dev</p>
+							<p>ready on http://localhost:3000</p>
+						</div>
+					</div>
+				</Region>
+
+				<Region lit={inspectorLit}>
+					<div className="flex h-full flex-col">
+						<div className="flex gap-1 rounded-lg bg-muted/30 p-1 text-[11px]">
+							{[t("inspector.tabs.activity"), t("inspector.tabs.context"), t("inspector.tabs.spec")].map(
+								(label, index) => (
+									<span
+										key={label}
+										className={cn(
+											"flex-1 rounded-md px-2 py-1 text-center",
+											index === 0 ? "bg-background text-foreground" : "text-muted-foreground",
+										)}
+									>
+										{label}
+									</span>
+								),
+							)}
+						</div>
+
+						<div className="mt-3 space-y-2">
+							<ActivityLine text={t("onboarding.mockup.activityRead")} />
+							<ActivityLine text={t("onboarding.mockup.activityEdit")} />
+							<ActivityLine text={t("onboarding.mockup.activityTest")} />
+						</div>
+
+						<div className="mt-auto">
+							<p className="px-1 text-[11px] font-medium text-muted-foreground">{t("inspector.modeDock.git")}</p>
+							<div className="mt-2 space-y-1.5">
+								<DiffRow path="src/checkout/stripe.ts" added={42} removed={3} />
+								<DiffRow path="src/checkout/stripe.test.ts" added={18} removed={0} />
+							</div>
+						</div>
+					</div>
+				</Region>
+			</div>
+		</div>
 	);
 }
 
-function buildMockupState(step: OnboardingStep) {
-	switch (step) {
-		case "workflows":
-			return {
-				title: "Choose the right start",
-				subtitle: "Prompt directly, ask for a plan, or open the SDD lane from /spec.",
-				composerMode: "SDD flow",
-				composerPrompt: "/spec Add mission criteria for the onboarding refresh",
-				inspectorCards: ["Spec", "Plan", "Validation"],
-				slashOpen: false,
-				showFlowRail: true,
-			};
-		case "slashCommands":
-			return {
-				title: "Slash commands are entry points",
-				subtitle: "Typing / opens local actions before you leave the composer.",
-				composerMode: "Composer",
-				composerPrompt: "/",
-				inspectorCards: ["Activity", "Spec", "Plan"],
-				slashOpen: true,
-				showFlowRail: false,
-			};
-		case "agents":
-			return {
-				title: "Inspector and thread stay aligned",
-				subtitle: "Activity, spec state, and plan review remain attached to the active workspace.",
-				composerMode: "Plan mode",
-				composerPrompt: "Inspect the repo and return a concise plan before editing.",
-				inspectorCards: ["Activity", "Spec", "Plan"],
-				slashOpen: false,
-				showFlowRail: false,
-			};
-		case "repoImport":
-			return {
-				title: "Import first, then compose",
-				subtitle: "Open a local repo or clone from URL and the rest of the workbench wraps around it.",
-				composerMode: "Workspace ready",
-				composerPrompt: "Open project or clone from URL to begin.",
-				inspectorCards: ["Branches", "Session state", "Providers"],
-				slashOpen: false,
-				showFlowRail: false,
-			};
-		case "completeTransition":
-			return {
-				title: "Same shell, no context switch",
-				subtitle: "The onboarding exits directly into the same workspace, composer, and inspector layout.",
-				composerMode: "Ready",
-				composerPrompt: "Create a workspace and start a thread when you are ready.",
-				inspectorCards: ["Spec", "Plan", "Git"],
-				slashOpen: false,
-				showFlowRail: true,
-			};
-		case "intro":
-		default:
-			return {
-				title: "Compose, inspect, and ship",
-				subtitle: "DCC keeps the active workspace, thread, and inspector visible together.",
-				composerMode: "Quick chat",
-				composerPrompt: "Summarize this repo and suggest the next best action.",
-				inspectorCards: ["Inspector", "Session state", "Branches"],
-				slashOpen: false,
-				showFlowRail: false,
-			};
-	}
+function Region({ lit, children }: { lit: boolean; children: React.ReactNode }) {
+	return (
+		<div
+			className={cn(
+				"rounded-2xl border bg-background/80 p-3 transition-all duration-700 ease-[cubic-bezier(.22,.82,.2,1)]",
+				lit
+					? "border-foreground/25 opacity-100 shadow-[0_18px_60px_rgba(0,0,0,0.14)]"
+					: "border-border/50 opacity-45",
+			)}
+		>
+			{children}
+		</div>
+	);
 }
 
-export function OnboardingMockup({ step }: { step: OnboardingStep }) {
-	const state = buildMockupState(step);
-
+function ProjectRow({ name, lit }: { name: string; lit?: boolean }) {
 	return (
-		<div className="relative h-full w-full overflow-hidden rounded-[28px] border border-border/60 bg-[radial-gradient(circle_at_20%_0%,color-mix(in_oklch,var(--workspace-pr-open-accent)_20%,transparent),transparent_28%),linear-gradient(180deg,color-mix(in_oklch,var(--background)_92%,transparent),color-mix(in_oklch,var(--sidebar)_96%,transparent))] p-4">
-			<div className="grid h-full grid-cols-[240px_minmax(0,1fr)_240px] gap-3">
-				<div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-sidebar/80 p-3">
-					<Badge variant="outline" className="h-7 w-fit px-2.5 text-[11px] font-normal">
-						Workspaces
-					</Badge>
-					<div className="space-y-2">
-						{["Alpha", "Core Refactor", "Provider Swap"].map((item) => (
-							<div key={item} className="rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-[12px]">
-								{item}
-							</div>
-						))}
-					</div>
-					<Button type="button" variant="outline" size="sm" className="mt-auto h-8 text-[12px]">
-						Open project
-					</Button>
-				</div>
+		<div
+			className={cn(
+				"flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[12px]",
+				lit ? "border-foreground/30 bg-background text-foreground" : "border-border/50 bg-background/60 text-foreground/90",
+			)}
+		>
+			<FolderOpen className="size-3.5 text-muted-foreground" aria-hidden />
+			<span className="truncate">{name}</span>
+		</div>
+	);
+}
 
-				<div className="flex min-h-0 flex-col gap-3 rounded-2xl border border-border/60 bg-background/85 p-4">
-					<div className="flex items-center justify-between">
-						<div>
-							<p className="text-[12px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-								Workbench
-							</p>
-							<p className="text-[14px] font-medium text-foreground">
-								{state.title}
-							</p>
-							<p className="mt-1 max-w-md text-[12px] leading-5 text-muted-foreground">
-								{state.subtitle}
-							</p>
-						</div>
-						<Badge variant="outline">{state.composerMode}</Badge>
-					</div>
+function TaskRow({
+	name,
+	status,
+	lit,
+	tone,
+}: {
+	name: string;
+	status: string;
+	lit?: boolean;
+	tone: "running" | "waiting";
+}) {
+	return (
+		<div
+			className={cn(
+				"flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[11px]",
+				lit ? "border-foreground/30 bg-background text-foreground" : "border-transparent text-foreground/80",
+			)}
+		>
+			<span className="truncate font-mono">{name}</span>
+			<span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+				<span
+					className={cn(
+						"size-1.5 rounded-full",
+						tone === "running" ? "bg-emerald-500" : "bg-amber-500",
+					)}
+				/>
+				{status}
+			</span>
+		</div>
+	);
+}
 
-					<div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
-						<div className="rounded-2xl border border-border/60 bg-sidebar/70 p-3">
-							<div className="flex items-center justify-between">
-								<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-									Composer
-								</p>
-								<div className="flex gap-1.5">
-									{["Quick", "Plan", "SDD"].map((item) => (
-										<Badge
-											key={item}
-											variant="outline"
-											className="h-6 px-2 text-[10px] font-normal"
-										>
-											{item}
-										</Badge>
-									))}
-								</div>
-							</div>
-							<div className="mt-3 rounded-xl border border-border/60 bg-background/85 p-3">
-								<p className="font-mono text-[12px] text-foreground">{state.composerPrompt}</p>
-							</div>
-							{state.slashOpen ? (
-								<div className="mt-3 rounded-xl border border-border/60 bg-background/88 p-2.5">
-									<div className="grid gap-1.5">
-										{[
-											"/spec",
-											"/clear",
-										].map((command) => (
-											<div
-												key={command}
-												className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/15 px-2.5 py-2 text-[11px]"
-											>
-												<span className="font-mono text-foreground">{command}</span>
-												<span className="text-muted-foreground">action</span>
-											</div>
-										))}
-									</div>
-								</div>
-							) : null}
-						</div>
+function Callout({ className, children }: { className?: string; children: React.ReactNode }) {
+	return (
+		<div
+			className={cn(
+				"flex items-center gap-2 rounded-lg border border-foreground/30 bg-foreground px-2.5 py-1.5 text-[12px] font-medium text-background shadow-[0_0_0_6px_color-mix(in_oklch,var(--foreground)_10%,transparent)]",
+				className,
+			)}
+		>
+			{children}
+		</div>
+	);
+}
 
-						<div className="space-y-3">
-							<div className="rounded-2xl border border-border/60 bg-sidebar/60 p-3">
-								<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-									Inspector
-								</p>
-								<div className="mt-2 grid gap-2">
-									{state.inspectorCards.map((item) => (
-										<div
-											key={item}
-											className="rounded-xl border border-border/60 bg-background/80 px-3 py-2 text-[12px] text-foreground"
-										>
-											{item}
-										</div>
-									))}
-								</div>
-							</div>
+function Bubble({ align, children }: { align: "start" | "end"; children: React.ReactNode }) {
+	return (
+		<div className={cn("flex", align === "end" ? "justify-end" : "justify-start")}>
+			<p
+				className={cn(
+					"max-w-[78%] rounded-2xl px-3 py-2 text-[12px] leading-5",
+					align === "end" ? "bg-foreground/90 text-background" : "bg-muted/40 text-foreground/90",
+				)}
+			>
+				{children}
+			</p>
+		</div>
+	);
+}
 
-							{state.showFlowRail ? (
-								<div className="rounded-2xl border border-border/60 bg-background/85 p-3">
-									<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-										Flow
-									</p>
-									<div className="mt-2 flex flex-wrap gap-1.5">
-										{["/spec", "Spec", "Plan", "Validate", "Continue"].map((item) => (
-											<Badge
-												key={item}
-												variant="outline"
-												className="h-6 px-2 text-[10px] font-normal"
-											>
-												{item}
-											</Badge>
-										))}
-									</div>
-								</div>
-							) : (
-								<div className="rounded-2xl border border-border/60 bg-background/85 p-3">
-									<p className="text-[12px] text-muted-foreground">
-										The composer and thread viewport stay in lockstep with the selected workspace.
-									</p>
-								</div>
-							)}
-						</div>
-					</div>
-				</div>
+function ActivityLine({ text }: { text: string }) {
+	return (
+		<div className="flex items-start gap-2 text-[11px] leading-5 text-foreground/85">
+			<span className="mt-2 size-1.5 shrink-0 rounded-full bg-emerald-500" />
+			<span>{text}</span>
+		</div>
+	);
+}
 
-				<div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-sidebar/80 p-3">
-					{state.inspectorCards.map((title) => (
-						<MockWindow key={title} title={title} />
-					))}
-				</div>
-			</div>
+function DiffRow({ path, added, removed }: { path: string; added: number; removed: number }) {
+	return (
+		<div className="flex items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/70 px-2.5 py-1.5 font-mono text-[11px]">
+			<span className="truncate text-foreground/90">{path}</span>
+			<span className="shrink-0">
+				<span className="text-emerald-600 dark:text-emerald-400">+{added}</span>{" "}
+				<span className="text-red-600 dark:text-red-400">-{removed}</span>
+			</span>
 		</div>
 	);
 }

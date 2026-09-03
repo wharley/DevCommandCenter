@@ -1,36 +1,30 @@
 import { describe, expect, it } from "vitest";
 import {
-	futureOnboardingSteps,
 	getNextOnboardingStep,
 	getPreviousOnboardingStep,
+	isLastOnboardingStep,
 	onboardingSteps,
 } from "./OnboardingWizard.logic";
 
 describe("OnboardingWizard.logic", () => {
-	it("keeps the onboarding flow ordered", () => {
-		expect(onboardingSteps).toEqual([
-			"intro",
-			"workflows",
-			"slashCommands",
-			"agents",
-			"repoImport",
-			"completeTransition",
-		]);
+	it("keeps the onboarding flow short and ordered", () => {
+		expect(onboardingSteps).toEqual(["project", "task", "workbench"]);
 	});
 
 	it("moves forward until the last step", () => {
-		expect(getNextOnboardingStep("agents")).toBe("repoImport");
-		expect(getNextOnboardingStep("workflows")).toBe("slashCommands");
-		expect(getNextOnboardingStep("completeTransition")).toBeNull();
+		expect(getNextOnboardingStep("project")).toBe("task");
+		expect(getNextOnboardingStep("task")).toBe("workbench");
+		expect(getNextOnboardingStep("workbench")).toBeNull();
 	});
 
 	it("moves backward until the first step", () => {
-		expect(getPreviousOnboardingStep("repoImport")).toBe("agents");
-		expect(getPreviousOnboardingStep("slashCommands")).toBe("workflows");
-		expect(getPreviousOnboardingStep("intro")).toBeNull();
+		expect(getPreviousOnboardingStep("workbench")).toBe("task");
+		expect(getPreviousOnboardingStep("task")).toBe("project");
+		expect(getPreviousOnboardingStep("project")).toBeNull();
 	});
 
-	it("keeps future steps reserved for later phases", () => {
-		expect(futureOnboardingSteps).toEqual(["corner", "skills", "conductor"]);
+	it("knows which step hands off to the Help panel", () => {
+		expect(isLastOnboardingStep("project")).toBe(false);
+		expect(isLastOnboardingStep("workbench")).toBe(true);
 	});
 });

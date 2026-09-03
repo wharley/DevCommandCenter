@@ -5654,6 +5654,7 @@ export default function App() {
 				open={isOnboardingOpen}
 				onOpenChange={setIsOnboardingOpen}
 				onComplete={handleCompleteOnboarding}
+				onOpenHelp={() => openHelp()}
 			/>
 			<Toaster theme={theme} position="bottom-right" visibleToasts={6} />
 		</>
