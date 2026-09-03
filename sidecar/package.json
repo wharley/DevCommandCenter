@@ -1,6 +1,6 @@
 {
   "name": "@dcc/claude-sidecar",
-	"version": "0.1.60",
+	"version": "0.1.61",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",

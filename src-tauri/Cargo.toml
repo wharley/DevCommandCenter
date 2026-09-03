@@ -1,6 +1,6 @@
 [package]
 name = "dev-command-center-tauri"
-version = "0.1.60"
+version = "0.1.61"
 edition = "2021"
 license.workspace = true
 default-run = "dev-command-center-tauri"
