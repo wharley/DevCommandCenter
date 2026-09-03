@@ -38,6 +38,7 @@ import { resolveHumanBrowserAddress } from "./browser-address";
 type WorkspaceBrowserSurfaceProps = {
 	workspaceId: string;
 	sessionId: string | null;
+	initialUrl?: string | null;
 	onClose: () => void;
 	onSendToAgent?: (context: BrowserAgentContext) => void;
 	/** Receives a drained console/resource capture started by an explicit gesture. */
@@ -131,6 +132,7 @@ export function newestFirstBrowserAuditRecords(records: BrowserAuditRecord[]): B
 export function WorkspaceBrowserSurface({
 	workspaceId,
 	sessionId,
+	initialUrl = null,
 	onClose,
 	onSendToAgent,
 	onSendEvidenceToAgent,
@@ -220,7 +222,14 @@ export function WorkspaceBrowserSurface({
 		// This surface only mounts after the user explicitly opens Browser from
 		// the workbench, so durable URL restoration remains opt-in rather than a
 		// side effect of app/workspace remounts.
-		void openBrowser({ workspaceId, sessionId, bounds, restoreLastUrl: true, initialOccluded: isBrowserOccluded(viewport) })
+		void openBrowser({
+			workspaceId,
+			sessionId,
+			initialUrl,
+			restoreLastUrl: initialUrl === null,
+			bounds,
+			initialOccluded: isBrowserOccluded(viewport),
+		})
 			.then((next) => {
 				if (cancelled) {
 					void hideBrowser({
@@ -244,7 +253,7 @@ export function WorkspaceBrowserSurface({
 		return () => {
 			cancelled = true;
 		};
-	}, [scheduleBoundsUpdate, sessionId, workspaceId]);
+	}, [initialUrl, scheduleBoundsUpdate, sessionId, workspaceId]);
 
 	useEffect(() => {
 		let unlisten: (() => void) | undefined;

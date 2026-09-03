@@ -2,6 +2,7 @@ import {
 	ChevronDown,
 	Eraser,
 	ExternalLink,
+	Globe2,
 	GripHorizontal,
 	Maximize2,
 	MoreHorizontal,
@@ -76,6 +77,7 @@ import {
 	resolveTerminalAgentContent,
 } from "./terminal-selection";
 import { openTerminalAtPath } from "@/lib/shell-api";
+import { formatDevServerAddress } from "./dev-server-detection";
 
 const HEIGHT_STORAGE_KEY = "dcc-workbench-terminal-dock-height-v1";
 const DEFAULT_HEIGHT_PX = 340;
@@ -146,6 +148,7 @@ export type WorkspaceTerminalDrawerProps = {
 	sessionState: string;
 	sessionId: string | null;
 	onSendToAgent?: (context: TerminalAgentContext) => void;
+	onOpenDetectedServer?: (url: string) => void;
 	className?: string;
 };
 
@@ -174,6 +177,7 @@ export function WorkspaceTerminalDrawer({
 	sessionState,
 	sessionId,
 	onSendToAgent,
+	onOpenDetectedServer,
 	className,
 }: WorkspaceTerminalDrawerProps) {
 	const { t } = useTranslation("common");
@@ -203,6 +207,13 @@ export function WorkspaceTerminalDrawer({
 				]),
 			),
 		[scopeKey, tabs, terminalStatusVersion],
+	);
+	const detectedDevServer = useMemo(
+		() =>
+			[...terminalSnapshots.values()]
+				.flatMap((terminal) => terminal?.detectedDevServers ?? [])
+				.sort((left, right) => right.detectedAt - left.detectedAt)[0] ?? null,
+		[terminalSnapshots],
 	);
 
 	useEffect(
@@ -632,6 +643,31 @@ export function WorkspaceTerminalDrawer({
 							</TooltipContent>
 						</Tooltip>
 					</div>
+					{detectedDevServer && onOpenDetectedServer ? (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									type="button"
+									size="sm"
+									variant="outline"
+									className="h-7 max-w-52 shrink-0 gap-1.5 px-2 text-xs"
+									onClick={() => onOpenDetectedServer(detectedDevServer.url)}
+								>
+									<Globe2 className="size-3.5 shrink-0" />
+									<span className="truncate">
+										{t("terminalDock.openDevServer", {
+											address: formatDevServerAddress(detectedDevServer.url),
+										})}
+									</span>
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="bottom">
+								{t("terminalDock.openDevServerHint", {
+									url: detectedDevServer.url,
+								})}
+							</TooltipContent>
+						</Tooltip>
+					) : null}
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
 							<Button

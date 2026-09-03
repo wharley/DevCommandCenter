@@ -318,6 +318,7 @@ export function SessionWorkbench({
 	const [terminalUiStates, setTerminalUiStates] =
 		useState<WorkspaceTerminalUiStates>({});
 	const [browserOpen, setBrowserOpen] = useState(false);
+	const [browserInitialUrl, setBrowserInitialUrl] = useState<string | null>(null);
 	const [browserSurfaceWidth, setBrowserSurfaceWidth] = useState(() =>
 		readBrowserSurfaceWidth(workspaceId),
 	);
@@ -355,6 +356,7 @@ export function SessionWorkbench({
 	const [followUpVersion, setFollowUpVersion] = useState(0);
 	useEffect(() => {
 		setBrowserOpen(false);
+		setBrowserInitialUrl(null);
 		setBrowserSurfaceWidth(readBrowserSurfaceWidth(workspaceId));
 		browserRestoreRef.current = null;
 	}, [workspaceId]);
@@ -750,11 +752,7 @@ export function SessionWorkbench({
 		}
 		requestAnimationFrame(() => dispatchWorkbenchCommand("composer.focus"));
 	}, [inspectorCollapsed, onInspectorCollapsedChange, sessionId, workspaceId]);
-	const handleOpenBrowser = useCallback(() => {
-		if (browserOpen) {
-			handleCloseBrowser();
-			return;
-		}
+	const openBrowserSurface = useCallback((initialUrl: string | null) => {
 		const previousInspectorCollapsed = effectiveInspectorCollapsedForBrowserOpen({
 			inspectorCollapsed,
 			inspectorBeforeTerminalExpand: inspectorBeforeTerminalExpandRef.current,
@@ -770,10 +768,9 @@ export function SessionWorkbench({
 			inspectorCollapsed: previousInspectorCollapsed,
 		};
 		if (previousInspectorCollapsed === false) onInspectorCollapsedChange?.(true);
+		setBrowserInitialUrl(initialUrl);
 		setBrowserOpen(true);
 	}, [
-		browserOpen,
-		handleCloseBrowser,
 		handleTerminalOpenChange,
 		inspectorCollapsed,
 		onInspectorCollapsedChange,
@@ -781,6 +778,17 @@ export function SessionWorkbench({
 		terminalOpen,
 		workspaceId,
 	]);
+	const handleOpenBrowser = useCallback(() => {
+		if (browserOpen) {
+			handleCloseBrowser();
+			return;
+		}
+		openBrowserSurface(null);
+	}, [browserOpen, handleCloseBrowser, openBrowserSurface]);
+	const handleOpenDetectedServer = useCallback(
+		(url: string) => openBrowserSurface(url),
+		[openBrowserSurface],
+	);
 	useEffect(() => {
 		const restore = browserRestoreRef.current;
 		if (restore && (restore.workspaceId !== workspaceId || restore.sessionId !== sessionId)) {
@@ -1218,6 +1226,7 @@ export function SessionWorkbench({
 						<WorkspaceBrowserSurface
 							workspaceId={workspaceId}
 							sessionId={sessionId}
+							initialUrl={browserInitialUrl}
 							onClose={handleCloseBrowser}
 							onSendToAgent={handleSendBrowserToAgent}
 							onSendEvidenceToAgent={handleSendBrowserEvidenceToAgent}
@@ -1252,6 +1261,7 @@ export function SessionWorkbench({
 					sessionState={sessionState}
 					sessionId={sessionId}
 					onSendToAgent={handleSendTerminalToAgent}
+					onOpenDetectedServer={handleOpenDetectedServer}
 				/>
 			) : null}
 

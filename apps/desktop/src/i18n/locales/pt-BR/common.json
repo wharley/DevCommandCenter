@@ -1622,6 +1622,8 @@
     "interrupt": "Interromper comando",
     "restart": "Reiniciar shell",
     "openExternal": "Abrir no Terminal do sistema",
+    "openDevServer": "Abrir {{address}}",
+    "openDevServerHint": "Servidor local detectado no terminal: {{url}}",
     "closeRunningTitle": "Há um processo em execução",
     "closeRunningDescription": "{{process}} continua ativo neste terminal. Você pode ocultar o Dock sem interrompê-lo ou encerrar o processo e fechar a aba.",
     "hideInstead": "Apenas ocultar",

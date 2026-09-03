@@ -10,6 +10,7 @@ import {
 	writeTerminalStdin,
 	type TerminalRuntimeActivityStatus,
 } from "@/lib/terminal-api";
+import { scanDevServerOutput } from "./dev-server-detection";
 
 export type TerminalStatus = "idle" | "starting" | "running" | "exited" | "error";
 
@@ -35,6 +36,12 @@ export type TerminalSnapshot = {
 	chunks: string[];
 	bufferedBytes: number;
 	truncated: boolean;
+	detectedDevServers: DetectedDevServer[];
+};
+
+export type DetectedDevServer = {
+	url: string;
+	detectedAt: number;
 };
 
 export type TerminalListener = {
@@ -53,6 +60,7 @@ type TerminalEntry = TerminalSnapshot & {
 	disposed: boolean;
 	lastResizeCols: number | null;
 	lastResizeRows: number | null;
+	devServerDetectionTail: string;
 };
 
 const entries = new Map<string, TerminalEntry>();
@@ -63,6 +71,7 @@ let bridgeScope: string | null = null;
 let bridgeCleanup: (() => void) | null = null;
 let activityPollTimer: ReturnType<typeof setInterval> | null = null;
 let activityPollInFlight = false;
+let latestDevServerDetectionAt = 0;
 
 function terminalEntryKey(terminalId: string) {
 	return `${getTerminalBackendScope()}:${terminalId}`;
@@ -88,11 +97,13 @@ function getOrCreateEntry(terminalId: string): TerminalEntry {
 		chunks: [],
 		bufferedBytes: 0,
 		truncated: false,
+		detectedDevServers: [],
 		listeners: new Set(),
 		spawnPromise: null,
 		disposed: false,
 		lastResizeCols: null,
 		lastResizeRows: null,
+		devServerDetectionTail: "",
 	};
 	entries.set(entryKey, created);
 	return created;
@@ -112,6 +123,7 @@ function snapshot(entry: TerminalEntry): TerminalSnapshot {
 		chunks: [...entry.chunks],
 		bufferedBytes: entry.bufferedBytes,
 		truncated: entry.truncated,
+		detectedDevServers: entry.detectedDevServers.map((server) => ({ ...server })),
 	};
 }
 
@@ -132,7 +144,24 @@ function applyPendingResize(entry: TerminalEntry) {
 	void resizeTerminalApi(entry.ptyId, entry.lastResizeCols, entry.lastResizeRows);
 }
 
+function detectDevServersInChunk(entry: TerminalEntry, data: string): boolean {
+	const detection = scanDevServerOutput(entry.devServerDetectionTail, data);
+	entry.devServerDetectionTail = detection.tail;
+	for (const url of detection.urls) {
+		latestDevServerDetectionAt = Math.max(
+			Date.now(),
+			latestDevServerDetectionAt + 1,
+		);
+		entry.detectedDevServers = [
+			{ url, detectedAt: latestDevServerDetectionAt },
+			...entry.detectedDevServers.filter((server) => server.url !== url),
+		].slice(0, 5);
+	}
+	return detection.urls.length > 0;
+}
+
 function appendChunk(entry: TerminalEntry, data: string) {
+	const detectedServerChanged = detectDevServersInChunk(entry, data);
 	entry.chunks.push(data);
 	entry.bufferedBytes += data.length;
 	while (entry.bufferedBytes > MAX_CHUNK_BYTES && entry.chunks.length > 1) {
@@ -147,6 +176,7 @@ function appendChunk(entry: TerminalEntry, data: string) {
 	for (const listener of entry.listeners) {
 		listener.onChunk(data);
 	}
+	if (detectedServerChanged) notifyStoreListeners();
 }
 
 function notifyStoreListeners() {
@@ -353,6 +383,11 @@ export async function ensureTerminal(
 					0,
 				);
 				entry.truncated = result.truncated;
+				entry.detectedDevServers = [];
+				entry.devServerDetectionTail = "";
+				for (const chunk of result.chunks) {
+					detectDevServersInChunk(entry, chunk);
+				}
 			} else if (!result.existing) {
 				appendChunk(
 					entry,
@@ -449,6 +484,8 @@ export function clearTerminal(terminalId: string) {
 	entry.chunks = [];
 	entry.bufferedBytes = 0;
 	entry.truncated = false;
+	entry.detectedDevServers = [];
+	entry.devServerDetectionTail = "";
 	entry.listeners.forEach((listener) => {
 		listener.onChunk("\x1b[2J\x1b[H");
 	});
@@ -456,6 +493,7 @@ export function clearTerminal(terminalId: string) {
 	if (entry.ptyId) {
 		void writeTerminalStdin(entry.ptyId, "\x0c");
 	}
+	notifyStoreListeners();
 }
 
 export function writeTerminalInput(terminalId: string, data: string) {
@@ -568,6 +606,8 @@ export async function restartTerminal(
 	entry.chunks = [];
 	entry.bufferedBytes = 0;
 	entry.truncated = false;
+	entry.detectedDevServers = [];
+	entry.devServerDetectionTail = "";
 	notifyStatus(entry);
 	return ensureTerminal(terminalId, cwd, context);
 }

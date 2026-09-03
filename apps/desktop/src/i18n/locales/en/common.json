@@ -1622,6 +1622,8 @@
     "interrupt": "Interrupt command",
     "restart": "Restart shell",
     "openExternal": "Open in system terminal",
+    "openDevServer": "Open {{address}}",
+    "openDevServerHint": "Local server detected in terminal: {{url}}",
     "closeRunningTitle": "A process is still running",
     "closeRunningDescription": "{{process}} is still active in this terminal. You can hide the Dock without interrupting it, or stop the process and close the tab.",
     "hideInstead": "Just hide",

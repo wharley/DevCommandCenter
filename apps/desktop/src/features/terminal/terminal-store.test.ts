@@ -24,9 +24,14 @@ vi.mock("@/lib/terminal-api", () => ({
 	writeTerminalStdin: terminalApi.writeTerminalStdin,
 }));
 
+let emitTerminalOutput:
+	| ((event: { ptyId: string; data: string }) => void)
+	| undefined;
+
 describe("terminal sizing during PTY startup", () => {
 	beforeEach(() => {
 		vi.resetModules();
+		emitTerminalOutput = undefined;
 		terminalApi.getDefaultShell.mockReset().mockResolvedValue({ shell: "/bin/zsh" });
 		terminalApi.getOrCreateTerminalByOwner.mockReset().mockResolvedValue({
 			ptyId: "pty-1",
@@ -36,7 +41,12 @@ describe("terminal sizing during PTY startup", () => {
 			truncated: false,
 		});
 		terminalApi.listenTerminalExit.mockReset().mockResolvedValue(() => {});
-		terminalApi.listenTerminalOutput.mockReset().mockResolvedValue(() => {});
+		terminalApi.listenTerminalOutput.mockReset().mockImplementation(
+			async (listener: (event: { ptyId: string; data: string }) => void) => {
+				emitTerminalOutput = listener;
+				return () => {};
+			},
+		);
 		terminalApi.listTerminalRuntimeActivity.mockReset().mockResolvedValue([]);
 		terminalApi.resizeTerminal.mockReset();
 		terminalApi.killTerminal.mockResolvedValue({ ok: true });
@@ -68,11 +78,11 @@ describe("terminal sizing during PTY startup", () => {
 			session: { status: "running", lastExitCode: null },
 			chunks: [
 				"\x1b[32mready\x1b[0m\r\n",
-				"\x1b[31mfailed test\x1b[0m\r\n",
+				"\x1b[31mfailed test\x1b[0m\r\nLocal: http://localhost:4173/\r\n",
 			],
 			truncated: false,
 		});
-		const { ensureTerminal, getTerminalContextExcerpt } = await import(
+		const { ensureTerminal, getTerminalContextExcerpt, getTerminalSnapshot } = await import(
 			"./terminal-store"
 		);
 
@@ -86,8 +96,48 @@ describe("terminal sizing during PTY startup", () => {
 		});
 
 		expect(getTerminalContextExcerpt("terminal-backlog")).toBe(
-			"ready\nfailed test",
+			"ready\nfailed test\nLocal: http://localhost:4173/",
 		);
+		expect(getTerminalSnapshot("terminal-backlog")?.detectedDevServers).toEqual([
+			expect.objectContaining({ url: "http://localhost:4173/" }),
+		]);
+	});
+
+	it("publishes newly detected server URLs and removes them when output is cleared", async () => {
+		const {
+			clearTerminal,
+			ensureTerminal,
+			getTerminalSnapshot,
+			subscribeTerminalStore,
+		} = await import("./terminal-store");
+		await ensureTerminal("terminal-server", "/workspace", {
+			title: "Dev server",
+			workspaceName: "Workspace",
+			workspaceBranch: "main",
+			providerLabel: null,
+			sessionState: "idle",
+			sessionId: null,
+		});
+		const storeListener = vi.fn();
+		const unsubscribe = subscribeTerminalStore(storeListener);
+
+		emitTerminalOutput?.({
+			ptyId: "pty-1",
+			data: "➜ Local: http://local",
+		});
+		expect(getTerminalSnapshot("terminal-server")?.detectedDevServers).toEqual([]);
+		expect(storeListener).not.toHaveBeenCalled();
+
+		emitTerminalOutput?.({ ptyId: "pty-1", data: "host:5173/\r\n" });
+		expect(getTerminalSnapshot("terminal-server")?.detectedDevServers).toEqual([
+			expect.objectContaining({ url: "http://localhost:5173/" }),
+		]);
+		expect(storeListener).toHaveBeenCalledTimes(1);
+
+		clearTerminal("terminal-server");
+		expect(getTerminalSnapshot("terminal-server")?.detectedDevServers).toEqual([]);
+		expect(storeListener).toHaveBeenCalledTimes(2);
+		unsubscribe();
 	});
 
 	it("terminates only terminals owned by the completed workspace", async () => {
