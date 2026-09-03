@@ -2297,8 +2297,8 @@
         "keywords": "spec mission sdd goal scope criteria acceptance plan validate compile context"
       },
       "objective": {
-        "label": "Objective and evidence",
-        "summary": "Keep the agent focused and record what you saw.",
+        "label": "Task objective",
+        "summary": "Keep the agent focused on the outcome until the task is done.",
         "whatIs": "The [Task objective] holds the intent and what done means, with turn and failure limits so the agent pauses on its own. Evidence is snippets from the terminal, diff or screen you attach to the composer, grouped by stage: [Observe], [Reproduce], [Investigate], [Fix] and [Verify].",
         "whenToUse": "In long sessions or bug hunts, when the agent tends to drift and you want a record of what has already been proven.",
         "steps": [

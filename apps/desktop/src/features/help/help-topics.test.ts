@@ -56,6 +56,12 @@ describe("help topics", () => {
 		}
 	});
 
+	it("keeps the task objective next to plan mode", () => {
+		expect(HELP_TOPIC_IDS.indexOf("objective")).toBe(
+			HELP_TOPIC_IDS.indexOf("plan") + 1,
+		);
+	});
+
 	it("recognises topic ids and rejects strangers", () => {
 		expect(isHelpTopicId("delegate")).toBe(true);
 		expect(isHelpTopicId("settings")).toBe(false);

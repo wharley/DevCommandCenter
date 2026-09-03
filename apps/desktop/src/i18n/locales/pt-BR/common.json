@@ -2297,8 +2297,8 @@
         "keywords": "spec missão mission sdd objetivo escopo critérios aceite plano validar compilar contexto"
       },
       "objective": {
-        "label": "Objetivo e evidências",
-        "summary": "Mantenha o agente focado e registre o que você viu.",
+        "label": "Objetivo da tarefa",
+        "summary": "Mantenha o agente focado no resultado até a tarefa terminar.",
         "whatIs": "O [Objetivo da tarefa] guarda a intenção e o que significa pronto, com limites de turnos e falhas para o agente pausar sozinho. As evidências são trechos de terminal, diff ou tela que você anexa ao composer, organizados por etapa: [Observar], [Reproduzir], [Investigar], [Corrigir] e [Verificar].",
         "whenToUse": "Em sessões longas ou investigações de bug, quando o agente tende a derivar e você quer um registro do que já foi comprovado.",
         "steps": [
