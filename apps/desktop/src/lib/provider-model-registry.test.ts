@@ -88,14 +88,18 @@ describe("provider-model-registry", () => {
 		);
 	});
 
-	it("registers Grok 4.5 and resolves its aliases", () => {
-		expect(getDefaultModelId("grok")).toBe("grok-4.5");
-		expect(resolveModelAlias("grok", "grok")).toBe("grok-4.5");
-		expect(resolveModelAlias("grok", "4.5")).toBe("grok-4.5");
+	it("registers Grok 4.6 through the stable Grok Build model ID", () => {
+		expect(getDefaultModelId("grok")).toBe("grok-build");
+		expect(resolveModelAlias("grok", "grok")).toBe("grok-build");
+		expect(resolveModelAlias("grok", "4.6")).toBe("grok-build");
+		expect(resolveModelAlias("grok", "grok-4.6")).toBe("grok-build");
+		expect(resolveModelAlias("grok", "4.5")).toBe("grok-build");
+		expect(resolveModelAlias("grok", "grok-4.5")).toBe("grok-build");
 		const provider = FALLBACK_PROVIDER_CATALOG.providers.find(
 			(candidate) => candidate.id === "grok",
 		);
-		expect(provider?.models[0]?.id).toBe("grok-4.5");
+		expect(provider?.models[0]?.id).toBe("grok-build");
+		expect(provider?.models[0]?.label).toBe("Grok 4.6");
 		expect(provider?.stable).toBe(true);
 	});
 

@@ -498,6 +498,7 @@ mod tests {
                 provider_id: "codex".to_string(),
                 model: Some("gpt-5-codex".to_string()),
                 provider_runtime: Some(ProviderRuntimeConfig {
+                    binary_path: None,
                     home_path: Some("/tmp/codex-home".to_string()),
                     shadow_home_path: None,
                     max_concurrent_subagents: None,
@@ -536,6 +537,7 @@ mod tests {
                 provider_id: Some("gemini".to_string()),
                 model: Some("gemini-2.5-pro".to_string()),
                 provider_runtime: Some(ProviderRuntimeConfig {
+                    binary_path: None,
                     home_path: Some("/tmp/gemini-home".to_string()),
                     shadow_home_path: None,
                     max_concurrent_subagents: None,

@@ -44,7 +44,7 @@ const PROVIDERS: ProviderChoice[] = [
 	{
 		id: "grok",
 		label: "Grok Build",
-		description: "SpaceXAI — Grok 4.5",
+		description: "SpaceXAI — Grok 4.6",
 	},
 ];
 

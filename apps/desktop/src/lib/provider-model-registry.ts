@@ -178,10 +178,10 @@ export const PROVIDER_MODEL_REGISTRY = {
 
 	grok: [
 		{
-			id: "grok-4.5",
-			label: "Grok 4.5",
+			id: "grok-build",
+			label: "Grok 4.6",
 			description:
-				"Grok Build coding and agentic model through the local ACP CLI.",
+				"Current Grok Build coding and agentic model through the local ACP CLI.",
 			recommended: true,
 			effortLevels: ["low", "medium", "high"],
 		},
@@ -265,9 +265,14 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 		"gemini-3-flash-preview": "gemini-3-flash-preview",
 	},
 	grok: {
-		grok: "grok-4.5",
-		"4.5": "grok-4.5",
-		"grok-4-5": "grok-4.5",
+		grok: "grok-build",
+		"4.6": "grok-build",
+		"grok-4.6": "grok-build",
+		"grok-4-6": "grok-build",
+		"grok-build-latest": "grok-build",
+		"4.5": "grok-build",
+		"grok-4.5": "grok-build",
+		"grok-4-5": "grok-build",
 	},
 };
 

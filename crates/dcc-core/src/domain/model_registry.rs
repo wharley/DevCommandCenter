@@ -121,9 +121,14 @@ pub const DROID_ALIASES: &[(&str, &str)] = &[
 ];
 
 pub const GROK_ALIASES: &[(&str, &str)] = &[
-    ("grok", "grok-4.5"),
-    ("4.5", "grok-4.5"),
-    ("grok-4-5", "grok-4.5"),
+    ("grok", "grok-build"),
+    ("4.6", "grok-build"),
+    ("grok-4.6", "grok-build"),
+    ("grok-4-6", "grok-build"),
+    ("grok-build-latest", "grok-build"),
+    ("4.5", "grok-build"),
+    ("grok-4.5", "grok-build"),
+    ("grok-4-5", "grok-build"),
 ];
 
 /// Resolves a model alias or legacy ID to its canonical form for the given provider.
@@ -284,9 +289,9 @@ pub const DROID: &[ModelEntry] = &[
 ];
 
 pub const GROK: &[ModelEntry] = &[ModelEntry {
-    id: "grok-4.5",
-    label: "Grok 4.5",
-    description: "Grok Build coding and agentic model through the local ACP CLI.",
+    id: "grok-build",
+    label: "Grok 4.6",
+    description: "Current Grok Build coding and agentic model through the local ACP CLI.",
     recommended: true,
     effort_levels: &["low", "medium", "high"],
 }];
@@ -323,10 +328,11 @@ mod tests {
     }
 
     #[test]
-    fn grok_aliases_resolve_to_grok_45() {
-        assert_eq!(resolve_alias("grok", "grok"), "grok-4.5");
-        assert_eq!(resolve_alias("grok", "4.5"), "grok-4.5");
-        assert!(GROK.iter().any(|model| model.id == "grok-4.5"));
+    fn grok_aliases_resolve_to_the_current_grok_build_model() {
+        for alias in ["grok", "4.6", "grok-4.6", "4.5", "grok-4.5"] {
+            assert_eq!(resolve_alias("grok", alias), "grok-build");
+        }
+        assert!(GROK.iter().any(|model| model.id == "grok-build"));
     }
 
     #[test]
