@@ -1,4 +1,4 @@
-import { FolderOpen, Link2 } from "lucide-react";
+import { CircleQuestionMark, FolderOpen, Link2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ type WorkspaceBootstrapStateProps = {
 	selectedModelLabel: string | null;
 	onCreateWorkspace: () => void;
 	onCloneWorkspace: () => void;
+	onOpenHelp?: () => void;
 };
 
 export function WorkspaceBootstrapState({
@@ -15,6 +16,7 @@ export function WorkspaceBootstrapState({
 	selectedModelLabel,
 	onCreateWorkspace,
 	onCloneWorkspace,
+	onOpenHelp,
 }: WorkspaceBootstrapStateProps) {
 	const { t } = useTranslation("common");
 	return (
@@ -49,6 +51,18 @@ export function WorkspaceBootstrapState({
 						{t("bootstrap.cloneFromUrl")}
 					</Button>
 				</div>
+				{onOpenHelp ? (
+					<Button
+						type="button"
+						size="sm"
+						variant="ghost"
+						className="mt-2 gap-1.5 text-muted-foreground hover:text-foreground"
+						onClick={onOpenHelp}
+					>
+						<CircleQuestionMark className="size-3.5" strokeWidth={2} aria-hidden />
+						{t("bootstrap.howItWorks")}
+					</Button>
+				) : null}
 				{selectedProviderLabel ? (
 					<p className="mt-4 text-[12px] text-muted-foreground">
 						{t("bootstrap.currentProvider", {

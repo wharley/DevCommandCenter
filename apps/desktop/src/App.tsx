@@ -75,6 +75,7 @@ import { resolveActiveSkillsCheckout } from "./features/skills/skills-path";
 import { compileSkills, detectSkillContext } from "./lib/skills-api";
 import { OnboardingWizard } from "./features/onboarding";
 import { ShortcutCheatsheetDialog } from "./features/shortcuts";
+import { HelpDialog, type HelpTopicId } from "./features/help";
 import {
 	isOpenPreferredEditorShortcut,
 	isCommandPaletteShortcut,
@@ -1035,6 +1036,12 @@ export default function App() {
 		});
 	});
 	const [isShortcutSheetOpen, setIsShortcutSheetOpen] = useState(false);
+	const [helpTopic, setHelpTopic] = useState<HelpTopicId | null>(null);
+	const [isHelpOpen, setIsHelpOpen] = useState(false);
+	const openHelp = useCallback((topic?: HelpTopicId) => {
+		setHelpTopic(topic ?? null);
+		setIsHelpOpen(true);
+	}, []);
 	const providersQuery = useQuery({
 		queryKey: ["providers", "catalog"],
 		queryFn: listProviders,
@@ -5056,6 +5063,7 @@ export default function App() {
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onOpenSkills={() => setIsSkillsOpen(true)}
 							onOpenUsage={() => setIsUsageOpen(true)}
+							onOpenHelp={() => openHelp()}
 							onOpenPullRequests={() => setGlobalSurface("pullRequests")}
 							pullRequestsActive={globalSurface === "pullRequests"}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
@@ -5139,6 +5147,7 @@ export default function App() {
 								onOpenSettings={() => setIsSettingsOpen(true)}
 								onOpenOnboarding={() => setIsOnboardingOpen(true)}
 								onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
+								onOpenHelp={openHelp}
 								onOpenSkills={() => setIsSkillsOpen(true)}
 								onOpenUsage={() => setIsUsageOpen(true)}
 								workspaceRoot={selectedWorkspacePath}
@@ -5368,6 +5377,7 @@ export default function App() {
 									selectedModelLabel={selectedModel?.label ?? null}
 									onCreateWorkspace={() => openWorkspaceDialog("open")}
 									onCloneWorkspace={() => openWorkspaceDialog("clone")}
+									onOpenHelp={() => openHelp("workspaces")}
 								/>
 							)}
 						</div>
@@ -5633,6 +5643,13 @@ export default function App() {
 			<ShortcutCheatsheetDialog
 				open={isShortcutSheetOpen}
 				onOpenChange={setIsShortcutSheetOpen}
+			/>
+			<HelpDialog
+				open={isHelpOpen}
+				onOpenChange={setIsHelpOpen}
+				initialTopic={helpTopic}
+				onOpenOnboarding={() => setIsOnboardingOpen(true)}
+				onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 			/>
 			<OnboardingWizard
 				open={isOnboardingOpen}

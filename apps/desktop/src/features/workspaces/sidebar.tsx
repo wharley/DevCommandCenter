@@ -2,6 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	BarChart3,
 	CircleCheckBig,
+	CircleQuestionMark,
 	ChevronRight,
 	Clock3,
 	FolderPlus,
@@ -263,6 +264,7 @@ type WorkspacesSidebarProps = {
 	onOpenSettings: () => void;
 	onOpenSkills: () => void;
 	onOpenUsage: () => void;
+	onOpenHelp: () => void;
 	onOpenPullRequests: () => void;
 	pullRequestsActive?: boolean;
 	onToggleCollapsed: () => void;
@@ -323,6 +325,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onOpenSettings,
 	onOpenSkills,
 	onOpenUsage,
+	onOpenHelp,
 	onOpenPullRequests,
 	pullRequestsActive = false,
 	onToggleCollapsed,
@@ -1252,6 +1255,21 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						</TooltipTrigger>
 						<TooltipContent side="right">{t("sidebar.openSettings")}</TooltipContent>
 					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								className="text-muted-foreground hover:text-foreground"
+								aria-label={t("sidebar.openHelp")}
+								onClick={onOpenHelp}
+							>
+								<CircleQuestionMark className="size-4" strokeWidth={1.85} aria-hidden />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="right">{t("sidebar.openHelp")}</TooltipContent>
+					</Tooltip>
 					{onInstallUpdate ? (
 						<AppUpdateButton
 							update={appUpdate}
@@ -1608,6 +1626,21 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="top">{t("sidebar.openSettings")}</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="text-muted-foreground hover:text-foreground"
+								aria-label={t("sidebar.openHelp")}
+								onClick={onOpenHelp}
+							>
+								<CircleQuestionMark className="size-4" strokeWidth={1.85} aria-hidden />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="top">{t("sidebar.openHelp")}</TooltipContent>
 					</Tooltip>
 					{onInstallUpdate ? (
 						<AppUpdateButton

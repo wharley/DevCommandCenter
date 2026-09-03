@@ -22,6 +22,7 @@ import {
 	getPrimaryShortcutModifier,
 	getToggleTerminalShortcutKeys,
 } from "@/features/shortcuts/shortcut-utils";
+import { HELP_TOPIC_IDS, matchesHelpTopic, type HelpTopicId } from "@/features/help/help-topics";
 import { sessionSearchQueryOptions } from "@/features/sessions/session-search-query";
 import { listGitTrackedFiles } from "@/lib/workspace-api";
 import type { WorkspaceSummary } from "./types";
@@ -49,6 +50,7 @@ type WorkspaceCommandPaletteProps = {
 	onOpenSettings: () => void;
 	onOpenOnboarding: () => void;
 	onOpenShortcuts: () => void;
+	onOpenHelp: (topic?: HelpTopicId) => void;
 	onOpenSkills: () => void;
 	onOpenUsage: () => void;
 	workspaceRoot: string | null;
@@ -73,6 +75,7 @@ export function WorkspaceCommandPalette({
 	onOpenSettings,
 	onOpenOnboarding,
 	onOpenShortcuts,
+	onOpenHelp,
 	onOpenSkills,
 	onOpenUsage,
 	workspaceRoot,
@@ -182,11 +185,13 @@ export function WorkspaceCommandPalette({
 			{ id: "usage", label: t("commandPalette.openUsage"), keywords: t("commandPalette.keywords.usage"), onSelect: onOpenUsage },
 			{ id: "onboarding", label: t("commandPalette.openOnboarding"), keywords: t("commandPalette.keywords.onboarding"), onSelect: onOpenOnboarding },
 			{ id: "shortcuts", label: t("commandPalette.keyboardShortcuts"), keywords: t("commandPalette.keywords.shortcuts"), onSelect: onOpenShortcuts },
+			{ id: "help", label: t("commandPalette.openHelp"), keywords: t("commandPalette.keywords.help"), onSelect: () => onOpenHelp() },
 		],
 		[
 			onCloneWorkspace,
 			onCreateWorkspace,
 			onDelegate,
+			onOpenHelp,
 			onOpenOnboarding,
 			onOpenSettings,
 			onOpenShortcuts,
@@ -198,9 +203,29 @@ export function WorkspaceCommandPalette({
 			workbenchCommands,
 		],
 	);
+	// Help topics only surface while typing, so the empty palette stays short.
+	const helpTopicActions = useMemo<Array<PaletteAction & { id: string; shortcut?: string; onSelect: () => void }>>(() => {
+		if (deferredQuery.trim().length === 0) return [];
+		return HELP_TOPIC_IDS.flatMap((topic) => {
+			const label = t(`help.topics.${topic}.label`);
+			const keywords = `${t(`help.topics.${topic}.summary`)} ${t(`help.topics.${topic}.keywords`, { defaultValue: "" })}`;
+			if (!matchesHelpTopic(`${label} ${keywords}`, deferredQuery)) return [];
+			return [
+				{
+					id: `help:${topic}`,
+					label: t("commandPalette.helpTopic", { topic: label }),
+					keywords,
+					onSelect: () => onOpenHelp(topic),
+				},
+			];
+		});
+	}, [deferredQuery, onOpenHelp, t]);
 	const visibleActions = useMemo(
-		() => actions.filter((action) => matchesPaletteAction(action, deferredQuery)),
-		[actions, deferredQuery],
+		() => [
+			...actions.filter((action) => matchesPaletteAction(action, deferredQuery)),
+			...helpTopicActions,
+		],
+		[actions, deferredQuery, helpTopicActions],
 	);
 
 	return (

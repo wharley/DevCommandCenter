@@ -81,6 +81,7 @@
     "cloneFromUrl": "Clone from URL",
     "openProject": "Open project",
     "openSettings": "Open settings",
+    "openHelp": "Help",
     "manageSkills": "Manage skills",
     "openUsage": "Open DCC Usage",
     "openProjectMenu": "Open project menu",
@@ -224,6 +225,8 @@
     "rebuildContracts": "Rebuild contracts",
     "stub": "Stub",
     "openOnboarding": "Open onboarding",
+    "openHelp": "Open help",
+    "helpTopic": "Help: {{topic}}",
     "keyboardShortcuts": "Keyboard shortcuts",
 	"keywords": {
 		"delegate": "delegate delegation agent",
@@ -234,6 +237,7 @@
 		"usage": "usage analytics provider arena tokens models",
 		"onboarding": "onboarding welcome",
 		"shortcuts": "keyboard shortcuts hotkeys",
+		"help": "help documentation guide how it works question",
 		"focusComposer": "composer prompt focus",
 		"execution": "composer execution effort fast ultrathink",
 		"plan": "composer plan mode",
@@ -520,6 +524,7 @@
     "openProject": "Open project",
     "cloneFromUrl": "Clone from URL",
     "commandPalette": "Command palette",
+    "howItWorks": "How it works",
     "currentProvider": "Current provider: {{provider}}{{model}}"
   },
   "remoteMode": {
@@ -2052,6 +2057,212 @@
     "steerSession": "Steer session",
     "abortSession": "Abort session",
     "openPreferredEditor": "Open preferred editor"
+  },
+  "help": {
+    "title": "Help",
+    "description": "A quick guide to each part of DCC, with examples.",
+    "searchPlaceholder": "Search topics…",
+    "empty": "No topic matches that term.",
+    "emptyHint": "Try another word, like \"terminal\", \"delegate\" or \"commit\".",
+    "sections": {
+      "whatIs": "What it is",
+      "whenToUse": "When to use it",
+      "steps": "How to do it",
+      "prompt": "Example prompt",
+      "shortcut": "Shortcut"
+    },
+    "actions": {
+      "openOnboarding": "Replay the welcome tour",
+      "openShortcuts": "Keyboard shortcuts"
+    },
+    "topics": {
+      "workspaces": {
+        "label": "Projects and tasks",
+        "summary": "Every task starts in an isolated worktree.",
+        "whatIs": "A project is a local Git repository DCC keeps track of. Each task you open in it becomes a workspace with its own worktree: a real folder on disk, on its own branch, without touching the original checkout.",
+        "whenToUse": "Whenever you start something new: a feature, a hotfix, a PR review. Opening a task takes seconds and whatever you were doing keeps running where it is.",
+        "steps": [
+          "Click [Open project] in the sidebar and pick the repository folder.",
+          "Click [New task] next to the project and describe what you are about to do. DCC creates the worktree and the branch.",
+          "Work in the chat, the terminal and the Inspector. Everything points at that task's folder.",
+          "When you are done, use [Complete workspace] in the task menu. The worktree moves to [Completed] and can be cleaned up later."
+        ],
+        "tip": "Urgent bug in the middle of a feature? Open another task in the same project. No git stash.",
+        "keywords": "project workspace worktree branch task git stash isolated open clone"
+      },
+      "composer": {
+        "label": "Composer",
+        "summary": "Ask for changes, mention files with @ and use /commands.",
+        "whatIs": "The composer is the text box at the bottom of the chat. It is how you talk to the task's agent. It knows the workspace folder, so you can point at files with @ and trigger local commands with /.",
+        "whenToUse": "To ask for a change, ask a question about the code, or tell the agent to keep going after you reviewed.",
+        "steps": [
+          "Type the request. Be specific about the outcome and about what must not change.",
+          "Type @ and start a file name to attach it as context.",
+          "Type / to see local commands, such as [/spec] and [/clear].",
+          "Use [Attach file or image] to send a screenshot or a log.",
+          "Send. While the agent works, the Inspector shows what it is doing."
+        ],
+        "prompt": "Fix the login error in @src/auth/session.ts. Keep the public signature, add a test for the failing case and tell me what changed before touching other files.",
+        "tip": "The [Execution] menu next to the composer switches model, effort and response style without leaving the task.",
+        "keywords": "composer prompt chat message file @ / command attach execution model effort"
+      },
+      "plan": {
+        "label": "Plan mode",
+        "summary": "Agree on the path before changing code.",
+        "whatIs": "With [Plan] on, the agent edits nothing. It investigates the code and returns a plan with steps, likely files and risks for you to approve.",
+        "whenToUse": "For larger or ambiguous changes, when taking the wrong path costs more than the minutes spent planning. For small, clear fixes, go straight to implementation.",
+        "steps": [
+          "Turn on [Plan] in the composer controls.",
+          "Describe the goal and what done means.",
+          "Read the plan in [Review plan]. Adjust it by asking for changes in the chat.",
+          "Click [Approve plan]. Then execute in the same session or use [Delegate plan] to have another agent implement it."
+        ],
+        "prompt": "I want to move the session cache from memory to Redis. Before changing code, list the files involved, the risks and how we will validate.",
+        "keywords": "plan planning plan mode approve steps strategy spec"
+      },
+      "inspector": {
+        "label": "Inspector",
+        "summary": "Agent activity, changes, files and the task spec.",
+        "whatIs": "The Inspector is the panel on the right. It shows what the agent is doing in [Activity], workspace data in [Details] and the mission spec in [Spec]. In [Changes] mode you see the task's diff; in [Files], the project tree.",
+        "whenToUse": "To follow a running agent without reading the terminal, and to review what changed before committing.",
+        "steps": [
+          "Switch between [Activity], [Details] and [Spec] in the tabs at the top.",
+          "Use the bottom dock to switch between [Changes] and [Files].",
+          "Click a file to open its diff or its content in the center of the screen.",
+          "Use [Pin Inspector] if you want it always visible."
+        ],
+        "keywords": "inspector activity details spec changes files diff panel right"
+      },
+      "review": {
+        "label": "Review the diff and annotate",
+        "summary": "Comment on a snippet and send the note straight to the agent.",
+        "whatIs": "Every changed file opens as a diff. You select lines, write a comment and send it to the agent with the snippet already attached, like a code review that becomes an instruction.",
+        "whenToUse": "When the agent delivered something almost right and you want to point at exactly where to adjust, without retyping context.",
+        "steps": [
+          "Open [Changes] in the Inspector and click the file.",
+          "Select the lines of the snippet you want to comment on.",
+          "Write the note and click [Send to agent ↗]. The snippet goes along.",
+          "Use [+ Add as evidence] when the finding should be recorded in the task review."
+        ],
+        "prompt": "You are swallowing the exception here. Propagate the error with context and cover the case with a test.",
+        "keywords": "diff review annotate annotation comment line evidence changes code review"
+      },
+      "terminal": {
+        "label": "Terminal",
+        "summary": "Shells in the right folder, next to the chat.",
+        "whatIs": "The terminal dock opens shells already inside the task's worktree. You pick the scope: [Isolated task] for the worktree or [Local project] for the original checkout. You can have several tabs.",
+        "whenToUse": "To run the dev server, tests, lint and Git by hand while the agent works in the same directory.",
+        "steps": [
+          "Open the terminal from the icon at the top of the chat or with the shortcut.",
+          "Click [New terminal tab] for more shells. Each tab keeps its own process.",
+          "Switch the scope between [Isolated task] and [Local project] depending on where the command should run.",
+          "When a server comes up, DCC detects the address and offers to open it in the built-in browser.",
+          "Use [Expand terminal] when you need more room for logs."
+        ],
+        "tip": "When you complete a task with active processes, DCC asks whether to [Keep running] or [Stop and continue].",
+        "keywords": "terminal shell dock tab command dev server logs scope worktree process"
+      },
+      "browser": {
+        "label": "Browser",
+        "summary": "See the app running and let the agent test it on screen.",
+        "whatIs": "The built-in browser opens next to the chat. Use it to see the task's local server and, when you allow it, to let the agent drive the page and verify what it implemented.",
+        "whenToUse": "To check a screen without switching windows, and to ask the agent to reproduce a UI bug.",
+        "steps": [
+          "Click [Open browser] at the top of the chat.",
+          "Type an address or accept the local server detected in the terminal.",
+          "To let the agent interact, click [Allow agent control for 60 seconds]. Control expires on its own.",
+          "Ask in the composer what it should verify."
+        ],
+        "prompt": "Open the checkout screen in the browser, try to complete a purchase with the test card and tell me at which step the error appears.",
+        "keywords": "browser preview local server page agent control screen"
+      },
+      "delegate": {
+        "label": "Delegate to another agent",
+        "summary": "Send a bounded task to a second agent.",
+        "whatIs": "Delegating creates a child session with another provider, with the instruction and context you choose. The main session stays free and the result comes back as a card in the conversation.",
+        "whenToUse": "To parallelize: one agent implements while another writes tests or reviews. Or to get a second opinion from another model on the same diff.",
+        "steps": [
+          "Click [Delegate] next to the composer's send button.",
+          "Write the instruction and pick the target provider, or leave [Chosen by DCC].",
+          "Pick the context: [Current diff], [Full reanchor] or [Minimal].",
+          "Follow the [Delegation] card in the conversation. Use [Open child session] for details or [Rerun on another agent] to compare."
+        ],
+        "prompt": "Review the current diff as a code review. Prioritize bugs, regressions and missing tests. Answer with findings by severity and do not edit files.",
+        "keywords": "delegate delegation agent child session parallel provider review second opinion fan-out"
+      },
+      "handoff": {
+        "label": "Switch provider",
+        "summary": "Continue the same task with another model.",
+        "whatIs": "There is no transfer command. In a session with history, you switch the provider in the composer and send the next message. DCC detects the switch and re-anchors the new model with recent context and workspace state, once.",
+        "whenToUse": "When the current model is stuck, when another one is better for the next step, or when a provider's quota ran out.",
+        "steps": [
+          "Open [Select model] in the composer.",
+          "Pick the new provider or model.",
+          "Send the next message as usual. Re-anchoring happens on its own."
+        ],
+        "prompt": "Continue from where we stopped: the integration tests still fail on the expired-token case.",
+        "tip": "Want to compare providers on the same task? See usage per model in [DCC Usage], in the sidebar.",
+        "keywords": "provider model switch handoff claude codex gemini cursor grok continue re-anchor"
+      },
+      "skills": {
+        "label": "Skills",
+        "summary": "Reusable instructions for the project's agents.",
+        "whatIs": "A skill is a block of instructions saved in the project and made available to the agents you pick. Instead of repeating the same prompt, you write it once and it applies across sessions.",
+        "whenToUse": "For team patterns that repeat: how to review a PR, how to write tests, how to investigate bugs, how to prepare a release.",
+        "steps": [
+          "Open [Skills] in the sidebar with a project selected.",
+          "Click [New skill]. Give it a short name, like review-pr, and describe when to use it.",
+          "Write the instructions in [Skill content].",
+          "Check the [Target agents] that should receive the skill and click [Save skill].",
+          "Turn on [Disable model invocation] if you want to use the skill only by slash, manually."
+        ],
+        "prompt": "Skill review-pr: review for risk, regressions and missing tests. List findings by severity, cite file and line, and do not suggest refactors outside the scope.",
+        "tip": "The [Detected in project] section shows agent files and external rules that already exist in the repository.",
+        "keywords": "skill skills instructions prompt reuse target agents slash rules"
+      },
+      "delivery": {
+        "label": "Commit and PR",
+        "summary": "From diff to PR without leaving the workbench.",
+        "whatIs": "Delivery controls live in the composer dock. DCC drafts a commit message from the staged files, you edit it if you want, and the same button evolves: commit, push, create the PR, open the PR, fix CI.",
+        "whenToUse": "When the diff is reviewed and you want to close the task with a commit, a push and a pull request.",
+        "steps": [
+          "Review the diff in [Changes] in the Inspector.",
+          "Click [Commit and push]. Adjust the title and body in [Review commit message] and confirm.",
+          "Once the branch is pushed, the button becomes [Create PR]. Choose a regular or draft PR.",
+          "Follow reviewers, approvals and CI in [Review status]. If CI breaks, use [Fix CI] to have the agent investigate."
+        ],
+        "tip": "GitHub or GitLab? Log in to the matching CLI and connect the account in Settings, under [Account].",
+        "keywords": "commit push pr pull request merge request delivery branch ci review github gitlab draft"
+      },
+      "undo": {
+        "label": "Guarded Undo",
+        "summary": "Undo the agent's last turn safely.",
+        "whatIs": "Before applying changes, DCC captures the state of the files the agent is about to touch. If the result did not work out, [Undo last turn] restores exactly those files, with verification and rollback if anything fails.",
+        "whenToUse": "When the agent went too far or broke something and you would rather go back to the previous point than ask for yet another fix.",
+        "steps": [
+          "Open [Last turn review] at the end of the agent's answer.",
+          "Check the state: [Guarded Undo protected] means the capture is valid.",
+          "Click [Undo last turn] and confirm the file list.",
+          "Follow [Restoring files] and [Verifying restored files]. If manual recovery is requested, follow the on-screen instruction."
+        ],
+        "tip": "The capture expires. If you see [Guarded Undo expired], use Git normally from the terminal.",
+        "keywords": "undo restore turn guarded revert files safety rollback"
+      },
+      "mobile": {
+        "label": "Pair your phone",
+        "summary": "Follow agents and pending items from your phone.",
+        "whatIs": "Mobile access shows running tasks and what needs you on your phone. Pairing uses a QR code and a PIN, on the same network or via Tailscale, with no external server in between.",
+        "whenToUse": "When you left agents running and stepped away from the computer.",
+        "steps": [
+          "Open Settings and the [Connections] section.",
+          "Click [Pair new device] and choose between local network and Tailscale.",
+          "Scan the QR code with your phone and enter the PIN before it expires.",
+          "To remove a device, use the device list in the same section."
+        ],
+        "tip": "Avoid public Wi-Fi for pairing. Away from home, Tailscale keeps desktop and phone on the same private network.",
+        "keywords": "phone mobile pair pairing qr pin tailscale notification remote"
+      }
+    }
   },
   "onboarding": {
     "steps": {
