@@ -2072,7 +2072,6 @@
       "shortcut": "Shortcut"
     },
     "actions": {
-      "openOnboarding": "Replay the welcome tour",
       "openShortcuts": "Keyboard shortcuts"
     },
     "topics": {

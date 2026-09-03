@@ -1,4 +1,4 @@
-import { Compass, Keyboard, Search } from "lucide-react";
+import { Keyboard, Search } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,6 @@ type HelpDialogProps = {
 	onOpenChange: (open: boolean) => void;
 	/** Topic to land on when the dialog opens; contextual entry points pass this. */
 	initialTopic?: HelpTopicId | null;
-	onOpenOnboarding: () => void;
 	onOpenShortcuts: () => void;
 };
 
@@ -46,7 +45,6 @@ export function HelpDialog({
 	open,
 	onOpenChange,
 	initialTopic,
-	onOpenOnboarding,
 	onOpenShortcuts,
 }: HelpDialogProps) {
 	const { t } = useTranslation("common");
@@ -175,20 +173,7 @@ export function HelpDialog({
 							)}
 						</div>
 
-						<div className="mt-auto space-y-1 border-t border-sidebar-border px-3 pt-3">
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								className="w-full justify-start gap-2.5 text-muted-foreground hover:text-foreground"
-								onClick={() => {
-									onOpenChange(false);
-									onOpenOnboarding();
-								}}
-							>
-								<Compass className="size-4" strokeWidth={1.9} aria-hidden />
-								{t("help.actions.openOnboarding")}
-							</Button>
+						<div className="mt-auto border-t border-sidebar-border px-3 pt-3">
 							<Button
 								type="button"
 								variant="ghost"

@@ -5648,7 +5648,6 @@ export default function App() {
 				open={isHelpOpen}
 				onOpenChange={setIsHelpOpen}
 				initialTopic={helpTopic}
-				onOpenOnboarding={() => setIsOnboardingOpen(true)}
 				onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
 			/>
 			<OnboardingWizard
