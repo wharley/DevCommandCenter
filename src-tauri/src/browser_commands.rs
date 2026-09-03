@@ -409,6 +409,118 @@ pub fn normalize_browser_bounds(bounds: BrowserBounds) -> Result<BrowserBounds, 
     })
 }
 
+/// Last measured distance, in logical pixels, from the top of the native view
+/// that hosts child WebViews to the top of the main WebView's document.
+///
+/// The renderer measures bounds in document coordinates, while wry positions
+/// child WebViews inside the window's content view. Those two origins differ
+/// when the content view extends under the title bar and WebKit insets the
+/// document below it (macOS 26 does this for a plain titled window), so a
+/// child placed at the renderer's `y` lands one title bar too high and leaves
+/// the same strip blank at the bottom.
+static HOST_DOCUMENT_TOP_INSET: Mutex<Option<f64>> = Mutex::new(None);
+
+/// Refresh [`HOST_DOCUMENT_TOP_INSET`] from the main window and return the
+/// value to use for the current layout call.
+///
+/// The measurement has to run on the main thread. Only the first call waits
+/// for it; later calls return the cached value immediately and let the fresh
+/// measurement land for the next call, so a busy main thread never stalls
+/// resize traffic. The inset only changes with the window chrome (for example
+/// entering full screen), and those transitions produce several bounds updates
+/// in a row, so the cache converges within the same gesture.
+#[cfg(target_os = "macos")]
+fn host_document_top_inset(app: &AppHandle<Wry>) -> f64 {
+    use std::sync::mpsc;
+    let cached = HOST_DOCUMENT_TOP_INSET.lock().ok().and_then(|inset| *inset);
+    // `get_webview_window` stops resolving once the browser child is attached
+    // (the window then hosts more than one WebView), so look the host up as a
+    // plain WebView.
+    let Some(host) = app.get_webview("main") else {
+        return cached.unwrap_or(0.0);
+    };
+    let (tx, rx) = mpsc::channel();
+    let dispatched = host.with_webview(move |platform| {
+        // SAFETY: `inner` is the live WKWebView of the main window, and this
+        // closure runs on the main thread, where AppKit views may be read.
+        let inset = unsafe { measure_document_top_inset(platform.inner()) };
+        if let Ok(mut slot) = HOST_DOCUMENT_TOP_INSET.lock() {
+            *slot = Some(inset);
+        }
+        let _ = tx.send(inset);
+    });
+    if dispatched.is_err() {
+        return cached.unwrap_or(0.0);
+    }
+    match cached {
+        Some(inset) => inset,
+        None => rx.recv_timeout(Duration::from_secs(1)).unwrap_or(0.0),
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn measure_document_top_inset(webview: *mut std::ffi::c_void) -> f64 {
+    use objc2::runtime::NSObjectProtocol;
+    use objc2_app_kit::NSView;
+    use objc2_foundation::NSEdgeInsets;
+
+    if webview.is_null() {
+        return 0.0;
+    }
+    let view = &*webview.cast::<NSView>();
+    let mut inset = 0.0;
+    if let Some(parent) = view.superview() {
+        // AppKit's y axis grows upward: this is the gap between both top edges.
+        let parent_frame = parent.frame();
+        let frame = view.frame();
+        inset += parent_frame.size.height - (frame.origin.y + frame.size.height);
+    }
+    // WebKit reports the document region hidden under the title bar as an
+    // inset (macOS 26+); older systems do not respond to the selector.
+    if view.respondsToSelector(objc2::sel!(obscuredContentInsets)) {
+        let insets: NSEdgeInsets = objc2::msg_send![view, obscuredContentInsets];
+        inset += insets.top;
+    }
+    if inset.is_finite() {
+        inset.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn host_document_top_inset(_app: &AppHandle<Wry>) -> f64 {
+    0.0
+}
+
+/// Translate renderer bounds (document coordinates) into the coordinate space
+/// wry uses for child WebViews. Call this before taking the WebView lock: the
+/// first measurement waits briefly on the main thread.
+fn host_adjusted_bounds(app: &AppHandle<Wry>, bounds: BrowserBounds) -> BrowserBounds {
+    let inset = host_document_top_inset(app);
+    BrowserBounds {
+        y: bounds.y + inset,
+        ..bounds
+    }
+}
+
+/// Apply position and size as one native frame update.
+///
+/// On macOS, child WebView coordinates are converted from a top-left logical
+/// origin to AppKit's native coordinate system. Sending position and size as
+/// separate messages can briefly combine a new origin with the previous
+/// height while the browser toolbar changes size. A single `set_bounds` keeps
+/// both values consistent. Bounds must already be in host coordinates; see
+/// [`host_adjusted_bounds`].
+fn set_browser_bounds(webview: &Webview<Wry>, bounds: BrowserBounds) -> Result<(), String> {
+    webview
+        .set_bounds(tauri::Rect {
+            position: tauri::LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0)).into(),
+            size: tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)).into(),
+        })
+        .map_err(|error| error.to_string())
+}
+
 #[derive(Debug, Clone, Default)]
 struct BrowserContext {
     url: Option<String>,
@@ -3279,7 +3391,7 @@ pub async fn browser_open(
 ) -> Result<BrowserSnapshot, String> {
     let _operation = state.operation_lock.lock().await;
     validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
-    let bounds = normalize_browser_bounds(bounds)?;
+    let bounds = host_adjusted_bounds(&app, normalize_browser_bounds(bounds)?);
     let key = scope_key(&workspace_id, session_id.as_deref());
     let requested_url = initial_url.is_some();
     let initial_occluded = initial_occluded.unwrap_or(false);
@@ -3383,18 +3495,7 @@ pub async fn browser_open(
                     .navigate(desired)
                     .map_err(|error| format!("failed to navigate browser: {error}"))?;
             }
-            webview
-                .set_position(tauri::LogicalPosition::new(
-                    bounds.x.max(0.0),
-                    bounds.y.max(0.0),
-                ))
-                .map_err(|error| error.to_string())?;
-            webview
-                .set_size(tauri::LogicalSize::new(
-                    bounds.width.max(1.0),
-                    bounds.height.max(1.0),
-                ))
-                .map_err(|error| error.to_string())?;
+            set_browser_bounds(webview, bounds)?;
             if initial_occluded {
                 webview.hide().map_err(|error| error.to_string())?;
             } else {
@@ -4525,6 +4626,7 @@ async fn extract_browser_context_locked(
 
 #[tauri::command]
 pub async fn browser_set_bounds(
+    app: AppHandle<Wry>,
     state: State<'_, BrowserState>,
     workspace_id: String,
     session_id: Option<String>,
@@ -4539,7 +4641,7 @@ pub async fn browser_set_bounds(
         lifecycle_token,
         "browser layout lifecycle is stale",
     )?;
-    let bounds = normalize_browser_bounds(bounds)?;
+    let bounds = host_adjusted_bounds(&app, normalize_browser_bounds(bounds)?);
     let webview = state
         .webview
         .lock()
@@ -4547,18 +4649,7 @@ pub async fn browser_set_bounds(
     let webview = webview
         .as_ref()
         .ok_or_else(|| "browser is not open".to_string())?;
-    webview
-        .set_position(tauri::LogicalPosition::new(
-            bounds.x.max(0.0),
-            bounds.y.max(0.0),
-        ))
-        .and_then(|_| {
-            webview.set_size(tauri::LogicalSize::new(
-                bounds.width.max(1.0),
-                bounds.height.max(1.0),
-            ))
-        })
-        .map_err(|error| error.to_string())
+    set_browser_bounds(webview, bounds)
 }
 
 /// Hide/show the child WebView for a short-lived DCC surface. This lifecycle
@@ -4586,7 +4677,10 @@ pub async fn browser_set_occluded(
         .occluded
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())?;
-    let bounds = bounds.map(normalize_browser_bounds).transpose()?;
+    let bounds = bounds
+        .map(normalize_browser_bounds)
+        .transpose()?
+        .map(|bounds| host_adjusted_bounds(&app, bounds));
     {
         let webview = state
             .webview
@@ -4596,12 +4690,7 @@ pub async fn browser_set_occluded(
             .as_ref()
             .ok_or_else(|| "browser is not open".to_string())?;
         if let Some(bounds) = bounds {
-            webview
-                .set_position(tauri::LogicalPosition::new(bounds.x, bounds.y))
-                .and_then(|_| {
-                    webview.set_size(tauri::LogicalSize::new(bounds.width, bounds.height))
-                })
-                .map_err(|error| error.to_string())?;
+            set_browser_bounds(webview, bounds)?;
         }
         if currently_occluded != occluded {
             if occluded {
