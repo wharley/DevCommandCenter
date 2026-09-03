@@ -1855,6 +1855,25 @@ fn browser_scroll_script(delta_x: f64, delta_y: f64) -> String {
     format!("(() => {{ window.scrollBy({delta_x}, {delta_y}); }})()")
 }
 
+/// Rechecks the live document without using wry's panic-prone WKWebView.URL
+/// accessor. It returns only a closed confirmation and never exposes the page
+/// URL to the renderer or to an MCP caller.
+fn browser_action_url_check_script(expected_url: &str) -> Result<String, String> {
+    let url_json = serde_json::to_string(expected_url)
+        .map_err(|_| "browser action URL is invalid".to_string())?;
+    Ok(format!(
+        r#"(() => {{
+  try {{
+    return window.location.href === {url_json}
+      ? {{ ok: true, reason: "ok" }}
+      : {{ ok: false, reason: "stale" }};
+  }} catch (_) {{
+    return {{ ok: false, reason: "stale" }};
+  }}
+}})()"#
+    ))
+}
+
 fn browser_semantic_action_script(
     target: &BrowserSemanticTargetRecord,
     fill_text: Option<&str>,
@@ -2261,20 +2280,6 @@ fn browser_action_target(
         .cloned()
         .ok_or_else(|| "browser action reference is stale".to_string())?;
     Ok((target, record.document_identity))
-}
-
-/// The map is already consumed before this final native check. Reuse it for
-/// every page-level action so a navigation that races after anchor validation
-/// cannot target a different document.
-fn require_action_native_url(
-    current_url: &str,
-    anchor: &BrowserActionAnchor,
-) -> Result<(), String> {
-    if current_url == anchor.url {
-        Ok(())
-    } else {
-        Err("browser action anchor is stale".to_string())
-    }
 }
 
 fn require_action_page_revision(
@@ -2899,6 +2904,10 @@ fn emit_snapshot(app: &AppHandle<Wry>, snapshot: BrowserSnapshot) {
     let _ = app.emit("browser://state-changed", snapshot);
 }
 
+fn tracked_browser_url(context: &BrowserContext) -> Option<String> {
+    context.expected_url.clone().or_else(|| context.url.clone())
+}
+
 fn current_snapshot(state: &BrowserState) -> Result<BrowserSnapshot, String> {
     let workspace_id = state
         .active_workspace
@@ -2919,17 +2928,22 @@ fn current_snapshot(state: &BrowserState) -> Result<BrowserSnapshot, String> {
         .lifecycle_token
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())?;
-    let url = state
-        .webview
+    // WKWebView.URL is nullable while a navigation has no committed page
+    // (notably after a localhost server disappears). wry 0.55 unwraps that
+    // nullable value, so Webview::url() can panic instead of returning Err.
+    // The navigation/page-load callbacks already maintain the requested and
+    // committed URLs; snapshots must use that state and never make closing an
+    // unavailable page capable of terminating the whole application.
+    let (url, title) = state
+        .contexts
         .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?
-        .as_ref()
-        .and_then(|webview| webview.url().ok().map(|url| url.to_string()));
-    let title = state.contexts.lock().ok().and_then(|contexts| {
-        contexts
-            .get(&scope_key(&workspace_id, session_id.as_deref()))
-            .and_then(|c| c.title.clone())
-    });
+        .ok()
+        .and_then(|contexts| {
+            contexts
+                .get(&scope_key(&workspace_id, session_id.as_deref()))
+                .map(|context| (tracked_browser_url(context), context.title.clone()))
+        })
+        .unwrap_or((None, None));
     Ok(BrowserSnapshot {
         workspace_id,
         session_id,
@@ -2941,11 +2955,6 @@ fn current_snapshot(state: &BrowserState) -> Result<BrowserSnapshot, String> {
 }
 
 fn persist_current_context(state: &BrowserState) {
-    let url = state.webview.lock().ok().and_then(|webviews| {
-        webviews
-            .as_ref()
-            .and_then(|webview| webview.url().ok().map(|url| url.to_string()))
-    });
     let Ok(workspace) = state.active_workspace.lock() else {
         return;
     };
@@ -2960,8 +2969,9 @@ fn persist_current_context(state: &BrowserState) {
         return;
     };
     let context = contexts.entry(key).or_default();
-    if should_persist_context_url(context, url.as_deref()) {
-        context.url = url;
+    let ready_url = context.ready_url.clone();
+    if should_persist_context_url(context, ready_url.as_deref()) {
+        context.url = ready_url;
     }
 }
 
@@ -3104,10 +3114,9 @@ fn page_load_matches_expected(
     active_scope: Option<&str>,
     scope: &str,
     expected_url: Option<&str>,
-    current_url: &str,
     payload_url: &str,
 ) -> bool {
-    active_scope == Some(scope) && expected_url == Some(payload_url) && current_url == payload_url
+    active_scope == Some(scope) && expected_url == Some(payload_url)
 }
 
 fn callback_matches_scope(
@@ -3115,12 +3124,10 @@ fn callback_matches_scope(
     contexts: &Arc<Mutex<HashMap<String, BrowserContext>>>,
     workspace_id: &str,
     session_id: Option<&str>,
-    observed_url: &str,
 ) -> bool {
-    // Tauri's title/page-load callbacks do not carry our workspace/session
-    // token. Matching the active scope and requested URL prevents late events
-    // from a previous scope from mutating the new one. Title callbacks remain
-    // conservative because they do not expose a payload URL.
+    // Title callbacks do not carry our workspace/session token. Keep them
+    // scoped to the currently active context. Page-load callbacks additionally
+    // validate their payload URL before committing state.
     let expected_scope = scope_key(workspace_id, session_id);
     let active_scope = active_scope.lock().ok().and_then(|scope| scope.clone());
     if active_scope.as_deref() != Some(expected_scope.as_str()) {
@@ -3129,9 +3136,7 @@ fn callback_matches_scope(
     contexts
         .lock()
         .ok()
-        .and_then(|contexts| contexts.get(&expected_scope).cloned())
-        .and_then(|context| context.expected_url)
-        .is_some_and(|expected| expected == observed_url)
+        .is_some_and(|contexts| contexts.contains_key(&expected_scope))
 }
 
 fn occlusion_request_is_current(
@@ -3239,14 +3244,11 @@ fn build_browser(
             }
             false
         })
-        .on_document_title_changed(move |webview, title| {
+        .on_document_title_changed(move |_webview, title| {
             let (Some(workspace), Ok(session)) = (
                 state_workspace.lock().ok().and_then(|w| w.clone()),
                 state_session.lock(),
             ) else {
-                return;
-            };
-            let Some(current_url) = webview.url().ok().map(|url| url.to_string()) else {
                 return;
             };
             if !callback_matches_scope(
@@ -3254,7 +3256,6 @@ fn build_browser(
                 &state_contexts,
                 &workspace,
                 session.as_deref(),
-                &current_url,
             ) {
                 return;
             }
@@ -3265,7 +3266,7 @@ fn build_browser(
                     .title = Some(title);
             }
         })
-        .on_page_load(move |webview, payload| {
+        .on_page_load(move |_webview, payload| {
             let Some(workspace_id) = page_load_workspace
                 .lock()
                 .ok()
@@ -3277,9 +3278,6 @@ fn build_browser(
                 .lock()
                 .ok()
                 .and_then(|session| session.clone());
-            let Ok(current_url) = webview.url() else {
-                return;
-            };
             let key = scope_key(&workspace_id, session_id.as_deref());
             let payload_url = payload.url().to_string();
             if matches!(payload.event(), PageLoadEvent::Started) {
@@ -3309,7 +3307,7 @@ fn build_browser(
             }
             // Internal links remain valid because on_navigation updates
             // expected_url for the active scope. A late Finished event from a
-            // prior workspace/session cannot satisfy all three URL checks.
+            // prior workspace/session cannot satisfy the scope and URL checks.
             let active_scope = page_load_active_scope
                 .lock()
                 .ok()
@@ -3320,7 +3318,6 @@ fn build_browser(
                     active_scope.as_deref(),
                     &key,
                     context.expected_url.as_deref(),
-                    current_url.as_str(),
                     &payload_url,
                 ) {
                     return None;
@@ -3574,6 +3571,16 @@ pub async fn browser_reload(
         lifecycle_token,
         "browser reload lifecycle is stale",
     )?;
+    let current_url = state
+        .contexts
+        .lock()
+        .ok()
+        .and_then(|contexts| {
+            contexts
+                .get(&scope_key(&workspace_id, session_id.as_deref()))
+                .and_then(tracked_browser_url)
+        })
+        .ok_or_else(|| "browser page URL is unavailable".to_string())?;
     {
         let webview = state
             .webview
@@ -3582,10 +3589,6 @@ pub async fn browser_reload(
         let webview = webview
             .as_ref()
             .ok_or_else(|| "browser is not open".to_string())?;
-        let current_url = webview
-            .url()
-            .map_err(|error| format!("failed to read browser URL: {error}"))?
-            .to_string();
         if let Ok(mut contexts) = state.contexts.lock() {
             mark_context_loading(
                 contexts
@@ -3860,6 +3863,11 @@ pub(crate) async fn execute_browser_control_action(
         consume_browser_action_anchor(&state, &anchor)?;
     }
 
+    // Preserve the final live-document check without calling Webview::url().
+    // On macOS wry 0.55 unwraps WKWebView.URL even though WebKit may return nil
+    // for an unavailable localhost page.
+    eval_browser_action_with_callback(state, browser_action_url_check_script(&anchor.url)?).await?;
+
     let action_name = action.name().to_string();
     match action {
         PreparedBrowserControlAction::Navigate(url) => {
@@ -3870,11 +3878,6 @@ pub(crate) async fn execute_browser_control_action(
             let webview = webview
                 .as_ref()
                 .ok_or_else(|| "browser is not open".to_string())?;
-            let current_url = webview
-                .url()
-                .map_err(|_| "browser action anchor is stale".to_string())?
-                .to_string();
-            require_action_native_url(&current_url, &anchor)?;
             require_action_page_revision(state, &anchor)?;
             require_browser_control_grant(
                 state,
@@ -3911,11 +3914,6 @@ pub(crate) async fn execute_browser_control_action(
             let webview = webview
                 .as_ref()
                 .ok_or_else(|| "browser is not open".to_string())?;
-            let current_url = webview
-                .url()
-                .map_err(|_| "browser action anchor is stale".to_string())?
-                .to_string();
-            require_action_native_url(&current_url, &anchor)?;
             require_action_page_revision(state, &anchor)?;
             require_browser_control_grant(
                 state,
@@ -3932,7 +3930,7 @@ pub(crate) async fn execute_browser_control_action(
                             anchor.session_id.as_deref(),
                         ))
                         .or_default(),
-                    current_url,
+                    anchor.url.clone(),
                 );
             }
             invalidate_browser_evidence_for_scope(
@@ -3952,11 +3950,6 @@ pub(crate) async fn execute_browser_control_action(
             let webview = webview
                 .as_ref()
                 .ok_or_else(|| "browser is not open".to_string())?;
-            let current_url = webview
-                .url()
-                .map_err(|_| "browser action anchor is stale".to_string())?
-                .to_string();
-            require_action_native_url(&current_url, &anchor)?;
             require_action_page_revision(state, &anchor)?;
             require_browser_control_grant(
                 state,
@@ -3972,20 +3965,6 @@ pub(crate) async fn execute_browser_control_action(
         PreparedBrowserControlAction::Click { .. } => {
             let (target, document_identity) =
                 target.ok_or_else(|| "browser action target is stale".to_string())?;
-            let webview_url = {
-                let webview = state
-                    .webview
-                    .lock()
-                    .map_err(|_| "browser state lock poisoned".to_string())?;
-                let webview = webview
-                    .as_ref()
-                    .ok_or_else(|| "browser is not open".to_string())?;
-                webview
-                    .url()
-                    .map_err(|_| "browser action anchor is stale".to_string())?
-                    .to_string()
-            };
-            require_action_native_url(&webview_url, &anchor)?;
             require_action_page_revision(state, &anchor)?;
             require_browser_control_grant(
                 state,
@@ -4003,20 +3982,6 @@ pub(crate) async fn execute_browser_control_action(
         PreparedBrowserControlAction::Fill { text, .. } => {
             let (target, document_identity) =
                 target.ok_or_else(|| "browser action target is stale".to_string())?;
-            let webview_url = {
-                let webview = state
-                    .webview
-                    .lock()
-                    .map_err(|_| "browser state lock poisoned".to_string())?;
-                let webview = webview
-                    .as_ref()
-                    .ok_or_else(|| "browser is not open".to_string())?;
-                webview
-                    .url()
-                    .map_err(|_| "browser action anchor is stale".to_string())?
-                    .to_string()
-            };
-            require_action_native_url(&webview_url, &anchor)?;
             require_action_page_revision(state, &anchor)?;
             require_browser_control_grant(
                 state,
@@ -4784,8 +4749,8 @@ mod tests {
 
     use super::{
         advance_lifecycle_token, append_browser_audit, arm_browser_control_grant,
-        browser_action_anchor_matches_context, browser_audit_outcome,
-        browser_evidence_cleanup_script, browser_evidence_read_script,
+        browser_action_anchor_matches_context, browser_action_url_check_script,
+        browser_audit_outcome, browser_evidence_cleanup_script, browser_evidence_read_script,
         browser_evidence_start_script, browser_location_cache_insert,
         browser_location_cache_matches_current, browser_location_cache_purge_expired,
         browser_location_cache_remove, browser_scroll_script, browser_semantic_action_script,
@@ -4799,10 +4764,10 @@ mod tests {
         occlusion_request_is_current, page_load_matches_expected, page_load_revision_is_current,
         parse_browser_action_callback, parse_browser_evidence_callback,
         parse_browser_evidence_cleanup_callback, prepare_browser_control_action,
-        read_browser_audit, require_action_native_url, require_browser_control_grant,
-        require_current_lifecycle, sanitize_browser_evidence_url,
-        sanitize_browser_link_destination, sanitize_browser_location_url, select_browser_open_url,
-        semantic_item_serialized_chars, semantic_map_record_is_current, should_persist_context_url,
+        read_browser_audit, require_browser_control_grant, require_current_lifecycle,
+        sanitize_browser_evidence_url, sanitize_browser_link_destination,
+        sanitize_browser_location_url, select_browser_open_url, semantic_item_serialized_chars,
+        semantic_map_record_is_current, should_persist_context_url, tracked_browser_url,
         validate_browser_document_identity, validate_browser_evidence_capture_id,
         validate_browser_reference, validate_browser_url, BrowserActionAnchor, BrowserActionResult,
         BrowserAuditGrantState, BrowserAuditOrigin, BrowserAuditOutcome, BrowserAuditRecord,
@@ -4980,20 +4945,17 @@ mod tests {
             "workspace\u{1f}|session",
             Some("https://example.test/ready"),
             "https://example.test/ready",
-            "https://example.test/ready",
         ));
         assert!(!page_load_matches_expected(
             Some("other\u{1f}|session"),
             "workspace\u{1f}|session",
             Some("https://example.test/ready"),
             "https://example.test/ready",
-            "https://example.test/ready",
         ));
         assert!(!page_load_matches_expected(
             Some("workspace\u{1f}|session"),
             "workspace\u{1f}|session",
-            Some("https://example.test/ready"),
-            "https://example.test/old",
+            Some("https://example.test/old"),
             "https://example.test/ready",
         ));
     }
@@ -5243,18 +5205,58 @@ mod tests {
     }
 
     #[test]
-    fn navigate_reload_and_scroll_require_the_final_native_url_recheck() {
-        let (anchor, _) = action_anchor_and_context();
-        for action in ["navigate", "reload", "scroll"] {
-            assert!(
-                require_action_native_url(&anchor.url, &anchor).is_ok(),
-                "{action}"
-            );
-            assert!(
-                require_action_native_url("https://example.test/changed", &anchor).is_err(),
-                "{action}"
-            );
-        }
+    fn tracked_url_prefers_the_requested_page_without_reading_the_native_webview() {
+        let context = BrowserContext {
+            url: Some("https://example.test/previous".to_string()),
+            expected_url: Some("http://localhost:5173".to_string()),
+            ..BrowserContext::default()
+        };
+        assert_eq!(
+            tracked_browser_url(&context).as_deref(),
+            Some("http://localhost:5173")
+        );
+
+        let committed_only = BrowserContext {
+            url: Some("https://example.test/ready".to_string()),
+            ..BrowserContext::default()
+        };
+        assert_eq!(
+            tracked_browser_url(&committed_only).as_deref(),
+            Some("https://example.test/ready")
+        );
+    }
+
+    #[test]
+    fn failed_localhost_snapshot_and_persist_do_not_require_a_native_url() {
+        let state = BrowserState::default();
+        *state.active_workspace.lock().unwrap() = Some("workspace".to_string());
+        *state.active_session.lock().unwrap() = Some("session".to_string());
+        *state.visible.lock().unwrap() = false;
+        *state.lifecycle_token.lock().unwrap() = 9;
+        state.contexts.lock().unwrap().insert(
+            super::scope_key("workspace", Some("session")),
+            BrowserContext {
+                url: Some("https://example.test/previous".to_string()),
+                expected_url: Some("http://localhost:5173".to_string()),
+                ready_url: None,
+                ..BrowserContext::default()
+            },
+        );
+
+        super::persist_current_context(&state);
+        let snapshot = super::current_snapshot(&state).unwrap();
+        assert!(!snapshot.visible);
+        assert_eq!(snapshot.lifecycle_token, 9);
+        assert_eq!(snapshot.url.as_deref(), Some("http://localhost:5173"));
+        assert_eq!(
+            state
+                .contexts
+                .lock()
+                .unwrap()
+                .get(&super::scope_key("workspace", Some("session")))
+                .and_then(|context| context.url.as_deref()),
+            Some("https://example.test/previous")
+        );
     }
 
     #[test]
@@ -5443,20 +5445,17 @@ mod tests {
             scope,
             context.expected_url.as_deref(),
             "https://example.test/b",
-            "https://example.test/b",
         ));
         assert!(!page_load_matches_expected(
             Some(scope),
             scope,
             context.expected_url.as_deref(),
             "https://example.test/a",
-            "https://example.test/a",
         ));
         assert!(!page_load_matches_expected(
             Some("workspace\u{1f}|session-a"),
             scope,
             context.expected_url.as_deref(),
-            "https://example.test/b",
             "https://example.test/b",
         ));
 
@@ -5745,6 +5744,15 @@ mod tests {
             Err("browser action anchor is stale".to_string())
         );
         assert!(parse_browser_action_callback("not-json").is_err());
+
+        let url_check = browser_action_url_check_script(
+            "https://example.test/path?value=\"quoted\"&next=</script>",
+        )
+        .unwrap();
+        assert!(url_check.contains("window.location.href ==="));
+        assert!(url_check.contains(r#"\"quoted\""#));
+        assert!(url_check.contains("{ ok: false, reason: \"stale\" }"));
+        assert!(!url_check.contains("document.cookie"));
     }
 
     #[test]
