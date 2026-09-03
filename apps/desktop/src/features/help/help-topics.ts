@@ -1,24 +1,38 @@
 import type { LucideIcon } from "lucide-react";
 import {
+	AppWindow,
 	ArrowLeftRight,
+	BarChart3,
+	Bot,
+	Cable,
+	CircleUserRound,
 	FileDiff,
+	FileText,
 	FolderGit2,
+	GitMerge,
+	GitPullRequest,
 	GitPullRequestArrow,
 	Globe,
+	Layers,
 	ListChecks,
 	MessageSquareText,
 	PanelRight,
+	Search,
 	Send,
 	Smartphone,
 	Sparkles,
 	SquareTerminal,
+	Target,
 	Undo2,
+	Workflow,
 } from "lucide-react";
 import {
 	getCommandPaletteShortcutKeys,
 	getFocusComposerShortcutKeys,
 	getInspectorCodeModeShortcutKeys,
 	getInspectorGitModeShortcutKeys,
+	getOpenPreferredEditorShortcutKeys,
+	getQuickOpenShortcutKeys,
 	getToggleTerminalShortcutKeys,
 } from "@/features/shortcuts/shortcut-utils";
 
@@ -41,6 +55,18 @@ export const HELP_TOPIC_IDS = [
 	"delivery",
 	"undo",
 	"mobile",
+	"pullRequests",
+	"spec",
+	"objective",
+	"multiProject",
+	"mergeConflict",
+	"mcp",
+	"codeRabbit",
+	"automation",
+	"usage",
+	"search",
+	"editor",
+	"account",
 ] as const;
 
 export type HelpTopicId = (typeof HELP_TOPIC_IDS)[number];
@@ -61,6 +87,18 @@ export const HELP_TOPIC_ICONS: Record<HelpTopicId, LucideIcon> = {
 	delivery: GitPullRequestArrow,
 	undo: Undo2,
 	mobile: Smartphone,
+	pullRequests: GitPullRequest,
+	spec: FileText,
+	objective: Target,
+	multiProject: Layers,
+	mergeConflict: GitMerge,
+	mcp: Cable,
+	codeRabbit: Bot,
+	automation: Workflow,
+	usage: BarChart3,
+	search: Search,
+	editor: AppWindow,
+	account: CircleUserRound,
 };
 
 /** Shortcut shown on the topic card, when the surface has a direct one. */
@@ -76,6 +114,10 @@ export function resolveHelpTopicShortcut(topic: HelpTopicId): string[] | null {
 			return getInspectorCodeModeShortcutKeys();
 		case "terminal":
 			return getToggleTerminalShortcutKeys();
+		case "search":
+			return getQuickOpenShortcutKeys();
+		case "editor":
+			return getOpenPreferredEditorShortcutKeys();
 		default:
 			return null;
 	}

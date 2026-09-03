@@ -2261,6 +2261,176 @@
         ],
         "tip": "Evite Wi-Fi público para parear. Fora de casa, Tailscale mantém desktop e celular na mesma rede privada.",
         "keywords": "celular mobile parear pareamento qr pin tailscale telefone notificação remoto"
+      },
+      "pullRequests": {
+        "label": "Pull Requests",
+        "summary": "Todos os PRs dos seus projetos, sem criar uma tarefa.",
+        "whatIs": "A superfície [Pull Requests] lista os PRs abertos de todos os projetos registrados. Cada PR abre com [Resumo] e [Código]: descrição, revisores, checks e o diff com comentários por linha.",
+        "whenToUse": "Para revisar o PR de alguém sem desmontar o seu ambiente, responder conversas e fazer merge quando estiver aprovado.",
+        "steps": [
+          "Clique em [Pull Requests] na barra lateral. Filtre por [Todos], [Revisando] ou [Criados por você].",
+          "Abra o PR e vá para [Código]. Clique numa linha para comentar e use [Adicionar à revisão] para agrupar os comentários.",
+          "Use [Revisar com agente] para o agente ler o diff e sugerir rascunhos de comentários. Você decide o que publicar.",
+          "Precisa rodar o código? [Trabalhar neste PR] cria uma tarefa com worktree na branch do PR.",
+          "Aprovado e verde? Clique em [Mesclar] e escolha o método. [Abrir no provedor Git] leva ao GitHub ou GitLab."
+        ],
+        "prompt": "Revise este PR como se fosse o revisor principal. Procure regressões, casos de borda sem teste e mudanças fora do escopo. Rascunhe os comentários, mas não publique.",
+        "keywords": "pull request pr merge request revisar review mesclar comentário github gitlab"
+      },
+      "spec": {
+        "label": "Spec da missão",
+        "summary": "Transforme uma tarefa ambígua em objetivo, escopo e critérios.",
+        "whatIs": "A spec é o documento vivo da tarefa: objetivo, fora de escopo, critérios de aceite e verificação. Ela fica na aba [Spec] do Inspector e vira contexto compilado para o agente.",
+        "whenToUse": "Em tarefas maiores, quando o pedido chega vago e você quer que o agente trabalhe contra uma definição clara, não contra a sua memória.",
+        "steps": [
+          "Digite [/spec] no composer para criar ou atualizar a spec desta tarefa.",
+          "Revise o texto na aba [Spec]. Use [Abrir no centro] para editar com mais espaço.",
+          "Clique em [Gerar plano] para derivar um plano da spec, e em [Validar] para o agente conferir a implementação contra os critérios.",
+          "Ao retomar a tarefa depois de um tempo, use [Reancorar] ou [Compilar contexto] para o agente reler a spec.",
+          "Com etapas definidas, [Continuar próxima] avança para a próxima fase."
+        ],
+        "prompt": "/spec Objetivo: exportar relatórios em CSV. Fora de escopo: PDF e agendamento. Pronto quando: botão na tela de relatórios, arquivo com cabeçalho e testes do serviço passando.",
+        "tip": "A spec não executa as fases sozinha. Cada etapa continua sendo uma decisão sua.",
+        "keywords": "spec missão mission sdd objetivo escopo critérios aceite plano validar compilar contexto"
+      },
+      "objective": {
+        "label": "Objetivo e evidências",
+        "summary": "Mantenha o agente focado e registre o que você viu.",
+        "whatIs": "O [Objetivo da tarefa] guarda a intenção e o que significa pronto, com limites de turnos e falhas para o agente pausar sozinho. As evidências são trechos de terminal, diff ou tela que você anexa ao composer, organizados por etapa: [Observar], [Reproduzir], [Investigar], [Corrigir] e [Verificar].",
+        "whenToUse": "Em sessões longas ou investigações de bug, quando o agente tende a derivar e você quer um registro do que já foi comprovado.",
+        "steps": [
+          "Abra [Objetivo da tarefa] no composer e preencha [Intenção] e [Pronto quando].",
+          "Ajuste [Orçamento de turnos] e [Pausar após falhas consecutivas] e clique em [Definir objetivo].",
+          "No diff ou no terminal, use [+ Adicionar como evidência] para anexar um achado.",
+          "As evidências aparecem no composer agrupadas por etapa e vão junto com a próxima mensagem."
+        ],
+        "prompt": "Intenção: eliminar o erro 500 no upload de avatar. Pronto quando: upload de 5 MB funciona, teste de integração cobre o caso e o log não mostra mais a exceção.",
+        "keywords": "objetivo intenção pronto quando evidência evidências turnos falhas pausar investigar bug"
+      },
+      "multiProject": {
+        "label": "Tarefa multi-projeto",
+        "summary": "Um chat coordenando dois ou mais repositórios.",
+        "whatIs": "Uma tarefa multi-projeto cria um worktree protegido em cada repositório escolhido e um único chat que enxerga todos. O agente trabalha nos projetos em conjunto, e cada um mantém sua branch.",
+        "whenToUse": "Quando a mudança atravessa repositórios: API e front, biblioteca e consumidor, contrato e implementação.",
+        "steps": [
+          "No menu de [Nova tarefa], escolha [Nova tarefa multi-projeto].",
+          "Marque os projetos em [Vários projetos] e dê um [Nome da tarefa].",
+          "Clique em [Criar tarefa multi-projeto]. O DCC prepara um worktree por projeto.",
+          "No chat, cite em qual projeto cada mudança deve acontecer. O Inspector mostra os diffs separados."
+        ],
+        "prompt": "Adicione o campo birthDate ao contrato em api-core e consuma no formulário de perfil em web-app. Mantenha compatibilidade com clientes antigos.",
+        "keywords": "multi projeto vários repositórios monorepo api front coordenar worktrees"
+      },
+      "mergeConflict": {
+        "label": "Resolver conflitos",
+        "summary": "Conflitos de merge bloco a bloco, com ou sem agente.",
+        "whatIs": "Quando atualizar a worktree com a base ou fazer merge gera conflito, o DCC abre [Resolver conflitos]: cada bloco mostra a sua versão e a versão da base, e você escolhe uma, aceita ambas ou pede ao agente.",
+        "whenToUse": "Sempre que aparecer conflito ao usar [Atualizar worktree] ou ao mesclar um PR.",
+        "steps": [
+          "Abra [Resolver conflitos] a partir do aviso no Inspector.",
+          "Em cada bloco, clique em aceitar a sua branch, aceitar a base ou [Aceitar ambos].",
+          "Para blocos difíceis, use [Resolver este bloco com agente]. Para o arquivo inteiro, [Resolver arquivo com agente].",
+          "Antes de fechar, [Pedir revisão do arquivo ao agente] confere se a resolução compila e faz sentido."
+        ],
+        "prompt": "Resolva este conflito mantendo a validação nova da minha branch e o formato de log da base. Explique o que descartou.",
+        "keywords": "conflito conflitos merge rebase base atualizar worktree bloco hunk resolver"
+      },
+      "mcp": {
+        "label": "Integrações MCP",
+        "summary": "Dê ferramentas externas aos agentes, com escopo e credenciais.",
+        "whatIs": "Uma integração MCP conecta um servidor de ferramentas ao provider: Figma, pagamentos, ferramentas internas. Você define o [Escopo], guarda credenciais protegidas e ativa depois de revisar o que o servidor expõe.",
+        "whenToUse": "Quando o agente precisa consultar ou agir em um sistema fora do repositório.",
+        "steps": [
+          "Abra Configurações e a seção [Integrações].",
+          "Clique em [Adicionar integração], preencha [Nome de exibição] e [URL do servidor].",
+          "Escolha o [Escopo]: [Esta sessão], [Este projeto] ou [Global].",
+          "Guarde tokens em [Credenciais protegidas] ou use [Conectar com OAuth].",
+          "Clique em [Revisar e ativar integração]. Ela vale para as próximas sessões dos providers."
+        ],
+        "tip": "Credenciais são armazenadas com segurança e nunca voltam para a tela. Quem vê a integração não vê o segredo.",
+        "keywords": "mcp integração integrações servidor ferramentas oauth credencial escopo figma"
+      },
+      "codeRabbit": {
+        "label": "Review com CodeRabbit",
+        "summary": "Rode a CLI do CodeRabbit no diff e envie os achados ao agente.",
+        "whatIs": "O DCC integra a CLI do CodeRabbit ao Inspector. Ele revisa o diff da tarefa, lista os achados e deixa você escolher quais mandar ao composer para o agente corrigir.",
+        "whenToUse": "Antes de abrir o PR, como uma segunda revisão automática além da sua.",
+        "steps": [
+          "Em Configurações, seção [Conta], conecte o [CodeRabbit CLI] com [Conectar]. É preciso ter feito login na CLI.",
+          "No Inspector, em [Mudanças], clique em [Rodar review]. Pode levar alguns minutos.",
+          "Marque os achados relevantes ou use [Selecionar tudo].",
+          "Clique em [Enviar ao Composer]. Os achados entram como contexto para a próxima mensagem."
+        ],
+        "prompt": "Corrija os achados do CodeRabbit que estão no contexto. Ignore os de estilo. Rode os testes ao final e liste o que mudou.",
+        "keywords": "coderabbit review revisão automática findings achados cli diff"
+      },
+      "automation": {
+        "label": "Automação do projeto",
+        "summary": "Checks e correções que o DCC roda antes de push e merge.",
+        "whatIs": "A automação vive no arquivo .dcc.toml do projeto. Você define o [Setup do workspace], as [Tarefas do projeto] do tipo [Check] ou [Correção], e a [Política de entrega] que bloqueia push ou merge quando algo falha.",
+        "whenToUse": "Para não depender de lembrar de rodar testes e lint, e para dar ao agente um jeito padrão de verificar o próprio trabalho.",
+        "steps": [
+          "Abra [Configurar automação] no dock do composer.",
+          "Preencha o [Setup do workspace], por exemplo yarn install, para novas worktrees.",
+          "Em [Tarefas do projeto], clique em [Adicionar tarefa], informe o comando e marque [Executar antes de push] ou [Executar antes de concluir merge].",
+          "Ajuste a [Política de entrega]: aprovações mínimas, pipeline aprovada, discussões resolvidas.",
+          "Clique em [Salvar configuração]. Depois use [Executar checks] e [Executar correções] quando quiser."
+        ],
+        "tip": "Nada roda em polling. Checks só executam em ações explícitas suas, como push ou merge.",
+        "keywords": "automação automation checks lint testes correções setup política entrega dcc.toml push merge"
+      },
+      "usage": {
+        "label": "Uso por provider",
+        "summary": "Tokens e turns reais, comparados entre providers e modelos.",
+        "whatIs": "[DCC Usage] mostra a atividade registrada pelo próprio DCC: quantos tokens e turns cada provider e modelo consumiu, no período [Tudo] ou só no [Projeto atual].",
+        "whenToUse": "Para decidir onde gastar cota, comparar modelos na mesma tarefa ou entender por que um provider bateu o limite.",
+        "steps": [
+          "Clique no ícone de gráfico na barra lateral para abrir [DCC Usage].",
+          "Alterne entre [Tudo] e [Projeto atual].",
+          "Compare em [Arena de providers], [Placar dos providers] e [Ranking de modelos]."
+        ],
+        "tip": "Os números vêm da telemetria local das sessões. Providers sem telemetria aparecem sem tokens.",
+        "keywords": "uso usage tokens turns custo provider modelo ranking arena cota"
+      },
+      "search": {
+        "label": "Buscar e abrir rápido",
+        "summary": "Arquivos, texto, conversas e sessões passadas.",
+        "whatIs": "Há quatro buscas, cada uma com um alvo: [Abertura rápida] acha arquivos pelo nome, [Buscar no workspace] procura texto nos arquivos, [Buscar na conversa] encontra trechos do chat atual e [Sessões passadas] reabre threads antigas de qualquer workspace.",
+        "whenToUse": "Quando você sabe o que procura e não quer navegar na árvore, ou quando precisa reencontrar uma decisão tomada em outra sessão.",
+        "steps": [
+          "Use o atalho de [Abertura rápida] e digite parte do nome do arquivo.",
+          "Use [Buscar no workspace] para texto. Clique no resultado para abrir o arquivo na linha.",
+          "No chat, [Buscar na conversa] navega pelas ocorrências com anterior e próxima.",
+          "Na paleta de comandos, digite @ seguido de duas letras ou mais para buscar em [Sessões passadas]."
+        ],
+        "keywords": "buscar busca procurar arquivo texto conversa sessões quick open paleta @"
+      },
+      "editor": {
+        "label": "Editar e abrir na IDE",
+        "summary": "Edições rápidas no DCC, mudanças grandes no seu editor.",
+        "whatIs": "O DCC abre qualquer arquivo no centro da tela para leitura e ajustes pequenos: [Abrir arquivo inteiro] a partir do diff, editar e [Salvar]. Para trabalho maior, o botão de editor abre a pasta da worktree no Cursor, Zed ou VS Code.",
+        "whenToUse": "Trocar uma linha ou conferir contexto, fique no DCC. Refatorar à mão por meia hora, vá para a IDE e volte para revisar e commitar.",
+        "steps": [
+          "No diff, clique em [Abrir arquivo inteiro] para ver e editar o arquivo completo.",
+          "Faça o ajuste e clique em [Salvar]. O Inspector atualiza o diff.",
+          "Para a IDE, use o botão de editor no topo do chat ou o atalho. Em [Escolher editor] você define o preferido.",
+          "Volte ao DCC para revisar em [Mudanças], delegar ou commitar."
+        ],
+        "keywords": "editor ide cursor zed vscode abrir arquivo editar salvar preferido"
+      },
+      "account": {
+        "label": "Contas GitHub e GitLab",
+        "summary": "Login nas CLIs para PRs, MRs e status de revisão.",
+        "whatIs": "O DCC usa as CLIs oficiais gh e glab já autenticadas na sua máquina. Com elas conectadas, ele mostra contexto de PR ou MR, cria e abre pull requests e acompanha aprovações e pipelines.",
+        "whenToUse": "Na primeira vez que abrir um projeto com remoto GitHub ou GitLab, ou quando o Inspector avisar que a conta não está conectada.",
+        "steps": [
+          "No terminal, rode gh auth login para GitHub ou glab auth login para GitLab, inclusive instâncias self-managed.",
+          "Abra Configurações e a seção [Conta].",
+          "Em [Contas de forge], use [Conectar no app] para o DCC reconhecer a sessão da CLI.",
+          "Volte ao projeto. O Inspector passa a mostrar o contexto do PR ou MR da branch."
+        ],
+        "tip": "Os providers de IA seguem a mesma lógica: Claude, Codex, Gemini e Cursor precisam estar instalados e autenticados no computador.",
+        "keywords": "conta github gitlab gh glab login autenticação forge pr mr credenciais"
       }
     }
   },
