@@ -2149,32 +2149,36 @@
       },
       "terminal": {
         "label": "Terminal",
-        "summary": "Shells na pasta certa, ao lado do chat.",
-        "whatIs": "O dock de terminal abre shells já dentro do worktree da tarefa. Você escolhe o escopo: [Tarefa isolada] para o worktree ou [Projeto local] para o checkout original. Dá para ter várias abas.",
-        "whenToUse": "Para rodar dev server, testes, lint e Git com as suas mãos, enquanto o agente trabalha no mesmo diretório.",
+        "summary": "Shells na pasta certa, com a saída a um clique do agente.",
+        "whatIs": "O dock de terminal abre shells já dentro do worktree da tarefa. Você escolhe o escopo: [Tarefa isolada] para o worktree ou [Projeto local] para o checkout original. Dá para ter várias abas, e tudo que aparece na tela pode virar contexto para o agente.",
+        "whenToUse": "Para rodar dev server, testes, lint e Git com as suas mãos, e para mandar um erro ou um log ao agente sem copiar e colar.",
         "steps": [
-          "Abra o terminal pelo ícone no topo do chat ou pelo atalho.",
-          "Clique em [Nova aba de terminal] para mais shells. Cada aba guarda o próprio processo.",
+          "Abra o terminal pelo ícone no topo do chat ou pelo atalho. Clique em [Nova aba de terminal] para mais shells.",
           "Troque o escopo entre [Tarefa isolada] e [Projeto local] conforme onde o comando deve rodar.",
-          "Quando um servidor subir, o DCC detecta o endereço e oferece abrir no navegador integrado.",
-          "Use [Expandir terminal] quando precisar de mais espaço para logs."
+          "Selecione um trecho da saída, como um stack trace. Aparece o botão [Enviar seleção ao agente]: o trecho vai para o composer como contexto.",
+          "Para a saída inteira, abra o menu da aba e use [Analisar saída com agente].",
+          "Quando um servidor subir, o DCC detecta o endereço e mostra um botão para abri-lo no navegador integrado.",
+          "Use [Expandir terminal] para mais espaço e [Abrir no Terminal do sistema] quando preferir o app de terminal."
         ],
+        "prompt": "Esse é o erro que apareceu ao rodar os testes. Encontre a causa, corrija e rode de novo só o arquivo que falhou.",
         "tip": "Ao concluir uma tarefa com processos ativos, o DCC pergunta se quer [Manter executando] ou [Encerrar e continuar].",
-        "keywords": "terminal shell dock aba comando dev server logs escopo worktree processo"
+        "keywords": "terminal shell dock aba comando dev server logs escopo worktree processo seleção enviar agente saída erro"
       },
       "browser": {
         "label": "Navegador",
-        "summary": "Veja o app rodando e deixe o agente testar na tela.",
-        "whatIs": "O navegador integrado abre ao lado do chat. Serve para ver o servidor local da tarefa e, quando você autorizar, para o agente controlar a página e verificar o que implementou.",
-        "whenToUse": "Para conferir uma tela sem trocar de janela e para pedir ao agente que reproduza um bug de interface.",
+        "summary": "Veja o app rodando, deixe o agente testar e capture evidências.",
+        "whatIs": "O navegador integrado abre ao lado do chat. Serve para ver o servidor local da tarefa, mandar o que está na página ao agente e, quando você autorizar, deixar o agente controlar a página por um tempo curto. Ele também captura texto, console e rede como evidência.",
+        "whenToUse": "Para conferir uma tela sem trocar de janela, para pedir ao agente que reproduza um bug de interface e para provar o que aconteceu com console e requisições reais.",
         "steps": [
-          "Clique em [Abrir navegador] no topo do chat.",
-          "Digite um endereço ou aceite o servidor local detectado no terminal.",
-          "Para o agente interagir, clique em [Permitir controle do agente por 60 segundos]. O controle expira sozinho.",
-          "Peça no composer o que ele deve verificar."
+          "Clique em [Abrir navegador] no topo do chat, ou no botão com o endereço que o terminal mostra quando detecta um servidor.",
+          "Selecione um texto na página ou não selecione nada e use [Enviar contexto da página ao agente]. A seleção vai junto quando existir.",
+          "Para o agente interagir, abra [Ações do agente no navegador] e clique em [Permitir controle do agente por 60 segundos]. O controle expira sozinho, ou use [Desativar controle do agente].",
+          "Com o controle ativo, clique em [Capturar evidência da página, console e rede]. Reproduza o problema na página e depois clique em [Coletar]. Ou [Descartar] se não serviu.",
+          "Tudo que o agente fez no navegador fica registrado em [Abrir atividade do navegador]."
         ],
-        "prompt": "Abra a tela de checkout no navegador, tente finalizar uma compra com o cartão de teste e me diga em que passo o erro aparece.",
-        "keywords": "navegador browser preview servidor local página agente controle tela"
+        "prompt": "Abra a tela de checkout, tente finalizar uma compra com o cartão de teste e me diga em que passo o erro aparece. Use a evidência de console e rede que eu coletei.",
+        "tip": "Capturar evidência exige o controle do agente ativo. Sem ele, o botão explica o que falta.",
+        "keywords": "navegador browser preview servidor local página agente controle 60 segundos evidência console rede coletar tela"
       },
       "delegate": {
         "label": "Delegar para outro agente",

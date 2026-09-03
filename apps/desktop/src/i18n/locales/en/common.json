@@ -2149,32 +2149,36 @@
       },
       "terminal": {
         "label": "Terminal",
-        "summary": "Shells in the right folder, next to the chat.",
-        "whatIs": "The terminal dock opens shells already inside the task's worktree. You pick the scope: [Isolated task] for the worktree or [Local project] for the original checkout. You can have several tabs.",
-        "whenToUse": "To run the dev server, tests, lint and Git by hand while the agent works in the same directory.",
+        "summary": "Shells in the right folder, with output one click away from the agent.",
+        "whatIs": "The terminal dock opens shells already inside the task's worktree. You pick the scope: [Isolated task] for the worktree or [Local project] for the original checkout. You can have several tabs, and anything on screen can become context for the agent.",
+        "whenToUse": "To run the dev server, tests, lint and Git by hand, and to hand an error or a log to the agent without copy and paste.",
         "steps": [
-          "Open the terminal from the icon at the top of the chat or with the shortcut.",
-          "Click [New terminal tab] for more shells. Each tab keeps its own process.",
+          "Open the terminal from the icon at the top of the chat or with the shortcut. Click [New terminal tab] for more shells.",
           "Switch the scope between [Isolated task] and [Local project] depending on where the command should run.",
-          "When a server comes up, DCC detects the address and offers to open it in the built-in browser.",
-          "Use [Expand terminal] when you need more room for logs."
+          "Select part of the output, such as a stack trace. The [Send selection to agent] button appears: the excerpt goes to the composer as context.",
+          "For the whole output, open the tab menu and use [Analyze output with agent].",
+          "When a server comes up, DCC detects the address and shows a button to open it in the built-in browser.",
+          "Use [Expand terminal] for more room and [Open in system terminal] when you prefer the terminal app."
         ],
+        "prompt": "This is the error that showed up when running the tests. Find the cause, fix it and re-run only the file that failed.",
         "tip": "When you complete a task with active processes, DCC asks whether to [Keep running] or [Stop and continue].",
-        "keywords": "terminal shell dock tab command dev server logs scope worktree process"
+        "keywords": "terminal shell dock tab command dev server logs scope worktree process selection send agent output error"
       },
       "browser": {
         "label": "Browser",
-        "summary": "See the app running and let the agent test it on screen.",
-        "whatIs": "The built-in browser opens next to the chat. Use it to see the task's local server and, when you allow it, to let the agent drive the page and verify what it implemented.",
-        "whenToUse": "To check a screen without switching windows, and to ask the agent to reproduce a UI bug.",
+        "summary": "See the app running, let the agent test it and capture evidence.",
+        "whatIs": "The built-in browser opens next to the chat. Use it to see the task's local server, send what is on the page to the agent and, when you allow it, let the agent drive the page for a short window. It also captures page text, console and network as evidence.",
+        "whenToUse": "To check a screen without switching windows, to ask the agent to reproduce a UI bug, and to prove what happened with real console output and requests.",
         "steps": [
-          "Click [Open browser] at the top of the chat.",
-          "Type an address or accept the local server detected in the terminal.",
-          "To let the agent interact, click [Allow agent control for 60 seconds]. Control expires on its own.",
-          "Ask in the composer what it should verify."
+          "Click [Open browser] at the top of the chat, or the address button the terminal shows when it detects a server.",
+          "Select text on the page, or nothing at all, and use [Send page context to agent]. The selection goes along when there is one.",
+          "To let the agent interact, open [Agent browser actions] and click [Allow agent control for 60 seconds]. Control expires on its own, or use [Disable agent control].",
+          "With control active, click [Capture page, console, and network evidence]. Reproduce the problem on the page, then click [Collect]. Or [Discard] if it did not help.",
+          "Everything the agent did in the browser is logged under [Open browser activity]."
         ],
-        "prompt": "Open the checkout screen in the browser, try to complete a purchase with the test card and tell me at which step the error appears.",
-        "keywords": "browser preview local server page agent control screen"
+        "prompt": "Open the checkout screen, try to complete a purchase with the test card and tell me at which step the error appears. Use the console and network evidence I collected.",
+        "tip": "Capturing evidence requires active agent control. Without it, the button explains what is missing.",
+        "keywords": "browser preview local server page agent control 60 seconds evidence console network collect screen"
       },
       "delegate": {
         "label": "Delegate to another agent",
