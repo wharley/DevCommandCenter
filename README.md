@@ -145,4 +145,6 @@ DCC was shaped by the broader ecosystem of AI coding tools, terminal-native deve
 - [CodeRabbit integration](docs/CODERABBIT.md)
 - [Git conflict resolution](docs/GIT_CONFLICT_RESOLUTION.md)
 - [Delivery workflows roadmap](docs/DELIVERY_WORKFLOWS_ROADMAP.md)
+- [Antigravity provider](docs/ANTIGRAVITY_PROVIDER.md)
+- [Browser workbench](docs/BROWSER_WORKBENCH.md)
 - [Monaco Editor in Tauri](docs/MONACO_TAURI.md)

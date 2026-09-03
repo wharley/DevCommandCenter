@@ -100,6 +100,16 @@ export const PROVIDER_MODEL_REGISTRY = {
 		},
 	] satisfies ModelEntry[],
 
+	antigravity: [
+		{
+			id: "default",
+			label: "Account default",
+			description: "Use the default model offered to this Google account.",
+			recommended: true,
+			effortLevels: [],
+		},
+	] satisfies ModelEntry[],
+
 	gemini: [
 		{
 			id: "gemini-3.8-flash",

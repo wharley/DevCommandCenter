@@ -916,6 +916,11 @@ export function SessionWorkbench({
 			}
 			const formatted = formatBrowserEvidence(capture, {
 				noEvents: t("browser.evidence.noEvents"),
+				noPageText: t("browser.evidence.noPageText"),
+				pageSnapshot: t("browser.evidence.pageSnapshot"),
+				eventsAfterStart: t("browser.evidence.eventsAfterStart"),
+				selection: t("browser.agentContext.selection"),
+				visibleText: t("browser.agentContext.visibleText"),
 				yes: t("browser.agentContext.yes"),
 				no: t("browser.agentContext.no"),
 			});

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, sync::Arc};
+use std::{collections::HashMap, fs, path::PathBuf, process::Stdio, sync::Arc};
 
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
@@ -109,15 +109,52 @@ impl HeadlessCliProviderAdapter {
         }
     }
 
-    fn turn_command(&self) -> Command {
-        let mut command = Command::new(&self.binary);
+    fn runtime_binary(&self, cfg: &SessionConfig) -> Result<String> {
+        let Some(path) = cfg
+            .provider_runtime
+            .as_ref()
+            .and_then(|runtime| runtime.binary_path.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(self.binary.clone());
+        };
+        let path = PathBuf::from(path);
+        let metadata = fs::metadata(&path).map_err(|_| {
+            CoreError::Provider(format!(
+                "the configured {} executable path is invalid",
+                self.label
+            ))
+        })?;
+        if !path.is_absolute() || !metadata.is_file() {
+            return Err(CoreError::Provider(format!(
+                "the configured {} executable path is invalid",
+                self.label
+            )));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o111 == 0 {
+                return Err(CoreError::Provider(format!(
+                    "the configured {} executable is not executable",
+                    self.label
+                )));
+            }
+        }
+        Ok(path.display().to_string())
+    }
+
+    fn turn_command(&self, cfg: &SessionConfig) -> Result<Command> {
+        let mut command = Command::new(self.runtime_binary(cfg)?);
         command.stdin(Stdio::null());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
-        command
+        Ok(command)
     }
 
     async fn prepare_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
+        self.runtime_binary(&cfg)?;
         let handle = SessionHandle {
             provider_id: self.id.clone(),
             session_id: cfg.session_id.clone(),
@@ -260,7 +297,7 @@ impl HeadlessCliProviderAdapter {
             approval_policy,
             &runtime.cfg.additional_working_directories,
         );
-        let mut command = self.turn_command();
+        let mut command = self.turn_command(&runtime.cfg)?;
         command.args(&args);
         command.current_dir(&runtime.cwd);
         apply_cli_spawn_environment(&mut command, &self.id.0, &runtime.cfg)?;
@@ -385,7 +422,11 @@ impl HeadlessCliProviderAdapter {
                             .send(ProviderEvent::Completed { at });
                     }
                     Ok(exit) => {
-                        let message = if stderr_output.trim().is_empty() {
+                        let message = if let Some(message) =
+                            normalized_headless_failure_message(kind, &stderr_output)
+                        {
+                            message
+                        } else if stderr_output.trim().is_empty() {
                             format!("{binary} exited with status {exit}")
                         } else {
                             stderr_output.trim().to_string()
@@ -437,18 +478,49 @@ fn parse_provider_prompt_line(kind: HeadlessCliKind, line: &str) -> Option<Provi
     match kind {
         HeadlessCliKind::Claude => None,
         HeadlessCliKind::Gemini => {
-            if lower.contains("opening authentication page in your browser")
-                || lower.contains("do you want to continue?")
-            {
-                Some(ProviderEvent::Failed {
-                    message:
-                        "Gemini CLI is not authenticated. Run `gemini` in a terminal and complete login."
-                            .to_string(),
-                    at,
-                })
-            } else {
-                None
-            }
+            normalized_gemini_auth_failure(&lower).map(|message| ProviderEvent::Failed {
+                message: message.to_string(),
+                at,
+            })
+        }
+    }
+}
+
+const GEMINI_AUTH_FAILURE_MESSAGE: &str =
+    "Gemini CLI is not authenticated. Open `gemini` in a terminal, complete sign-in, and try again.";
+
+const GEMINI_UNSUPPORTED_CLIENT_MESSAGE: &str = "Personal Google sign-in is no longer supported by Gemini CLI. Configure the Antigravity provider in DCC Settings and use Gemini CLI (legacy) only with an API key, Vertex AI, or an eligible enterprise account.";
+
+fn normalized_gemini_auth_failure(message: &str) -> Option<&'static str> {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("unsupported_client")
+        || lower.contains("ineligibletiererror")
+        || lower.contains("this client is no longer supported")
+    {
+        return Some(GEMINI_UNSUPPORTED_CLIENT_MESSAGE);
+    }
+
+    if lower.contains("error authenticating")
+        || lower.contains("opening authentication page in your browser")
+        || lower.contains("authentication required")
+        || lower.contains("not authenticated")
+        || lower.contains("not logged in")
+        || lower.contains("do you want to continue?")
+    {
+        return Some(GEMINI_AUTH_FAILURE_MESSAGE);
+    }
+
+    None
+}
+
+fn normalized_headless_failure_message(
+    kind: HeadlessCliKind,
+    stderr_output: &str,
+) -> Option<String> {
+    match kind {
+        HeadlessCliKind::Claude => None,
+        HeadlessCliKind::Gemini => {
+            normalized_gemini_auth_failure(stderr_output).map(str::to_string)
         }
     }
 }
@@ -561,11 +633,13 @@ fn parse_gemini_stream_value(
             if severity == "warning" {
                 None
             } else {
+                let raw_message = value
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("gemini runtime error");
                 Some(ProviderEvent::Failed {
-                    message: value
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or("gemini runtime error")
+                    message: normalized_gemini_auth_failure(raw_message)
+                        .unwrap_or(raw_message)
                         .to_string(),
                     at,
                 })
@@ -593,12 +667,14 @@ fn parse_gemini_stream_value(
                 }
                 Some(ProviderEvent::Completed { at })
             } else {
+                let raw_message = value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("gemini turn failed");
                 Some(ProviderEvent::Failed {
-                    message: value
-                        .get("error")
-                        .and_then(|error| error.get("message"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("gemini turn failed")
+                    message: normalized_gemini_auth_failure(raw_message)
+                        .unwrap_or(raw_message)
                         .to_string(),
                     at,
                 })
@@ -937,6 +1013,34 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_gemini_unsupported_client_failure_without_exposing_stack_trace() {
+        let stderr = "YOLO mode is enabled.\nError authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals.\n    at throwIneligibleOrProjectIdError (bundle.js:307474:11)\nreasonCode: 'UNSUPPORTED_CLIENT'";
+
+        let message = normalized_headless_failure_message(HeadlessCliKind::Gemini, stderr)
+            .expect("known Gemini authentication failure");
+
+        assert!(message.contains("Personal Google sign-in is no longer supported"));
+        assert!(message.contains("Antigravity"));
+        assert!(!message.contains("bundle.js"));
+        assert!(!message.contains("YOLO mode"));
+    }
+
+    #[test]
+    fn normalizes_gemini_stream_authentication_errors() {
+        let mut state = ProviderStreamState::default();
+        let parsed = parse_gemini_stream_line(
+            r#"{"type":"error","message":"Error authenticating: not logged in\n    at internal.js:1:1"}"#,
+            &mut state,
+        );
+
+        assert!(matches!(
+            parsed,
+            ParsedProviderLine::Event(ProviderEvent::Failed { message, .. })
+                if message == GEMINI_AUTH_FAILURE_MESSAGE && !message.contains("internal.js")
+        ));
+    }
+
+    #[test]
     fn gemini_build_turn_args_use_native_plan_mode() {
         let provider = HeadlessCliProviderAdapter::new(
             "gemini",
@@ -965,6 +1069,7 @@ mod tests {
                     ProviderApprovalPolicy::FullAccess,
                 ],
                 supports_runtime_home: true,
+                supports_runtime_binary: false,
                 supports_shadow_home: false,
                 supports_subagent_concurrency: false,
                 supports_account_usage: false,

@@ -1,4 +1,13 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	Children,
+	Suspense,
+	useCallback,
+	useEffect,
+	useId,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import {
 	Activity,
 	AlertCircle,
@@ -35,7 +44,11 @@ import {
 } from "@/features/panel/plan-content";
 import { parseMissionValidationReport } from "@/features/spec/mission-spec-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
-import { shouldAutoOpenAssistantActivity } from "./assistant-activity-disclosure";
+import {
+	ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS,
+	partitionAssistantActivity,
+	shouldAutoOpenAssistantActivity,
+} from "./assistant-activity-disclosure";
 import {
 	resolveNativeSubagentPresentation,
 } from "../native-subagent-presentation";
@@ -402,15 +415,48 @@ function NativeSubagentTree({
 	);
 }
 
-function AssistantActivityGroup({
-	annotations,
+function AssistantActivityHistory({
+	count,
 	children,
 }: {
-	annotations: WorkspaceMessageAnnotation[];
+	count: number;
 	children: React.ReactNode;
 }) {
 	const { t } = useTranslation("common");
-	const isLive = annotations.some(
+	const [isOpen, setIsOpen] = useState(false);
+
+	return (
+		<details
+			className="flex min-w-0 flex-col"
+			open={isOpen}
+			onToggle={(event) => setIsOpen(event.currentTarget.open)}
+		>
+			<summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground [&::-webkit-details-marker]:hidden">
+				<ChevronRight
+					className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
+					aria-hidden
+				/>
+				<span>{t("conversation.activity.previous", { count })}</span>
+			</summary>
+			<div className="mt-1 flex min-w-0 flex-col gap-1.5 border-l border-border/45 pl-2">
+				{children}
+			</div>
+		</details>
+	);
+}
+
+function AssistantActivityGroup({
+	annotations,
+	turnStreaming,
+	children,
+}: {
+	annotations: WorkspaceMessageAnnotation[];
+	turnStreaming?: boolean;
+	children: React.ReactNode;
+}) {
+	const { t } = useTranslation("common");
+	const contentId = useId();
+	const isLive = Boolean(turnStreaming) || annotations.some(
 		(annotation) => Boolean(annotation.streaming),
 	);
 	const toolCount = annotations.filter((annotation) => annotation.type === "tool-call").length;
@@ -420,39 +466,80 @@ function AssistantActivityGroup({
 	const failedCount = annotations.filter(
 		(annotation) => annotation.type === "tool-call" && annotation.status?.type === "failed",
 	).length;
-	const shouldStayOpen = shouldAutoOpenAssistantActivity(annotations);
+	const shouldStayOpen = shouldAutoOpenAssistantActivity(annotations, turnStreaming);
+	const annotationChildren = Children.toArray(children);
+	const { historyIndexes, prominentIndexes } = useMemo(
+		() => partitionAssistantActivity(annotations),
+		[annotations],
+	);
 	const initialOpenRef = useRef(shouldStayOpen);
 	const [isOpen, setIsOpen] = useState(initialOpenRef.current);
-	const detailsRef = useRef<HTMLDetailsElement | null>(null);
-	const handleDetailsRef = useCallback((details: HTMLDetailsElement | null) => {
-		detailsRef.current = details;
-		if (details) details.open = initialOpenRef.current;
-	}, []);
 	// Once the user toggles by hand, auto open/close stops driving this disclosure.
 	const userToggledRef = useRef(false);
+	const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
+		if (autoCollapseTimerRef.current) {
+			clearTimeout(autoCollapseTimerRef.current);
+			autoCollapseTimerRef.current = null;
+		}
 		if (userToggledRef.current) {
 			return;
 		}
-		const details = detailsRef.current;
-		if (details && details.open !== shouldStayOpen) {
-			details.open = shouldStayOpen;
+		if (shouldStayOpen) {
+			setIsOpen(true);
+			return;
 		}
-		setIsOpen((current) => (current === shouldStayOpen ? current : shouldStayOpen));
-	}, [shouldStayOpen]);
+		if (!isOpen) {
+			return;
+		}
+		autoCollapseTimerRef.current = setTimeout(() => {
+			autoCollapseTimerRef.current = null;
+			setIsOpen(false);
+		}, ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS);
+		return () => {
+			if (autoCollapseTimerRef.current) {
+				clearTimeout(autoCollapseTimerRef.current);
+				autoCollapseTimerRef.current = null;
+			}
+		};
+	}, [isOpen, shouldStayOpen]);
+
+	const showCompactedHistory =
+		isLive || failedCount > 0 || (!userToggledRef.current && isOpen);
+	const visibleContent = showCompactedHistory ? (
+		<>
+			{historyIndexes.length > 0 ? (
+				<AssistantActivityHistory count={historyIndexes.length}>
+					{historyIndexes.map((index) => annotationChildren[index])}
+				</AssistantActivityHistory>
+			) : null}
+			{prominentIndexes.map((index) => annotationChildren[index])}
+		</>
+	) : (
+		children
+	);
+
+	const handleToggle = () => {
+		userToggledRef.current = true;
+		if (autoCollapseTimerRef.current) {
+			clearTimeout(autoCollapseTimerRef.current);
+			autoCollapseTimerRef.current = null;
+		}
+		setIsOpen((open) => !open);
+	};
 
 	return (
-		<details
-			ref={handleDetailsRef}
+		<div
 			className="mb-2 flex min-w-0 flex-col rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2"
-			onToggle={(event) => setIsOpen(event.currentTarget.open)}
+			data-state={isOpen ? "open" : "closed"}
 		>
-			<summary
-				onClick={() => {
-					userToggledRef.current = true;
-				}}
-				className="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground [&::-webkit-details-marker]:hidden"
+			<button
+				type="button"
+				aria-expanded={isOpen}
+				aria-controls={contentId}
+				onClick={handleToggle}
+				className="flex w-full cursor-pointer items-center gap-2 text-left text-[12px] text-muted-foreground"
 			>
 				<ChevronRight
 					className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
@@ -479,13 +566,25 @@ function AssistantActivityGroup({
 						{t("conversation.activity.failed", { count: failedCount })}
 					</span>
 				) : null}
-			</summary>
-			{isOpen ? (
-				<div className="mt-2 flex min-w-0 flex-col gap-1.5 pl-1">
-					{children}
+			</button>
+			<div
+				id={contentId}
+				aria-hidden={!isOpen}
+				inert={!isOpen}
+				className={cn(
+					"grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none",
+					isOpen
+						? "grid-rows-[1fr] opacity-100"
+						: "pointer-events-none grid-rows-[0fr] opacity-0",
+				)}
+			>
+				<div className="min-h-0 overflow-hidden">
+					<div className="mt-2 flex min-w-0 flex-col gap-1.5 pl-1">
+						{visibleContent}
+					</div>
 				</div>
-			) : null}
-		</details>
+			</div>
+		</div>
 	);
 }
 
@@ -642,7 +741,10 @@ export function AssistantMessage({
 					</div>
 				) : null}
 				{activityAnnotations.length ? (
-					<AssistantActivityGroup annotations={activityAnnotations}>
+					<AssistantActivityGroup
+						annotations={activityAnnotations}
+						turnStreaming={streaming}
+					>
 						{activityAnnotations.map((annotation) => {
 							if (annotation.type === "commentary") {
 								return (

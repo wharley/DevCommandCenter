@@ -21,7 +21,12 @@ function resolveIconKey(provider: string | null | undefined): IconKey | null {
 	const value = provider.toLowerCase();
 	if (value.includes("claude") || value.includes("anthropic")) return "claude";
 	if (value.includes("codex") || value.includes("openai")) return "codex";
-	if (value.includes("gemini") || value.includes("google")) return "gemini";
+	if (
+		value.includes("gemini") ||
+		value.includes("google") ||
+		value.includes("antigravity")
+	)
+		return "gemini";
 	if (value.includes("grok") || value.includes("xai")) return "grok";
 	if (value.includes("cursor")) return "cursor";
 	if (value.includes("droid") || value.includes("factory")) return "droid";

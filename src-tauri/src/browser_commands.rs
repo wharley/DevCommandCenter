@@ -168,6 +168,7 @@ pub struct BrowserSnapshot {
     pub session_id: Option<String>,
     pub lifecycle_token: u64,
     pub visible: bool,
+    pub loading: bool,
     pub url: Option<String>,
     pub title: Option<String>,
 }
@@ -1646,6 +1647,8 @@ fn expire_browser_evidence_capture(state: &BrowserState, capture_id: &str, captu
 struct BrowserEvidenceCallback {
     ok: bool,
     #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
     events: Vec<BrowserEvidenceEventRaw>,
     #[serde(default)]
     truncated: bool,
@@ -2075,7 +2078,18 @@ fn parse_browser_evidence_callback(raw: &str) -> Result<BrowserEvidenceCallback,
     if callback.ok {
         Ok(callback)
     } else {
-        Err("browser evidence capture was unavailable".to_string())
+        match callback.reason.as_deref() {
+            Some("url_changed" | "origin_changed") => {
+                Err("browser page changed during evidence capture".to_string())
+            }
+            Some("document_changed") => {
+                Err("browser page reloaded during evidence capture".to_string())
+            }
+            Some("collector_missing") => {
+                Err("browser evidence collector ended before collection".to_string())
+            }
+            _ => Err("browser evidence capture was unavailable".to_string()),
+        }
     }
 }
 
@@ -2339,6 +2353,7 @@ fn consume_browser_action_anchor(
 fn consume_browser_evidence_anchor(
     state: &BrowserState,
     anchor: &BrowserActionAnchor,
+    visibility_policy: BrowserVisibilityPolicy,
 ) -> Result<f64, String> {
     require_current_lifecycle(
         state,
@@ -2348,7 +2363,9 @@ fn consume_browser_evidence_anchor(
         "browser evidence anchor is stale",
     )?;
     let snapshot = current_snapshot(state)?;
-    if !snapshot.visible || snapshot.url.as_deref() != Some(anchor.url.as_str()) {
+    if !browser_surface_matches_visibility_policy(state, snapshot.visible, visibility_policy)?
+        || snapshot.url.as_deref() != Some(anchor.url.as_str())
+    {
         return Err("browser evidence anchor is stale".to_string());
     }
     let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
@@ -2402,6 +2419,16 @@ async fn eval_browser_evidence_with_callback(
         .map_err(|_| "browser evidence response was cancelled".to_string())
 }
 
+fn browser_evidence_origin_json(expected_url: &str) -> Result<String, String> {
+    let expected_origin = Url::parse(expected_url)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https") && url.host().is_some())
+        .map(|url| url.origin().ascii_serialization())
+        .ok_or_else(|| "browser evidence URL is invalid".to_string())?;
+    serde_json::to_string(&expected_origin)
+        .map_err(|_| "browser evidence URL is invalid".to_string())
+}
+
 fn browser_evidence_start_script(
     capture_token: &str,
     expected_url: &str,
@@ -2410,8 +2437,7 @@ fn browser_evidence_start_script(
 ) -> Result<String, String> {
     let token_json = serde_json::to_string(capture_token)
         .map_err(|_| "browser evidence token is invalid".to_string())?;
-    let url_json = serde_json::to_string(expected_url)
-        .map_err(|_| "browser evidence URL is invalid".to_string())?;
+    let origin_json = browser_evidence_origin_json(expected_url)?;
     if !document_identity.is_finite() || document_identity <= 0.0 {
         return Err("browser document identity is unavailable".to_string());
     }
@@ -2422,12 +2448,15 @@ fn browser_evidence_start_script(
   let stop = () => {{}};
   try {{
     const key = {token_json};
-    const expectedUrl = {url_json};
+    const expectedOrigin = {origin_json};
     const expectedIdentity = {document_identity};
-    if (window.location.href !== expectedUrl
-      || !Number.isFinite(performance.timeOrigin)
-      || performance.timeOrigin !== expectedIdentity
-      || Object.prototype.hasOwnProperty.call(window, key)) return {{ ok: false }};
+    // SPA routers may change path/query/hash without replacing the document.
+    // The document identity remains authoritative; origin prevents this
+    // capability from following a cross-site document.
+    if (window.location.origin !== expectedOrigin) return {{ ok: false, reason: "origin_changed" }};
+    if (!Number.isFinite(performance.timeOrigin)
+      || performance.timeOrigin !== expectedIdentity) return {{ ok: false, reason: "document_changed" }};
+    if (Object.prototype.hasOwnProperty.call(window, key)) return {{ ok: false, reason: "collector_exists" }};
     const maxEvents = {MAX_BROWSER_EVIDENCE_EVENTS};
     // A single observer callback may be very large. Inspect at most one more
     // entry than the retained ring, so overflow is explicit without walking
@@ -2440,6 +2469,7 @@ fn browser_evidence_start_script(
     let truncated = false;
     let timer = 0;
     let resourceObserver = null;
+    let drainListener = null;
     const bounded = (value) => String(value ?? "").slice(0, maxMessageChars);
     const safeUrl = (value) => {{
       if (typeof value !== "string") return null;
@@ -2519,6 +2549,7 @@ fn browser_evidence_start_script(
     let installedError = false;
     let installedErrorListener = false;
     let installedRejectionListener = false;
+    let installedDrainListener = false;
     stop = () => {{
       // Every cleanup step is isolated. Disconnect first: a tampered console
       // or event API must not leave the observer collecting after a drain.
@@ -2529,12 +2560,20 @@ fn browser_evidence_start_script(
       try {{ if (installedError && console.error === error) console.error = originalError; }} catch (_) {{}}
       try {{ if (installedErrorListener) window.removeEventListener("error", onError, true); }} catch (_) {{}}
       try {{ if (installedRejectionListener) window.removeEventListener("unhandledrejection", onRejection, false); }} catch (_) {{}}
+      try {{ if (installedDrainListener && drainListener) window.removeEventListener(key, drainListener, false); }} catch (_) {{}}
       try {{ delete window[key]; }} catch (_) {{}}
     }};
     const drain = () => {{
       const result = {{ events: events.slice(0, maxEvents), truncated }};
       stop();
       return result;
+    }};
+    drainListener = (event) => {{
+      try {{
+        const holder = event?.detail;
+        if (!holder || typeof holder !== "object" || Object.prototype.hasOwnProperty.call(holder, "result")) return;
+        holder.result = drain();
+      }} catch (_) {{}}
     }};
     console.warn = warn;
     installedWarn = true;
@@ -2545,6 +2584,8 @@ fn browser_evidence_start_script(
     installedErrorListener = true;
     window.addEventListener("unhandledrejection", onRejection, false);
     installedRejectionListener = true;
+    window.addEventListener(key, drainListener, false);
+    installedDrainListener = true;
     if (typeof PerformanceObserver === "function") {{
       try {{
         resourceObserver = new PerformanceObserver(onResources);
@@ -2557,10 +2598,10 @@ fn browser_evidence_start_script(
       }}
     }}
     timer = window.setTimeout(stop, {ttl_ms});
-    return {{ ok: true }};
+    return {{ ok: true, reason: "started" }};
   }} catch (_) {{
     try {{ stop(); }} catch (_) {{}}
-    return {{ ok: false }};
+    return {{ ok: false, reason: "install_failed" }};
   }}
 }})()"#
     ))
@@ -2573,8 +2614,7 @@ fn browser_evidence_read_script(
 ) -> Result<String, String> {
     let token_json = serde_json::to_string(capture_token)
         .map_err(|_| "browser evidence token is invalid".to_string())?;
-    let url_json = serde_json::to_string(expected_url)
-        .map_err(|_| "browser evidence URL is invalid".to_string())?;
+    let origin_json = browser_evidence_origin_json(expected_url)?;
     if !document_identity.is_finite() || document_identity <= 0.0 {
         return Err("browser document identity is unavailable".to_string());
     }
@@ -2582,14 +2622,19 @@ fn browser_evidence_read_script(
         r#"(() => {{
   try {{
     const key = {token_json};
-    if (window.location.href !== {url_json}
-      || !Number.isFinite(performance.timeOrigin)
-      || performance.timeOrigin !== {document_identity}) return {{ ok: false, events: [], truncated: true }};
+    if (window.location.origin !== {origin_json}) return {{ ok: false, reason: "origin_changed", events: [], truncated: true }};
+    if (!Number.isFinite(performance.timeOrigin)
+      || performance.timeOrigin !== {document_identity}) return {{ ok: false, reason: "document_changed", events: [], truncated: true }};
     const state = window[key];
-    if (!state || typeof state.drain !== "function") return {{ ok: false, events: [], truncated: true }};
-    const result = state.drain();
-    return {{ ok: true, events: Array.isArray(result.events) ? result.events : [], truncated: Boolean(result.truncated) }};
-  }} catch (_) {{ return {{ ok: false, events: [], truncated: true }}; }}
+    let result = state && typeof state.drain === "function" ? state.drain() : null;
+    if (!result) {{
+      const holder = {{}};
+      try {{ window.dispatchEvent(new CustomEvent(key, {{ detail: holder }})); }} catch (_) {{}}
+      result = holder.result ?? null;
+    }}
+    if (!result) return {{ ok: false, reason: "collector_missing", events: [], truncated: true }};
+    return {{ ok: true, reason: "collected", events: Array.isArray(result.events) ? result.events : [], truncated: Boolean(result.truncated) }};
+  }} catch (_) {{ return {{ ok: false, reason: "collection_failed", events: [], truncated: true }}; }}
 }})()"#
     ))
 }
@@ -2604,22 +2649,27 @@ fn browser_evidence_cleanup_script(
 ) -> Result<String, String> {
     let token_json = serde_json::to_string(capture_token)
         .map_err(|_| "browser evidence token is invalid".to_string())?;
-    let url_json = serde_json::to_string(expected_url)
-        .map_err(|_| "browser evidence URL is invalid".to_string())?;
+    let origin_json = browser_evidence_origin_json(expected_url)?;
     if !document_identity.is_finite() || document_identity <= 0.0 {
         return Err("browser document identity is unavailable".to_string());
     }
     Ok(format!(
         r#"(() => {{
   try {{
-    if (window.location.href !== {url_json}
-      || !Number.isFinite(performance.timeOrigin)
-      || performance.timeOrigin !== {document_identity}) return {{ ok: false }};
-    const state = window[{token_json}];
-    if (!state || typeof state.drain !== "function") return {{ ok: false }};
-    state.drain();
-    return {{ ok: true }};
-  }} catch (_) {{ return {{ ok: false }}; }}
+    const key = {token_json};
+    if (window.location.origin !== {origin_json}) return {{ ok: false, reason: "origin_changed" }};
+    if (!Number.isFinite(performance.timeOrigin)
+      || performance.timeOrigin !== {document_identity}) return {{ ok: false, reason: "document_changed" }};
+    const state = window[key];
+    let result = state && typeof state.drain === "function" ? state.drain() : null;
+    if (!result) {{
+      const holder = {{}};
+      try {{ window.dispatchEvent(new CustomEvent(key, {{ detail: holder }})); }} catch (_) {{}}
+      result = holder.result ?? null;
+    }}
+    if (!result) return {{ ok: false, reason: "collector_missing" }};
+    return {{ ok: true, reason: "cleaned" }};
+  }} catch (_) {{ return {{ ok: false, reason: "cleanup_failed" }}; }}
 }})()"#
     ))
 }
@@ -2652,6 +2702,7 @@ fn browser_context_script() -> String {
     const maxScanNodes = {MAX_BROWSER_SEMANTIC_SCAN_NODES};
     const maxAncestors = {MAX_BROWSER_SEMANTIC_ANCESTORS};
     const maxTextNodes = {MAX_BROWSER_CONTEXT_TEXT_NODES};
+    const maxShadowRoots = 8;
     const maxNameTextNodes = {MAX_BROWSER_SEMANTIC_NAME_TEXT_NODES};
     const maxItems = {MAX_BROWSER_SEMANTIC_ITEMS};
     const maxNameChars = {MAX_BROWSER_SEMANTIC_NAME_CHARS};
@@ -2663,9 +2714,17 @@ fn browser_context_script() -> String {
       .trim()
       .slice(0, max);
     let visibilityLimitReached = false;
+    const composedParent = (element) => {{
+      if (!element) return null;
+      if (element.parentElement) return element.parentElement;
+      try {{
+        const root = element.getRootNode?.();
+        return root?.host instanceof Element ? root.host : null;
+      }} catch (_) {{ return null; }}
+    }};
     const isVisible = (element) => {{
       let node = element;
-      for (let depth = 0; node && depth < maxAncestors; depth += 1, node = node.parentElement) {{
+      for (let depth = 0; node && depth < maxAncestors; depth += 1, node = composedParent(node)) {{
         if (node.hidden || node.inert || node.getAttribute("aria-hidden") === "true") return false;
         const style = window.getComputedStyle(node);
         if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity) === 0) return false;
@@ -2695,12 +2754,12 @@ fn browser_context_script() -> String {
           return {{ safe: false, truncated: false }};
         }}
         if (element === document.body) return {{ safe: true, truncated: false }};
-        element = element.parentElement;
+        element = composedParent(element);
       }}
       return {{ safe: false, truncated: true }};
     }};
     const boundedText = (root, maxChars, nodeBudget) => {{
-      if (!root) return {{ text: "", truncated: false }};
+      if (!root) return {{ text: "", truncated: false, scanned: 0 }};
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       const parts = [];
       let used = 0;
@@ -2725,7 +2784,7 @@ fn browser_context_script() -> String {
         if (raw.length > remaining || used >= maxChars) {{ truncated = true; break; }}
       }}
       if (seen >= nodeBudget) truncated = true;
-      return {{ text: clean(parts.join(" "), maxChars), truncated }};
+      return {{ text: clean(parts.join(" "), maxChars), truncated, scanned: seen }};
     }};
     let selectionPolicyTruncated = false;
     const safeSelection = (() => {{
@@ -2748,11 +2807,61 @@ fn browser_context_script() -> String {
         return null;
       }}
     }})();
-    // Visible text is bounded independently. The semantic map never reads a
-    // body-wide text property and never uses a value-bearing control as text.
+    // Visible text is bounded independently. Include explicitly open Shadow
+    // DOM (for example framework error overlays), but keep a shared text-node
+    // budget and walk the composed ancestor chain so editable/control content
+    // remains excluded. Closed Shadow DOM is never inspected.
+    const textRoots = (() => {{
+      const roots = document.body ? [document.body] : [];
+      let scanned = 0;
+      let truncated = false;
+      const addOpenShadow = (element) => {{
+        let shadow = null;
+        try {{ shadow = element?.shadowRoot ?? null; }} catch (_) {{}}
+        if (!shadow || roots.includes(shadow)) return;
+        if (roots.length > maxShadowRoots) {{ truncated = true; return; }}
+        roots.push(shadow);
+      }};
+      // Framework overlays are commonly direct body children; inspect these
+      // first so a large application DOM cannot consume the discovery budget.
+      const directChildren = document.body?.children;
+      const directLimit = Math.min(64, directChildren?.length ?? 0);
+      for (let index = 0; index < directLimit; index += 1) addOpenShadow(directChildren[index]);
+      if ((directChildren?.length ?? 0) > directLimit) truncated = true;
+      for (let rootIndex = 0; rootIndex < roots.length && scanned < maxScanNodes; rootIndex += 1) {{
+        const walker = document.createTreeWalker(roots[rootIndex], NodeFilter.SHOW_ELEMENT);
+        let element;
+        while (scanned < maxScanNodes && (element = walker.nextNode())) {{
+          scanned += 1;
+          addOpenShadow(element);
+        }}
+      }}
+      if (scanned >= maxScanNodes) truncated = true;
+      // Overlays are visually on top of the page, so reserve the shared text
+      // budget for their open roots before scanning the underlying body.
+      return {{ roots: [...roots.slice(1), ...roots.slice(0, 1)], truncated }};
+    }})();
+    const composedVisibleText = () => {{
+      const parts = [];
+      let usedChars = 0;
+      let usedNodes = 0;
+      let truncated = textRoots.truncated;
+      for (const root of textRoots.roots) {{
+        const remainingChars = Math.max(0, maxTextChars - usedChars);
+        const remainingNodes = Math.max(0, maxTextNodes - usedNodes);
+        if (remainingChars === 0 || remainingNodes === 0) {{ truncated = true; break; }}
+        const part = boundedText(root, remainingChars, remainingNodes);
+        usedNodes += part.scanned;
+        if (part.truncated) truncated = true;
+        if (!part.text) continue;
+        parts.push(part.text);
+        usedChars += part.text.length + 1;
+      }}
+      return {{ text: clean(parts.join(" "), maxTextChars), truncated }};
+    }};
     const visibleText = safeSelection
       ? safeSelection
-      : boundedText(document.body, maxTextChars, maxTextNodes);
+      : composedVisibleText();
     const labelledByName = (element) => {{
       const ids = (element.getAttribute("aria-labelledby") || "").trim().split(/\s+/).filter(Boolean).slice(0, 4);
       const parts = [];
@@ -2839,9 +2948,9 @@ fn browser_context_script() -> String {
       return ["heading", "button", "link", "textbox", "searchbox", "combobox", "listbox", "checkbox", "radio", "switch", "slider", "spinbutton", "option"].includes((element.getAttribute("role") || "").toLowerCase());
     }};
     const map = {{ items: [], truncated: false }};
-    // This first map intentionally stays in the document tree: closed/open
-    // Shadow DOM and iframe documents need their own scoped budgets and are
-    // not represented by this human-context extraction.
+    // The actionable semantic map intentionally stays in the document tree:
+    // Shadow DOM and iframe targets need distinct action anchoring and are not
+    // represented by this first provider-neutral control contract.
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
     let scanned = 0;
     let candidates = 0;
@@ -2908,6 +3017,12 @@ fn tracked_browser_url(context: &BrowserContext) -> Option<String> {
     context.expected_url.clone().or_else(|| context.url.clone())
 }
 
+fn browser_context_is_loading(context: &BrowserContext) -> bool {
+    tracked_browser_url(context)
+        .as_deref()
+        .is_none_or(|url| !context_is_ready_for_url(context, url))
+}
+
 fn current_snapshot(state: &BrowserState) -> Result<BrowserSnapshot, String> {
     let workspace_id = state
         .active_workspace
@@ -2934,24 +3049,64 @@ fn current_snapshot(state: &BrowserState) -> Result<BrowserSnapshot, String> {
     // The navigation/page-load callbacks already maintain the requested and
     // committed URLs; snapshots must use that state and never make closing an
     // unavailable page capable of terminating the whole application.
-    let (url, title) = state
+    let (url, title, loading) = state
         .contexts
         .lock()
         .ok()
         .and_then(|contexts| {
             contexts
                 .get(&scope_key(&workspace_id, session_id.as_deref()))
-                .map(|context| (tracked_browser_url(context), context.title.clone()))
+                .map(|context| {
+                    let url = tracked_browser_url(context);
+                    let loading = browser_context_is_loading(context);
+                    (url, context.title.clone(), loading)
+                })
         })
-        .unwrap_or((None, None));
+        .unwrap_or((None, None, true));
     Ok(BrowserSnapshot {
         workspace_id,
         session_id,
         lifecycle_token,
         visible,
+        loading,
         url,
         title,
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BrowserVisibilityPolicy {
+    RequireVisible,
+    AllowTemporaryUiOcclusion,
+}
+
+/// The renderer hides the whole native child WebView while a DCC portal (such
+/// as the Browser agent menu) overlaps it. An explicit UI action from that
+/// menu still belongs to the open Browser surface. MCP/agent operations keep
+/// using `RequireVisible` and cannot rely on this compositing exception.
+fn browser_surface_matches_visibility_policy(
+    state: &BrowserState,
+    visible: bool,
+    policy: BrowserVisibilityPolicy,
+) -> Result<bool, String> {
+    let lifecycle_open = *state
+        .lifecycle_open
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    if !lifecycle_open {
+        return Ok(false);
+    }
+    if visible {
+        return Ok(true);
+    }
+    if policy == BrowserVisibilityPolicy::RequireVisible {
+        return Ok(false);
+    }
+    let temporarily_occluded = *state
+        .occluded
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    Ok(temporarily_occluded)
 }
 
 fn persist_current_context(state: &BrowserState) {
@@ -3288,7 +3443,7 @@ fn build_browser(
                 if active_scope.as_deref() != Some(key.as_str()) {
                     return;
                 }
-                if let Ok(mut contexts) = page_load_contexts.lock() {
+                let marked_loading = if let Ok(mut contexts) = page_load_contexts.lock() {
                     if let Some(context) = contexts.get_mut(&key) {
                         if context.expected_url.as_deref() == Some(payload_url.as_str()) {
                             context.ready_url = None;
@@ -3296,10 +3451,37 @@ fn build_browser(
                             context.page_load_revision =
                                 context.page_load_revision.wrapping_add(1).max(1);
                             invalidate_semantic_map(context);
+                            true
+                        } else {
+                            false
                         }
+                    } else {
+                        false
                     }
-                }
+                } else {
+                    false
+                };
                 invalidate_browser_evidence_for_scope_key(&page_load_state, &key);
+                if marked_loading {
+                    emit_snapshot(
+                        &page_load_app,
+                        BrowserSnapshot {
+                            workspace_id,
+                            session_id,
+                            lifecycle_token: page_load_token
+                                .lock()
+                                .map(|token| *token)
+                                .unwrap_or(0),
+                            visible: page_load_visible
+                                .lock()
+                                .map(|visible| *visible)
+                                .unwrap_or(true),
+                            loading: true,
+                            url: Some(payload_url),
+                            title: None,
+                        },
+                    );
+                }
                 return;
             }
             if !matches!(payload.event(), PageLoadEvent::Finished) {
@@ -3346,6 +3528,7 @@ fn build_browser(
                         .lock()
                         .map(|visible| *visible)
                         .unwrap_or(true),
+                    loading: false,
                     url: Some(payload_url),
                     title,
                 },
@@ -3628,7 +3811,12 @@ pub async fn browser_arm_control(
             lifecycle_token,
             "browser control lifecycle is stale",
         )?;
-        if !current_snapshot(&state)?.visible {
+        let snapshot = current_snapshot(&state)?;
+        if !browser_surface_matches_visibility_policy(
+            &state,
+            snapshot.visible,
+            BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+        )? {
             return Err("browser is not visible".to_string());
         }
         arm_browser_control_grant(
@@ -4029,7 +4217,13 @@ pub async fn browser_start_evidence_capture(
         session_id.as_deref(),
         Some(lifecycle_token),
     );
-    let result = start_browser_evidence_capture(&state, &sessions, anchor).await;
+    let result = start_browser_evidence_capture_with_visibility_policy(
+        &state,
+        &sessions,
+        anchor,
+        BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+    )
+    .await;
     append_browser_audit(
         &state,
         BrowserAuditOrigin::Ui,
@@ -4050,6 +4244,21 @@ pub(crate) async fn start_browser_evidence_capture(
     state: &BrowserState,
     sessions: &SessionCommandState,
     anchor: BrowserActionAnchor,
+) -> Result<BrowserEvidenceCaptureHandle, String> {
+    start_browser_evidence_capture_with_visibility_policy(
+        state,
+        sessions,
+        anchor,
+        BrowserVisibilityPolicy::RequireVisible,
+    )
+    .await
+}
+
+async fn start_browser_evidence_capture_with_visibility_policy(
+    state: &BrowserState,
+    sessions: &SessionCommandState,
+    anchor: BrowserActionAnchor,
+    visibility_policy: BrowserVisibilityPolicy,
 ) -> Result<BrowserEvidenceCaptureHandle, String> {
     let _operation = state.operation_lock.lock().await;
     validate_scope(
@@ -4074,7 +4283,9 @@ pub(crate) async fn start_browser_evidence_capture(
         now,
     )?;
     let snapshot = current_snapshot(&state)?;
-    if !snapshot.visible || snapshot.url.as_deref() != Some(anchor.url.as_str()) {
+    if !browser_surface_matches_visibility_policy(state, snapshot.visible, visibility_policy)?
+        || snapshot.url.as_deref() != Some(anchor.url.as_str())
+    {
         return Err("browser evidence anchor is stale".to_string());
     }
     let scope = scope_key(&anchor.workspace_id, anchor.session_id.as_deref());
@@ -4104,7 +4315,7 @@ pub(crate) async fn start_browser_evidence_capture(
     if active_capture_exists {
         return Err("browser evidence capture is already active".to_string());
     }
-    let document_identity = consume_browser_evidence_anchor(&state, &anchor)?;
+    let document_identity = consume_browser_evidence_anchor(&state, &anchor, visibility_policy)?;
     let capture_id = new_browser_evidence_credential("c");
     let capture_token = new_browser_evidence_credential("t");
     let capture_now = Instant::now();
@@ -4379,7 +4590,15 @@ pub(crate) async fn extract_browser_context_for_scope(
     lifecycle_token: u64,
 ) -> Result<BrowserAgentContext, String> {
     let _operation = state.operation_lock.lock().await;
-    extract_browser_context_locked(state, sessions, workspace_id, session_id, lifecycle_token).await
+    extract_browser_context_locked(
+        state,
+        sessions,
+        workspace_id,
+        session_id,
+        lifecycle_token,
+        BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+    )
+    .await
 }
 
 /// Context endpoint for the app-owned MCP projection. The caller never gets
@@ -4421,6 +4640,7 @@ pub(crate) async fn extract_browser_control_context(
         workspace_id.clone(),
         session_id.clone(),
         lifecycle_token,
+        BrowserVisibilityPolicy::RequireVisible,
     )
     .await?;
     if let Err(error) = require_browser_control_grant(
@@ -4456,6 +4676,7 @@ async fn extract_browser_context_locked(
     workspace_id: String,
     session_id: Option<String>,
     lifecycle_token: u64,
+    visibility_policy: BrowserVisibilityPolicy,
 ) -> Result<BrowserAgentContext, String> {
     validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
     require_current_lifecycle(
@@ -4466,7 +4687,11 @@ async fn extract_browser_context_locked(
         "browser context lifecycle is stale",
     )?;
     let initial_snapshot = current_snapshot(&state)?;
-    if !initial_snapshot.visible {
+    if !browser_surface_matches_visibility_policy(
+        state,
+        initial_snapshot.visible,
+        visibility_policy,
+    )? {
         return Err("browser is not visible".to_string());
     }
     let initial_url = initial_snapshot
@@ -4512,7 +4737,9 @@ async fn extract_browser_context_locked(
         "browser context lifecycle is stale",
     )?;
     let snapshot = current_snapshot(&state)?;
-    if !snapshot.visible || snapshot.url.as_deref() != Some(initial_url.as_str()) {
+    if !browser_surface_matches_visibility_policy(state, snapshot.visible, visibility_policy)?
+        || snapshot.url.as_deref() != Some(initial_url.as_str())
+    {
         return Err("browser page changed while reading context".to_string());
     }
     if !context_ready_for_scope(&state, &workspace_id, session_id.as_deref(), &initial_url)? {
@@ -4548,7 +4775,9 @@ async fn extract_browser_context_locked(
         "browser context lifecycle is stale",
     )?;
     let final_snapshot = current_snapshot(&state)?;
-    if !final_snapshot.visible || final_snapshot.url.as_deref() != Some(initial_url.as_str()) {
+    if !browser_surface_matches_visibility_policy(state, final_snapshot.visible, visibility_policy)?
+        || final_snapshot.url.as_deref() != Some(initial_url.as_str())
+    {
         return Err("browser page changed while building semantic map".to_string());
     }
     if !context_ready_for_scope(&state, &workspace_id, session_id.as_deref(), &initial_url)? {
@@ -4750,15 +4979,16 @@ mod tests {
     use super::{
         advance_lifecycle_token, append_browser_audit, arm_browser_control_grant,
         browser_action_anchor_matches_context, browser_action_url_check_script,
-        browser_audit_outcome, browser_evidence_cleanup_script, browser_evidence_read_script,
-        browser_evidence_start_script, browser_location_cache_insert,
+        browser_audit_outcome, browser_context_is_loading, browser_evidence_cleanup_script,
+        browser_evidence_read_script, browser_evidence_start_script, browser_location_cache_insert,
         browser_location_cache_matches_current, browser_location_cache_purge_expired,
         browser_location_cache_remove, browser_scroll_script, browser_semantic_action_script,
-        clear_browser_control_grant, click_target_is_compatible, consume_semantic_map_for_anchor,
-        context_is_ready_for_url, control_grant_is_current, control_grant_status,
-        fill_target_is_compatible, mark_context_loading, normalize_browser_bounds,
-        normalize_browser_context_text, normalize_browser_evidence_events,
-        normalize_browser_evidence_resource_initiator_type,
+        browser_surface_matches_visibility_policy, clear_browser_control_grant,
+        click_target_is_compatible, consume_browser_evidence_anchor,
+        consume_semantic_map_for_anchor, context_is_ready_for_url, control_grant_is_current,
+        control_grant_status, fill_target_is_compatible, mark_context_loading,
+        normalize_browser_bounds, normalize_browser_context_text,
+        normalize_browser_evidence_events, normalize_browser_evidence_resource_initiator_type,
         normalize_browser_evidence_resource_status, normalize_browser_fill_text,
         normalize_browser_scroll_delta, normalize_browser_semantic_map,
         occlusion_request_is_current, page_load_matches_expected, page_load_revision_is_current,
@@ -4776,9 +5006,9 @@ mod tests {
         BrowserEvidenceCaptureRecord, BrowserEvidenceEventRaw, BrowserLocationCache,
         BrowserSemanticItemExtraction, BrowserSemanticMap, BrowserSemanticMapExtraction,
         BrowserSemanticMapRecord, BrowserSemanticTargetRecord, BrowserState,
-        MAX_BROWSER_AUDIT_ENTRIES, MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS,
-        MAX_BROWSER_AUDIT_PROVIDER_CHARS, MAX_BROWSER_AUDIT_SCOPE_CHARS,
-        MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS,
+        BrowserVisibilityPolicy, MAX_BROWSER_AUDIT_ENTRIES,
+        MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS, MAX_BROWSER_AUDIT_PROVIDER_CHARS,
+        MAX_BROWSER_AUDIT_SCOPE_CHARS, MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS,
         MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS, MAX_BROWSER_LOCATION_CACHE_ENTRIES,
         MAX_BROWSER_SEMANTIC_ITEMS,
     };
@@ -5021,9 +5251,13 @@ mod tests {
         assert!(script.contains("createTreeWalker"));
         assert!(script.contains("maxScanNodes"));
         assert!(script.contains("maxTextNodes"));
+        assert!(script.contains("maxShadowRoots"));
         assert!(script.contains("maxCandidates"));
         assert!(script.contains("maxMapChars"));
         assert!(script.contains("const textNodeSafety"));
+        assert!(script.contains("const composedParent"));
+        assert!(script.contains("element?.shadowRoot"));
+        assert!(script.contains("const composedVisibleText"));
         assert!(script.contains("[\"input\", \"textarea\", \"select\", \"option\"].includes(tag)"));
         assert!(script.contains("element.isContentEditable"));
         assert!(script.contains("const safety = textNodeSafety(node)"));
@@ -5307,6 +5541,105 @@ mod tests {
     }
 
     #[test]
+    fn explicit_ui_actions_accept_only_visible_or_temporarily_occluded_open_surfaces() {
+        let state = BrowserState::default();
+        assert!(!browser_surface_matches_visibility_policy(
+            &state,
+            false,
+            BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+        )
+        .unwrap());
+
+        *state.lifecycle_open.lock().unwrap() = true;
+        assert!(browser_surface_matches_visibility_policy(
+            &state,
+            true,
+            BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+        )
+        .unwrap());
+
+        *state.occluded.lock().unwrap() = true;
+        assert!(browser_surface_matches_visibility_policy(
+            &state,
+            false,
+            BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+        )
+        .unwrap());
+        assert!(!browser_surface_matches_visibility_policy(
+            &state,
+            false,
+            BrowserVisibilityPolicy::RequireVisible,
+        )
+        .unwrap());
+
+        *state.occluded.lock().unwrap() = false;
+        assert!(!browser_surface_matches_visibility_policy(
+            &state,
+            false,
+            BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+        )
+        .unwrap());
+
+        *state.lifecycle_open.lock().unwrap() = false;
+        assert!(!browser_surface_matches_visibility_policy(
+            &state,
+            true,
+            BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn evidence_anchor_consumption_keeps_mcp_strict_but_allows_its_ui_menu() {
+        let (anchor, context) = action_anchor_and_context();
+        let state = BrowserState::default();
+        *state.active_scope.lock().unwrap() = Some("workspace\u{1f}|session".to_string());
+        *state.active_workspace.lock().unwrap() = Some("workspace".to_string());
+        *state.active_session.lock().unwrap() = Some("session".to_string());
+        *state.lifecycle_token.lock().unwrap() = anchor.lifecycle_token;
+        *state.lifecycle_open.lock().unwrap() = true;
+        *state.visible.lock().unwrap() = false;
+        *state.occluded.lock().unwrap() = true;
+        state
+            .contexts
+            .lock()
+            .unwrap()
+            .insert("workspace\u{1f}|session".to_string(), context);
+
+        assert!(consume_browser_evidence_anchor(
+            &state,
+            &anchor,
+            BrowserVisibilityPolicy::RequireVisible,
+        )
+        .is_err());
+        assert!(state
+            .contexts
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .semantic_map
+            .is_some());
+
+        assert!(consume_browser_evidence_anchor(
+            &state,
+            &anchor,
+            BrowserVisibilityPolicy::AllowTemporaryUiOcclusion,
+        )
+        .is_ok());
+        assert!(state
+            .contexts
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .semantic_map
+            .is_none());
+    }
+
+    #[test]
     fn control_grant_status_reports_remaining_and_clears_expired_grants() {
         let now = Instant::now();
         let mut grant = Some(BrowserControlGrant {
@@ -5435,7 +5768,9 @@ mod tests {
     fn only_accepts_finished_loads_for_the_active_expected_url() {
         let scope = "workspace\u{1f}|session-b";
         let mut context = BrowserContext::default();
+        assert!(browser_context_is_loading(&context));
         mark_context_loading(&mut context, "https://example.test/b".to_string());
+        assert!(browser_context_is_loading(&context));
         assert!(!context_is_ready_for_url(
             &context,
             "https://example.test/b"
@@ -5461,6 +5796,7 @@ mod tests {
 
         context.ready_url = Some("https://example.test/b".to_string());
         assert!(context_is_ready_for_url(&context, "https://example.test/b"));
+        assert!(!browser_context_is_loading(&context));
     }
 
     #[test]
@@ -5872,10 +6208,13 @@ mod tests {
         assert!(start.contains("window.setTimeout(stop, 900)"));
         assert!(start.contains("maxEvents"));
         assert!(start.contains("events.shift()"));
-        assert!(start.contains("window.location.href !== expectedUrl"));
+        assert!(start.contains("window.location.origin !== expectedOrigin"));
+        assert!(!start.contains("https://example.test/page"));
         assert!(start.contains("performance.timeOrigin !== expectedIdentity"));
         assert!(start.contains("window.addEventListener(\"error\", onError, true)"));
         assert!(start.contains("window.removeEventListener(\"error\", onError, true)"));
+        assert!(start.contains("window.addEventListener(key, drainListener, false)"));
+        assert!(start.contains("window.removeEventListener(key, drainListener, false)"));
         assert!(start.contains("new PerformanceObserver(onResources)"));
         assert!(start.contains("resourceObserver.observe({ type: \"resource\" })"));
         assert!(start.contains("resourceObserver.disconnect()"));
@@ -5905,9 +6244,20 @@ mod tests {
         let read = browser_evidence_read_script("t-test-secret", "https://example.test/page", 42.5)
             .unwrap();
         assert!(read.contains("state.drain()"));
-        assert!(read.contains("window.location.href !=="));
+        assert!(read.contains("window.dispatchEvent(new CustomEvent(key"));
+        assert!(read.contains("reason: \"collector_missing\""));
+        assert!(read.contains("window.location.origin !=="));
+        assert!(!read.contains("https://example.test/page"));
         assert!(read.contains("performance.timeOrigin !=="));
         assert!(!read.contains("JSON.stringify"));
+
+        let cleanup =
+            browser_evidence_cleanup_script("t-test-secret", "https://example.test/page", 42.5)
+                .unwrap();
+        assert!(cleanup.contains("window.dispatchEvent(new CustomEvent(key"));
+        assert!(cleanup.contains("reason: \"collector_missing\""));
+        assert!(cleanup.contains("window.location.origin !=="));
+        assert!(!cleanup.contains("https://example.test/page"));
     }
 
     #[test]
@@ -6051,6 +6401,34 @@ mod tests {
             parse_browser_evidence_callback(r#"{"ok":false,"events":[],"truncated":true}"#,)
                 .is_err()
         );
+        assert_eq!(
+            parse_browser_evidence_callback(
+                r#"{"ok":false,"reason":"url_changed","events":[],"truncated":true}"#,
+            )
+            .unwrap_err(),
+            "browser page changed during evidence capture"
+        );
+        assert_eq!(
+            parse_browser_evidence_callback(
+                r#"{"ok":false,"reason":"origin_changed","events":[],"truncated":true}"#,
+            )
+            .unwrap_err(),
+            "browser page changed during evidence capture"
+        );
+        assert_eq!(
+            parse_browser_evidence_callback(
+                r#"{"ok":false,"reason":"document_changed","events":[],"truncated":true}"#,
+            )
+            .unwrap_err(),
+            "browser page reloaded during evidence capture"
+        );
+        assert_eq!(
+            parse_browser_evidence_callback(
+                r#"{"ok":false,"reason":"collector_missing","events":[],"truncated":true}"#,
+            )
+            .unwrap_err(),
+            "browser evidence collector ended before collection"
+        );
         assert!(parse_browser_evidence_callback(&format!(
             "{{\"ok\":true,\"events\":[],\"padding\":\"{}\"}}",
             "x".repeat(super::MAX_BROWSER_EVIDENCE_CALLBACK_CHARS)
@@ -6192,7 +6570,8 @@ mod tests {
         let script =
             browser_evidence_cleanup_script("t-private-token", "https://example.test/page", 42.5)
                 .unwrap();
-        assert!(script.contains("state.drain();"));
+        assert!(script.contains("typeof state.drain === \"function\" ? state.drain() : null"));
+        assert!(script.contains("window.dispatchEvent(new CustomEvent(key"));
         assert!(!script.contains("events"));
         assert!(parse_browser_evidence_cleanup_callback(r#"{"ok":true}"#).is_ok());
         assert!(parse_browser_evidence_cleanup_callback(

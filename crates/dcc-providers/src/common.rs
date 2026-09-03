@@ -1914,6 +1914,7 @@ pub fn stable_cli_capabilities() -> Capabilities {
         supports_multi_root: false,
         approval_policies: Vec::new(),
         supports_runtime_home: false,
+        supports_runtime_binary: false,
         supports_shadow_home: false,
         supports_subagent_concurrency: false,
         supports_account_usage: false,
@@ -1943,6 +1944,7 @@ pub fn experimental_cli_capabilities() -> Capabilities {
         supports_multi_root: false,
         approval_policies: Vec::new(),
         supports_runtime_home: false,
+        supports_runtime_binary: false,
         supports_shadow_home: false,
         supports_subagent_concurrency: false,
         supports_account_usage: false,
@@ -1991,6 +1993,7 @@ mod tests {
             working_directory: None,
             additional_working_directories: Vec::new(),
             provider_runtime: Some(ProviderRuntimeConfig {
+                binary_path: None,
                 home_path: Some(shared_home.to_string_lossy().to_string()),
                 shadow_home_path: Some(shadow_home.to_string_lossy().to_string()),
                 max_concurrent_subagents: None,

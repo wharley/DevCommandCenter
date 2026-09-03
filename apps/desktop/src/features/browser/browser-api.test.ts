@@ -37,6 +37,7 @@ describe("browser-api", () => {
 			workspaceId: "workspace-1",
 			sessionId: "session-1",
 			visible: true,
+			loading: false,
 			url: "http://localhost:3000",
 			title: null,
 		});

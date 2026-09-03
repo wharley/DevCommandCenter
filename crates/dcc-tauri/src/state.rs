@@ -1597,7 +1597,20 @@ impl SessionCommandState {
         provider_id: &str,
         runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<ProviderRuntimeConfig> {
-        let runtime = runtime.cloned().unwrap_or_default();
+        let mut runtime = runtime.cloned().unwrap_or_default();
+        if provider_id == "antigravity" && runtime.home_path.is_none() {
+            runtime.home_path = Some(
+                self.provider_home_root()
+                    .join("antigravity")
+                    .display()
+                    .to_string(),
+            );
+        }
+        if provider_id == "antigravity" && runtime.binary_path.is_none() {
+            runtime.binary_path =
+                crate::antigravity_installation::managed_executable_path(&self.app_data_dir)
+                    .map(|path| path.display().to_string());
+        }
         if self.is_legacy_managed_provider_home(provider_id, &runtime) {
             return Ok(ProviderRuntimeConfig::default());
         }
@@ -1744,6 +1757,10 @@ impl SessionCommandState {
 
     fn provider_home_root(&self) -> PathBuf {
         self.app_data_dir.join("provider-homes")
+    }
+
+    pub(crate) fn app_data_dir(&self) -> &std::path::Path {
+        &self.app_data_dir
     }
 
     fn is_legacy_managed_provider_home(
@@ -7255,6 +7272,20 @@ mod tests {
         assert!(state
             .provider_runtime_config("cursor", Some(&home))
             .is_err());
+
+        let antigravity = state
+            .provider_runtime_config("antigravity", None)
+            .expect("Antigravity has an isolated managed home");
+        assert_eq!(
+            antigravity.home_path,
+            Some(
+                state
+                    .provider_home_root()
+                    .join("antigravity")
+                    .display()
+                    .to_string()
+            )
+        );
 
         let shadow = ProviderRuntimeConfig {
             shadow_home_path: Some(root.join("shadow").display().to_string()),

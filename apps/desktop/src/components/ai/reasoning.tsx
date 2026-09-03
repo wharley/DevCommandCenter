@@ -1,6 +1,6 @@
 import type * as React from "react";
 import { ChevronRight, Brain } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export function Reasoning({
@@ -13,6 +13,13 @@ export function Reasoning({
 	defaultOpen?: boolean;
 }) {
 	const [isOpen, setIsOpen] = useState(defaultOpen);
+	const userToggledRef = useRef(false);
+
+	useEffect(() => {
+		if (!userToggledRef.current) {
+			setIsOpen(defaultOpen);
+		}
+	}, [defaultOpen]);
 
 	return (
 		<details
@@ -21,6 +28,9 @@ export function Reasoning({
 			onToggle={(event) => setIsOpen(event.currentTarget.open)}
 		>
 			<summary
+				onClick={() => {
+					userToggledRef.current = true;
+				}}
 				className={cn(
 					"group/reasoning-trigger inline-flex max-w-full cursor-pointer items-center gap-1.5 py-0.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden",
 				)}

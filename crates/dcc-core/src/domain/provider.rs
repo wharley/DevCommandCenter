@@ -147,6 +147,10 @@ pub struct Capabilities {
     /// backend rejects it instead of silently dropping the preference.
     #[serde(default)]
     pub supports_runtime_home: bool,
+    /// The adapter honors an explicit executable path from runtime config.
+    /// Invalid non-empty paths must never silently fall back to PATH.
+    #[serde(default)]
+    pub supports_runtime_binary: bool,
     /// The adapter materializes a DCC-managed `shadow_home_path` (isolated
     /// auth/config copy) from the runtime config.
     #[serde(default)]

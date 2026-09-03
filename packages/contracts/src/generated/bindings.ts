@@ -6,7 +6,7 @@ export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","can
 
 export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
-export const PROVIDER_METHODS = {"getProviderAvailability":"get_provider_availability","listProviders":"list_providers","providerAccountUsage":"provider_account_usage","setProviderAvailability":"set_provider_availability"} as const;
+export const PROVIDER_METHODS = {"connectAntigravity":"connect_antigravity","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviders":"list_providers","providerAccountUsage":"provider_account_usage","setProviderAvailability":"set_provider_availability"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","applyTaskTitle":"apply_task_title","approvePlan":"approve_plan","clearSessionObjective":"clear_session_objective","closeSession":"close_session","dispatchNextQueuedTurn":"dispatch_next_queued_turn","executeGuardedUndo":"execute_guarded_undo","getSessionObjective":"get_session_objective","inheritSessionObjective":"inherit_session_objective","interruptNativeSubagent":"interrupt_native_subagent","lastTurnReview":"last_turn_review","listMcpRuntimeStatuses":"list_mcp_runtime_statuses","listThreadEvents":"list_thread_events","listTurnQueue":"list_turn_queue","listWorkspaceSessions":"list_workspace_sessions","prepareGuardedUndo":"prepare_guarded_undo","prepareTurn":"prepare_turn","queueTurn":"queue_turn","recordPlanHandoff":"record_plan_handoff","removeQueuedTurn":"remove_queued_turn","reorderTurnQueue":"reorder_turn_queue","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","runPullRequestReviewAgent":"run_pull_request_review_agent","searchSessions":"search_sessions","sendTurn":"send_turn","sessionLiveSnapshot":"session_live_snapshot","setSessionObjective":"set_session_objective","startMcpOauth":"start_mcp_oauth","startThread":"start_thread","steerNativeSubagent":"steer_native_subagent","steerTurn":"steer_turn","transitionSessionObjective":"transition_session_objective","turnReviewFileDiff":"turn_review_file_diff","usageDashboard":"usage_dashboard","waitMcpOauth":"wait_mcp_oauth"} as const;
 
@@ -35,6 +35,18 @@ export type ActivateMcpDefinitionInput = {
 export type ActivateMcpIntegrationOutput = {
 	integration: McpIntegrationRecord,
 	changed: boolean,
+};
+
+export type AntigravityStatusInput = {
+	providerRuntime?: ProviderRuntimeConfig | null,
+};
+
+export type AntigravityStatusOutput = {
+	managedRuntimeInstalled: boolean,
+	runtimeVersion: string | null,
+	signedIn: boolean,
+	cachedModelCount: number,
+	lastVerifiedAt: string | null,
 };
 
 export type ApplyTaskTitleInput = {
@@ -123,6 +135,11 @@ export type Capabilities = {
 	 *  backend rejects it instead of silently dropping the preference.
 	 */
 	supportsRuntimeHome?: boolean,
+	/**
+	 *  The adapter honors an explicit executable path from runtime config.
+	 *  Invalid non-empty paths must never silently fall back to PATH.
+	 */
+	supportsRuntimeBinary?: boolean,
 	/**
 	 *  The adapter materializes a DCC-managed `shadow_home_path` (isolated
 	 *  auth/config copy) from the runtime config.
@@ -271,6 +288,14 @@ export type CompleteDelegationInput = {
 
 export type CompleteDelegationOutput = {
 	delegation: Delegation,
+};
+
+export type ConnectAntigravityInput = {
+	providerRuntime?: ProviderRuntimeConfig | null,
+};
+
+export type ConnectAntigravityOutput = {
+	models: ProviderModelDescriptor[],
 };
 
 export type CoreEvent = ({ workspacePrepared: {
@@ -798,6 +823,11 @@ export type InheritSessionObjectiveInput = {
 	childSessionId: SessionId,
 };
 
+export type InstallAntigravityOutput = {
+	binaryPath: string,
+	version: string,
+};
+
 export type InterruptNativeSubagentInput = {
 	sessionId: string,
 	agentThreadId: string,
@@ -1277,6 +1307,11 @@ export type ProviderModelDescriptor = {
 };
 
 export type ProviderRuntimeConfig = {
+	/**
+	 *  Explicit provider executable. When set, adapters must use this exact
+	 *  path and fail closed if it is invalid instead of falling back to PATH.
+	 */
+	binaryPath?: string | null,
 	homePath?: string | null,
 	shadowHomePath?: string | null,
 	maxConcurrentSubagents?: number | null,

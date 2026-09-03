@@ -103,8 +103,10 @@ use dcc_tauri::commands::{
         SetMcpToolPolicyInput, SetMcpToolPolicyOutput,
     },
     provider_commands::{
-        ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
-        ProviderAvailabilityInput, ProviderAvailabilityOutput, SetProviderAvailabilityInput,
+        AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
+        ConnectAntigravityOutput, InstallAntigravityOutput, ListProvidersOutput,
+        ProviderAccountUsageInput, ProviderAccountUsageOutput, ProviderAvailabilityInput,
+        ProviderAvailabilityOutput, SetProviderAvailabilityInput,
     },
     session_commands::{
         ApplyTaskTitleInput, ApplyTaskTitleOutput, ExecuteGuardedUndoInput,
@@ -326,6 +328,9 @@ struct ProviderMethods {
     get_provider_availability: String,
     set_provider_availability: String,
     provider_account_usage: String,
+    install_antigravity: String,
+    get_antigravity_status: String,
+    connect_antigravity: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -631,6 +636,11 @@ fn main() {
         .typ::<ListProvidersOutput>()
         .typ::<ProviderAccountUsageInput>()
         .typ::<ProviderAccountUsageOutput>()
+        .typ::<InstallAntigravityOutput>()
+        .typ::<AntigravityStatusInput>()
+        .typ::<AntigravityStatusOutput>()
+        .typ::<ConnectAntigravityInput>()
+        .typ::<ConnectAntigravityOutput>()
         .typ::<ProviderAvailability>()
         .typ::<ProviderAvailabilityState>()
         .typ::<ProviderAvailabilityInput>()
@@ -913,6 +923,9 @@ fn main() {
             get_provider_availability: "get_provider_availability".to_string(),
             set_provider_availability: "set_provider_availability".to_string(),
             provider_account_usage: "provider_account_usage".to_string(),
+            install_antigravity: "install_antigravity".to_string(),
+            get_antigravity_status: "get_antigravity_status".to_string(),
+            connect_antigravity: "connect_antigravity".to_string(),
         },
     );
 

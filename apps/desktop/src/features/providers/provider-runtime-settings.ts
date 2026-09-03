@@ -13,10 +13,14 @@ export const CODEX_SUBAGENT_CONCURRENCY_OPTIONS = SUBAGENT_CONCURRENCY_OPTIONS;
  */
 export type ProviderRuntimeCapabilities = Pick<
 	Capabilities,
-	"supportsRuntimeHome" | "supportsShadowHome" | "supportsSubagentConcurrency"
+	| "supportsRuntimeHome"
+	| "supportsRuntimeBinary"
+	| "supportsShadowHome"
+	| "supportsSubagentConcurrency"
 >;
 
 export type ProviderRuntimeDraft = {
+	binaryPath: string;
 	homePath: string;
 	shadowHomePath: string;
 	maxConcurrentSubagents: string;
@@ -25,6 +29,7 @@ export type ProviderRuntimeDraft = {
 export type ProviderRuntimeSettings = Record<string, ProviderRuntimeDraft>;
 
 const EMPTY_DRAFT: ProviderRuntimeDraft = {
+	binaryPath: "",
 	homePath: "",
 	shadowHomePath: "",
 	maxConcurrentSubagents: "",
@@ -47,6 +52,7 @@ function normalizeDraftEntry(value: unknown): ProviderRuntimeDraft | null {
 
 	const record = value as Record<string, unknown>;
 	return {
+		binaryPath: typeof record.binaryPath === "string" ? record.binaryPath : "",
 		homePath: typeof record.homePath === "string" ? record.homePath : "",
 		shadowHomePath:
 			typeof record.shadowHomePath === "string" ? record.shadowHomePath : "",
@@ -60,6 +66,12 @@ export function supportsProviderRuntimeHome(
 	capabilities: ProviderRuntimeCapabilities | null | undefined,
 ): boolean {
 	return capabilities?.supportsRuntimeHome === true;
+}
+
+export function supportsProviderRuntimeBinary(
+	capabilities: ProviderRuntimeCapabilities | null | undefined,
+): boolean {
+	return capabilities?.supportsRuntimeBinary === true;
 }
 
 export function supportsProviderShadowHome(
@@ -79,6 +91,7 @@ export function supportsProviderRuntime(
 	capabilities: ProviderRuntimeCapabilities | null | undefined,
 ): boolean {
 	return (
+		supportsProviderRuntimeBinary(capabilities) ||
 		supportsProviderRuntimeHome(capabilities) ||
 		supportsProviderShadowHome(capabilities) ||
 		supportsProviderSubagentConcurrency(capabilities)
@@ -143,6 +156,7 @@ export function setProviderRuntimeDraft(
 	const next = {
 		...settings,
 		[providerId]: {
+			binaryPath: draft.binaryPath,
 			homePath: draft.homePath,
 			shadowHomePath: draft.shadowHomePath,
 			maxConcurrentSubagents: draft.maxConcurrentSubagents,
@@ -150,6 +164,7 @@ export function setProviderRuntimeDraft(
 	};
 
 	if (
+		!draft.binaryPath.trim() &&
 		!draft.homePath.trim() &&
 		!draft.shadowHomePath.trim() &&
 		!draft.maxConcurrentSubagents
@@ -188,6 +203,10 @@ export function draftToProviderRuntimeConfig(
 	}
 
 	const gated = capabilities !== undefined;
+	const binaryPath =
+		!gated || supportsProviderRuntimeBinary(capabilities)
+			? draft.binaryPath.trim()
+			: "";
 	const homePath =
 		!gated || supportsProviderRuntimeHome(capabilities) ? draft.homePath.trim() : "";
 	const shadowHomePath =
@@ -199,11 +218,12 @@ export function draftToProviderRuntimeConfig(
 			? normalizeMaxConcurrentSubagents(draft.maxConcurrentSubagents)
 			: "";
 
-	if (!homePath && !shadowHomePath && !maxConcurrentSubagents) {
+	if (!binaryPath && !homePath && !shadowHomePath && !maxConcurrentSubagents) {
 		return null;
 	}
 
 	return {
+		binaryPath: binaryPath || null,
 		homePath: homePath || null,
 		shadowHomePath: shadowHomePath || null,
 		maxConcurrentSubagents: maxConcurrentSubagents

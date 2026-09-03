@@ -162,6 +162,10 @@ impl std::fmt::Debug for ProviderMcpSecret {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderRuntimeConfig {
+    /// Explicit provider executable. When set, adapters must use this exact
+    /// path and fail closed if it is invalid instead of falling back to PATH.
+    #[serde(default)]
+    pub binary_path: Option<String>,
     #[serde(default)]
     pub home_path: Option<String>,
     #[serde(default)]

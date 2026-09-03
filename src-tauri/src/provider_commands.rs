@@ -1,6 +1,8 @@
 use dcc_tauri::commands::provider_commands::{
-    ListProvidersOutput, ProviderAccountUsageInput, ProviderAccountUsageOutput,
-    ProviderAvailabilityInput, ProviderAvailabilityOutput, SetProviderAvailabilityInput,
+    AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
+    ConnectAntigravityOutput, InstallAntigravityOutput, ListProvidersOutput,
+    ProviderAccountUsageInput, ProviderAccountUsageOutput, ProviderAvailabilityInput,
+    ProviderAvailabilityOutput, SetProviderAvailabilityInput,
 };
 use dcc_tauri::state::SessionCommandState;
 use tauri::State;
@@ -34,4 +36,27 @@ pub async fn provider_account_usage(
     input: ProviderAccountUsageInput,
 ) -> Result<ProviderAccountUsageOutput, String> {
     dcc_tauri::commands::provider_commands::provider_account_usage(state, input).await
+}
+
+#[tauri::command]
+pub async fn install_antigravity(
+    state: State<'_, SessionCommandState>,
+) -> Result<InstallAntigravityOutput, String> {
+    dcc_tauri::commands::provider_commands::install_antigravity(state).await
+}
+
+#[tauri::command]
+pub async fn get_antigravity_status(
+    state: State<'_, SessionCommandState>,
+    input: AntigravityStatusInput,
+) -> Result<AntigravityStatusOutput, String> {
+    dcc_tauri::commands::provider_commands::get_antigravity_status(state, input).await
+}
+
+#[tauri::command]
+pub async fn connect_antigravity(
+    state: State<'_, SessionCommandState>,
+    input: ConnectAntigravityInput,
+) -> Result<ConnectAntigravityOutput, String> {
+    dcc_tauri::commands::provider_commands::connect_antigravity(state, input).await
 }

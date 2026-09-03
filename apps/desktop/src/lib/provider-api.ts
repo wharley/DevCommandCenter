@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { PROVIDER_METHODS } from "@dcc/contracts";
 import type {
 	ListProvidersOutput,
+	AntigravityStatusOutput,
+	InstallAntigravityOutput,
+	ConnectAntigravityOutput,
 	ProviderAvailabilityInput,
 	ProviderAvailabilityOutput,
 	ProviderAccountUsageOutput,
@@ -90,5 +93,44 @@ export async function getProviderAccountUsage(
 				providerRuntime,
 			},
 		},
+	);
+}
+
+export async function installAntigravity(): Promise<InstallAntigravityOutput> {
+	if (!isTauriRuntime()) {
+		throw new Error("Antigravity installation requires the desktop runtime.");
+	}
+	return invoke<InstallAntigravityOutput>(
+		PROVIDER_METHODS.installAntigravity,
+	);
+}
+
+export async function getAntigravityStatus(
+	providerRuntime: ProviderRuntimeConfig | null,
+): Promise<AntigravityStatusOutput> {
+	if (!isTauriRuntime()) {
+		return {
+			managedRuntimeInstalled: false,
+			runtimeVersion: null,
+			signedIn: false,
+			cachedModelCount: 0,
+			lastVerifiedAt: null,
+		};
+	}
+	return invoke<AntigravityStatusOutput>(
+		PROVIDER_METHODS.getAntigravityStatus,
+		{ input: { providerRuntime } },
+	);
+}
+
+export async function connectAntigravity(
+	providerRuntime: ProviderRuntimeConfig | null,
+): Promise<ConnectAntigravityOutput> {
+	if (!isTauriRuntime()) {
+		throw new Error("Antigravity sign-in requires the desktop runtime.");
+	}
+	return invoke<ConnectAntigravityOutput>(
+		PROVIDER_METHODS.connectAntigravity,
+		{ input: { providerRuntime } },
 	);
 }

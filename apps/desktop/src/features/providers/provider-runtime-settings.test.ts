@@ -34,6 +34,7 @@ describe("provider runtime settings", () => {
 		);
 
 		expect(getProviderRuntimeDraft(readProviderRuntimeSettings(), "codex")).toEqual({
+			binaryPath: "",
 			homePath: "/tmp/codex",
 			shadowHomePath: "",
 			maxConcurrentSubagents: "",
@@ -43,11 +44,13 @@ describe("provider runtime settings", () => {
 	it("projects a supported concurrency limit into the session runtime", () => {
 		expect(
 			draftToProviderRuntimeConfig({
+				binaryPath: "",
 				homePath: "",
 				shadowHomePath: "",
 				maxConcurrentSubagents: "4",
 			}),
 		).toEqual({
+			binaryPath: null,
 			homePath: null,
 			shadowHomePath: null,
 			maxConcurrentSubagents: 4,
@@ -56,6 +59,7 @@ describe("provider runtime settings", () => {
 
 	it("drops empty settings but keeps a concurrency-only preference", () => {
 		const concurrencyOnly = setProviderRuntimeDraft({}, "codex", {
+			binaryPath: "",
 			homePath: "",
 			shadowHomePath: "",
 			maxConcurrentSubagents: "2",
@@ -64,6 +68,7 @@ describe("provider runtime settings", () => {
 
 		expect(
 			setProviderRuntimeDraft(concurrencyOnly, "codex", {
+				binaryPath: "",
 				homePath: "",
 				shadowHomePath: "",
 				maxConcurrentSubagents: "",
@@ -73,6 +78,7 @@ describe("provider runtime settings", () => {
 
 	it("projects only the runtime fields the provider capability declares", () => {
 		const draft = {
+			binaryPath: "/opt/dcc/provider",
 			homePath: "~/dcc-home",
 			shadowHomePath: "~/dcc-shadow",
 			maxConcurrentSubagents: "4",
@@ -80,11 +86,13 @@ describe("provider runtime settings", () => {
 
 		expect(
 			draftToProviderRuntimeConfig(draft, {
+				supportsRuntimeBinary: true,
 				supportsRuntimeHome: true,
 				supportsShadowHome: true,
 				supportsSubagentConcurrency: true,
 			}),
 		).toEqual({
+			binaryPath: "/opt/dcc/provider",
 			homePath: "~/dcc-home",
 			shadowHomePath: "~/dcc-shadow",
 			maxConcurrentSubagents: 4,
@@ -92,11 +100,13 @@ describe("provider runtime settings", () => {
 
 		expect(
 			draftToProviderRuntimeConfig(draft, {
+				supportsRuntimeBinary: false,
 				supportsRuntimeHome: true,
 				supportsShadowHome: false,
 				supportsSubagentConcurrency: false,
 			}),
 		).toEqual({
+			binaryPath: null,
 			homePath: "~/dcc-home",
 			shadowHomePath: null,
 			maxConcurrentSubagents: null,
@@ -136,6 +146,7 @@ describe("provider runtime settings", () => {
 		);
 
 		expect(getProviderRuntimeDraft(readProviderRuntimeSettings(), "codex")).toEqual({
+			binaryPath: "",
 			homePath: "",
 			shadowHomePath: "",
 			maxConcurrentSubagents: "",

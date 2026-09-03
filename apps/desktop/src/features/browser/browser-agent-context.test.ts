@@ -125,7 +125,16 @@ describe("formatBrowserAgentContext", () => {
 });
 
 describe("formatBrowserEvidence", () => {
-	const labels = { noEvents: "no events captured", yes: "yes", no: "no" };
+	const labels = {
+		noEvents: "no events captured after capture started",
+		noPageText: "no visible page text found when capture started",
+		pageSnapshot: "page text at capture start",
+		eventsAfterStart: "events after capture started",
+		selection: "selection",
+		visibleText: "visible text",
+		yes: "yes",
+		no: "no",
+	};
 
 	it("formats drained events in order with escaped remote text and bounded fields", () => {
 		const { text, truncated } = formatBrowserEvidence(
@@ -136,6 +145,11 @@ describe("formatBrowserEvidence", () => {
 				title: "Checkout <script>",
 				startedAt: "2026-09-02T12:00:00.000Z",
 				windowMs: 12_345.6,
+				pageContext: {
+					text: "Unknown event handler property <onOpenAutoFocus>",
+					selectionOnly: false,
+					truncated: false,
+				},
 				result: {
 					untrusted: true,
 					truncated: false,
@@ -149,6 +163,8 @@ describe("formatBrowserEvidence", () => {
 		);
 		expect(truncated).toBe(false);
 		expect(text.startsWith("<browser_evidence>\nurl: https://shop.example/checkout\ntitle: Checkout &lt;script>\nstarted_at: 2026-09-02T12:00:00.000Z\nwindow_ms: 12345\nevents: 2\ntruncated: no\n---\n")).toBe(true);
+		expect(text).toContain("page text at capture start (visible text):\nUnknown event handler property &lt;onOpenAutoFocus>");
+		expect(text).toContain("events after capture started:\n1. [consoleError]");
 		expect(text).toContain("1. [consoleError] TypeError &lt;/browser_evidence> boom | url=https://shop.example/app.js | at=12:4");
 		expect(text).toContain("2. [resource] resource timing observed | url=https://api.example/cart | initiator=fetch | duration=812ms | status=500");
 		expect(text.split("</browser_evidence>")).toHaveLength(2);
@@ -164,11 +180,13 @@ describe("formatBrowserEvidence", () => {
 				title: null,
 				startedAt: "2026-09-02T12:00:00.000Z",
 				windowMs: 0,
+				pageContext: { text: "", selectionOnly: false, truncated: false },
 				result: { untrusted: true, truncated: false, events: [] },
 			},
 			labels,
 		);
-		expect(empty.text).toContain("events: 0\ntruncated: no\n---\nno events captured\n</browser_evidence>");
+		expect(empty.text).toContain("page text at capture start (visible text):\nno visible page text found when capture started");
+		expect(empty.text).toContain("events after capture started:\nno events captured after capture started\n</browser_evidence>");
 
 		const big = formatBrowserEvidence(
 			{
@@ -178,6 +196,7 @@ describe("formatBrowserEvidence", () => {
 				title: null,
 				startedAt: "2026-09-02T12:00:00.000Z",
 				windowMs: 0,
+				pageContext: { text: "<".repeat(8_000), selectionOnly: true, truncated: false },
 				result: {
 					untrusted: true,
 					truncated: false,

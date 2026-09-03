@@ -133,7 +133,7 @@ export function formatBrowserAgentContext(
 	return envelope;
 }
 
-/** A drained console/resource capture, scoped to the page it was started on. */
+/** A page snapshot plus drained console/resource events, scoped to one document. */
 export type BrowserEvidenceCapture = {
 	workspaceId: string;
 	sessionId: string | null;
@@ -141,19 +141,30 @@ export type BrowserEvidenceCapture = {
 	title: string | null;
 	startedAt: string;
 	windowMs: number;
+	pageContext: Pick<BrowserAgentContext, "text" | "selectionOnly" | "truncated">;
 	result: BrowserEvidenceResult;
 };
 
 /**
- * Formats a drained capture as one delimited block. Event text is remote and
- * untrusted, so it is escaped and stays bounded; the backend already redacts
- * credentials, query strings, fragments and sensitive terms.
+ * Formats the initial visible text and drained events as one delimited block.
+ * All page data is remote and untrusted, so it is escaped and stays bounded;
+ * the backend already redacts event credentials and sensitive URL components.
  */
 export function formatBrowserEvidence(
 	capture: BrowserEvidenceCapture,
-	labels: { noEvents: string; yes: string; no: string },
+	labels: {
+		noEvents: string;
+		noPageText: string;
+		pageSnapshot: string;
+		eventsAfterStart: string;
+		selection: string;
+		visibleText: string;
+		yes: string;
+		no: string;
+	},
 ) {
 	const escape = escapeBrowserAgentContext;
+	const pageText = escapeBrowserAgentContextWithin(capture.pageContext.text, 6_000);
 	const lines = capture.result.events.map((event, index) => {
 		const parts = [`${index + 1}. [${escape(event.kind)}] ${escape(event.message)}`];
 		if (event.url) parts.push(`url=${escape(event.url)}`);
@@ -166,7 +177,7 @@ export function formatBrowserEvidence(
 		return parts.join(" | ");
 	});
 	let included = lines;
-	let truncated = capture.result.truncated;
+	let truncated = capture.result.truncated || capture.pageContext.truncated || pageText.truncated;
 	const build = () =>
 		[
 			`<${BROWSER_EVIDENCE_TAG}>`,
@@ -177,6 +188,10 @@ export function formatBrowserEvidence(
 			`events: ${included.length}`,
 			`truncated: ${truncated ? labels.yes : labels.no}`,
 			"---",
+			`${labels.pageSnapshot} (${capture.pageContext.selectionOnly ? labels.selection : labels.visibleText}):`,
+			pageText.escaped || labels.noPageText,
+			"---",
+			`${labels.eventsAfterStart}:`,
 			...(included.length > 0 ? included : [labels.noEvents]),
 			`</${BROWSER_EVIDENCE_TAG}>`,
 		].join("\n");

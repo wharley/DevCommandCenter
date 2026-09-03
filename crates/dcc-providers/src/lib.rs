@@ -1,3 +1,4 @@
+pub mod antigravity_acp;
 pub mod claude_code;
 mod claude_mcp;
 pub mod claude_sdk_sidecar;
@@ -38,20 +39,29 @@ use dcc_core::domain::provider::{
 };
 use dcc_core::ports::Provider;
 
-pub const PROVIDER_IDS: [&str; 6] = ["claude_code", "codex", "gemini", "droid", "cursor", "grok"];
+pub const PROVIDER_IDS: [&str; 7] = [
+    "claude_code",
+    "codex",
+    "cursor",
+    "grok",
+    "antigravity",
+    "gemini",
+    "droid",
+];
 
 fn provider_registry() -> &'static HashMap<String, Arc<dyn Provider>> {
     static REGISTRY: OnceLock<HashMap<String, Arc<dyn Provider>>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let providers: [Arc<dyn Provider>; 6] = [
+        let providers: [Arc<dyn Provider>; 7] = [
             Arc::new(claude_code::adapter()),
             Arc::new(codex::adapter()),
-            Arc::new(gemini::adapter()),
-            Arc::new(droid::adapter()),
             Arc::new(cursor::adapter()),
             Arc::new(grok_acp::GrokAcpAdapter::new(
                 grok_acp::stable_grok_capabilities(),
             )),
+            Arc::new(antigravity_acp::AntigravityAcpAdapter::new()),
+            Arc::new(gemini::adapter()),
+            Arc::new(droid::adapter()),
         ];
 
         let mut registry = HashMap::with_capacity(PROVIDER_IDS.len());
@@ -83,6 +93,7 @@ pub enum ProviderCapability {
     DelegationRequest,
     MultiRoot,
     RuntimeHome,
+    RuntimeBinary,
     ShadowHome,
     SubagentConcurrency,
     AccountUsage,
@@ -108,6 +119,7 @@ pub fn supports_provider_capability(
         ProviderCapability::DelegationRequest => capabilities.can_request_delegation,
         ProviderCapability::MultiRoot => capabilities.supports_multi_root,
         ProviderCapability::RuntimeHome => capabilities.supports_runtime_home,
+        ProviderCapability::RuntimeBinary => capabilities.supports_runtime_binary,
         ProviderCapability::ShadowHome => capabilities.supports_shadow_home,
         ProviderCapability::SubagentConcurrency => capabilities.supports_subagent_concurrency,
         ProviderCapability::AccountUsage => capabilities.supports_account_usage,
@@ -153,6 +165,13 @@ pub fn validate_provider_runtime_config(
     capabilities: &Capabilities,
     runtime: &dcc_core::ports::ProviderRuntimeConfig,
 ) -> Result<(), String> {
+    if runtime.binary_path.is_some()
+        && !supports_provider_capability(capabilities, ProviderCapability::RuntimeBinary)
+    {
+        return Err(format!(
+            "provider {provider_id} does not support an explicit runtime executable"
+        ));
+    }
     if runtime.home_path.is_some()
         && !supports_provider_capability(capabilities, ProviderCapability::RuntimeHome)
     {
@@ -245,14 +264,27 @@ pub async fn provider_catalog() -> ProviderCatalog {
     let mut providers = Vec::with_capacity(PROVIDER_IDS.len());
     providers.push(claude_code::descriptor(health[0].clone()));
     providers.push(codex::descriptor(health[1].clone()));
-    providers.push(gemini::descriptor(health[2].clone()));
-    providers.push(droid::descriptor(health[3].clone()));
     let cursor_models = cursor::discover_models().await;
-    providers.push(cursor::descriptor(health[4].clone(), cursor_models));
+    providers.push(cursor::descriptor(health[2].clone(), cursor_models));
     providers.push(grok_acp::descriptor(
-        health[5].clone(),
+        health[3].clone(),
         grok_acp::stable_grok_capabilities(),
     ));
+    let antigravity_models = match provider_runtime("antigravity") {
+        Some(runtime) => runtime
+            .discover_models()
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    providers.push(antigravity_acp::descriptor(
+        health[4].clone(),
+        antigravity_models,
+    ));
+    providers.push(gemini::descriptor(health[5].clone()));
+    providers.push(droid::descriptor(health[6].clone()));
     for descriptor in &mut providers {
         // Labels/models stay adapter descriptors, while every capability comes
         // from the one canonical registered runtime. The sole catalog overlay
@@ -281,9 +313,27 @@ mod tests {
     use crate::cursor_mcp::CURSOR_MCP_RUNTIME_VERSION;
 
     #[test]
-    fn registers_grok_runtime() {
+    fn registers_acp_runtimes() {
+        assert!(PROVIDER_IDS.contains(&"antigravity"));
+        assert!(provider_runtime("antigravity").is_some());
         assert!(PROVIDER_IDS.contains(&"grok"));
         assert!(provider_runtime("grok").is_some());
+    }
+
+    #[test]
+    fn provider_order_matches_the_product_picker_order() {
+        assert_eq!(
+            PROVIDER_IDS,
+            [
+                "claude_code",
+                "codex",
+                "cursor",
+                "grok",
+                "antigravity",
+                "gemini",
+                "droid",
+            ]
+        );
     }
 
     #[test]
@@ -330,6 +380,24 @@ mod tests {
         assert!(supports_provider_approval_policy(
             &codex.capabilities,
             dcc_core::domain::provider::ProviderApprovalPolicy::Ask
+        ));
+
+        let antigravity = provider_registration("antigravity").expect("Antigravity provider");
+        assert!(!supports_provider_capability(
+            &antigravity.capabilities,
+            ProviderCapability::MultiRoot
+        ));
+        assert!(supports_provider_approval_policy(
+            &antigravity.capabilities,
+            dcc_core::domain::provider::ProviderApprovalPolicy::Ask
+        ));
+        assert!(supports_provider_approval_policy(
+            &antigravity.capabilities,
+            dcc_core::domain::provider::ProviderApprovalPolicy::Auto
+        ));
+        assert!(supports_provider_approval_policy(
+            &antigravity.capabilities,
+            dcc_core::domain::provider::ProviderApprovalPolicy::FullAccess
         ));
 
         let droid = provider_registration("droid").expect("Droid provider");
@@ -382,22 +450,30 @@ mod tests {
 
     #[test]
     fn runtime_usage_and_concurrency_capabilities_match_each_adapter_contract() {
-        let expectations: [(&str, bool, bool, bool, bool); 6] = [
-            // provider, runtime home, shadow home, subagent concurrency, usage
-            ("claude_code", true, false, false, true),
-            ("codex", true, true, true, true),
-            ("gemini", true, false, false, false),
-            ("droid", false, false, false, false),
-            ("cursor", false, false, false, false),
-            ("grok", true, false, false, false),
+        let expectations: [(&str, bool, bool, bool, bool, bool); 7] = [
+            // provider, runtime home, binary path, shadow home, subagent concurrency, usage
+            ("claude_code", true, false, false, false, true),
+            ("codex", true, false, true, true, true),
+            ("antigravity", true, true, false, false, false),
+            ("gemini", true, true, false, false, false),
+            ("droid", false, false, false, false, false),
+            ("cursor", false, false, false, false, false),
+            ("grok", true, false, false, false, false),
         ];
-        for (provider_id, runtime_home, shadow_home, concurrency, usage) in expectations {
+        for (provider_id, runtime_home, runtime_binary, shadow_home, concurrency, usage) in
+            expectations
+        {
             let registration = provider_registration(provider_id).expect("registered provider");
             let capabilities = &registration.capabilities;
             assert_eq!(
                 supports_provider_capability(capabilities, ProviderCapability::RuntimeHome),
                 runtime_home,
                 "{provider_id} runtime home"
+            );
+            assert_eq!(
+                supports_provider_capability(capabilities, ProviderCapability::RuntimeBinary),
+                runtime_binary,
+                "{provider_id} runtime binary"
             );
             assert_eq!(
                 supports_provider_capability(capabilities, ProviderCapability::ShadowHome),
@@ -432,6 +508,7 @@ mod tests {
             "droid",
             &droid.capabilities,
             &ProviderRuntimeConfig {
+                binary_path: None,
                 home_path: Some("/tmp/home".to_string()),
                 ..ProviderRuntimeConfig::default()
             }
@@ -472,6 +549,7 @@ mod tests {
             "codex",
             &codex.capabilities,
             &ProviderRuntimeConfig {
+                binary_path: None,
                 home_path: Some("/tmp/home".to_string()),
                 shadow_home_path: Some("/tmp/shadow".to_string()),
                 max_concurrent_subagents: Some(4),
@@ -522,6 +600,7 @@ mod tests {
         let expectations = [
             ("claude_code", Native, Native, true),
             ("codex", Native, Native, false),
+            ("antigravity", PromptFallback, PromptFallback, false),
             ("gemini", Native, PromptFallback, false),
             ("droid", Native, PromptFallback, false),
             ("cursor", Native, PromptFallback, false),

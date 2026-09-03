@@ -17,6 +17,7 @@ fn gemini_capabilities() -> dcc_core::domain::provider::Capabilities {
         ProviderApprovalPolicy::FullAccess,
     ];
     capabilities.supports_runtime_home = true;
+    capabilities.supports_runtime_binary = true;
     capabilities.plan_mode_support = dcc_core::domain::provider::TurnControlSupport::Native;
     capabilities
 }
@@ -24,8 +25,8 @@ fn gemini_capabilities() -> dcc_core::domain::provider::Capabilities {
 pub fn adapter() -> HeadlessCliProviderAdapter {
     HeadlessCliProviderAdapter::new(
         "gemini",
-        "Gemini",
-        "Stable Gemini CLI provider for workspace tasks.",
+        "Gemini CLI (legacy)",
+        "Legacy Gemini CLI provider for API keys, Vertex AI, and eligible enterprise accounts. Personal Google sign-in has moved to Antigravity.",
         "gemini",
         gemini_capabilities(),
         true,
@@ -36,8 +37,8 @@ pub fn adapter() -> HeadlessCliProviderAdapter {
 pub fn descriptor(health: HealthStatus) -> ProviderDescriptor {
     ProviderDescriptor {
         id: ProviderId("gemini".to_string()),
-        label: "Gemini".to_string(),
-        description: "Stable Gemini CLI provider for workspace tasks.".to_string(),
+        label: "Gemini CLI (legacy)".to_string(),
+        description: "Legacy Gemini CLI provider for API keys, Vertex AI, and eligible enterprise accounts. Personal Google sign-in has moved to Antigravity.".to_string(),
         models: model_registry::GEMINI
             .iter()
             .map(|m| m.to_descriptor())

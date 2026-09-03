@@ -41,7 +41,7 @@ type WorkspaceBrowserSurfaceProps = {
 	initialUrl?: string | null;
 	onClose: () => void;
 	onSendToAgent?: (context: BrowserAgentContext) => void;
-	/** Receives a drained console/resource capture started by an explicit gesture. */
+	/** Receives the initial page context plus events after an explicit gesture. */
 	onSendEvidenceToAgent?: (capture: BrowserEvidenceCapture) => void;
 	/** Splitter drags hide the native view for the duration of the resize. */
 	forceOccluded?: boolean;
@@ -159,6 +159,7 @@ export function WorkspaceBrowserSurface({
 		title: string | null;
 		startedAtMs: number;
 		expiresAtMs: number;
+		pageContext: Pick<BrowserAgentContext, "text" | "selectionOnly" | "truncated">;
 	} | null>(null);
 	const [evidenceBusy, setEvidenceBusy] = useState(false);
 	const [evidenceSecondsLeft, setEvidenceSecondsLeft] = useState(0);
@@ -242,7 +243,8 @@ export function WorkspaceBrowserSurface({
 				setSnapshot(next);
 				updateLifecycleToken(next.lifecycleToken);
 				setAddress(next.url ?? "");
-				setLoading(false);
+				// Do not regress a Finished event that raced ahead of this response.
+				setLoading((current) => current && next.loading);
 				scheduleBoundsUpdate();
 			})
 			.catch((reason: unknown) => {
@@ -265,7 +267,7 @@ export function WorkspaceBrowserSurface({
 			setSnapshot(next);
 			updateLifecycleToken(next.lifecycleToken);
 			if (next.url) setAddress(next.url);
-			setLoading(false);
+			setLoading(next.loading);
 		})
 			.then((dispose) => {
 				if (disposed) {
@@ -374,13 +376,16 @@ export function WorkspaceBrowserSurface({
 		setLoading(true);
 		void navigateBrowser({ workspaceId, sessionId, lifecycleToken, url })
 			.then((next) => {
+				// Navigation invalidates the page-bound collector in the backend.
+				setEvidenceCapture(null);
 				setSnapshot(next);
 				setAddress(next.url ?? url);
+				setLoading((current) => current && next.loading);
 			})
 			.catch((reason: unknown) => {
 				setError(reason instanceof Error ? reason.message : String(reason));
-			})
-			.finally(() => setLoading(false));
+				setLoading(false);
+			});
 	}, [address, sessionId, workspaceId]);
 
 	const handleReload = useCallback(() => {
@@ -389,10 +394,16 @@ export function WorkspaceBrowserSurface({
 		setError(null);
 		setLoading(true);
 		void reloadBrowser({ workspaceId, sessionId, lifecycleToken })
+			.then((next) => {
+				// Reload creates a new document, so an earlier collector cannot survive it.
+				setEvidenceCapture(null);
+				setSnapshot(next);
+				setLoading((current) => current && next.loading);
+			})
 			.catch((reason: unknown) => {
 				setError(reason instanceof Error ? reason.message : String(reason));
-			})
-			.finally(() => setLoading(false));
+				setLoading(false);
+			});
 	}, [sessionId, workspaceId]);
 
 	const handleSendToAgent = useCallback(() => {
@@ -476,6 +487,11 @@ export function WorkspaceBrowserSurface({
 					title: context.title,
 					startedAtMs: now,
 					expiresAtMs: now + handle.remainingMs,
+					pageContext: {
+						text: context.text,
+						selectionOnly: context.selectionOnly,
+						truncated: context.truncated,
+					},
 				});
 			})
 			.catch((reason: unknown) => {
@@ -502,6 +518,7 @@ export function WorkspaceBrowserSurface({
 					title: capture.title,
 					startedAt: new Date(capture.startedAtMs).toISOString(),
 					windowMs: Date.now() - capture.startedAtMs,
+					pageContext: capture.pageContext,
 					result,
 				});
 			})

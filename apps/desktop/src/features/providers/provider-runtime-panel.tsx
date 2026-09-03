@@ -1,6 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCcw } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	CheckCircle2,
+	Download,
+	LoaderCircle,
+	LogIn,
+	RefreshCcw,
+} from "lucide-react";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,9 +22,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
+	connectAntigravity,
+	getAntigravityStatus,
+	installAntigravity,
+} from "@/lib/provider-api";
+import { toast } from "sonner";
+import {
 	SUBAGENT_CONCURRENCY_OPTIONS,
+	draftToProviderRuntimeConfig,
 	getProviderRuntimeDraft,
 	supportsProviderRuntime,
+	supportsProviderRuntimeBinary,
 	supportsProviderRuntimeHome,
 	supportsProviderShadowHome,
 	supportsProviderSubagentConcurrency,
@@ -45,6 +60,72 @@ function ProviderRuntimeCard({
 	onClearRuntime: (providerId: string) => void;
 }) {
 	const { t } = useTranslation("common");
+	const queryClient = useQueryClient();
+	const [installing, setInstalling] = useState(false);
+	const [connecting, setConnecting] = useState(false);
+	const antigravityRuntime = useMemo(
+		() => draftToProviderRuntimeConfig(draft, provider.capabilities),
+		[draft, provider.capabilities],
+	);
+	const antigravityStatusQuery = useQuery({
+		queryKey: ["providers", "antigravity", "status", antigravityRuntime],
+		queryFn: () => getAntigravityStatus(antigravityRuntime),
+		enabled: provider.id === "antigravity",
+		staleTime: 30_000,
+	});
+	const antigravityStatus = antigravityStatusQuery.data;
+
+	async function installManagedAntigravity() {
+		setInstalling(true);
+		try {
+			const installed = await installAntigravity();
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["providers", "catalog"] }),
+				queryClient.invalidateQueries({
+					queryKey: ["providers", "antigravity", "status"],
+				}),
+			]);
+			toast.success(
+				t("settings.model.antigravityInstallSucceeded", {
+					version: installed.version,
+				}),
+			);
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: t("settings.model.antigravityInstallFailed"),
+			);
+		} finally {
+			setInstalling(false);
+		}
+	}
+
+	async function signInToAntigravity() {
+		setConnecting(true);
+		try {
+			const connected = await connectAntigravity(antigravityRuntime);
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ["providers", "catalog"] }),
+				queryClient.invalidateQueries({
+					queryKey: ["providers", "antigravity", "status"],
+				}),
+			]);
+			toast.success(
+				t("settings.model.antigravityConnectSucceeded", {
+					count: connected.models.length,
+				}),
+			);
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: t("settings.model.antigravityConnectFailed"),
+			);
+		} finally {
+			setConnecting(false);
+		}
+	}
 
 	return (
 		<Card className="rounded-2xl border-border/60 bg-muted/10 p-0 shadow-none">
@@ -77,6 +158,108 @@ function ProviderRuntimeCard({
 				</Button>
 			</CardHeader>
 			<CardContent className="space-y-3 px-4 py-4">
+				{provider.id === "antigravity" ? (
+					<div className="space-y-2 rounded-xl border border-border/50 bg-background/60 p-3">
+						<div className="space-y-3">
+							<div className="min-w-0">
+								<p className="text-[12px] font-medium">
+									{t("settings.model.antigravitySetupTitle")}
+								</p>
+								<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+									{t("settings.model.antigravitySetupHint")}
+								</p>
+								{antigravityStatus ? (
+									<div className="mt-2 flex flex-wrap gap-1.5">
+										{antigravityStatus.managedRuntimeInstalled ? (
+											<Badge variant="success" className="gap-1 text-[10px]">
+												<CheckCircle2 className="size-3" aria-hidden />
+												{t("settings.model.antigravityRuntimeInstalled", {
+													version: antigravityStatus.runtimeVersion,
+												})}
+											</Badge>
+										) : null}
+										{antigravityStatus.signedIn ? (
+											<Badge variant="success" className="gap-1 text-[10px]">
+												<CheckCircle2 className="size-3" aria-hidden />
+												{t("settings.model.antigravitySignedIn", {
+													count: antigravityStatus.cachedModelCount,
+												})}
+											</Badge>
+										) : null}
+									</div>
+								) : null}
+							</div>
+							<div className="flex min-w-0 flex-wrap gap-2">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={
+										installing ||
+										connecting ||
+										antigravityStatusQuery.isPending ||
+										antigravityStatus?.managedRuntimeInstalled
+									}
+									onClick={() => void installManagedAntigravity()}
+								>
+									{installing ? (
+										<LoaderCircle className="size-4 animate-spin" aria-hidden />
+									) : antigravityStatus?.managedRuntimeInstalled ? (
+										<CheckCircle2 className="size-4" aria-hidden />
+									) : (
+										<Download className="size-4" aria-hidden />
+									)}
+									{installing
+										? t("settings.model.antigravityInstalling")
+										: antigravityStatus?.managedRuntimeInstalled
+											? t("settings.model.antigravityInstalled")
+											: t("settings.model.antigravityInstall")}
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									disabled={installing || connecting}
+									onClick={() => void signInToAntigravity()}
+								>
+									{connecting ? (
+										<LoaderCircle className="size-4 animate-spin" aria-hidden />
+									) : antigravityStatus?.signedIn ? (
+										<RefreshCcw className="size-4" aria-hidden />
+									) : (
+										<LogIn className="size-4" aria-hidden />
+									)}
+									{connecting
+										? t("settings.model.antigravityConnecting")
+										: antigravityStatus?.signedIn
+											? t("settings.model.antigravityRefreshModels")
+											: t("settings.model.antigravityConnect")}
+								</Button>
+							</div>
+						</div>
+					</div>
+				) : null}
+				{supportsProviderRuntimeBinary(provider.capabilities) ? (
+					<div className="space-y-1.5">
+						<Label htmlFor={`provider-binary-${provider.id}`} className="text-[12px]">
+							{t("settings.model.runtimeBinaryPath")}
+						</Label>
+						<Input
+							id={`provider-binary-${provider.id}`}
+							value={draft.binaryPath}
+							onChange={(event) =>
+								onChangeRuntime(provider.id, {
+									...draft,
+									binaryPath: event.target.value,
+								})
+							}
+							placeholder={t("settings.model.runtimeBinaryPlaceholder")}
+							autoComplete="off"
+						/>
+						<p className="text-[11px] leading-relaxed text-muted-foreground">
+							{t("settings.model.runtimeBinaryHint")}
+						</p>
+					</div>
+				) : null}
 				{supportsProviderSubagentConcurrency(provider.capabilities) ? (
 					<div className="space-y-1.5 rounded-xl border border-border/50 bg-background/60 p-3">
 						<Label

@@ -13,6 +13,7 @@ export type BrowserSnapshot = {
 	sessionId: string | null;
 	lifecycleToken: number;
 	visible: boolean;
+	loading: boolean;
 	url: string | null;
 	title: string | null;
 };
