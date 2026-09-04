@@ -130,7 +130,7 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					project_id: record.kind.projectId,
 					provider_id: record.kind.providerId,
 					model: record.kind.model,
-					...(record.kind.forkedFrom ? { forked_from: record.kind.forkedFrom } : {}),
+					forked_from: record.kind.forkedFrom ?? null,
 				},
 			};
 		case "turn_started":
@@ -141,10 +141,8 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					prompt: record.kind.prompt,
 					plan_mode: record.kind.planMode ?? null,
 					model: record.kind.model ?? null,
-					...(record.kind.evidence ? { evidence: record.kind.evidence } : {}),
-					...(record.kind.retryOfTurnId
-						? { retry_of_turn_id: record.kind.retryOfTurnId }
-						: {}),
+					evidence: record.kind.evidence ?? null,
+					retry_of_turn_id: record.kind.retryOfTurnId ?? null,
 				},
 			};
 		case "turn_steered":

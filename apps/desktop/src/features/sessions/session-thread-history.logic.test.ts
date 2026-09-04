@@ -1190,6 +1190,37 @@ describe("projectWorkspaceMessages", () => {
 		]);
 	});
 
+	it("deduplicates a started turn replayed live with explicit null metadata", () => {
+		const history = [sessionTurnStarted("session-a", "turn-1", "Draft prompt")];
+		const live: CoreEvent[] = [
+			{
+				sessionTurnStarted: {
+					session_id: "session-a",
+					turn_id: "turn-1",
+					prompt: "Draft prompt",
+					plan_mode: null,
+					model: null,
+					evidence: null,
+					retry_of_turn_id: null,
+				},
+			},
+		];
+
+		expect(
+			projectWorkspaceMessages(history, live, "session-a", "Draft prompt"),
+		).toEqual([
+			{
+				id: "user-session-a-turn-1",
+				role: "user",
+				turnId: "turn-1",
+				label: "User",
+				content: "Draft prompt",
+				createdAt: "2026-05-01T12:00:00Z",
+				planMode: false,
+			},
+		]);
+	});
+
 	it("reconstructs a persisted plan approval as a session event", () => {
 		const approval: SessionEventRecord = {
 			eventId: "event-plan-approved",
