@@ -63,10 +63,21 @@ describe("provider-model-registry", () => {
 		expect(resolveModelAlias("droid", "5.4")).toBe("gpt-5.4");
 	});
 
-	it("registers the GPT-5.6 Codex preview models", () => {
+	it("recommends GPT-6 Astra while retaining the GPT-5.6 Codex models", () => {
 		const models = PROVIDER_MODEL_REGISTRY.codex;
 		expect(models.map((model) => model.id)).toEqual(
-			expect.arrayContaining(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]),
+			expect.arrayContaining([
+				"gpt-6-astra",
+				"gpt-5.6-sol",
+				"gpt-5.6-terra",
+				"gpt-5.6-luna",
+			]),
+		);
+		expect(getDefaultModelId("codex")).toBe("gpt-6-astra");
+		expect(resolveModelAlias("codex", "astra")).toBe("gpt-6-astra");
+		expect(resolveModelAlias("codex", "6-astra")).toBe("gpt-6-astra");
+		expect(models.find((model) => model.id === "gpt-6-astra")?.effortLevels).toEqual(
+			["low", "medium", "high", "xhigh", "max"],
 		);
 		expect(resolveModelAlias("codex", "sol")).toBe("gpt-5.6-sol");
 		expect(resolveModelAlias("codex", "5.6-terra")).toBe("gpt-5.6-terra");

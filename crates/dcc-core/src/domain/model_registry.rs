@@ -76,6 +76,8 @@ pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
 
 pub const CODEX_ALIASES: &[(&str, &str)] = &[
     ("gpt-5-codex", "gpt-5.4"),
+    ("astra", "gpt-6-astra"),
+    ("6-astra", "gpt-6-astra"),
     ("sol", "gpt-5.6-sol"),
     ("5.6-sol", "gpt-5.6-sol"),
     ("terra", "gpt-5.6-terra"),
@@ -183,6 +185,13 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
 
 pub const CODEX: &[ModelEntry] = &[
     ModelEntry {
+        id: "gpt-6-astra",
+        label: "GPT-6 Astra",
+        description: "Most capable OpenAI model for complex reasoning, coding, and long-horizon agentic work.",
+        recommended: true,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
+    ModelEntry {
         id: "gpt-5.6-sol",
         label: "GPT-5.6 Sol",
         description: "Flagship GPT-5.6 model for the most demanding coding and reasoning work. Preview access required.",
@@ -213,8 +222,8 @@ pub const CODEX: &[ModelEntry] = &[
     ModelEntry {
         id: "gpt-5.4",
         label: "GPT-5.4",
-        description: "Balanced default for agentic coding workflows.",
-        recommended: true,
+        description: "Balanced model for agentic coding workflows.",
+        recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
@@ -301,10 +310,21 @@ mod tests {
     use super::{resolve_alias, CLAUDE_CODE, CODEX, GEMINI, GROK};
 
     #[test]
-    fn codex_registers_gpt_56_preview_models() {
-        for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+    fn codex_recommends_astra_and_retains_gpt_56_models() {
+        for id in [
+            "gpt-6-astra",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ] {
             assert!(CODEX.iter().any(|model| model.id == id));
         }
+        assert_eq!(
+            CODEX.iter().find(|model| model.recommended).unwrap().id,
+            "gpt-6-astra"
+        );
+        assert_eq!(resolve_alias("codex", "astra"), "gpt-6-astra");
+        assert_eq!(resolve_alias("codex", "6-astra"), "gpt-6-astra");
         assert_eq!(resolve_alias("codex", "sol"), "gpt-5.6-sol");
         assert_eq!(resolve_alias("codex", "5.6-terra"), "gpt-5.6-terra");
         assert_eq!(resolve_alias("codex", "luna"), "gpt-5.6-luna");

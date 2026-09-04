@@ -271,13 +271,18 @@ fn validate_codex_mcp_projection(
     Ok(())
 }
 
-fn codex_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
+fn codex_reasoning_effort(model: Option<&str>, effort: Option<&str>) -> Option<&'static str> {
+    let astra = matches!(
+        model.map(str::trim),
+        Some("gpt-6-astra" | "astra" | "6-astra")
+    );
     match effort.map(str::trim).filter(|value| !value.is_empty()) {
         Some("none") => Some("none"),
         Some("minimal") => Some("minimal"),
         Some("low") => Some("low"),
         Some("balanced") | Some("medium") => Some("medium"),
         Some("high") => Some("high"),
+        Some("max") if astra => Some("max"),
         Some("xhigh") | Some("max") | Some("ultrathink") => Some("xhigh"),
         Some(_) | None => None,
     }
@@ -2753,7 +2758,7 @@ impl Provider for CodexAppServerAdapter {
                         ),
                         turn.tool_instructions.as_deref(),
                     ),
-                    codex_reasoning_effort(turn.effort.as_deref()),
+                    codex_reasoning_effort(runtime.model.as_deref(), turn.effort.as_deref()),
                     if turn.fast_mode.unwrap_or(false) {
                         Some("concise")
                     } else {
@@ -3067,6 +3072,26 @@ impl Provider for CodexAppServerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preserves_astra_max_reasoning_effort_without_changing_existing_models() {
+        assert_eq!(
+            codex_reasoning_effort(Some("gpt-6-astra"), Some("max")),
+            Some("max")
+        );
+        assert_eq!(
+            codex_reasoning_effort(Some("astra"), Some("max")),
+            Some("max")
+        );
+        assert_eq!(
+            codex_reasoning_effort(Some("gpt-5.6-sol"), Some("max")),
+            Some("xhigh")
+        );
+        assert_eq!(
+            codex_reasoning_effort(Some("gpt-6-astra"), Some("ultrathink")),
+            Some("xhigh")
+        );
+    }
 
     #[test]
     fn derives_mcp_projection_identity_from_any_well_formed_codex_version() {

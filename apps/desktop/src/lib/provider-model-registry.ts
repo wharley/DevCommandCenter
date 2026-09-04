@@ -47,6 +47,14 @@ export const PROVIDER_MODEL_REGISTRY = {
 
 	codex: [
 		{
+			id: "gpt-6-astra",
+			label: "GPT-6 Astra",
+			description:
+				"Most capable OpenAI model for complex reasoning, coding, and long-horizon agentic work.",
+			recommended: true,
+			effortLevels: ["low", "medium", "high", "xhigh", "max"],
+		},
+		{
 			id: "gpt-5.6-sol",
 			label: "GPT-5.6 Sol",
 			description:
@@ -80,8 +88,8 @@ export const PROVIDER_MODEL_REGISTRY = {
 		{
 			id: "gpt-5.4",
 			label: "GPT-5.4",
-			description: "Balanced default for agentic coding workflows.",
-			recommended: true,
+			description: "Balanced model for agentic coding workflows.",
+			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
 		{
@@ -224,6 +232,8 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 	},
 	codex: {
 		"gpt-5-codex": "gpt-5.4",
+		astra: "gpt-6-astra",
+		"6-astra": "gpt-6-astra",
 		sol: "gpt-5.6-sol",
 		"5.6-sol": "gpt-5.6-sol",
 		terra: "gpt-5.6-terra",
