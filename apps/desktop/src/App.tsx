@@ -1378,6 +1378,7 @@ export default function App() {
 	);
 	const [workspaceComposerPrefill, setWorkspaceComposerPrefill] =
 		useState<WorkspaceComposerPrefillRequest | null>(null);
+	const workspaceComposerPrefillSequenceRef = useRef(0);
 	const { theme, setTheme, density, setDensity } = useAppearance();
 	const {
 		update: appUpdateInfo,
@@ -4026,12 +4027,13 @@ export default function App() {
 				);
 				setSelectedSessionId(forkedSessionId);
 				if (forkPoint.forkedPrompt.trim().length > 0) {
-					setWorkspaceComposerPrefill((previous) => ({
+					workspaceComposerPrefillSequenceRef.current += 1;
+					setWorkspaceComposerPrefill({
 						workspaceId: selectedWorkspace.id,
 						text: forkPoint.forkedPrompt,
-						nonce: (previous?.nonce ?? 0) + 1,
+						nonce: workspaceComposerPrefillSequenceRef.current,
 						mode: "replace",
-					}));
+					});
 					toast.success(t("conversation.message.forkStarted"));
 				} else {
 					toast.success(t("conversation.message.forkStartedFromReply"));
@@ -4264,11 +4266,12 @@ export default function App() {
 			if (!selectedWorkspace || text.trim().length === 0) {
 				return;
 			}
-			setWorkspaceComposerPrefill((previous) => ({
+			workspaceComposerPrefillSequenceRef.current += 1;
+			setWorkspaceComposerPrefill({
 				workspaceId: selectedWorkspace.id,
 				text,
-				nonce: (previous?.nonce ?? 0) + 1,
-			}));
+				nonce: workspaceComposerPrefillSequenceRef.current,
+			});
 		},
 		[selectedWorkspace],
 	);

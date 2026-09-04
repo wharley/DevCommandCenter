@@ -133,14 +133,16 @@ import {
 	shouldRenderGitDiffSurface,
 } from "./secondary-surface-layout";
 
-/** Composer draft injection request; the nonce lets a repeated annotation re-fire. */
+/** Composer draft injection request with an identity unique across input sources. */
 type ComposerPrefill = {
+	requestId: string;
 	text: string;
 	nonce: number;
 	mode?: "append" | "replace";
 };
 
 type ComposerPrefillConsumption = Pick<ComposerPrefill, "text" | "nonce">;
+type ExternalComposerPrefill = Omit<ComposerPrefill, "requestId">;
 
 type InspectorPendingAnnotation = {
 	pending: PendingAnnotation;
@@ -257,7 +259,7 @@ type WorkspacePanelProps = {
 	onOpenTerminal?: (request: OpenTerminalRequest) => void;
 	onOpenBrowser?: () => void;
 	browserOpen?: boolean;
-	externalComposerPrefill?: ComposerPrefill | null;
+	externalComposerPrefill?: ExternalComposerPrefill | null;
 	onExternalComposerPrefillConsumed?: (
 		prefill: ComposerPrefillConsumption,
 	) => void;
@@ -410,6 +412,7 @@ export function WorkspacePanel({
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
 		null,
 	);
+	const composerPrefillRequestSequenceRef = useRef(0);
 	const [inspectorPendingAnnotation, setInspectorPendingAnnotation] =
 		useState<InspectorPendingAnnotation | null>(null);
 	const [isApprovingPlan, setIsApprovingPlan] = useState(false);
@@ -479,10 +482,26 @@ export function WorkspacePanel({
 
 	useEffect(() => {
 		if (externalComposerPrefill) {
-			setComposerPrefill(externalComposerPrefill);
-			onExternalComposerPrefillConsumed?.(externalComposerPrefill);
+			setComposerPrefill((current) => {
+				const requestId = `external:${externalComposerPrefill.nonce}`;
+				return current?.requestId === requestId
+					? current
+					: { ...externalComposerPrefill, requestId };
+			});
 		}
-	}, [externalComposerPrefill, onExternalComposerPrefillConsumed]);
+	}, [externalComposerPrefill]);
+
+	const handleComposerPrefillApplied = useCallback(
+		(applied: ComposerPrefillConsumption) => {
+			if (
+			externalComposerPrefill?.nonce === applied.nonce &&
+			externalComposerPrefill.text === applied.text
+			) {
+				onExternalComposerPrefillConsumed?.(applied);
+			}
+		},
+		[externalComposerPrefill, onExternalComposerPrefillConsumed],
+	);
 
 	const updateSecondarySurfaceWidth = useCallback(
 		(nextWidth: number, persist = false) => {
@@ -655,7 +674,10 @@ export function WorkspacePanel({
 			request: DiffAnnotationRequest;
 			instruction: string;
 		}) => {
+			composerPrefillRequestSequenceRef.current += 1;
+			const requestId = `local:${composerPrefillRequestSequenceRef.current}`;
 			setComposerPrefill((prev) => ({
+				requestId,
 				text: buildAnnotationContent(request, instruction),
 				nonce: (prev?.nonce ?? 0) + 1,
 			}));
@@ -923,7 +945,10 @@ export function WorkspacePanel({
 	);
 	const replaceComposerDraft = useCallback((text: string) => {
 		if (!text.trim()) return;
+		composerPrefillRequestSequenceRef.current += 1;
+		const requestId = `local:${composerPrefillRequestSequenceRef.current}`;
 		setComposerPrefill((previous) => ({
+			requestId,
 			text,
 			nonce: (previous?.nonce ?? 0) + 1,
 			mode: "replace",
@@ -1366,6 +1391,7 @@ export function WorkspacePanel({
 						turnQueueEventKey={turnQueueEventKey}
 						pendingPrompt={pendingPrompt}
 						prefill={composerPrefill}
+						onPrefillApplied={handleComposerPrefillApplied}
 						debugEvidence={debugEvidence}
 						focusRequestKey={composerFocusRequestKey}
 						workspacePath={workspacePath}

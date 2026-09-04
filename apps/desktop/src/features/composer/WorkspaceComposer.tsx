@@ -87,8 +87,9 @@ import { $createImageBadgeNode, ImageBadgeNode } from "./editor/image-badge-node
 import { PastedSnippetBadgeNode } from "./editor/pasted-snippet-badge-node";
 import { $appendNodesToComposerEnd } from "./editor/append-to-end";
 import { AutoResizePlugin } from "./editor/plugins/AutoResizePlugin";
-import { EditorRefPlugin } from "./editor/plugins/EditorRefPlugin";
+import { ComposerPrefillPlugin } from "./editor/plugins/ComposerPrefillPlugin";
 import { DraftPersistencePlugin } from "./editor/plugins/DraftPersistencePlugin";
+import { EditorRefPlugin } from "./editor/plugins/EditorRefPlugin";
 import { CompositionGuardPlugin } from "./editor/plugins/CompositionGuardPlugin";
 import { DropFilePlugin } from "./editor/plugins/drop-file-plugin";
 import { EditablePlugin } from "./editor/plugins/EditablePlugin";
@@ -141,10 +142,12 @@ type WorkspaceComposerProps = {
 	pendingPrompt: string | null;
 	/** External draft injection; annotations append and recovery actions replace. */
 	prefill?: {
+		requestId: string;
 		text: string;
 		nonce: number;
 		mode?: "append" | "replace";
 	} | null;
+	onPrefillApplied?: (prefill: { text: string; nonce: number }) => void;
 	focusRequestKey?: number | null;
 	/** Evidence-first debugging tray; the person reviews what travels with the next message. */
 	debugEvidence?: DebugEvidenceController | null;
@@ -193,6 +196,7 @@ export function WorkspaceComposer({
 	turnQueueEventKey,
 	pendingPrompt,
 	prefill,
+	onPrefillApplied,
 	focusRequestKey = null,
 	debugEvidence = null,
 	workspacePath,
@@ -279,7 +283,6 @@ export function WorkspaceComposer({
 	}, []);
 	const composerRootRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<LexicalEditor | null>(null);
-	const lastPrefillNonceRef = useRef<number | null>(null);
 	const selectedProvider = useMemo(
 		() =>
 			providerChoices.find((provider) => provider.id === selectedProviderId) ??
@@ -732,30 +735,6 @@ export function WorkspaceComposer({
 		}
 	}, [delegateAllowFileEdits]);
 
-	// Inject externally-supplied context. Diff annotations append; message
-	// recovery explicitly replaces the draft so stale text cannot be mixed into
-	// a retry without the user noticing.
-	// Keyed on nonce so the same selection can be re-sent, and so it fires once.
-	useEffect(() => {
-		if (!prefill || prefill.text.length === 0) {
-			return;
-		}
-		if (lastPrefillNonceRef.current === prefill.nonce) {
-			return;
-		}
-		const editor = editorRef.current;
-		if (!editor) {
-			return;
-		}
-		lastPrefillNonceRef.current = prefill.nonce;
-		if (prefill.mode === "replace") {
-			setEditorText(editor, prefill.text);
-		} else {
-			appendComposerText(editor, prefill.text);
-		}
-		editor.focus();
-	}, [prefill]);
-
 	const lexicalInitialConfig = useMemo(
 		() => ({
 			namespace: "WorkspaceComposer",
@@ -1072,6 +1051,11 @@ export function WorkspaceComposer({
 				<DraftPersistencePlugin
 					draftKey={composerDraftKey}
 					fallbackDraftKeys={draftFallbackKeys}
+				/>
+				<ComposerPrefillPlugin
+					key={composerDraftKey}
+					prefill={prefill}
+					onApplied={onPrefillApplied}
 				/>
 				<HasContentPlugin onChange={setHasContent} />
 			</LexicalComposer>

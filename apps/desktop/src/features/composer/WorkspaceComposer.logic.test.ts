@@ -14,6 +14,7 @@ import {
 	latestTurnQueueEventKey,
 	resolvePlanModeState,
 	setPlanModeState,
+	shouldApplyComposerPrefill,
 	submitComposerDraftOptimistically,
 } from "./WorkspaceComposer.logic";
 
@@ -64,6 +65,27 @@ describe("WorkspaceComposer.logic", () => {
 		expect(getComposerConversationDraftKey("alpha", "new")).not.toBe(
 			getComposerConversationDraftKey("alpha", null),
 		);
+	});
+
+	it("deduplicates composer prefills by request identity rather than colliding nonces", () => {
+		expect(
+			shouldApplyComposerPrefill("local:1", {
+				requestId: "external:1",
+				text: "delivery failure context",
+			}),
+		).toBe(true);
+		expect(
+			shouldApplyComposerPrefill("external:1", {
+				requestId: "external:1",
+				text: "delivery failure context",
+			}),
+		).toBe(false);
+		expect(
+			shouldApplyComposerPrefill(null, {
+				requestId: "external:2",
+				text: "",
+			}),
+		).toBe(false);
 	});
 
 	it("decides to block when disabled", () => {

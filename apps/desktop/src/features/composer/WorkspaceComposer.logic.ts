@@ -42,6 +42,17 @@ export function getComposerApprovalPolicyKey(
 	return `dcc.workspace.composer.approval.${workspaceId}.${providerId ?? "provider-managed"}`;
 }
 
+export function shouldApplyComposerPrefill(
+	lastAppliedRequestId: string | null,
+	prefill: { requestId: string; text: string } | null | undefined,
+) {
+	return Boolean(
+		prefill &&
+			prefill.text.length > 0 &&
+			prefill.requestId !== lastAppliedRequestId,
+	);
+}
+
 function getWorkspacePlanModeScopeKey(workspaceId: string | null) {
 	return workspaceId ? `workspace:${workspaceId}` : null;
 }
