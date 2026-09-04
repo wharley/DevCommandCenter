@@ -26,7 +26,7 @@ import { createDccMcpPermissionHooks } from "./mcp-permission-hook.mjs";
 import { createNativeSubagentHooks } from "./native-subagent-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 
-const SIDECAR_VERSION = "0.1.62";
+const SIDECAR_VERSION = "0.1.63";
 
 function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);
