@@ -7,6 +7,7 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
 	plugins: [react()],
+	publicDir: path.resolve(dirname, "../../public"),
 	test: {
 		environment: "jsdom",
 		globals: true,

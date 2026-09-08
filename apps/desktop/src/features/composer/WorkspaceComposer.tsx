@@ -1379,6 +1379,7 @@ export function WorkspaceComposer({
 		</div>,
 		<ExecutionContextRail
 			key="execution-context"
+			noteSessionId={sessionId}
 			projectLabel={projectLabel}
 			projectIcon={projectIcon}
 			projectColor={projectColor}

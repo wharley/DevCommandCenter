@@ -1,5 +1,13 @@
-import { Boxes, Check, ChevronDown, FolderGit2, LoaderCircle, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import {
+	ArrowUpRight,
+	Boxes,
+	Check,
+	ChevronDown,
+	FolderGit2,
+	LoaderCircle,
+	ShieldCheck,
+} from "lucide-react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Repository, WorkspaceIsolationMode } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
@@ -59,27 +67,34 @@ export function NewTaskLaunchState({
 	const [isolationMode, setIsolationMode] =
 		useState<WorkspaceIsolationMode>("protectedWorktree");
 	const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+	const selectingProject = useRef(false);
+	const busy = isCreating || pendingProjectId !== null;
 
 	async function selectProject(repository: Repository) {
-		if (isCreating) return;
+		if (isCreating || selectingProject.current) return;
+		selectingProject.current = true;
 		setPendingProjectId(repository.id);
 		try {
 			await onSelectProject(repository, isolationMode);
 		} finally {
+			selectingProject.current = false;
 			setPendingProjectId(null);
 		}
 	}
 
 	return (
-		<div className="flex min-h-0 flex-1 flex-col bg-background">
-			<div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-28 pt-20">
+		<div className="dcc-task-launch flex min-h-0 flex-1 flex-col bg-background">
+			<div className="dcc-task-launch-content flex flex-1 items-center justify-center">
 				<div className="flex w-full max-w-xl flex-col items-center text-center">
-					<div className="mb-5 grid size-11 place-items-center rounded-full border border-border/65 bg-muted/20 text-foreground">
+					<div className="dcc-task-launch-mark mb-5 grid size-11 place-items-center rounded-full border border-border/65 bg-muted/20 text-foreground">
 						<img src="/dcc-glyph.svg" alt="" className="size-6" />
 					</div>
 					<h1 className="text-balance text-[32px] font-medium tracking-[-0.045em] text-foreground">
 						{t("newTask.title")}
 					</h1>
+					<p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+						{t("newTask.designDescription")}
+					</p>
 
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
@@ -87,7 +102,7 @@ export function NewTaskLaunchState({
 								type="button"
 								variant="ghost"
 								size="sm"
-								disabled={isCreating}
+								disabled={busy}
 								className="mt-1 h-9 gap-1.5 px-3 text-[17px] font-normal text-muted-foreground hover:bg-muted/40 hover:text-foreground"
 							>
 								{isCreating ? (
@@ -97,12 +112,15 @@ export function NewTaskLaunchState({
 								<ChevronDown className="size-4" strokeWidth={1.8} />
 							</Button>
 						</DropdownMenuTrigger>
-						<DropdownMenuContent align="center" className="max-h-[24rem] w-80 overflow-y-auto">
+						<DropdownMenuContent
+							align="center"
+							className="max-h-[24rem] w-80 overflow-y-auto"
+						>
 							<DropdownMenuLabel>{t("newTask.projects")}</DropdownMenuLabel>
 							{repositories.map((repository) => (
 								<DropdownMenuItem
 									key={repository.id}
-									disabled={isCreating}
+									disabled={busy}
 									onSelect={() => void selectProject(repository)}
 									className="gap-2.5 py-2"
 								>
@@ -127,7 +145,7 @@ export function NewTaskLaunchState({
 							))}
 							<DropdownMenuSeparator />
 							<DropdownMenuItem
-								disabled={isCreating || repositories.length < 2}
+								disabled={busy || repositories.length < 2}
 								onSelect={onSelectMultiple}
 								className="gap-2.5 py-2"
 							>
@@ -141,16 +159,58 @@ export function NewTaskLaunchState({
 									</small>
 								</span>
 							</DropdownMenuItem>
-							<DropdownMenuItem onSelect={onOpenProject} className="gap-2.5 py-2">
+							<DropdownMenuItem
+								onSelect={onOpenProject}
+								className="gap-2.5 py-2"
+							>
 								<FolderGit2 className="size-4 text-muted-foreground" />
 								{t("newTask.openAnotherProject")}
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
+					{repositories.length > 0 ? (
+						<div
+							className="dcc-project-shortcuts"
+							aria-label={t("newTask.projects")}
+						>
+							{repositories.slice(0, 4).map((repository) => (
+								<button
+									key={repository.id}
+									type="button"
+									className="dcc-project-shortcut"
+									disabled={busy}
+									onClick={() => void selectProject(repository)}
+								>
+									<ProjectIdentityGlyph
+										icon={repository.icon}
+										color={repository.color}
+										size="sm"
+										className="size-9 shrink-0 rounded-xl"
+									/>
+									<span className="min-w-0 flex-1">
+										<strong className="block truncate text-[13px] font-medium">
+											{repositoryDisplayName(repository)}
+										</strong>
+										<small className="mt-1 block truncate text-[11px] text-muted-foreground">
+											{repository.baseBranch}
+										</small>
+									</span>
+									{pendingProjectId === repository.id ? (
+										<LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" />
+									) : (
+										<ArrowUpRight
+											className="size-4 shrink-0 text-muted-foreground/60"
+											aria-hidden
+										/>
+									)}
+								</button>
+							))}
+						</div>
+					) : null}
 				</div>
 			</div>
 
-			<div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center px-5">
+			<div className="dcc-task-launch-modes pointer-events-none flex justify-center px-5">
 				<div className="pointer-events-auto flex w-full max-w-[42rem] items-center justify-center gap-1 rounded-xl border border-border/55 bg-sidebar/95 p-1 shadow-[var(--dcc-elevation-1)] backdrop-blur">
 					{EXECUTION_MODES.map((mode) => {
 						const Icon = mode.icon;
@@ -159,7 +219,8 @@ export function NewTaskLaunchState({
 							<button
 								type="button"
 								key={mode.id}
-								disabled={isCreating}
+								aria-pressed={selected}
+								disabled={busy}
 								onClick={() => setIsolationMode(mode.id)}
 								className={cn(
 									"flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors",
@@ -168,13 +229,22 @@ export function NewTaskLaunchState({
 										: "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
 								)}
 							>
-								<span className={cn("grid size-7 shrink-0 place-items-center rounded-md", selected && mode.id === "protectedWorktree" ? "bg-emerald-500/12 text-emerald-500" : "bg-muted/55")}>
+								<span
+									className={cn(
+										"grid size-7 shrink-0 place-items-center rounded-md",
+										selected && mode.id === "protectedWorktree"
+											? "bg-emerald-500/12 text-emerald-500"
+											: "bg-muted/55",
+									)}
+								>
 									<Icon className="size-4" strokeWidth={1.8} />
 								</span>
 								<span className="min-w-0 flex-1">
 									<strong className="flex items-center gap-1.5 truncate text-[11px] font-medium">
 										{t(mode.titleKey)}
-										{selected ? <Check className="size-3 text-emerald-500" /> : null}
+										{selected ? (
+											<Check className="size-3 text-emerald-500" />
+										) : null}
 									</strong>
 									<small className="block truncate text-[9.5px] text-muted-foreground">
 										{t(mode.descriptionKey)}

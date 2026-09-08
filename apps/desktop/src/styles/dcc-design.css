@@ -1,0 +1,265 @@
+/* Shared visual language: quiet surfaces, purposeful accents, restrained motion. */
+:root {
+	--dcc-radius-control: 10px;
+	--dcc-radius-surface: 18px;
+	--dcc-radius-dialog: 22px;
+	--dcc-motion-fast: 160ms;
+	--dcc-motion-enter: 240ms;
+	--dcc-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+	--dcc-surface-raised: color-mix(
+		in oklab,
+		var(--card) 94%,
+		var(--foreground) 6%
+	);
+	--dcc-surface-edge: color-mix(in oklab, var(--border) 80%, transparent);
+	--dcc-accent-idea: light-dark(#ac751c, #e8b65e);
+	--dcc-accent-calm: light-dark(#31816d, #83cbb7);
+	--dcc-shadow-card: 0 2px 3px rgb(0 0 0 / 0.025), 0 8px 24px rgb(0 0 0 / 0.04);
+	--dcc-shadow-dialog:
+		0 24px 80px rgb(0 0 0 / 0.16), 0 4px 14px rgb(0 0 0 / 0.06);
+}
+
+.dcc-project-sidebar {
+	background: color-mix(
+		in oklab,
+		var(--sidebar) 97%,
+		var(--dcc-accent-idea) 3%
+	);
+}
+.dcc-sidebar-navigation {
+	margin: 4px 8px 12px;
+	padding: 5px;
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: var(--dcc-radius-surface);
+	background: color-mix(in oklab, var(--background) 45%, transparent);
+}
+.dcc-sidebar-navigation > button {
+	height: 34px;
+	border-radius: var(--dcc-radius-control);
+	transition:
+		background var(--dcc-motion-fast),
+		color var(--dcc-motion-fast),
+		box-shadow var(--dcc-motion-fast);
+}
+.dcc-sidebar-navigation > button[aria-current="page"] {
+	background: var(--popover);
+	box-shadow:
+		var(--dcc-shadow-card),
+		inset 0 0 0 1px var(--dcc-surface-edge);
+}
+.dcc-sidebar-navigation > button:first-child > svg {
+	color: var(--dcc-accent-calm);
+}
+.dcc-sidebar-navigation .dcc-notes-nav > svg {
+	color: var(--dcc-accent-idea);
+}
+.dcc-project-heading {
+	border-radius: var(--dcc-radius-control);
+	transition:
+		background var(--dcc-motion-fast),
+		box-shadow var(--dcc-motion-fast);
+}
+.dcc-project-heading[data-current="true"] > button {
+	color: var(--foreground);
+}
+.dcc-project-heading[data-current="true"] .dcc-project-label {
+	font-weight: 600;
+}
+.dcc-task-card {
+	border-radius: 12px;
+	background: color-mix(in oklab, var(--background) 28%, transparent);
+	box-shadow: inset 0 0 0 1px var(--dcc-surface-edge);
+	transition:
+		background var(--dcc-motion-fast),
+		box-shadow var(--dcc-motion-fast),
+		opacity var(--dcc-motion-fast);
+}
+.dcc-task-card:hover,
+.dcc-task-card:focus-visible {
+	background: var(--popover);
+	box-shadow:
+		inset 0 0 0 1px var(--border),
+		var(--dcc-shadow-card);
+}
+.dcc-task-card[data-active="true"] {
+	background: color-mix(
+		in oklab,
+		var(--popover) 94%,
+		var(--dcc-accent-calm) 6%
+	);
+	box-shadow:
+		inset 0 0 0 1px
+			color-mix(in oklab, var(--dcc-accent-calm) 28%, var(--border)),
+		var(--dcc-shadow-card);
+}
+.dcc-task-card .dcc-task-selection {
+	background: var(--dcc-accent-calm);
+	left: 1px;
+}
+.dcc-task-card[data-status="completed"] {
+	background: transparent;
+	box-shadow: inset 0 0 0 1px
+		color-mix(in oklab, var(--border) 45%, transparent);
+}
+.dcc-running-panel {
+	border-radius: 14px;
+	background: color-mix(in oklab, var(--dcc-accent-idea) 5%, transparent);
+	border-color: color-mix(in oklab, var(--dcc-accent-idea) 15%, var(--border));
+}
+.dcc-sidebar-tools {
+	margin: 0 10px;
+	border-top: 1px solid var(--dcc-surface-edge);
+}
+.dcc-composer-surface {
+	border-radius: var(--dcc-radius-surface);
+	border-color: var(--dcc-surface-edge);
+	box-shadow: var(--dcc-shadow-card);
+	transition:
+		border-color var(--dcc-motion-fast),
+		box-shadow var(--dcc-motion-fast);
+}
+.dcc-composer-surface:focus-within {
+	border-color: color-mix(in oklab, var(--dcc-accent-calm) 45%, var(--border));
+	box-shadow:
+		var(--dcc-shadow-card),
+		0 0 0 3px color-mix(in oklab, var(--dcc-accent-calm) 7%, transparent);
+}
+.dcc-execution-branch {
+	/* Keep the complete branch visible; long names wrap inside the context group. */
+	max-width: 100%;
+}
+.dcc-assistant-activity {
+	border-radius: 12px;
+	border-color: var(--dcc-surface-edge);
+	background: color-mix(in oklab, var(--muted) 22%, transparent);
+	transition:
+		background var(--dcc-motion-fast),
+		border-color var(--dcc-motion-fast);
+}
+.dcc-assistant-activity[data-live="true"] {
+	border-color: color-mix(in oklab, var(--dcc-accent-idea) 24%, var(--border));
+	background: color-mix(in oklab, var(--dcc-accent-idea) 4%, transparent);
+}
+.dcc-task-launch {
+	position: relative;
+	overflow-y: auto;
+}
+.dcc-task-launch-content {
+	padding: clamp(28px, 7vh, 80px) 24px 36px;
+}
+.dcc-task-launch-mark {
+	width: 52px;
+	height: 52px;
+	border-radius: 18px 18px 7px 18px;
+	background: color-mix(in oklab, var(--dcc-accent-calm) 8%, var(--popover));
+	box-shadow: var(--dcc-shadow-card);
+	border-color: color-mix(in oklab, var(--dcc-accent-calm) 20%, var(--border));
+}
+.dcc-project-shortcuts {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+	width: 100%;
+	margin-top: 28px;
+}
+.dcc-project-shortcut {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-width: 0;
+	padding: 18px;
+	text-align: left;
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: 16px 16px 7px 16px;
+	background: color-mix(in oklab, var(--sidebar) 55%, var(--background));
+	cursor: pointer;
+	transition:
+		transform var(--dcc-motion-fast) var(--dcc-motion-ease),
+		background var(--dcc-motion-fast),
+		box-shadow var(--dcc-motion-fast);
+}
+.dcc-project-shortcut:hover:not(:disabled),
+.dcc-project-shortcut:focus-visible {
+	transform: translateY(-2px);
+	background: var(--popover);
+	box-shadow: var(--dcc-shadow-card);
+	border-color: color-mix(in oklab, var(--dcc-accent-calm) 35%, var(--border));
+}
+.dcc-project-shortcut:disabled {
+	cursor: progress;
+	opacity: 0.6;
+}
+.dcc-task-launch-modes {
+	position: static;
+	flex-shrink: 0;
+	padding: 0 24px 24px;
+}
+.dcc-task-launch-modes > div {
+	border-radius: var(--dcc-radius-surface);
+	box-shadow: var(--dcc-shadow-card);
+}
+.dcc-task-launch-modes button {
+	border-radius: 12px;
+}
+.dcc-task-launch-modes button[aria-pressed="true"] {
+	background: var(--popover);
+	box-shadow:
+		var(--dcc-shadow-card),
+		inset 0 0 0 1px var(--dcc-surface-edge);
+}
+.dcc-project-sidebar button:focus-visible,
+.dcc-task-launch button:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+@media (max-width: 640px) {
+	.dcc-project-shortcuts {
+		gap: 8px;
+	}
+	.dcc-project-shortcut {
+		padding: 12px;
+		gap: 8px;
+	}
+	.dcc-task-launch-content {
+		padding-inline: 16px;
+	}
+}
+@media (prefers-reduced-motion: no-preference) {
+	.dcc-task-launch-content {
+		animation: dcc-surface-enter var(--dcc-motion-enter) var(--dcc-motion-ease)
+			both;
+	}
+}
+@keyframes dcc-surface-enter {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--dcc-motion-fast: 0ms;
+		--dcc-motion-enter: 0ms;
+	}
+	.dcc-project-sidebar *,
+	.dcc-task-launch *,
+	.dcc-assistant-activity * {
+		animation: none !important;
+		transition: none !important;
+	}
+	/* Preserve Radix Presence's animationend when the preference changes mid-exit. */
+	[data-slot="dialog-content"],
+	[data-slot="dialog-overlay"] {
+		animation-duration: 0.01ms !important;
+		transition-duration: 0.01ms !important;
+	}
+	.dcc-project-shortcut:hover:not(:disabled),
+	.dcc-project-shortcut:focus-visible,
+	.notes-capture-button:hover {
+		transform: none;
+	}
+}

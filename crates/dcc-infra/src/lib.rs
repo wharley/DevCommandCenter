@@ -9,6 +9,7 @@ mod git_parsing;
 pub mod guarded_undo;
 pub mod mcp_db;
 pub mod mcp_probe;
+pub mod notes;
 pub mod process;
 mod repo_config;
 mod workspace_setup_plan;

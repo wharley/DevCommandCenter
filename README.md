@@ -35,6 +35,8 @@ persistence in one Tauri application.
 - **Mobile companion pairing**: pair a phone with the desktop app through QR code + PIN and use companion workflows on the same trusted network or through Tailscale. See [Mobile web companion](docs/MOBILE_WEB.md).
 - **Provider-neutral workflows**: use Claude, Gemini, Codex, Cursor, and other provider integrations from the same workbench surface.
 - **Provider handoff**: select another provider inside an existing session and send the next turn normally; DCC automatically attaches one bounded, provider-neutral re-anchor. DCC persists the timeline, but the new runtime does not receive native 1:1 memory and a new thread starts fresh. See [Provider handoff](docs/PROVIDER_HANDOFF.md).
+- **Project notes**: capture ideas and conversation excerpts in floating, draggable balloons; prepare a task or composer draft when ready. Notes survive completed-task and worktree cleanup. See [Project notes](docs/PROJECT_NOTES.md).
+- **Visual direction**: shared surfaces, motion and navigation patterns inspired by project notes. See [DCC visual direction](docs/DCC_VISUAL_DIRECTION.md).
 - **Built-in review surface**: inspect changed files, inline diffs, annotations, branch status, CodeRabbit feedback, validations, and PR-ready state without leaving DCC.
 
 ## What you can do in DCC

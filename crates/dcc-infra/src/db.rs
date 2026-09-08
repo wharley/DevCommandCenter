@@ -1153,7 +1153,7 @@ impl SqliteWorkspaceRepo {
 
 #[derive(Clone)]
 pub struct SqliteSessionRepo {
-    conn: Arc<Mutex<Connection>>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 /// Content-free projection of a capture-v2 restoration record for review UI.
@@ -1258,6 +1258,8 @@ impl SqliteSessionRepo {
             "target_model_id",
             "TEXT NULL",
         )?;
+        conn.execute_batch(crate::notes::NOTES_SCHEMA)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_session_objectives",

@@ -3,6 +3,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./color-theme.css";
+@import "./dcc-design.css";
 
 @custom-variant dark (&:is(.dark *));
 

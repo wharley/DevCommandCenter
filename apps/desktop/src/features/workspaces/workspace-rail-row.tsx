@@ -48,7 +48,7 @@ import { useWorkspaceActiveTerminalCount } from "@/features/terminal/use-active-
 import { ProjectIdentityGlyph } from "./project-identity";
 
 const rowVariants = cva(
-	"group/dccRailRow relative min-h-[70px] select-none cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
+	"dcc-task-card group/dccRailRow relative min-h-[70px] select-none cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
 	{
 		variants: {
 			active: {
@@ -393,7 +393,7 @@ export const WorkspaceRailRowItem = memo(
 		const hasWorkspaceMenu = Boolean(onRenameWorkspace) || canPin;
 
 		return (
-			<div className="px-[2px]">
+			<div className="pl-3 pr-1">
 				<div
 					role={canSelect ? "button" : undefined}
 					tabIndex={canSelect ? 0 : -1}
@@ -404,6 +404,8 @@ export const WorkspaceRailRowItem = memo(
 							: undefined
 					}
 					data-active={selected ? "true" : "false"}
+					data-status={workspace.status}
+					aria-busy={isPending}
 					data-workspace-id={workspace.id}
 					onClick={() => {
 						if (isPending) {
@@ -414,6 +416,7 @@ export const WorkspaceRailRowItem = memo(
 						}
 					}}
 					onKeyDown={(event) => {
+						if (event.target !== event.currentTarget) return;
 						if (event.key === "Enter" || event.key === " ") {
 							event.preventDefault();
 							if (isPending) {
@@ -436,7 +439,7 @@ export const WorkspaceRailRowItem = memo(
 					{selected ? (
 						<span
 							aria-hidden
-							className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-sidebar-primary"
+							className="dcc-task-selection absolute inset-y-2 left-0 w-0.5 rounded-full bg-sidebar-primary"
 						/>
 					) : null}
 					<div className="flex min-w-0 items-start gap-2">
@@ -582,6 +585,12 @@ export const WorkspaceRailRowItem = memo(
 								>
 									{recapMessage}
 								</p>
+							) : null}
+							{!activity && !recapMessage && workspace.branch ? (
+								<div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] leading-3 text-muted-foreground/70">
+									<GitBranch className="size-2.5 shrink-0" aria-hidden />
+									<span className="truncate">{workspace.branch}</span>
+								</div>
 							) : null}
 								</div>
 							</TooltipTrigger>

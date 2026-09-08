@@ -1794,6 +1794,30 @@ impl SessionCommandState {
         self.session_repo.list_workspace_sessions(workspace_id)
     }
 
+    pub fn list_project_notes(
+        &self,
+    ) -> std::result::Result<Vec<dcc_infra::notes::ProjectNote>, String> {
+        self.session_repo.list_project_notes()
+    }
+
+    pub fn create_project_note(
+        &self,
+        input: dcc_infra::notes::CreateProjectNote,
+    ) -> std::result::Result<dcc_infra::notes::ProjectNote, String> {
+        self.session_repo.create_project_note(input)
+    }
+
+    pub fn update_project_note(
+        &self,
+        input: dcc_infra::notes::UpdateProjectNote,
+    ) -> std::result::Result<dcc_infra::notes::ProjectNote, String> {
+        self.session_repo.update_project_note(input)
+    }
+
+    pub fn delete_project_notes(&self, ids: &[String]) -> std::result::Result<(), String> {
+        self.session_repo.delete_project_notes(ids)
+    }
+
     pub fn search_sessions(&self, query: &str, limit: usize) -> Result<Vec<SessionSearchResult>> {
         self.session_repo.search_sessions(query, limit)
     }

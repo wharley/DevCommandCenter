@@ -7,6 +7,7 @@ mod delegation_commands;
 mod forge_commands;
 mod git_support;
 mod mcp_commands;
+mod note_commands;
 mod provider_commands;
 mod session_commands;
 mod skills_commands;
@@ -79,6 +80,9 @@ use forge_commands::{
     workspace_pipeline_job_log, workspace_pipeline_job_retry, workspace_pipeline_status,
     workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
     workspace_review_state,
+};
+use note_commands::{
+    create_project_note, delete_project_notes, list_project_notes, update_project_note,
 };
 use tauri_plugin_dialog::{
     DialogExt, FilePath, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
@@ -7029,6 +7033,10 @@ pub fn run() {
             delete_workspace_bundle,
             delete_repository,
             delete_workspace,
+            list_project_notes,
+            create_project_note,
+            update_project_note,
+            delete_project_notes,
             workspace_disk_usage,
             list_local_branches,
             list_git_tracked_files,

@@ -37,6 +37,9 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { NotesWorkspace } from "@/features/notes/notes-workspace";
+import { useProjectNotes } from "@/features/notes/use-project-notes";
+import { notePrompt, type ProjectNote } from "@/features/notes/notes-api";
 import { openInEditor } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
 import {
@@ -348,6 +351,7 @@ type PendingSessionNavigation = {
 
 type WorkspaceComposerPrefillRequest = {
 	workspaceId: string;
+	sessionId?: string | null;
 	text: string;
 	nonce: number;
 	mode?: "append" | "replace";
@@ -998,6 +1002,9 @@ export default function App() {
 		);
 	}, [selectedWorkspace, workspaceBundlesFromBackend]);
 	const queryClient = useQueryClient();
+	const projectNotes = useProjectNotes();
+	const [notesOpen, setNotesOpen] = useState(false);
+	const [notesCompletionTaskIds, setNotesCompletionTaskIds] = useState<string[]>([]);
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 	const [delegateSignal, setDelegateSignal] = useState(0);
 	const [reviewDelegationRequest, setReviewDelegationRequest] = useState<{
@@ -4262,13 +4269,14 @@ export default function App() {
 	);
 
 	const handlePrefillComposer = useCallback(
-		(text: string) => {
+		(text: string, sessionId?: string | null) => {
 			if (!selectedWorkspace || text.trim().length === 0) {
 				return;
 			}
 			workspaceComposerPrefillSequenceRef.current += 1;
 			setWorkspaceComposerPrefill({
 				workspaceId: selectedWorkspace.id,
+				sessionId,
 				text,
 				nonce: workspaceComposerPrefillSequenceRef.current,
 			});
@@ -4698,6 +4706,33 @@ export default function App() {
 			setWorkspaceRepositoryContext(null);
 		}
 	}, []);
+	const handleCreateTaskFromNote = useCallback(async (note: ProjectNote) => {
+		const repository = repositoriesFromBackend.find(
+			(repository) => repository.projectId === note.projectId,
+		);
+		if (!repository) {
+			toast.error(t("notes.projectUnavailable"));
+			throw new Error("note_project_unavailable");
+		}
+		const result = await createWorkspace({
+			projectId: repository.projectId,
+			workspaceRoot: repository.rootPath,
+			baseBranch: repository.baseBranch,
+			name: note.title.trim() || null,
+			isolationMode: "protectedWorktree",
+		});
+		notifyWorkspaceCreationResult(t, "open", result);
+		requestNewTaskComposerFocus(result.workspace.id);
+		workspaceComposerPrefillSequenceRef.current += 1;
+		setWorkspaceComposerPrefill({
+			workspaceId: result.workspace.id,
+			text: notePrompt(note),
+			nonce: workspaceComposerPrefillSequenceRef.current,
+		});
+		setGlobalSurface(null);
+		void queryClient.invalidateQueries({ queryKey: ["workspaces", backendCacheKey] });
+		return result.workspace.id;
+	}, [repositoriesFromBackend, createWorkspace, requestNewTaskComposerFocus, queryClient, backendCacheKey, t]);
 	const refreshWorkspaceCollections = useCallback(
 		async () =>
 			Promise.all([
@@ -4796,6 +4831,7 @@ export default function App() {
 				await completeWorkspace(workspaceId);
 				cleanupCompletedWorkspaceFrontendState(queryClient, { workspaceIds, roots });
 				await refreshWorkspaceCollections();
+				setNotesCompletionTaskIds(workspaceIds);
 			});
 		},
 		[
@@ -4837,6 +4873,7 @@ export default function App() {
 			try {
 				await terminateWorkspaceTerminals(affectedWorkspaceIds);
 				await deleteWorkspace(workspaceId, options);
+				void projectNotes.store.load();
 				cleanupDeletedWorkspaceFrontendState(queryClient, {
 					workspaceIds: affectedWorkspaceIds,
 					sessionIds: affectedSessionIds,
@@ -4869,6 +4906,7 @@ export default function App() {
 		[
 			allWorkspaces,
 			deleteWorkspace,
+			projectNotes.store,
 			purgeSessionsEvents,
 			queryClient,
 			refreshWorkspaceCollections,
@@ -5066,6 +5104,8 @@ export default function App() {
 							onOpenSettings={() => setIsSettingsOpen(true)}
 							onOpenSkills={() => setIsSkillsOpen(true)}
 							onOpenUsage={() => setIsUsageOpen(true)}
+							onOpenNotes={() => setNotesOpen(true)}
+							notesCount={projectNotes.notes.filter(note => note.status === "open").length}
 							onOpenHelp={() => openHelp()}
 							onOpenPullRequests={() => setGlobalSurface("pullRequests")}
 							pullRequestsActive={globalSurface === "pullRequests"}
@@ -5364,7 +5404,8 @@ export default function App() {
 									onMergeConflictStateChanged={handleMergeConflictStateChanged}
 									delegateSignal={delegateSignal}
 									composerPrefill={
-										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id
+										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id &&
+										(workspaceComposerPrefill.sessionId === undefined || workspaceComposerPrefill.sessionId === effectiveSelectedSessionId)
 											? {
 													text: workspaceComposerPrefill.text,
 													nonce: workspaceComposerPrefill.nonce,
@@ -5582,6 +5623,27 @@ export default function App() {
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+			<NotesWorkspace
+				controller={projectNotes}
+				open={notesOpen}
+				onOpenChange={setNotesOpen}
+				scope={selectedWorkspace && !globalSurface ? {
+					projectId: activeWorkspace?.projectId ?? selectedWorkspace.projectId ?? selectedWorkspace.id,
+					projectName: activeProjectLabel ?? selectedWorkspace.name,
+					workspaceId: activeWorkspace?.id ?? selectedWorkspace.id,
+					sessionId: effectiveSelectedSessionId,
+					taskTitle: selectedSessionSummary?.thread.title ?? selectedWorkspace.name,
+				} : null}
+				projects={repositoriesFromBackend.map(repository => ({ id: repository.projectId, name: repositoryDisplayName(repository) }))}
+				onUse={(text) => {
+					setGlobalSurface(null);
+					requestSurfaceSelection(null);
+					handlePrefillComposer(text, effectiveSelectedSessionId);
+				}}
+				onCreateTask={handleCreateTaskFromNote}
+				completionTaskIds={notesCompletionTaskIds}
+				onCompletionHandled={() => setNotesCompletionTaskIds([])}
+			/>
 			<SettingsDialog
 				open={isSettingsOpen}
 				onOpenChange={setIsSettingsOpen}

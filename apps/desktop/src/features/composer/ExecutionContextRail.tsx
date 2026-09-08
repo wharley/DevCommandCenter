@@ -1,12 +1,25 @@
-import { AlertTriangle, Check, FolderGit2, GitBranch, ShieldCheck, Terminal } from "lucide-react";
+import {
+	AlertTriangle,
+	Check,
+	FolderGit2,
+	GitBranch,
+	ShieldCheck,
+	Terminal,
+} from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSetupReport } from "@dcc/contracts";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { ProjectIdentityGlyph } from "@/features/workspaces/project-identity";
+import { NoteCaptureButton } from "@/features/notes/note-capture-button";
 
 type ExecutionContextRailProps = {
+	noteSessionId?: string | null;
 	projectLabel: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
@@ -25,6 +38,7 @@ type ExecutionContextRailProps = {
 };
 
 export const ExecutionContextRail = memo(function ExecutionContextRail({
+	noteSessionId,
 	projectLabel,
 	projectIcon = null,
 	projectColor = null,
@@ -37,11 +51,21 @@ export const ExecutionContextRail = memo(function ExecutionContextRail({
 }: ExecutionContextRailProps) {
 	const { t } = useTranslation("common");
 	const multiProject = contextProjects.length > 1;
-	const displayedProject = projectLabel || t("composer.executionDock.projectFallback");
-	const workingBranch = currentBranch && currentBranch !== "HEAD" ? currentBranch : baseBranch;
+	const displayedProject =
+		projectLabel || t("composer.executionDock.projectFallback");
+	const workingBranch =
+		currentBranch && currentBranch !== "HEAD" ? currentBranch : baseBranch;
 	const visibleProjects = multiProject
 		? contextProjects.slice(0, 3)
-		: [{ id: "active", name: displayedProject, branch: baseBranch ?? "", icon: projectIcon, color: projectColor }];
+		: [
+				{
+					id: "active",
+					name: displayedProject,
+					branch: baseBranch ?? "",
+					icon: projectIcon,
+					color: projectColor,
+				},
+			];
 	const setupProblem = setupReport?.steps.find(
 		(step) =>
 			step.command !== "compile_mission_spec_context" &&
@@ -69,63 +93,114 @@ export const ExecutionContextRail = memo(function ExecutionContextRail({
 								t("composer.executionDock.setup.commandFailed")}
 						</small>
 					</span>
-					<button type="button" disabled={!onOpenTerminal} onClick={onOpenTerminal} className="inline-flex h-6 items-center gap-1 rounded-md bg-amber-500/15 px-2 text-[10px] font-medium text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200">
+					<button
+						type="button"
+						disabled={!onOpenTerminal}
+						onClick={onOpenTerminal}
+						className="inline-flex h-6 items-center gap-1 rounded-md bg-amber-500/15 px-2 text-[10px] font-medium text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200"
+					>
 						<Terminal className="size-3" />
 						{t("workbench.terminal.open")}
 					</button>
 				</div>
 			) : null}
 
-			<div className="flex min-w-0 items-center justify-between gap-3 px-1 text-[10.5px] text-muted-foreground">
-				<Popover>
-					<PopoverTrigger asChild>
-						<button type="button" className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors hover:bg-muted/45 hover:text-foreground">
-							{isIsolatedWorkspace ? <ShieldCheck className="size-3.5 text-emerald-500" /> : <FolderGit2 className="size-3.5" />}
-							<span className="truncate">
-								{isIsolatedWorkspace
-									? t("newTask.execution.protected")
-									: t("newTask.execution.local")}
-							</span>
-						</button>
-					</PopoverTrigger>
-					<PopoverContent side="top" align="start" className="w-80 p-2">
-						<div className={cn("flex items-start gap-2 rounded-lg p-2", isIsolatedWorkspace && "bg-emerald-500/[0.06]")}>
-							<ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-							<span className="min-w-0 flex-1">
-								<strong className="flex items-center gap-1.5 text-[11px] font-medium">
-									{t("newTask.execution.protected")}
-									{isIsolatedWorkspace ? <Check className="size-3" /> : null}
-								</strong>
-								<small className="text-[10px] text-muted-foreground">{t("newTask.execution.protectedDescription")}</small>
-							</span>
-						</div>
-						<div className={cn("mt-1 flex items-start gap-2 rounded-lg p-2", !isIsolatedWorkspace && "bg-muted/55")}>
-							<FolderGit2 className="mt-0.5 size-4 shrink-0" />
-							<span className="min-w-0 flex-1">
-								<strong className="flex items-center gap-1.5 text-[11px] font-medium">
-									{t("newTask.execution.local")}
-									{!isIsolatedWorkspace ? <Check className="size-3" /> : null}
-								</strong>
-								<small className="text-[10px] text-muted-foreground">{t("newTask.execution.localDescription")}</small>
-							</span>
-						</div>
-						<p className="px-2 pb-1 pt-2 text-[9.5px] text-muted-foreground">{t("newTask.execution.fixedAfterCreation")}</p>
-					</PopoverContent>
-				</Popover>
+			<div className="dcc-execution-footer flex min-w-0 items-center justify-between gap-5 px-1 text-[10.5px] text-muted-foreground">
+				<div className="dcc-execution-tools flex min-w-0 max-w-[50%] shrink-0 items-center gap-3">
+					<Popover>
+						<PopoverTrigger asChild>
+							<button
+								type="button"
+								className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors hover:bg-muted/45 hover:text-foreground"
+							>
+								{isIsolatedWorkspace ? (
+									<ShieldCheck className="size-3.5 text-emerald-500" />
+								) : (
+									<FolderGit2 className="size-3.5" />
+								)}
+								<span className="truncate">
+									{isIsolatedWorkspace
+										? t("newTask.execution.protected")
+										: t("newTask.execution.local")}
+								</span>
+							</button>
+						</PopoverTrigger>
+						<PopoverContent side="top" align="start" className="w-80 p-2">
+							<div
+								className={cn(
+									"flex items-start gap-2 rounded-lg p-2",
+									isIsolatedWorkspace && "bg-emerald-500/[0.06]",
+								)}
+							>
+								<ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+								<span className="min-w-0 flex-1">
+									<strong className="flex items-center gap-1.5 text-[11px] font-medium">
+										{t("newTask.execution.protected")}
+										{isIsolatedWorkspace ? <Check className="size-3" /> : null}
+									</strong>
+									<small className="text-[10px] text-muted-foreground">
+										{t("newTask.execution.protectedDescription")}
+									</small>
+								</span>
+							</div>
+							<div
+								className={cn(
+									"mt-1 flex items-start gap-2 rounded-lg p-2",
+									!isIsolatedWorkspace && "bg-muted/55",
+								)}
+							>
+								<FolderGit2 className="mt-0.5 size-4 shrink-0" />
+								<span className="min-w-0 flex-1">
+									<strong className="flex items-center gap-1.5 text-[11px] font-medium">
+										{t("newTask.execution.local")}
+										{!isIsolatedWorkspace ? <Check className="size-3" /> : null}
+									</strong>
+									<small className="text-[10px] text-muted-foreground">
+										{t("newTask.execution.localDescription")}
+									</small>
+								</span>
+							</div>
+							<p className="px-2 pb-1 pt-2 text-[9.5px] text-muted-foreground">
+								{t("newTask.execution.fixedAfterCreation")}
+							</p>
+						</PopoverContent>
+					</Popover>
+					{noteSessionId !== undefined ? (
+						<NoteCaptureButton sessionId={noteSessionId} />
+					) : null}
+				</div>
 
-				<div className="flex min-w-0 items-center gap-3">
+				<div className="dcc-execution-identity ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-x-4 gap-y-1.5">
 					<span className="flex min-w-0 items-center gap-1.5">
 						<span className="flex shrink-0 items-center pl-1">
 							{visibleProjects.map((project, index) => (
-								<ProjectIdentityGlyph key={project.id} icon={project.icon} color={project.color} size="sm" title={project.name} className={cn("size-4", index > 0 && "-ml-1")} />
+								<ProjectIdentityGlyph
+									key={project.id}
+									icon={project.icon}
+									color={project.color}
+									size="sm"
+									title={project.name}
+									className={cn("size-4", index > 0 && "-ml-1")}
+								/>
 							))}
 						</span>
-						<span className="max-w-44 truncate">{multiProject ? t("composer.executionDock.coordinatedProjects", { count: contextProjects.length }) : displayedProject}</span>
+						<span className="max-w-44 truncate">
+							{multiProject
+								? t("composer.executionDock.coordinatedProjects", {
+										count: contextProjects.length,
+									})
+								: displayedProject}
+						</span>
 					</span>
 					{workingBranch ? (
-						<span className="flex min-w-0 items-center gap-1.5">
+						<span
+							className="dcc-execution-branch flex min-w-0 items-center gap-1.5"
+							title={workingBranch}
+						>
 							<GitBranch className="size-3.5 shrink-0" />
-							<span className="max-w-36 truncate">{workingBranch}</span>
+							<span className="min-w-0 [overflow-wrap:anywhere]">
+								{workingBranch}
+							</span>
 						</span>
 					) : null}
 				</div>

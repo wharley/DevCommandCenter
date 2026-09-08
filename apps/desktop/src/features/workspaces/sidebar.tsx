@@ -17,6 +17,7 @@ import {
 	Plus,
 	Settings2,
 	Sparkles,
+	StickyNote,
 	Trash2,
 } from "lucide-react";
 import {
@@ -109,8 +110,8 @@ type VirtualItem =
 	| { kind: "group-gap"; size: number }
 	| { kind: "bottom-padding" };
 
-const HEADER_HEIGHT = 36;
-const ROW_HEIGHT = 72;
+const HEADER_HEIGHT = 42;
+const ROW_HEIGHT = 76;
 const GROUP_GAP = 10;
 const EMPTY_GROUP_GAP = 8;
 const BOTTOM_PADDING = 8;
@@ -264,6 +265,8 @@ type WorkspacesSidebarProps = {
 	onOpenSettings: () => void;
 	onOpenSkills: () => void;
 	onOpenUsage: () => void;
+	onOpenNotes?: () => void;
+	notesCount?: number;
 	onOpenHelp: () => void;
 	onOpenPullRequests: () => void;
 	pullRequestsActive?: boolean;
@@ -325,6 +328,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onOpenSettings,
 	onOpenSkills,
 	onOpenUsage,
+	onOpenNotes,
+	notesCount = 0,
 	onOpenHelp,
 	onOpenPullRequests,
 	pullRequestsActive = false,
@@ -362,6 +367,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				repositories.map((repository) => [repository.rootPath.trim(), repository]),
 			),
 		[repositories],
+	);
+	const selectedProjectSourceKey = useMemo(
+		() => workspaces.find((workspace) => workspace.id === selectedWorkspaceId)?.rootPath?.trim(),
+		[workspaces, selectedWorkspaceId],
 	);
 	const projectLabelsBySourceKey = useMemo(
 		() => new Map(activeGroups.map((group) => [group.sourceKey, group.label])),
@@ -794,14 +803,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				return (
 					<div
 						className={cn(
-							"group/dccRailHeader flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent/50",
+							"dcc-project-heading group/dccRailHeader flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent/50",
 						)}
 						data-empty-group={isEmptyGroup ? "true" : "false"}
+						data-current={item.headerVariant === "project" && item.sourceKey === selectedProjectSourceKey ? "true" : "false"}
 					>
 						<button
 							type="button"
 							className="flex min-w-0 flex-1 cursor-pointer select-none items-center justify-between rounded-md px-2 py-1.5 text-[12px] font-semibold tracking-[0.005em] text-foreground/75 transition-colors hover:text-foreground group-hover/dccRailHeader:text-foreground"
 							disabled={!item.canCollapse}
+							aria-expanded={item.canCollapse ? isOpen : undefined}
 							onClick={() => toggleSection(item.groupId)}
 						>
 							<span className="flex min-w-0 items-center gap-1.5">
@@ -836,7 +847,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								) : (
 									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/75" />
 								)}
-								<span className="truncate">{item.label}</span>
+								<span className="dcc-project-label truncate">{item.label}</span>
 								{item.headerVariant === "completed" &&
 								completedDiskUsage.status === "ready" ? (
 									<span
@@ -1035,6 +1046,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			openWorkspaceDeletionDialog,
 			repositoriesBySourceKey,
 			sectionOpenState,
+			selectedProjectSourceKey,
 			selectedWorkspaceId,
 			t,
 			toggleSection,
@@ -1045,7 +1057,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 	if (collapsed) {
 		return (
-			<div className="flex h-full min-h-0 flex-col items-center gap-2 overflow-hidden py-2">
+			<div className="dcc-project-sidebar flex h-full min-h-0 flex-col items-center gap-2 overflow-hidden py-2">
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<Button
@@ -1101,6 +1113,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					<TooltipContent side="right">{t("sidebar.pullRequests")}</TooltipContent>
 				</Tooltip>
 
+				{onOpenNotes && (
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button variant="ghost" size="icon-xs" onClick={onOpenNotes} aria-label={t("notes.headingShort")}>
+								<StickyNote className="size-4 text-muted-foreground" />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="right">{t("notes.headingShort")}</TooltipContent>
+					</Tooltip>
+				)}
 				{workspaces.length > 0 ? (
 					<>
 						<Tooltip>
@@ -1285,7 +1307,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 	return (
 		<>
-			<div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
+			<div className="dcc-project-sidebar flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
 				<div data-slot="window-safe-top" className="flex h-9 shrink-0 items-center px-3">
 					<div
 						data-tauri-drag-region
@@ -1318,7 +1340,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					</Tooltip>
 				</div>
 
-				<div className="space-y-1 px-2 pb-3 pt-1">
+				<div className="dcc-sidebar-navigation space-y-1 px-2 pb-3 pt-1">
 					<button
 						type="button"
 						onClick={onNewTask}
@@ -1348,6 +1370,19 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						<GitPullRequest className="size-4" strokeWidth={1.9} />
 						<span>{t("sidebar.pullRequests")}</span>
 					</button>
+					{onOpenNotes && (
+						<button
+							type="button"
+							onClick={onOpenNotes}
+							className="dcc-notes-nav flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+						>
+							<StickyNote className="size-4" strokeWidth={1.8} />
+							<span>{t("notes.headingShort")}</span>
+							{notesCount > 0 && (
+								<span className="ml-auto rounded-full bg-foreground/5 px-1.5 text-[10px] tabular-nums">{notesCount}</span>
+							)}
+						</button>
+					)}
 				</div>
 
 				{runningActivities.length > 0 ? (
@@ -1365,7 +1400,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								{runningActivities.length}
 							</span>
 						</div>
-						<div className="space-y-px rounded-lg border border-border/45 bg-foreground/[0.018] p-0.5">
+						<div className="dcc-running-panel space-y-px rounded-lg border border-border/45 bg-foreground/[0.018] p-0.5">
 							{visibleRunningActivities.map(({ workspace, activity }) => {
 								const title = workspaceRailDisplayTitle(workspace);
 								const sourceKey = projectGroupingKey(workspace);
@@ -1576,7 +1611,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					)}
 				</div>
 
-				<div className="flex shrink-0 items-center justify-start gap-1 px-3 pb-3 pt-1">
+				<div className="dcc-sidebar-tools flex shrink-0 items-center justify-start gap-1 px-1 pb-3 pt-2">
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button

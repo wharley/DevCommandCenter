@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
+import { StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { LazyStreamdown } from "@/components/streamdown-loader";
@@ -531,8 +532,9 @@ function AssistantActivityGroup({
 
 	return (
 		<div
-			className="mb-2 flex min-w-0 flex-col rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2"
+			className="dcc-assistant-activity mb-2 flex min-w-0 flex-col rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2"
 			data-state={isOpen ? "open" : "closed"}
+			data-live={isLive ? "true" : "false"}
 		>
 			<button
 				type="button"
@@ -940,6 +942,9 @@ export function AssistantMessage({
 				) : null}
 				{showPlanCard ? null : (
 					<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/assistant:pointer-events-auto group-hover/assistant:opacity-100 group-focus-within/assistant:pointer-events-auto group-focus-within/assistant:opacity-100">
+						{onFork ? (
+							<Button type="button" variant="ghost" size="icon-xs" aria-label={t("notes.capture")} title={t("notes.capture")} className="pointer-events-auto size-5 text-muted-foreground/40 hover:text-muted-foreground" disabled={streaming || !content.trim()} onPointerDown={event => event.preventDefault()} onClick={() => { window.dispatchEvent(new CustomEvent("dcc:capture-note", { detail: { sessionId, content: window.getSelection()?.toString() || content } })); }}><StickyNote className="size-3.5" /></Button>
+						) : null}
 						{onFork ? (
 							<Button
 								type="button"
