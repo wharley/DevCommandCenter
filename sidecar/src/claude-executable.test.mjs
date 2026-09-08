@@ -77,7 +77,7 @@ test("sidecar probes the external CLI and preserves authentication output withou
 	const root = mkdtempSync(join(tmpdir(), "dcc-claude-probe-"));
 	t.after(() => rmSync(root, { recursive: true, force: true }));
 	const cli = join(root, "cli.js");
-	writeFileSync(cli, `if (process.argv.includes('--version')) console.log('2.1.999 (Claude Code)'); else if (process.argv.includes('--help')) console.log('  auth    Manage authentication'); else { console.log(JSON.stringify({ loggedIn: false })); process.exitCode = 1; }`, { mode: 0o755 });
+	writeFileSync(cli, `if (process.argv.includes('--version')) console.log('2.1.999 (Claude Code)'); else if (process.argv.slice(2).join(' ') === 'auth status') { console.log(JSON.stringify({ loggedIn: false })); process.exitCode = 1; } else throw new Error('unexpected command');`, { mode: 0o755 });
 	const entry = fileURLToPath(new URL("./index.mjs", import.meta.url));
 	const env = { ...process.env, DCC_CLAUDE_CODE_BIN_PATH: cli, PATH: `${dirname(process.execPath)}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}` };
 	const run = (args, variables = env) => spawnSync(process.execPath, [entry, ...args], { env: variables, encoding: "utf8", timeout: 15_000 });
@@ -96,9 +96,48 @@ test("sidecar probes the external CLI and preserves authentication output withou
 	const broken = run(["--resolve-cli"]);
 	assert.equal(broken.status, 1);
 	assert.match(broken.stderr, /Update or repair Claude Code/);
-	writeFileSync(cli, "if (process.argv.includes('--help')) console.log('  update    Update the CLI'); else throw new Error('auth must not be sent as a prompt');");
+	writeFileSync(cli, "if (process.argv.includes('--version')) console.log('2.0.76 (Claude Code)'); else throw new Error('auth must not be sent as a prompt');");
 	const legacyAuth = run(["--auth-status"]);
 	assert.equal(legacyAuth.status, 1);
 	assert.match(legacyAuth.stderr, /Update Claude Code/);
+	assert.match(legacyAuth.stderr, /2\.0\.76/);
+	assert.ok(legacyAuth.stderr.includes(realpathSync(cli)));
 	assert.doesNotMatch(legacyAuth.stderr, /auth must not be sent/);
+});
+
+test("authentication uses the documented version boundary without parsing help or prompting old CLIs", (t) => {
+	const root = mkdtempSync(join(tmpdir(), "dcc-claude-auth-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const cli = join(root, "cli.js");
+	writeFileSync(cli, `
+		if (process.argv.includes('--version')) {
+			console.log(process.env.DCC_TEST_VERSION);
+			process.exitCode = Number(process.env.DCC_TEST_VERSION_EXIT || 0);
+		} else if (process.env.DCC_TEST_AUTH_ALLOWED === '1' && process.argv.slice(2).join(' ') === 'auth status') {
+			console.log(JSON.stringify({ loggedIn: true }));
+		} else throw new Error('unexpected command: must not parse help or prompt a model');
+	`);
+	const entry = fileURLToPath(new URL("./index.mjs", import.meta.url));
+	for (const [version, supported, versionExit = 0] of [
+		["1.9.999", false], ["2.0.76", false], ["2.1.40", false],
+		["2.1.41", true], ["2.1.259", true], ["2.2.0", true], ["3.0.0", true],
+		["unknown", false], ["error from runtime 22.21.1", false],
+		["2.1.259", false, 7],
+	]) {
+		const result = spawnSync(process.execPath, [entry, "--auth-status"], {
+			env: { ...process.env, DCC_CLAUDE_CODE_BIN_PATH: cli,
+				PATH: `${dirname(process.execPath)}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+				DCC_TEST_VERSION: version, DCC_TEST_VERSION_EXIT: String(versionExit),
+				DCC_TEST_AUTH_ALLOWED: supported ? "1" : "0" },
+			encoding: "utf8", timeout: 15_000,
+		});
+		assert.equal(result.status, supported ? 0 : 1, `${version}: ${result.stderr}`);
+		assert.doesNotMatch(result.stderr, /unexpected command/);
+		if (supported) assert.equal(JSON.parse(result.stdout).loggedIn, true);
+		else assert.ok(result.stderr.includes(realpathSync(cli)), result.stderr);
+		if (versionExit) {
+			assert.match(result.stderr, /exit 7/);
+			assert.doesNotMatch(result.stderr, /does not support authentication/);
+		}
+	}
 });

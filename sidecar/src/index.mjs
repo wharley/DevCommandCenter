@@ -43,17 +43,32 @@ function runClaudeCommand(args) {
 		timeout: 10_000,
 	});
 	if (result.error) {
-		throw new Error(`Could not run the installed Claude Code CLI (${result.error.code}). Check your Claude Code installation${invocation.command === "node" ? " and Node.js" : ""}, then check the provider again.`);
+		throw new Error(`Could not run Claude Code at ${claudeBinPath} (${result.error.code}). Check your Claude Code installation${invocation.command === "node" ? " and Node.js" : ""}, then check the provider again.`);
+	}
+	if (result.signal) {
+		throw new Error(`Claude Code at ${claudeBinPath} was terminated by ${result.signal} during ${args.join(" ")}. Check the provider again.`);
 	}
 	return result;
 }
 
+function readClaudeVersion() {
+	const result = runClaudeCommand(["--version"]);
+	const version = result.stdout.trim();
+	const match = /^(\d+)\.(\d+)\.(\d+)(?:\s+\(Claude Code\))?$/.exec(version);
+	if (result.status !== 0 || !match) {
+		throw new Error(`Could not identify the installed Claude Code version at ${claudeBinPath} (exit ${result.status}). Update or repair Claude Code, then check the provider again.`);
+	}
+	return { version, parts: match.slice(1).map(Number) };
+}
+
 function handleAuthStatus() {
 	// Older CLIs can interpret unknown subcommands as prompts. Check the command
-	// surface first so a health check never submits "auth status" to a model.
-	const help = runClaudeCommand(["--help"]);
-	if (help.status !== 0 || !/^\s+auth\s+/m.test(help.stdout)) {
-		throw new Error("This Claude Code version does not support authentication checks. Update Claude Code, then run `claude auth login` and check the provider again.");
+	// introduction version instead of parsing human-readable --help output.
+	// https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#2141
+	// This is the auth-command minimum, not an SDK compatibility guarantee.
+	const { version, parts: [major, minor, patch] } = readClaudeVersion();
+	if (major < 2 || (major === 2 && (minor < 1 || (minor === 1 && patch < 41)))) {
+		throw new Error(`Claude Code ${version} at ${claudeBinPath} does not support authentication checks (requires 2.1.41 or newer). Update Claude Code at this path, then run \`claude auth login\` and check the provider again.`);
 	}
 	const result = runClaudeCommand(["auth", "status"]);
 
@@ -404,11 +419,7 @@ async function main() {
 
 	claudeBinPath = resolveClaudeExecutable();
 	if (process.argv.includes("--resolve-cli")) {
-		const result = runClaudeCommand(["--version"]);
-		const version = result.stdout.trim();
-		if (result.status !== 0 || !/\b\d+\.\d+\.\d+\b/.test(version)) {
-			throw new Error("Could not identify the installed Claude Code version. Update or repair Claude Code, then check the provider again.");
-		}
+		const { version } = readClaudeVersion();
 		emit({ path: claudeBinPath, version: version.slice(0, 256) });
 		return;
 	}
