@@ -27,7 +27,7 @@ import { createNativeSubagentHooks } from "./native-subagent-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 import { waitForPendingResponse } from "./pending-response.mjs";
 
-const SIDECAR_VERSION = "0.1.64";
+const SIDECAR_VERSION = "0.1.65";
 
 function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);
