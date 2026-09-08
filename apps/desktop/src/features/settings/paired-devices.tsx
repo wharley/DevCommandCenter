@@ -153,18 +153,24 @@ export function PairedDevicesPanel({
 				<div className="flex items-start justify-between gap-3">
 					<div className="min-w-0">
 						<div className="flex items-center gap-2">
-							<Smartphone className="size-4 text-muted-foreground" strokeWidth={1.9} />
+							<Smartphone
+								className="size-4 text-muted-foreground"
+								strokeWidth={1.9}
+							/>
 							<h3 className="text-[14px] font-medium text-foreground">
 								Dispositivos pareados
 							</h3>
 						</div>
 						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-							Celulares e tablets autenticam por chave pública (ECDSA P-256). A chave
-							privada nunca sai do dispositivo. Você pode revogar individualmente a
-							qualquer momento.
+							Celulares e tablets autenticam por chave pública (ECDSA P-256). A
+							chave privada nunca sai do dispositivo. Você pode revogar
+							individualmente a qualquer momento.
 						</p>
 					</div>
-					<Badge variant={devices.length > 0 ? "success" : "outline"} className="h-7 shrink-0 px-2.5 text-[11px] font-normal">
+					<Badge
+						variant={devices.length > 0 ? "success" : "outline"}
+						className="h-7 shrink-0 px-2.5 text-[11px] font-normal"
+					>
 						{devices.length}
 					</Badge>
 				</div>
@@ -184,7 +190,9 @@ export function PairedDevicesPanel({
 						size="sm"
 						onClick={() => void refresh()}
 					>
-						<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+						<RefreshCw
+							className={`size-3.5 ${loading ? "animate-spin" : ""}`}
+						/>
 						Atualizar
 					</Button>
 				</div>
@@ -320,9 +328,16 @@ function AuditLogSection() {
 						size="xs"
 						onClick={() => void refresh()}
 					>
-						<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+						<RefreshCw
+							className={`size-3.5 ${loading ? "animate-spin" : ""}`}
+						/>
 					</Button>
-					<Button type="button" variant="ghost" size="xs" onClick={() => setExpanded(false)}>
+					<Button
+						type="button"
+						variant="ghost"
+						size="xs"
+						onClick={() => setExpanded(false)}
+					>
 						Fechar
 					</Button>
 				</div>
@@ -346,15 +361,22 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
 	const meta = describeEvent(entry.event);
 	return (
 		<li className="flex items-start gap-3 px-4 py-2">
-			<meta.icon className={`mt-0.5 size-3.5 shrink-0 ${meta.tone}`} aria-hidden />
+			<meta.icon
+				className={`mt-0.5 size-3.5 shrink-0 ${meta.tone}`}
+				aria-hidden
+			/>
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
 					<p className="font-medium text-foreground">{meta.label}</p>
-					<span className="text-muted-foreground/70">{formatTime(entry.createdAt)}</span>
+					<span className="text-muted-foreground/70">
+						{formatTime(entry.createdAt)}
+					</span>
 				</div>
 				<div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
 					{entry.deviceId ? (
-						<span className="font-mono">device {entry.deviceId.slice(0, 8)}…</span>
+						<span className="font-mono">
+							device {entry.deviceId.slice(0, 8)}…
+						</span>
 					) : null}
 					{entry.ip ? <span className="font-mono">ip {entry.ip}</span> : null}
 					{entry.userAgent ? (
@@ -373,22 +395,45 @@ function describeEvent(event: string): {
 } {
 	switch (event) {
 		case "pair":
-			return { label: "Pareamento concluído", icon: CheckCircle2, tone: "text-emerald-500" };
+			return {
+				label: "Pareamento concluído",
+				icon: CheckCircle2,
+				tone: "text-emerald-500",
+			};
 		case "revoke":
-			return { label: "Dispositivo revogado", icon: XCircle, tone: "text-amber-500" };
+			return {
+				label: "Dispositivo revogado",
+				icon: XCircle,
+				tone: "text-amber-500",
+			};
 		case "pin_failure":
-			return { label: "PIN incorreto", icon: AlertTriangle, tone: "text-amber-500" };
+			return {
+				label: "PIN incorreto",
+				icon: AlertTriangle,
+				tone: "text-amber-500",
+			};
 		case "pin_locked":
-			return { label: "Nonce travado por brute-force", icon: AlertTriangle, tone: "text-red-500" };
+			return {
+				label: "Nonce travado por brute-force",
+				icon: AlertTriangle,
+				tone: "text-red-500",
+			};
 		default:
-			return { label: event, icon: CheckCircle2, tone: "text-muted-foreground" };
+			return {
+				label: event,
+				icon: CheckCircle2,
+				tone: "text-muted-foreground",
+			};
 	}
 }
 
 function formatTime(iso: string): string {
 	try {
 		const d = new Date(iso);
-		return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
+		return d.toLocaleString("pt-BR", {
+			dateStyle: "short",
+			timeStyle: "medium",
+		});
 	} catch {
 		return iso;
 	}
@@ -420,8 +465,12 @@ function EndpointOption({
 			}`}
 		>
 			<div className="flex w-full items-center justify-between gap-2">
-				<span className="text-[12px] font-medium text-foreground">{endpoint.label}</span>
-				<span className={`text-[10px] font-medium uppercase tracking-wider ${badge.tone}`}>
+				<span className="text-[12px] font-medium text-foreground">
+					{endpoint.label}
+				</span>
+				<span
+					className={`text-[10px] font-medium uppercase tracking-wider ${badge.tone}`}
+				>
 					{badge.text}
 				</span>
 			</div>
@@ -450,7 +499,41 @@ function PairDeviceDialog({
 	const [challenge, setChallenge] = useState<PairingChallenge | null>(null);
 	const [generating, setGenerating] = useState(false);
 	const [remainingSecs, setRemainingSecs] = useState(0);
-	const [selectedEndpointId, setSelectedEndpointId] = useState<string | null>(null);
+	const [selectedEndpointId, setSelectedEndpointId] = useState<string | null>(
+		null,
+	);
+	const [httpsAddress, setHttpsAddress] = useState(() => {
+		try {
+			return localStorage.getItem("dcc.mobile.httpsOrigin") ?? "";
+		} catch {
+			return "";
+		}
+	});
+	const httpsOrigin = useMemo(() => {
+		try {
+			const url = new URL(httpsAddress.trim());
+			return url.protocol === "https:" &&
+				!url.username &&
+				!url.password &&
+				!url.search &&
+				!url.hash &&
+				["/", "/m", "/m/"].includes(url.pathname)
+				? url.origin
+				: null;
+		} catch {
+			return null;
+		}
+	}, [httpsAddress]);
+	useEffect(() => {
+		try {
+			if (httpsOrigin)
+				localStorage.setItem("dcc.mobile.httpsOrigin", httpsOrigin);
+			else if (!httpsAddress.trim())
+				localStorage.removeItem("dcc.mobile.httpsOrigin");
+		} catch {
+			/* Browser storage is optional. */
+		}
+	}, [httpsOrigin, httpsAddress]);
 
 	// Endpoints reachable from a phone, in display order. Loopback is hidden
 	// from the picker but still selectable as a debug fallback.
@@ -467,7 +550,9 @@ function PairDeviceDialog({
 	useEffect(() => {
 		if (selectedEndpointId) return;
 		if (!endpoints || endpoints.length === 0) return;
-		const tailscale = endpoints.find((e) => e.provider === "tailscale" && e.status !== "unavailable");
+		const tailscale = endpoints.find(
+			(e) => e.provider === "tailscale" && e.status !== "unavailable",
+		);
 		const lan = endpoints.find((e) => e.reachability === "lan");
 		const any = externalEndpoints[0] ?? endpoints[0];
 		setSelectedEndpointId((tailscale ?? lan ?? any)?.id ?? null);
@@ -475,8 +560,9 @@ function PairDeviceDialog({
 
 	const selectedEndpoint =
 		endpoints?.find((e) => e.id === selectedEndpointId) ?? null;
-	const backendUrl = selectedEndpoint?.url ?? fallbackUrl;
-	const noEndpointsDetected = endpoints !== null && externalEndpoints.length === 0;
+	const backendUrl = httpsOrigin ?? selectedEndpoint?.url ?? fallbackUrl;
+	const noEndpointsDetected =
+		endpoints !== null && externalEndpoints.length === 0 && !httpsOrigin;
 
 	const generate = async () => {
 		setGenerating(true);
@@ -516,9 +602,9 @@ function PairDeviceDialog({
 	}, [challenge]);
 
 	const pairUrl = useMemo(() => {
-		if (!challenge) return null;
+		if (!challenge || (httpsAddress.trim() && !httpsOrigin)) return null;
 		return buildPairUrl(backendUrl, challenge.nonce);
-	}, [challenge, backendUrl]);
+	}, [challenge, backendUrl, httpsAddress, httpsOrigin]);
 
 	const copyPairUrl = async () => {
 		if (!pairUrl) return;
@@ -536,23 +622,51 @@ function PairDeviceDialog({
 		<Dialog open={open} onOpenChange={(o) => !o && onClose()}>
 			<DialogContent className="flex max-h-[90vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
 				<DialogHeader className="border-b border-border/50 px-6 py-4">
-					<DialogTitle className="text-[15px]">Parear novo dispositivo</DialogTitle>
+					<DialogTitle className="text-[15px]">
+						Parear novo dispositivo
+					</DialogTitle>
 					<DialogDescription className="text-[12px]">
-						Escaneie o QR code no celular e digite o PIN abaixo. O pareamento expira em 60 segundos.
+						Escaneie o QR code no celular e digite o PIN abaixo. O pareamento
+						expira em 60 segundos.
 					</DialogDescription>
 				</DialogHeader>
 
 				<div className="flex-1 overflow-y-auto px-6 py-5">
+					<label className="mb-5 block text-[12px] font-medium">
+						Endereço HTTPS para instalar no celular · opcional
+						<input
+							type="url"
+							value={httpsAddress}
+							onChange={(e) => setHttpsAddress(e.target.value)}
+							placeholder="https://meu-mac.minha-rede.ts.net"
+							className="mt-2 w-full rounded-lg border border-border bg-background p-2 font-mono text-xs"
+						/>
+						<span className="mt-2 block text-[11px] font-normal leading-relaxed text-muted-foreground">
+							Cole o endereço do Tailscale Serve já configurado para este DCC. O
+							QR usará esse endereço para habilitar instalação e notificações.
+						</span>
+						{httpsAddress.trim() && !httpsOrigin && (
+							<span
+								role="alert"
+								className="mt-1 block text-xs text-destructive"
+							>
+								Use um endereço HTTPS válido, sem credenciais ou parâmetros.
+							</span>
+						)}
+					</label>
 					{noEndpointsDetected ? (
 						<div className="flex h-[280px] flex-col items-center justify-center gap-3 px-4 text-center">
-							<AlertTriangle className="size-6 text-amber-500" strokeWidth={1.8} />
+							<AlertTriangle
+								className="size-6 text-amber-500"
+								strokeWidth={1.8}
+							/>
 							<p className="text-[13px] font-medium text-foreground">
 								Nenhuma rede alcançável detectada
 							</p>
 							<p className="text-[12px] leading-relaxed text-muted-foreground">
-								O celular precisa de uma rota até este desktop. Conecte ao
-								Wi-Fi (mesma rede do celular), ou instale o Tailscale em ambos
-								para parear de qualquer lugar.
+								O celular precisa de uma rota até este desktop. Conecte ao Wi-Fi
+								(mesma rede do celular), ou instale o Tailscale em ambos para
+								parear de qualquer lugar.
 							</p>
 							<Button
 								type="button"
@@ -588,9 +702,7 @@ function PairDeviceDialog({
 						</div>
 					) : (
 						<div className="flex flex-col items-center gap-4">
-							{pairUrl ? (
-								<RemoteAccessQr value={pairUrl} size={224} />
-							) : null}
+							{pairUrl ? <RemoteAccessQr value={pairUrl} size={224} /> : null}
 
 							<div className="w-full rounded-xl border border-border/60 bg-muted/15 p-4 text-center">
 								<p className="text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -613,6 +725,7 @@ function PairDeviceDialog({
 								size="sm"
 								className="w-full"
 								onClick={() => void copyPairUrl()}
+								disabled={!pairUrl}
 							>
 								<Copy className="size-3.5" />
 								Copiar link do pareamento
@@ -628,8 +741,11 @@ function PairDeviceDialog({
 											<EndpointOption
 												key={ep.id}
 												endpoint={ep}
-												selected={ep.id === selectedEndpointId}
-												onSelect={() => setSelectedEndpointId(ep.id)}
+												selected={!httpsOrigin && ep.id === selectedEndpointId}
+												onSelect={() => {
+													setHttpsAddress("");
+													setSelectedEndpointId(ep.id);
+												}}
 											/>
 										))}
 									</div>

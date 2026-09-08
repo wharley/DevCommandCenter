@@ -20,10 +20,13 @@ import { apiFetch } from "@/lib/api";
 import { foldEntry, type BundleEntry, type WorktreeDiff } from "@/lib/diff";
 import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
-import { openEventStream } from "@/lib/sseClient";
+import { openEventStream, type StreamState } from "@/lib/sseClient";
+import { readLocal, writeLocal, removeLocal } from "@/lib/local-data";
+import { AgentQuestions } from "@/components/agent-questions";
+import { pendingQuestions, type QuestionRequest } from "@/lib/questions";
+import { ConnectionNotice } from "@/components/connection-notice";
 import {
 	applyEvents,
-	applyIncomingEvent,
 	createThreadState,
 	incomingEventSessionId,
 	type ChatMessage,
@@ -50,7 +53,9 @@ export function ThreadRoute() {
 	const params = useParams({ from: "/threads/$threadId" });
 	const threadId = params.threadId;
 	const navigate = useNavigate();
-	const [session, setSession] = useState<PairingSession | null | undefined>(undefined);
+	const [session, setSession] = useState<PairingSession | null | undefined>(
+		undefined,
+	);
 	const [state, setState] = useState<ThreadState>(() => createThreadState());
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState<string | null>(null);
@@ -59,7 +64,21 @@ export function ThreadRoute() {
 	const [aborting, setAborting] = useState(false);
 	const [meta, setMeta] = useState<SessionMeta | null>(null);
 	const [diff, setDiff] = useState<WorktreeDiff | null>(null);
+	const [questions, setQuestions] = useState<QuestionRequest[]>([]);
+	const [connection, setConnection] = useState<StreamState>("connecting");
+	const [lastSynced, setLastSynced] = useState<string | null>(null);
+	const reconcileRef = useRef<() => void>(() => {});
+	const stickToBottom = useRef(true);
+	const permissionInFlight = useRef(new Set<string>());
 	const scrollerRef = useRef<HTMLDivElement | null>(null);
+	const [viewportHeight, setViewportHeight] = useState<number>();
+	useEffect(() => {
+		const viewport = window.visualViewport;
+		const resize = () => setViewportHeight(viewport?.height);
+		resize();
+		viewport?.addEventListener("resize", resize);
+		return () => viewport?.removeEventListener("resize", resize);
+	}, []);
 
 	useEffect(() => {
 		void loadSession().then((s) => setSession(s));
@@ -67,50 +86,96 @@ export function ThreadRoute() {
 
 	useEffect(() => {
 		if (!session) return;
-		let cancelled = false;
-		setLoading(true);
+		const controller = new AbortController();
+		let running = false;
+		let queued = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const cached = readLocal<{ events: RawSessionEvent[]; at: string }>(
+			session,
+			`history:${threadId}`,
+		);
+		setState(applyEvents(createThreadState(), cached?.events ?? []));
+		setQuestions(pendingQuestions(cached?.events ?? []));
+		setLastSynced(cached?.at ?? null);
+		setLoading(!cached);
 		setLoadError(null);
-		(async () => {
+		setComposer(readLocal<string>(session, `draft:${threadId}`) ?? "");
+		stickToBottom.current = true;
+		const refresh = async () => {
+			if (controller.signal.aborted) return;
+			if (running) {
+				queued = true;
+				return;
+			}
+			running = true;
 			try {
 				const events = await apiFetch<RawSessionEvent[]>(
 					session,
 					`/api/v1/sessions/${encodeURIComponent(threadId)}/events`,
+					{ signal: controller.signal },
 				);
-				if (cancelled) return;
-				setState((prev) => applyEvents(prev, events));
-				setLoading(false);
+				if (controller.signal.aborted) return;
+				// Durable sequence numbers are authoritative. Never merge synthetic SSE cursors.
+				setState(applyEvents(createThreadState(), events));
+				setQuestions(pendingQuestions(events));
+				const at = new Date().toISOString();
+				setLastSynced(at);
+				writeLocal(session, `history:${threadId}`, { events, at });
+				setLoadError(null);
 			} catch (err) {
-				if (cancelled) return;
-				setLoadError(err instanceof Error ? err.message : "Falha ao carregar.");
-				setLoading(false);
+				if (!controller.signal.aborted)
+					setLoadError(
+						err instanceof Error ? err.message : "Falha ao atualizar.",
+					);
+			} finally {
+				running = false;
+				if (!controller.signal.aborted) {
+					setLoading(false);
+					if (queued) {
+						queued = false;
+						schedule();
+					}
+				}
 			}
-		})();
+		};
+		const schedule = () => {
+			if (timer || controller.signal.aborted) return;
+			timer = setTimeout(() => {
+				timer = undefined;
+				void refresh();
+			}, 150);
+		};
+		reconcileRef.current = schedule;
+		const stop = openEventStream(session, "/api/v1/events/stream", {
+			onOpen: schedule,
+			onState: setConnection,
+			onMessage: (payload) => {
+				if (incomingEventSessionId(payload) === threadId) schedule();
+			},
+		});
+		void refresh();
+		// Desktop and HTTP can own separate provider processes; durable polling also covers desktop work.
+		const poll = setInterval(() => {
+			if (document.visibilityState === "visible") schedule();
+		}, 10_000);
+		const visible = () => {
+			if (document.visibilityState === "visible") schedule();
+		};
+		document.addEventListener("visibilitychange", visible);
 		return () => {
-			cancelled = true;
+			controller.abort();
+			stop();
+			clearInterval(poll);
+			clearTimeout(timer);
+			document.removeEventListener("visibilitychange", visible);
+			reconcileRef.current = () => {};
 		};
 	}, [session, threadId]);
 
-	// Listen for new events via SSE.
-	useEffect(() => {
-		if (!session) return;
-		const stop = openEventStream(session, "/api/v1/events/stream", {
-			onMessage: (payload) => {
-				if (incomingEventSessionId(payload) !== threadId) return;
-				setState((prev) => applyIncomingEvent(prev, payload));
-			},
-			onError: () => {
-				/* reconnect handled inside openEventStream */
-			},
-		});
-		return stop;
-	}, [session, threadId]);
-
-	// Auto-scroll to bottom when new messages arrive.
 	useEffect(() => {
 		const el = scrollerRef.current;
-		if (!el) return;
-		el.scrollTop = el.scrollHeight;
-	}, [state.cursor, state.messages.length]);
+		if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+	}, [state]);
 
 	const lastTurnId = useMemo(() => {
 		for (let i = state.messages.length - 1; i >= 0; i--) {
@@ -197,10 +262,10 @@ export function ThreadRoute() {
 	const submit = async () => {
 		if (!session) return;
 		const text = composer.trim();
-		if (!text || sending) return;
+		if (!text || sending || isRunning) return;
 		setSending(true);
 		try {
-			const result = await apiFetch<SendTurnOutput>(
+			await apiFetch<SendTurnOutput>(
 				session,
 				`/api/v1/sessions/${encodeURIComponent(threadId)}/turns`,
 				{
@@ -208,25 +273,10 @@ export function ThreadRoute() {
 					body: JSON.stringify({ sessionId: threadId, prompt: text }),
 				},
 			);
-			const turnId = result.turn?.id;
-			if (turnId) {
-				setState((prev) =>
-					applyEvents(prev, [
-						{
-							eventId: `local:${turnId}`,
-							sessionId: threadId,
-							sequence: prev.cursor + 1,
-							occurredAt: result.turn?.createdAt ?? new Date().toISOString(),
-							kind: {
-								type: "turn_started",
-								turnId,
-								prompt: result.turn?.content ?? text,
-							},
-						},
-					]),
-				);
-			}
 			setComposer("");
+			removeLocal(session, `draft:${threadId}`);
+			stickToBottom.current = true;
+			reconcileRef.current();
 		} catch (err) {
 			setLoadError(err instanceof Error ? err.message : "Falha ao enviar.");
 		} finally {
@@ -238,10 +288,14 @@ export function ThreadRoute() {
 		if (!session || aborting) return;
 		setAborting(true);
 		try {
-			await apiFetch(session, `/api/v1/sessions/${encodeURIComponent(threadId)}/abort`, {
-				method: "POST",
-				body: JSON.stringify({ sessionId: threadId }),
-			});
+			await apiFetch(
+				session,
+				`/api/v1/sessions/${encodeURIComponent(threadId)}/abort`,
+				{
+					method: "POST",
+					body: JSON.stringify({ sessionId: threadId }),
+				},
+			);
 		} catch (err) {
 			setLoadError(err instanceof Error ? err.message : "Falha ao abortar.");
 		} finally {
@@ -250,7 +304,8 @@ export function ThreadRoute() {
 	};
 
 	const respondPermission = async (requestId: string, choice: string) => {
-		if (!session) return;
+		if (!session || permissionInFlight.current.has(requestId)) return;
+		permissionInFlight.current.add(requestId);
 		try {
 			await apiFetch(
 				session,
@@ -264,8 +319,11 @@ export function ThreadRoute() {
 					}),
 				},
 			);
+			reconcileRef.current();
 		} catch (err) {
 			setLoadError(err instanceof Error ? err.message : "Falha ao responder.");
+		} finally {
+			permissionInFlight.current.delete(requestId);
 		}
 	};
 
@@ -297,7 +355,12 @@ export function ThreadRoute() {
 	}
 
 	return (
-		<div className="flex h-dvh flex-col">
+		<div
+			className="flex flex-col"
+			style={{
+				height: `calc(${viewportHeight ? `${viewportHeight}px` : "100dvh"} - env(safe-area-inset-top) - env(safe-area-inset-bottom))`,
+			}}
+		>
 			<TopBar
 				title={threadTitle}
 				subtitle={workspaceLabel(meta)}
@@ -307,14 +370,31 @@ export function ThreadRoute() {
 				onBack={() => void navigate({ to: "/" })}
 			/>
 
-			<div ref={scrollerRef} className="flex-1 overflow-y-auto">
+			<ConnectionNotice
+				state={connection}
+				lastSynced={lastSynced}
+				onRetry={() => reconcileRef.current()}
+			/>
+			<div
+				ref={scrollerRef}
+				onScroll={(e) => {
+					const el = e.currentTarget;
+					stickToBottom.current =
+						el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+				}}
+				className="flex-1 overflow-y-auto"
+			>
 				<div className="mx-auto max-w-md px-4 py-5">
+					{loadError && (
+						<ErrorBanner
+							message={loadError}
+							onDismiss={() => setLoadError(null)}
+						/>
+					)}
 					{loading ? (
 						<div className="flex h-[40vh] items-center justify-center text-mute">
 							<Loader2 className="size-5 animate-spin" />
 						</div>
-					) : loadError ? (
-						<ErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
 					) : state.messages.length === 0 ? (
 						<Rest title="Sem mensagens ainda">
 							Descreva a primeira tarefa no campo abaixo para colocar o agente
@@ -323,15 +403,29 @@ export function ThreadRoute() {
 					) : (
 						<MessageList
 							messages={state.messages}
-							onRespondPermission={(reqId, choice) => void respondPermission(reqId, choice)}
+							onRespondPermission={(reqId, choice) =>
+								void respondPermission(reqId, choice)
+							}
 						/>
 					)}
+					{questions.map((q) => (
+						<AgentQuestions
+							key={q.requestId}
+							request={q}
+							session={session}
+							threadId={threadId}
+							onAnswered={() => reconcileRef.current()}
+						/>
+					))}
 				</div>
 			</div>
 
 			<Composer
 				value={composer}
-				onChange={setComposer}
+				onChange={(text) => {
+					setComposer(text);
+					if (session) writeLocal(session, `draft:${threadId}`, text);
+				}}
 				onSubmit={() => void submit()}
 				sending={sending}
 				running={isRunning}
@@ -341,7 +435,7 @@ export function ThreadRoute() {
 					lastTurnId === null
 						? "Descreva a primeira tarefa…"
 						: isRunning
-							? "Fila: será enviado após a resposta…"
+							? "Aguarde a resposta ou pare o agente…"
 							: "Responda ou mande a próxima instrução…"
 				}
 			/>
@@ -376,7 +470,9 @@ function TopBar({
 			</button>
 			<StateDot state={isRunning ? "live" : "idle"} />
 			<div className="min-w-0 flex-1">
-				<p className="truncate text-[13px] font-medium leading-tight">{title}</p>
+				<p className="truncate text-[13px] font-medium leading-tight">
+					{title}
+				</p>
 				{subtitle ? (
 					<p className="flex items-center gap-1 truncate font-mono text-[10px] text-faint">
 						<GitBranch className="size-2.5 shrink-0" />
@@ -405,7 +501,9 @@ function TopBar({
 
 function workspaceLabel(meta: SessionMeta | null): string | null {
 	if (!meta) return null;
-	const text = [meta.workspaceName, meta.workspaceBranch].filter(Boolean).join(" · ");
+	const text = [meta.workspaceName, meta.workspaceBranch]
+		.filter(Boolean)
+		.join(" · ");
 	return text || null;
 }
 
@@ -432,7 +530,11 @@ function groupMessages(messages: ChatMessage[]): RenderItem[] {
 	const flush = () => {
 		if (run.length > 0) {
 			const first = run[0]!;
-			items.push({ type: "trace", key: `trace-${messageKey(first, 0)}`, steps: run });
+			items.push({
+				type: "trace",
+				key: `trace-${messageKey(first, 0)}`,
+				steps: run,
+			});
 			run = [];
 		}
 	};
@@ -523,7 +625,9 @@ function MessageView({
 				/>
 			);
 		case "permission":
-			return <PermissionRow message={message} onRespond={onRespondPermission} />;
+			return (
+				<PermissionRow message={message} onRespond={onRespondPermission} />
+			);
 		case "system":
 			return <SystemRow text={message.text} />;
 		// Reasoning/tools normally render inside a TraceBlock; this is only
@@ -660,17 +764,27 @@ function StepRow({ step }: { step: TraceStep }) {
 	const live = stepIsLive(step);
 	const failed = step.kind === "tool" && step.status === "failed";
 	const Icon =
-		step.kind === "reasoning" ? Brain : step.kind === "tool" ? Wrench : ShieldCheck;
+		step.kind === "reasoning"
+			? Brain
+			: step.kind === "tool"
+				? Wrench
+				: ShieldCheck;
 	const expandable =
 		step.kind === "tool" &&
 		(step.input != null || step.output != null || step.error != null);
 	const row = (
 		<>
-			<Icon className={cn("size-3 shrink-0", live ? "text-accent" : "text-faint")} />
+			<Icon
+				className={cn("size-3 shrink-0", live ? "text-accent" : "text-faint")}
+			/>
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate font-mono text-[11.5px]",
-					failed ? "text-danger" : live ? "text-accent/90" : "text-foreground/75",
+					failed
+						? "text-danger"
+						: live
+							? "text-accent/90"
+							: "text-foreground/75",
 				)}
 			>
 				{stepLabel(step)}
@@ -685,7 +799,11 @@ function StepRow({ step }: { step: TraceStep }) {
 		</>
 	);
 	if (!expandable) {
-		return <div className="flex items-center gap-2 rounded-lg px-1.5 py-1.5">{row}</div>;
+		return (
+			<div className="flex items-center gap-2 rounded-lg px-1.5 py-1.5">
+				{row}
+			</div>
+		);
 	}
 	return (
 		<div>
@@ -811,6 +929,9 @@ function Composer({
 		el.style.height = "auto";
 		el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
 	};
+	useEffect(() => {
+		if (ref.current) grow(ref.current);
+	}, [value, placeholder]);
 	return (
 		<footer className="sticky bottom-0 border-t border-border bg-bg/95 px-3 pb-3 pt-2 backdrop-blur">
 			<div className="mx-auto max-w-md">
@@ -844,21 +965,26 @@ function Composer({
 							grow(e.currentTarget);
 						}}
 						onKeyDown={(e) => {
-							if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+							if (
+								e.key === "Enter" &&
+								(e.ctrlKey || e.metaKey) &&
+								!e.nativeEvent.isComposing
+							) {
 								e.preventDefault();
 								onSubmit();
 							}
 						}}
 						placeholder={placeholder}
+						aria-label="Mensagem para o agente"
 						rows={1}
 						className="min-w-0 flex-1 resize-none bg-transparent px-2.5 py-2 text-[14px] leading-snug text-foreground outline-none placeholder:text-faint focus:outline-none focus-visible:outline-none"
-						style={{ minHeight: 38, maxHeight: 140 }}
+						style={{ minHeight: 44, maxHeight: 140 }}
 					/>
 					<button
 						type="button"
 						onClick={onSubmit}
-						disabled={sending || value.trim().length === 0}
-						className="grid size-[38px] shrink-0 place-items-center rounded-xl bg-accent text-[var(--color-accent-ink)] transition-opacity disabled:opacity-40"
+						disabled={sending || running || value.trim().length === 0}
+						className="grid size-11 shrink-0 place-items-center rounded-xl bg-accent text-[var(--color-accent-ink)] transition-opacity disabled:opacity-40"
 						title="Enviar"
 					>
 						{sending ? (

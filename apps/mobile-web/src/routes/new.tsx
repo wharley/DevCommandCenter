@@ -1,323 +1,398 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import {
-	AlertTriangle,
-	ArrowLeft,
-	Check,
-	FolderGit2,
-	GitBranch,
-	Loader2,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, RefreshCw } from "lucide-react";
+import { Shell, Rest } from "@/components/ui";
 import { ProviderIcon } from "@/components/provider-icon";
-import { ApiError, apiFetch } from "@/lib/api";
-import { cn } from "@/lib/cn";
+import { apiFetch } from "@/lib/api";
 import { loadSession, type PairingSession } from "@/lib/session";
+import { readLocal, writeLocal, removeLocal } from "@/lib/local-data";
+import {
+	createMobileTask,
+	pendingTask,
+	forgetTask,
+	newRequestId,
+	type MobileCatalog,
+	type TaskInput,
+	type TaskResult,
+} from "@/lib/task-api";
 
-type Comb = {
-	id: string;
-	name: string | null;
-	branch: string | null;
-	projectId: string | null;
-	projectName: string | null;
-	worktreePath: string | null;
-	status: string | null;
-	lastOpenedAt: string | null;
+type Draft = {
+	title: string;
+	prompt: string;
+	mode: "existing" | "isolated";
+	target: string;
+	provider: string;
+	model: string;
+	plan: boolean;
 };
-
-type ProviderChoice = {
-	id: string;
-	label: string;
-	description: string;
+const EMPTY: Draft = {
+	title: "",
+	prompt: "",
+	mode: "isolated",
+	target: "",
+	provider: "",
+	model: "",
+	plan: false,
 };
-
-const PROVIDERS: ProviderChoice[] = [
-	{
-		id: "claude_code",
-		label: "Claude Code",
-		description: "Anthropic — Sonnet 4.6 por padrão",
-	},
-	{
-		id: "codex",
-		label: "Codex",
-		description: "OpenAI — GPT-5.4 por padrão",
-	},
-	{
-		id: "grok",
-		label: "Grok Build",
-		description: "SpaceXAI — Grok 4.6",
-	},
-];
-
-type StartThreadOutput = {
-	session?: { id?: string; sessionId?: string };
-	thread?: { id?: string };
-};
+const field =
+	"mt-2 w-full rounded-xl border border-border bg-panel px-3 py-3 text-base outline-none focus:border-accent disabled:opacity-50";
 
 export function NewThreadRoute() {
 	const navigate = useNavigate();
-	const [session, setSession] = useState<PairingSession | null | undefined>(undefined);
-	const [combs, setCombs] = useState<Comb[] | null>(null);
-	const [loadError, setLoadError] = useState<string | null>(null);
-	const [selectedComb, setSelectedComb] = useState<string | null>(null);
-	const [selectedProvider, setSelectedProvider] = useState<string>(PROVIDERS[0]!.id);
-	const [submitting, setSubmitting] = useState(false);
-	const [submitError, setSubmitError] = useState<string | null>(null);
-
+	const [session, setSession] = useState<PairingSession | null>();
+	const [catalog, setCatalog] = useState<MobileCatalog | null>(null);
+	const [draft, setDraft] = useState<Draft>(EMPTY);
+	const [error, setError] = useState<string | null>(null);
+	const [loading, setLoading] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [pending, setPending] = useState<TaskInput | null>(null);
+	const [result, setResult] = useState<TaskResult | null>(null);
+	const request = useRef<AbortController | null>(null);
 	useEffect(() => {
-		void loadSession().then((s) => setSession(s));
+		let disposed = false;
+		void loadSession().then((s) => {
+			if (disposed) return;
+			setSession(s);
+			if (s) {
+				setDraft(readLocal<Draft>(s, "task-draft") ?? EMPTY);
+				setPending(pendingTask(s));
+			}
+		});
+		return () => {
+			disposed = true;
+			request.current?.abort();
+		};
 	}, []);
 
-	useEffect(() => {
-		if (!session) return;
-		setLoadError(null);
-		apiFetch<Comb[]>(session, "/api/v1/combs")
-			.then((result) => {
-				setCombs(result);
-				// Pre-select the most recently opened (non-archived) worktree.
-				const sorted = [...result]
-					.filter((c) => c.status !== "archived")
-					.sort((a, b) => {
-					const av = a.lastOpenedAt ?? "";
-					const bv = b.lastOpenedAt ?? "";
-					return bv.localeCompare(av);
-				});
-				if (sorted[0]) setSelectedComb(sorted[0].id);
-			})
-			.catch((err) => {
-				setLoadError(
-					err instanceof ApiError && err.status === 401
-						? "Sessão expirada. Pareie novamente."
-						: err instanceof Error
-							? err.message
-							: "Falha ao carregar workspaces.",
-				);
+	const refresh = async (active: PairingSession) => {
+		setLoading(true);
+		setError(null);
+		try {
+			const data = await apiFetch<MobileCatalog>(
+				active,
+				"/api/v1/mobile/catalog",
+			);
+			setCatalog(data);
+			setDraft((d) => {
+				const mode = data.repositories.length ? d.mode : "existing";
+				const targets =
+					mode === "isolated"
+						? data.repositories
+						: data.workspaces.filter((w) => w.state === "ready");
+				const providers = data.providers.filter(available);
+				return {
+					...d,
+					mode,
+					target: targets.some((t) => t.id === d.target)
+						? d.target
+						: (targets[0]?.id ?? ""),
+					provider: providers.some((p) => p.id === d.provider)
+						? d.provider
+						: (providers[0]?.id ?? ""),
+				};
 			});
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "Falha ao carregar opções.");
+		} finally {
+			setLoading(false);
+		}
+	};
+	useEffect(() => {
+		if (session) void refresh(session);
 	}, [session]);
-
-	const combGroups = useMemo(() => groupCombs(combs), [combs]);
-
-	if (session === undefined) {
-		return (
-			<Shell>
-				<div className="flex h-[50vh] items-center justify-center text-mute">
-					<Loader2 className="size-5 animate-spin" />
-				</div>
-			</Shell>
-		);
-	}
-
-	if (session === null) {
-		return (
-			<Shell>
-				<h1 className="text-xl font-semibold">Sem sessão</h1>
-				<p className="mt-2 text-[13px] text-mute">
-					Pareie o celular primeiro.{" "}
-					<Link to="/" className="text-foreground underline">
-						Voltar
-					</Link>
-				</p>
-			</Shell>
-		);
-	}
+	const change = (patch: Partial<Draft>) => {
+		const next = { ...draft, ...patch };
+		setDraft(next);
+		if (session) writeLocal(session, "task-draft", next);
+	};
+	const provider = catalog?.providers.find((p) => p.id === draft.provider);
+	const targets =
+		draft.mode === "isolated"
+			? (catalog?.repositories ?? [])
+			: (catalog?.workspaces.filter((w) => w.state === "ready") ?? []);
+	const valid = Boolean(
+		draft.prompt.trim() &&
+		targets.some((t) => t.id === draft.target) &&
+		provider &&
+		available(provider),
+	);
 
 	const submit = async () => {
-		if (!selectedComb || submitting) return;
-		const comb = combs?.find((c) => c.id === selectedComb);
-		if (!comb || !comb.projectId) {
-			setSubmitError("Workspace inválido.");
-			return;
-		}
-		setSubmitting(true);
-		setSubmitError(null);
+		if (!session || request.current || (!pending && !valid)) return;
+		const input: TaskInput = pending ?? {
+			requestId: newRequestId(),
+			workspaceId: draft.mode === "existing" ? draft.target : null,
+			repositoryId: draft.mode === "isolated" ? draft.target : null,
+			title:
+				draft.title.trim() || draft.prompt.trim().split("\n")[0]!.slice(0, 100),
+			prompt: draft.prompt,
+			providerId: draft.provider,
+			model: draft.model || null,
+			planMode: draft.plan,
+		};
+		setPending(input);
+		setBusy(true);
+		setError(null);
+		const controller = new AbortController();
+		request.current = controller;
 		try {
-			const result = await apiFetch<StartThreadOutput>(
-				session,
-				"/api/v1/sessions/start",
-				{
-					method: "POST",
-					body: JSON.stringify({
-						workspaceId: comb.id,
-						projectId: comb.projectId,
-						providerId: selectedProvider,
-					}),
-				},
-			);
-			const sessionId =
-				result?.session?.sessionId ?? result?.session?.id ?? result?.thread?.id;
-			if (!sessionId) {
-				throw new Error("Resposta inesperada — sessionId ausente.");
-			}
-			void navigate({
-				to: "/threads/$threadId",
-				params: { threadId: sessionId },
-				replace: true,
-			});
-		} catch (err) {
-			setSubmitError(err instanceof Error ? err.message : "Falha ao criar.");
+			const outcome = await createMobileTask(session, input, controller.signal);
+			if (controller.signal.aborted) return;
+			setResult(outcome);
+			if (outcome.state === "started" && outcome.sessionId) {
+				forgetTask(session);
+				removeLocal(session, "task-draft");
+				void navigate({
+					to: "/threads/$threadId",
+					params: { threadId: outcome.sessionId },
+					replace: true,
+				});
+			} else if (outcome.state === "failed")
+				setError(outcome.error ?? "Não foi possível iniciar o agente.");
+			else
+				setError(
+					"A criação continua no computador. Toque em verificar para recuperar o resultado.",
+				);
+		} catch (e) {
+			if (!controller.signal.aborted)
+				setError(e instanceof Error ? e.message : "Falha ao criar tarefa.");
 		} finally {
-			setSubmitting(false);
+			request.current = null;
+			if (!controller.signal.aborted) setBusy(false);
 		}
 	};
 
-	const submittable = Boolean(selectedComb) && !submitting;
-
 	return (
 		<Shell>
-			<header className="flex items-center gap-2 pb-5">
-				<Link
-					to="/"
-					className="-ml-2 rounded-lg p-2 text-mute hover:text-foreground"
-				>
-					<ArrowLeft className="size-4" />
+			<header className="mb-6 flex items-center gap-3">
+				<Link to="/" aria-label="Voltar" className="rounded-xl p-3 text-mute">
+					<ArrowLeft className="size-5" />
 				</Link>
-				<h1 className="text-xl font-semibold">Nova thread</h1>
-			</header>
-
-			<section>
-				<h2 className="text-[11px] font-medium uppercase tracking-wider text-mute">
-					Worktree
-				</h2>
-				<p className="pb-2.5 pt-1 text-[11px] leading-relaxed text-mute">
-					A thread é criada na <span className="text-foreground/80">worktree</span> que
-					você escolher — cada projeto pode ter várias.
-				</p>
-				{loadError ? (
-					<div className="rounded-2xl border border-danger/30 bg-danger/5 p-3 text-[12px] text-danger">
-						<AlertTriangle className="mr-1 inline size-3.5" />
-						{loadError}
-					</div>
-				) : combs === null ? (
-					<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
-						Carregando…
-					</div>
-				) : combGroups.length === 0 ? (
-					<div className="rounded-2xl border border-dashed border-border/70 p-6 text-center text-[12px] text-mute">
-						Nenhuma worktree. Crie uma pelo desktop primeiro.
-					</div>
-				) : (
-					<div className="space-y-4">
-						{combGroups.map(([projectName, projectCombs]) => (
-							<div key={projectName}>
-								<div className="mb-1.5 flex items-center gap-1.5 px-0.5">
-									<FolderGit2 className="size-3 shrink-0 text-faint" />
-									<span className="text-[11px] font-semibold">{projectName}</span>
-									<span className="h-px flex-1 bg-border/50" />
-								</div>
-								<ul className="space-y-2">
-									{projectCombs.map((comb) => (
-										<li key={comb.id}>
-											<button
-												type="button"
-												onClick={() => setSelectedComb(comb.id)}
-												className={cn(
-													"flex w-full items-center gap-3 rounded-2xl border bg-panel px-4 py-3 text-left transition-colors",
-													selectedComb === comb.id
-														? "border-accent bg-accent/10"
-														: "border-border active:bg-muted/20",
-												)}
-											>
-												<GitBranch
-													className={cn(
-														"size-4 shrink-0",
-														selectedComb === comb.id ? "text-accent" : "text-faint",
-													)}
-												/>
-												<div className="min-w-0 flex-1">
-													<p className="truncate text-[14px] font-medium">{comb.name}</p>
-													{comb.branch ? (
-														<p className="mt-0.5 truncate font-mono text-[11px] text-mute">
-															{comb.branch}
-														</p>
-													) : null}
-												</div>
-												{selectedComb === comb.id ? (
-													<Check className="size-4 shrink-0 text-accent" />
-												) : null}
-											</button>
-										</li>
-									))}
-								</ul>
-							</div>
-						))}
-					</div>
-				)}
-			</section>
-
-			<section className="mt-6">
-				<h2 className="pb-2 text-[11px] font-medium uppercase tracking-wider text-mute">
-					Agent
-				</h2>
-				<div className="space-y-2">
-					{PROVIDERS.map((p) => (
-						<button
-							key={p.id}
-							type="button"
-							onClick={() => setSelectedProvider(p.id)}
-							className={cn(
-								"flex w-full items-center gap-3 rounded-2xl border bg-panel px-4 py-3 text-left transition-colors",
-								selectedProvider === p.id
-									? "border-accent bg-accent/10"
-									: "border-border active:bg-muted/20",
-							)}
-						>
-							<ProviderIcon provider={p.id} className="size-5 shrink-0" />
-							<div className="min-w-0 flex-1">
-								<p className="text-[14px] font-medium">{p.label}</p>
-								<p className="mt-0.5 text-[11px] text-mute">{p.description}</p>
-							</div>
-							{selectedProvider === p.id ? (
-								<Check className="size-4 shrink-0 text-accent" />
-							) : null}
-						</button>
-					))}
+				<div>
+					<p className="font-mono text-[10px] uppercase tracking-widest text-accent">
+						Do celular ao código
+					</p>
+					<h1 className="text-xl font-semibold">Nova tarefa</h1>
 				</div>
-			</section>
-
-			{submitError ? (
-				<p className="mt-4 rounded-2xl border border-danger/30 bg-danger/5 p-3 text-[12px] text-danger">
-					<AlertTriangle className="mr-1 inline size-3.5" />
-					{submitError}
-				</p>
-			) : null}
-
-			<button
-				type="button"
-				onClick={() => void submit()}
-				disabled={!submittable}
-				className={cn(
-					"mt-6 w-full rounded-2xl bg-accent px-4 py-3.5 text-[15px] font-semibold text-[#04231b] transition-opacity",
-					!submittable && "opacity-40",
-				)}
-			>
-				{submitting ? (
-					<span className="inline-flex items-center gap-2">
-						<Loader2 className="size-4 animate-spin" />
-						Criando…
-					</span>
-				) : (
-					"Criar thread"
-				)}
-			</button>
+			</header>
+			{session === undefined ? (
+				<Rest title="Carregando…" />
+			) : !session ? (
+				<Rest title="Pareie seu celular">
+					<Link to="/">Voltar ao início</Link>
+				</Rest>
+			) : (
+				<>
+					{pending ? (
+						<section className="mb-5 rounded-2xl border border-wait/40 bg-wait/5 p-4 text-sm">
+							<p className="font-medium">
+								{busy
+									? "Preparando sua tarefa…"
+									: "Há uma criação para acompanhar"}
+							</p>
+							<p className="mt-2 text-mute">
+								{pending.title}. O pedido fica salvo para você recuperar o
+								resultado se a conexão cair.
+							</p>
+							{result?.sessionId && (
+								<Link
+									className="mt-3 inline-block text-accent underline"
+									to="/threads/$threadId"
+									params={{ threadId: result.sessionId }}
+								>
+									Abrir conversa criada
+								</Link>
+							)}
+							{result?.state === "failed" && (
+								<button
+									type="button"
+									className="mt-3 block underline"
+									onClick={() => {
+										forgetTask(session);
+										setPending(null);
+										setResult(null);
+										setError(null);
+									}}
+								>
+									Preparar outra tarefa
+								</button>
+							)}
+						</section>
+					) : null}
+					<fieldset
+						disabled={busy || Boolean(pending)}
+						className="space-y-5 disabled:opacity-60"
+					>
+						<label className="block text-sm font-medium">
+							O que vamos fazer?
+							<textarea
+								className={`${field} min-h-36 resize-y`}
+								placeholder="Descreva a mudança, o problema ou a ideia…"
+								value={draft.prompt}
+								maxLength={100000}
+								onChange={(e) => change({ prompt: e.target.value })}
+							/>
+							<span className="mt-1 block text-xs font-normal text-mute">
+								Rascunho salvo neste celular. Enviado somente quando você
+								iniciar.
+							</span>
+						</label>
+						<label className="block text-sm font-medium">
+							Título <span className="font-normal text-mute">· opcional</span>
+							<input
+								className={field}
+								value={draft.title}
+								maxLength={200}
+								placeholder="Um nome para encontrar depois"
+								onChange={(e) => change({ title: e.target.value })}
+							/>
+						</label>
+						<div>
+							<p className="text-sm font-medium">Onde trabalhar</p>
+							<div className="mt-2 grid grid-cols-2 gap-2">
+								{(["isolated", "existing"] as const).map((mode) => (
+									<button
+										key={mode}
+										type="button"
+										aria-pressed={draft.mode === mode}
+										className={`rounded-xl border p-3 text-sm ${draft.mode === mode ? "border-accent bg-accent/10" : "border-border bg-panel"}`}
+										onClick={() => change({ mode, target: "" })}
+									>
+										{mode === "isolated"
+											? "Nova área isolada"
+											: "Área existente"}
+									</button>
+								))}
+							</div>
+							<p className="mt-2 text-xs leading-relaxed text-mute">
+								{draft.mode === "isolated"
+									? "Cria uma branch e worktree a partir da base do projeto. Alterações locais não salvas em commits ficam na área original."
+									: "Continua no workspace escolhido, usando os arquivos que já estão nele."}
+							</p>
+							<label className="block">
+								<span className="sr-only">
+									{draft.mode === "isolated" ? "Projeto" : "Workspace"}
+								</span>
+								<select
+									className={field}
+									value={draft.target}
+									onChange={(e) => change({ target: e.target.value })}
+								>
+									<option value="">
+										{loading
+											? "Carregando…"
+											: "Escolha um projeto ou workspace"}
+									</option>
+									{targets.map((t) => (
+										<option key={t.id} value={t.id}>
+											{t.name || t.rootPath.split("/").pop()} · {t.baseBranch}
+										</option>
+									))}
+								</select>
+							</label>
+							{catalog && targets.length === 0 && (
+								<p className="mt-2 text-xs text-wait">
+									Nenhuma opção disponível. Cadastre um repositório no DCC ou
+									escolha outra forma de trabalhar.
+								</p>
+							)}
+						</div>
+						<div>
+							<p className="text-sm font-medium">Agente</p>
+							<div className="mt-2 grid grid-cols-2 gap-2">
+								{catalog?.providers.map((p) => (
+									<button
+										type="button"
+										key={p.id}
+										disabled={!available(p)}
+										aria-pressed={draft.provider === p.id}
+										onClick={() => change({ provider: p.id, model: "" })}
+										className={`flex items-center gap-2 rounded-xl border p-3 text-left text-sm disabled:opacity-40 ${draft.provider === p.id ? "border-accent bg-accent/10" : "border-border bg-panel"}`}
+									>
+										<ProviderIcon provider={p.id} className="size-5 shrink-0" />
+										<span>
+											{p.label}
+											{!available(p) && (
+												<small className="block text-mute">
+													Indisponível no host
+												</small>
+											)}
+										</span>
+									</button>
+								))}
+							</div>
+						</div>
+						<label className="block text-sm font-medium">
+							Modelo
+							<select
+								className={field}
+								value={draft.model}
+								onChange={(e) => change({ model: e.target.value })}
+							>
+								<option value="">Padrão do agente</option>
+								{provider?.models.map((m) => (
+									<option key={m.id} value={m.id}>
+										{m.label}
+										{m.recommended ? " · recomendado" : ""}
+									</option>
+								))}
+							</select>
+						</label>
+						<label className="flex items-center gap-3 rounded-xl border border-border bg-panel p-4 text-sm">
+							<input
+								type="checkbox"
+								className="size-5 accent-[var(--color-accent)]"
+								checked={draft.plan}
+								onChange={(e) => change({ plan: e.target.checked })}
+							/>
+							<span>Planejar antes de implementar</span>
+						</label>
+					</fieldset>
+					{error && (
+						<p
+							role="alert"
+							className="mt-4 rounded-xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger"
+						>
+							{error}
+						</p>
+					)}
+					{!pending && (
+						<button
+							type="button"
+							disabled={loading}
+							onClick={() => void refresh(session)}
+							className="mt-3 flex items-center justify-center gap-2 p-3 text-xs text-mute"
+						>
+							<RefreshCw
+								className={`size-4 ${loading ? "animate-spin" : ""}`}
+							/>
+							Atualizar agentes e projetos
+						</button>
+					)}
+					<button
+						type="button"
+						disabled={
+							busy || (!pending && !valid) || result?.state === "failed"
+						}
+						onClick={() => void submit()}
+						className="mt-5 flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-accent p-4 font-semibold text-accent-ink disabled:opacity-40"
+					>
+						{busy ? (
+							<Loader2 className="size-5 animate-spin" />
+						) : (
+							<ArrowRight className="size-5" />
+						)}
+						{busy
+							? "Criando e iniciando…"
+							: pending
+								? "Verificar criação"
+								: "Iniciar tarefa"}
+					</button>
+				</>
+			)}
 		</Shell>
 	);
 }
-
-/** Active worktrees grouped by their project, for the picker. */
-function groupCombs(combs: Comb[] | null): Array<[string, Comb[]]> {
-	if (!combs) return [];
-	const map = new Map<string, Comb[]>();
-	for (const c of combs) {
-		if (c.status === "archived") continue;
-		const key = c.projectName ?? c.projectId ?? "—";
-		const list = map.get(key) ?? [];
-		list.push(c);
-		map.set(key, list);
-	}
-	return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-	return (
-		<main className="mx-auto flex min-h-dvh max-w-md flex-col px-5 py-8">{children}</main>
-	);
+function available(p: MobileCatalog["providers"][number]): boolean {
+	return p.enabled && !(typeof p.health === "object" && p.health.Unhealthy);
 }

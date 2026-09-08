@@ -2,6 +2,8 @@
  * Persisted pairing session. After the user pairs once we keep the bearer
  * token + backend URL in IndexedDB so the app reopens straight into the home.
  */
+import { clearLocalData } from "./local-data";
+
 export type PairingSession = {
 	deviceId: string;
 	sessionToken: string;
@@ -28,7 +30,8 @@ export async function loadSession(): Promise<PairingSession | null> {
 		return await new Promise((resolve) => {
 			const tx = db.transaction(STORE, "readonly");
 			const req = tx.objectStore(STORE).get(KEY);
-			req.onsuccess = () => resolve((req.result as PairingSession | undefined) ?? null);
+			req.onsuccess = () =>
+				resolve((req.result as PairingSession | undefined) ?? null);
 			req.onerror = () => resolve(null);
 		});
 	} catch {
@@ -47,6 +50,7 @@ export async function saveSession(session: PairingSession): Promise<void> {
 }
 
 export async function clearSession(): Promise<void> {
+	clearLocalData();
 	try {
 		const db = await openDb();
 		await new Promise<void>((resolve) => {

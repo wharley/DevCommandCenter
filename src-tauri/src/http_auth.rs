@@ -14,6 +14,9 @@ use tokio::sync::RwLock;
 use crate::http_config::{HttpAuthMode, HttpConfig};
 use crate::pairing::{self, SignedRequestHeaders};
 
+#[derive(Clone)]
+pub struct PairedDeviceIdentity(pub String);
+
 const MAX_SIGNED_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Middleware to validate HTTP auth.
@@ -33,7 +36,7 @@ const MAX_SIGNED_BODY_BYTES: usize = 32 * 1024 * 1024;
 /// failure as "try another method," which would let an attacker probe.
 pub async fn auth_middleware(
     State(config): State<Arc<RwLock<HttpConfig>>>,
-    request: Request<Body>,
+    mut request: Request<Body>,
     next: Next,
 ) -> Result<Response, AuthError> {
     if has_signed_request_headers(request.headers()) {
@@ -47,7 +50,12 @@ pub async fn auth_middleware(
         let configured = config.read().await.bearer_token.clone();
         if configured.as_deref() != Some(token.as_str()) {
             match try_paired_session_bearer(&config, &token, request.headers()).await {
-                Some(Ok(())) => return Ok(next.run(request).await),
+                Some(Ok(device_id)) => {
+                    request
+                        .extensions_mut()
+                        .insert(PairedDeviceIdentity(device_id));
+                    return Ok(next.run(request).await);
+                }
                 Some(Err(err)) => return Err(err),
                 None => {
                     // Not a known paired-session token. Fall through to legacy
@@ -85,7 +93,7 @@ async fn try_paired_session_bearer(
     config: &Arc<RwLock<HttpConfig>>,
     token: &str,
     headers: &HeaderMap,
-) -> Option<Result<(), AuthError>> {
+) -> Option<Result<String, AuthError>> {
     let db_path: PathBuf = config.read().await.db_path.clone();
     let client_ip = header_str(headers, "x-forwarded-for")
         .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()));
@@ -103,7 +111,7 @@ async fn try_paired_session_bearer(
     .ok()??;
 
     match outcome {
-        Ok(_) => Some(Ok(())),
+        Ok(device) => Some(Ok(device.device_id)),
         Err(pairing::PairingError::UnknownDevice) => None,
         Err(pairing::PairingError::DeviceRevoked) => {
             Some(Err(AuthError::SignedRequestRevokedDevice))
@@ -170,8 +178,11 @@ async fn validate_signed_request(
     .map_err(|_| AuthError::SignedRequestInternal)?;
 
     match result {
-        Ok(_) => {
-            let new_request = Request::from_parts(parts, Body::from(body_bytes));
+        Ok(device) => {
+            let mut new_request = Request::from_parts(parts, Body::from(body_bytes));
+            new_request
+                .extensions_mut()
+                .insert(PairedDeviceIdentity(device.device_id));
             Ok(next.run(new_request).await)
         }
         Err(pairing::PairingError::UnknownDevice) => Err(AuthError::SignedRequestUnknownDevice),

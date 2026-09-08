@@ -1,14 +1,40 @@
-import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
-import { DiffRoute } from "./routes/diff";
+import { lazy, Suspense } from "react";
+import {
+	createRootRoute,
+	createRoute,
+	createRouter,
+	Outlet,
+} from "@tanstack/react-router";
+const DiffRoute = lazy(() =>
+	import("./routes/diff").then((m) => ({ default: m.DiffRoute })),
+);
 import { HomeRoute } from "./routes/home";
-import { NewThreadRoute } from "./routes/new";
+const NewThreadRoute = lazy(() =>
+	import("./routes/new").then((m) => ({ default: m.NewThreadRoute })),
+);
 import { PairRoute } from "./routes/pair";
-import { PermissionsRoute } from "./routes/permissions";
-import { SettingsRoute } from "./routes/settings";
-import { ThreadRoute } from "./routes/thread";
+const PermissionsRoute = lazy(() =>
+	import("./routes/permissions").then((m) => ({ default: m.PermissionsRoute })),
+);
+const SettingsRoute = lazy(() =>
+	import("./routes/settings").then((m) => ({ default: m.SettingsRoute })),
+);
+const ThreadRoute = lazy(() =>
+	import("./routes/thread").then((m) => ({ default: m.ThreadRoute })),
+);
 
 const rootRoute = createRootRoute({
-	component: () => <Outlet />,
+	component: () => (
+		<Suspense
+			fallback={
+				<p role="status" className="p-8 text-center text-mute">
+					Carregando DCC…
+				</p>
+			}
+		>
+			<Outlet />
+		</Suspense>
+	),
 });
 
 const indexRoute = createRoute({

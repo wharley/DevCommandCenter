@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
 	AlertTriangle,
@@ -12,7 +12,10 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
 import { openEventStream } from "@/lib/sseClient";
-import { incomingEventKindType, type RawSessionEvent } from "@/lib/threadEvents";
+import {
+	incomingEventKindType,
+	type RawSessionEvent,
+} from "@/lib/threadEvents";
 
 type SessionSearchResult = {
 	sessionId: string;
@@ -39,7 +42,10 @@ const RECENCY_WINDOW_MS = 48 * 3600 * 1000;
 
 export function PermissionsRoute() {
 	const navigate = useNavigate();
-	const [session, setSession] = useState<PairingSession | null | undefined>(undefined);
+	const scanning = useRef(false);
+	const [session, setSession] = useState<PairingSession | null | undefined>(
+		undefined,
+	);
 	const [pending, setPending] = useState<PendingPermission[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
@@ -50,6 +56,8 @@ export function PermissionsRoute() {
 	}, []);
 
 	const scan = async (active: PairingSession) => {
+		if (scanning.current) return;
+		scanning.current = true;
 		setRefreshing(true);
 		setError(null);
 		try {
@@ -85,7 +93,10 @@ export function PermissionsRoute() {
 				for (const event of events) {
 					const kind = event.kind;
 					if (kind?.type === "turn_permission_requested") {
-						const id = typeof kind.requestId === "string" ? kind.requestId : event.eventId;
+						const id =
+							typeof kind.requestId === "string"
+								? kind.requestId
+								: event.eventId;
 						requested.set(id, event);
 					} else if (kind?.type === "turn_permission_resolved") {
 						const id = typeof kind.requestId === "string" ? kind.requestId : "";
@@ -124,12 +135,22 @@ export function PermissionsRoute() {
 			}
 		} finally {
 			setRefreshing(false);
+			scanning.current = false;
 		}
 	};
 
 	useEffect(() => {
 		if (!session) return;
 		void scan(session);
+		const refresh = () => {
+			if (document.visibilityState === "visible") void scan(session);
+		};
+		const timer = setInterval(refresh, 10_000);
+		document.addEventListener("visibilitychange", refresh);
+		return () => {
+			clearInterval(timer);
+			document.removeEventListener("visibilitychange", refresh);
+		};
 	}, [session]);
 
 	// Live-update: when a turn_permission_* event arrives on any thread,
@@ -137,9 +158,13 @@ export function PermissionsRoute() {
 	useEffect(() => {
 		if (!session) return;
 		const stop = openEventStream(session, "/api/v1/events/stream", {
+			onOpen: () => void scan(session),
 			onMessage: (payload) => {
 				const kind = incomingEventKindType(payload);
-				if (kind === "turn_permission_requested" || kind === "turn_permission_resolved") {
+				if (
+					kind === "turn_permission_requested" ||
+					kind === "turn_permission_resolved"
+				) {
 					void scan(session);
 				}
 			},
@@ -165,8 +190,15 @@ export function PermissionsRoute() {
 				},
 			);
 			// Optimistically drop from the list; the SSE event will reconfirm.
-			setPending((prev) =>
-				prev?.filter((p) => !(p.thread.sessionId === item.thread.sessionId && p.requestId === item.requestId)) ?? prev,
+			setPending(
+				(prev) =>
+					prev?.filter(
+						(p) =>
+							!(
+								p.thread.sessionId === item.thread.sessionId &&
+								p.requestId === item.requestId
+							),
+					) ?? prev,
 			);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Falha ao responder.");
@@ -308,7 +340,10 @@ function PermissionCard({
 		"Sessão";
 	const subtitle = useMemo(
 		() =>
-			[item.thread.workspaceName ?? item.thread.projectId, item.thread.workspaceBranch]
+			[
+				item.thread.workspaceName ?? item.thread.projectId,
+				item.thread.workspaceBranch,
+			]
 				.filter(Boolean)
 				.join(" · "),
 		[item.thread],
@@ -369,6 +404,8 @@ function PermissionCard({
 
 function Shell({ children }: { children: React.ReactNode }) {
 	return (
-		<main className="mx-auto flex min-h-dvh max-w-md flex-col px-5 py-8">{children}</main>
+		<main className="mx-auto flex min-h-dvh max-w-md flex-col px-5 py-8">
+			{children}
+		</main>
 	);
 }

@@ -53,6 +53,17 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+mod mobile;
+mod push;
+
+pub fn start_mobile_notifications(config: Arc<RwLock<HttpConfig>>) {
+    push::start(config);
+}
+
+pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
+    mobile::recover_interrupted_tasks(db_path)
+}
+
 use crate::daemon_client::{default_app_data_dir, rpc_with_db_path_timeout};
 use crate::http_auth::auth_middleware;
 use crate::http_config::{HttpAuthMode, HttpConfig};
@@ -311,6 +322,19 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .expect("config lock must be uncontended at router build time")
         .clone();
     let protected_routes = Router::new()
+        .route("/api/v1/mobile/catalog", get(mobile::catalog))
+        .route(
+            "/api/v1/mobile/push",
+            get(push::config)
+                .post(push::subscribe)
+                .delete(push::unsubscribe),
+        )
+        .route(
+            "/api/v1/mobile/workspaces/:workspace_id/patch",
+            get(mobile::patch),
+        )
+        .route("/api/v1/mobile/tasks", post(mobile::create_task))
+        .route("/api/v1/mobile/tasks/:request_id", get(mobile::task_status))
         .route("/rpc", post(handle_json_rpc))
         .route("/api/v1/shell/default", get(shell_default_handler))
         .route("/api/v1/events/stream", get(events_stream_handler))
@@ -594,7 +618,7 @@ where
     .map_err(classify_session_error)
 }
 
-/// Run a read-only query against the app database in-process (inside dccd-http),
+/// Run a database operation in-process (inside dccd-http), off the async executor,
 /// bypassing the daemon RPC queue. The queue is served by a separate, possibly
 /// stale daemon process, so the mobile endpoints that need current data read
 /// the live tables (`dcc_workspaces`, `dcc_sessions`) directly here.

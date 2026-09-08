@@ -1,50 +1,94 @@
 import type { PairingSession } from "./session";
 
-/**
- * EventSource cannot carry an `Authorization` header, which we need for the
- * bearer-token mobile flow. So we open the stream manually with `fetch`,
- * parse the SSE frame format off the response body, and reconnect on failure.
- */
-
+export type StreamState =
+	"connecting" | "connected" | "reconnecting" | "offline" | "unauthorized";
 export type SseOptions = {
 	signal?: AbortSignal;
-	/** Called once per JSON-decoded `data:` block. */
 	onMessage: (payload: unknown) => void;
-	/** Called when the stream goes down (will be followed by reconnect). */
+	/** Reconcile durable history on every connection, including the first. */
+	onOpen?: () => void;
 	onError?: (error: unknown) => void;
+	onState?: (state: StreamState) => void;
 };
 
-const RECONNECT_DELAY_MS = 1_500;
-const MAX_RECONNECT_DELAY_MS = 15_000;
-
+/** Fetch supports bearer headers; EventSource does not. Never retry mutations here. */
 export function openEventStream(
 	session: PairingSession,
 	path: string,
 	options: SseOptions,
 ): () => void {
-	const controller = new AbortController();
-	const onAbort = () => controller.abort();
-	options.signal?.addEventListener("abort", onAbort);
 	let closed = false;
-	let delay = RECONNECT_DELAY_MS;
-
-	const url = `${session.backendUrl}${path.startsWith("/") ? path : `/${path}`}`;
+	let attempt: AbortController | undefined;
+	let wake: (() => void) | undefined;
+	let delay = 1_500;
+	let connectedBefore = false;
+	const restart = () => {
+		delay = 1_500;
+		attempt?.abort();
+		wake?.();
+	};
+	const visible = () => {
+		if (document.visibilityState === "visible") restart();
+	};
+	const stop = () => {
+		closed = true;
+		attempt?.abort();
+		wake?.();
+		window.removeEventListener("online", restart);
+		window.removeEventListener("offline", restart);
+		document.removeEventListener("visibilitychange", visible);
+		options.signal?.removeEventListener("abort", stop);
+	};
+	const pause = (ms: number) =>
+		new Promise<void>((resolve) => {
+			const timer = window.setTimeout(finish, ms);
+			function finish() {
+				clearTimeout(timer);
+				wake = undefined;
+				resolve();
+			}
+			wake = finish;
+		});
+	if (options.signal?.aborted) return stop;
+	options.signal?.addEventListener("abort", stop, { once: true });
+	window.addEventListener("online", restart);
+	window.addEventListener("offline", restart);
+	document.addEventListener("visibilitychange", visible);
 
 	void (async () => {
 		while (!closed) {
+			if (!navigator.onLine) {
+				options.onState?.("offline");
+				await pause(15_000);
+				continue;
+			}
+			attempt = new AbortController();
+			let watchdog: ReturnType<typeof setTimeout>;
+			// Server keepalives arrive every 15s, including while an agent is idle.
+			const heartbeat = () => {
+				clearTimeout(watchdog);
+				watchdog = setTimeout(() => attempt?.abort(), 45_000);
+			};
+			options.onState?.(connectedBefore ? "reconnecting" : "connecting");
+			heartbeat();
 			try {
-				const res = await fetch(url, {
-					method: "GET",
+				const res = await fetch(`${session.backendUrl}${path}`, {
 					headers: {
 						Authorization: `Bearer ${session.sessionToken}`,
 						Accept: "text/event-stream",
 					},
-					signal: controller.signal,
+					cache: "no-store",
+					signal: attempt.signal,
 				});
-				if (!res.ok || !res.body) {
-					throw new Error(`SSE returned HTTP ${res.status}`);
+				if (res.status === 401 || res.status === 403) {
+					options.onState?.("unauthorized");
+					break;
 				}
-				delay = RECONNECT_DELAY_MS;
+				if (!res.ok || !res.body) throw new Error(`SSE HTTP ${res.status}`);
+				connectedBefore = true;
+				delay = 1_500;
+				options.onState?.("connected");
+				options.onOpen?.();
 				const reader = res.body.getReader();
 				const decoder = new TextDecoder();
 				let buffer = "";
@@ -52,45 +96,42 @@ export function openEventStream(
 					while (!closed) {
 						const { value, done } = await reader.read();
 						if (done) break;
+						heartbeat();
 						buffer += decoder.decode(value, { stream: true });
-						let boundary = buffer.search(/\r?\n\r?\n/u);
-						while (boundary >= 0) {
-							const sepMatch = buffer.slice(boundary).match(/^\r?\n\r?\n/u);
-							const sepLen = sepMatch?.[0]?.length ?? 2;
-							const frame = buffer.slice(0, boundary);
-							buffer = buffer.slice(boundary + sepLen);
+						let match: RegExpExecArray | null;
+						while ((match = /\r?\n\r?\n/u.exec(buffer))) {
+							const frame = buffer.slice(0, match.index);
+							buffer = buffer.slice(match.index + match[0].length);
 							const data = frame
 								.split(/\r?\n/u)
-								.filter((line) => line.startsWith("data:"))
-								.map((line) => line.slice(5).trimStart())
+								.filter((l) => l.startsWith("data:"))
+								.map((l) => l.slice(5).trimStart())
 								.join("\n");
-							if (data.length > 0) {
-								try {
-									options.onMessage(JSON.parse(data));
-								} catch {
-									/* ignore non-JSON SSE frames (keepalives etc.) */
-								}
+							if (!data) continue;
+							let payload: unknown;
+							try {
+								payload = JSON.parse(data);
+							} catch {
+								continue;
 							}
-							boundary = buffer.search(/\r?\n\r?\n/u);
+							options.onMessage(payload);
 						}
+						if (buffer.length > 2_000_000)
+							throw new Error("Evento excedeu o limite de tamanho.");
 					}
 				} finally {
 					void reader.cancel().catch(() => {});
 				}
-			} catch (err) {
-				if (!closed && !controller.signal.aborted) {
-					options.onError?.(err);
-				}
+			} catch (error) {
+				if (!closed) options.onError?.(error);
+			} finally {
+				clearTimeout(watchdog!);
 			}
-			if (closed || controller.signal.aborted) break;
-			await new Promise((r) => window.setTimeout(r, delay));
-			delay = Math.min(delay * 2, MAX_RECONNECT_DELAY_MS);
+			if (closed) break;
+			options.onState?.(navigator.onLine ? "reconnecting" : "offline");
+			await pause(delay + Math.random() * 500);
+			delay = Math.min(delay * 2, 15_000);
 		}
 	})();
-
-	return () => {
-		closed = true;
-		controller.abort();
-		options.signal?.removeEventListener("abort", onAbort);
-	};
+	return stop;
 }

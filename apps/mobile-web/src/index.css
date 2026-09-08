@@ -101,3 +101,7 @@ html {
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* Avoid iOS focus zoom and leave room for the software keyboard. */
+input, textarea, select { font-size: 16px; }
+button, a { touch-action: manipulation; }

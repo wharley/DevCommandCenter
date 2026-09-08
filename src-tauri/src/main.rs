@@ -6120,10 +6120,8 @@ fn strip_ansi_codes(input: &str) -> String {
     use std::sync::LazyLock;
     static RE_SGR: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\x1b\[[\d;?]*[A-Za-z]").unwrap());
-    static RE_OSC1: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\x1b\][^\x07]*\x07").unwrap());
-    static RE_OSC2: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\x1b\][^\x1b\\]*\\").unwrap());
+    static RE_OSC1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\][^\x07]*\x07").unwrap());
+    static RE_OSC2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\][^\x1b\\]*\\").unwrap());
     // Remove SGR sequences: ESC [ ... m
     let s = RE_SGR.replace_all(input, "");
 

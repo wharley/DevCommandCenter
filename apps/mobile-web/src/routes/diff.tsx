@@ -2,9 +2,13 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, GitBranch, Loader2 } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
-import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
-import { foldEntry, type BundleEntry, type FileChange, type WorktreeDiff } from "@/lib/diff";
+import {
+	foldEntry,
+	type BundleEntry,
+	type FileChange,
+	type WorktreeDiff,
+} from "@/lib/diff";
 import { Rest, SectionLabel, Shell } from "@/components/ui";
 
 type Comb = {
@@ -25,7 +29,9 @@ const CODE_COLOR: Record<FileChange["code"], string> = {
 export function DiffRoute() {
 	const { combId } = useParams({ from: "/diff/$combId" });
 	const navigate = useNavigate();
-	const [session, setSession] = useState<PairingSession | null | undefined>(undefined);
+	const [session, setSession] = useState<PairingSession | null | undefined>(
+		undefined,
+	);
 	const [diff, setDiff] = useState<WorktreeDiff | null>(null);
 	const [comb, setComb] = useState<Comb | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -89,7 +95,9 @@ export function DiffRoute() {
 					<ArrowLeft className="size-4" />
 				</button>
 				<div className="min-w-0 flex-1">
-					<h1 className="truncate text-[16px] font-semibold leading-tight">{title}</h1>
+					<h1 className="truncate text-[16px] font-semibold leading-tight">
+						{title}
+					</h1>
 					{branch ? (
 						<p className="flex items-center gap-1 truncate font-mono text-[10px] text-mute">
 							<GitBranch className="size-3 text-faint" />
@@ -117,15 +125,25 @@ export function DiffRoute() {
 					{diff?.error ?? "Nenhum dado de diff retornado."}
 				</Rest>
 			) : diff.clean ? (
-				<Rest title="Árvore limpa">Nada mudou neste worktree desde o último commit.</Rest>
+				<Rest title="Árvore limpa">
+					Nada mudou neste worktree desde o último commit.
+				</Rest>
 			) : (
-				<DiffBody diff={diff} />
+				<DiffBody diff={diff} session={session!} workspaceId={combId} />
 			)}
 		</Shell>
 	);
 }
 
-function DiffBody({ diff }: { diff: WorktreeDiff }) {
+function DiffBody({
+	diff,
+	session,
+	workspaceId,
+}: {
+	diff: WorktreeDiff;
+	session: PairingSession;
+	workspaceId: string;
+}) {
 	return (
 		<div>
 			<StatBar
@@ -136,25 +154,13 @@ function DiffBody({ diff }: { diff: WorktreeDiff }) {
 			<div className="mt-5">
 				<SectionLabel count={diff.files.length}>Arquivos</SectionLabel>
 				<ul className="overflow-hidden rounded-xl border border-border bg-panel">
-					{diff.files.map((file, i) => (
-						<li
-							key={`${file.path}-${i}`}
-							className={cn(
-								"flex items-center gap-3 px-3.5 py-2.5",
-								i > 0 && "border-t border-border/60",
-							)}
-						>
-							<span
-								className={cn(
-									"grid size-5 shrink-0 place-items-center rounded font-mono text-[11px] font-bold",
-									CODE_COLOR[file.code],
-								)}
-								title={file.label}
-							>
-								{file.code}
-							</span>
-							<FilePath path={file.path} />
-						</li>
+					{diff.files.map((file) => (
+						<PatchFile
+							key={file.path}
+							file={file}
+							session={session}
+							workspaceId={workspaceId}
+						/>
 					))}
 				</ul>
 			</div>
@@ -187,7 +193,10 @@ function StatBar({
 			{insertions + deletions > 0 ? (
 				<div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-bg">
 					<span className="h-full bg-accent" style={{ width: `${insPct}%` }} />
-					<span className="h-full bg-danger" style={{ width: `${100 - insPct}%` }} />
+					<span
+						className="h-full bg-danger"
+						style={{ width: `${100 - insPct}%` }}
+					/>
 				</div>
 			) : null}
 			<p className="mt-2 font-mono text-[10px] text-faint">
@@ -206,5 +215,102 @@ function FilePath({ path }: { path: string }) {
 			{dir ? <span className="truncate text-faint">{dir}</span> : null}
 			<span className="shrink-0 font-medium text-foreground">{base}</span>
 		</div>
+	);
+}
+
+function PatchFile({
+	file,
+	session,
+	workspaceId,
+}: {
+	file: FileChange;
+	session: PairingSession;
+	workspaceId: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const [patch, setPatch] = useState<{
+		patch: string;
+		truncated: boolean;
+	} | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [attempt, setAttempt] = useState(0);
+	useEffect(() => {
+		if (!open) return;
+		const controller = new AbortController();
+		setError(null);
+		setPatch(null);
+		void apiFetch<{ patch: string; truncated: boolean }>(
+			session,
+			`/api/v1/mobile/workspaces/${encodeURIComponent(workspaceId)}/patch?path=${encodeURIComponent(file.path)}`,
+			{ signal: controller.signal },
+		)
+			.then(setPatch)
+			.catch((e) => {
+				if (!controller.signal.aborted) setError(e.message);
+			});
+		return () => controller.abort();
+	}, [open, session, workspaceId, file.path, attempt]);
+	return (
+		<li className="border-b border-border/60 last:border-b-0">
+			<button
+				type="button"
+				aria-expanded={open}
+				onClick={() => setOpen(!open)}
+				className="flex min-h-12 w-full items-center gap-3 px-3.5 py-3 text-left"
+			>
+				<span
+					className={`font-mono text-xs font-bold ${CODE_COLOR[file.code]}`}
+				>
+					{file.code}
+				</span>
+				<FilePath path={file.path} />
+				<span className="ml-auto text-mute">{open ? "−" : "+"}</span>
+			</button>
+			{open && (
+				<div className="border-t border-border bg-bg">
+					{error ? (
+						<div role="alert" className="p-3 text-xs text-danger">
+							{error}
+							<button
+								className="ml-2 underline"
+								onClick={() => setAttempt((a) => a + 1)}
+							>
+								Tentar novamente
+							</button>
+						</div>
+					) : !patch ? (
+						<p className="p-4 text-xs text-mute">Carregando alterações…</p>
+					) : (
+						<>
+							{patch.truncated && (
+								<p className="p-3 text-xs text-wait">
+									Arquivo grande: mostrando os primeiros 500 KB.
+								</p>
+							)}
+							{patch.patch ? (
+								<pre
+									tabIndex={0}
+									aria-label={`Alterações em ${file.path}`}
+									className="max-h-[60dvh] overflow-auto p-3 font-mono text-[11px] leading-5"
+								>
+									{patch.patch.split("\n").map((line, i) => (
+										<span
+											key={i}
+											className={`block min-h-5 ${line.startsWith("+") ? "bg-accent/5 text-accent" : line.startsWith("-") ? "bg-danger/5 text-danger" : line.startsWith("@@") ? "text-info" : "text-mute"}`}
+										>
+											{line || " "}
+										</span>
+									))}
+								</pre>
+							) : (
+								<p className="p-4 text-xs text-mute">
+									Sem alterações de conteúdo neste arquivo.
+								</p>
+							)}
+						</>
+					)}
+				</div>
+			)}
+		</li>
 	);
 }

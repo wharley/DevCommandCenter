@@ -166,6 +166,14 @@ async fn main() {
         None
     };
 
+    if let Err(error) =
+        dev_command_center_tauri::http_api::recover_mobile_tasks(&config.read().await.db_path)
+    {
+        eprintln!("[DCC HTTP] Failed to recover mobile task journal: {error}");
+        std::process::exit(1);
+    }
+
+    dev_command_center_tauri::http_api::start_mobile_notifications(config.clone());
     let primary_app = app.clone();
     let primary_task = tokio::spawn(async move {
         if let Err(error) = axum::serve(primary_listener, primary_app).await {

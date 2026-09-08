@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
 	ChevronDown,
@@ -19,8 +19,14 @@ import {
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
-import { openEventStream } from "@/lib/sseClient";
-import { incomingEventKindType, type RawSessionEvent } from "@/lib/threadEvents";
+import { pendingQuestions } from "@/lib/questions";
+import { readLocal, writeLocal } from "@/lib/local-data";
+import { ConnectionNotice } from "@/components/connection-notice";
+import { openEventStream, type StreamState } from "@/lib/sseClient";
+import {
+	incomingEventKindType,
+	type RawSessionEvent,
+} from "@/lib/threadEvents";
 import { indexBundle, type BundleEntry, type WorktreeDiff } from "@/lib/diff";
 import {
 	Rest,
@@ -113,6 +119,24 @@ export function HomeRoute() {
 }
 
 function UnpairedView() {
+	const [link, setLink] = useState("");
+	const [error, setError] = useState<string | null>(null);
+	const connect = () => {
+		try {
+			const url = new URL(link.trim());
+			if (
+				url.origin !== location.origin ||
+				url.pathname !== "/m/pair" ||
+				!new URLSearchParams(url.hash.slice(1)).get("nonce")
+			)
+				throw new Error(
+					"Use o link de pareamento deste mesmo endereço do DCC.",
+				);
+			location.assign(url.href);
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "Link inválido.");
+		}
+	};
 	return (
 		<Shell>
 			<header className="px-0.5 pb-6">
@@ -127,12 +151,38 @@ function UnpairedView() {
 					No app desktop, abra Settings &rarr; Conexões &rarr; Parear novo
 					dispositivo e escaneie o QR com este celular.
 				</p>
+				<label className="mt-5 block text-xs text-mute">
+					Já abriu pelo ícone instalado? Cole o link de pareamento:
+					<input
+						type="url"
+						value={link}
+						onChange={(e) => setLink(e.target.value)}
+						placeholder="https://…/m/pair#nonce=…"
+						className="mt-2 w-full rounded-xl border border-border bg-bg p-3 text-base"
+					/>
+				</label>
+				<button
+					type="button"
+					disabled={!link.trim()}
+					onClick={connect}
+					className="mt-3 w-full rounded-xl bg-accent p-3 font-semibold text-accent-ink disabled:opacity-40"
+				>
+					Continuar pareamento
+				</button>
+				{error && (
+					<p role="alert" className="mt-2 text-xs text-danger">
+						{error}
+					</p>
+				)}
 			</section>
 		</Shell>
 	);
 }
 
 function PairedHome({ session }: { session: PairingSession }) {
+	const refreshLock = useRef(false);
+	const [connection, setConnection] = useState<StreamState>("connecting");
+	const [lastSynced, setLastSynced] = useState<string | null>(null);
 	const [status, setStatus] = useState<DaemonStatus | null>(null);
 	const [scan, setScan] = useState<Scan | null>(null);
 	const [combs, setCombs] = useState<Comb[] | null>(null);
@@ -145,16 +195,31 @@ function PairedHome({ session }: { session: PairingSession }) {
 	const [diffs, setDiffs] = useState<Map<string, WorktreeDiff> | null>(null);
 
 	const refresh = async () => {
+		if (refreshLock.current) return;
+		refreshLock.current = true;
 		setRefreshing(true);
 		setError(null);
+		const statusController = new AbortController();
+		const statusTimeout = setTimeout(() => statusController.abort(), 5000);
+		void apiFetch<DaemonStatus>(session, "/api/v1/status", {
+			signal: statusController.signal,
+		})
+			.then(setStatus)
+			.catch(() => setStatus(null))
+			.finally(() => clearTimeout(statusTimeout));
 		try {
-			const [s, result] = await Promise.all([
-				apiFetch<DaemonStatus>(session, "/api/v1/status").catch(() => null),
-				runScan(session),
-			]);
-			setStatus(s);
+			const result = await runScan(session);
 			setScan(result.scan);
 			setCombs(result.combs);
+			const at = new Date().toISOString();
+			setLastSynced(at);
+			writeLocal(session, "home", {
+				at,
+				combs: result.combs,
+				sessions: result.scan.sessions,
+				needsYou: result.scan.needsYou,
+				statuses: [...result.scan.statuses],
+			});
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 401) {
 				setError("Sessão expirada. Pareie de novo no desktop.");
@@ -163,17 +228,45 @@ function PairedHome({ session }: { session: PairingSession }) {
 			}
 		} finally {
 			setRefreshing(false);
+			refreshLock.current = false;
 		}
 	};
 
 	useEffect(() => {
+		const cached = readLocal<{
+			at: string;
+			combs: Comb[];
+			sessions: SessionSearchResult[];
+			needsYou: PendingItem[];
+			statuses: [string, LiveStatus][];
+		}>(session, "home");
+		if (cached) {
+			setCombs(cached.combs);
+			setLastSynced(cached.at);
+			setScan({
+				sessions: cached.sessions,
+				needsYou: cached.needsYou,
+				statuses: new Map(cached.statuses),
+			});
+		}
 		void refresh();
-		const id = window.setInterval(refresh, 15_000);
-		return () => window.clearInterval(id);
+		const visible = () => {
+			if (document.visibilityState === "visible") void refresh();
+		};
+		const id = window.setInterval(visible, 15_000);
+		document.addEventListener("visibilitychange", visible);
+		window.addEventListener("online", visible);
+		return () => {
+			window.clearInterval(id);
+			document.removeEventListener("visibilitychange", visible);
+			window.removeEventListener("online", visible);
+		};
 	}, []);
 
 	useEffect(() => {
 		const stop = openEventStream(session, "/api/v1/events/stream", {
+			onOpen: () => void refresh(),
+			onState: setConnection,
 			onMessage: (payload) => {
 				const kind = incomingEventKindType(payload);
 				if (
@@ -260,7 +353,13 @@ function PairedHome({ session }: { session: PairingSession }) {
 		if (!q) return null;
 		return sessions.filter((s) => {
 			if (workspaceFilter && s.workspaceId !== workspaceFilter) return false;
-			return [s.threadTitle, s.workspaceName, s.workspaceBranch, s.projectId, s.snippet]
+			return [
+				s.threadTitle,
+				s.workspaceName,
+				s.workspaceBranch,
+				s.projectId,
+				s.snippet,
+			]
 				.filter(Boolean)
 				.join(" ")
 				.toLowerCase()
@@ -278,7 +377,9 @@ function PairedHome({ session }: { session: PairingSession }) {
 			(s) => !workspaceFilter || s.workspaceId === workspaceFilter,
 		);
 		const running = visible.filter(
-			(s) => scan.statuses.get(s.sessionId) === "running" && !blocked.has(s.sessionId),
+			(s) =>
+				scan.statuses.get(s.sessionId) === "running" &&
+				!blocked.has(s.sessionId),
 		);
 		const runningIds = new Set(running.map((s) => s.sessionId));
 		const recent = visible
@@ -313,13 +414,13 @@ function PairedHome({ session }: { session: PairingSession }) {
 		return [...base].sort((a, b) => {
 			const an = sessionsByWorkspace.get(a.id) ?? 0;
 			const bn = sessionsByWorkspace.get(b.id) ?? 0;
-			if ((an > 0) !== (bn > 0)) return bn - an;
+			if (an > 0 !== bn > 0) return bn - an;
 			return (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "");
 		});
 	}, [combs, search, sessionsByWorkspace]);
 
 	const activeWorkspace = workspaceFilter
-		? combs?.find((c) => c.id === workspaceFilter) ?? null
+		? (combs?.find((c) => c.id === workspaceFilter) ?? null)
 		: null;
 	const needsYouCount = scan?.needsYou.length ?? 0;
 
@@ -334,7 +435,9 @@ function PairedHome({ session }: { session: PairingSession }) {
 						aria-label="Permissões"
 						className={cn(
 							"relative grid size-9 place-items-center rounded-xl transition-colors active:bg-elevated",
-							needsYouCount > 0 ? "text-wait" : "text-mute hover:text-foreground",
+							needsYouCount > 0
+								? "text-wait"
+								: "text-mute hover:text-foreground",
 						)}
 					>
 						<ShieldAlert className="size-[18px]" />
@@ -346,8 +449,8 @@ function PairedHome({ session }: { session: PairingSession }) {
 					</Link>
 					<Link
 						to="/new"
-						title="Nova thread"
-						aria-label="Nova thread"
+						title="Nova tarefa"
+						aria-label="Nova tarefa"
 						className="grid size-9 place-items-center rounded-xl text-mute transition-colors hover:text-foreground active:bg-elevated"
 					>
 						<Plus className="size-[18px]" />
@@ -363,7 +466,24 @@ function PairedHome({ session }: { session: PairingSession }) {
 				</div>
 			</header>
 
-			<DaemonBar status={status} refreshing={refreshing} onRefresh={() => void refresh()} />
+			<Link
+				to="/new"
+				className="mb-4 flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-accent px-4 py-3 font-semibold text-accent-ink"
+			>
+				<Plus className="size-5" />
+				Nova tarefa
+			</Link>
+
+			<ConnectionNotice
+				state={connection}
+				lastSynced={lastSynced}
+				onRetry={() => void refresh()}
+			/>
+			<DaemonBar
+				status={status}
+				refreshing={refreshing}
+				onRefresh={() => void refresh()}
+			/>
 
 			{error ? (
 				<p className="mt-3 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-[12px] text-danger">
@@ -372,16 +492,21 @@ function PairedHome({ session }: { session: PairingSession }) {
 			) : null}
 
 			<div className="mt-5">
-				<Segmented tab={tab} onChange={(t) => {
-					setTab(t);
-					setWorkspaceFilter(null);
-					setSearch("");
-				}} />
+				<Segmented
+					tab={tab}
+					onChange={(t) => {
+						setTab(t);
+						setWorkspaceFilter(null);
+						setSearch("");
+					}}
+				/>
 
 				<SearchBar
 					value={search}
 					onChange={setSearch}
-					placeholder={tab === "agents" ? "Buscar agentes…" : "Buscar workspaces…"}
+					placeholder={
+						tab === "agents" ? "Buscar agentes…" : "Buscar workspaces…"
+					}
 				/>
 
 				{activeWorkspace ? (
@@ -391,7 +516,9 @@ function PairedHome({ session }: { session: PairingSession }) {
 						className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 font-mono text-[11px] text-accent"
 					>
 						<FolderGit2 className="size-3" />
-						{activeWorkspace.name ?? activeWorkspace.projectName ?? activeWorkspace.id}
+						{activeWorkspace.name ??
+							activeWorkspace.projectName ??
+							activeWorkspace.id}
 						<X className="size-3" />
 					</button>
 				) : null}
@@ -421,7 +548,13 @@ function PairedHome({ session }: { session: PairingSession }) {
 	);
 }
 
-function Segmented({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+function Segmented({
+	tab,
+	onChange,
+}: {
+	tab: Tab;
+	onChange: (t: Tab) => void;
+}) {
 	const tabs: Array<[Tab, string]> = [
 		["agents", "Agentes"],
 		["workspaces", "Workspaces"],
@@ -523,7 +656,11 @@ function Triage({
 	resolving,
 	onRespond,
 }: {
-	groups: { needsYou: PendingItem[]; running: SessionSearchResult[]; recent: SessionSearchResult[] } | null;
+	groups: {
+		needsYou: PendingItem[];
+		running: SessionSearchResult[];
+		recent: SessionSearchResult[];
+	} | null;
 	statuses: Map<string, LiveStatus>;
 	resolving: Set<string>;
 	onRespond: (item: PendingItem, choice: string) => void;
@@ -540,8 +677,11 @@ function Triage({
 
 	if (needsYou.length === 0 && running.length === 0 && recent.length === 0) {
 		return (
-			<Rest icon={<Inbox className="size-6" strokeWidth={1.6} />} title="Nada por aqui">
-				Crie uma thread no botão + para colocar um agente pra trabalhar.
+			<Rest
+				icon={<Inbox className="size-6" strokeWidth={1.6} />}
+				title="Nada por aqui"
+			>
+				Toque em Nova tarefa para colocar um agente para trabalhar.
 			</Rest>
 		);
 	}
@@ -653,6 +793,15 @@ function NeedsYouCard({
 				{item.question}
 			</p>
 			<div className="flex gap-2 px-3.5 pb-3">
+				{item.choices.length === 0 && (
+					<Link
+						to="/threads/$threadId"
+						params={{ threadId: item.thread.sessionId }}
+						className="min-h-11 w-full rounded-xl bg-wait p-3 text-center text-sm font-semibold text-wait-ink"
+					>
+						Responder ao agente
+					</Link>
+				)}
 				{item.choices.map((choice) => {
 					const deny = choice.id === "deny";
 					return (
@@ -725,7 +874,9 @@ function SessionRow({
 				) : null}
 				<div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider">
 					<StatusText status={status} />
-					<span className="text-faint">· {formatRelative(session.updatedAt)}</span>
+					<span className="text-faint">
+						· {formatRelative(session.updatedAt)}
+					</span>
 				</div>
 			</div>
 			<ChevronRight className="size-4 shrink-0 self-center text-faint" />
@@ -803,78 +954,90 @@ function WorkspacesList({
 			{projects.map(([projectName, projectCombs]) => {
 				const isCollapsed = collapsed.has(projectName);
 				return (
-				<section key={projectName}>
-					<button
-						type="button"
-						onClick={() => toggle(projectName)}
-						className="mb-2 flex w-full items-center gap-2 px-0.5"
-					>
-						<ChevronDown
-							className={cn(
-								"size-3.5 shrink-0 text-faint transition-transform",
-								isCollapsed && "-rotate-90",
-							)}
-						/>
-						<FolderGit2 className="size-3.5 shrink-0 text-mute" />
-						<span className="truncate text-[12px] font-semibold">{projectName}</span>
-						<span className="shrink-0 rounded-full bg-elevated px-1.5 font-mono text-[10px] tabular-nums text-mute">
-							{projectCombs.length}
-						</span>
-						<span className="h-px flex-1 bg-border/60" />
-					</button>
-					{isCollapsed ? null : (
-					<ul className="space-y-2">
-						{projectCombs.map((c) => {
-							const sess = latestByWorkspace.get(c.id) ?? null;
-							const status = sess ? statuses.get(sess.sessionId) : undefined;
-							const diff = c.worktreePath ? diffs?.get(c.worktreePath) ?? null : null;
-							const body = (
-								<div className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3">
-									<StateDot state={status ? DOT_FOR_STATUS[status] : "idle"} />
-									<div className="min-w-0 flex-1">
-										<p className="truncate text-[13.5px] font-medium">{c.name}</p>
-										<p className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-[10px] uppercase tracking-wider">
-											{c.branch ? (
-												<span className="flex items-center gap-1 text-mute">
-													<GitBranch className="size-3 shrink-0 text-faint" />
-													{c.branch}
-												</span>
-											) : null}
-											<StatusText status={status} />
-										</p>
-									</div>
-								</div>
-							);
-							return (
-								<li
-									key={c.id}
-									className="flex items-stretch overflow-hidden rounded-xl border border-border bg-panel"
-								>
-									{sess ? (
-										<Link
-											to="/threads/$threadId"
-											params={{ threadId: sess.sessionId }}
-											className="flex min-w-0 flex-1 active:bg-elevated"
+					<section key={projectName}>
+						<button
+							type="button"
+							onClick={() => toggle(projectName)}
+							className="mb-2 flex w-full items-center gap-2 px-0.5"
+						>
+							<ChevronDown
+								className={cn(
+									"size-3.5 shrink-0 text-faint transition-transform",
+									isCollapsed && "-rotate-90",
+								)}
+							/>
+							<FolderGit2 className="size-3.5 shrink-0 text-mute" />
+							<span className="truncate text-[12px] font-semibold">
+								{projectName}
+							</span>
+							<span className="shrink-0 rounded-full bg-elevated px-1.5 font-mono text-[10px] tabular-nums text-mute">
+								{projectCombs.length}
+							</span>
+							<span className="h-px flex-1 bg-border/60" />
+						</button>
+						{isCollapsed ? null : (
+							<ul className="space-y-2">
+								{projectCombs.map((c) => {
+									const sess = latestByWorkspace.get(c.id) ?? null;
+									const status = sess
+										? statuses.get(sess.sessionId)
+										: undefined;
+									const diff = c.worktreePath
+										? (diffs?.get(c.worktreePath) ?? null)
+										: null;
+									const body = (
+										<div className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3">
+											<StateDot
+												state={status ? DOT_FOR_STATUS[status] : "idle"}
+											/>
+											<div className="min-w-0 flex-1">
+												<p className="truncate text-[13.5px] font-medium">
+													{c.name}
+												</p>
+												<p className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-[10px] uppercase tracking-wider">
+													{c.branch ? (
+														<span className="flex items-center gap-1 text-mute">
+															<GitBranch className="size-3 shrink-0 text-faint" />
+															{c.branch}
+														</span>
+													) : null}
+													<StatusText status={status} />
+												</p>
+											</div>
+										</div>
+									);
+									return (
+										<li
+											key={c.id}
+											className="flex items-stretch overflow-hidden rounded-xl border border-border bg-panel"
 										>
-											{body}
-										</Link>
-									) : (
-										<div className="flex min-w-0 flex-1 opacity-60">{body}</div>
-									)}
-									<Link
-										to="/diff/$combId"
-										params={{ combId: c.id }}
-										title="Ver o que mudou"
-										className="flex shrink-0 items-center gap-1.5 border-l border-border px-3 font-mono text-[11px] tabular-nums active:bg-elevated"
-									>
-										<DiffPill diff={diffs ? diff : undefined} />
-									</Link>
-								</li>
-							);
-						})}
-					</ul>
-					)}
-				</section>
+											{sess ? (
+												<Link
+													to="/threads/$threadId"
+													params={{ threadId: sess.sessionId }}
+													className="flex min-w-0 flex-1 active:bg-elevated"
+												>
+													{body}
+												</Link>
+											) : (
+												<div className="flex min-w-0 flex-1 opacity-60">
+													{body}
+												</div>
+											)}
+											<Link
+												to="/diff/$combId"
+												params={{ combId: c.id }}
+												title="Ver o que mudou"
+												className="flex shrink-0 items-center gap-1.5 border-l border-border px-3 font-mono text-[11px] tabular-nums active:bg-elevated"
+											>
+												<DiffPill diff={diffs ? diff : undefined} />
+											</Link>
+										</li>
+									);
+								})}
+							</ul>
+						)}
+					</section>
 				);
 			})}
 		</div>
@@ -903,7 +1066,8 @@ function DiffPill({ diff }: { diff: WorktreeDiff | null | undefined }) {
 function normalizeProvider(id: string): string {
 	const v = id.toLowerCase();
 	if (v.includes("claude") || v.includes("anthropic")) return "claude";
-	if (v.includes("codex") || v.includes("openai") || v.includes("gpt")) return "codex";
+	if (v.includes("codex") || v.includes("openai") || v.includes("gpt"))
+		return "codex";
 	if (v.includes("cursor")) return "cursor";
 	if (v.includes("gemini") || v.includes("google")) return "gemini";
 	if (v.includes("droid") || v.includes("factory")) return "droid";
@@ -959,7 +1123,10 @@ async function runScan(
 	session: PairingSession,
 ): Promise<{ scan: Scan; combs: Comb[] }> {
 	const [sessRaw, combs] = await Promise.all([
-		apiFetch<SessionSearchResult[]>(session, "/api/v1/sessions/search?limit=60"),
+		apiFetch<SessionSearchResult[]>(
+			session,
+			"/api/v1/sessions/search?limit=60",
+		),
 		apiFetch<Comb[]>(session, "/api/v1/combs").catch(() => [] as Comb[]),
 	]);
 
@@ -974,7 +1141,11 @@ async function runScan(
 			: null;
 	const sessions = sessRaw.filter((s) => {
 		if (s.archivedAt) return false;
-		if (activeWorkspaces && s.workspaceId && !activeWorkspaces.has(s.workspaceId))
+		if (
+			activeWorkspaces &&
+			s.workspaceId &&
+			!activeWorkspaces.has(s.workspaceId)
+		)
 			return false;
 		return true;
 	});
@@ -1001,6 +1172,14 @@ async function runScan(
 	const statuses = new Map<string, LiveStatus>();
 	const needsYou: PendingItem[] = [];
 	for (const { thread, events } of sweeps) {
+		for (const request of pendingQuestions(events))
+			needsYou.push({
+				thread,
+				requestId: request.requestId,
+				question: request.questions.map((q) => q.question).join(" · "),
+				choices: [],
+				at: request.at,
+			});
 		const requested = new Map<string, RawSessionEvent>();
 		const resolved = new Set<string>();
 		let live = false;
@@ -1049,7 +1228,9 @@ async function runScan(
 				thread,
 				requestId: id,
 				question:
-					typeof kind.question === "string" ? kind.question : "Pedido de permissão",
+					typeof kind.question === "string"
+						? kind.question
+						: "Pedido de permissão",
 				choices,
 				at: event.occurredAt,
 			});

@@ -1,17 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import {
-	ArrowLeft,
-	Copy,
-	LogOut,
-	QrCode,
-	Smartphone,
-} from "lucide-react";
+import { ArrowLeft, Copy, LogOut, QrCode, Smartphone } from "lucide-react";
+import { PushSettings } from "@/components/push-settings";
+import { apiFetch } from "@/lib/api";
+import { InstallApp } from "@/components/install-app";
 import { clearSession, loadSession, type PairingSession } from "@/lib/session";
 
 export function SettingsRoute() {
 	const navigate = useNavigate();
-	const [session, setSession] = useState<PairingSession | null | undefined>(undefined);
+	const [session, setSession] = useState<PairingSession | null | undefined>(
+		undefined,
+	);
 	const [copied, setCopied] = useState(false);
 
 	useEffect(() => {
@@ -30,6 +29,20 @@ export function SettingsRoute() {
 	};
 
 	const logout = async () => {
+		if (session)
+			await apiFetch(session, "/api/v1/mobile/push", {
+				method: "DELETE",
+			}).catch(() => {});
+		if ("serviceWorker" in navigator) {
+			const registration = await navigator.serviceWorker
+				.getRegistration("/m/")
+				.catch(() => undefined);
+			await (
+				await registration?.pushManager?.getSubscription().catch(() => null)
+			)
+				?.unsubscribe()
+				.catch(() => {});
+		}
 		await clearSession();
 		void navigate({ to: "/", replace: true });
 	};
@@ -44,7 +57,7 @@ export function SettingsRoute() {
 					>
 						<ArrowLeft className="size-4" />
 					</Link>
-					<h1 className="text-xl font-semibold">Settings</h1>
+					<h1 className="text-xl font-semibold">Configurações</h1>
 				</header>
 			</Shell>
 		);
@@ -60,7 +73,7 @@ export function SettingsRoute() {
 					>
 						<ArrowLeft className="size-4" />
 					</Link>
-					<h1 className="text-xl font-semibold">Settings</h1>
+					<h1 className="text-xl font-semibold">Configurações</h1>
 				</header>
 				<p className="rounded-2xl border border-border bg-panel p-4 text-[13px] text-mute">
 					Nenhum dispositivo pareado.
@@ -72,11 +85,17 @@ export function SettingsRoute() {
 	return (
 		<Shell>
 			<header className="flex items-center gap-2 pb-5">
-				<Link to="/" className="-ml-2 rounded-lg p-2 text-mute hover:text-foreground">
+				<Link
+					to="/"
+					className="-ml-2 rounded-lg p-2 text-mute hover:text-foreground"
+				>
 					<ArrowLeft className="size-4" />
 				</Link>
-				<h1 className="text-xl font-semibold">Settings</h1>
+				<h1 className="text-xl font-semibold">Configurações</h1>
 			</header>
+
+			<InstallApp />
+			<PushSettings session={session} />
 
 			<section className="rounded-2xl border border-border bg-panel p-4">
 				<div className="flex items-center gap-3">
@@ -92,7 +111,7 @@ export function SettingsRoute() {
 				</div>
 
 				<dl className="mt-4 space-y-3 border-t border-border/60 pt-3 text-[12px]">
-					<Row label="Backend">
+					<Row label="Computador">
 						<button
 							type="button"
 							onClick={() => void copyBackendUrl()}
@@ -105,7 +124,7 @@ export function SettingsRoute() {
 							<span className="ml-2 text-[10px] text-accent">copiado</span>
 						) : null}
 					</Row>
-					<Row label="Device ID">
+					<Row label="Dispositivo">
 						<code className="font-mono text-[11px] text-foreground/80">
 							{session.deviceId.slice(0, 8)}…
 						</code>
@@ -145,10 +164,18 @@ export function SettingsRoute() {
 	);
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+	label,
+	children,
+}: {
+	label: string;
+	children: React.ReactNode;
+}) {
 	return (
 		<div className="flex items-center justify-between gap-3">
-			<dt className="text-[11px] uppercase tracking-wider text-mute">{label}</dt>
+			<dt className="text-[11px] uppercase tracking-wider text-mute">
+				{label}
+			</dt>
 			<dd className="min-w-0 max-w-[70%] text-right">{children}</dd>
 		</div>
 	);
@@ -169,6 +196,8 @@ function formatDate(iso: string): string {
 
 function Shell({ children }: { children: React.ReactNode }) {
 	return (
-		<main className="mx-auto flex min-h-dvh max-w-md flex-col px-5 py-8">{children}</main>
+		<main className="mx-auto flex min-h-dvh max-w-md flex-col px-5 py-8">
+			{children}
+		</main>
 	);
 }
