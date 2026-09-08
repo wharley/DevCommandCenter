@@ -48,9 +48,42 @@ type ProviderStream = BoxStream<'static, dcc_core::Result<ProviderEvent>>;
 struct TurnObservation {
     statuses: Vec<dcc_core::domain::mcp::McpRuntimeStatus>,
     text: String,
+    assistant_messages: HashMap<String, String>,
     permission_resolutions: Vec<(String, String)>,
     completed_actions: Vec<String>,
     failed: bool,
+}
+
+impl TurnObservation {
+    fn observe_text(&mut self, event: &ProviderEvent) {
+        match event {
+            ProviderEvent::TextDelta { content } => self.text.push_str(content),
+            ProviderEvent::AssistantMessageDelta { id, content } => {
+                self.assistant_messages
+                    .entry(id.clone())
+                    .or_default()
+                    .push_str(content);
+            }
+            ProviderEvent::AssistantMessageCompleted {
+                id,
+                content: Some(content),
+                ..
+            } => {
+                // Match the production consumer: the completed snapshot replaces
+                // partial text, which may be incomplete or have been revised.
+                self.assistant_messages.insert(id.clone(), content.clone());
+            }
+            _ => {}
+        }
+    }
+
+    fn contains_text(&self, expected: &str) -> bool {
+        self.text.contains(expected)
+            || self
+                .assistant_messages
+                .values()
+                .any(|text| text.contains(expected))
+    }
 }
 
 struct ProviderMcpConformanceAdapter<P> {
@@ -328,11 +361,11 @@ where
     }
 
     fn observe_event(&mut self, event: &ProviderEvent, observation: &mut TurnObservation) {
+        observation.observe_text(event);
         match event {
             ProviderEvent::McpRuntimeStatusSnapshot { statuses } => {
                 observation.statuses = statuses.clone();
             }
-            ProviderEvent::TextDelta { content } => observation.text.push_str(content),
             ProviderEvent::ToolCallStarted { id, action, .. } => {
                 self.active_tool_calls.insert(id.clone(), action.clone());
             }
@@ -621,7 +654,7 @@ where
                     .permission_resolutions
                     .iter()
                     .any(|(_, behavior)| behavior == "allow");
-                let expected_text = observation.text.contains(MCP_CONFORMANCE_ECHO_VALUE);
+                let expected_text = observation.contains_text(MCP_CONFORMANCE_ECHO_VALUE);
                 if observation.failed || !echo_completed || !allow_resolved || !expected_text {
                     eprintln!(
                         "read-only conformance observation: provider_failed={}, \
@@ -869,6 +902,36 @@ fn provider_tool_names_are_normalized_without_provider_heuristics() {
         "mcp__dcc-session__fixture_mutate",
         "fixture_echo"
     ));
+}
+
+#[test]
+fn conformance_observes_current_assistant_messages_and_reconciles_partial_text() {
+    let mut observation = TurnObservation::default();
+    observation.observe_text(&ProviderEvent::AssistantMessageDelta {
+        id: "message".to_string(),
+        content: "dcc-conformance-echo-".to_string(),
+    });
+    assert!(!observation.contains_text(MCP_CONFORMANCE_ECHO_VALUE));
+    observation.observe_text(&ProviderEvent::AssistantMessageCompleted {
+        id: "message".to_string(),
+        phase: dcc_core::domain::session::AssistantMessagePhase::Unknown,
+        content: Some(MCP_CONFORMANCE_ECHO_VALUE.to_string()),
+        model: None,
+        at: "fixture".to_string(),
+    });
+    assert!(observation.contains_text(MCP_CONFORMANCE_ECHO_VALUE));
+    observation.observe_text(&ProviderEvent::AssistantMessageCompleted {
+        id: "message".to_string(),
+        phase: dcc_core::domain::session::AssistantMessagePhase::Unknown,
+        content: Some("revised text without the expected value".to_string()),
+        model: None,
+        at: "fixture".to_string(),
+    });
+    assert!(!observation.contains_text(MCP_CONFORMANCE_ECHO_VALUE));
+    observation.observe_text(&ProviderEvent::TextDelta {
+        content: MCP_CONFORMANCE_ECHO_VALUE.to_string(),
+    });
+    assert!(observation.contains_text(MCP_CONFORMANCE_ECHO_VALUE));
 }
 
 #[tokio::test]

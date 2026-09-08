@@ -25,8 +25,6 @@ function run(command, args) {
 	}
 }
 
-run("node", ["scripts/stage-vendor.mjs"]);
-
 const probe = spawnSync("bun", ["--version"], {
 	stdio: "ignore",
 	env: process.env,

@@ -2,8 +2,6 @@
 
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
 import readline from "node:readline";
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -26,6 +24,7 @@ import { createDccMcpPermissionHooks } from "./mcp-permission-hook.mjs";
 import { createNativeSubagentHooks } from "./native-subagent-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 import { waitForPendingResponse } from "./pending-response.mjs";
+import { claudeCommand, resolveClaudeExecutable } from "./claude-executable.mjs";
 
 const SIDECAR_VERSION = "0.1.66";
 
@@ -33,25 +32,30 @@ function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-function resolveClaudeBinPath() {
-	const override = process.env.DCC_CLAUDE_CODE_BIN_PATH;
-	if (override && override.trim().length > 0) {
-		return override.trim();
-	}
+let claudeBinPath;
 
-	const require = createRequire(import.meta.url);
-	const pkgJson = require.resolve("@anthropic-ai/claude-code/package.json");
-	return join(dirname(pkgJson), "bin", "claude.exe");
-}
-
-const CLAUDE_BIN_PATH = resolveClaudeBinPath();
-
-function handleAuthStatus() {
-	const result = spawnSync(CLAUDE_BIN_PATH, ["auth", "status"], {
+function runClaudeCommand(args) {
+	const invocation = claudeCommand(claudeBinPath, args);
+	const result = spawnSync(invocation.command, invocation.args, {
 		stdio: ["ignore", "pipe", "pipe"],
 		env: process.env,
 		encoding: "utf8",
+		timeout: 10_000,
 	});
+	if (result.error) {
+		throw new Error(`Could not run the installed Claude Code CLI (${result.error.code}). Check your Claude Code installation${invocation.command === "node" ? " and Node.js" : ""}, then check the provider again.`);
+	}
+	return result;
+}
+
+function handleAuthStatus() {
+	// Older CLIs can interpret unknown subcommands as prompts. Check the command
+	// surface first so a health check never submits "auth status" to a model.
+	const help = runClaudeCommand(["--help"]);
+	if (help.status !== 0 || !/^\s+auth\s+/m.test(help.stdout)) {
+		throw new Error("This Claude Code version does not support authentication checks. Update Claude Code, then run `claude auth login` and check the provider again.");
+	}
+	const result = runClaudeCommand(["auth", "status"]);
 
 	if (result.stdout) {
 		process.stdout.write(result.stdout);
@@ -271,7 +275,8 @@ async function runTurn(payload, state) {
 		options: {
 			cwd: process.cwd(),
 			additionalDirectories,
-			pathToClaudeCodeExecutable: CLAUDE_BIN_PATH,
+			pathToClaudeCodeExecutable: claudeBinPath,
+			executable: "node",
 			model: process.env.DCC_MODEL || undefined,
 			...(state.resumeSessionId ? { resume: state.resumeSessionId } : {}),
 			...approvalOptions,
@@ -394,6 +399,17 @@ async function main() {
 
 	if (process.argv.includes("--version")) {
 		process.stdout.write(`dcc-claude-sidecar ${SIDECAR_VERSION}\n`);
+		return;
+	}
+
+	claudeBinPath = resolveClaudeExecutable();
+	if (process.argv.includes("--resolve-cli")) {
+		const result = runClaudeCommand(["--version"]);
+		const version = result.stdout.trim();
+		if (result.status !== 0 || !/\b\d+\.\d+\.\d+\b/.test(version)) {
+			throw new Error("Could not identify the installed Claude Code version. Update or repair Claude Code, then check the provider again.");
+		}
+		emit({ path: claudeBinPath, version: version.slice(0, 256) });
 		return;
 	}
 
@@ -543,8 +559,13 @@ async function main() {
 }
 
 main().catch((error) => {
+	const diagnostic = error instanceof Error
+		? (process.argv.includes("--resolve-cli") || process.argv.includes("--auth-status")
+			? error.message
+			: error.stack ?? error.message)
+		: String(error);
 	process.stderr.write(
-		`[dcc-claude-sidecar] ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`,
+		`[dcc-claude-sidecar] ${diagnostic}\n`,
 	);
 	process.exit(1);
 });

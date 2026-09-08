@@ -8,6 +8,11 @@
 
 ## Development setup
 
+To exercise agent sessions during development, complete the same
+[provider setup](README.md#provider-setup) as desktop users. The CLI must be
+installed and authenticated separately; `yarn install` does not replace that
+provider setup.
+
 Requirements:
 
 - Node.js 22 recommended

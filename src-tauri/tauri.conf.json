@@ -43,7 +43,6 @@
       "../sidecar/dist/dcc-claude-sidecar"
     ],
     "resources": {
-      "../sidecar/dist/vendor/": "vendor",
       "../apps/mobile-web/dist/": "mobile-web"
     },
     "icon": [

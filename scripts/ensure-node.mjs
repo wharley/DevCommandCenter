@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * O runtime Claude Code empacotado exige Node 22; mantemos toda a toolchain no mesmo piso.
+ * A toolchain de build exige Node >=22.12; o app distribuído não usa este script.
  * Com Node mais antigo o `yarn vite` falha ou emite avisos inconsistentes → Tauri pode abrir em branco.
  */
 const [majS, minS, patS] = process.versions.node.split(".");

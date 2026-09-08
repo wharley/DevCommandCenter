@@ -81,6 +81,29 @@ struct ClaudeSidecarMessageType {
     r#type: String,
 }
 
+#[derive(serde::Deserialize)]
+struct ClaudeExecutable {
+    path: PathBuf,
+    version: String,
+}
+
+fn claude_command_path(existing: &str, home: Option<&str>, augmented: &str) -> String {
+    let mut paths = vec![existing.to_string()];
+    // Preserve the user's PATH choice. GUI launches may only inherit system
+    // paths, so try the native install before legacy Node-version directories.
+    if let Some(home) = home {
+        paths.push(
+            PathBuf::from(home)
+                .join(".local")
+                .join("bin")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    paths.push(augmented.to_string());
+    paths.join(if cfg!(windows) { ";" } else { ":" })
+}
+
 fn parse_claude_mcp_oauth_update(raw: &str) -> Option<Result<ProviderMcpOauthUpdate>> {
     let message_type = serde_json::from_str::<ClaudeSidecarMessageType>(raw).ok()?;
     if message_type.r#type != "dcc_mcp_oauth_state" {
@@ -412,28 +435,13 @@ impl ClaudeSdkSidecarAdapter {
     }
 
     fn script_path(&self) -> Option<PathBuf> {
+        // A distributed app must not silently depend on a developer checkout
+        // (or a user's workspace containing a similarly named script).
+        if !cfg!(debug_assertions) {
+            return None;
+        }
         for base in self.repo_root_candidates() {
             let candidate = base.join("sidecar").join("src").join("index.mjs");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-        None
-    }
-
-    fn repo_vendor_claude_bin_path(&self) -> Option<PathBuf> {
-        let binary_name = if cfg!(windows) {
-            "claude.exe"
-        } else {
-            "claude"
-        };
-        for base in self.repo_root_candidates() {
-            let candidate = base
-                .join("sidecar")
-                .join("dist")
-                .join("vendor")
-                .join("claude-code")
-                .join(binary_name);
             if candidate.is_file() {
                 return Some(candidate);
             }
@@ -458,55 +466,60 @@ impl ClaudeSdkSidecarAdapter {
         None
     }
 
-    fn vendor_claude_bin_path(&self) -> Option<PathBuf> {
-        let exe = std::env::current_exe().ok()?;
-        let contents_dir = exe.parent()?.parent()?;
-        let resources_dir = contents_dir.join("Resources");
-        let name = if cfg!(windows) {
-            "claude.exe"
-        } else {
-            "claude"
-        };
-        let candidate = resources_dir.join("vendor").join("claude-code").join(name);
-        if candidate.is_file() {
-            Some(candidate)
-        } else {
-            None
-        }
-    }
-
     fn base_command(&self, extra_args: &[&str]) -> Result<Command> {
-        if let Some(script_path) = self.script_path() {
+        let mut command = if let Some(sidecar_binary) = self.bundled_sidecar_path() {
+            Command::new(sidecar_binary)
+        } else if let Some(script_path) = self.script_path() {
             let mut command = Command::new("node");
             command.arg(script_path);
-            command.args(extra_args);
-            command.env("PATH", augmented_path());
-            if let Some(repo_vendor_claude) = self.repo_vendor_claude_bin_path() {
-                command.env("DCC_CLAUDE_CODE_BIN_PATH", repo_vendor_claude);
-            }
-            return Ok(command);
-        }
-
-        if let Some(sidecar_binary) = self.bundled_sidecar_path() {
-            let mut command = Command::new(sidecar_binary);
-            command.args(extra_args);
-            command.env("PATH", augmented_path());
-            if let Some(claude_bin_path) = self
-                .vendor_claude_bin_path()
-                .or_else(|| self.repo_vendor_claude_bin_path())
-            {
-                command.env("DCC_CLAUDE_CODE_BIN_PATH", claude_bin_path);
-            }
-            return Ok(command);
-        }
-
-        Err(CoreError::Provider(
-            "Claude sidecar not found. Expected sidecar/src/index.mjs in dev or bundled dcc-claude-sidecar next to the app executable.".to_string(),
-        ))
+            command
+        } else {
+            return Err(CoreError::Provider(
+                "The DCC Claude integration is missing. Reinstall DCC to repair it.".to_string(),
+            ));
+        };
+        command.args(extra_args);
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .ok();
+        command.env(
+            "PATH",
+            claude_command_path(
+                &std::env::var("PATH").unwrap_or_default(),
+                home.as_deref(),
+                &augmented_path(),
+            ),
+        );
+        command.kill_on_drop(true);
+        Ok(command)
     }
 
     fn binary_command(&self, extra_args: &[&str]) -> Result<Command> {
         self.base_command(extra_args)
+    }
+
+    async fn resolve_claude_executable(&self) -> Result<ClaudeExecutable> {
+        let mut command = self.binary_command(&["--resolve-cli"])?;
+        let output = tokio::time::timeout(Duration::from_secs(15), command.output())
+            .await
+            .map_err(|_| CoreError::Provider("Claude Code version check timed out. Check your Claude Code installation and try again.".to_string()))?
+            .map_err(|error| CoreError::Provider(format!("Could not start the DCC Claude integration: {error}")))?;
+        if !output.status.success() {
+            let reason = String::from_utf8_lossy(&output.stderr);
+            return Err(CoreError::Provider(if reason.trim().is_empty() {
+                "Could not check Claude Code. Install Claude Code and run `claude auth login`, then check the provider again.".to_string()
+            } else {
+                reason.trim().to_string()
+            }));
+        }
+        let executable: ClaudeExecutable = serde_json::from_slice(&output.stdout)
+            .map_err(|_| CoreError::Provider("Invalid Claude Code discovery response. Rebuild or reinstall the DCC Claude integration.".to_string()))?;
+        if !executable.path.is_absolute() || executable.version.trim().is_empty() {
+            return Err(CoreError::Provider(
+                "Invalid Claude Code executable or version.".to_string(),
+            ));
+        }
+        Ok(executable)
     }
 
     fn interactive_command(&self) -> Result<Command> {
@@ -519,9 +532,13 @@ impl ClaudeSdkSidecarAdapter {
     }
 
     async fn start_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
+        // Resolve before creating a session so missing installations surface as
+        // actionable errors, and retain the same executable for the session.
+        let executable = self.resolve_claude_executable().await?;
         let account_usage_key = provider_runtime_cache_key(cfg.provider_runtime.as_ref());
         let mut command = self.interactive_command()?;
         apply_cli_spawn_environment(&mut command, &self.id.0, &cfg)?;
+        command.env("DCC_CLAUDE_CODE_BIN_PATH", executable.path);
         let additional_directories = serde_json::to_string(&cfg.additional_working_directories)
             .map_err(|error| CoreError::Provider(error.to_string()))?;
         command.env("DCC_ADDITIONAL_DIRECTORIES", additional_directories);
@@ -974,8 +991,23 @@ impl Provider for ClaudeSdkSidecarAdapter {
     }
 
     async fn healthcheck(&self) -> Result<HealthStatus> {
+        let executable = match self.resolve_claude_executable().await {
+            Ok(executable) => executable,
+            Err(error) => {
+                return Ok(HealthStatus::Unhealthy {
+                    reason: error.to_string(),
+                })
+            }
+        };
         let mut auth_command = self.binary_command(&["--auth-status"])?;
-        match auth_command.output().await {
+        auth_command.env("DCC_CLAUDE_CODE_BIN_PATH", executable.path);
+        let auth_output =
+            tokio::time::timeout(Duration::from_secs(15), auth_command.output()).await;
+        let auth_output = match auth_output {
+            Ok(output) => output,
+            Err(_) => return Ok(HealthStatus::Unhealthy { reason: "Claude Code authentication check timed out. Check your Claude Code installation and try again.".to_string() }),
+        };
+        match auth_output {
             Ok(output) => {
                 if claude_auth_reports_logged_out(&output.stdout) {
                     return Ok(HealthStatus::Unhealthy {
@@ -993,7 +1025,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
                     } else {
                         format!("Claude auth check exited with status {}", output.status)
                     };
-                    return Ok(HealthStatus::Degraded { reason });
+                    return Ok(HealthStatus::Unhealthy { reason });
                 }
             }
             Err(error) => {
@@ -1003,28 +1035,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
             }
         }
 
-        let mut version_command = self.binary_command(&["--version"])?;
-        match version_command.output().await {
-            Ok(output) if output.status.success() => Ok(HealthStatus::Healthy),
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let reason = if !stderr.is_empty() {
-                    stderr
-                } else if !stdout.is_empty() {
-                    stdout
-                } else {
-                    format!(
-                        "Claude sidecar version check exited with status {}",
-                        output.status
-                    )
-                };
-                Ok(HealthStatus::Degraded { reason })
-            }
-            Err(error) => Ok(HealthStatus::Unhealthy {
-                reason: format!("failed to execute Claude sidecar version check: {error}"),
-            }),
-        }
+        Ok(HealthStatus::Healthy)
     }
 
     async fn account_usage(
@@ -1072,6 +1083,112 @@ impl Provider for ClaudeSdkSidecarAdapter {
 #[cfg(test)]
 mod account_usage_tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_search_preserves_path_and_does_not_prefer_legacy_nvm_over_native_install() {
+        assert_eq!(
+            claude_command_path(
+                "/custom/bin:/usr/bin",
+                Some("/home/person"),
+                "/home/person/.nvm/old/bin:/usr/bin"
+            ),
+            "/custom/bin:/usr/bin:/home/person/.local/bin:/home/person/.nvm/old/bin:/usr/bin"
+        );
+        assert_eq!(
+            claude_command_path(
+                "/usr/bin:/bin",
+                Some("/home/person"),
+                "/home/person/.nvm/old/bin"
+            ),
+            "/usr/bin:/bin:/home/person/.local/bin:/home/person/.nvm/old/bin"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn external_cli_health_uses_the_packaged_helper_and_reports_setup_failures() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Each case runs in a child test process, so environment overrides cannot
+        // leak to concurrently running provider tests or use the developer's CLI.
+        if let Ok(mode) = std::env::var("DCC_CLAUDE_HEALTH_TEST_CHILD") {
+            let adapter = crate::claude_code::adapter();
+            let health = adapter.healthcheck().await.expect("health response");
+            match mode.as_str() {
+                "healthy" => assert!(matches!(health, HealthStatus::Healthy)),
+                "missing" => assert!(
+                    matches!(health, HealthStatus::Unhealthy { reason } if reason.contains("Install Claude Code"))
+                ),
+                "logged-out" => assert!(
+                    matches!(health, HealthStatus::Unhealthy { reason } if reason.contains("claude auth login"))
+                ),
+                "broken" => assert!(
+                    matches!(health, HealthStatus::Unhealthy { reason } if reason.contains("Invalid Claude Code discovery response"))
+                ),
+                _ => panic!("unexpected fixture mode"),
+            }
+            if mode == "missing" {
+                let error = adapter
+                    .prepare_session(SessionConfig {
+                        workspace_id: dcc_core::domain::workspace::WorkspaceId(
+                            "fixture".to_string(),
+                        ),
+                        session_id: SessionId("fixture".to_string()),
+                        model: None,
+                        working_directory: None,
+                        additional_working_directories: vec![],
+                        provider_runtime: None,
+                        mcp_servers: vec![],
+                    })
+                    .await
+                    .expect_err("missing CLI must not start a session");
+                assert!(error.to_string().contains("Install Claude Code"));
+            }
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("dcc-claude-health-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("fixture directory");
+        let helper = root.join("DCC Claude helper");
+        fs::write(
+            &helper,
+            r##"#!/bin/sh
+if [ "$1" = "--resolve-cli" ]; then
+  case "$DCC_CLAUDE_HEALTH_TEST_CHILD" in
+    missing) echo 'Install Claude Code and run `claude auth login`.' >&2; exit 1 ;;
+    broken) echo 'invalid response'; exit 0 ;;
+    *) echo '{"path":"/usr/bin/false","version":"2.1.999 (Claude Code)"}'; exit 0 ;;
+  esac
+fi
+if [ "$1" = "--auth-status" ]; then
+  [ "$DCC_CLAUDE_CODE_BIN_PATH" = "/usr/bin/false" ] || exit 42
+  if [ "$DCC_CLAUDE_HEALTH_TEST_CHILD" = "logged-out" ]; then
+    echo '{"loggedIn":false}'; exit 1
+  fi
+  echo '{"loggedIn":true}'; exit 0
+fi
+exit 43
+"##,
+        )
+        .expect("helper fixture");
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o755))
+            .expect("executable fixture");
+        for mode in ["healthy", "missing", "logged-out", "broken"] {
+            let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+                .args(["--exact", "claude_sdk_sidecar::account_usage_tests::external_cli_health_uses_the_packaged_helper_and_reports_setup_failures", "--nocapture"])
+                .env("DCC_CLAUDE_SIDECAR_PATH", &helper)
+                .env("DCC_CLAUDE_HEALTH_TEST_CHILD", mode)
+                .output().expect("isolated health test");
+            assert!(
+                output.status.success(),
+                "{mode}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
 
     #[test]
     fn captures_mcp_oauth_state_only_on_the_private_adapter_channel() {

@@ -123,22 +123,13 @@ for (const baseName of ['dcc', 'dccd', 'dccd-http']) {
   ensurePlaceholder(releaseDir, baseName, hostTriple);
 }
 
-run('node', ['scripts/stage-vendor.mjs'], {
-  cwd: sidecarDir,
-  env: {
-    ...process.env,
-  },
-});
-
 if (isDevMode) {
   ensurePlaceholder(sidecarDistDir, 'dcc-claude-sidecar', hostTriple);
   console.log(`[build-sidecars] prepared dev placeholders for ${hostTriple}`);
   process.exit(0);
 }
 
-// Sidecar compilation must run before `cargo build --bins`: the Tauri crate's build
-// script validates `bundle.resources` (e.g. `../sidecar/dist/vendor`) while compiling
-// `dev-command-center-tauri`, and `stage-vendor.mjs` only runs during this step.
+// Compile our SDK integration only. Claude Code is a user-installed prerequisite.
 run('bun', ['build', '--compile', 'src/index.mjs', '--outfile', 'dist/dcc-claude-sidecar'], {
   cwd: sidecarDir,
   env: {

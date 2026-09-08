@@ -31,7 +31,8 @@ const MAX_ARGUMENT_COUNT: usize = 128;
 const MAX_SECRET_COUNT: usize = 64;
 const MAX_TOOL_COUNT: usize = 256;
 
-pub(crate) const CLAUDE_MCP_RUNTIME_VERSION: &str = "claude-agent-sdk@0.2.126+claude-code@2.1.258";
+// Projection identity pins our integration, not the user's independently updated CLI.
+pub(crate) const CLAUDE_MCP_RUNTIME_VERSION: &str = "claude-agent-sdk@0.2.126+claude-code@external";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -693,23 +694,21 @@ mod tests {
     }
 
     #[test]
-    fn runtime_version_is_pinned_to_the_bundled_provider_dependencies() {
+    fn runtime_version_identifies_the_sdk_and_external_cli_contract() {
         let package: Value =
             serde_json::from_str(include_str!("../../../package.json")).expect("root package");
         let dependencies = package["dependencies"]
             .as_object()
             .expect("root dependencies");
         let expected = format!(
-            "claude-agent-sdk@{}+claude-code@{}",
+            "claude-agent-sdk@{}+claude-code@external",
             dependencies["@anthropic-ai/claude-agent-sdk"]
                 .as_str()
                 .expect("SDK version"),
-            dependencies["@anthropic-ai/claude-code"]
-                .as_str()
-                .expect("Claude Code version"),
         );
 
         assert_eq!(CLAUDE_MCP_RUNTIME_VERSION, expected);
+        assert!(!dependencies.contains_key("@anthropic-ai/claude-code"));
     }
 
     #[tokio::test]

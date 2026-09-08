@@ -17,11 +17,37 @@ header authentication, `alwaysLoad`, tool naming, status inspection, and the
 independent `.mcp.json`/`settingSources` path in the
 [Agent SDK MCP guide](https://code.claude.com/docs/en/agent-sdk/mcp).
 
-The bundled versions for this slice are:
+The bundled integration dependencies are:
 
 - `@anthropic-ai/claude-agent-sdk` `0.2.126`;
-- `@anthropic-ai/claude-code` `2.1.258`;
 - `mcp-remote` `0.1.38`, pinned for the Claude remote-OAuth transport bridge.
+
+Claude Code itself is an external prerequisite installed and authenticated by
+the user. The previous bundled baseline was `2.1.258`; it is not a pinned DCC
+dependency anymore.
+
+### External CLI validation — 2026-09-08
+
+- The local MCP release gate passed, including Rust tests, contracts/desktop
+  type checks and frontend MCP checks. All 42 sidecar tests passed; targeted
+  regressions additionally cover CLI discovery, health and missing-install
+  session rejection.
+- The compiled Bun sidecar discovered the user's native Claude **2.1.259** from
+  a temporary directory with only `/usr/bin:/bin` in PATH. Authentication passed
+  with normal macOS Keychain access.
+- `authenticated_claude_bridge_passes_the_shared_harness` passed against that
+  compiled sidecar and external CLI, covering **stdio and HTTP**. No bundled CLI
+  or source-script fallback was used. The fixture's text observer was updated to
+  consume current `AssistantMessageDelta`/`AssistantMessageCompleted` events and
+  reconcile final snapshots; its tool/content/permission assertions remain.
+- Regression checks preserve inherited PATH precedence and put the user's
+  native installation ahead of additional legacy NVM directories on GUI launches.
+  Authentication probes verify that `auth` exists before calling it, because old
+  CLIs can interpret unknown subcommands as model prompts.
+
+This is integration evidence for the tested SDK/CLI combination, not a claim of
+compatibility with every CLI version. The next signed release artifact still
+needs bundle validation and installed/download size measurement.
 
 The installed TypeScript contract also exposes `mcpServerStatus()` and defines
 `mcpServers` as an in-memory query option. No provider file mutation is needed.
@@ -189,13 +215,17 @@ mapping them to the provider-neutral hint contract. Free-form annotation data
 is discarded. Missing booleans remain unknown rather than receiving inferred
 defaults.
 
-The Claude adapter declares the exact runtime key
-`claude-agent-sdk@0.2.126+claude-code@2.1.258`. A test binds that key to the
-pinned package dependencies, so a dependency upgrade cannot silently retain
-old runtime identity.
+The Claude adapter declares the projection key
+`claude-agent-sdk@0.2.126+claude-code@external`. A test binds the SDK portion to
+the pinned SDK dependency. Claude Code is installed and authenticated by the user;
+DCC does not bundle, install, update or fall back to a private copy of the CLI.
+The sidecar's `--resolve-cli` probe reports the actual executable path and version.
+Before a session starts, Rust probes that executable and passes its resolved path
+to the interactive sidecar. Missing or broken installations fail with setup
+guidance. Health checks also require authentication via `claude auth login`.
 
 Rust validates the snapshot again and creates `McpRuntimeStatus` values bound
-to the definition, provider, exact runtime version, and session. The backend
+to the definition, provider, SDK/external-CLI projection key, and session. The backend
 atomically replaces the in-memory snapshot and publishes
 `dcc/session/mcp/runtime-status`. These values are deliberately not appended
 to the durable session transcript. The snapshot is cleared when the provider

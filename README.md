@@ -15,6 +15,12 @@ engineering with AI agents. It connects isolated Git worktrees, multi-provider
 sessions, review and delivery workflows, terminals, usage insights, and local
 persistence in one Tauri application.
 
+> [!IMPORTANT]
+> Before starting agent sessions, set up at least one provider on the computer
+> running DCC. Claude, Codex, Cursor, Grok, Gemini and Droid require their own
+> installed and authenticated CLIs. Install only the providers you want to use.
+> See [Provider setup](#provider-setup), including Antigravity's separate setup.
+
 ![Dev Command Center running an agent task across multiple projects](docs/assets/dcc-workbench-running-task.png)
 
 ## Core capabilities
@@ -65,6 +71,47 @@ persistence in one Tauri application.
 
 ## Requirements
 
+### Provider setup
+
+Install and authenticate the CLI for each provider you intend to use, on the
+computer running DCC and under the same OS user account. DCC uses those existing
+installations; it does not bundle, install or update these provider CLIs.
+
+| Provider | Required installation | Authentication/setup |
+| --- | --- | --- |
+| Claude | [Claude Code CLI](https://code.claude.com/docs/en/setup), command `claude` | Run `claude auth login`. |
+| Codex | [Codex CLI](https://developers.openai.com/codex/cli/), command `codex` | Run `codex login`. |
+| Cursor | [Cursor CLI](https://cursor.com/docs/cli/installation), command `cursor-agent` in DCC | Run `cursor-agent login`. DCC currently requires this command to be available, even where upstream docs use the name `agent`. |
+| Grok Build | Grok Build CLI, command `grok` | Run `grok login` or configure its supported API-key authentication. |
+| Gemini | [Gemini CLI](https://geminicli.com/docs/get-started/authentication/), command `gemini` | Configure API-key, Vertex AI or an eligible enterprise account. For personal Google sign-in in DCC, use Antigravity below. |
+| Droid | [Factory Droid CLI](https://docs.factory.ai/droid-cli/quickstart), command `droid` | Open `droid` in a terminal and complete its sign-in flow. |
+
+**Antigravity has a separate setup:** open **Settings > Models > Antigravity**,
+select **Install official runtime**, then **Sign in with Google**. Follow the
+[Antigravity provider guide](docs/ANTIGRAVITY_PROVIDER.md) for supported platforms
+and manual runtime paths.
+
+Installing DCC does not create a provider account or grant model access. Use an
+account or API configuration with access to the models you select. For the mobile
+companion, provider setup belongs on the computer running DCC, not on the phone.
+
+For Claude, DCC retains the Anthropic Agent SDK integration and points it at your
+installed CLI. No second Claude executable is included in the DCC package.
+
+If Claude is missing or cannot run, DCC shows the provider as unavailable with
+setup guidance. Install or repair the CLI, then check the provider again. Native
+Claude installations do not require a separate Node.js or Bun installation for
+DCC's Claude integration; older npm JavaScript installations still require Node.js.
+
+If a provider cannot start, first verify its CLI works in a terminal under the
+same account, then follow [Provider troubleshooting](SUPPORT.md#provider-troubleshooting).
+Missing providers do not require installing every other provider in the table.
+
+### Development requirements
+
+The following tools are needed to build DCC from source, not to install the
+desktop release. Individual provider CLIs may have their own runtime requirements.
+
 - Node.js 22 recommended
 - Yarn v1
 - Rust stable
@@ -112,6 +159,8 @@ If no shared `.env` is found, the setup script falls back to `.env.example`.
 DCC was shaped by the broader ecosystem of AI coding tools, terminal-native developer workflows, local-first apps, and worktree-based development practices.
 
 ## Downloads
+
+Before starting your first agent session, complete [Provider setup](#provider-setup).
 
 - Releases page: <https://github.com/wharley/DevCommandCenter/releases>
 - Signed builds are published for macOS and Linux through GitHub Releases.

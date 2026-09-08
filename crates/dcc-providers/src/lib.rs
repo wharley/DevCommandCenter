@@ -421,7 +421,7 @@ mod tests {
             provider_runtime("claude_code")
                 .expect("Claude provider")
                 .dcc_mcp_projection_version(),
-            Some("claude-agent-sdk@0.2.126+claude-code@2.1.258")
+            Some("claude-agent-sdk@0.2.126+claude-code@external")
         );
         assert!(matches!(
             provider_runtime("codex")

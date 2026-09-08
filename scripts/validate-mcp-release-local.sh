@@ -53,6 +53,7 @@ run_gate cargo test --locked -p dcc-providers --lib
 run_gate cargo test --locked -p dcc-mcp-fixture
 run_gate cargo test --locked -p dcc-tauri mcp_commands
 run_gate node --test \
+  sidecar/src/claude-executable.test.mjs \
   sidecar/src/mcp-config.test.mjs \
   sidecar/src/permission-bridge.test.mjs \
   sidecar/src/turn-lifecycle.test.mjs

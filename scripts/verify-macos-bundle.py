@@ -23,6 +23,8 @@ def verify_bundle(app):
     executable = app / "Contents/MacOS" / executable_name
     if not executable.is_file():
         raise RuntimeError(f"Missing app executable: {executable}")
+    if (app / "Contents/Resources/vendor/claude-code").exists():
+        raise RuntimeError("Claude Code must be installed by the user, not bundled with DCC")
 
     checked = set()
     total_bytes = 0
