@@ -29,7 +29,7 @@ dependency anymore.
 ### External CLI validation — 2026-09-08
 
 - The local MCP release gate passed, including Rust tests, contracts/desktop
-  type checks and frontend MCP checks. All 42 sidecar tests passed; targeted
+  type checks and frontend MCP checks. All 43 sidecar tests passed; targeted
   regressions additionally cover CLI discovery, health and missing-install
   session rejection.
 - The compiled Bun sidecar discovered the user's native Claude **2.1.259** from
@@ -42,8 +42,9 @@ dependency anymore.
   reconcile final snapshots; its tool/content/permission assertions remain.
 - Regression checks preserve inherited PATH precedence and put the user's
   native installation ahead of additional legacy NVM directories on GUI launches.
-  Authentication probes verify that `auth` exists before calling it, because old
-  CLIs can interpret unknown subcommands as model prompts.
+  Authentication probes check the documented command introduction version
+  (2.1.41) before calling `auth status`, because old CLIs can interpret unknown
+  subcommands as model prompts. They do not parse human-readable help output.
 
 This is integration evidence for the tested SDK/CLI combination, not a claim of
 compatibility with every CLI version. The next signed release artifact still
