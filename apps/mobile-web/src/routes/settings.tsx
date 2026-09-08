@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Copy, LogOut, QrCode, Smartphone } from "lucide-react";
-import { PushSettings } from "@/components/push-settings";
-import { apiFetch } from "@/lib/api";
 import { InstallApp } from "@/components/install-app";
 import { clearSession, loadSession, type PairingSession } from "@/lib/session";
 
@@ -29,20 +27,6 @@ export function SettingsRoute() {
 	};
 
 	const logout = async () => {
-		if (session)
-			await apiFetch(session, "/api/v1/mobile/push", {
-				method: "DELETE",
-			}).catch(() => {});
-		if ("serviceWorker" in navigator) {
-			const registration = await navigator.serviceWorker
-				.getRegistration("/m/")
-				.catch(() => undefined);
-			await (
-				await registration?.pushManager?.getSubscription().catch(() => null)
-			)
-				?.unsubscribe()
-				.catch(() => {});
-		}
 		await clearSession();
 		void navigate({ to: "/", replace: true });
 	};
@@ -95,7 +79,6 @@ export function SettingsRoute() {
 			</header>
 
 			<InstallApp />
-			<PushSettings session={session} />
 
 			<section className="rounded-2xl border border-border bg-panel p-4">
 				<div className="flex items-center gap-3">

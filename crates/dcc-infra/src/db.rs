@@ -198,6 +198,10 @@ CREATE TABLE IF NOT EXISTS dcc_session_events (
 CREATE INDEX IF NOT EXISTS idx_dcc_session_events_session_sequence
 	ON dcc_session_events(session_id, sequence);
 
+-- Web Push was retired in 0.1.66. Stop legacy databases from accumulating
+-- notifications without a delivery worker; keep existing user data intact.
+DROP TRIGGER IF EXISTS mobile_push_event_insert;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS dcc_session_search USING fts5(
 	session_id UNINDEXED,
 	workspace_id UNINDEXED,
@@ -11393,6 +11397,46 @@ mod tests {
             )
             .expect("insert legacy event");
         }
+    }
+
+    #[test]
+    fn migration_retires_mobile_push_trigger_without_deleting_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy-push.sqlite");
+        create_legacy_event_table(
+            &path,
+            &[("existing-event", r#"{"type":"future_event"}"#, "1")],
+        );
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE mobile_push_outbox (event_id TEXT);
+             INSERT INTO mobile_push_outbox VALUES ('already-queued');
+             CREATE TRIGGER mobile_push_event_insert AFTER INSERT ON dcc_session_events
+             BEGIN INSERT INTO mobile_push_outbox VALUES (NEW.event_id); END;",
+        )
+        .unwrap();
+
+        // Upgrade and reopen: cleanup must be idempotent and preserve history.
+        drop(SqliteSessionRepo::open(&path).unwrap());
+        drop(SqliteSessionRepo::open(&path).unwrap());
+        conn.execute(
+            "INSERT INTO dcc_session_events(event_id,session_id,sequence,occurred_at,kind_json)
+             VALUES ('new-event','legacy-session',2,'t1','{\"type\":\"future_event\"}')",
+            [],
+        )
+        .unwrap();
+        let events: i64 = conn
+            .query_row("SELECT count(*) FROM dcc_session_events", [], |r| r.get(0))
+            .unwrap();
+        let queued: String = conn
+            .query_row(
+                "SELECT group_concat(event_id) FROM mobile_push_outbox",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(events, 2);
+        assert_eq!(queued, "already-queued");
     }
 
     #[test]

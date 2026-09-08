@@ -154,6 +154,8 @@ jobs:
           echo "App bundle: ${APP_PATH}"
           echo "DMG package: ${DMG_PATH}"
 
+          python3 scripts/verify-macos-bundle.py "${APP_PATH}" --smoke-test
+
       - name: Validate macOS signature and notarization readiness
         shell: bash
         run: |

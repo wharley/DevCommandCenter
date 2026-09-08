@@ -54,11 +54,6 @@ use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 mod mobile;
-mod push;
-
-pub fn start_mobile_notifications(config: Arc<RwLock<HttpConfig>>) {
-    push::start(config);
-}
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
     mobile::recover_interrupted_tasks(db_path)
@@ -323,12 +318,6 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .clone();
     let protected_routes = Router::new()
         .route("/api/v1/mobile/catalog", get(mobile::catalog))
-        .route(
-            "/api/v1/mobile/push",
-            get(push::config)
-                .post(push::subscribe)
-                .delete(push::unsubscribe),
-        )
         .route(
             "/api/v1/mobile/workspaces/:workspace_id/patch",
             get(mobile::patch),

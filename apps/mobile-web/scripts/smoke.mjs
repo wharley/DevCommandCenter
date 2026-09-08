@@ -183,8 +183,6 @@ const server = http.createServer(async (req, res) => {
 					"diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-oldValue\n+newValue",
 				truncated: false,
 			});
-		if (p === "/api/v1/mobile/push")
-			return json(res, { publicKey: "test", enabled: false });
 		if (p === "/api/v1/sessions/session/respond-user-input") {
 			let body = "";
 			for await (const b of req) body += b;
@@ -376,8 +374,12 @@ try {
 	});
 	await page.goto("http://127.0.0.1:5199/m/settings");
 	await page
-		.getByRole("heading", { name: "Notificações", exact: true })
+		.getByRole("heading", { name: "DCC na tela inicial", exact: true })
 		.waitFor();
+	assert.equal(
+		await page.getByRole("heading", { name: "Notificações", exact: true }).count(),
+		0,
+	);
 	await page.screenshot({
 		path: path.join(artifacts, "settings.png"),
 		fullPage: true,
@@ -413,6 +415,7 @@ try {
 					"agent questions",
 					"file diff",
 					"PWA settings",
+					"mobile push settings removed",
 					"no horizontal overflow",
 					"no browser errors",
 				],

@@ -10,6 +10,14 @@ self.addEventListener("activate", (event) => {
 			for (const name of await caches.keys())
 				if (name.startsWith("dcc-shell-") && name !== CACHE)
 					await caches.delete(name);
+			// Retire subscriptions left by 0.1.65 while preserving the offline shell.
+			try {
+				await (
+					await self.registration.pushManager?.getSubscription()
+				)?.unsubscribe();
+			} catch {
+				/* Subscription cleanup must not prevent an offline-shell update. */
+			}
 			await self.clients.claim();
 		})(),
 	);
@@ -47,49 +55,4 @@ self.addEventListener("fetch", (event) => {
 			caches.match(url.pathname).then((cached) => cached || fetch(request)),
 		);
 	}
-});
-self.addEventListener("push", (event) => {
-	let data = {};
-	try {
-		data = event.data?.json() || {};
-	} catch {
-		/* Show a generic visible notification. */
-	}
-	event.waitUntil(
-		self.registration.showNotification(data.title || "DCC", {
-			body: data.body || "Há uma atualização nas suas tarefas.",
-			icon: "/m/icons/icon-192.png",
-			badge: "/m/icons/icon-192.png",
-			tag: data.tag || "dcc-update",
-			data: { url: data.url || "/m/" },
-		}),
-	);
-});
-self.addEventListener("notificationclick", (event) => {
-	event.notification.close();
-	const candidate = new URL(
-		event.notification.data?.url || "/m/",
-		self.location.origin,
-	);
-	const url =
-		candidate.origin === self.location.origin &&
-		candidate.pathname.startsWith("/m/")
-			? candidate.href
-			: new URL("/m/", self.location.origin).href;
-	event.waitUntil(
-		(async () => {
-			const windows = await self.clients.matchAll({
-				type: "window",
-				includeUncontrolled: true,
-			});
-			const existing = windows.find((client) =>
-				client.url.startsWith(new URL("/m/", self.location.origin).href),
-			);
-			if (existing) {
-				await existing.navigate(url);
-				return existing.focus();
-			}
-			return self.clients.openWindow(url);
-		})(),
-	);
 });

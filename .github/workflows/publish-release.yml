@@ -248,3 +248,16 @@ jobs:
 
           echo "Verifying the stapled app notarization ticket..."
           xcrun stapler validate "${APP_PATH}"
+
+          echo "Verifying the exact updater archive and signed app startup..."
+          EXTRACT_DIR="$(mktemp -d "${RUNNER_TEMP}/dcc-release-check.XXXXXX")"
+          tar -xzf "${UPDATER_ARCHIVE}" -C "${EXTRACT_DIR}"
+          EXTRACTED_APP="$(find "${EXTRACT_DIR}" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [[ -z "${EXTRACTED_APP}" ]]; then
+            echo "Updater archive does not contain an app bundle."
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "${EXTRACTED_APP}"
+          xcrun stapler validate "${EXTRACTED_APP}"
+          python3 scripts/verify-macos-bundle.py "${EXTRACTED_APP}" --smoke-test
+          echo "Updater archive size (bytes): $(wc -c < "${UPDATER_ARCHIVE}")"
