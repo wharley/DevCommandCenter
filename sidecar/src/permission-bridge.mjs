@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { waitForPendingResponse } from "./pending-response.mjs";
 
 function toolInputCommand(input) {
 	if (!input || typeof input !== "object") {
@@ -52,7 +53,6 @@ export async function handlePermissionRequest(
 		typeof options?.toolUseID === "string" && options.toolUseID.trim().length > 0
 			? options.toolUseID.trim()
 			: randomUUID();
-	let aborted = false;
 
 	emit({
 		type: "dcc_permission_request",
@@ -71,22 +71,9 @@ export async function handlePermissionRequest(
 		file: toolInputFile(input),
 	});
 
-	const behavior = await new Promise((resolve) => {
-		state.pendingPermissions.set(requestId, { resolve });
-		options.signal.addEventListener(
-			"abort",
-			() => {
-				if (!state.pendingPermissions.delete(requestId)) {
-					return;
-				}
-				aborted = true;
-				resolve("deny");
-			},
-			{ once: true },
-		);
-	});
-
-	state.pendingPermissions.delete(requestId);
+	const { value: behavior, aborted } = await waitForPendingResponse(
+		state.pendingPermissions, requestId, options.signal, "deny",
+	);
 
 	emit({
 		type: "dcc_permission_resolved",

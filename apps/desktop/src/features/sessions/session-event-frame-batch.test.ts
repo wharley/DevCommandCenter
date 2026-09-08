@@ -86,4 +86,16 @@ describe("SessionEventFrameBatch", () => {
 		expect(frames.pendingFrames()).toBe(0);
 		expect(flush).not.toHaveBeenCalled();
 	});
+
+	it("bounds retained events when animation frames stop, preserving every event in order", () => {
+		const frames = manualFrames();
+		const published: CoreEvent[] = [];
+		const batch = new SessionEventFrameBatch((events) => published.push(...events), frames.scheduler);
+		const events = Array.from({ length: 10_000 }, (_, index) => event("s", index));
+		for (const next of events) batch.enqueue(next);
+		expect(events.length - published.length).toBeLessThan(256);
+		frames.flushFrame();
+		expect(published).toEqual(events);
+		expect(frames.pendingFrames()).toBe(0);
+	});
 });

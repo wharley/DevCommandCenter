@@ -440,10 +440,8 @@ export async function terminateWorkspaceTerminals(workspaceIds: readonly string[
 	const prefixes = workspaceIds.map((id) => `worktree:${id}:`);
 	const terminations: Array<Promise<boolean>> = [];
 	for (const entry of entries.values()) {
-		if (
-			(entry.ptyId || entry.spawnPromise) &&
-			prefixes.some((prefix) => entry.terminalId.startsWith(prefix))
-		) {
+		// Exited/idle entries also retain scrollback after their workspace is gone.
+		if (prefixes.some((prefix) => entry.terminalId.startsWith(prefix))) {
 			terminations.push(disposeTerminal(entry.terminalId));
 		}
 	}

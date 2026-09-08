@@ -1,0 +1,7 @@
+{"baseline":"7d4fecf","node":"v22.21.1"}
+{"version":"before","requests":100,"pending":0,"retainedAbortListeners":100}
+{"version":"before","requests":1000,"pending":0,"retainedAbortListeners":1000}
+{"version":"before","requests":10000,"pending":0,"retainedAbortListeners":10000}
+{"version":"after","requests":100,"pending":0,"retainedAbortListeners":0}
+{"version":"after","requests":1000,"pending":0,"retainedAbortListeners":0}
+{"version":"after","requests":10000,"pending":0,"retainedAbortListeners":0}

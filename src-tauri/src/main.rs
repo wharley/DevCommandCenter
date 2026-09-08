@@ -6115,16 +6115,22 @@ fn check_needs_attention(
 
 /// Remove códigos ANSI básicos para análise de texto
 fn strip_ansi_codes(input: &str) -> String {
+    // This runs for every terminal output batch and activity poll. Compile once,
+    // preserving the exact matching/replacement behavior of the three passes.
+    use std::sync::LazyLock;
+    static RE_SGR: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\x1b\[[\d;?]*[A-Za-z]").unwrap());
+    static RE_OSC1: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\x1b\][^\x07]*\x07").unwrap());
+    static RE_OSC2: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\x1b\][^\x1b\\]*\\").unwrap());
     // Remove SGR sequences: ESC [ ... m
-    let re_sgr = Regex::new(r"\x1b\[[\d;?]*[A-Za-z]").unwrap();
-    let s = re_sgr.replace_all(input, "");
+    let s = RE_SGR.replace_all(input, "");
 
     // Remove OSC sequences: ESC ] ... BEL or ESC ]... ESC \
-    let re_osc1 = Regex::new(r"\x1b\][^\x07]*\x07").unwrap();
-    let s = re_osc1.replace_all(&s, "");
+    let s = RE_OSC1.replace_all(&s, "");
 
-    let re_osc2 = Regex::new(r"\x1b\][^\x1b\\]*\\").unwrap();
-    re_osc2.replace_all(&s, "").to_string()
+    RE_OSC2.replace_all(&s, "").to_string()
 }
 
 fn spawn_terminal_reader_thread(

@@ -25,6 +25,7 @@ import { resolveClaudeApprovalOptions } from "./approval-policy.mjs";
 import { createDccMcpPermissionHooks } from "./mcp-permission-hook.mjs";
 import { createNativeSubagentHooks } from "./native-subagent-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
+import { waitForPendingResponse } from "./pending-response.mjs";
 
 const SIDECAR_VERSION = "0.1.64";
 
@@ -196,7 +197,6 @@ async function handleAskUserQuestion(input, options, state) {
 			? options.toolUseID.trim()
 			: randomUUID();
 	const questions = normalizeQuestions(input);
-	let aborted = false;
 
 	emit({
 		type: "dcc_user_input_request",
@@ -204,22 +204,9 @@ async function handleAskUserQuestion(input, options, state) {
 		questions,
 	});
 
-	const answers = await new Promise((resolve) => {
-		state.pendingUserInputs.set(requestId, { resolve });
-		options.signal.addEventListener(
-			"abort",
-			() => {
-				if (!state.pendingUserInputs.delete(requestId)) {
-					return;
-				}
-				aborted = true;
-				resolve([]);
-			},
-			{ once: true },
-		);
-	});
-
-	state.pendingUserInputs.delete(requestId);
+	const { value: answers, aborted } = await waitForPendingResponse(
+		state.pendingUserInputs, requestId, options.signal, [],
+	);
 
 	const normalizedAnswers = normalizeAnswerEntries(answers);
 	emit({

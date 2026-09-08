@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getEventListeners } from "node:events";
 
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 
@@ -101,5 +102,33 @@ test("aborting a pending MCP permission fails closed", async () => {
 
 	assert.equal((await request).behavior, "deny");
 	assert.equal(events[1].behavior, "deny");
+	assert.equal(state.pendingPermissions.size, 0);
+});
+
+test("resolved permissions release their abort listeners while the signal stays alive", async () => {
+	const state = { pendingPermissions: new Map() };
+	const controller = new AbortController();
+	for (let index = 0; index < 100; index += 1) {
+		const requestId = `permission-${index}`;
+		const request = handlePermissionRequest("Tool", {}, {
+			toolUseID: requestId,
+			signal: controller.signal,
+		}, state, () => {});
+		state.pendingPermissions.get(requestId).resolve("allow");
+		await request;
+	}
+	assert.equal(state.pendingPermissions.size, 0);
+	assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+});
+
+test("an already aborted permission settles without waiting for a response", async () => {
+	const controller = new AbortController();
+	controller.abort();
+	const state = { pendingPermissions: new Map() };
+	const result = await handlePermissionRequest("Tool", {}, {
+		toolUseID: "already-aborted",
+		signal: controller.signal,
+	}, state, () => {});
+	assert.equal(result.behavior, "deny");
 	assert.equal(state.pendingPermissions.size, 0);
 });

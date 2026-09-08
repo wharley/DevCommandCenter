@@ -14,7 +14,8 @@ const MAX_ACTIVITY_EVENTS = 12;
  * Subscribes to the global session event stream.
  *
  * `onEvent` fires for every event, in native arrival order, in a single React
- * batch on the next animation frame. Use it to drive per-session state (e.g.
+ * batch on the next animation frame (or earlier when the pending batch fills).
+ * Use it to drive per-session state (e.g.
  * snapshots) so background sessions keep updating even when their tab is not
  * selected. The returned `events` and `activityEvents` contain only the selected
  * session (plus unscoped events), preventing background deltas from rebuilding

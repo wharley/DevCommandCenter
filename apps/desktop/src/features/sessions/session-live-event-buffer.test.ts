@@ -1,10 +1,32 @@
 import type { CoreEvent } from "@dcc/contracts";
 import { describe, expect, it } from "vitest";
-import { SessionLiveEventBuffer } from "./session-live-event-buffer";
+import { SESSION_LIVE_BYTE_LIMIT, SessionLiveEventBuffer } from "./session-live-event-buffer";
 
 const event = (value: object) => value as CoreEvent;
 
 describe("SessionLiveEventBuffer", () => {
+	it("accounts for Unicode surrogate pairs split between chunks", () => {
+		const buffer = new SessionLiveEventBuffer();
+		for (const content of ["ação ", "\ud83e", "", "\udd80", "\ud83e", "x", "\udd80"]) {
+			buffer.append(event({ sessionTurnDelta: { session_id: "a", turn_id: "t", content } }));
+			expect(buffer.stats()[0].bytes).toBe(JSON.stringify(buffer.events()[0]).length * 2);
+		}
+	});
+
+	it("keeps byte accounting exact across escaped deltas, eviction and metadata changes", () => {
+		const buffer = new SessionLiveEventBuffer();
+		for (let index = 0; index < 30; index += 1) {
+			buffer.append(event({ sessionTurnDelta: {
+				session_id: "a", turn_id: "t", content: "\n\"\\".repeat(100_000),
+				sequence: index, note: "metadata".repeat(index % 3),
+			} }));
+			const actualBytes = buffer.eventsForSession("a")
+				.reduce((sum, entry) => sum + JSON.stringify(entry).length * 2, 0);
+			expect(buffer.stats()[0]?.bytes ?? 0).toBe(actualBytes);
+			expect(actualBytes).toBeLessThanOrEqual(SESSION_LIVE_BYTE_LIMIT);
+		}
+	});
+
 	it("coalesces deltas independently for parallel sessions", () => {
 		const buffer = new SessionLiveEventBuffer();
 		for (let index = 0; index < 1000; index += 1) {

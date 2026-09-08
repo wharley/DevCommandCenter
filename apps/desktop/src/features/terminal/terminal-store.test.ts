@@ -193,6 +193,30 @@ describe("terminal sizing during PTY startup", () => {
 		expect(terminalApi.killTerminal).toHaveBeenCalledWith("pty-1");
 	});
 
+	it("releases exited terminal history when its workspace is removed", async () => {
+		terminalApi.getOrCreateTerminalByOwner.mockResolvedValueOnce({
+			ptyId: "pty-exited",
+			existing: true,
+			session: { status: "running", lastExitCode: null },
+			chunks: ["x".repeat(2 * 1024 * 1024 - 1024)],
+			truncated: false,
+		});
+		const store = await import("./terminal-store");
+		const terminalId = "worktree:removed-workspace:tab-exited";
+		await store.ensureTerminal(terminalId, "/workspace", {
+			title: "Terminal", workspaceName: "Workspace", workspaceBranch: "main",
+			providerLabel: null, sessionState: "idle", sessionId: null,
+		});
+		const onExit = terminalApi.listenTerminalExit.mock.calls[0][0];
+		onExit({ ptyId: "pty-exited", code: 0 });
+		expect(store.getTerminalSnapshot(terminalId)?.status).toBe("exited");
+		expect(store.getTerminalSnapshot(terminalId)?.bufferedBytes).toBeGreaterThan(2_000_000);
+		terminalApi.killTerminal.mockClear();
+		await store.terminateWorkspaceTerminals(["removed-workspace"]);
+		expect(store.getTerminalSnapshot(terminalId)).toBeNull();
+		expect(terminalApi.killTerminal).not.toHaveBeenCalled();
+	});
+
 	it("kills a PTY that finishes spawning after its tab was disposed", async () => {
 		let resolveSpawn!: (value: {
 			ptyId: string;

@@ -1,0 +1,5 @@
+{"baseline":"7d4fecf","node":"v22.21.1","metric":"JSON length * 2; not heap/RSS"}
+{"version":"before","deltas":30,"charsPerDelta":300000,"peakSerializedBytes":20400146,"minimumCounter":-7200000}
+{"version":"after","deltas":30,"charsPerDelta":300000,"peakSerializedBytes":7200146,"minimumCounter":0}
+{"version":"before","smallDeltas":10000,"medianMs":4.602250000000026,"samplesMs":[5.433958000000075,4.609542000000033,4.775457999999958,4.536959000000024,4.602250000000026,4.463917000000038,4.5518749999999955]}
+{"version":"after","smallDeltas":10000,"medianMs":5.628790999999978,"samplesMs":[6.55337499999996,5.628790999999978,5.8907500000000255,5.234583000000043,5.609916999999996,5.202541999999994,5.72458400000005]}

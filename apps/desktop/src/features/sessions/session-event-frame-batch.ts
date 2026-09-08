@@ -6,14 +6,17 @@ type FrameScheduler = {
 	cancel: (handle: number) => void;
 };
 
+export const MAX_PENDING_SESSION_EVENTS = 256;
+
 const browserFrameScheduler: FrameScheduler = {
 	schedule: (callback) => window.requestAnimationFrame(callback),
 	cancel: (handle) => window.cancelAnimationFrame(handle),
 };
 
 /**
- * Preserves native event order while limiting React publication to one flush
- * per animation frame. The durable/live buffer may still be updated eagerly.
+ * Preserves native event order, normally publishing once per animation frame.
+ * A full batch publishes eagerly even if frames are suspended. The durable/live
+ * buffer may still be updated eagerly.
  */
 export class SessionEventFrameBatch {
 	private pending: CoreEvent[] = [];
@@ -28,6 +31,12 @@ export class SessionEventFrameBatch {
 	enqueue(event: CoreEvent) {
 		if (this.disposed) return;
 		this.pending.push(event);
+		// WebViews may suspend animation frames while hidden. Apply backpressure
+		// by publishing a bounded batch; never drop lifecycle events or deltas.
+		if (this.pending.length >= MAX_PENDING_SESSION_EVENTS) {
+			this.flush();
+			return;
+		}
 		if (this.scheduledHandle !== null) return;
 		this.scheduledHandle = this.scheduler.schedule(() => {
 			this.scheduledHandle = null;
@@ -52,6 +61,10 @@ export class SessionEventFrameBatch {
 
 	flush() {
 		if (this.disposed || this.pending.length === 0) return;
+		if (this.scheduledHandle !== null) {
+			this.scheduler.cancel(this.scheduledHandle);
+			this.scheduledHandle = null;
+		}
 		const events = this.pending;
 		this.pending = [];
 		this.onFlush(events);
