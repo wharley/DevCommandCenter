@@ -3,8 +3,6 @@
   "productName": "Dev Command Center Dev",
   "identifier": "com.devcommandcenter.app.dev",
   "bundle": {
-    "resources": [
-      "../sidecar/dist/vendor/"
-    ]
+    "resources": []
   }
 }

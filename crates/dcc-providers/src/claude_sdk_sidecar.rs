@@ -87,6 +87,35 @@ struct ClaudeExecutable {
     version: String,
 }
 
+fn claude_sidecar_command(
+    override_path: Option<PathBuf>,
+    development_script: Option<PathBuf>,
+    bundled_binary: Option<PathBuf>,
+) -> Result<Command> {
+    if let Some(path) = override_path {
+        if !path.is_absolute() || !path.is_file() {
+            return Err(CoreError::Provider(
+                "DCC_CLAUDE_SIDECAR_PATH must point to an existing absolute DCC helper path."
+                    .to_string(),
+            ));
+        }
+        return Ok(Command::new(path));
+    }
+    // Tauri stages Node placeholders beside the debug executable. Only an
+    // explicit override may take precedence over the development source.
+    if let Some(script) = development_script {
+        let mut command = Command::new("node");
+        command.arg(script);
+        return Ok(command);
+    }
+    if let Some(binary) = bundled_binary {
+        return Ok(Command::new(binary));
+    }
+    Err(CoreError::Provider(
+        "The DCC Claude integration is missing. Reinstall DCC to repair it.".to_string(),
+    ))
+}
+
 fn claude_command_path(existing: &str, home: Option<&str>, augmented: &str) -> String {
     let mut paths = vec![existing.to_string()];
     // Preserve the user's PATH choice. GUI launches may only inherit system
@@ -450,13 +479,6 @@ impl ClaudeSdkSidecarAdapter {
     }
 
     fn bundled_sidecar_path(&self) -> Option<PathBuf> {
-        if let Ok(path) = std::env::var("DCC_CLAUDE_SIDECAR_PATH") {
-            let candidate = PathBuf::from(path);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-
         let exe = std::env::current_exe().ok()?;
         let exe_dir = exe.parent()?;
         let candidate = exe_dir.join(Self::sidecar_name());
@@ -467,17 +489,11 @@ impl ClaudeSdkSidecarAdapter {
     }
 
     fn base_command(&self, extra_args: &[&str]) -> Result<Command> {
-        let mut command = if let Some(sidecar_binary) = self.bundled_sidecar_path() {
-            Command::new(sidecar_binary)
-        } else if let Some(script_path) = self.script_path() {
-            let mut command = Command::new("node");
-            command.arg(script_path);
-            command
-        } else {
-            return Err(CoreError::Provider(
-                "The DCC Claude integration is missing. Reinstall DCC to repair it.".to_string(),
-            ));
-        };
+        let mut command = claude_sidecar_command(
+            std::env::var_os("DCC_CLAUDE_SIDECAR_PATH").map(PathBuf::from),
+            self.script_path(), // Disabled in release builds.
+            self.bundled_sidecar_path(),
+        )?;
         command.args(extra_args);
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
@@ -1083,6 +1099,40 @@ impl Provider for ClaudeSdkSidecarAdapter {
 #[cfg(test)]
 mod account_usage_tests {
     use super::*;
+
+    #[test]
+    fn development_source_wins_over_an_adjacent_tauri_placeholder() {
+        let script = PathBuf::from("workspace with spaces/sidecar/src/index.mjs");
+        let placeholder = PathBuf::from("target/debug/dcc-claude-sidecar");
+        let mut command = claude_sidecar_command(None, Some(script.clone()), Some(placeholder))
+            .expect("development command");
+        command.arg("--resolve-cli");
+        assert_eq!(command.as_std().get_program(), "node");
+        assert_eq!(
+            command.as_std().get_args().collect::<Vec<_>>(),
+            vec![script.as_os_str(), std::ffi::OsStr::new("--resolve-cli")]
+        );
+    }
+
+    #[test]
+    fn explicit_helper_override_wins_and_release_uses_its_bundled_helper() {
+        let helper = std::env::current_exe().expect("existing fixture executable");
+        let command =
+            claude_sidecar_command(Some(helper.clone()), Some(PathBuf::from("index.mjs")), None)
+                .expect("explicit helper");
+        assert_eq!(command.as_std().get_program(), helper.as_os_str());
+        assert_eq!(command.as_std().get_args().count(), 0);
+        let command =
+            claude_sidecar_command(None, None, Some(helper.clone())).expect("release helper");
+        assert_eq!(command.as_std().get_program(), helper.as_os_str());
+        assert!(claude_sidecar_command(
+            Some(PathBuf::from("missing-helper")),
+            Some(PathBuf::from("index.mjs")),
+            Some(helper)
+        )
+        .is_err());
+        assert!(claude_sidecar_command(None, None, None).is_err());
+    }
 
     #[cfg(unix)]
     #[test]
