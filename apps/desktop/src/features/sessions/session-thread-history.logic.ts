@@ -1628,6 +1628,9 @@ export function projectWorkspaceMessages(
 
 		if ("sessionStarted" in event) {
 			const forkedFrom = event.sessionStarted?.forked_from ?? null;
+			// Session creation stays in the event log. The conversation begins
+			// with the person's prompt and the live preparation indicator.
+			if (!forkedFrom) continue;
 			messages.push({
 				id: `${eventLabel(event)}-${messages.length}`,
 				role: "system",

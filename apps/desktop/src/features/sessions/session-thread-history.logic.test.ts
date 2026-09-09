@@ -993,6 +993,24 @@ describe("projectWorkspaceMessages", () => {
 		);
 	});
 
+	it("starts the conversation with the prompt instead of session infrastructure", () => {
+		const record: SessionEventRecord = {
+			eventId: "evt-start", sessionId: "session-a", sequence: 1,
+			occurredAt: "2026-05-01T12:00:00Z",
+			kind: { type: "session_started", workspaceId: "ws", projectId: "proj", providerId: "codex", model: null },
+		};
+		const prompt = "Review this project";
+		expect(projectWorkspaceMessages([record], [], "session-a")).toEqual([]);
+		const pending = projectWorkspaceMessages([record], [], "session-a", prompt);
+		expect(pending).toHaveLength(1);
+		expect(pending[0]).toMatchObject({ role: "user", content: prompt });
+		const accepted = projectWorkspaceMessages(
+			[record, sessionTurnStarted("session-a", "turn-1", prompt)], [], "session-a", prompt,
+		);
+		expect(accepted).toHaveLength(1);
+		expect(accepted[0]).toMatchObject({ role: "user", content: prompt, turnId: "turn-1" });
+	});
+
 	it("shows the fork origin on the session start with a link to the source thread", () => {
 		const record: SessionEventRecord = {
 			eventId: "evt-start",

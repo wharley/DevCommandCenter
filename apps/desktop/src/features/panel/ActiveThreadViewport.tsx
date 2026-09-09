@@ -36,7 +36,7 @@ import {
 	conversationWindowStart,
 	INITIAL_CONVERSATION_MESSAGE_LIMIT,
 } from "./conversation-window";
-import { shouldShowConversationStarting } from "./conversation-starting.logic";
+import { conversationStartingPhase, shouldShowConversationStarting } from "./conversation-starting.logic";
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -81,7 +81,6 @@ export function ActiveThreadViewport({
 	hasLoaded,
 	isEmpty,
 	workspaceName,
-	sessionState,
 	lastTurnState,
 	pendingPrompt,
 	workspacePath,
@@ -150,6 +149,7 @@ export function ActiveThreadViewport({
 		pendingPrompt,
 		lastTurnState,
 	);
+	const startingPhase = conversationStartingPhase(sessionId, lastTurnState);
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
 		initial: "instant",
 		// Token-by-token height changes should not start overlapping smooth-scroll
@@ -244,23 +244,26 @@ export function ActiveThreadViewport({
 	if (!hasLoaded) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-				<EmptyState
-					title={t("conversation.loading.title")}
-					description={t("conversation.loading.description")}
-				/>
+				{pendingPrompt ? (
+					<ConversationExecutionState pendingPrompt={pendingPrompt} phase={startingPhase} />
+				) : (
+					<EmptyState
+						title={t("conversation.loading.title")}
+						description={t("conversation.loading.description")}
+					/>
+				)}
 			</div>
 		);
 	}
 
-	if (isEmpty) {
+	if (isEmpty || messages.length === 0) {
 		if (
 			pendingPrompt ||
-			sessionState === "active" ||
 			lastTurnState === "running"
 		) {
 			return (
 				<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-					<ConversationExecutionState pendingPrompt={pendingPrompt} />
+					<ConversationExecutionState pendingPrompt={pendingPrompt} phase={startingPhase} />
 				</div>
 			);
 		}
@@ -277,7 +280,7 @@ export function ActiveThreadViewport({
 			<div
 				ref={scrollRef}
 				tabIndex={0}
-				className="dcc-conversation-scroll-viewport conversation-scrollbar-fade-in h-full w-full overflow-x-hidden overflow-y-auto overscroll-none scrollbar-stable"
+				className="dcc-conversation-scroll-viewport h-full w-full overflow-x-hidden overflow-y-auto overscroll-none scrollbar-stable"
 			>
 				<div ref={contentRef} className="flex min-h-full min-w-0 flex-col">
 					<div className="h-6 shrink-0" aria-hidden />
@@ -295,14 +298,6 @@ export function ActiveThreadViewport({
 							</Button>
 						</div>
 					) : null}
-					{messages.length === 0 ? (
-						<div className="flex min-h-full flex-1 items-center justify-center px-8">
-							<EmptyState
-								title="Session loaded"
-								description="The timeline is still empty. Send a prompt to begin the conversation."
-							/>
-						</div>
-					) : (
 						<div className="dcc-conversation-thread-list flex flex-col gap-0 px-5">
 							{visibleMessages.map((message, visibleMessageIndex) => {
 								const messageIndex = visibleStart + visibleMessageIndex;
@@ -454,11 +449,10 @@ export function ActiveThreadViewport({
 							})}
 							{showConversationStarting ? (
 								<div className="pb-4">
-									<ConversationStartingIndicator />
+									<ConversationStartingIndicator phase={startingPhase} />
 								</div>
 							) : null}
 						</div>
-					)}
 					<div className="h-10 shrink-0" aria-hidden />
 				</div>
 			</div>

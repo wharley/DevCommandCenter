@@ -1,5 +1,15 @@
 import type { WorkspaceMessage } from "./thread-projection";
 
+export type ConversationStartingPhase = "creating" | "sending" | "waiting";
+
+export function conversationStartingPhase(
+	sessionId: string | null,
+	lastTurnState: string | null,
+): ConversationStartingPhase {
+	if (!sessionId) return "creating";
+	return lastTurnState === "running" ? "waiting" : "sending";
+}
+
 /**
  * A persisted conversation already renders an optimistic user message while a
  * turn is being accepted. Keep visible feedback below it until the runtime

@@ -929,15 +929,19 @@ export function WorkspacePanel({
 			workspacePath,
 		],
 	);
+	// Keep the accepted prompt visible while persisted history catches up.
+	const timelinePendingPrompt = pendingPrompt ?? (
+		lastTurnState === "running" ? sessionSnapshot?.lastTurnPrompt ?? null : null
+	);
 	const messages = useMemo(
 		() =>
 			projectWorkspaceMessages(
 				historyEvents,
 				sessionEvents,
 				effectiveSessionId,
-				pendingPrompt,
+				timelinePendingPrompt,
 			),
-		[effectiveSessionId, historyEvents, pendingPrompt, sessionEvents],
+		[effectiveSessionId, historyEvents, timelinePendingPrompt, sessionEvents],
 	);
 	const turnQueueEventKey = useMemo(
 		() => latestTurnQueueEventKey(sessionEvents),
@@ -1344,7 +1348,7 @@ export function WorkspacePanel({
 					workspaceName={workspaceName}
 					sessionState={sessionState}
 					lastTurnState={lastTurnState}
-					pendingPrompt={pendingPrompt}
+					pendingPrompt={timelinePendingPrompt}
 					workspacePath={workspacePath}
 					workspaceId={workspaceId}
 					providers={providerChoices}

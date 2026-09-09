@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceMessage } from "./thread-projection";
-import { shouldShowConversationStarting } from "./conversation-starting.logic";
+import { conversationStartingPhase, shouldShowConversationStarting } from "./conversation-starting.logic";
 
 function message(
 	id: string,
@@ -11,6 +11,11 @@ function message(
 }
 
 describe("shouldShowConversationStarting", () => {
+	it("advances the preparation copy from actual session and turn state", () => {
+		expect(conversationStartingPhase(null, null)).toBe("creating");
+		expect(conversationStartingPhase("session-1", null)).toBe("sending");
+		expect(conversationStartingPhase("session-1", "running")).toBe("waiting");
+	});
 	it("shows while an optimistic prompt is being accepted", () => {
 		expect(
 			shouldShowConversationStarting(

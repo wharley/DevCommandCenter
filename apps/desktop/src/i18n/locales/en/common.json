@@ -2743,6 +2743,23 @@
     "requestedModelLabel": "Requested model",
     "newActivity": "New activity",
     "starting": "Preparing the agent…",
+    "startup": {
+      "creating": {
+        "step": "Prepare conversation",
+        "title": "Preparing the conversation…",
+        "description": "Your message is ready. Creating the session for this task."
+      },
+      "sending": {
+        "step": "Send message",
+        "title": "Sending your message…",
+        "description": "Preparing the task context for the agent."
+      },
+      "waiting": {
+        "step": "Start agent",
+        "title": "Waiting for the agent…",
+        "description": "Your request was received. Agent activity will appear here."
+      }
+    },
     "trail": {
       "label": "Conversation navigation",
       "itemLabel": "Turn {{position}}: {{preview}}"

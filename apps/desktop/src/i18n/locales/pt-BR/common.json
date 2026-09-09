@@ -2743,6 +2743,23 @@
     "requestedModelLabel": "Modelo solicitado",
     "newActivity": "Nova atividade",
     "starting": "Preparando o agente…",
+    "startup": {
+      "creating": {
+        "step": "Preparar conversa",
+        "title": "Preparando a conversa…",
+        "description": "Sua mensagem está pronta. Estamos criando a sessão desta tarefa."
+      },
+      "sending": {
+        "step": "Enviar mensagem",
+        "title": "Enviando sua mensagem…",
+        "description": "Preparando o contexto da tarefa para o agente."
+      },
+      "waiting": {
+        "step": "Iniciar agente",
+        "title": "Aguardando o agente…",
+        "description": "Sua solicitação foi recebida. A atividade do agente aparecerá aqui."
+      }
+    },
     "trail": {
       "label": "Navegação da conversa",
       "itemLabel": "Turno {{position}}: {{preview}}"
