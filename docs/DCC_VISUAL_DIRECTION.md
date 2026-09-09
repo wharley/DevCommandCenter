@@ -16,6 +16,8 @@ area adapts these patterns to its purpose.
 | Diff inspector | Keep comparison scopes visible and branch context readable. |
 | Pull Requests | Connect the request list, summary, and code review with clear hierarchy and compact navigation. |
 | Skills | Separate the editable library from detected context and make agent targets easy to compare. |
+| Open and clone project | Group source, destination, and task setup, with persistent footer actions. |
+| Task objective | Separate outcome, completion criteria, limits, and live status while keeping actions visible. |
 
 ## Implemented foundation
 
@@ -86,6 +88,39 @@ while code scrolls horizontally. In compact layouts, the overall review footer
 temporarily gives its space to the inline composer and returns when the draft is
 saved or cancelled, retaining its input. Draft comments stay local until the existing
 review submission action is used.
+
+## Open and clone project
+
+Both workspace creation flows share a header, accent, surfaces, field sizing, and
+fixed action footer. The form body scrolls independently of the header and footer.
+Clone groups repository URL, local destination, and task configuration into separate
+cards. Opening a project preserves single/multiple repository selection, branch
+resolution, and the protected-worktree preview. The generic entry is titled “Open
+project”; repository-specific and multi-project entries retain “New task”.
+
+Long context paths and protection branches wrap instead of clipping. Repository
+choices expose full names and native branch choices retain the full value in their
+title. Multi-project selection has a visible focus ring for its hidden checkbox.
+Compact layouts retain access to actions, and motion respects system preferences.
+The native directory picker, creation payloads, validation, setup reporting, and
+post-creation composer focus behavior are preserved. Pending creation hides the
+close control while the existing dismissal guard remains active.
+
+## Task objective
+
+The objective keeps its composer-anchored popover, with a shared surface, a calm
+accent header, larger outcome/acceptance fields, and a dedicated execution-limits
+card. Persisted objectives show their status, pause reason, turn and failure
+counters, retries, and revision. Automatic-dispatch restrictions remain visible
+alongside the status that explains them.
+
+The body scrolls within the available window height while save, transition, and
+clear actions remain in a fixed footer. Compact windows stack the limit fields.
+The panel has an accessible name, an explicit close action, Escape/focus return,
+and reduced-motion support. Loading and read failure have explicit states and a
+retry action; unavailable data disables mutations. Pending writes keep the panel
+open. Existing validation, generation checks, session API calls, and objective
+execution semantics remain in place.
 
 ## Skills library and editing
 
@@ -311,3 +346,28 @@ The DCC catalog follow-up passed the 8 focused skills tests, TypeScript checking
 the production build, and the expanded browser smoke test. The browser scenarios
 verify cancellation without writes, project-copy customization, the added state,
 delete/re-add with original template content, and read-only access.
+
+For objective UI checks, `/tests/objective.html` renders the actual control with
+in-memory session IPC. `apps/desktop/tests/objective-smoke.mjs` supports the same
+browser environment variables; `DCC_OBJECTIVE_URL` overrides the dev-server URL.
+Coverage includes create/edit validation, generation payloads, pause/resume/complete,
+clear, read retry, failed-save draft retention, loading, keyboard focus, both themes,
+reduced motion, and compact layouts. The fixture never changes a real conversation.
+
+Objective validation: 3 focused logic tests, TypeScript checking, the production
+build, and the browser smoke test passed. Screenshots were visually reviewed and
+remain in a temporary directory. Native agent execution is outside the fixture.
+
+For open/clone UI checks, `/tests/workspace-dialog.html` renders the actual dialog
+with simulated directory selection, branch reads, source resolution, and creation
+callbacks. Run `apps/desktop/tests/workspace-dialog-smoke.mjs` with the same browser
+environment variables; `DCC_WORKSPACE_DIALOG_URL` overrides the dev-server URL.
+Coverage includes single/multiple projects, source branches, clone payloads, folder
+selection/cancellation, pending and failed operations, keyboard selection/dismissal,
+both themes, reduced motion, and compact layouts with long paths and branches.
+No repositories are cloned or modified, and no native directory picker is opened.
+
+Open/clone validation: 12 focused logic tests, TypeScript checking, the production
+build, and the browser smoke test passed. Screenshots were visually reviewed and
+remain outside the repository. Live Git and native picker behavior are outside the
+browser fixture's scope.

@@ -418,6 +418,13 @@
     }
   },
   "workspaceDialog": {
+    "design": {
+      "openTitle": "Open project",
+      "cloneDescription": "Bring a remote repository into DCC and prepare a task in an isolated worktree.",
+      "origin": "Source",
+      "destination": "Local destination",
+      "taskSetup": "Task setup"
+    },
     "cloneTitle": "Clone repository",
     "createTitle": "New task",
     "cloneDescription": "Clone a remote repository into a local folder, then create the worktree from it. Leave base branch empty to auto-detect the remote default branch.",
@@ -1203,6 +1210,19 @@
   },
   "composer": {
     "objective": {
+      "design": {
+        "subtitle": "Keep the outcome and completion criteria in view.",
+        "close": "Close objective",
+        "progress": "Progress",
+        "turns": "Turns",
+        "failures": "Consecutive failures",
+        "retries": "Retries",
+        "limits": "Execution limits",
+        "limitsHint": "Choose when to pause and review progress.",
+        "persistence": "The objective follows every turn, even after switching agents or resuming the conversation. Your current message always takes priority.",
+        "loadError": "Could not load the objective.",
+        "retry": "Try again"
+      },
       "open": "Task objective",
       "compact": "Objective",
       "title": "Task objective",

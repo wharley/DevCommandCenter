@@ -1,0 +1,223 @@
+.objective-panel {
+	width: min(520px, calc(100vw - 24px));
+	max-height: min(760px, var(--radix-popover-content-available-height));
+	padding: 0;
+	gap: 0;
+	overflow: hidden;
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: var(--dcc-radius-dialog);
+	box-shadow: var(--dcc-shadow-dialog);
+	container: objective / inline-size;
+}
+.objective-header {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+	padding: 20px;
+	flex-shrink: 0;
+	background: linear-gradient(
+		120deg,
+		color-mix(in srgb, var(--dcc-accent-calm) 7%, var(--popover)),
+		var(--popover)
+	);
+	border-bottom: 1px solid var(--dcc-surface-edge);
+}
+.objective-mark {
+	display: grid;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	flex-shrink: 0;
+	border-radius: 12px;
+	color: var(--dcc-accent-calm);
+	background: color-mix(in srgb, var(--dcc-accent-calm) 10%, transparent);
+}
+.objective-header > div {
+	flex: 1;
+	min-width: 0;
+}
+.objective-header h2 {
+	font-size: 15px;
+	font-weight: 600;
+	letter-spacing: -0.02em;
+}
+.objective-header p {
+	margin-top: 4px;
+	font-size: 11px;
+	line-height: 1.6;
+	color: var(--muted-foreground);
+}
+.objective-scroll {
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding: 18px 20px;
+}
+.objective-fields {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+.objective-fields label {
+	display: block;
+	margin-bottom: 7px;
+	font-weight: 500;
+}
+.objective-fields textarea,
+.objective-fields input {
+	border-radius: 10px;
+	background: var(--background);
+	font-size: 12px;
+	border-color: var(--dcc-surface-edge);
+}
+.objective-fields textarea {
+	line-height: 1.7;
+	resize: vertical;
+}
+.objective-intent {
+	min-height: 90px;
+}
+.objective-done-when {
+	min-height: 72px;
+}
+.objective-limits {
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: var(--dcc-radius-surface);
+	padding: 14px;
+	background: color-mix(in srgb, var(--muted) 25%, var(--popover));
+}
+.objective-limits h3 {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 12px;
+	font-weight: 500;
+}
+.objective-limits h3 svg {
+	color: var(--dcc-accent-calm);
+}
+.objective-limits p {
+	margin: 6px 0 14px;
+	font-size: 11px;
+	line-height: 1.6;
+	color: var(--muted-foreground);
+}
+.objective-limits-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 12px;
+}
+.objective-limits-grid label {
+	min-height: 32px;
+	line-height: 1.5;
+}
+.objective-persistence {
+	margin-top: 14px;
+	font-size: 10px;
+	line-height: 1.7;
+	color: var(--muted-foreground);
+}
+.objective-footer {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	flex-shrink: 0;
+	gap: 6px;
+	padding: 12px 16px;
+	border-top: 1px solid var(--dcc-surface-edge);
+	background: color-mix(in srgb, var(--muted) 25%, var(--popover));
+}
+.objective-footer button {
+	font-size: 11px;
+}
+.objective-clear {
+	margin-left: auto;
+}
+.objective-progress {
+	padding: 14px;
+	margin-bottom: 18px;
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: var(--dcc-radius-surface);
+	background: var(--background);
+}
+.objective-status-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 7px;
+	font-size: 10px;
+	color: var(--muted-foreground);
+}
+.objective-generation {
+	margin-left: auto;
+}
+.objective-status {
+	padding: 3px 8px;
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: 7px;
+	color: var(--foreground);
+}
+.objective-status[data-status="active"] {
+	color: var(--dcc-accent-calm);
+	background: color-mix(in srgb, var(--dcc-accent-calm) 9%, transparent);
+}
+.objective-status[data-status="paused"] {
+	color: var(--dcc-accent-idea);
+	background: color-mix(in srgb, var(--dcc-accent-idea) 9%, transparent);
+}
+.objective-metrics {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	margin-top: 14px;
+	gap: 10px;
+}
+.objective-metrics dt {
+	font-size: 10px;
+	color: var(--muted-foreground);
+}
+.objective-metrics dd {
+	margin-top: 3px;
+	font-size: 16px;
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+}
+.objective-dispatch-note {
+	margin-top: 12px;
+	padding-top: 10px;
+	border-top: 1px solid var(--dcc-surface-edge);
+	font-size: 11px;
+	line-height: 1.6;
+	color: var(--muted-foreground);
+}
+.objective-feedback {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 12px;
+	padding: 16px 0;
+	color: var(--muted-foreground);
+	font-size: 12px;
+}
+@container objective (max-width: 390px) {
+	.objective-header {
+		padding: 16px;
+		gap: 10px;
+	}
+	.objective-scroll {
+		padding: 14px;
+	}
+	.objective-limits-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.objective-limits-grid label {
+		min-height: 0;
+	}
+	.objective-footer {
+		padding: 10px 12px;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.objective-panel {
+		animation-duration: 0.01ms !important;
+	}
+}

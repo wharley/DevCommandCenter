@@ -5,6 +5,7 @@ import {
 	CheckCircle2,
 	FolderOpen,
 	GitBranch,
+	GitFork,
 	Link2,
 	LoaderCircle,
 	ShieldCheck,
@@ -47,7 +48,10 @@ import {
 	repositoryNameFromWorkspaceRoot,
 	type WorkspaceStart,
 } from "./create-workspace-dialog.logic";
-import { listLocalBranches, resolveWorkspaceSourceUrl } from "../../lib/workspace-api";
+import {
+	listLocalBranches,
+	resolveWorkspaceSourceUrl,
+} from "../../lib/workspace-api";
 import {
 	setupHintsDescription,
 	setupReportDescription,
@@ -55,6 +59,8 @@ import {
 import { cn } from "@/lib/utils";
 import { repositoryDisplayName } from "./repository-display-name";
 import { ProjectIdentityGlyph } from "./project-identity";
+
+import "./workspace-dialog.css";
 
 type WorkspaceCreationMode = "open" | "clone";
 
@@ -82,14 +88,18 @@ type CreateWorkspaceDialogProps = {
 	initialCreationScope?: "single" | "multi";
 	repositoryContext?: ExistingRepositoryContext | null;
 	onOpenChange: (open: boolean) => void;
-	onCreateWorkspace: (input: CreateWorkspaceForRepoInput) => Promise<WorkspaceCreationResult>;
+	onCreateWorkspace: (
+		input: CreateWorkspaceForRepoInput,
+	) => Promise<WorkspaceCreationResult>;
 	onCreateWorkspaceFromSourceUrl: (
 		input: CreateWorkspaceFromSourceUrlInput,
 	) => Promise<WorkspaceCreationResult>;
 	onCreateWorkspaceBundle: (
 		input: CreateWorkspaceBundleForReposInput,
 	) => Promise<WorkspaceBundleCreationResult>;
-	onCloneWorkspace: (input: CreateWorkspaceFromUrlInput) => Promise<WorkspaceCreationResult>;
+	onCloneWorkspace: (
+		input: CreateWorkspaceFromUrlInput,
+	) => Promise<WorkspaceCreationResult>;
 	repositories: Repository[];
 	isSubmitting: boolean;
 };
@@ -144,17 +154,29 @@ export function notifyWorkspaceCreationResult(
 			return;
 		case "completed":
 			toast.success(successTitle, {
-				description: setupReportDescription(t, result.setupReport, result.setupHints),
+				description: setupReportDescription(
+					t,
+					result.setupReport,
+					result.setupHints,
+				),
 			});
 			return;
 		case "warning":
 			toast.warning(successTitle, {
-				description: setupReportDescription(t, result.setupReport, result.setupHints),
+				description: setupReportDescription(
+					t,
+					result.setupReport,
+					result.setupHints,
+				),
 			});
 			return;
 		case "failed":
 			toast.error(t("workspaceDialog.toastSetupFailedTitle"), {
-				description: setupReportDescription(t, result.setupReport, result.setupHints),
+				description: setupReportDescription(
+					t,
+					result.setupReport,
+					result.setupHints,
+				),
 			});
 			return;
 		default:
@@ -181,14 +203,18 @@ export function CreateWorkspaceDialog({
 	const [form, setForm] = useState(INITIAL_FORM);
 	const [availableBranches, setAvailableBranches] = useState<string[]>([]);
 	const [isLoadingBranches, setIsLoadingBranches] = useState(false);
-	const [creationScope, setCreationScope] = useState<"single" | "multi">("single");
+	const [creationScope, setCreationScope] = useState<"single" | "multi">(
+		"single",
+	);
 	const [workspaceStart, setWorkspaceStart] = useState<WorkspaceStart>("new");
 	const [sourceUrl, setSourceUrl] = useState("");
 	const [validatedSourceUrl, setValidatedSourceUrl] = useState("");
 	const [sourceResolution, setSourceResolution] =
 		useState<WorkspaceSourceUrlResolution | null>(null);
 	const [isResolvingSource, setIsResolvingSource] = useState(false);
-	const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<string[]>([]);
+	const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<string[]>(
+		[],
+	);
 	const [selectedSingleRepositoryId, setSelectedSingleRepositoryId] = useState<
 		string | null
 	>(null);
@@ -325,8 +351,8 @@ export function CreateWorkspaceDialog({
 			});
 
 			const pickedPath = Array.isArray(selected)
-				? selected[0] ?? ""
-				: selected ?? "";
+				? (selected[0] ?? "")
+				: (selected ?? "");
 
 			if (!pickedPath) {
 				return;
@@ -473,7 +499,7 @@ export function CreateWorkspaceDialog({
 	const protectedWorktreeCount =
 		creationScope === "multi" ? selectedRepositoryIds.length : 1;
 	const protectionBranch = isSourceWorkspace
-		? sourceResolution?.baseBranch ?? null
+		? (sourceResolution?.baseBranch ?? null)
 		: form.baseBranch.trim() || null;
 
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -542,7 +568,9 @@ export function CreateWorkspaceDialog({
 			suppressCloseAutoFocusRef.current = false;
 			const message = error instanceof Error ? error.message : String(error);
 			toast.error(
-				mode === "clone" ? t("workspaceDialog.toastCloneError") : t("workspaceDialog.toastCreateError"),
+				mode === "clone"
+					? t("workspaceDialog.toastCloneError")
+					: t("workspaceDialog.toastCreateError"),
 				{
 					description: message,
 				},
@@ -567,15 +595,33 @@ export function CreateWorkspaceDialog({
 						suppressCloseAutoFocusRef.current = false;
 					}
 				}}
-				className="max-h-[min(46rem,calc(100vh-2rem))] w-[min(calc(100vw-2rem),38rem)] max-w-[38rem] gap-4 overflow-y-auto overflow-x-hidden p-5 sm:w-[38rem] sm:max-w-[38rem]"
+				className="workspace-dialog"
+				showCloseButton={!isSubmitting}
 			>
-				<DialogHeader className="min-w-0 space-y-1">
-					<DialogTitle className="text-[15px] font-medium tracking-[-0.015em]">
-						{mode === "clone" ? t("workspaceDialog.cloneTitle") : t("workspaceDialog.createTitle")}
-					</DialogTitle>
-					<DialogDescription className="min-w-0 text-[12px] leading-snug text-muted-foreground">
-						{mode === "clone" ? t("workspaceDialog.cloneDescription") : t("workspaceDialog.createDescription")}
-					</DialogDescription>
+				<DialogHeader className="workspace-dialog-header">
+					<div className="workspace-dialog-heading">
+						<span className="workspace-dialog-mark">
+							{mode === "clone" ? (
+								<GitFork size={22} aria-hidden />
+							) : (
+								<FolderOpen size={22} aria-hidden />
+							)}
+						</span>
+						<div>
+							<DialogTitle className="text-[15px] font-medium tracking-[-0.015em]">
+								{mode === "clone"
+									? t("workspaceDialog.cloneTitle")
+									: repositoryContext || initialCreationScope === "multi"
+										? t("workspaceDialog.createTitle")
+										: t("workspaceDialog.design.openTitle")}
+							</DialogTitle>
+							<DialogDescription className="min-w-0 text-[12px] leading-snug text-muted-foreground">
+								{mode === "clone"
+									? t("workspaceDialog.design.cloneDescription")
+									: t("workspaceDialog.createDescription")}
+							</DialogDescription>
+						</div>
+					</div>
 					{mode === "open" && repositoryContext ? (
 						<div className="mt-2 flex min-w-0 items-center gap-2.5 overflow-hidden rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-[11.5px] leading-5 text-muted-foreground">
 							<span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-foreground ring-1 ring-border/60">
@@ -587,7 +633,10 @@ export function CreateWorkspaceDialog({
 										label: repositoryContext.label,
 									})}
 								</span>
-								<span className="block truncate font-mono text-[10px]">
+								<span
+									className="workspace-dialog-path font-mono text-[10px]"
+									title={repositoryContext.workspaceRoot}
+								>
 									{repositoryContext.workspaceRoot}
 								</span>
 							</span>
@@ -595,582 +644,662 @@ export function CreateWorkspaceDialog({
 					) : null}
 				</DialogHeader>
 
-				<form
-					onSubmit={handleSubmit}
-					className="flex min-w-0 flex-col gap-3 overflow-x-hidden"
-				>
-					{mode === "open" ? (
-						<div className="space-y-2">
-							<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-								{t("workspaceDialog.taskScopeLabel")}
-							</p>
-							<div className="grid grid-cols-2 gap-2 max-[500px]:grid-cols-1">
-								<button
-									type="button"
-									aria-pressed={creationScope === "single"}
-									className={cn(
-										"flex min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-										creationScope === "single"
-											? "border-emerald-500/35 bg-emerald-500/[0.07]"
-											: "border-border/60 bg-muted/10 hover:bg-muted/35",
-									)}
-									disabled={isSubmitting}
-									onClick={() => setCreationScope("single")}
-								>
-									<span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background ring-1 ring-border/50">
-										<Box className="size-4" strokeWidth={1.8} />
-									</span>
-									<span className="min-w-0">
-										<strong className="block text-[12px] font-medium text-foreground">
-											{t("workspaceDialog.singleWorkspace")}
-										</strong>
-										<small className="mt-1 block text-[10.5px] leading-4 text-muted-foreground">
-											{t("workspaceDialog.singleWorkspaceDescription")}
-										</small>
-									</span>
-								</button>
-								<button
-									type="button"
-									aria-pressed={creationScope === "multi"}
-									className={cn(
-										"flex min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45",
-										creationScope === "multi"
-											? "border-emerald-500/35 bg-emerald-500/[0.07]"
-											: "border-border/60 bg-muted/10 hover:bg-muted/35",
-									)}
-									disabled={isSubmitting || repositories.length < 2}
-									onClick={() => {
-										setCreationScope("multi");
-										setWorkspaceStart("new");
-										const contextRepository = repositoryContext
-											? repositories.find(
-												(repository) =>
-													repository.rootPath === repositoryContext.workspaceRoot,
-												)
-											: null;
-										if (contextRepository) {
-											setSelectedRepositoryIds((current) =>
-												current.includes(contextRepository.id)
-													? current
-													: [contextRepository.id, ...current],
-											);
-										}
-									}}
-								>
-									<span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background ring-1 ring-border/50">
-										<Boxes className="size-4" strokeWidth={1.8} />
-									</span>
-									<span className="min-w-0">
-										<strong className="block text-[12px] font-medium text-foreground">
-											{t("workspaceDialog.multiWorkspace")}
-										</strong>
-										<small className="mt-1 block text-[10.5px] leading-4 text-muted-foreground">
-											{t("workspaceDialog.multiWorkspaceDescription")}
-										</small>
-									</span>
-								</button>
-							</div>
-						</div>
-					) : null}
-
-					{mode === "open" &&
-					creationScope === "single" &&
-					repositoryContext === null &&
-					(repositories.length > 0 || pickedRepository !== null) ? (
-						<div className="space-y-2">
-							<div className="flex items-center justify-between gap-3">
-								<div>
-									<p className="text-[12px] font-medium text-foreground">
-										{t("workspaceDialog.singleProjectLabel")}
-									</p>
-									<p className="text-[10.5px] text-muted-foreground">
-										{t("workspaceDialog.singleProjectDescription")}
-									</p>
-								</div>
-								<Button
-									type="button"
-									variant="ghost"
-									size="sm"
-									className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-muted-foreground"
-									disabled={isSubmitting}
-									onClick={() => void handlePickWorkspaceRoot()}
-								>
-									<FolderOpen className="size-3.5" />
-									{t("workspaceDialog.otherFolder")}
-								</Button>
-							</div>
-							<div className="grid max-h-36 grid-cols-2 gap-1.5 overflow-y-auto rounded-xl border border-border/60 bg-muted/10 p-2 max-[500px]:grid-cols-1">
-								{singleRepositoryOptions.map((repository) => {
-									const selected = selectedSingleRepositoryId === repository.id;
-									return (
-										<button
-											type="button"
-											key={repository.id}
-											aria-pressed={selected}
-											className={cn(
-												"flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
-												selected
-													? "border-emerald-500/30 bg-emerald-500/[0.055]"
-													: "border-transparent hover:border-border/50 hover:bg-muted/40",
-											)}
-											disabled={isSubmitting}
-											onClick={() => selectSingleRepository(repository)}
-										>
-											<ProjectIdentityGlyph
-												icon={repository.icon}
-												color={repository.color}
-												size="sm"
-												className="size-6"
-											/>
-											<span className="min-w-0 flex-1">
-												<strong className="block truncate text-[11px] font-medium text-foreground">
-													{repositoryDisplayName(repository)}
-												</strong>
-												<small className="block truncate text-[9.5px] text-muted-foreground">
-													{selected && isLoadingBranches && !repository.baseBranch
-														? t("workspaceDialog.loadingBranches")
-														: t("workspaceDialog.basePreview", {
-																branch: repository.baseBranch,
-															})}
-												</small>
-											</span>
-											{selected ? (
-												<Check className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-											) : null}
-										</button>
-									);
-								})}
-							</div>
-						</div>
-					) : null}
-
-					{mode === "open" &&
-					creationScope === "single" &&
-					repositoryContext ? (
-						<div className="grid grid-cols-2 gap-1 rounded-md border border-border/60 p-1">
-							<Button
-								type="button"
-								variant={workspaceStart === "new" ? "secondary" : "ghost"}
-								size="sm"
-								className="h-7 text-[12px]"
-								disabled={isSubmitting || isResolvingSource}
-								onClick={() => setWorkspaceStart("new")}
-							>
-								{t("workspaceDialog.newWorkspaceStart")}
-							</Button>
-							<Button
-								type="button"
-								variant={workspaceStart === "branch" ? "secondary" : "ghost"}
-								size="sm"
-								className="h-7 gap-1.5 text-[12px]"
-								disabled={isSubmitting || isResolvingSource}
-								onClick={() => setWorkspaceStart("branch")}
-							>
-								<Link2 className="size-3.5" aria-hidden />
-								{t("workspaceDialog.existingBranchOrPr")}
-							</Button>
-						</div>
-					) : null}
-
-					{mode === "open" && creationScope === "multi" ? (
-						<div className="flex min-w-0 flex-col gap-2">
-							<div>
-								<p className="text-[12px] font-medium">
-									{t("workspaceDialog.selectProjects")}
+				<form onSubmit={handleSubmit} className="workspace-dialog-form">
+					<div className="workspace-dialog-scroll">
+						{mode === "open" ? (
+							<div className="space-y-2">
+								<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+									{t("workspaceDialog.taskScopeLabel")}
 								</p>
-								<p className="text-[11px] leading-snug text-muted-foreground">
-									{t("workspaceDialog.selectProjectsDescription")}
-								</p>
-							</div>
-							<div className="max-h-52 space-y-1.5 overflow-y-auto rounded-xl border border-border/60 bg-muted/10 p-2">
-								{repositories.map((repository) => {
-									const checked = selectedRepositoryIds.includes(repository.id);
-									return (
-										<label
-											key={repository.id}
-											className={cn(
-												"flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
-												checked
-													? "border-emerald-500/30 bg-emerald-500/[0.055]"
-													: "border-transparent hover:border-border/50 hover:bg-muted/40",
-											)}
-										>
-											<input
-												type="checkbox"
-												checked={checked}
-												disabled={isSubmitting}
-												onChange={() =>
-													setSelectedRepositoryIds((current) =>
-														checked
-															? current.filter((id) => id !== repository.id)
-															: [...current, repository.id],
+								<div className="grid grid-cols-2 gap-2 max-[500px]:grid-cols-1">
+									<button
+										type="button"
+										aria-pressed={creationScope === "single"}
+										className={cn(
+											"flex min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+											creationScope === "single"
+												? "border-emerald-500/35 bg-emerald-500/[0.07]"
+												: "border-border/60 bg-muted/10 hover:bg-muted/35",
+										)}
+										disabled={isSubmitting}
+										onClick={() => setCreationScope("single")}
+									>
+										<span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background ring-1 ring-border/50">
+											<Box className="size-4" strokeWidth={1.8} />
+										</span>
+										<span className="min-w-0">
+											<strong className="block text-[12px] font-medium text-foreground">
+												{t("workspaceDialog.singleWorkspace")}
+											</strong>
+											<small className="mt-1 block text-[10.5px] leading-4 text-muted-foreground">
+												{t("workspaceDialog.singleWorkspaceDescription")}
+											</small>
+										</span>
+									</button>
+									<button
+										type="button"
+										aria-pressed={creationScope === "multi"}
+										className={cn(
+											"flex min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45",
+											creationScope === "multi"
+												? "border-emerald-500/35 bg-emerald-500/[0.07]"
+												: "border-border/60 bg-muted/10 hover:bg-muted/35",
+										)}
+										disabled={isSubmitting || repositories.length < 2}
+										onClick={() => {
+											setCreationScope("multi");
+											setWorkspaceStart("new");
+											const contextRepository = repositoryContext
+												? repositories.find(
+														(repository) =>
+															repository.rootPath ===
+															repositoryContext.workspaceRoot,
 													)
-												}
-												className="sr-only"
-											/>
-											<span
-												className={cn(
-													"grid size-5 shrink-0 place-items-center rounded-md border",
-													checked
-														? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-														: "border-border/70 bg-background text-transparent",
-												)}
-											>
-												<Check className="size-3" strokeWidth={2.4} />
-											</span>
-											<ProjectIdentityGlyph
-												icon={repository.icon}
-												color={repository.color}
-												size="sm"
-											/>
-											<span className="min-w-0">
-												<span className="block truncate text-[12px] font-medium">
-													{repositoryDisplayName(repository)}
-												</span>
-												<span className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
-													<span className="truncate font-mono">{repository.rootPath}</span>
-													<span className="shrink-0">·</span>
-													<span className="shrink-0">
-														{t("workspaceDialog.basePreview", {
-															branch: repository.baseBranch,
-														})}
-													</span>
-												</span>
-											</span>
-										</label>
-									);
-								})}
-							</div>
-							<p className="text-[11px] text-muted-foreground">
-								{t("workspaceDialog.projectsSelected", {
-									count: selectedRepositoryIds.length,
-								})}
-							</p>
-						</div>
-					) : null}
-
-					{isSourceWorkspace ? (
-						<div className="flex min-w-0 flex-col gap-2">
-							<div className="flex min-w-0 flex-col gap-1">
-								<Label
-									htmlFor="workspace-source-url"
-									className="text-[12px] font-medium tracking-[-0.01em]"
-								>
-									{t("workspaceDialog.sourceUrl")}
-								</Label>
-								<p className="text-[11px] leading-snug text-muted-foreground">
-									{t("workspaceDialog.sourceUrlDescription")}
-								</p>
-								<div className="flex min-w-0 gap-2">
-									<Input
-										id="workspace-source-url"
-										value={sourceUrl}
-										onChange={(event) => {
-											setSourceUrl(event.target.value);
-											setSourceResolution(null);
-											setValidatedSourceUrl("");
+												: null;
+											if (contextRepository) {
+												setSelectedRepositoryIds((current) =>
+													current.includes(contextRepository.id)
+														? current
+														: [contextRepository.id, ...current],
+												);
+											}
 										}}
-										placeholder={t("workspaceDialog.sourceUrlPlaceholder")}
-										autoComplete="off"
-										spellCheck={false}
-										disabled={isSubmitting || isResolvingSource}
-										className="h-7 min-w-0 flex-1 font-mono text-[12px] md:text-[12px]"
-									/>
+									>
+										<span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background ring-1 ring-border/50">
+											<Boxes className="size-4" strokeWidth={1.8} />
+										</span>
+										<span className="min-w-0">
+											<strong className="block text-[12px] font-medium text-foreground">
+												{t("workspaceDialog.multiWorkspace")}
+											</strong>
+											<small className="mt-1 block text-[10.5px] leading-4 text-muted-foreground">
+												{t("workspaceDialog.multiWorkspaceDescription")}
+											</small>
+										</span>
+									</button>
+								</div>
+							</div>
+						) : null}
+
+						{mode === "open" &&
+						creationScope === "single" &&
+						repositoryContext === null &&
+						(repositories.length > 0 || pickedRepository !== null) ? (
+							<div className="space-y-2">
+								<div className="flex items-center justify-between gap-3">
+									<div>
+										<p className="text-[12px] font-medium text-foreground">
+											{t("workspaceDialog.singleProjectLabel")}
+										</p>
+										<p className="text-[10.5px] text-muted-foreground">
+											{t("workspaceDialog.singleProjectDescription")}
+										</p>
+									</div>
 									<Button
 										type="button"
-										variant="outline"
+										variant="ghost"
 										size="sm"
-										className="h-7 shrink-0 gap-1.5"
-										disabled={
-											isSubmitting ||
-											isResolvingSource ||
-											sourceUrl.trim().length === 0
-										}
-										onClick={() => void handleResolveSourceUrl()}
+										className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-muted-foreground"
+										disabled={isSubmitting}
+										onClick={() => void handlePickWorkspaceRoot()}
 									>
-										{isResolvingSource ? (
-											<LoaderCircle className="size-3.5 animate-spin" aria-hidden />
-										) : (
-											<Link2 className="size-3.5" aria-hidden />
-										)}
-										{t("workspaceDialog.validateSource")}
+										<FolderOpen className="size-3.5" />
+										{t("workspaceDialog.otherFolder")}
 									</Button>
 								</div>
-							</div>
-							{sourceResolution ? (
-								<div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-2 text-[11px]">
-									<div className="flex items-center gap-1.5 font-medium text-foreground">
-										<CheckCircle2
-											className="size-3.5 text-emerald-600 dark:text-emerald-400"
-											aria-hidden
-										/>
-										{t("workspaceDialog.branchResolved")}
-									</div>
-									{sourceResolution.title ? (
-										<p className="mt-1 truncate text-foreground">
-											{sourceResolution.title}
-										</p>
-									) : null}
-									<p className="mt-1 break-all font-mono text-muted-foreground">
-										{sourceResolution.headBranch} → {sourceResolution.baseBranch}
-									</p>
-									{sourceResolution.isCrossRepository ? (
-										<p className="mt-1 text-muted-foreground">
-											{t("workspaceDialog.forkSource", {
-												repository:
-													sourceResolution.sourceRepository ??
-													sourceResolution.repository,
-											})}
-										</p>
-									) : null}
+								<div className="grid max-h-36 grid-cols-2 gap-1.5 overflow-y-auto rounded-xl border border-border/60 bg-muted/10 p-2 max-[500px]:grid-cols-1">
+									{singleRepositoryOptions.map((repository) => {
+										const selected =
+											selectedSingleRepositoryId === repository.id;
+										return (
+											<button
+												type="button"
+												key={repository.id}
+												aria-pressed={selected}
+												className={cn(
+													"flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors",
+													selected
+														? "border-emerald-500/30 bg-emerald-500/[0.055]"
+														: "border-transparent hover:border-border/50 hover:bg-muted/40",
+												)}
+												disabled={isSubmitting}
+												onClick={() => selectSingleRepository(repository)}
+											>
+												<ProjectIdentityGlyph
+													icon={repository.icon}
+													color={repository.color}
+													size="sm"
+													className="size-6"
+												/>
+												<span className="min-w-0 flex-1">
+													<strong
+														title={repositoryDisplayName(repository)}
+														className="block truncate text-[11px] font-medium text-foreground"
+													>
+														{repositoryDisplayName(repository)}
+													</strong>
+													<small className="block truncate text-[9.5px] text-muted-foreground">
+														{selected &&
+														isLoadingBranches &&
+														!repository.baseBranch
+															? t("workspaceDialog.loadingBranches")
+															: t("workspaceDialog.basePreview", {
+																	branch: repository.baseBranch,
+																})}
+													</small>
+												</span>
+												{selected ? (
+													<Check className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+												) : null}
+											</button>
+										);
+									})}
 								</div>
-							) : null}
-						</div>
-					) : null}
+							</div>
+						) : null}
 
-					{mode === "clone" ? (
-						<div className="flex min-w-0 flex-col gap-1">
-							<Label
-								htmlFor="workspace-repository-url"
-								className="text-[12px] font-medium tracking-[-0.01em]"
-							>
-								{t("workspaceDialog.repositoryUrl")}
-							</Label>
-							<Input
-								id="workspace-repository-url"
-								value={form.repositoryUrl}
-								onChange={(event) =>
-									setForm((current) => ({
-										...current,
-										repositoryUrl: event.target.value,
-									}))
-								}
-								placeholder="https://github.com/org/repo.git"
-								autoComplete="off"
-								spellCheck={false}
-								disabled={isSubmitting}
-								className="h-7 min-w-0 font-mono text-[13px] md:text-[13px]"
-							/>
-						</div>
-					) : null}
+						{mode === "open" &&
+						creationScope === "single" &&
+						repositoryContext ? (
+							<div className="grid grid-cols-2 gap-1 rounded-md border border-border/60 p-1">
+								<Button
+									type="button"
+									variant={workspaceStart === "new" ? "secondary" : "ghost"}
+									size="sm"
+									className="h-7 text-[12px]"
+									disabled={isSubmitting || isResolvingSource}
+									onClick={() => setWorkspaceStart("new")}
+								>
+									{t("workspaceDialog.newWorkspaceStart")}
+								</Button>
+								<Button
+									type="button"
+									variant={workspaceStart === "branch" ? "secondary" : "ghost"}
+									size="sm"
+									className="h-7 gap-1.5 text-[12px]"
+									disabled={isSubmitting || isResolvingSource}
+									onClick={() => setWorkspaceStart("branch")}
+								>
+									<Link2 className="size-3.5" aria-hidden />
+									{t("workspaceDialog.existingBranchOrPr")}
+								</Button>
+							</div>
+						) : null}
 
-					<div
-						className={
-							creationScope === "multi" ||
-							isSourceWorkspace ||
-							mode === "open"
-								? "hidden"
-								: "flex min-w-0 flex-col gap-1"
-						}
-					>
-						<div className="flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:flex-nowrap sm:items-center sm:gap-2">
-							<Label
-								htmlFor="workspace-project-id"
-								className="text-[12px] font-medium tracking-[-0.01em]"
-							>
-								{t("workspaceDialog.projectId")}
-							</Label>
-							<span className="max-w-full text-[11px] leading-snug text-muted-foreground sm:max-w-[11rem] sm:text-right">
-								{t("workspaceDialog.autoFilledFromFolder")}
-							</span>
-						</div>
-						<Input
-							id="workspace-project-id"
-							value={form.projectId}
-							onChange={(event) =>
-								setForm((current) => ({ ...current, projectId: event.target.value }))
+						{mode === "open" && creationScope === "multi" ? (
+							<div className="flex min-w-0 flex-col gap-2">
+								<div>
+									<p className="text-[12px] font-medium">
+										{t("workspaceDialog.selectProjects")}
+									</p>
+									<p className="text-[11px] leading-snug text-muted-foreground">
+										{t("workspaceDialog.selectProjectsDescription")}
+									</p>
+								</div>
+								<div className="max-h-52 space-y-1.5 overflow-y-auto rounded-xl border border-border/60 bg-muted/10 p-2">
+									{repositories.map((repository) => {
+										const checked = selectedRepositoryIds.includes(
+											repository.id,
+										);
+										return (
+											<label
+												key={repository.id}
+												className={cn(
+													"workspace-dialog-project-option flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
+													checked
+														? "border-emerald-500/30 bg-emerald-500/[0.055]"
+														: "border-transparent hover:border-border/50 hover:bg-muted/40",
+												)}
+											>
+												<input
+													type="checkbox"
+													checked={checked}
+													disabled={isSubmitting}
+													onChange={() =>
+														setSelectedRepositoryIds((current) =>
+															checked
+																? current.filter((id) => id !== repository.id)
+																: [...current, repository.id],
+														)
+													}
+													className="sr-only"
+												/>
+												<span
+													className={cn(
+														"grid size-5 shrink-0 place-items-center rounded-md border",
+														checked
+															? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+															: "border-border/70 bg-background text-transparent",
+													)}
+												>
+													<Check className="size-3" strokeWidth={2.4} />
+												</span>
+												<ProjectIdentityGlyph
+													icon={repository.icon}
+													color={repository.color}
+													size="sm"
+												/>
+												<span className="min-w-0">
+													<span className="block truncate text-[12px] font-medium">
+														{repositoryDisplayName(repository)}
+													</span>
+													<span className="workspace-dialog-project-meta text-[10px] text-muted-foreground">
+														<span
+															className="workspace-dialog-path font-mono"
+															title={repository.rootPath}
+														>
+															{repository.rootPath}
+														</span>
+														<span className="shrink-0">·</span>
+														<span className="shrink-0">
+															{t("workspaceDialog.basePreview", {
+																branch: repository.baseBranch,
+															})}
+														</span>
+													</span>
+												</span>
+											</label>
+										);
+									})}
+								</div>
+								<p className="text-[11px] text-muted-foreground">
+									{t("workspaceDialog.projectsSelected", {
+										count: selectedRepositoryIds.length,
+									})}
+								</p>
+							</div>
+						) : null}
+
+						{isSourceWorkspace ? (
+							<div className="flex min-w-0 flex-col gap-2">
+								<div className="flex min-w-0 flex-col gap-1">
+									<Label
+										htmlFor="workspace-source-url"
+										className="text-[12px] font-medium tracking-[-0.01em]"
+									>
+										{t("workspaceDialog.sourceUrl")}
+									</Label>
+									<p className="text-[11px] leading-snug text-muted-foreground">
+										{t("workspaceDialog.sourceUrlDescription")}
+									</p>
+									<div className="flex min-w-0 gap-2">
+										<Input
+											id="workspace-source-url"
+											value={sourceUrl}
+											onChange={(event) => {
+												setSourceUrl(event.target.value);
+												setSourceResolution(null);
+												setValidatedSourceUrl("");
+											}}
+											placeholder={t("workspaceDialog.sourceUrlPlaceholder")}
+											autoComplete="off"
+											spellCheck={false}
+											disabled={isSubmitting || isResolvingSource}
+											className="h-7 min-w-0 flex-1 font-mono text-[12px] md:text-[12px]"
+										/>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											className="h-7 shrink-0 gap-1.5"
+											disabled={
+												isSubmitting ||
+												isResolvingSource ||
+												sourceUrl.trim().length === 0
+											}
+											onClick={() => void handleResolveSourceUrl()}
+										>
+											{isResolvingSource ? (
+												<LoaderCircle
+													className="size-3.5 animate-spin"
+													aria-hidden
+												/>
+											) : (
+												<Link2 className="size-3.5" aria-hidden />
+											)}
+											{t("workspaceDialog.validateSource")}
+										</Button>
+									</div>
+								</div>
+								{sourceResolution ? (
+									<div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-2 text-[11px]">
+										<div className="flex items-center gap-1.5 font-medium text-foreground">
+											<CheckCircle2
+												className="size-3.5 text-emerald-600 dark:text-emerald-400"
+												aria-hidden
+											/>
+											{t("workspaceDialog.branchResolved")}
+										</div>
+										{sourceResolution.title ? (
+											<p className="mt-1 truncate text-foreground">
+												{sourceResolution.title}
+											</p>
+										) : null}
+										<p className="mt-1 break-all font-mono text-muted-foreground">
+											{sourceResolution.headBranch} →{" "}
+											{sourceResolution.baseBranch}
+										</p>
+										{sourceResolution.isCrossRepository ? (
+											<p className="mt-1 text-muted-foreground">
+												{t("workspaceDialog.forkSource", {
+													repository:
+														sourceResolution.sourceRepository ??
+														sourceResolution.repository,
+												})}
+											</p>
+										) : null}
+									</div>
+								) : null}
+							</div>
+						) : null}
+
+						{mode === "clone" ? (
+							<section className="workspace-dialog-section">
+								<h3>
+									<Link2 size={15} aria-hidden />
+									{t("workspaceDialog.design.origin")}
+								</h3>
+								<div className="flex min-w-0 flex-col gap-1">
+									<Label
+										htmlFor="workspace-repository-url"
+										className="text-[12px] font-medium tracking-[-0.01em]"
+									>
+										{t("workspaceDialog.repositoryUrl")}
+									</Label>
+									<Input
+										id="workspace-repository-url"
+										value={form.repositoryUrl}
+										onChange={(event) =>
+											setForm((current) => ({
+												...current,
+												repositoryUrl: event.target.value,
+											}))
+										}
+										placeholder="https://github.com/org/repo.git"
+										autoComplete="off"
+										spellCheck={false}
+										disabled={isSubmitting}
+										className="h-7 min-w-0 font-mono text-[13px] md:text-[13px]"
+									/>
+								</div>
+							</section>
+						) : null}
+
+						<div
+							className={
+								mode === "clone"
+									? "workspace-dialog-section"
+									: "workspace-dialog-field-group"
 							}
-							placeholder="dcc-demo"
-							autoComplete="off"
-							spellCheck={false}
-							disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
-							className="h-7 min-w-0 text-[13px] md:text-[13px]"
-						/>
-					</div>
-
-					<div
-						className={
-							creationScope === "multi" ||
-							isSourceWorkspace ||
-							(mode === "open" &&
-								(repositoryContext !== null || selectedSingleRepositoryId !== null))
-								? "hidden"
-								: "flex min-w-0 flex-col gap-1"
-						}
-					>
-						<div className="flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:flex-nowrap sm:items-center sm:gap-2">
-							<Label
-								htmlFor="workspace-root"
-								className="text-[12px] font-medium tracking-[-0.01em]"
+						>
+							{mode === "clone" && (
+								<h3>
+									<FolderOpen size={15} aria-hidden />
+									{t("workspaceDialog.design.destination")}
+								</h3>
+							)}
+							<div
+								className={
+									creationScope === "multi" ||
+									isSourceWorkspace ||
+									mode === "open"
+										? "hidden"
+										: "flex min-w-0 flex-col gap-1"
+								}
 							>
-								{mode === "clone"
-									? t("workspaceDialog.destinationFolder")
-									: t("workspaceDialog.repositoryPath")}
-							</Label>
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								className="h-6 shrink-0 self-start gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground sm:self-auto"
-								disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
-								onClick={handlePickWorkspaceRoot}
-							>
-								<FolderOpen className="size-3.5" aria-hidden />
-								{t("workspaceDialog.chooseFolder")}
-							</Button>
-						</div>
-						<Input
-							id="workspace-root"
-							value={form.workspaceRoot}
-							onChange={(event) => {
-								const workspaceRoot = event.target.value;
-								setForm((current) => ({
-									...current,
-									workspaceRoot,
-									projectId:
-										mode === "open"
-											? inferProjectIdFromWorkspaceRoot(workspaceRoot)
-											: current.projectId,
-								}));
-							}}
-							onBlur={() => {
-								if (mode === "open" && form.workspaceRoot.trim().length > 0) {
-									if (form.projectId.trim().length === 0) {
+								<div className="flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:flex-nowrap sm:items-center sm:gap-2">
+									<Label
+										htmlFor="workspace-project-id"
+										className="text-[12px] font-medium tracking-[-0.01em]"
+									>
+										{t("workspaceDialog.projectId")}
+									</Label>
+									<span className="max-w-full text-[11px] leading-snug text-muted-foreground sm:max-w-[11rem] sm:text-right">
+										{t("workspaceDialog.autoFilledFromFolder")}
+									</span>
+								</div>
+								<Input
+									id="workspace-project-id"
+									value={form.projectId}
+									onChange={(event) =>
 										setForm((current) => ({
 											...current,
-											projectId: inferProjectIdFromWorkspaceRoot(
-												current.workspaceRoot,
-											),
-										}));
+											projectId: event.target.value,
+										}))
 									}
-									void loadBranchesForWorkspaceRoot(form.workspaceRoot);
-								}
-							}}
-							placeholder={
-								mode === "clone" ? "/path/to/clone/destination" : "/path/to/git/repo"
-							}
-							autoComplete="off"
-							spellCheck={false}
-							disabled={isSubmitting || (mode === "open" && repositoryContext !== null)}
-							className="h-7 min-w-0 font-mono text-[13px] md:text-[13px]"
-						/>
-					</div>
-
-					<div
-						className={
-							creationScope === "multi" || isSourceWorkspace
-								? "hidden"
-								: "flex min-w-0 flex-col gap-1"
-						}
-					>
-						<Label
-							htmlFor="workspace-branch"
-							className="text-[12px] font-medium tracking-[-0.01em]"
-						>
-							{mode === "clone"
-								? t("workspaceDialog.baseBranchOptional")
-								: t("workspaceDialog.baseBranch")}
-						</Label>
-						{mode === "open" ? (
-							<select
-								id="workspace-branch"
-								value={form.baseBranch}
-								onChange={(event) =>
-									setForm((current) => ({ ...current, baseBranch: event.target.value }))
-								}
-								disabled={isSubmitting || isLoadingBranches || availableBranches.length === 0}
-								className="h-7 w-full min-w-0 rounded-md border border-input bg-background px-2 text-[13px] text-foreground shadow-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-							>
-								{isLoadingBranches ? (
-									<option value="">{t("workspaceDialog.loadingBranches")}</option>
-								) : availableBranches.length === 0 ? (
-									<option value="">{t("workspaceDialog.chooseFolderForBranches")}</option>
-								) : null}
-								{availableBranches.map((branch) => (
-									<option key={branch} value={branch}>
-										{branch}
-									</option>
-								))}
-							</select>
-						) : (
-							<Input
-								id="workspace-branch"
-								value={form.baseBranch}
-								onChange={(event) =>
-									setForm((current) => ({ ...current, baseBranch: event.target.value }))
-								}
-								placeholder={t("workspaceDialog.autoDetectPlaceholder")}
-								autoComplete="off"
-								spellCheck={false}
-								disabled={isSubmitting}
-								className="h-7 min-w-0 text-[13px] md:text-[13px]"
-							/>
-						)}
-					</div>
-
-					<div className="flex min-w-0 flex-col gap-1">
-						<Label
-							htmlFor="workspace-name"
-							className="text-[12px] font-medium tracking-[-0.01em]"
-						>
-							{creationScope === "multi"
-								? t("workspaceDialog.multiName")
-								: t("workspaceDialog.displayName")}{" "}
-							{creationScope === "single" ? (
-								<span className="font-normal text-muted-foreground">
-									({t("workspaceDialog.optional")})
-								</span>
-							) : null}
-						</Label>
-						<Input
-							id="workspace-name"
-							value={form.name}
-							onChange={(event) =>
-								setForm((current) => ({ ...current, name: event.target.value }))
-							}
-							placeholder={
-								creationScope === "multi"
-									? t("workspaceDialog.multiNamePlaceholder")
-									: t("workspaceDialog.defaultsFromBranch")
-							}
-							autoComplete="off"
-							spellCheck={false}
-							disabled={isSubmitting}
-							className="h-7 min-w-0 text-[13px] md:text-[13px]"
-						/>
-					</div>
-
-					{mode === "open" ? (
-						<div className="flex min-w-0 items-start gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.055] p-3">
-							<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-600 dark:text-emerald-400">
-								<ShieldCheck className="size-[18px]" strokeWidth={1.9} />
-							</span>
-							<div className="min-w-0 flex-1">
-								<p className="text-[12px] font-medium text-foreground">
-									{creationScope === "multi" && protectedWorktreeCount < 2
-										? t("workspaceDialog.protectionPending")
-										: t("workspaceDialog.protectionPreview", {
-												count: protectedWorktreeCount,
-											})}
-								</p>
-								<p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">
-									{t("workspaceDialog.protectionDescription")}
-								</p>
+									placeholder="dcc-demo"
+									autoComplete="off"
+									spellCheck={false}
+									disabled={
+										isSubmitting ||
+										(mode === "open" && repositoryContext !== null)
+									}
+									className="h-7 min-w-0 text-[13px] md:text-[13px]"
+								/>
 							</div>
-							{creationScope === "single" && protectionBranch ? (
-								<span className="inline-flex max-w-36 shrink-0 items-center gap-1 rounded-md border border-emerald-500/20 bg-background/60 px-2 py-1 text-[10px] text-muted-foreground">
-									<GitBranch className="size-3 shrink-0" strokeWidth={1.8} />
-									<span className="truncate">
-										{t("workspaceDialog.basePreview", {
-											branch: protectionBranch,
-										})}
-									</span>
-								</span>
-							) : null}
-						</div>
-					) : null}
 
-					<div className="flex flex-wrap items-center justify-stretch gap-2 pt-0.5 sm:justify-end">
+							<div
+								className={
+									creationScope === "multi" ||
+									isSourceWorkspace ||
+									(mode === "open" &&
+										(repositoryContext !== null ||
+											selectedSingleRepositoryId !== null))
+										? "hidden"
+										: "flex min-w-0 flex-col gap-1"
+								}
+							>
+								<div className="flex min-w-0 flex-wrap items-start justify-between gap-1.5 sm:flex-nowrap sm:items-center sm:gap-2">
+									<Label
+										htmlFor="workspace-root"
+										className="text-[12px] font-medium tracking-[-0.01em]"
+									>
+										{mode === "clone"
+											? t("workspaceDialog.destinationFolder")
+											: t("workspaceDialog.repositoryPath")}
+									</Label>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										className="h-6 shrink-0 self-start gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground sm:self-auto"
+										disabled={
+											isSubmitting ||
+											(mode === "open" && repositoryContext !== null)
+										}
+										onClick={handlePickWorkspaceRoot}
+									>
+										<FolderOpen className="size-3.5" aria-hidden />
+										{t("workspaceDialog.chooseFolder")}
+									</Button>
+								</div>
+								<Input
+									id="workspace-root"
+									value={form.workspaceRoot}
+									onChange={(event) => {
+										const workspaceRoot = event.target.value;
+										setForm((current) => ({
+											...current,
+											workspaceRoot,
+											projectId:
+												mode === "open"
+													? inferProjectIdFromWorkspaceRoot(workspaceRoot)
+													: current.projectId,
+										}));
+									}}
+									onBlur={() => {
+										if (
+											mode === "open" &&
+											form.workspaceRoot.trim().length > 0
+										) {
+											if (form.projectId.trim().length === 0) {
+												setForm((current) => ({
+													...current,
+													projectId: inferProjectIdFromWorkspaceRoot(
+														current.workspaceRoot,
+													),
+												}));
+											}
+											void loadBranchesForWorkspaceRoot(form.workspaceRoot);
+										}
+									}}
+									placeholder={
+										mode === "clone"
+											? "/path/to/clone/destination"
+											: "/path/to/git/repo"
+									}
+									autoComplete="off"
+									spellCheck={false}
+									disabled={
+										isSubmitting ||
+										(mode === "open" && repositoryContext !== null)
+									}
+									className="h-7 min-w-0 font-mono text-[13px] md:text-[13px]"
+								/>
+							</div>
+						</div>
+						<div className="workspace-dialog-section">
+							<h3>
+								<GitBranch size={15} aria-hidden />
+								{t("workspaceDialog.design.taskSetup")}
+							</h3>
+							<div
+								className={
+									creationScope === "multi" || isSourceWorkspace
+										? "hidden"
+										: "flex min-w-0 flex-col gap-1"
+								}
+							>
+								<Label
+									htmlFor="workspace-branch"
+									className="text-[12px] font-medium tracking-[-0.01em]"
+								>
+									{mode === "clone"
+										? t("workspaceDialog.baseBranchOptional")
+										: t("workspaceDialog.baseBranch")}
+								</Label>
+								{mode === "open" ? (
+									<select
+										id="workspace-branch"
+										title={form.baseBranch}
+										value={form.baseBranch}
+										onChange={(event) =>
+											setForm((current) => ({
+												...current,
+												baseBranch: event.target.value,
+											}))
+										}
+										disabled={
+											isSubmitting ||
+											isLoadingBranches ||
+											availableBranches.length === 0
+										}
+										className="h-7 w-full min-w-0 rounded-md border border-input bg-background px-2 text-[13px] text-foreground shadow-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+									>
+										{isLoadingBranches ? (
+											<option value="">
+												{t("workspaceDialog.loadingBranches")}
+											</option>
+										) : availableBranches.length === 0 ? (
+											<option value="">
+												{t("workspaceDialog.chooseFolderForBranches")}
+											</option>
+										) : null}
+										{availableBranches.map((branch) => (
+											<option key={branch} value={branch}>
+												{branch}
+											</option>
+										))}
+									</select>
+								) : (
+									<Input
+										id="workspace-branch"
+										title={form.baseBranch}
+										value={form.baseBranch}
+										onChange={(event) =>
+											setForm((current) => ({
+												...current,
+												baseBranch: event.target.value,
+											}))
+										}
+										placeholder={t("workspaceDialog.autoDetectPlaceholder")}
+										autoComplete="off"
+										spellCheck={false}
+										disabled={isSubmitting}
+										className="h-7 min-w-0 text-[13px] md:text-[13px]"
+									/>
+								)}
+							</div>
+
+							<div className="flex min-w-0 flex-col gap-1">
+								<Label
+									htmlFor="workspace-name"
+									className="text-[12px] font-medium tracking-[-0.01em]"
+								>
+									{creationScope === "multi"
+										? t("workspaceDialog.multiName")
+										: t("workspaceDialog.displayName")}{" "}
+									{creationScope === "single" ? (
+										<span className="font-normal text-muted-foreground">
+											({t("workspaceDialog.optional")})
+										</span>
+									) : null}
+								</Label>
+								<Input
+									id="workspace-name"
+									value={form.name}
+									onChange={(event) =>
+										setForm((current) => ({
+											...current,
+											name: event.target.value,
+										}))
+									}
+									placeholder={
+										creationScope === "multi"
+											? t("workspaceDialog.multiNamePlaceholder")
+											: t("workspaceDialog.defaultsFromBranch")
+									}
+									autoComplete="off"
+									spellCheck={false}
+									disabled={isSubmitting}
+									className="h-7 min-w-0 text-[13px] md:text-[13px]"
+								/>
+							</div>
+						</div>
+						{mode === "open" ? (
+							<div className="workspace-dialog-protection">
+								<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-600 dark:text-emerald-400">
+									<ShieldCheck className="size-[18px]" strokeWidth={1.9} />
+								</span>
+								<div className="min-w-0 flex-1">
+									<p className="text-[12px] font-medium text-foreground">
+										{creationScope === "multi" && protectedWorktreeCount < 2
+											? t("workspaceDialog.protectionPending")
+											: t("workspaceDialog.protectionPreview", {
+													count: protectedWorktreeCount,
+												})}
+									</p>
+									<p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">
+										{t("workspaceDialog.protectionDescription")}
+									</p>
+								</div>
+								{creationScope === "single" && protectionBranch ? (
+									<span
+										className="workspace-dialog-branch"
+										title={protectionBranch}
+									>
+										<GitBranch className="size-3 shrink-0" strokeWidth={1.8} />
+										<span>
+											{t("workspaceDialog.basePreview", {
+												branch: protectionBranch,
+											})}
+										</span>
+									</span>
+								) : null}
+							</div>
+						) : null}
+					</div>
+					<footer className="workspace-dialog-footer">
 						<Button
 							type="button"
 							variant="outline"
@@ -1193,7 +1322,9 @@ export function CreateWorkspaceDialog({
 										className="size-4 shrink-0 animate-spin"
 										strokeWidth={2.1}
 									/>
-								{mode === "clone" ? t("workspaceDialog.cloning") : t("workspaceDialog.creating")}
+									{mode === "clone"
+										? t("workspaceDialog.cloning")
+										: t("workspaceDialog.creating")}
 								</>
 							) : mode === "clone" ? (
 								t("workspaceDialog.cloneSubmit")
@@ -1205,7 +1336,7 @@ export function CreateWorkspaceDialog({
 								t("workspaceDialog.createSubmit")
 							)}
 						</Button>
-					</div>
+					</footer>
 				</form>
 			</DialogContent>
 		</Dialog>

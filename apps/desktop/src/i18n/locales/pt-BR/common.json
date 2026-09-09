@@ -418,6 +418,13 @@
     }
   },
   "workspaceDialog": {
+    "design": {
+      "openTitle": "Abrir projeto",
+      "cloneDescription": "Traga um repositório remoto para o DCC e prepare uma tarefa em um worktree isolado.",
+      "origin": "Origem",
+      "destination": "Destino local",
+      "taskSetup": "Configuração da tarefa"
+    },
     "cloneTitle": "Clonar repositório",
     "createTitle": "Nova tarefa",
     "cloneDescription": "Clone um repositório remoto em uma pasta local e crie o worktree. Deixe o branch base vazio para detectar o branch padrão do remoto.",
@@ -1203,6 +1210,19 @@
   },
   "composer": {
     "objective": {
+      "design": {
+        "subtitle": "Mantenha o resultado e os critérios de conclusão sempre à vista.",
+        "close": "Fechar objetivo",
+        "progress": "Acompanhamento",
+        "turns": "Turnos",
+        "failures": "Falhas seguidas",
+        "retries": "Retentativas",
+        "limits": "Limites de execução",
+        "limitsHint": "Defina quando pausar para revisar o andamento.",
+        "persistence": "O objetivo acompanha cada turno, mesmo após trocar de agente ou retomar a conversa. Sua mensagem atual sempre tem prioridade.",
+        "loadError": "Não foi possível carregar o objetivo.",
+        "retry": "Tentar novamente"
+      },
       "open": "Objetivo da tarefa",
       "compact": "Objetivo",
       "title": "Objetivo da tarefa",

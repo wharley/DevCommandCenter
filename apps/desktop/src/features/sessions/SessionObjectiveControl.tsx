@@ -1,15 +1,33 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { CheckCircle2, LoaderCircle, Pause, Play, Target, Trash2 } from "lucide-react";
+import {
+	CheckCircle2,
+	LoaderCircle,
+	Pause,
+	Play,
+	Target,
+	Trash2,
+	X,
+	ShieldCheck,
+	RefreshCw,
+} from "lucide-react";
 import type { ObjectiveTransition, SessionObjective } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { composerToolbarTriggerClassName } from "@/features/composer/WorkspaceComposer.logic";
 import { cn } from "@/lib/utils";
 import {
@@ -26,6 +44,8 @@ import {
 	summarizeObjective,
 	type ObjectiveFormDraft,
 } from "./session-objective.logic";
+
+import "./session-objective.css";
 
 export const SESSION_OBJECTIVE_QUERY_KEY = "session-objective";
 
@@ -47,13 +67,16 @@ export function SessionObjectiveControl({
 }) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
+	const headingId = useId();
+	const hintId = useId();
 	const [open, setOpen] = useState(false);
 	const [form, setForm] = useState<ObjectiveFormDraft>(EMPTY_OBJECTIVE_FORM);
 	const [dirty, setDirty] = useState(false);
 
 	const query = useQuery({
 		queryKey: [SESSION_OBJECTIVE_QUERY_KEY, sessionId],
-		queryFn: async () => (sessionId ? (await getSessionObjective(sessionId)).objective : null),
+		queryFn: async () =>
+			sessionId ? (await getSessionObjective(sessionId)).objective : null,
 		enabled: Boolean(sessionId),
 		staleTime: 5_000,
 		refetchOnWindowFocus: false,
@@ -72,7 +95,10 @@ export function SessionObjectiveControl({
 	}, [dirty, objective]);
 	// An automatic pause (budget or failure limit) must be visible even when
 	// the popover is closed: it is the moment the person has to decide.
-	const previousStatusRef = useRef<{ sessionId: string | null; status: string | null }>({
+	const previousStatusRef = useRef<{
+		sessionId: string | null;
+		status: string | null;
+	}>({
 		sessionId: null,
 		status: null,
 	});
@@ -87,7 +113,9 @@ export function SessionObjectiveControl({
 			objective.pauseReason !== "manual"
 		) {
 			toast.warning(t("composer.objective.autoPaused"), {
-				description: t(`composer.objective.pauseReason.${objective.pauseReason}`),
+				description: t(
+					`composer.objective.pauseReason.${objective.pauseReason}`,
+				),
 			});
 		}
 		previousStatusRef.current = { sessionId, status };
@@ -110,7 +138,8 @@ export function SessionObjectiveControl({
 		mutationFn: async (draftForm: ObjectiveFormDraft) => {
 			if (!sessionId) throw new Error("no session");
 			const parsed = objectiveDraftFromForm(draftForm);
-			if (parsed.error) throw new Error(t(`composer.objective.errors.${parsed.error}`));
+			if (parsed.error)
+				throw new Error(t(`composer.objective.errors.${parsed.error}`));
 			return (
 				await setSessionObjective({
 					sessionId,
@@ -152,8 +181,12 @@ export function SessionObjectiveControl({
 		onError: failure,
 	});
 
-	const summary = useMemo(() => (objective ? summarizeObjective(objective) : null), [objective]);
+	const summary = useMemo(
+		() => (objective ? summarizeObjective(objective) : null),
+		[objective],
+	);
 	const busy = save.isPending || transition.isPending || clear.isPending;
+	const unavailable = busy || query.isLoading || query.isError;
 	if (!sessionId) return null;
 
 	const statusTone =
@@ -164,7 +197,12 @@ export function SessionObjectiveControl({
 				: "text-muted-foreground";
 
 	return (
-		<Popover open={open} onOpenChange={setOpen}>
+		<Popover
+			open={open}
+			onOpenChange={(next) => {
+				if (!busy) setOpen(next);
+			}}
+		>
 			<Tooltip>
 				<TooltipTrigger asChild>
 					<PopoverTrigger asChild>
@@ -185,7 +223,10 @@ export function SessionObjectiveControl({
 							data-testid="session-objective-control"
 						>
 							{query.isLoading && !objective ? (
-								<LoaderCircle className="size-[13px] shrink-0 animate-spin" strokeWidth={1.8} />
+								<LoaderCircle
+									className="size-[13px] shrink-0 animate-spin"
+									strokeWidth={1.8}
+								/>
 							) : (
 								<Target
 									className={cn("size-[13px] shrink-0", statusTone)}
@@ -198,106 +239,223 @@ export function SessionObjectiveControl({
 						</Button>
 					</PopoverTrigger>
 				</TooltipTrigger>
-				<TooltipContent side="top" className="max-w-80 flex-col items-start gap-0">
+				<TooltipContent
+					side="top"
+					className="max-w-80 flex-col items-start gap-0"
+				>
 					<p className="font-medium">{t("composer.objective.tooltipTitle")}</p>
 					<p className="mt-1 text-[11px] leading-4 text-background/75">
 						{t("composer.objective.tooltipDescription")}
 					</p>
 				</TooltipContent>
 			</Tooltip>
-			<PopoverContent side="top" align="start" className="w-[26rem] max-w-[calc(100vw-1rem)] p-3">
-				<div className="mb-2 flex items-center justify-between gap-2">
-					<p className="text-[12px] font-medium">{t("composer.objective.title")}</p>
-					{objective ? (
-						<span className="text-[10px] text-muted-foreground">
-							{t("composer.objective.generation", { generation: objective.generation })}
-						</span>
-					) : null}
-				</div>
-				<p className="mb-2 text-[11px] leading-4 text-muted-foreground">
-					{t("composer.objective.hint")}
-				</p>
-				<div className="space-y-2">
-					<div className="space-y-1">
-						<Label htmlFor="objective-intent" className="text-[11px]">
-							{t("composer.objective.intent")}
-						</Label>
-						<Textarea
-							id="objective-intent"
-							value={form.intent}
-							onChange={(event) => {
-								setDirty(true);
-								setForm((current) => ({ ...current, intent: event.target.value }));
-							}}
-							placeholder={t("composer.objective.intentPlaceholder")}
-							className="min-h-[56px] text-[12px]"
-							disabled={busy}
-						/>
+			<PopoverContent
+				side="top"
+				align="start"
+				sideOffset={10}
+				collisionPadding={12}
+				className="objective-panel"
+				aria-labelledby={headingId}
+				aria-describedby={hintId}
+			>
+				<header className="objective-header">
+					<span className="objective-mark">
+						<Target size={21} aria-hidden />
+					</span>
+					<div>
+						<h2 id={headingId}>{t("composer.objective.title")}</h2>
+						<p id={hintId}>{t("composer.objective.design.subtitle")}</p>
 					</div>
-					<div className="space-y-1">
-						<Label htmlFor="objective-done-when" className="text-[11px]">
-							{t("composer.objective.doneWhen")}
-						</Label>
-						<Textarea
-							id="objective-done-when"
-							value={form.doneWhen}
-							onChange={(event) => {
-								setDirty(true);
-								setForm((current) => ({ ...current, doneWhen: event.target.value }));
-							}}
-							placeholder={t("composer.objective.doneWhenPlaceholder")}
-							className="min-h-[48px] text-[12px]"
-							disabled={busy}
-						/>
-					</div>
-					<div className="grid grid-cols-2 gap-2">
-						<div className="space-y-1">
-							<Label htmlFor="objective-max-failures" className="text-[11px]">
-								{t("composer.objective.maxFailures")}
-							</Label>
-							<Input
-								id="objective-max-failures"
-								inputMode="numeric"
-								value={form.maxConsecutiveFailures}
-								onChange={(event) => {
-									setDirty(true);
-									setForm((current) => ({
-										...current,
-										maxConsecutiveFailures: event.target.value,
-									}));
-								}}
-								className="h-8 text-[12px]"
-								disabled={busy}
-							/>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label={t("composer.objective.design.close")}
+						disabled={busy}
+						onClick={() => setOpen(false)}
+					>
+						<X size={15} />
+					</Button>
+				</header>
+				<div className="objective-scroll">
+					{query.isLoading ? (
+						<div className="objective-feedback" role="status">
+							<LoaderCircle size={18} className="animate-spin" />
+							{t("composer.objective.loading")}
 						</div>
-						<div className="space-y-1">
-							<Label htmlFor="objective-max-turns" className="text-[11px]">
-								{t("composer.objective.maxTurns")}
-							</Label>
-							<Input
-								id="objective-max-turns"
-								inputMode="numeric"
-								value={form.maxTurns}
-								onChange={(event) => {
-									setDirty(true);
-									setForm((current) => ({ ...current, maxTurns: event.target.value }));
-								}}
-								placeholder={t("composer.objective.unlimited")}
-								className="h-8 text-[12px]"
-								disabled={busy}
-							/>
+					) : query.isError ? (
+						<div className="objective-feedback" role="alert">
+							<p>{t("composer.objective.design.loadError")}</p>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={query.isFetching}
+								onClick={() => void query.refetch()}
+							>
+								<RefreshCw size={14} />
+								{t("composer.objective.design.retry")}
+							</Button>
 						</div>
-					</div>
+					) : (
+						<>
+							{objective && summary && (
+								<section
+									className="objective-progress"
+									aria-label={t("composer.objective.design.progress")}
+								>
+									<div className="objective-status-row">
+										<span
+											className="objective-status"
+											data-status={summary.status}
+										>
+											{t(`composer.objective.status.${summary.status}`)}
+										</span>
+										{summary.pauseReason && (
+											<span>
+												{t(
+													`composer.objective.pauseReason.${summary.pauseReason}`,
+												)}
+											</span>
+										)}
+										<span className="objective-generation">
+											{t("composer.objective.generation", {
+												generation: objective.generation,
+											})}
+										</span>
+									</div>
+									<dl className="objective-metrics">
+										<div>
+											<dt>{t("composer.objective.design.turns")}</dt>
+											<dd>{summary.turnsLabel}</dd>
+										</div>
+										<div>
+											<dt>{t("composer.objective.design.failures")}</dt>
+											<dd>{summary.failuresLabel}</dd>
+										</div>
+										<div>
+											<dt>{t("composer.objective.design.retries")}</dt>
+											<dd>{summary.retries}</dd>
+										</div>
+									</dl>
+									{summary.blocksAutomaticDispatch && (
+										<p className="objective-dispatch-note">
+											{t("composer.objective.dispatchBlocked")}
+										</p>
+									)}
+								</section>
+							)}
+							<div className="objective-fields">
+								<div className="space-y-1">
+									<Label htmlFor="objective-intent" className="text-[11px]">
+										{t("composer.objective.intent")}
+									</Label>
+									<Textarea
+										id="objective-intent"
+										value={form.intent}
+										onChange={(event) => {
+											setDirty(true);
+											setForm((current) => ({
+												...current,
+												intent: event.target.value,
+											}));
+										}}
+										placeholder={t("composer.objective.intentPlaceholder")}
+										className="objective-intent"
+										disabled={unavailable}
+									/>
+								</div>
+								<div className="space-y-1">
+									<Label htmlFor="objective-done-when" className="text-[11px]">
+										{t("composer.objective.doneWhen")}
+									</Label>
+									<Textarea
+										id="objective-done-when"
+										value={form.doneWhen}
+										onChange={(event) => {
+											setDirty(true);
+											setForm((current) => ({
+												...current,
+												doneWhen: event.target.value,
+											}));
+										}}
+										placeholder={t("composer.objective.doneWhenPlaceholder")}
+										className="objective-done-when"
+										disabled={unavailable}
+									/>
+								</div>
+								<section className="objective-limits">
+									<h3>
+										<ShieldCheck size={15} aria-hidden />
+										{t("composer.objective.design.limits")}
+									</h3>
+									<p>{t("composer.objective.design.limitsHint")}</p>
+									<div className="objective-limits-grid">
+										<div className="space-y-1">
+											<Label
+												htmlFor="objective-max-failures"
+												className="text-[11px]"
+											>
+												{t("composer.objective.maxFailures")}
+											</Label>
+											<Input
+												id="objective-max-failures"
+												inputMode="numeric"
+												value={form.maxConsecutiveFailures}
+												onChange={(event) => {
+													setDirty(true);
+													setForm((current) => ({
+														...current,
+														maxConsecutiveFailures: event.target.value,
+													}));
+												}}
+												className="h-8 text-[12px]"
+												disabled={unavailable}
+											/>
+										</div>
+										<div className="space-y-1">
+											<Label
+												htmlFor="objective-max-turns"
+												className="text-[11px]"
+											>
+												{t("composer.objective.maxTurns")}
+											</Label>
+											<Input
+												id="objective-max-turns"
+												inputMode="numeric"
+												value={form.maxTurns}
+												onChange={(event) => {
+													setDirty(true);
+													setForm((current) => ({
+														...current,
+														maxTurns: event.target.value,
+													}));
+												}}
+												placeholder={t("composer.objective.unlimited")}
+												className="h-8 text-[12px]"
+												disabled={unavailable}
+											/>
+										</div>
+									</div>
+								</section>
+							</div>
+							<p className="objective-persistence">
+								{t("composer.objective.design.persistence")}
+							</p>
+						</>
+					)}
 				</div>
-				<div className="mt-3 flex flex-wrap items-center gap-1.5">
+				<footer className="objective-footer">
 					<Button
 						type="button"
-						size="xs"
-						disabled={busy || !dirty}
+						size="sm"
+						disabled={unavailable || !dirty}
 						onClick={() => save.mutate(form)}
 					>
-						{save.isPending ? <LoaderCircle className="size-3 animate-spin" /> : null}
-						{objective ? t("composer.objective.save") : t("composer.objective.create")}
+						{save.isPending ? (
+							<LoaderCircle className="size-3 animate-spin" />
+						) : null}
+						{objective
+							? t("composer.objective.save")
+							: t("composer.objective.create")}
 					</Button>
 					{objective
 						? availableObjectiveTransitions(objective).map((kind) => (
@@ -305,8 +463,8 @@ export function SessionObjectiveControl({
 									key={kind}
 									type="button"
 									variant="outline"
-									size="xs"
-									disabled={busy}
+									size="sm"
+									disabled={unavailable}
 									onClick={() => transition.mutate(kind)}
 								>
 									{kind === "pause" ? (
@@ -324,21 +482,16 @@ export function SessionObjectiveControl({
 						<Button
 							type="button"
 							variant="ghost"
-							size="xs"
-							className="ml-auto text-muted-foreground hover:text-destructive"
-							disabled={busy}
+							size="sm"
+							className="objective-clear text-muted-foreground hover:text-destructive"
+							disabled={unavailable}
 							onClick={() => clear.mutate()}
 						>
 							<Trash2 className="size-3" />
 							{t("composer.objective.clear")}
 						</Button>
 					) : null}
-				</div>
-				{summary?.blocksAutomaticDispatch ? (
-					<p className="mt-2 text-[10.5px] leading-4 text-amber-700 dark:text-amber-400">
-						{t("composer.objective.dispatchBlocked")}
-					</p>
-				) : null}
+				</footer>
 			</PopoverContent>
 		</Popover>
 	);
