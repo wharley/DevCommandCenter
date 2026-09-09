@@ -1,35 +1,21 @@
 import { useTranslation } from "react-i18next";
 import { Bot, Check, MessageSquarePlus, Send, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { UserMessage } from "./message-components";
 import type { ConversationStartingPhase } from "./conversation-starting.logic";
 
 type ConversationExecutionStateProps = {
-	pendingPrompt: string | null;
 	phase?: ConversationStartingPhase;
 };
 
 /**
- * Optimistic first-turn timeline shown while the provider session boots and
- * before persisted events catch up. It deliberately mirrors the real chat so
- * the user never falls into an infrastructure/loading screen after sending.
+ * Keep one stable preparation surface until the first agent activity. The
+ * prompt is revealed only in the real timeline, at its final position.
  */
 export function ConversationExecutionState({
-	pendingPrompt,
 	phase = "creating",
 }: ConversationExecutionStateProps) {
-	const { t } = useTranslation("common");
-
 	return (
 		<div className="flex min-h-full flex-1 flex-col px-5 py-6">
-			{pendingPrompt ? (
-				<div className="pb-4">
-					<UserMessage
-						label={t("conversation.roles.user")}
-						content={pendingPrompt}
-					/>
-				</div>
-			) : null}
 			<ConversationStartingIndicator phase={phase} />
 		</div>
 	);

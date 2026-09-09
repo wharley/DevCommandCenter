@@ -6,6 +6,7 @@ import type { CoreEvent } from "@dcc/contracts";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ActiveThreadViewport } from "@/features/panel/ActiveThreadViewport";
 import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
+import { visibleSessionPendingPrompt } from "@/features/sessions/pending-prompt";
 import "@/i18n/config";
 import "@/styles/app.css";
 
@@ -16,24 +17,32 @@ const accepted: CoreEvent = { sessionTurnStarted: { session_id: sessionId, turn_
 
 function Fixture() {
 	const { i18n } = useTranslation("common");
-	const [stage, setStage] = useState("creating");
+	const [stage, setStage] = useState("idle");
 	const creating = stage === "creating";
+	const unanchored = creating || stage === "catalog";
+	const selectedSessionId = creating || stage === "idle" ? null : sessionId;
 	const running = ["accepted", "activity"].includes(stage);
-	const pending = !["idle", "activity"].includes(stage) ? prompt : null;
+	const pending = visibleSessionPendingPrompt({
+		prompt: !["idle", "activity"].includes(stage) ? prompt : null,
+		pendingSessionId: unanchored ? null : selectedSessionId,
+		startingWorkspaceId: unanchored ? "ws" : null,
+		workspaceId: "ws",
+		sessionId: selectedSessionId,
+	});
 	const events = creating ? [] : running ? [started, accepted] : [started];
 	if (stage === "activity") events.push({ sessionTurnDelta: { session_id: sessionId, turn_id: "turn-1", content: "Vou conferir a autenticação e a restauração das sessões." } });
 	const messages = projectWorkspaceMessages([], events, creating ? null : sessionId, pending);
 	return (
 		<main className="mx-auto flex h-screen max-w-3xl flex-col text-foreground">
 			<nav className="flex flex-wrap gap-3 border-b border-border p-4 text-xs">
-				{["idle", "creating", "hydrating", "sending", "accepted", "activity"].map(value => <button key={value} onClick={() => setStage(value)}>{value}</button>)}
+				{["idle", "creating", "catalog", "hydrating", "sending", "accepted", "activity"].map(value => <button key={value} onClick={() => setStage(value)}>{value}</button>)}
 				<button onClick={() => void i18n.changeLanguage(i18n.language === "en" ? "pt-BR" : "en")}>Idioma</button>
 				<button onClick={() => document.documentElement.classList.toggle("dark")}>Tema</button>
 			</nav>
 			<ActiveThreadViewport
 				messages={messages} hasLoaded={stage !== "hydrating"} isEmpty={creating}
-				workspaceName="Autenticação" sessionState="active" lastTurnState={running ? "running" : null}
-				pendingPrompt={pending} workspacePath={null} sessionId={creating ? null : sessionId}
+				workspaceName={stage === "idle" ? "Nova tarefa" : prompt} sessionState="active" lastTurnState={running ? "running" : null}
+				pendingPrompt={pending} workspacePath={null} sessionId={selectedSessionId}
 				planMessageId={null} planApproved={false} planReadOnly={false} onSelectSession={() => {}}
 			/>
 		</main>

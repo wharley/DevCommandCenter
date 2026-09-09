@@ -36,7 +36,7 @@ import {
 	conversationWindowStart,
 	INITIAL_CONVERSATION_MESSAGE_LIMIT,
 } from "./conversation-window";
-import { conversationStartingPhase, shouldShowConversationStarting } from "./conversation-starting.logic";
+import { conversationStartingPhase, shouldShowConversationStarting, shouldShowInitialConversationStarting } from "./conversation-starting.logic";
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -241,11 +241,19 @@ export function ActiveThreadViewport({
 		}));
 	}, [scrollRef, sessionId]);
 
+	if (shouldShowInitialConversationStarting(messages, pendingPrompt, lastTurnState)) {
+		return (
+			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+				<ConversationExecutionState phase={startingPhase} />
+			</div>
+		);
+	}
+
 	if (!hasLoaded) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 				{pendingPrompt ? (
-					<ConversationExecutionState pendingPrompt={pendingPrompt} phase={startingPhase} />
+					<ConversationExecutionState phase={startingPhase} />
 				) : (
 					<EmptyState
 						title={t("conversation.loading.title")}
@@ -263,7 +271,7 @@ export function ActiveThreadViewport({
 		) {
 			return (
 				<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-					<ConversationExecutionState pendingPrompt={pendingPrompt} phase={startingPhase} />
+					<ConversationExecutionState phase={startingPhase} />
 				</div>
 			);
 		}

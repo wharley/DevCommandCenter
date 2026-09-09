@@ -106,6 +106,7 @@ import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapStat
 import { NewTaskLaunchState } from "./features/panel/NewTaskLaunchState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
+import { visibleSessionPendingPrompt } from "./features/sessions/pending-prompt";
 import { useSessionLiveHydration } from "./features/sessions/use-session-live-hydration";
 import { sessionThreadHistoryQueryOptions } from "./features/sessions/session-thread-history";
 import {
@@ -1145,6 +1146,7 @@ export default function App() {
 		Record<string, RuntimeSessionSnapshot>
 	>({});
 	const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+	const [startingPromptWorkspaceId, setStartingPromptWorkspaceId] = useState<string | null>(null);
 	const [pendingPromptSessionId, setPendingPromptSessionId] = useState<
 		string | null
 	>(null);
@@ -2256,6 +2258,7 @@ export default function App() {
 		setSessionSnapshotsById({});
 		setPendingPrompt(null);
 		setPendingPromptSessionId(null);
+		setStartingPromptWorkspaceId(null);
 		requestSurfaceSelection(null);
 	}, [requestSurfaceSelection, selectedWorkspace?.id]);
 
@@ -2269,6 +2272,7 @@ export default function App() {
 		setSessionSnapshotsById({});
 		setPendingPrompt(null);
 		setPendingPromptSessionId(null);
+		setStartingPromptWorkspaceId(null);
 		requestSurfaceSelection(null);
 		setWorkspaceRepositoryContext(null);
 		setIsSessionSearchOpen(false);
@@ -3212,9 +3216,9 @@ export default function App() {
 			options?.forceNewSession || !currentSession || !currentSessionId,
 		);
 		if (willStartSession && selectedProvider && selectedWorkspace) {
-			// Render the first user turn before `start_thread` returns. The prompt is
-			// temporarily workspace-scoped and is anchored to the real session as
-			// soon as the backend creates it.
+			// Keep preparation visible even if the session catalog updates before
+			// startThread returns and anchors this prompt to the real session.
+			setStartingPromptWorkspaceId(selectedWorkspace.id);
 			setPendingPrompt(trimmedPrompt);
 			setPendingPromptSessionId(null);
 		}
@@ -3299,6 +3303,7 @@ export default function App() {
 			}
 			setPendingPrompt(trimmedPrompt);
 			setPendingPromptSessionId(currentSessionId);
+			setStartingPromptWorkspaceId(null);
 			const baseToolInstructions = resolveDelegateTaskToolInstructions({
 				provider: turnProvider,
 				providers: providerChoices,
@@ -5018,11 +5023,13 @@ export default function App() {
 		showRemoteUnsupported("workspaces");
 	}, [showRemoteUnsupported]);
 
-	const visiblePendingPrompt =
-		effectiveSelectedSessionId === pendingPromptSessionId ||
-		(!effectiveSelectedSessionId && !pendingPromptSessionId)
-			? pendingPrompt
-			: null;
+	const visiblePendingPrompt = visibleSessionPendingPrompt({
+		prompt: pendingPrompt,
+		pendingSessionId: pendingPromptSessionId,
+		startingWorkspaceId: startingPromptWorkspaceId,
+		workspaceId: selectedWorkspace?.id ?? null,
+		sessionId: effectiveSelectedSessionId,
+	});
 	const sidebarRailWidth = sidebarCollapsed ? 76 : sidebarWidth;
 	const hasWorkspace = Boolean(selectedWorkspace);
 	const activeProjectRoot = activeWorkspace?.rootPath ?? selectedWorkspace?.rootPath ?? null;
