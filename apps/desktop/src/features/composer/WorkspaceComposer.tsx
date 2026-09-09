@@ -59,6 +59,7 @@ import type {
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { canAbortRun } from "@/features/sessions/session-chrome-state";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { ComposerContextReview } from "./ComposerContextReview";
 import { ExecutionContextRail } from "./ExecutionContextRail";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ComposerApprovalPolicyMenu } from "./ComposerApprovalPolicyMenu";
@@ -1001,6 +1002,11 @@ export function WorkspaceComposer({
 			) : null}
 
 			<LexicalComposer initialConfig={lexicalInitialConfig}>
+				<ComposerContextReview
+					workspaceRoot={workspacePath}
+					draftKey={composerDraftKey}
+					disabled={inputDisabled}
+				/>
 				<div className="relative">
 					<PlainTextPlugin
 						contentEditable={

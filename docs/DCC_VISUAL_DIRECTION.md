@@ -13,6 +13,8 @@ area adapts these patterns to its purpose.
 | Conversation | Prioritize reading and distinguish live activity from tool history. |
 | Composer | Make attachments, context, and controls easy to review before sending. |
 | Dialogs and settings | Share surface, focus, and motion patterns with the notes library. |
+| Diff inspector | Keep comparison scopes visible and branch context readable. |
+| Pull Requests | Connect the request list, summary, and code review with clear hierarchy and compact navigation. |
 
 ## Implemented foundation
 
@@ -28,6 +30,38 @@ area adapts these patterns to its purpose.
   behavior preserves dialog exit lifecycle events.
 - Open task notes restore automatically on returning to their source or linked
   implementation task, retaining position and minimized state without taking focus.
+- Composer context review: a collapsible summary lists attached files, images,
+  and pasted snippets with individual preview and removal actions.
+- Settings navigation groups the nine existing sections by purpose, with section
+  search, a compact layout, and visual previews for the light/dark theme choices.
+- Assistant activity keeps the latest recorded step visible, with chronological
+  details, filters, explicit execution states, and incremental history rendering.
+
+## Review surfaces
+
+The diff inspector exposes Workspace, Last turn, and Branch as visible segmented
+controls. Each scope has a file count and a short explanation of its comparison.
+Missing or still-loading summaries use a dash rather than a misleading zero.
+The existing scope selection rules, lazy diff loading, and Git operations remain
+in place. File actions in the tree also become visible when the row has keyboard
+focus. Workspace and last-turn diff cards share the same surface treatment.
+
+Branch context uses a shared component in the inspector and PR summary. Source
+and base names wrap, with more room reserved for the source branch. The inspector
+continues to compare committed changes using the existing base-to-HEAD merge-base
+comparison; local changes remain in the Workspace scope.
+
+Pull Requests use a subtle selected-card accent, grouped summary sections, and
+consistent focus treatment. Filters and review controls expose their selected
+state to assistive technology. Below 780 px of available hub width, selecting a
+request opens its detail with an explicit back action and keyboard focus transfer.
+Below 620 px of detail width, file navigation sits above the diff. Code keeps its
+own horizontal scrolling; the review footer remains accessible within its region.
+Existing comment, agent-review, merge confirmation, and permission checks remain
+in place.
+
+These surfaces extend the original three increments. The scope is visual and
+navigational; it does not introduce new forge actions or change Git semantics.
 
 ## Note capture and branch context
 
@@ -39,12 +73,79 @@ The branch has no fixed truncation limit; long names wrap when necessary. Captur
 preserves the current text selection and identifies the composer's session.
 Outside the conversation, the notes library and Cmd/Ctrl + Shift + N remain available.
 
-## Next increments
+## Composer context review
 
-1. **Composer attachments and context:** improve review, preview, and removal of
-   attached files, images, and pasted context while preserving draft and send behavior.
-2. **Settings hierarchy:** improve grouping and navigation inside settings.
-3. **Long conversations:** refine the presentation of agent steps and tool history.
+The review appears when the editor contains attachment or pasted-snippet badges.
+It starts collapsed to preserve writing space. Expanded cards distinguish item
+types and show paths to disambiguate equal filenames. Removing an item affects
+only that occurrence in the draft and can be undone in the editor.
+
+Previews open on demand in an accessible dialog. Local files are read through
+`preview_composer_attachment`; text is rendered as plain text, and PNG, JPEG, GIF,
+and WebP are displayed as images. File previews are limited to 1 MiB for text and
+8 MiB for images. Missing, unsupported, or oversized files remain attached, with
+an explanation when a preview cannot be displayed. Relative paths must resolve
+within the workspace; explicit absolute attachment paths are supported.
+
+Drafts with context retain a versioned editor-state companion in local storage,
+alongside the existing plain-text draft. This restores badge types after navigation
+or reload without changing the text sent to a provider. Clearing or replacing the
+draft clears the companion; legacy drafts remain readable as plain text. Image
+bytes are not duplicated in draft storage. Temporary image files still depend on
+their existing lifetime on disk. Notes inserted as ordinary text remain text.
+
+## Settings hierarchy
+
+The settings sidebar now groups the existing destinations into personal
+preferences (general, appearance, shortcuts), agents and services (providers,
+integrations, connections, account), and project/advanced options (Git,
+experimental). The active destination has a visible selection state; the content
+header identifies its group, title, and description. The sidebar footer identifies
+the current workspace, while workspace actions retain their existing availability.
+
+Section search matches translated names, descriptions, and keywords without
+requiring accents. It filters navigation, not individual controls or account data.
+Enter opens the first result; Escape clears a nonempty focused search before
+dismissing the dialog. Empty results offer a reset. The existing section content
+and action handlers remain in place, and switching sections resets content scroll.
+
+Below 720 px, a grouped native section selector replaces the sidebar navigation.
+The content keeps its own scroll area. Appearance groups language, theme, and
+density into distinct surfaces; the light/dark choices have illustrative interface
+previews with explicit selection states. Existing preference persistence is retained.
+The dialog uses shared surface and motion tokens, supports reduced motion, and
+returns keyboard focus to its opener when that element still exists.
+
+## Long conversations
+
+The assistant activity summary remains visible when its details are collapsed.
+It shows the latest recorded action or update and distinguishes active execution,
+waiting for user input, interruption, and historical activity. Explicit turn
+completion takes precedence over stale streaming flags on restored annotations.
+No synthetic progress percentage or elapsed-work estimate is introduced.
+
+Expanded activity retains source order and stable sequence numbers. Filters show
+all entries, tool actions, updates (commentary and reasoning), or failures. Failure
+counts remain visible when collapsed and open the failure filter directly, including
+errors that occurred before the latest page. A failed tool does not label the entire
+turn as failed. Approval, user-input, and native-agent supervision cards remain
+outside these filters.
+
+History starts with the latest 20 matching entries. Earlier entries can be revealed
+20 at a time. The activity body is unmounted when collapsed, and closed tool and
+reasoning disclosures do not mount their output. Inspected entries stay mounted as
+new events arrive; that deliberate reading window can grow beyond the initial page.
+This limits initial rendering work without changing stored events or transcripts.
+
+Automatic collapse retains a short grace period after execution settles. Manual
+expansion, collapse, and inspection take precedence; focused or selected content is
+not automatically hidden. A tool with an unfinished annotation on a stopped turn
+uses a neutral state instead of a success check. Outputs have bounded scroll areas,
+and keyboard focus remains visible. Existing response rendering and conversation
+navigation retain their behavior.
+
+The three planned increments (composer context, settings, and long conversations)
+are implemented. Packaged native-app verification remains part of release review.
 
 Task exit animations need to respect virtualization and scroll position. Current
 row transitions update surfaces and selection without retaining a completed task
@@ -68,3 +169,59 @@ and callbacks. `apps/desktop/tests/design-smoke.mjs` exercises navigation, creat
 completion, capture, and footer geometry. `notes-return-smoke.mjs` checks restoration
 and position persistence. Fixtures are development entries and are excluded from
 production bundles. Browser checks complement validation in the native Tauri app.
+
+The composer fixture `/tests/composer-context.html` uses real editor, persistence,
+and review components with synthetic preview IPC. Run
+`apps/desktop/tests/composer-context-smoke.mjs` against the desktop dev server
+(default `http://127.0.0.1:1432`; override with `DCC_COMPOSER_URL`). It checks
+previews and retry, removal and undo, unchanged send text, keyboard actions,
+conversation isolation, reload, both themes, and compact dialogs. Screenshots go
+to a temporary directory, outside the repository. The script accepts
+`DCC_PLAYWRIGHT_MODULE` and `DCC_CHROMIUM_EXECUTABLE` for an existing browser setup.
+
+Validation for this increment: 708 desktop tests, desktop TypeScript checking,
+the production Vite build, three native attachment-preview tests, and the composer
+browser smoke test passed. Native preview tests cover text/image responses, path
+boundaries, directories, binary files, and size limits. Browser IPC is simulated;
+an end-to-end check in the packaged native app remains a release check.
+
+For settings, `/tests/settings.html` renders the real dialog with synthetic IPC,
+disconnected accounts, and an empty provider catalog. Run
+`apps/desktop/tests/settings-smoke.mjs` against the desktop dev server; override
+its URL with `DCC_SETTINGS_URL`. It uses the same optional Playwright/browser
+environment variables as the composer smoke test. It covers all nine destinations,
+search and empty results, Escape and focus restoration, update/shortcut callbacks,
+theme/density/language controls, persistence, and compact layout without horizontal
+overflow. Both themes and reduced motion are checked. Account authentication and
+native integration operations are outside this fixture's scope.
+
+Settings validation: the browser smoke test, 708 desktop tests, TypeScript checking,
+and the production Vite build passed. Screenshots remain in a temporary directory
+outside the repository.
+
+For activity, `/tests/activity.html` renders the real assistant message with synthetic
+events. `apps/desktop/tests/activity-smoke.mjs` accepts `DCC_ACTIVITY_URL` and the
+same optional browser environment variables as the other smoke scripts. It checks
+1,000-entry history, lazy output mounting, chronological pagination, filters, old
+failures, live/collapsed summaries, completion, interruption, pending approval,
+native-agent visibility, retained inspection, keyboard operation, both themes, and
+compact layout with reduced motion. Provider execution and permissions are not
+sent to a live backend by this fixture.
+
+Activity validation: 710 desktop tests, TypeScript checking, the production Vite
+build, and the activity browser smoke test passed. The browser fixture complements
+native-app release verification; it does not run a real coding-agent session.
+
+For review surfaces, `/tests/review-surfaces.html` renders the actual inspector and
+PR hub with synthetic read-only IPC responses. Run
+`apps/desktop/tests/review-surfaces-smoke.mjs` against the desktop dev server;
+`DCC_REVIEW_URL` and the same optional Playwright/browser environment variables
+are supported. Coverage includes all three scopes, rendered workspace/turn/PR
+diffs, empty states, list/tree switching, full branch names, PR filtering/search,
+summary/code navigation, keyboard focus restoration, both themes, reduced motion,
+and widths down to 360 px. The fixture asserts that no mutation IPC is sent.
+It does not validate live forge operations or native Git execution.
+
+Review-surface validation: 710 desktop tests, TypeScript checking, production Vite
+build, and the browser smoke test passed. Captured screenshots were visually
+reviewed and remain outside the repository in a temporary directory.

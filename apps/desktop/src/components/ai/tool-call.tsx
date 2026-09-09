@@ -27,6 +27,7 @@ export function ToolCall({
 	children,
 	isLive = false,
 	isError = false,
+	isUnfinished = false,
 }: {
 	action: string;
 	command?: string;
@@ -34,14 +35,22 @@ export function ToolCall({
 	children?: React.ReactNode;
 	isLive?: boolean;
 	isError?: boolean;
+	isUnfinished?: boolean;
 }) {
 	const { t } = useTranslation("common");
 	const shouldStayOpen = isLive || isError;
 	const [isOpen, setIsOpen] = useState(shouldStayOpen);
 	// Once the user toggles by hand, auto open/close stops driving this disclosure.
 	const userToggledRef = useRef(false);
-	const displayFile = useMemo(() => (file ? getDisplayPath(file) : null), [file]);
-	const StatusIcon = isLive ? CircleDashed : isError ? AlertCircle : CheckCircle2;
+	const displayFile = useMemo(
+		() => (file ? getDisplayPath(file) : null),
+		[file],
+	);
+	const StatusIcon = isError
+		? AlertCircle
+		: isLive || isUnfinished
+			? CircleDashed
+			: CheckCircle2;
 
 	useEffect(() => {
 		if (userToggledRef.current) {
@@ -52,7 +61,16 @@ export function ToolCall({
 	}, [shouldStayOpen]);
 
 	return (
-		<details className="group/tool-call flex min-w-0 flex-col" open={isOpen}>
+		<details
+			onPointerDown={() => {
+				userToggledRef.current = true;
+			}}
+			onFocusCapture={() => {
+				userToggledRef.current = true;
+			}}
+			className="group/tool-call dcc-activity-tool flex min-w-0 flex-col"
+			open={isOpen}
+		>
 			<summary
 				onClick={(event) => {
 					event.preventDefault();
@@ -64,7 +82,10 @@ export function ToolCall({
 				)}
 			>
 				<ChevronRight
-					className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
+					className={cn(
+						"size-3 shrink-0 transition-transform",
+						isOpen && "rotate-90",
+					)}
 					aria-hidden
 				/>
 				<StatusIcon
@@ -72,11 +93,13 @@ export function ToolCall({
 						"size-3.5 shrink-0",
 						isLive && "text-info",
 						isError && "text-destructive",
-						!isLive && !isError && "text-success",
+						!isLive && !isError && !isUnfinished && "text-success",
 					)}
 					aria-hidden
 				/>
-				<span className="shrink-0 font-medium text-foreground/85">{action}</span>
+				<span className="min-w-0 break-words font-medium text-foreground/85">
+					{action}
+				</span>
 				{file ? (
 					<span
 						title={file}
@@ -104,11 +127,20 @@ export function ToolCall({
 					<span className="ml-auto shrink-0 text-[11px] text-destructive">
 						{t("conversation.toolCall.failed")}
 					</span>
+				) : isUnfinished ? (
+					<span className="ml-auto text-[11px] text-muted-foreground">
+						{t("conversation.activity.timeline.unfinished")}
+					</span>
 				) : null}
 			</summary>
-			<div className="mt-1 max-h-64 overflow-auto rounded-md border border-border/45 bg-muted/20 px-3 py-2 text-[12px] leading-6 text-muted-foreground">
-				{children}
-			</div>
+			{isOpen && (
+				<div
+					tabIndex={0}
+					className="mt-1 max-h-64 overflow-auto rounded-md border border-border/45 bg-muted/20 px-3 py-2 text-[12px] leading-6 text-muted-foreground"
+				>
+					{children}
+				</div>
+			)}
 		</details>
 	);
 }

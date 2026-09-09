@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod attachment_commands;
 mod browser_commands;
 mod browser_mcp_bridge;
 mod coderabbit_commands;
@@ -7019,6 +7020,7 @@ pub fn run() {
             pair_get_lan_url,
             pair_get_endpoints,
             terminal_save_temp_image,
+            attachment_commands::preview_composer_attachment,
             create_workspace_for_repo,
             create_workspace_bundle_for_repos,
             resolve_workspace_source_url,

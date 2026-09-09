@@ -1,4 +1,15 @@
 {
+  "review": {
+    "changes": "Revisão de mudanças",
+    "branch": "Branch",
+    "base": "Base",
+    "backToList": "Voltar para pull requests",
+    "scopes": {
+      "working": "Mudanças locais, preparadas e não preparadas para commit.",
+      "last-turn": "Mudanças registradas no último turno do agente.",
+      "branch": "Mudanças desta branch em relação à base."
+    }
+  },
   "app": {
     "shellAria": "Área principal do aplicativo",
     "workspaceSidebarAria": "Barra lateral de workspaces",
@@ -1289,6 +1300,21 @@
     },
     "ariaLabel": "Composer do workspace",
     "inputAriaLabel": "Prompt do workspace",
+    "context": {
+      "title": "Contexto do rascunho",
+      "description": "Revise anexos e textos colados antes de enviar. Remover um item altera apenas este rascunho.",
+      "snippet": "Texto colado",
+      "characters_one": "{{count}} caractere",
+      "characters_other": "{{count}} caracteres",
+      "previewItem": "Visualizar {{name}}",
+      "removeItem": "Remover {{name}} do rascunho",
+      "snippetDescription": "Este texto será incluído na mensagem.",
+      "loading": "Carregando prévia…",
+      "failed": "Não foi possível visualizar este arquivo. Ele pode ter sido movido ou excluído.",
+      "retry": "Tentar novamente",
+      "tooLarge": "Este arquivo é grande demais para uma prévia aqui. Ele continua anexado.",
+      "binary": "Não há prévia de texto ou imagem para este arquivo. Ele continua anexado."
+    },
     "attachments": {
       "imagesUnsupported": "Este provider não suporta imagens; as imagens foram anexadas como referências de arquivo.",
       "add": "Anexar arquivo ou imagem",
@@ -1658,6 +1684,32 @@
     }
   },
   "settings": {
+    "navigation": {
+      "label": "Seções das configurações",
+      "search": "Buscar seções…",
+      "clearSearch": "Limpar busca de seções",
+      "chooseSection": "Seção",
+      "showAll": "Mostrar todas as seções",
+      "results_zero": "Nenhuma seção encontrada",
+      "results_one": "{{count}} seção encontrada",
+      "results_other": "{{count}} seções encontradas",
+      "groups": {
+        "workspace": "Seu espaço",
+        "services": "Agentes e serviços",
+        "advanced": "Projeto e avançado"
+      },
+      "keywords": {
+        "general": "versão atualização app shell",
+        "appearance": "tema claro escuro idioma linguagem português inglês densidade compacta confortável",
+        "shortcuts": "teclado comandos atalhos",
+        "model": "agentes modelos uso limite conta runtime codex claude cursor grok gemini",
+        "integrations": "mcp servidores ferramentas credenciais",
+        "account": "github gitlab login autenticação coderabbit contas",
+        "connections": "celular tablet remoto pareamento dispositivos",
+        "git": "automação tarefas scripts merge push repositório workspace",
+        "experimental": "métricas diagnóstico ux preview"
+      }
+    },
     "title": "Configurações",
     "repository": "Repositório",
     "currentWorkspace": "Workspace atual",
@@ -1673,7 +1725,7 @@
       },
       "appearance": {
         "label": "Aparência",
-        "description": "Tema, idioma e contraste da interface."
+        "description": "Tema, idioma e densidade da interface."
       },
       "model": {
         "label": "Provedores",
@@ -1725,14 +1777,14 @@
     },
     "appearance": {
       "theme": "Tema",
-      "themeHint": "Seguir o sistema ou fixar claro/escuro.",
+      "themeHint": "Escolha o tema claro ou escuro para toda a interface.",
       "light": "Claro",
       "dark": "Escuro",
       "density": "Densidade da interface",
       "densityHint": "Escolha mais respiro ou mais informação visível na tela.",
       "comfortable": "Confortável",
       "compact": "Compacta",
-      "colorSystemHint": "O tema usa tokens do shell; a escolha afeta toda a interface."
+      "colorSystemHint": "As alterações de aparência são aplicadas imediatamente."
     },
     "model": {
       "providersTitle": "Provedores",
@@ -2715,6 +2767,33 @@
       "user": "Usuário"
     },
     "activity": {
+      "timeline": {
+        "running": "Agente trabalhando",
+        "waiting": "Aguardando você",
+        "interrupted": "Execução interrompida",
+        "history": "Histórico de atividade",
+        "records_one": "{{count}} registro",
+        "records_other": "{{count}} registros",
+        "latest": "Último registro",
+        "collapse": "Recolher atividades",
+        "expand": "Mostrar atividades",
+        "showFailures_one": "Ver {{count}} falha",
+        "showFailures_other": "Ver {{count}} falhas",
+        "filterLabel": "Filtrar atividades",
+        "filters": {
+          "all": "Todas",
+          "tools": "Ações",
+          "updates": "Atualizações",
+          "failures": "Falhas"
+        },
+        "earlier_one": "Mostrar {{count}} registro anterior",
+        "earlier_other": "Mostrar {{count}} registros anteriores",
+        "remaining_one": "{{count}} restante",
+        "remaining_other": "{{count}} restantes",
+        "steps": "Etapas do agente em ordem cronológica",
+        "empty": "Nenhum registro neste filtro.",
+        "unfinished": "Sem conclusão registrada"
+      },
       "running": "Trabalhando",
       "completed": "Atividade",
       "summary": "{{thoughts}} pensamentos · {{actions}} ações",

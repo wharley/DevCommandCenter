@@ -23,6 +23,12 @@ export function Reasoning({
 
 	return (
 		<details
+			onPointerDown={() => {
+				userToggledRef.current = true;
+			}}
+			onFocusCapture={() => {
+				userToggledRef.current = true;
+			}}
 			className="group/reasoning flex flex-col"
 			open={isOpen}
 			onToggle={(event) => setIsOpen(event.currentTarget.open)}
@@ -36,17 +42,23 @@ export function Reasoning({
 				)}
 			>
 				<Brain className="size-3 shrink-0" aria-hidden />
-				<span className="min-w-0 truncate">
-					{label ?? "Thinking"}
-				</span>
+				<span className="min-w-0 truncate">{label ?? "Thinking"}</span>
 				<ChevronRight
-					className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
+					className={cn(
+						"size-3 shrink-0 transition-transform",
+						isOpen && "rotate-90",
+					)}
 					aria-hidden
 				/>
 			</summary>
-			<div className="pl-4 pt-1 text-[12px] leading-6 text-muted-foreground">
-				{children}
-			</div>
+			{isOpen && (
+				<div
+					tabIndex={0}
+					className="max-h-64 overflow-auto pl-4 pt-1 text-[12px] leading-6 text-muted-foreground"
+				>
+					{children}
+				</div>
+			)}
 		</details>
 	);
 }

@@ -1,3 +1,5 @@
+import { ReviewBranchContext } from "@/features/review/review-branch-context";
+import "@/features/review/review-surfaces.css";
 import type {
 	ProviderCatalog,
 	ProviderRuntimeConfig,
@@ -6,6 +8,7 @@ import type {
 } from "@dcc/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+	ArrowLeft,
 	ArrowUpRight,
 	Check,
 	ChevronDown,
@@ -13,7 +16,6 @@ import {
 	CircleDot,
 	Clock3,
 	Code2,
-	GitBranch,
 	GitMerge,
 	GitPullRequest,
 	Loader2,
@@ -23,7 +25,7 @@ import {
 	Send,
 	UserRoundCheck,
 } from "lucide-react";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { LazyStreamdown } from "@/components/streamdown-loader";
@@ -126,6 +128,14 @@ export function PullRequestsHub({
 }: PullRequestsHubProps) {
 	const { t, i18n } = useTranslation("common");
 	const queryClient = useQueryClient();
+	const [detailOpen, setDetailOpen] = useState(false);
+	const listRef = useRef<HTMLElement>(null);
+	const backRef = useRef<HTMLButtonElement>(null);
+	useEffect(() => {
+		if (detailOpen && backRef.current?.getClientRects().length) {
+			backRef.current.focus();
+		}
+	}, [detailOpen]);
 	const [filter, setFilter] = useState<PullRequestFilter>("all");
 	const [search, setSearch] = useState("");
 	const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -273,8 +283,8 @@ export function PullRequestsHub({
 	};
 
 	return (
-		<div className="flex h-full min-h-0 bg-background pt-9">
-			<section className="flex w-[350px] min-w-[310px] shrink-0 flex-col border-r border-border/70 bg-sidebar/35">
+		<div className="dcc-pr-hub flex h-full min-h-0 bg-background pt-9" data-detail-open={detailOpen && Boolean(selected)}>
+			<section ref={listRef} className="dcc-pr-list flex shrink-0 flex-col border-r border-border/70">
 				<header className="shrink-0 border-b border-border/70 px-4 pb-3 pt-2">
 					<div className="mb-3 flex items-center justify-between">
 						<div>
@@ -295,11 +305,12 @@ export function PullRequestsHub({
 							<RefreshCw className={cn("size-3.5", listQuery.isFetching && "animate-spin")} />
 						</Button>
 					</div>
-					<div className="mb-3 grid grid-cols-[0.8fr_1fr_1.45fr] gap-1 rounded-lg bg-muted/55 p-1">
+					<div className="dcc-review-segments mb-3 grid grid-cols-[0.8fr_1fr_1.45fr] gap-1 rounded-lg bg-muted/55 p-1">
 						{(["all", "reviewing", "mine"] as const).map((value) => (
 							<button
 								key={value}
 								type="button"
+								aria-pressed={filter === value}
 								onClick={() => setFilter(value)}
 								className={cn(
 									"min-w-0 whitespace-nowrap rounded-md px-1.5 py-1.5 text-[10.5px] font-medium transition-colors",
@@ -315,6 +326,7 @@ export function PullRequestsHub({
 					<label className="flex h-8 items-center gap-2 rounded-lg border border-border/80 bg-background/80 px-2.5 focus-within:border-ring">
 						<Search className="size-3.5 text-muted-foreground" />
 						<input
+							aria-label={t("pullRequests.search")}
 							value={search}
 							onChange={(event) => setSearch(event.target.value)}
 							placeholder={t("pullRequests.search")}
@@ -345,13 +357,15 @@ export function PullRequestsHub({
 							{filteredItems.map((item) => (
 								<button
 									key={item.id}
+									aria-current={selectedId === item.id ? "true" : undefined}
 									type="button"
 									onClick={() => {
 										setSelectedId(item.id);
+										setDetailOpen(true);
 										setActiveTab("summary");
 									}}
 									className={cn(
-										"w-full rounded-xl border px-3 py-2.5 text-left transition-colors",
+										"dcc-pr-card w-full rounded-xl border px-3 py-2.5 text-left transition-colors",
 										selectedId === item.id
 											? "border-border bg-accent/70 shadow-sm"
 											: "border-transparent hover:bg-accent/40",
@@ -373,7 +387,7 @@ export function PullRequestsHub({
 											<div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
 												<ActorAvatar item={item} />
 												<span className="max-w-24 truncate">{item.author?.login ?? t("pullRequests.unknownAuthor")}</span>
-												<span className="truncate">{item.headBranch}</span>
+												<span className="truncate" title={item.headBranch}>{item.headBranch}</span>
 												<span className="ml-auto flex shrink-0 items-center gap-1">
 													<CheckState state={item.checksState} />
 													{item.additions != null ? <b className="font-medium text-emerald-500">+{item.additions}</b> : null}
@@ -394,18 +408,35 @@ export function PullRequestsHub({
 				) : null}
 			</section>
 
-			<section className="flex min-w-0 flex-1 flex-col">
+			<section className="dcc-pr-detail flex min-w-0 flex-1 flex-col">
 				{!selected ? (
 					<div className="grid h-full place-items-center text-[13px] text-muted-foreground">
 						{t("pullRequests.selectPrompt")}
 					</div>
 				) : (
 					<>
-						<header className="shrink-0 border-b border-border/70 px-7 pb-4 pt-3">
-							<div className="flex items-center justify-between gap-4">
-								<div className="flex items-center gap-1 rounded-lg bg-muted/50 p-1">
+						<header className="dcc-pr-detail-header shrink-0 border-b border-border/70 px-7 pb-4 pt-3">
+							<button
+								ref={backRef}
+								type="button"
+								className="dcc-pr-back"
+								onClick={() => {
+									setDetailOpen(false);
+									requestAnimationFrame(() =>
+										listRef.current
+											?.querySelector<HTMLButtonElement>('[aria-current="true"]')
+											?.focus(),
+									);
+								}}
+							>
+								<ArrowLeft size={14} aria-hidden />
+								{t("review.backToList")}
+							</button>
+							<div className="flex flex-wrap items-center justify-between gap-3">
+								<div className="dcc-review-segments flex items-center gap-1 rounded-lg bg-muted/50 p-1">
 									<button
 										type="button"
+										aria-pressed={activeTab === "summary"}
 										onClick={() => setActiveTab("summary")}
 										className={cn("rounded-md px-3 py-1.5 text-[11px] font-medium", activeTab === "summary" ? "bg-background shadow-sm ring-1 ring-border/70" : "text-muted-foreground")}
 									>
@@ -413,13 +444,14 @@ export function PullRequestsHub({
 									</button>
 									<button
 										type="button"
+										aria-pressed={activeTab === "code"}
 										onClick={() => setActiveTab("code")}
 										className={cn("rounded-md px-3 py-1.5 text-[11px] font-medium", activeTab === "code" ? "bg-background shadow-sm ring-1 ring-border/70" : "text-muted-foreground")}
 									>
 										{t("pullRequests.tabs.code")}
 									</button>
 								</div>
-								<div className="flex items-center gap-2">
+								<div className="flex flex-wrap items-center gap-2">
 									{selected.linkedWorkspaceId ? (
 										<Button size="sm" variant="outline" onClick={() => onOpenWorkspace(selected.linkedWorkspaceId!)}>
 											{t("pullRequests.openTask")}
@@ -484,7 +516,7 @@ export function PullRequestsHub({
 							<h2 className="mt-5 max-w-4xl text-[20px] font-semibold leading-7 tracking-[-0.02em]">
 								{selected.title}
 							</h2>
-							<div className="mt-2 flex items-center gap-2 text-[12px] text-muted-foreground">
+							<div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
 								<ActorAvatar item={selected} />
 								<span>{selected.author?.name || selected.author?.login}</span>
 								<span>·</span>
@@ -498,7 +530,7 @@ export function PullRequestsHub({
 							className={cn(
 								"min-h-0 flex-1",
 								activeTab === "summary" &&
-									"overflow-y-auto px-7 py-5 [scrollbar-width:thin]",
+									"dcc-pr-summary overflow-y-auto px-7 py-5 [scrollbar-width:thin]",
 							)}
 						>
 							{activeTab === "code" ? (
@@ -521,9 +553,8 @@ export function PullRequestsHub({
 								/>
 							) : (
 								<div className="mx-auto max-w-4xl space-y-6">
-									<div className="grid grid-cols-[140px_minmax(0,1fr)] gap-x-4 gap-y-3 text-[12px]">
-										<span className="flex items-center gap-2 text-muted-foreground"><GitBranch className="size-3.5" />{t("pullRequests.branch")}</span>
-										<span className="truncate">{selected.headBranch} <span className="text-muted-foreground">→ {selected.baseBranch}</span></span>
+									<ReviewBranchContext head={selected.headBranch} base={selected.baseBranch} />
+									<div className="dcc-pr-facts grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-3 text-[12px]">
 										<span className="flex items-center gap-2 text-muted-foreground"><UserRoundCheck className="size-3.5" />{t("pullRequests.reviewers")}</span>
 										<span>{selected.reviewers.length > 0 ? selected.reviewers.map((reviewer) => `@${reviewer.login}`).join(", ") : t("pullRequests.noReviewers")}</span>
 										<span className="flex items-center gap-2 text-muted-foreground"><MessageSquare className="size-3.5" />{t("pullRequests.comments")}</span>
@@ -532,14 +563,14 @@ export function PullRequestsHub({
 										<span>{t(`pullRequests.checkStates.${selected.checksState}`, { defaultValue: selected.checksState })}</span>
 									</div>
 
-									<section className="border-t border-border/70 pt-5">
+									<section className="dcc-pr-summary-card">
 										<h3 className="text-[14px] font-medium">{t("pullRequests.description")}</h3>
 										<p className="mt-3 whitespace-pre-wrap text-[12px] leading-5 text-foreground/85">
 											{detailQuery.data?.body || selected.body || t("pullRequests.noDescription")}
 										</p>
 									</section>
 
-									<section className="border-t border-border/70 pt-5">
+									<section className="dcc-pr-summary-card">
 										<h3 className="mb-3 text-[14px] font-medium">{t("pullRequests.checks")}</h3>
 										{detailQuery.isPending ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : (detailQuery.data?.checks.length ?? 0) > 0 ? (
 											<div className="space-y-2">{detailQuery.data?.checks.map((check, index) => (
@@ -548,7 +579,7 @@ export function PullRequestsHub({
 										) : <p className="text-[11px] text-muted-foreground">{t("pullRequests.noChecks")}</p>}
 									</section>
 
-									<section className="border-t border-border/70 pt-5">
+									<section className="dcc-pr-summary-card">
 										<h3 className="mb-3 text-[14px] font-medium">{t("pullRequests.activity")}</h3>
 						{detailQuery.isError ? <p className="text-[11px] text-red-500">{detailQuery.error instanceof Error ? detailQuery.error.message : t("pullRequests.detailError")}</p> : (detailQuery.data?.comments.length ?? 0) > 0 ? (
 							<div className="space-y-3">{detailQuery.data?.comments.map((entry) => (
@@ -572,9 +603,10 @@ export function PullRequestsHub({
 						</div>
 
 						{activeTab === "summary" ? (
-							<footer className="shrink-0 border-t border-border/70 bg-background/95 px-7 py-3">
+							<footer className="dcc-pr-comment-footer shrink-0 border-t border-border/70 bg-background/95 px-7 py-3">
 								<div className="mx-auto flex max-w-4xl items-end gap-2 rounded-xl border border-border bg-muted/25 p-2 focus-within:border-ring">
 									<Textarea
+										aria-label={t("pullRequests.commentPlaceholder")}
 										value={comment}
 										onChange={(event) => setComment(event.target.value)}
 										placeholder={t("pullRequests.commentPlaceholder")}

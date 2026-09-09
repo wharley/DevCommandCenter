@@ -1,5 +1,6 @@
 import { DEFAULT_EFFORT_LEVEL } from "./effort";
 import type { ProviderApprovalPolicy } from "@dcc/contracts";
+import type { SerializedEditorState } from "lexical";
 
 export type EffortSelection = {
 	effort: string;
@@ -80,7 +81,9 @@ export function loadApprovalPolicy(
 		: (supportedPolicies[0] ?? null);
 	if (typeof window === "undefined") return fallback;
 
-	const stored = window.localStorage.getItem(key) as ProviderApprovalPolicy | null;
+	const stored = window.localStorage.getItem(
+		key,
+	) as ProviderApprovalPolicy | null;
 	return stored && supportedPolicies.includes(stored) ? stored : fallback;
 }
 
@@ -100,17 +103,48 @@ export function loadDraft(key: string) {
 	return window.localStorage.getItem(key) ?? "";
 }
 
-export function saveDraft(key: string, value: string) {
+const structuredDraftKey = (key: string) => `${key}.editor.v1`;
+
+export function loadStructuredDraft(key: string): SerializedEditorState | null {
+	if (typeof window === "undefined") return null;
+	try {
+		const stored = JSON.parse(
+			window.localStorage.getItem(structuredDraftKey(key)) ?? "null",
+		);
+		return stored?.text === loadDraft(key) && stored?.state?.root
+			? stored.state
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+export function saveDraft(
+	key: string,
+	value: string,
+	state?: SerializedEditorState,
+) {
 	if (typeof window === "undefined") {
 		return;
 	}
 
 	if (value.trim().length === 0) {
-		window.localStorage.removeItem(key);
+		clearDraft(key);
 		return;
 	}
 
 	window.localStorage.setItem(key, value);
+	try {
+		if (state)
+			window.localStorage.setItem(
+				structuredDraftKey(key),
+				JSON.stringify({ text: value, state }),
+			);
+		else window.localStorage.removeItem(structuredDraftKey(key));
+	} catch {
+		/* Plain text remains recoverable if structured storage is full. */
+		window.localStorage.removeItem(structuredDraftKey(key));
+	}
 }
 
 export function clearDraft(key: string) {
@@ -119,4 +153,5 @@ export function clearDraft(key: string) {
 	}
 
 	window.localStorage.removeItem(key);
+	window.localStorage.removeItem(structuredDraftKey(key));
 }

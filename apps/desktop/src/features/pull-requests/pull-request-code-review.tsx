@@ -471,10 +471,10 @@ export function PullRequestCodeReview({
 	}
 
 	return (
-		<div className="flex h-full min-h-0 flex-col">
+		<div className="dcc-pr-code flex h-full min-h-0 flex-col">
 			{agentPanelOpen ? (
 				<section className="shrink-0 border-b border-violet-500/20 bg-violet-500/5 px-4 py-3">
-					<div className="flex items-center gap-2">
+					<div className="flex flex-wrap items-center gap-2">
 						<Sparkles className="size-4 text-violet-500" />
 						<div className="min-w-0 flex-1">
 							<strong className="text-[12px] font-medium">{t("pullRequests.code.agentReviewTitle")}</strong>
@@ -490,8 +490,8 @@ export function PullRequestCodeReview({
 					<Textarea value={agentInstruction} onChange={(event) => setAgentInstruction(event.target.value)} placeholder={t("pullRequests.code.agentInstructionPlaceholder")} className="mt-2 min-h-14 resize-y bg-background/70 text-[11px]" />
 				</section>
 			) : null}
-			<div className="flex min-h-0 flex-1">
-				<aside className="w-52 shrink-0 overflow-y-auto border-r border-border/70 bg-sidebar/25 p-2 [scrollbar-width:thin]">
+			<div className="dcc-pr-code-body flex min-h-0 flex-1">
+				<aside className="dcc-pr-code-files w-52 shrink-0 overflow-y-auto border-r border-border/70 bg-sidebar/25 p-2 [scrollbar-width:thin]">
 					<div className="px-2 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
 						{t("pullRequests.code.changedFiles", { count: files.length })}
 					</div>
@@ -500,6 +500,7 @@ export function PullRequestCodeReview({
 							<button
 								key={file.path}
 								type="button"
+								aria-pressed={selectedPath === file.path}
 								onClick={() => setSelectedPath(file.path)}
 								className={cn(
 									"flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[11px] transition-colors",
@@ -515,7 +516,7 @@ export function PullRequestCodeReview({
 					</div>
 				</aside>
 
-				<section className="min-w-0 flex-1 overflow-auto bg-background [scrollbar-width:thin]">
+				<section className="dcc-pr-code-diff min-h-0 min-w-0 flex-1 overflow-auto bg-background [scrollbar-width:thin]">
 					{selectedFile ? (
 						<div className="min-w-max">
 							<div className="sticky top-0 z-10 flex h-9 min-w-[620px] items-center border-b border-border bg-background/95 px-3 text-[11px] backdrop-blur">
@@ -563,8 +564,8 @@ export function PullRequestCodeReview({
 				</section>
 			</div>
 
-			<footer className="shrink-0 border-t border-border bg-background px-4 py-3">
-				<div className="flex items-center gap-2">
+			<footer className="dcc-pr-review-footer shrink-0 border-t border-border bg-background px-4 py-3">
+				<div className="flex flex-wrap items-center gap-2">
 					<MessageSquarePlus className="size-4 text-muted-foreground" />
 					<strong className="text-[12px] font-medium">{t("pullRequests.code.submitReview")}</strong>
 					{drafts.length > 0 ? <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">{t("pullRequests.code.pendingCount", { count: drafts.length })}</span> : null}
@@ -600,6 +601,7 @@ export function PullRequestCodeReview({
 							return (
 								<button
 									key={event}
+									aria-pressed={reviewEvent === event}
 									type="button"
 									disabled={disabled}
 									title={disabledReason}
@@ -614,6 +616,7 @@ export function PullRequestCodeReview({
 				</div>
 				<div className="mt-2 flex items-end gap-2 rounded-xl border border-border bg-muted/25 p-2 focus-within:border-ring">
 					<Textarea
+						aria-label={t(`pullRequests.code.reviewPlaceholders.${reviewEvent}`)}
 						value={reviewBody}
 						onChange={(event) => { setReviewBody(event.target.value); setSubmitted(false); setSubmitWarning(null); }}
 						placeholder={t(`pullRequests.code.reviewPlaceholders.${reviewEvent}`)}

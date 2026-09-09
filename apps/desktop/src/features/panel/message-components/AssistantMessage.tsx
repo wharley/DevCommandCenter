@@ -1,18 +1,12 @@
 import {
-	Children,
 	Suspense,
 	useCallback,
-	useEffect,
-	useId,
 	useMemo,
-	useRef,
 	useState,
 } from "react";
 import {
-	Activity,
 	AlertCircle,
 	Bot,
-	ChevronRight,
 	Copy,
 	GitBranch,
 	GitFork,
@@ -23,7 +17,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { ProviderCatalog } from "@dcc/contracts";
-import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,8 +24,6 @@ import { LazyStreamdown } from "@/components/streamdown-loader";
 import { WorkspaceFileLinkProvider } from "@/components/workspace-file-link-context";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { cn } from "@/lib/utils";
-import { Reasoning } from "@/components/ai/reasoning";
-import { ToolCall } from "@/components/ai/tool-call";
 import { MessageTimestamp } from "./message-metadata";
 import { PlanSummaryCard } from "./PlanSummaryCard";
 import { MissionValidationCard } from "./MissionValidationCard";
@@ -45,11 +36,8 @@ import {
 } from "@/features/panel/plan-content";
 import { parseMissionValidationReport } from "@/features/spec/mission-spec-content";
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
-import {
-	ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS,
-	partitionAssistantActivity,
-	shouldAutoOpenAssistantActivity,
-} from "./assistant-activity-disclosure";
+import { isActivityAnnotation } from "./assistant-activity-disclosure";
+import { AssistantActivity } from "./AssistantActivity";
 import {
 	resolveNativeSubagentPresentation,
 } from "../native-subagent-presentation";
@@ -88,14 +76,6 @@ function AssistantTextFallback({ text }: { text: string }) {
 				{text}
 			</p>
 		</div>
-	);
-}
-
-function isActivityAnnotation(annotation: WorkspaceMessageAnnotation) {
-	return (
-		annotation.type === "commentary" ||
-		annotation.type === "reasoning" ||
-		annotation.type === "tool-call"
 	);
 }
 
@@ -416,180 +396,6 @@ function NativeSubagentTree({
 	);
 }
 
-function AssistantActivityHistory({
-	count,
-	children,
-}: {
-	count: number;
-	children: React.ReactNode;
-}) {
-	const { t } = useTranslation("common");
-	const [isOpen, setIsOpen] = useState(false);
-
-	return (
-		<details
-			className="flex min-w-0 flex-col"
-			open={isOpen}
-			onToggle={(event) => setIsOpen(event.currentTarget.open)}
-		>
-			<summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground [&::-webkit-details-marker]:hidden">
-				<ChevronRight
-					className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
-					aria-hidden
-				/>
-				<span>{t("conversation.activity.previous", { count })}</span>
-			</summary>
-			<div className="mt-1 flex min-w-0 flex-col gap-1.5 border-l border-border/45 pl-2">
-				{children}
-			</div>
-		</details>
-	);
-}
-
-function AssistantActivityGroup({
-	annotations,
-	turnStreaming,
-	children,
-}: {
-	annotations: WorkspaceMessageAnnotation[];
-	turnStreaming?: boolean;
-	children: React.ReactNode;
-}) {
-	const { t } = useTranslation("common");
-	const contentId = useId();
-	const isLive = Boolean(turnStreaming) || annotations.some(
-		(annotation) => Boolean(annotation.streaming),
-	);
-	const toolCount = annotations.filter((annotation) => annotation.type === "tool-call").length;
-	const reasoningCount = annotations.filter(
-		(annotation) => annotation.type === "reasoning",
-	).length;
-	const failedCount = annotations.filter(
-		(annotation) => annotation.type === "tool-call" && annotation.status?.type === "failed",
-	).length;
-	const shouldStayOpen = shouldAutoOpenAssistantActivity(annotations, turnStreaming);
-	const annotationChildren = Children.toArray(children);
-	const { historyIndexes, prominentIndexes } = useMemo(
-		() => partitionAssistantActivity(annotations),
-		[annotations],
-	);
-	const initialOpenRef = useRef(shouldStayOpen);
-	const [isOpen, setIsOpen] = useState(initialOpenRef.current);
-	// Once the user toggles by hand, auto open/close stops driving this disclosure.
-	const userToggledRef = useRef(false);
-	const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-	useEffect(() => {
-		if (autoCollapseTimerRef.current) {
-			clearTimeout(autoCollapseTimerRef.current);
-			autoCollapseTimerRef.current = null;
-		}
-		if (userToggledRef.current) {
-			return;
-		}
-		if (shouldStayOpen) {
-			setIsOpen(true);
-			return;
-		}
-		if (!isOpen) {
-			return;
-		}
-		autoCollapseTimerRef.current = setTimeout(() => {
-			autoCollapseTimerRef.current = null;
-			setIsOpen(false);
-		}, ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS);
-		return () => {
-			if (autoCollapseTimerRef.current) {
-				clearTimeout(autoCollapseTimerRef.current);
-				autoCollapseTimerRef.current = null;
-			}
-		};
-	}, [isOpen, shouldStayOpen]);
-
-	const showCompactedHistory =
-		isLive || failedCount > 0 || (!userToggledRef.current && isOpen);
-	const visibleContent = showCompactedHistory ? (
-		<>
-			{historyIndexes.length > 0 ? (
-				<AssistantActivityHistory count={historyIndexes.length}>
-					{historyIndexes.map((index) => annotationChildren[index])}
-				</AssistantActivityHistory>
-			) : null}
-			{prominentIndexes.map((index) => annotationChildren[index])}
-		</>
-	) : (
-		children
-	);
-
-	const handleToggle = () => {
-		userToggledRef.current = true;
-		if (autoCollapseTimerRef.current) {
-			clearTimeout(autoCollapseTimerRef.current);
-			autoCollapseTimerRef.current = null;
-		}
-		setIsOpen((open) => !open);
-	};
-
-	return (
-		<div
-			className="dcc-assistant-activity mb-2 flex min-w-0 flex-col rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2"
-			data-state={isOpen ? "open" : "closed"}
-			data-live={isLive ? "true" : "false"}
-		>
-			<button
-				type="button"
-				aria-expanded={isOpen}
-				aria-controls={contentId}
-				onClick={handleToggle}
-				className="flex w-full cursor-pointer items-center gap-2 text-left text-[12px] text-muted-foreground"
-			>
-				<ChevronRight
-					className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
-					aria-hidden
-				/>
-				{isLive ? (
-					<DccThinkingIndicator size={13} />
-				) : (
-					<Activity className="size-3.5 shrink-0" aria-hidden />
-				)}
-				<span className="font-medium text-foreground/85">
-					{isLive
-						? t("conversation.activity.running")
-						: t("conversation.activity.completed")}
-				</span>
-				<span className="truncate text-muted-foreground/70">
-					{t("conversation.activity.summary", {
-						actions: toolCount,
-						thoughts: reasoningCount,
-					})}
-				</span>
-				{failedCount > 0 ? (
-					<span className="ml-auto shrink-0 rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] text-destructive">
-						{t("conversation.activity.failed", { count: failedCount })}
-					</span>
-				) : null}
-			</button>
-			<div
-				id={contentId}
-				aria-hidden={!isOpen}
-				inert={!isOpen}
-				className={cn(
-					"grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none",
-					isOpen
-						? "grid-rows-[1fr] opacity-100"
-						: "pointer-events-none grid-rows-[0fr] opacity-0",
-				)}
-			>
-				<div className="min-h-0 overflow-hidden">
-					<div className="mt-2 flex min-w-0 flex-col gap-1.5 pl-1">
-						{visibleContent}
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-}
-
 export function AssistantMessage({
 	content,
 	streaming,
@@ -743,82 +549,14 @@ export function AssistantMessage({
 					</div>
 				) : null}
 				{activityAnnotations.length ? (
-					<AssistantActivityGroup
+					<AssistantActivity
 						annotations={activityAnnotations}
 						turnStreaming={streaming}
-					>
-						{activityAnnotations.map((annotation) => {
-							if (annotation.type === "commentary") {
-								return (
-									<div
-										key={`commentary-${annotation.id}`}
-										className="rounded-md px-2 py-1.5 text-[12px] leading-5 text-muted-foreground"
-									>
-										<div className="mb-0.5 font-medium text-foreground/75">
-											{t("conversation.commentary.label")}
-										</div>
-										<div className="whitespace-pre-wrap break-words">
-											{annotation.content}
-										</div>
-									</div>
-								);
-							}
-							if (annotation.type === "reasoning") {
-								return (
-									<Reasoning
-										key={`reasoning-${annotation.id}`}
-										label={annotation.label ?? t("conversation.reasoning.label")}
-										defaultOpen={Boolean(annotation.streaming)}
-									>
-										<div className="flex items-center gap-1.5">
-											{annotation.content.trim().length > 0 ? (
-												<span className="whitespace-pre-wrap">{annotation.content}</span>
-											) : annotation.streaming ? (
-												<>
-													<DccThinkingIndicator size={12} />
-													<span>{t("conversation.reasoning.label")}</span>
-												</>
-											) : (
-												<span className="text-muted-foreground/70">
-													{t("conversation.reasoning.empty")}
-												</span>
-											)}
-										</div>
-									</Reasoning>
-								);
-							}
-
-							return (
-								<ToolCall
-									key={`tool-call-${annotation.id}`}
-									action={annotation.action}
-									command={annotation.command}
-									file={annotation.file}
-									isLive={Boolean(annotation.streaming)}
-									isError={annotation.status?.type === "failed"}
-								>
-									<div className="min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-5">
-										{annotation.content.trim().length > 0 ? (
-											annotation.content.trimEnd()
-										) : annotation.streaming ? (
-											<span className="flex items-center gap-1.5 font-sans text-[12px]">
-												<DccThinkingIndicator size={12} />
-												<span>{t("conversation.toolCall.running")}</span>
-											</span>
-										) : annotation.status?.type === "failed" ? (
-											<span className="font-sans text-[12px]">
-												{annotation.status.reason ?? t("conversation.toolCall.failedFallback")}
-											</span>
-										) : (
-											<span className="font-sans text-[12px] text-muted-foreground/70">
-												{t("conversation.toolCall.noOutput")}
-											</span>
-										)}
-									</div>
-								</ToolCall>
-							);
-						})}
-					</AssistantActivityGroup>
+						interrupted={status?.type === "incomplete"}
+						waitingForInput={(annotations ?? []).some(annotation =>
+							(annotation.type === "approval" || annotation.type === "user-input") && annotation.streaming,
+						)}
+					/>
 				) : null}
 				{nativeSubagentAnnotations.length > 0 ? (
 					<NativeSubagentTree

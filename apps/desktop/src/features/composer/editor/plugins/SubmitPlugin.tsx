@@ -29,6 +29,9 @@ export function SubmitPlugin({
 		const unregisterCommand = editor.registerCommand<KeyboardEvent>(
 			KEY_ENTER_COMMAND,
 			(event) => {
+				// Enter on an inline attachment action activates that action, not send.
+				if (event?.target instanceof Element && event.target.closest("button"))
+					return false;
 				if (event?.isComposing || event?.keyCode === 229) {
 					return false;
 				}

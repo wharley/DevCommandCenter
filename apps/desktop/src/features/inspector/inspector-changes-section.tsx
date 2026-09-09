@@ -3,15 +3,16 @@
  * extension icons and NumberTicker for diff stats.
  */
 
+import { InspectorReviewScopes } from "./inspector-review-scopes";
+import { ReviewBranchContext } from "@/features/review/review-branch-context";
+import "@/features/review/review-surfaces.css";
 import { useQueryClient } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
 import {
 	AlertCircle,
-	Check,
 	ChevronDown,
 	ChevronRight,
 	CloudIcon,
-	Clock3,
 	Expand,
 	GitCompareArrows,
 	LaptopIcon,
@@ -43,12 +44,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -106,7 +101,7 @@ function statusClass(status: string): string {
  * buttons off-screen — they always sit on top, at the right, on hover.
  */
 const ROW_ACTIONS_CLASS =
-	"absolute right-1 top-1/2 z-10 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-background/95 px-0.5 py-px shadow-sm ring-1 ring-border/60 backdrop-blur-sm group-hover/row:flex";
+	"absolute right-1 top-1/2 z-10 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-background/95 px-0.5 py-px shadow-sm ring-1 ring-border/60 backdrop-blur-sm group-hover/row:flex group-focus-within/row:flex";
 const EMPTY_REVIEW_COMMENTS_BY_PATH = new Map<string, WorkspacePrReviewComment[]>();
 
 function dirname(path: string): string {
@@ -267,7 +262,7 @@ function ChangeRow({
 			<span
 				className={cn(
 					"min-w-0 flex-1 truncate text-right text-[10px] text-muted-foreground",
-					"group-hover/row:hidden",
+					"group-hover/row:hidden group-focus-within/row:hidden",
 				)}
 			>
 				{folder}
@@ -275,7 +270,7 @@ function ChangeRow({
 			<span
 				className={cn(
 					"flex shrink-0 items-center gap-1 tabular-nums",
-					"group-hover/row:hidden",
+					"group-hover/row:hidden group-focus-within/row:hidden",
 				)}
 			>
 				{entry.insertions > 0 ? (
@@ -636,7 +631,7 @@ function ReviewChangeCard({
 	return (
 		<article
 			ref={cardRef}
-			className="overflow-hidden rounded-xl border border-border/60 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+			className="dcc-review-diff-card overflow-hidden rounded-xl border border-border/60 bg-background"
 		>
 			<div className="flex min-h-11 items-center gap-2 border-b border-border/45 px-2.5 py-1.5">
 				<button
@@ -1247,17 +1242,11 @@ export function InspectorChangesSection({
 	const reviewScopes = availableInspectorReviewScopes(
 		Boolean(sessionId && workspaceId),
 	);
-	const scopeCounts: Record<InspectorReviewScope, number> = {
+	const scopeCounts: Record<InspectorReviewScope, number | null> = {
 		working: workingChanges.length,
-		"last-turn": lastTurnReview?.files.length ?? 0,
-		branch: branchChanges.length,
+		"last-turn": lastTurnReview?.files.length ?? null,
+		branch: branchDiffQuery.data ? branchChanges.length : null,
 	};
-	const ActiveScopeIcon =
-		activeScope === "working"
-			? LaptopIcon
-			: activeScope === "last-turn"
-				? Clock3
-				: GitCompareArrows;
 	const hasReviewableChanges = hasAny || branchChanges.length > 0;
 
 	if (selectedPreview) {
@@ -1285,57 +1274,14 @@ export function InspectorChangesSection({
 	}
 
 	return (
-		<div className="relative flex min-h-0 flex-1 flex-col">
+		<div className="dcc-review-inspector relative flex min-h-0 flex-1 flex-col">
 			<div className="shrink-0 border-b border-border/50 bg-background">
 				<div className="flex min-h-10 items-center gap-1 px-2 py-1.5">
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								className="h-8 min-w-0 flex-1 justify-start gap-2 rounded-lg px-2 text-[11px] font-medium hover:bg-muted/50"
-								aria-label={t("inspector.changes.scopeLabel")}
-							>
-								<ActiveScopeIcon className="size-3.5 shrink-0" strokeWidth={1.9} />
-								<span className="truncate">
-									{t(`inspector.changes.scopes.${activeScope}`)}
-								</span>
-								<span className="tabular-nums text-muted-foreground">
-									{scopeCounts[activeScope]}
-								</span>
-								<ChevronDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start" className="min-w-52">
-							{reviewScopes.map((scope) => {
-								const Icon =
-									scope === "working"
-										? LaptopIcon
-										: scope === "last-turn"
-											? Clock3
-											: GitCompareArrows;
-								return (
-									<DropdownMenuItem
-										key={scope}
-										size="sm"
-										className="h-8 gap-2"
-										onSelect={() => handleScopeChange(scope)}
-									>
-										<Icon className="size-3.5 shrink-0" strokeWidth={1.9} />
-										<span className="min-w-0 flex-1 truncate">
-											{t(`inspector.changes.scopes.${scope}`)}
-										</span>
-										<span className="tabular-nums text-muted-foreground">
-											{scopeCounts[scope]}
-										</span>
-										{scope === activeScope ? <Check className="size-3.5" /> : null}
-									</DropdownMenuItem>
-								);
-							})}
-						</DropdownMenuContent>
-					</DropdownMenu>
-					<div
+					<span className="dcc-review-heading-mark">
+						<GitCompareArrows size={14} aria-hidden />
+					</span>
+					<h3 className="dcc-review-heading-title">{t("review.changes")}</h3>
+					{scopeCounts[activeScope] !== null && <div
 						className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums"
 						aria-label={t("inspector.changes.fileCount", {
 							count: visibleSummary.fileCount,
@@ -1343,7 +1289,8 @@ export function InspectorChangesSection({
 					>
 						<span className="text-emerald-600 dark:text-emerald-400">+{visibleSummary.insertions}</span>
 						<span className="text-destructive">−{visibleSummary.deletions}</span>
-					</div>
+					</div>}
+
 					{activeScope !== "last-turn" ? (
 						<Tooltip>
 							<TooltipTrigger asChild>
@@ -1376,6 +1323,20 @@ export function InspectorChangesSection({
 						</Tooltip>
 					) : null}
 				</div>
+				<InspectorReviewScopes
+					scopes={reviewScopes}
+					active={activeScope}
+					counts={scopeCounts}
+					onChange={handleScopeChange}
+				/>
+				{activeScope === "branch" && (
+					<div className="dcc-review-scope-branches">
+						<ReviewBranchContext
+							head={data.currentBranch}
+							base={branchDiffQuery.data?.baseBranch}
+						/>
+					</div>
+				)}
 			</div>
 			{activeScope === "last-turn" && sessionId && workspaceId ? (
 				<TurnReviewSurface sessionId={sessionId} workspaceId={workspaceId} />

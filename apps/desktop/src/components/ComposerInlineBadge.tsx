@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 /** Blueprint §7.5 — inline chip for Lexical decorator badges inside the composer. */
 export function ComposerInlineBadge({
@@ -14,6 +15,7 @@ export function ComposerInlineBadge({
 	onRemove: () => void;
 	className?: string;
 }) {
+	const { t } = useTranslation("common");
 	return (
 		<span
 			className={cn(
@@ -33,7 +35,7 @@ export function ComposerInlineBadge({
 					e.stopPropagation();
 					onRemove();
 				}}
-				aria-label="Remove"
+				aria-label={t("composer.context.removeItem", { name: label })}
 			>
 				<X className="size-3" strokeWidth={1.8} />
 			</button>

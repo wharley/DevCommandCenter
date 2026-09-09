@@ -1,3 +1,4 @@
+import "@/features/review/review-surfaces.css";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -93,7 +94,7 @@ function TurnReviewCard({
 	return (
 		<article
 			ref={cardRef}
-			className="overflow-hidden rounded-xl border border-border/60 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+			className="dcc-review-diff-card overflow-hidden rounded-xl border border-border/60 bg-background"
 		>
 			<div className="flex min-h-11 items-center gap-2 border-b border-border/45 px-2.5 py-1.5">
 				<button

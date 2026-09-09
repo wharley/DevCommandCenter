@@ -1,4 +1,15 @@
 {
+  "review": {
+    "changes": "Change review",
+    "branch": "Branch",
+    "base": "Base",
+    "backToList": "Back to pull requests",
+    "scopes": {
+      "working": "Local changes, staged and unstaged.",
+      "last-turn": "Changes captured during the latest agent turn.",
+      "branch": "Changes in this branch compared with its base."
+    }
+  },
   "app": {
     "shellAria": "Application shell",
     "workspaceSidebarAria": "Workspace sidebar",
@@ -1289,6 +1300,21 @@
     },
     "ariaLabel": "Workspace composer",
     "inputAriaLabel": "Workspace prompt",
+    "context": {
+      "title": "Draft context",
+      "description": "Review attachments and pasted text before sending. Removing an item only changes this draft.",
+      "snippet": "Pasted text",
+      "characters_one": "{{count}} character",
+      "characters_other": "{{count}} characters",
+      "previewItem": "Preview {{name}}",
+      "removeItem": "Remove {{name}} from draft",
+      "snippetDescription": "This text will be included in the message.",
+      "loading": "Loading preview…",
+      "failed": "Unable to preview this file. It may have moved or been deleted.",
+      "retry": "Try again",
+      "tooLarge": "This file is too large for an inline preview. It remains attached.",
+      "binary": "A text or image preview is not available for this file. It remains attached."
+    },
     "attachments": {
       "imagesUnsupported": "This provider has no image support; images were attached as file references.",
       "add": "Attach file or image",
@@ -1658,6 +1684,32 @@
     }
   },
   "settings": {
+    "navigation": {
+      "label": "Settings sections",
+      "search": "Find a section…",
+      "clearSearch": "Clear section search",
+      "chooseSection": "Section",
+      "showAll": "Show all sections",
+      "results_zero": "No sections found",
+      "results_one": "{{count}} section found",
+      "results_other": "{{count}} sections found",
+      "groups": {
+        "workspace": "Your workspace",
+        "services": "Agents and services",
+        "advanced": "Project and advanced"
+      },
+      "keywords": {
+        "general": "version update app shell",
+        "appearance": "theme light dark language portuguese english density compact comfortable",
+        "shortcuts": "keyboard commands shortcuts",
+        "model": "agents models usage limits account runtime codex claude cursor grok gemini",
+        "integrations": "mcp servers tools credentials",
+        "account": "github gitlab login authentication coderabbit accounts",
+        "connections": "phone tablet remote pairing devices",
+        "git": "automation tasks scripts merge push repository workspace",
+        "experimental": "metrics diagnostics ux preview"
+      }
+    },
     "title": "Settings",
     "repository": "Repository",
     "currentWorkspace": "Current workspace",
@@ -1673,7 +1725,7 @@
       },
       "appearance": {
         "label": "Appearance",
-        "description": "Theme, language, and interface contrast."
+        "description": "Theme, language, and interface density."
       },
       "model": {
         "label": "Providers",
@@ -1725,14 +1777,14 @@
     },
     "appearance": {
       "theme": "Theme",
-      "themeHint": "Match the shell to the system or force a fixed mode.",
+      "themeHint": "Choose a light or dark theme for the entire interface.",
       "light": "Light",
       "dark": "Dark",
       "density": "Interface density",
       "densityHint": "Choose more breathing room or fit more information on screen.",
       "comfortable": "Comfortable",
       "compact": "Compact",
-      "colorSystemHint": "The color system is driven by shell tokens, so this choice changes the whole chrome instead of just the canvas."
+      "colorSystemHint": "Appearance changes are applied immediately."
     },
     "model": {
       "providersTitle": "Providers",
@@ -2715,6 +2767,33 @@
       "user": "User"
     },
     "activity": {
+      "timeline": {
+        "running": "Agent working",
+        "waiting": "Waiting for you",
+        "interrupted": "Execution interrupted",
+        "history": "Activity history",
+        "records_one": "{{count}} entry",
+        "records_other": "{{count}} entries",
+        "latest": "Latest entry",
+        "collapse": "Collapse activity",
+        "expand": "Show activity",
+        "showFailures_one": "View {{count}} failure",
+        "showFailures_other": "View {{count}} failures",
+        "filterLabel": "Filter activity",
+        "filters": {
+          "all": "All",
+          "tools": "Actions",
+          "updates": "Updates",
+          "failures": "Failures"
+        },
+        "earlier_one": "Show {{count}} earlier entry",
+        "earlier_other": "Show {{count}} earlier entries",
+        "remaining_one": "{{count}} remaining",
+        "remaining_other": "{{count}} remaining",
+        "steps": "Agent steps in chronological order",
+        "empty": "No entries in this filter.",
+        "unfinished": "No completion recorded"
+      },
       "running": "Working",
       "completed": "Activity",
       "summary": "{{thoughts}} thoughts · {{actions}} actions",
