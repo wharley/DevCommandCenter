@@ -25,6 +25,7 @@ import { WorkspaceFileLinkProvider } from "@/components/workspace-file-link-cont
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { cn } from "@/lib/utils";
 import { MessageTimestamp } from "./message-metadata";
+import { ProviderErrorMessage } from "./ProviderErrorMessage";
 import { PlanSummaryCard } from "./PlanSummaryCard";
 import { MissionValidationCard } from "./MissionValidationCard";
 import { ApprovalCard } from "./ApprovalCard";
@@ -641,15 +642,13 @@ export function AssistantMessage({
 					<MessageTimestamp createdAt={createdAt} />
 				</div>
 				{status?.type === "incomplete" ? (
-					<div className="mt-2 flex max-w-2xl items-start gap-2.5 rounded-lg border border-destructive/20 bg-destructive/[0.045] px-3 py-2.5">
+					<div className="mt-2 flex max-w-2xl flex-wrap items-start gap-2.5 rounded-lg border border-destructive/20 bg-destructive/[0.045] px-3 py-2.5">
 						<AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
-						<div className="min-w-0 flex-1">
+						<div className="min-w-0 flex-1 basis-56">
 							<div className="text-[12px] font-medium text-foreground">
 								{t("conversation.message.interrupted")}
 							</div>
-							<div className="mt-0.5 line-clamp-2 break-words text-[11px] leading-4 text-muted-foreground">
-								{status.reason ?? t("conversation.message.incomplete")}
-							</div>
+							<ProviderErrorMessage reason={status.reason || t("conversation.message.incomplete")} />
 						</div>
 						{onRetry ? (
 							<Button

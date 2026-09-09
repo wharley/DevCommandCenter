@@ -2754,6 +2754,10 @@
     "message": {
       "incomplete": "Incomplete",
       "interrupted": "Run interrupted",
+      "errorDetails": "Full error details",
+      "copyError": "Copy full error",
+      "errorCopied": "Error copied",
+      "errorCopyFailed": "Could not copy the error. Select the text to copy it manually.",
       "retry": "Retry",
       "retryHint": "Re-run the same prompt now, linked to the interrupted turn. It counts toward the objective budgets like any turn.",
       "retryFailed": "Unable to retry this turn.",

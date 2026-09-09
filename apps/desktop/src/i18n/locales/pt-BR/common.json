@@ -2754,6 +2754,10 @@
     "message": {
       "incomplete": "Incompleta",
       "interrupted": "Execução interrompida",
+      "errorDetails": "Detalhes completos do erro",
+      "copyError": "Copiar erro completo",
+      "errorCopied": "Erro copiado",
+      "errorCopyFailed": "Não foi possível copiar o erro. Selecione o texto para copiar manualmente.",
       "retry": "Tentar de novo",
       "retryHint": "Reenvia o mesmo prompt agora, vinculado ao turno interrompido. Conta nos orçamentos do objetivo como qualquer turno.",
       "retryFailed": "Não foi possível repetir este turno.",
