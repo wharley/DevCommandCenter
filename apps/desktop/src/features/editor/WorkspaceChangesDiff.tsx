@@ -1,3 +1,5 @@
+import codeReviewControlsCss from "./code-review-controls.css?inline";
+import "./code-review-controls.css";
 import {
 	parseDiffFromFile,
 	type DiffLineAnnotation,
@@ -232,7 +234,7 @@ export default function WorkspaceChangesDiff({
 				disableWorkerPool
 				options={{
 					...workspaceDiffViewOptions<AnnotationMetadata>(theme, inline),
-					unsafeCSS: annotationCss,
+					unsafeCSS: `${codeReviewControlsCss}\n${annotationCss}`,
 					enableGutterUtility: Boolean(onAnnotate),
 					enableLineSelection: Boolean(onAnnotate),
 					onGutterUtilityClick: (range) => handleAnnotate(range),
@@ -254,7 +256,7 @@ export default function WorkspaceChangesDiff({
 				<button
 					ref={selectionButtonRef}
 					type="button"
-					className="absolute right-3 top-3 z-20 inline-flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary px-2.5 py-1.5 text-[11px] font-medium text-primary-foreground shadow-lg"
+					className="dcc-snippet-trigger absolute right-3 top-3 z-20"
 					onClick={(event) =>
 						handleAnnotate(selectedLines.range, event.currentTarget)
 					}

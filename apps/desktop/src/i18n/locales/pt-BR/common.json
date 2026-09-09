@@ -2194,7 +2194,7 @@
           "Abra [Mudanças] no Inspector e clique no arquivo.",
           "Selecione as linhas do trecho que quer comentar.",
           "Escreva a anotação e clique em [Enviar ao agente ↗]. O trecho vai junto.",
-          "Use [+ Adicionar como evidência] quando o achado deve ficar registrado na revisão da tarefa."
+          "Use [Adicionar como evidência] quando o achado deve ficar registrado na revisão da tarefa."
         ],
         "prompt": "Aqui você está engolindo a exceção. Propague o erro com contexto e cubra o caso com um teste.",
         "keywords": "diff revisar review anotar anotação comentar linha evidência mudanças code review"
@@ -2357,7 +2357,7 @@
         "steps": [
           "Abra [Objetivo da tarefa] no composer e preencha [Intenção] e [Pronto quando].",
           "Ajuste [Orçamento de turnos] e [Pausar após falhas consecutivas] e clique em [Definir objetivo].",
-          "No diff ou no terminal, use [+ Adicionar como evidência] para anexar um achado.",
+          "No diff ou no terminal, use [Adicionar como evidência] para anexar um achado.",
           "As evidências aparecem no composer agrupadas por etapa e vão junto com a próxima mensagem."
         ],
         "prompt": "Intenção: eliminar o erro 500 no upload de avatar. Pronto quando: upload de 5 MB funciona, teste de integração cobre o caso e o log não mostra mais a exceção.",
@@ -2999,6 +2999,32 @@
     }
   },
   "skills": {
+    "catalog": {
+      "title": "Catálogo DCC",
+      "hint": "Modelos prontos do DCC para adicionar e personalizar no seu projeto.",
+      "back": "Voltar ao catálogo DCC",
+      "review": "Revisar modelo",
+      "reviewHint": "Revise as instruções e os agentes. Ao adicionar, você cria uma cópia editável no projeto.",
+      "add": "Adicionar ao projeto",
+      "added": "Adicionado"
+    },
+    "design": {
+      "subtitle": "Instruções reutilizáveis para os agentes deste projeto.",
+      "project": "Projeto",
+      "back": "Voltar às skills",
+      "edit": "Editar skill",
+      "formHint": "Defina quando usar, o que fazer e quais agentes recebem a skill.",
+      "navigation": "Navegação de skills",
+      "library": "Suas skills",
+      "refresh": "Atualizar skills",
+      "search": "Buscar por nome, descrição ou agente…",
+      "retry": "Tentar novamente",
+      "presetHint": "Um ponto de partida para coordenar o trabalho entre agentes.",
+      "usePreset": "Usar modelo",
+      "noResults": "Nenhuma skill corresponde à busca.",
+      "clearSearch": "Limpar busca",
+      "source": "Fonte do projeto"
+    },
     "title": "Skills",
     "description": "Escreva uma vez em uma fonte neutra; o DCC compila para cada agente. Fonte:",
     "selectProject": "Selecione um projeto para gerenciar as skills.",
@@ -3065,6 +3091,9 @@
     }
   },
   "diffAnnotate": {
+    "close": "Fechar anotação de código",
+    "selectedCode": "Código selecionado",
+    "previewLimited": "Prévia reduzida. A seleção completa será preservada.",
     "sendToAgent": "Enviar ao agente ↗",
     "reviewComment": "Comentário",
     "dialogLabel": "Enviar trecho ao agente",
@@ -3072,8 +3101,8 @@
     "deletedSide": "removido",
     "editInComposer": "Editar no composer",
     "newSession": "Nova sessão",
-    "send": "Enviar ↗",
-    "addToReview": "+ Adicionar como evidência"
+    "send": "Enviar",
+    "addToReview": "Adicionar como evidência"
   },
   "reviewThread": {
     "title": "Revisão de código",

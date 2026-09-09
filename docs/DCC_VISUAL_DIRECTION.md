@@ -15,6 +15,7 @@ area adapts these patterns to its purpose.
 | Dialogs and settings | Share surface, focus, and motion patterns with the notes library. |
 | Diff inspector | Keep comparison scopes visible and branch context readable. |
 | Pull Requests | Connect the request list, summary, and code review with clear hierarchy and compact navigation. |
+| Skills | Separate the editable library from detected context and make agent targets easy to compare. |
 
 ## Implemented foundation
 
@@ -63,7 +64,59 @@ in place.
 These surfaces extend the original three increments. The scope is visual and
 navigational; it does not introduce new forge actions or change Git semantics.
 
+## Code selection and line annotations
+
+Diff and file selections use a shared rounded action button and restrained gutter
+plus controls. The styles are also injected into Pierre's shadow roots, including
+the editable file surface; its positioning wrapper does not draw a second card.
+Native code selection, editing, line ranges, and original/modified side handling
+retain their existing behavior.
+
+The shared annotation balloon identifies the file and line range, previews the
+selected source, and separates instruction entry from destination actions. Source
+previews scroll and display at most 6,000 characters; the complete captured snippet
+is retained for submission, composer editing, or evidence collection. A close
+button and Escape dismiss the balloon, Tab cycles through its controls, and
+Cmd/Ctrl + Enter submits the instruction. The surface uses the shared radius,
+accent, shadow, and motion tokens and honors reduced motion.
+
+PR line comments use the same surfaces and focus treatment. Inline composers and
+comment cards size themselves against the visible diff region and remain reachable
+while code scrolls horizontally. In compact layouts, the overall review footer
+temporarily gives its space to the inline composer and returns when the draft is
+saved or cancelled, retaining its input. Draft comments stay local until the existing
+review submission action is used.
+
+## Skills library and editing
+
+The skills dialog has three sections: the editable library, detected project agent
+context, and the bundled DCC catalog. Library search matches names, descriptions, and target agent names. Cards
+show readable descriptions, compact target labels, and explicit edit/delete actions.
+The orchestration preset lives in the DCC catalog and opens a review form before
+anything is saved. “Add to project” creates an editable copy and returns to the
+library. Cancelling returns focus to the catalog. Names are fixed when adding a
+catalog template; its presence in the library determines the “Added” indicator.
+Deleting that copy makes the template available again. Project edits never modify
+the bundled template. `skill-catalog.ts` lists the bundled records and translated
+card metadata for future additions.
+
+The form gives instructions a larger editor area and presents each target as a
+selectable card with its native destination. Existing invocation behavior and the
+explanation of always-on targets remain visible. Save actions stay in a fixed
+footer while form content scrolls; selected targets and the invocation switch are
+keyboard accessible. Inputs and navigation are disabled while a save is pending.
+The existing save/delete/compile commands retain their checkout and workspace
+arguments, and mutations remain unavailable without a workspace identity.
+
+Loading, load failure with retry, empty search, empty inventory, and no-project
+states have distinct presentations. The dialog uses shared surface/accent tokens,
+visible focus, and compact layouts for fields, targets, and cards. Detected external
+files remain an inventory; opening that section does not import or rewrite them.
+
 ## Note capture and branch context
+
+Floating project notes use rounded cards without a pointer, in both expanded and
+minimized states: their movable position does not imply a fixed visual anchor.
 
 The lightbulb is a compact 32 × 32 px balloon with an accessible name and a tooltip
 that includes its shortcut. It occupies its own place after the worktree control,
@@ -225,3 +278,36 @@ It does not validate live forge operations or native Git execution.
 Review-surface validation: 710 desktop tests, TypeScript checking, production Vite
 build, and the browser smoke test passed. Captured screenshots were visually
 reviewed and remain outside the repository in a temporary directory.
+
+For code annotations, `/tests/code-annotation.html` renders the actual diff, file,
+editable editor, and shared annotation balloon with synthetic content and local
+callbacks. Run `apps/desktop/tests/code-annotation-smoke.mjs` using the same browser
+environment variables; `DCC_ANNOTATION_URL` overrides the dev-server URL. Coverage
+includes original/modified gutter actions, read-only line ranges, editable text
+selection, annotations after an edit, all four destination actions, focus cycling,
+Escape, limited previews with full submission payloads, both themes, and a compact
+viewport. The review-surface smoke test also checks inline PR drafts, removal,
+cancellation, and the compact review footer's return without sending mutation IPC.
+
+Code-annotation validation: 710 desktop tests, TypeScript checking, the production
+Vite build, and both browser smoke tests passed. Screenshots were visually reviewed
+and remain in temporary directories outside the repository. Live agent execution
+and publishing forge comments are outside these fixtures' scope.
+
+For skills, `/tests/skills.html` renders the actual dialog with an in-memory IPC
+fixture. Run `apps/desktop/tests/skills-smoke.mjs` with the same browser environment
+variables; `DCC_SKILLS_URL` overrides the dev-server URL. Coverage includes search,
+detected context, catalog navigation, preset copy/add/delete/re-add, create/edit/delete,
+target selection, invocation,
+validation, load retry, compile failure, read-only/no-project states, keyboard,
+both themes, reduced motion, and a 390 px viewport. No real skill files are changed.
+
+Skills validation: 710 desktop tests, TypeScript checking, the production Vite
+build, and the browser smoke test passed. Screenshots were visually reviewed and
+remain outside the repository. Native compilation of agent files is outside the
+browser fixture's scope.
+
+The DCC catalog follow-up passed the 8 focused skills tests, TypeScript checking,
+the production build, and the expanded browser smoke test. The browser scenarios
+verify cancellation without writes, project-copy customization, the added state,
+delete/re-add with original template content, and read-only access.

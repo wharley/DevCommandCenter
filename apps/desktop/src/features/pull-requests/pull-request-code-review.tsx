@@ -1,3 +1,5 @@
+import "@/features/editor/code-review-controls.css";
+import "@/features/editor/code-annotation.css";
 import type {
 	ProviderCatalog,
 	ProviderRuntimeConfig,
@@ -138,7 +140,7 @@ function DiffRow({
 								line: row.reviewLine,
 							})}
 							onClick={onStartComment}
-							className="grid size-5 place-items-center rounded text-sky-500 opacity-0 transition-opacity hover:bg-sky-500/10 group-hover/line:opacity-100 focus:opacity-100"
+							className="dcc-code-line-plus grid size-5 place-items-center opacity-0 group-hover/line:opacity-100 focus:opacity-100"
 						>
 							<Plus className="size-3.5" strokeWidth={2.2} />
 						</button>
@@ -167,7 +169,7 @@ function DiffRow({
 			{existingComments.map((comment) => (
 				<div
 					key={comment.id}
-					className="ml-7 border-b border-l-2 border-sky-500/40 bg-sky-500/5 px-4 py-3"
+					className="dcc-code-inline-thread"
 				>
 					<div className="flex items-center gap-2 text-[10px] text-muted-foreground">
 						<strong className="font-medium text-foreground">
@@ -181,7 +183,7 @@ function DiffRow({
 					</div>
 					<p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-4">{comment.body}</p>
 					{comment.threadId ? (
-						<div className="mt-2 flex items-center gap-1.5">
+						<div className="mt-2 flex flex-wrap items-center gap-1.5">
 							<Button size="xs" variant="ghost" onClick={() => onStartReply(comment)}>
 								<Reply className="mr-1 size-3" />{t("pullRequests.code.reply")}
 							</Button>
@@ -197,7 +199,7 @@ function DiffRow({
 					{replyingToId === comment.id ? (
 						<div className="mt-2 rounded-lg border border-border bg-background/70 p-2">
 							<Textarea autoFocus value={replyBody} onChange={(event) => onReplyBodyChange(event.target.value)} placeholder={t("pullRequests.code.replyPlaceholder")} className="min-h-16 resize-y text-[11px]" />
-							<div className="mt-2 flex justify-end gap-2">
+							<div className="mt-3 flex flex-wrap justify-end gap-2">
 								<Button size="xs" variant="ghost" onClick={onCancelReply}>{t("pullRequests.code.cancel")}</Button>
 								<Button size="xs" disabled={!replyBody.trim()} onClick={() => onSubmitReply(comment)}><Send className="mr-1 size-3" />{t("pullRequests.code.publishReply")}</Button>
 							</div>
@@ -207,7 +209,7 @@ function DiffRow({
 			))}
 
 			{draft ? (
-				<div className="ml-7 flex items-start gap-3 border-b border-l-2 border-amber-500/50 bg-amber-500/5 px-4 py-3">
+				<div data-draft="true" className="dcc-code-inline-thread flex items-start gap-3">
 					<div className="min-w-0 flex-1">
 						<span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-amber-600 dark:text-amber-400">
 							{t("pullRequests.code.pendingComment")}
@@ -226,15 +228,24 @@ function DiffRow({
 			) : null}
 
 			{isEditing ? (
-				<div className="ml-7 w-[348px] rounded-br-xl border-b border-l-2 border-sky-500 bg-card px-3 py-3 shadow-sm">
+				<div className="dcc-code-annotation dcc-code-inline-card">
+					<div className="mb-3 flex items-center gap-2">
+						<span className="dcc-code-annotation-mark"><MessageSquarePlus size={15} aria-hidden /></span>
+						<div className="min-w-0">
+							<h3 className="dcc-code-annotation-title">{t("pullRequests.code.addInlineComment", {line: row.reviewLine})}</h3>
+							<p className="dcc-code-annotation-path">{path}</p>
+						</div>
+					</div>
 					<Textarea
 						autoFocus
 						value={draftBody}
+						aria-label={t("pullRequests.code.inlinePlaceholder", { path })}
+						onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onCancelComment(); } }}
 						onChange={(event) => onDraftBodyChange(event.target.value)}
 						placeholder={t("pullRequests.code.inlinePlaceholder", { path })}
-						className="min-h-20 resize-y text-[12px]"
+						className="dcc-code-annotation-input"
 					/>
-					<div className="mt-2 flex justify-end gap-2">
+					<div className="mt-3 flex flex-wrap justify-end gap-2">
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button

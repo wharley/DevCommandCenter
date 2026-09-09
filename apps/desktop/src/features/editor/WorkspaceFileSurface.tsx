@@ -1,3 +1,5 @@
+import codeReviewControlsCss from "./code-review-controls.css?inline";
+import "./code-review-controls.css";
 import type { SelectedLineRange } from "@pierre/diffs";
 import { Editor, type EditorOptions } from "@pierre/diffs/edit";
 import { EditProvider, File, Virtualizer, useVirtualizer } from "@pierre/diffs/react";
@@ -254,8 +256,19 @@ export const WorkspaceFileEditor = forwardRef<
 			const button = document.createElement("button");
 			button.type = "button";
 			button.textContent = annotateLabelRef.current;
-			button.className =
-				"rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground shadow-sm";
+			const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+			icon.setAttribute("viewBox", "0 0 24 24");
+			icon.setAttribute("width", "14");
+			icon.setAttribute("height", "14");
+			icon.setAttribute("fill", "none");
+			icon.setAttribute("stroke", "currentColor");
+			icon.setAttribute("stroke-width", "1.7");
+			icon.setAttribute("aria-hidden", "true");
+			const outline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+			outline.setAttribute("d", "M21 15a2 2 0 0 1-2 2H7l-5 5V5a2 2 0 0 1 2-2h15a2 2 0 0 1 2 2z");
+			icon.append(outline);
+			button.prepend(icon);
+			button.className = "dcc-snippet-trigger";
 			button.addEventListener("click", () => {
 				const startLine = Math.min(
 					context.selection.start.line,
@@ -408,6 +421,7 @@ export const WorkspaceFileEditor = forwardRef<
 	const fileOptions = useMemo<ComponentProps<typeof File>["options"]>(
 		() => ({
 			disableFileHeader: true,
+			unsafeCSS: codeReviewControlsCss,
 			overflow: "scroll",
 			theme: theme === "dark" ? "pierre-dark" : "pierre-light",
 			themeType: theme,
@@ -443,7 +457,7 @@ export const WorkspaceFileEditor = forwardRef<
 			{readOnly && selectedLines && onAnnotate ? (
 				<button
 					type="button"
-					className="absolute bottom-3 right-3 z-20 inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-[11px] text-primary-foreground shadow-md"
+					className="dcc-snippet-trigger absolute bottom-3 right-3 z-20"
 					onClick={(event) => annotateSelectedLines(selectedLines, event.currentTarget)}
 				>
 					<MessageSquare className="size-3" aria-hidden />

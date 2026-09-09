@@ -2194,7 +2194,7 @@
           "Open [Changes] in the Inspector and click the file.",
           "Select the lines of the snippet you want to comment on.",
           "Write the note and click [Send to agent ↗]. The snippet goes along.",
-          "Use [+ Add as evidence] when the finding should be recorded in the task review."
+          "Use [Add as evidence] when the finding should be recorded in the task review."
         ],
         "prompt": "You are swallowing the exception here. Propagate the error with context and cover the case with a test.",
         "keywords": "diff review annotate annotation comment line evidence changes code review"
@@ -2357,7 +2357,7 @@
         "steps": [
           "Open [Task objective] in the composer and fill in [Intent] and [Done when].",
           "Adjust [Turn budget] and [Pause after consecutive failures] and click [Set objective].",
-          "In the diff or terminal, use [+ Add as evidence] to attach a finding.",
+          "In the diff or terminal, use [Add as evidence] to attach a finding.",
           "Evidence shows up in the composer grouped by stage and goes along with the next message."
         ],
         "prompt": "Intent: eliminate the 500 error on avatar upload. Done when: a 5 MB upload works, an integration test covers the case and the log no longer shows the exception.",
@@ -2999,6 +2999,32 @@
     }
   },
   "skills": {
+    "catalog": {
+      "title": "DCC catalog",
+      "hint": "Ready-to-use DCC templates to add and customize in your project.",
+      "back": "Back to DCC catalog",
+      "review": "Review template",
+      "reviewHint": "Review the instructions and agents. Adding creates an editable copy in your project.",
+      "add": "Add to project",
+      "added": "Added"
+    },
+    "design": {
+      "subtitle": "Reusable instructions for the agents in this project.",
+      "project": "Project",
+      "back": "Back to skills",
+      "edit": "Edit skill",
+      "formHint": "Define when to use it, what to do, and which agents receive it.",
+      "navigation": "Skills navigation",
+      "library": "Your skills",
+      "refresh": "Refresh skills",
+      "search": "Search by name, description, or agent…",
+      "retry": "Try again",
+      "presetHint": "A starting point for coordinating work across agents.",
+      "usePreset": "Use template",
+      "noResults": "No skills match your search.",
+      "clearSearch": "Clear search",
+      "source": "Project source"
+    },
     "title": "Skills",
     "description": "Write once in a neutral source; DCC compiles to each agent. Source:",
     "selectProject": "Select a project to manage its skills.",
@@ -3065,6 +3091,9 @@
     }
   },
   "diffAnnotate": {
+    "close": "Close annotation",
+    "selectedCode": "Selected code",
+    "previewLimited": "Preview shortened. The complete selection is preserved.",
     "sendToAgent": "Send to agent ↗",
     "reviewComment": "Review comment",
     "dialogLabel": "Send selection to agent",
@@ -3072,8 +3101,8 @@
     "deletedSide": "deleted",
     "editInComposer": "Edit in composer",
     "newSession": "New session",
-    "send": "Send ↗",
-    "addToReview": "+ Add as evidence"
+    "send": "Send",
+    "addToReview": "Add as evidence"
   },
   "reviewThread": {
     "title": "Code review",

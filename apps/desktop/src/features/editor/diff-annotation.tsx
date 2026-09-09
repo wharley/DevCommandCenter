@@ -1,3 +1,5 @@
+import { Code2, X, Send, SquarePen, ListPlus, Plus } from "lucide-react";
+import "./code-annotation.css";
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -50,9 +52,10 @@ export function DiffAnnotationPopover({
 	const cardRef = useRef<HTMLDivElement | null>(null);
 	// Resolved viewport position. Kept null until measured so the card never
 	// flashes at an unclamped spot (which is what pushed the actions off-screen).
-	const [position, setPosition] = useState<{ top: number; left: number } | null>(
-		null,
-	);
+	const [position, setPosition] = useState<{
+		top: number;
+		left: number;
+	} | null>(null);
 
 	const { request, anchor } = pending;
 
@@ -152,40 +155,80 @@ export function DiffAnnotationPopover({
 				role="dialog"
 				aria-modal="true"
 				aria-label={t("diffAnnotate.dialogLabel")}
-				className="fixed z-[71] flex max-h-[calc(100vh-1.5rem)] w-[348px] max-w-[calc(100vw-1.5rem)] origin-top flex-col overflow-hidden rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/10 animate-in fade-in-0 zoom-in-95 duration-100"
+				className="dcc-code-annotation fixed z-[71] flex max-h-[calc(100vh-1.5rem)] w-[396px] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden"
 				style={{
 					top: position?.top ?? anchor.top,
 					left: position?.left ?? anchor.left,
 					visibility: position ? "visible" : "hidden",
 				}}
 				onMouseDown={(event) => event.stopPropagation()}
+				onKeyDown={(event) => {
+					if (event.key === "Escape") {
+						event.preventDefault();
+						event.stopPropagation();
+						onCancel();
+					}
+					if (event.key === "Tab") {
+						const controls = [
+							...event.currentTarget.querySelectorAll<HTMLElement>(
+								'button:not(:disabled), textarea, [tabindex="0"]',
+							),
+						].filter((el) => el.getClientRects().length > 0);
+						const first = controls[0];
+						const last = controls.at(-1);
+						if (event.shiftKey && document.activeElement === first) {
+							event.preventDefault();
+							last?.focus();
+						} else if (!event.shiftKey && document.activeElement === last) {
+							event.preventDefault();
+							first?.focus();
+						}
+					}
+				}}
 			>
-				<div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/30 px-3 py-2 text-[11px]">
-					<span className="size-1.5 shrink-0 rounded-full bg-primary/70" aria-hidden />
-					<span
-						className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
-						title={request.path}
-						dir="rtl"
+				<div className="dcc-code-annotation-header">
+					<span className="dcc-code-annotation-mark">
+						<Code2 size={16} aria-hidden />
+					</span>
+					<div className="min-w-0 flex-1">
+						<h2 className="dcc-code-annotation-title">
+							{t("diffAnnotate.dialogLabel")}
+						</h2>
+						<p className="dcc-code-annotation-path">{request.path}</p>
+					</div>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-xs"
+						aria-label={t("diffAnnotate.close")}
+						onClick={onCancel}
 					>
-						{request.path}
-					</span>
-					<span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono font-medium tabular-nums text-foreground/80">
-						{lineLabel}
-					</span>
-					{sideLabel ? (
-						<span className="shrink-0 rounded bg-destructive/15 px-1.5 py-0.5 font-medium text-destructive">
-							{sideLabel}
-						</span>
-					) : null}
+						<X size={14} />
+					</Button>
 				</div>
+				<div className="dcc-code-annotation-context">
+					<span className="font-mono tabular-nums">{lineLabel}</span>
+					{sideLabel && <span data-side="original">{sideLabel}</span>}
+				</div>
+				<div className="dcc-code-annotation-body">
+					{request.snippet && (
+						<div className="dcc-code-annotation-snippet">
+							<pre tabIndex={0} aria-label={t("diffAnnotate.selectedCode")}>
+								<code>{request.snippet.slice(0, 6000)}</code>
+							</pre>
+							{request.snippet.length > 6000 && (
+								<small>{t("diffAnnotate.previewLimited")}</small>
+							)}
+						</div>
+					)}
 
-				<div className="flex min-h-0 flex-col gap-2.5 overflow-y-auto p-3">
 					<Textarea
 						ref={textareaRef}
+						aria-label={t("diffAnnotate.instructionPlaceholder")}
 						value={instruction}
 						onChange={(event) => setInstruction(event.target.value)}
 						placeholder={t("diffAnnotate.instructionPlaceholder")}
-						className="min-h-[76px] resize-none text-[13px] leading-relaxed"
+						className="dcc-code-annotation-input"
 						onKeyDown={(event) => {
 							if (event.key === "Escape") {
 								event.preventDefault();
@@ -196,6 +239,7 @@ export function DiffAnnotationPopover({
 							if (
 								(event.metaKey || event.ctrlKey) &&
 								event.key === "Enter" &&
+								!event.nativeEvent.isComposing &&
 								canSubmit
 							) {
 								event.preventDefault();
@@ -204,9 +248,10 @@ export function DiffAnnotationPopover({
 						}}
 					/>
 
-					<div className="flex items-center justify-between gap-2 text-[10.5px] text-muted-foreground">
+					<div className="dcc-code-annotation-hints">
 						<span className="inline-flex items-center gap-1">
 							<InlineShortcutDisplay keys={["⌘", "↵"]} />
+							<Send className="mr-1 size-3" aria-hidden />
 							{t("diffAnnotate.send")}
 						</span>
 						{canAddToReview ? (
@@ -218,13 +263,14 @@ export function DiffAnnotationPopover({
 								disabled={!canSubmit}
 								onClick={() => onAddToReview(trimmed)}
 							>
+								<ListPlus className="mr-1 size-3" aria-hidden />
 								{t("diffAnnotate.addToReview")}
 							</Button>
 						) : null}
 					</div>
 				</div>
 
-				<div className="flex flex-wrap items-center justify-end gap-1.5 border-t border-border/60 bg-muted/20 px-3 py-2.5">
+				<div className="dcc-code-annotation-footer">
 					{canEditInComposer ? (
 						<Button
 							type="button"
@@ -233,6 +279,7 @@ export function DiffAnnotationPopover({
 							className="mr-auto h-7 px-2 text-muted-foreground hover:text-foreground"
 							onClick={() => onEditInComposer(trimmed)}
 						>
+							<SquarePen className="mr-1 size-3" aria-hidden />
 							{t("diffAnnotate.editInComposer")}
 						</Button>
 					) : null}
@@ -244,6 +291,7 @@ export function DiffAnnotationPopover({
 						disabled={!canSubmit}
 						onClick={() => onSubmit(trimmed, true)}
 					>
+						<Plus className="mr-1 size-3" aria-hidden />
 						{t("diffAnnotate.newSession")}
 					</Button>
 					<Button
@@ -254,6 +302,7 @@ export function DiffAnnotationPopover({
 						disabled={!canSubmit}
 						onClick={() => onSubmit(trimmed, false)}
 					>
+						<Send className="mr-1 size-3" aria-hidden />
 						{t("diffAnnotate.send")}
 					</Button>
 				</div>

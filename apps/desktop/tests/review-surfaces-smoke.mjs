@@ -107,6 +107,9 @@ try {
 	await noOverflow();
 	await shot("pr-compact-code");
 	await button("Voltar para pull requests").click();
+	await page.waitForFunction(() =>
+		document.activeElement?.matches('.dcc-pr-card[aria-current="true"]'),
+	);
 	assert.equal(
 		await page
 			.locator('.dcc-pr-card[aria-current="true"]')
@@ -121,6 +124,46 @@ try {
 	await button("Código").click();
 	await noOverflow();
 	await shot("pr-narrow-code");
+	await page.locator(".dcc-code-line-plus").first().focus();
+	await page.keyboard.press("Enter");
+	const inlineCard = page.locator(".dcc-code-inline-card");
+	await inlineCard
+		.locator("textarea")
+		.fill("Verificar o comportamento desta linha.");
+	await inlineCard.scrollIntoViewIfNeeded();
+	const inlineBox = await inlineCard.boundingBox();
+	assert.equal(await page.locator(".dcc-pr-review-footer").isVisible(), false);
+	const inlineActions = await inlineCard
+		.getByRole("button", { name: "Adicionar à revisão", exact: true })
+		.boundingBox();
+	const diffBounds = await page.locator(".dcc-pr-code-diff").boundingBox();
+	assert(
+		inlineActions.y + inlineActions.height <= diffBounds.y + diffBounds.height,
+		"inline actions remain visible above the bottom edge",
+	);
+	assert(
+		inlineBox.x >= 0 && inlineBox.x + inlineBox.width <= 360,
+		"inline annotation fits the visible diff width",
+	);
+	await shot("pr-inline-annotation");
+	await inlineCard
+		.getByRole("button", { name: "Adicionar à revisão", exact: true })
+		.click();
+	await page
+		.locator(".dcc-code-inline-thread[data-draft]")
+		.getByText("Verificar o comportamento desta linha.", { exact: true })
+		.waitFor();
+	assert.equal(await page.locator(".dcc-pr-review-footer").isVisible(), true);
+	await button("Remover comentário pendente").click();
+	assert.equal(
+		await page.locator(".dcc-code-inline-thread[data-draft]").count(),
+		0,
+	);
+	await page.locator(".dcc-code-line-plus").first().focus();
+	await page.keyboard.press("Enter");
+	await inlineCard.locator("textarea").press("Escape");
+	assert.equal(await inlineCard.count(), 0);
+
 	assert.equal(
 		await page
 			.locator(".dcc-pr-review-footer")
@@ -149,7 +192,7 @@ try {
 		"no mutation IPC",
 	);
 	console.log(
-		"PASS: review scopes, diffs, empty states, branches, PR filters/search/code, keyboard/focus, themes, compact layout, reduced motion. Screenshots: " +
+		"PASS: review scopes, diffs, empty states, branches, PR filters/search/code and inline drafts, keyboard/focus, themes, compact layout, reduced motion. Screenshots: " +
 			output,
 	);
 } catch (error) {
