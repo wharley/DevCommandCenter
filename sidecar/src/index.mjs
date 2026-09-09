@@ -26,7 +26,7 @@ import { finishTurn } from "./turn-lifecycle.mjs";
 import { waitForPendingResponse } from "./pending-response.mjs";
 import { claudeCommand, resolveClaudeExecutable } from "./claude-executable.mjs";
 
-const SIDECAR_VERSION = "0.1.68";
+const SIDECAR_VERSION = "0.1.69";
 
 function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);
