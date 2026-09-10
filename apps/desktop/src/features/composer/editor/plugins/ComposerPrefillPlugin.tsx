@@ -3,12 +3,10 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import { appendComposerText, setEditorText } from "../../editorOps";
 import { shouldApplyComposerPrefill } from "../../WorkspaceComposer.logic";
 
-type ComposerPrefill = {
-	requestId: string;
-	text: string;
-	nonce: number;
-	mode?: "append" | "replace";
-};
+import type {
+	ComposerPrefill,
+	ComposerPrefillConsumption,
+} from "../../use-composer-prefill";
 
 /**
  * Applies an external draft injection from inside Lexical's lifecycle.
@@ -22,7 +20,7 @@ export function ComposerPrefillPlugin({
 	onApplied,
 }: {
 	prefill?: ComposerPrefill | null;
-	onApplied?: (prefill: Pick<ComposerPrefill, "text" | "nonce">) => void;
+	onApplied?: (prefill: ComposerPrefillConsumption) => void;
 }) {
 	const [editor] = useLexicalComposerContext();
 	const lastAppliedRequestIdRef = useRef<string | null>(null);

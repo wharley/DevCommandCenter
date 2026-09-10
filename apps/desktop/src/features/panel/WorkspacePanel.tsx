@@ -132,17 +132,11 @@ import {
 	resolveSecondarySurfaceRestoration,
 	shouldRenderGitDiffSurface,
 } from "./secondary-surface-layout";
-
-/** Composer draft injection request with an identity unique across input sources. */
-type ComposerPrefill = {
-	requestId: string;
-	text: string;
-	nonce: number;
-	mode?: "append" | "replace";
-};
-
-type ComposerPrefillConsumption = Pick<ComposerPrefill, "text" | "nonce">;
-type ExternalComposerPrefill = Omit<ComposerPrefill, "requestId">;
+import {
+	useComposerPrefill,
+	type ComposerPrefillConsumption,
+	type ExternalComposerPrefill,
+} from "@/features/composer/use-composer-prefill";
 
 type InspectorPendingAnnotation = {
 	pending: PendingAnnotation;
@@ -409,9 +403,13 @@ export function WorkspacePanel({
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, []);
-	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(
-		null,
-	);
+	const { composerPrefill, setComposerPrefill, handleComposerPrefillApplied } =
+		useComposerPrefill({
+			workspaceId,
+			selectedSessionId,
+			externalComposerPrefill,
+			onExternalComposerPrefillConsumed,
+		});
 	const composerPrefillRequestSequenceRef = useRef(0);
 	const [inspectorPendingAnnotation, setInspectorPendingAnnotation] =
 		useState<InspectorPendingAnnotation | null>(null);
@@ -467,41 +465,11 @@ export function WorkspacePanel({
 	// transient UI state so a plan delegation from the previous workspace cannot
 	// be offered or submitted from the newly selected one.
 	useEffect(() => {
-		setComposerPrefill(null);
 		setIsApprovingPlan(false);
 		planHandoffInFlightRef.current = false;
 		setSecondarySurfaceWidth(readSecondarySurfaceWidth(workspaceId));
 		restoredSecondarySurfaceWorkspaceRef.current = null;
 	}, [workspaceId]);
-
-	useEffect(() => {
-		// An external prefill belongs to the exact workspace/session that produced
-		// it; never carry it into another conversation.
-		setComposerPrefill(null);
-	}, [selectedSessionId, workspaceId]);
-
-	useEffect(() => {
-		if (externalComposerPrefill) {
-			setComposerPrefill((current) => {
-				const requestId = `external:${externalComposerPrefill.nonce}`;
-				return current?.requestId === requestId
-					? current
-					: { ...externalComposerPrefill, requestId };
-			});
-		}
-	}, [externalComposerPrefill]);
-
-	const handleComposerPrefillApplied = useCallback(
-		(applied: ComposerPrefillConsumption) => {
-			if (
-			externalComposerPrefill?.nonce === applied.nonce &&
-			externalComposerPrefill.text === applied.text
-			) {
-				onExternalComposerPrefillConsumed?.(applied);
-			}
-		},
-		[externalComposerPrefill, onExternalComposerPrefillConsumed],
-	);
 
 	const updateSecondarySurfaceWidth = useCallback(
 		(nextWidth: number, persist = false) => {

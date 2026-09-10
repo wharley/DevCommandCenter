@@ -88,6 +88,7 @@ import { $createImageBadgeNode, ImageBadgeNode } from "./editor/image-badge-node
 import { PastedSnippetBadgeNode } from "./editor/pasted-snippet-badge-node";
 import { $appendNodesToComposerEnd } from "./editor/append-to-end";
 import { AutoResizePlugin } from "./editor/plugins/AutoResizePlugin";
+import type { ComposerPrefill, ComposerPrefillConsumption } from "./use-composer-prefill";
 import { ComposerPrefillPlugin } from "./editor/plugins/ComposerPrefillPlugin";
 import { DraftPersistencePlugin } from "./editor/plugins/DraftPersistencePlugin";
 import { EditorRefPlugin } from "./editor/plugins/EditorRefPlugin";
@@ -142,13 +143,8 @@ type WorkspaceComposerProps = {
 	turnQueueEventKey: string | null;
 	pendingPrompt: string | null;
 	/** External draft injection; annotations append and recovery actions replace. */
-	prefill?: {
-		requestId: string;
-		text: string;
-		nonce: number;
-		mode?: "append" | "replace";
-	} | null;
-	onPrefillApplied?: (prefill: { text: string; nonce: number }) => void;
+	prefill?: ComposerPrefill | null;
+	onPrefillApplied?: (prefill: ComposerPrefillConsumption) => void;
 	focusRequestKey?: number | null;
 	/** Evidence-first debugging tray; the person reviews what travels with the next message. */
 	debugEvidence?: DebugEvidenceController | null;
