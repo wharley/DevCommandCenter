@@ -1260,7 +1260,8 @@ pub struct CursorBridgeProvider {
     legacy: CursorProvider,
     acp: CursorAcpAdapter,
     capabilities: Capabilities,
-    mcp_projection_version: Option<&'static str>,
+    mcp_projection_version: Arc<RwLock<Option<&'static str>>>,
+    metadata_refresh: Arc<Mutex<()>>,
     routes: Arc<RwLock<HashMap<String, CursorRoute>>>,
 }
 
@@ -1289,7 +1290,8 @@ impl CursorBridgeProvider {
             legacy,
             acp: CursorAcpAdapter::new(binary, capabilities.clone()),
             capabilities,
-            mcp_projection_version,
+            mcp_projection_version: Arc::new(RwLock::new(mcp_projection_version)),
+            metadata_refresh: Arc::new(Mutex::new(())),
             routes: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -1313,15 +1315,36 @@ impl Provider for CursorBridgeProvider {
         self.capabilities.clone()
     }
 
-    fn dcc_mcp_projection_version(&self) -> Option<&str> {
+    fn dcc_mcp_projection_version(&self) -> Option<String> {
         self.mcp_projection_version
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(str::to_string)
+    }
+
+    async fn refresh_runtime_metadata(&self) -> Result<()> {
+        let _refresh = self.metadata_refresh.lock().await;
+        let output = crate::common::cli_metadata_output(&self.acp.binary, &["--version"]).await;
+        *self
+            .mcp_projection_version
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = output
+            .as_deref()
+            .and_then(crate::cursor_mcp::projection_version_for_cursor_output);
+        Ok(())
+    }
+
+    async fn session_mcp_projection_version(&self, handle: &SessionHandle) -> Option<String> {
+        (self.route(&handle.session_id) == Some(CursorRoute::Acp))
+            .then(|| CURSOR_MCP_RUNTIME_VERSION.to_string())
     }
 
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
+        self.refresh_runtime_metadata().await?;
         let route = if cfg.mcp_servers.is_empty() {
             CursorRoute::Legacy
         } else {
-            if self.mcp_projection_version != Some(CURSOR_MCP_RUNTIME_VERSION) {
+            if self.dcc_mcp_projection_version().as_deref() != Some(CURSOR_MCP_RUNTIME_VERSION) {
                 return Err(CoreError::Provider(
                     "Cursor MCP requires the audited Cursor ACP runtime".to_string(),
                 ));
@@ -1547,7 +1570,7 @@ mod tests {
             legacy.clone(),
             None,
         );
-        assert_eq!(unsupported.dcc_mcp_projection_version(), None);
+        assert_eq!(unsupported.dcc_mcp_projection_version().as_deref(), None);
         let supported = CursorBridgeProvider::with_projection_version(
             "cursor-agent".to_string(),
             capabilities,
@@ -1555,7 +1578,36 @@ mod tests {
             Some(CURSOR_MCP_RUNTIME_VERSION),
         );
         assert_eq!(
-            supported.dcc_mcp_projection_version(),
+            supported.dcc_mcp_projection_version().as_deref(),
+            Some(CURSOR_MCP_RUNTIME_VERSION)
+        );
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cli_metadata_refresh_invalidates_and_recovers_the_cursor_projection() {
+        let cli = crate::test_cli::TestCli::new(crate::cursor_mcp::SUPPORTED_CURSOR_CLI_VERSION);
+        let provider = CursorBridgeProvider::with_projection_version(
+            cli.binary.clone(),
+            crate::common::stable_cli_capabilities(),
+            CursorProvider::new(
+                "cursor",
+                cli.binary.clone(),
+                crate::common::stable_cli_capabilities(),
+            ),
+            None,
+        );
+        provider.refresh_runtime_metadata().await.unwrap();
+        assert_eq!(
+            provider.dcc_mcp_projection_version().as_deref(),
+            Some(CURSOR_MCP_RUNTIME_VERSION)
+        );
+        cli.write("version", "2026.09.10-unknown");
+        provider.refresh_runtime_metadata().await.unwrap();
+        assert_eq!(provider.dcc_mcp_projection_version(), None);
+        cli.write("version", crate::cursor_mcp::SUPPORTED_CURSOR_CLI_VERSION);
+        provider.refresh_runtime_metadata().await.unwrap();
+        assert_eq!(
+            provider.dcc_mcp_projection_version().as_deref(),
             Some(CURSOR_MCP_RUNTIME_VERSION)
         );
     }

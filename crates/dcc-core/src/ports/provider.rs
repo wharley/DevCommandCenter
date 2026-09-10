@@ -262,8 +262,17 @@ pub trait Provider: Send + Sync {
     /// `None` means this adapter must receive no DCC projection. A version is
     /// an internal wiring contract, not conformance evidence or a
     /// renderer-facing compatibility claim.
-    fn dcc_mcp_projection_version(&self) -> Option<&str> {
+    fn dcc_mcp_projection_version(&self) -> Option<String> {
         None
+    }
+    /// Refresh installed CLI metadata before resolving a new session's MCP
+    /// projection. Existing processes retain their negotiated runtime identity.
+    async fn refresh_runtime_metadata(&self) -> Result<()> {
+        Ok(())
+    }
+    /// The running session may use an older CLI than newly created sessions.
+    async fn session_mcp_projection_version(&self, _handle: &SessionHandle) -> Option<String> {
+        self.dcc_mcp_projection_version()
     }
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
     async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;

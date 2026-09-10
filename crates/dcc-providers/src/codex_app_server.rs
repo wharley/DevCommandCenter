@@ -186,6 +186,34 @@ fn detect_codex_mcp_projection() -> Option<CodexMcpProjection> {
     CodexMcpProjection::from_cli_output(str::from_utf8(&output.stdout).ok()?)
 }
 
+#[derive(Clone, Debug)]
+struct CodexRuntimeMetadata {
+    mcp_projection: Option<CodexMcpProjection>,
+    multi_agent_v2_supported: bool,
+}
+
+impl CodexRuntimeMetadata {
+    fn require_version(&self) -> Result<()> {
+        self.mcp_projection.as_ref().map(|_| ()).ok_or_else(|| {
+            CoreError::Provider(
+                "Could not detect the installed Codex CLI version. If Codex is updating, wait for the update to finish and try again.".to_string(),
+            )
+        })
+    }
+}
+
+#[derive(Debug)]
+enum CodexStartError {
+    VersionChanged(CoreError),
+    Other(CoreError),
+}
+
+impl From<CoreError> for CodexStartError {
+    fn from(error: CoreError) -> Self {
+        Self::Other(error)
+    }
+}
+
 fn codex_feature_list_contains(output: &str, feature: &str) -> bool {
     output.lines().any(|line| {
         line.split_ascii_whitespace()
@@ -1500,6 +1528,7 @@ struct SessionRuntime {
     handle: SessionHandle,
     model: Option<String>,
     mcp_provider_version: Option<String>,
+    multi_agent_v2_supported: bool,
     stdin: Mutex<ChildStdin>,
     child: Mutex<Child>,
     thread_id: Mutex<Option<String>>,
@@ -2071,6 +2100,18 @@ struct AdapterState {
     sessions: Mutex<HashMap<String, Arc<SessionRuntime>>>,
 }
 
+impl AdapterState {
+    async fn remove_runtime(&self, session_key: &str, runtime: &Arc<SessionRuntime>) {
+        let mut sessions = self.sessions.lock().await;
+        if sessions
+            .get(session_key)
+            .is_some_and(|current| Arc::ptr_eq(current, runtime))
+        {
+            sessions.remove(session_key);
+        }
+    }
+}
+
 // ── Public adapter ──────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -2080,8 +2121,9 @@ pub struct CodexAppServerAdapter {
     pub description: String,
     pub capabilities: Capabilities,
     pub stable: bool,
-    mcp_projection: Option<CodexMcpProjection>,
-    multi_agent_v2_supported: bool,
+    binary: String,
+    runtime_metadata: Arc<StdRwLock<CodexRuntimeMetadata>>,
+    metadata_refresh: Arc<Mutex<()>>,
     state: Arc<AdapterState>,
 }
 
@@ -2107,8 +2149,12 @@ impl CodexAppServerAdapter {
             description: "OpenAI Codex provider via app-server protocol.".to_string(),
             capabilities,
             stable: true,
-            mcp_projection,
-            multi_agent_v2_supported,
+            binary: "codex".to_string(),
+            runtime_metadata: Arc::new(StdRwLock::new(CodexRuntimeMetadata {
+                mcp_projection,
+                multi_agent_v2_supported,
+            })),
+            metadata_refresh: Arc::new(Mutex::new(())),
             state: Arc::new(AdapterState::default()),
         }
     }
@@ -2117,14 +2163,62 @@ impl CodexAppServerAdapter {
         self.state.sessions.lock().await.get(&id.0).cloned()
     }
 
+    fn runtime_metadata(&self) -> CodexRuntimeMetadata {
+        self.runtime_metadata
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    async fn detect_runtime_metadata(&self) -> CodexRuntimeMetadata {
+        let _refresh = self.metadata_refresh.lock().await;
+        let (version, features) = tokio::join!(
+            crate::common::cli_metadata_output(&self.binary, &["--version"]),
+            crate::common::cli_metadata_output(&self.binary, &["features", "list"]),
+        );
+        let metadata = CodexRuntimeMetadata {
+            mcp_projection: version
+                .as_deref()
+                .and_then(CodexMcpProjection::from_cli_output),
+            multi_agent_v2_supported: features.as_deref().is_some_and(|output| {
+                codex_feature_list_contains(output, CODEX_MULTI_AGENT_V2_FEATURE)
+            }),
+        };
+        *self
+            .runtime_metadata
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = metadata.clone();
+        metadata
+    }
+
     async fn start_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
-        let mut cmd = Command::new("codex");
+        for attempt in 0..2 {
+            let metadata = self.detect_runtime_metadata().await;
+            metadata.require_version()?;
+            match self.start_runtime_attempt(&cfg, &metadata).await {
+                Ok(handle) => return Ok(handle),
+                Err(CodexStartError::VersionChanged(_)) if attempt == 0 => continue,
+                Err(CodexStartError::VersionChanged(error)) => return Err(CoreError::Provider(
+                    format!("Codex changed versions while connecting, even after an automatic retry. Wait for the CLI update to finish and try again. ({error})"),
+                )),
+                Err(CodexStartError::Other(error)) => return Err(error),
+            }
+        }
+        unreachable!("the final connection attempt always returns")
+    }
+
+    async fn start_runtime_attempt(
+        &self,
+        cfg: &SessionConfig,
+        metadata: &CodexRuntimeMetadata,
+    ) -> std::result::Result<SessionHandle, CodexStartError> {
+        let mut cmd = Command::new(&self.binary);
         let max_concurrent_subagents = cfg
             .provider_runtime
             .as_ref()
             .and_then(|runtime| runtime.max_concurrent_subagents);
         cmd.args(codex_app_server_args(
-            self.multi_agent_v2_supported,
+            metadata.multi_agent_v2_supported,
             max_concurrent_subagents,
         )?);
         cmd.stdin(Stdio::piped());
@@ -2177,7 +2271,8 @@ impl CodexAppServerAdapter {
         let runtime = Arc::new(SessionRuntime {
             handle: handle.clone(),
             model: cfg.model.clone(),
-            mcp_provider_version: self
+            multi_agent_v2_supported: metadata.multi_agent_v2_supported,
+            mcp_provider_version: metadata
                 .mcp_projection
                 .as_ref()
                 .map(|projection| projection.runtime_version.clone()),
@@ -2216,8 +2311,8 @@ impl CodexAppServerAdapter {
         );
 
         // Handshake + thread/start
-        if let Err(e) = Self::handshake(&runtime, &cfg, self.mcp_projection.as_ref()).await {
-            self.state.sessions.lock().await.remove(&session_key);
+        if let Err(e) = Self::handshake(&runtime, cfg, metadata.mcp_projection.as_ref()).await {
+            self.state.remove_runtime(&session_key, &runtime).await;
             let _ = runtime.child.lock().await.start_kill();
             return Err(e);
         }
@@ -2229,13 +2324,23 @@ impl CodexAppServerAdapter {
         runtime: &Arc<SessionRuntime>,
         cfg: &SessionConfig,
         mcp_projection: Option<&CodexMcpProjection>,
-    ) -> Result<()> {
+    ) -> std::result::Result<(), CodexStartError> {
         // initialize
         let initialize_result = runtime
             .send_request("initialize", initialize_params(true))
             .await?;
         if !cfg.mcp_servers.is_empty() {
-            validate_codex_mcp_projection(mcp_projection, &initialize_result)?;
+            validate_codex_mcp_projection(mcp_projection, &initialize_result).map_err(|error| {
+                // Retry only a proven version change, before thread/start or
+                // any user input. Malformed handshakes still fail closed.
+                if mcp_projection.is_some()
+                    && initialize_result_codex_version(&initialize_result).is_some()
+                {
+                    CodexStartError::VersionChanged(error)
+                } else {
+                    CodexStartError::Other(error)
+                }
+            })?;
         }
 
         // initialized notification (no response expected)
@@ -2619,7 +2724,7 @@ impl CodexAppServerAdapter {
             }
 
             let _ = stderr_task.await;
-            state.sessions.lock().await.remove(&session_key);
+            state.remove_runtime(&session_key, &runtime).await;
         });
     }
 }
@@ -2692,13 +2797,29 @@ impl Provider for CodexAppServerAdapter {
     }
 
     fn capabilities(&self) -> Capabilities {
-        self.capabilities.clone()
+        let mut capabilities = self.capabilities.clone();
+        let supported = self.runtime_metadata().multi_agent_v2_supported;
+        capabilities.supports_native_subagent_steering = supported;
+        capabilities.supports_native_subagent_interrupt = supported;
+        capabilities
     }
 
-    fn dcc_mcp_projection_version(&self) -> Option<&str> {
-        self.mcp_projection
-            .as_ref()
-            .map(|projection| projection.runtime_version.as_str())
+    fn dcc_mcp_projection_version(&self) -> Option<String> {
+        self.runtime_metadata()
+            .mcp_projection
+            .map(|projection| projection.runtime_version)
+    }
+
+    async fn refresh_runtime_metadata(&self) -> Result<()> {
+        // Never silently omit configured MCP servers after a failed probe.
+        self.detect_runtime_metadata().await.require_version()
+    }
+
+    async fn session_mcp_projection_version(&self, handle: &SessionHandle) -> Option<String> {
+        self.session_runtime(&handle.session_id)
+            .await
+            .filter(|runtime| runtime.handle.handle_id == handle.handle_id)
+            .and_then(|runtime| runtime.mcp_provider_version.clone())
     }
 
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
@@ -2839,11 +2960,6 @@ impl Provider for CodexAppServerAdapter {
         agent_thread_id: &str,
         prompt: &str,
     ) -> Result<()> {
-        if !self.multi_agent_v2_supported {
-            return Err(CoreError::Provider(
-                "The installed Codex does not support native subagent supervision".to_string(),
-            ));
-        }
         let prompt = prompt.trim();
         if prompt.is_empty() || prompt.chars().count() > 32_000 {
             return Err(CoreError::InvalidInput(
@@ -2860,6 +2976,11 @@ impl Provider for CodexAppServerAdapter {
                     handle.session_id.0
                 ))
             })?;
+        if !runtime.multi_agent_v2_supported {
+            return Err(CoreError::Provider(
+                "The installed Codex does not support native subagent supervision".to_string(),
+            ));
+        }
         let target = agent_thread_id.trim();
         let _child_turn_id = runtime.active_native_subagent_turn(target).await?;
         let root_thread_id = runtime
@@ -2896,11 +3017,6 @@ impl Provider for CodexAppServerAdapter {
         handle: &SessionHandle,
         agent_thread_id: &str,
     ) -> Result<()> {
-        if !self.multi_agent_v2_supported {
-            return Err(CoreError::Provider(
-                "The installed Codex does not support native subagent supervision".to_string(),
-            ));
-        }
         let runtime = self
             .session_runtime(&handle.session_id)
             .await
@@ -2910,6 +3026,11 @@ impl Provider for CodexAppServerAdapter {
                     handle.session_id.0
                 ))
             })?;
+        if !runtime.multi_agent_v2_supported {
+            return Err(CoreError::Provider(
+                "The installed Codex does not support native subagent supervision".to_string(),
+            ));
+        }
         let target = agent_thread_id.trim();
         let _child_turn_id = runtime.active_native_subagent_turn(target).await?;
         let root_thread_id = runtime
@@ -3125,10 +3246,10 @@ mod tests {
             true,
         );
         assert_eq!(
-            adapter.dcc_mcp_projection_version(),
+            adapter.dcc_mcp_projection_version().as_deref(),
             Some("codex-cli@0.146.0+app-server-protocol-v2")
         );
-        assert!(adapter.multi_agent_v2_supported);
+        assert!(adapter.runtime_metadata().multi_agent_v2_supported);
         assert!(adapter.capabilities.supports_native_subagent_steering);
         assert!(adapter.capabilities.supports_native_subagent_interrupt);
 
@@ -4307,3 +4428,7 @@ unified_exec                         stable             true
         writer_task.abort();
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "codex_runtime_update_tests.rs"]
+mod runtime_update_tests;

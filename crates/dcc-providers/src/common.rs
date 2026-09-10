@@ -33,6 +33,24 @@ use dcc_core::{
     CoreError, Result,
 };
 
+/// CLI metadata must not block the async executor or leave a hung child behind.
+pub(crate) async fn cli_metadata_output(binary: &str, args: &[&str]) -> Option<String> {
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .env("PATH", augmented_path())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(5), command.output())
+        .await
+        .ok()?
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8(output.stdout).ok())
+        .flatten()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ProviderEnvelope {

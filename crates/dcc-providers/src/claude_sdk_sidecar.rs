@@ -757,8 +757,8 @@ impl Provider for ClaudeSdkSidecarAdapter {
         self.capabilities.clone()
     }
 
-    fn dcc_mcp_projection_version(&self) -> Option<&str> {
-        Some(CLAUDE_MCP_RUNTIME_VERSION)
+    fn dcc_mcp_projection_version(&self) -> Option<String> {
+        Some(CLAUDE_MCP_RUNTIME_VERSION.to_string())
     }
 
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {

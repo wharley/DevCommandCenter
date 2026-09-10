@@ -3293,9 +3293,10 @@ impl SessionCommandState {
             .await?;
         let provider_runtime =
             self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
-        let mcp_projection_version = provider.dcc_mcp_projection_version().map(str::to_string);
+        provider.refresh_runtime_metadata().await?;
+        let mcp_projection_version = provider.dcc_mcp_projection_version();
         let mut mcp_servers = self
-            .resolve_provider_mcp_servers(session, provider.as_ref())
+            .resolve_provider_mcp_servers(session, mcp_projection_version.as_deref())
             .await?;
         let projected_definition_ids = mcp_servers
             .iter()
@@ -3373,6 +3374,9 @@ impl SessionCommandState {
             }
         };
 
+        // Preparation can retry after a CLI update. Use the version of the
+        // process that actually connected for every status in this binding.
+        let mcp_projection_version = provider.session_mcp_projection_version(&handle).await;
         let binding = ProviderSessionBinding {
             provider_id: session.provider_id.clone(),
             handle: handle.clone(),
@@ -3455,7 +3459,7 @@ impl SessionCommandState {
             };
         }
 
-        if let Some(provider_version) = mcp_projection_version {
+        if let Some(provider_version) = mcp_projection_version.as_ref() {
             let checked_at = Utc::now().to_rfc3339();
             let statuses = projected_definition_ids
                 .into_iter()
@@ -3480,8 +3484,13 @@ impl SessionCommandState {
                 .await;
         }
 
-        self.spawn_provider_bridge(session.id.clone(), binding, provider)
-            .await;
+        self.spawn_provider_bridge(
+            session.id.clone(),
+            binding,
+            provider,
+            mcp_projection_version,
+        )
+        .await;
         Ok(())
     }
 
@@ -3986,12 +3995,12 @@ impl SessionCommandState {
     async fn resolve_provider_mcp_servers(
         &self,
         session: &Session,
-        provider: &dyn Provider,
+        projection_version: Option<&str>,
     ) -> Result<Vec<ProviderMcpServerConfig>> {
         // Only adapters with an explicit DCC projection path may receive
         // registry definitions. Native provider configuration remains
         // independent for every other provider.
-        if provider.dcc_mcp_projection_version().is_none() {
+        if projection_version.is_none() {
             return Ok(Vec::new());
         }
 
@@ -4487,6 +4496,7 @@ impl SessionCommandState {
         session_id: SessionId,
         binding: ProviderSessionBinding,
         provider: Arc<dyn Provider>,
+        mcp_projection_version: Option<String>,
     ) {
         let state = self.clone();
         tokio::spawn(async move {
@@ -4496,7 +4506,7 @@ impl SessionCommandState {
                 match event {
                     Ok(ProviderEvent::Started { .. }) => {}
                     Ok(ProviderEvent::McpRuntimeStatusSnapshot { statuses }) => {
-                        if let Some(provider_version) = provider.dcc_mcp_projection_version() {
+                        if let Some(provider_version) = mcp_projection_version.as_deref() {
                             let _ = state
                                 .replace_mcp_runtime_statuses(
                                     &session_id,
@@ -4517,7 +4527,7 @@ impl SessionCommandState {
                             .await
                             .is_err()
                         {
-                            if let Some(provider_version) = provider.dcc_mcp_projection_version() {
+                            if let Some(provider_version) = mcp_projection_version.as_deref() {
                                 let mut statuses = state
                                     .lock_store()
                                     .ok()

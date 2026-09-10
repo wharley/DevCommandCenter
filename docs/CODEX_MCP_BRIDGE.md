@@ -21,6 +21,19 @@ actual contract through `thread/start.params.config.mcp_servers` and
 a missing field, rejected request, malformed status, or lost permission
 correlation fails closed.
 
+DCC refreshes CLI metadata when refreshing the provider catalog, before
+resolving a new session's MCP definitions, and before launching an app-server.
+Updating Codex while DCC is open therefore does not require restarting DCC.
+If the executable changes between the version probe and initialization, DCC
+disposes of that process and retries once with fresh metadata, before creating
+a thread or sending user input. A repeated mismatch produces an actionable
+error; other handshake and thread failures are not retried.
+
+Each running session retains its own runtime version and launch feature
+snapshot. MCP status validation uses that session's negotiated version rather
+than the latest installed CLI. New metadata probes are asynchronous, have a
+five-second deadline, and terminate the probe process on timeout.
+
 For interactive sessions, DCC also probes `codex features list`. When the
 installed CLI advertises `multi_agent_v2`, DCC enables that feature only for
 the child `codex app-server` process. It does not edit the user's `config.toml`.

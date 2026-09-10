@@ -25,6 +25,8 @@ pub mod grok_acp;
 #[allow(dead_code)]
 mod grok_mcp;
 pub mod headless_cli;
+#[cfg(all(test, unix))]
+mod test_cli;
 
 use std::{
     collections::HashMap,
@@ -223,7 +225,10 @@ async fn provider_health_statuses() -> Vec<HealthStatus> {
     let futures = PROVIDER_IDS
         .into_iter()
         .filter_map(|provider_id| providers.get(provider_id).cloned())
-        .map(|provider| async move { provider.healthcheck().await });
+        .map(|provider| async move {
+            provider.refresh_runtime_metadata().await?;
+            provider.healthcheck().await
+        });
     let results = join_all(futures).await;
     results
         .into_iter()
@@ -254,7 +259,7 @@ fn project_catalog_capabilities(registration: &ProviderRegistration) -> Capabili
     let mut capabilities = registration.capabilities.clone();
     expose_runtime_mcp_bridge(
         &mut capabilities,
-        registration.runtime.dcc_mcp_projection_version(),
+        registration.runtime.dcc_mcp_projection_version().as_deref(),
     );
     capabilities
 }
@@ -356,7 +361,7 @@ mod tests {
             let mut expected = registration.capabilities.clone();
             expose_runtime_mcp_bridge(
                 &mut expected,
-                registration.runtime.dcc_mcp_projection_version(),
+                registration.runtime.dcc_mcp_projection_version().as_deref(),
             );
             assert_eq!(
                 serde_json::to_value(project_catalog_capabilities(&registration))
@@ -420,7 +425,8 @@ mod tests {
         assert_eq!(
             provider_runtime("claude_code")
                 .expect("Claude provider")
-                .dcc_mcp_projection_version(),
+                .dcc_mcp_projection_version()
+                .as_deref(),
             Some("claude-agent-sdk@0.2.126+claude-code@external")
         );
         assert!(matches!(
@@ -432,7 +438,8 @@ mod tests {
         assert!(matches!(
             provider_runtime("cursor")
                 .expect("Cursor provider")
-                .dcc_mcp_projection_version(),
+                .dcc_mcp_projection_version()
+                .as_deref(),
             None | Some(CURSOR_MCP_RUNTIME_VERSION)
         ));
         for provider_id in PROVIDER_IDS

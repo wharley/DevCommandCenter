@@ -63,6 +63,13 @@ An upgrade or downgrade does not inherit compatibility. The new exact version
 must be audited and must pass conformance before DCC can activate its
 projection.
 
+DCC refreshes the installed version when refreshing the provider catalog,
+before resolving a new session's MCP definitions, and before preparing its
+runtime. CLI upgrades and downgrades no longer retain a stale projection gate
+until DCC restarts. This refresh preserves the exact-version audit requirement;
+it does not grant an unknown version compatibility. Existing ACP sessions keep
+their negotiated MCP identity even after the installed CLI changes.
+
 ## Production routing and permission boundary
 
 At provider construction, DCC executes only `cursor-agent --version`. The
