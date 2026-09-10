@@ -3664,6 +3664,7 @@
     "retry": "Tentar novamente",
     "createTask": "Criar tarefa",
     "useHere": "Adicionar à conversa atual",
+    "useRequiresProjectTask": "Para adicionar à conversa, selecione uma tarefa do projeto {{project}} ou crie uma tarefa a partir desta anotação.",
     "complete": "Marcar como concluída",
     "reopen": "Reabrir anotação",
     "delete": "Excluir",

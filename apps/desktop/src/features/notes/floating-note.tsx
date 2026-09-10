@@ -19,6 +19,7 @@ import {
 import {
 	useCallback,
 	useEffect,
+	useId,
 	useRef,
 	useState,
 	type CSSProperties,
@@ -52,18 +53,21 @@ function IconAction({
 	onClick,
 	active = false,
 	disabled = false,
+	describedBy,
 }: {
 	label: string;
 	children: ReactNode;
 	onClick: () => void;
 	active?: boolean;
 	disabled?: boolean;
+	describedBy?: string;
 }) {
 	return (
 		<button
 			type="button"
 			title={label}
 			aria-label={label}
+			aria-describedby={describedBy}
 			aria-pressed={active || undefined}
 			disabled={disabled}
 			onClick={onClick}
@@ -84,7 +88,7 @@ export function FloatingNote({
 	onUse,
 	onTask,
 	onDelete,
-	canUse,
+	useDisabledReason,
 }: {
 	note: ProjectNote;
 	position: FloatingState;
@@ -95,9 +99,10 @@ export function FloatingNote({
 	onUse: () => void;
 	onTask: () => Promise<void>;
 	onDelete: () => void;
-	canUse: boolean;
+	useDisabledReason: string | null;
 }) {
 	const { t } = useTranslation("common");
+	const useDisabledReasonId = useId();
 	const reduced = useReducedMotion();
 	const ref = useRef<HTMLDivElement>(null);
 	const drag = useRef<{
@@ -355,6 +360,11 @@ export function FloatingNote({
 							</>
 						)}
 					</div>
+					{useDisabledReason && (
+						<p id={useDisabledReasonId} className="note-use-hint">
+							{useDisabledReason}
+						</p>
+					)}
 					<div className="note-balloon-actions">
 						<button
 							type="button"
@@ -369,7 +379,8 @@ export function FloatingNote({
 						</button>
 						<IconAction
 							label={t("notes.useHere")}
-							disabled={!canUse || busy}
+							disabled={Boolean(useDisabledReason) || busy}
+							describedBy={useDisabledReason ? useDisabledReasonId : undefined}
 							onClick={() => {
 								void perform(async () => onUse());
 							}}

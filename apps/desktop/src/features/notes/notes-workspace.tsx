@@ -344,6 +344,16 @@ export function NotesWorkspace({
 								controller={controller}
 								onUse={() => {
 									if (
+										!scopeRef.current?.workspaceId ||
+										scopeRef.current.projectId !== note.projectId
+									) {
+										toast.info(t("notes.useRequiresProjectTask", {
+											project: note.projectName,
+										}));
+										return;
+									}
+									if (
+										scopeRef.current.projectId !== scope?.projectId ||
 										scopeRef.current?.workspaceId !== scope?.workspaceId ||
 										scopeRef.current?.sessionId !== scope?.sessionId
 									) {
@@ -355,7 +365,13 @@ export function NotesWorkspace({
 								}}
 								onTask={() => newTask(note)}
 								onDelete={() => setDeleteIds([note.id])}
-								canUse={Boolean(scope?.workspaceId)}
+								useDisabledReason={
+									scope?.workspaceId && scope.projectId === note.projectId
+										? null
+										: t("notes.useRequiresProjectTask", {
+												project: note.projectName,
+											})
+								}
 							/>
 						))}
 			</AnimatePresence>

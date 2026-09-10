@@ -3664,6 +3664,7 @@
     "retry": "Try again",
     "createTask": "Create task",
     "useHere": "Add to current conversation",
+    "useRequiresProjectTask": "To add to a conversation, select a task in {{project}} or create a task from this note.",
     "complete": "Mark complete",
     "reopen": "Reopen note",
     "delete": "Delete",

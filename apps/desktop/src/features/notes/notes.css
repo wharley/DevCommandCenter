@@ -245,6 +245,12 @@
 	text-decoration: underline;
 	cursor: pointer;
 }
+.note-use-hint {
+	margin: 0 0 10px;
+	font-size: 11px;
+	line-height: 1.5;
+	color: var(--muted-foreground);
+}
 .note-balloon-actions {
 	display: flex;
 	align-items: center;

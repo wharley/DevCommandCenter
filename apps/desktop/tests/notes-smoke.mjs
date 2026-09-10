@@ -96,6 +96,25 @@ try {
 		.getByRole("heading", { name: "Uma busca que entende o contexto" })
 		.click();
 	await page.getByLabel("Texto da anotação").waitFor();
+	assert.equal(
+		await page
+			.getByRole("button", { name: "Adicionar à conversa atual" })
+			.isDisabled(),
+		true,
+		"a note from another project cannot enter the current composer",
+	);
+	await page
+		.getByText(
+			"Para adicionar à conversa, selecione uma tarefa do projeto Orbit ou crie uma tarefa a partir desta anotação.",
+			{ exact: true },
+		)
+		.waitFor();
+	assert.equal(await page.getByLabel("Composer de teste").inputValue(), "");
+	await page.getByRole("button", { name: "Trocar projeto" }).click();
+	await library();
+	await page
+		.getByRole("heading", { name: "Uma busca que entende o contexto" })
+		.click();
 	await page
 		.getByRole("button", { name: "Adicionar à conversa atual" })
 		.click();
@@ -103,6 +122,13 @@ try {
 		await page.getByLabel("Composer de teste").inputValue(),
 		/Explorar filtros/,
 	);
+	await page.getByLabel("Texto da anotação").waitFor({ state: "hidden" });
+	await page.getByRole("button", { name: "Trocar projeto" }).click();
+	// Switching back restores this task's source note; dismiss it before capture.
+	await page
+		.locator('[data-note-id="note-login"]')
+		.getByRole("button", { name: "Fechar balão e manter anotação salva" })
+		.click();
 	await page.getByLabel("Texto da anotação").waitFor({ state: "hidden" });
 	await page.evaluate(() => {
 		const node = document.querySelector("#capture-text");
