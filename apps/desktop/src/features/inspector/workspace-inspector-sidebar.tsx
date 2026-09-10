@@ -1,3 +1,4 @@
+import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
 import type { TFunction } from "i18next";
@@ -196,6 +197,8 @@ type WorkspaceInspectorSidebarProps = {
 	sessionActivityEvents: CoreEvent[];
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
+	turnReviewRequest?: TurnReviewRequest | null;
+	onCloseTurnReview?: () => void;
 	reviewDelegationRequest?: { delegationId: string; nonce: number } | null;
 	onSelectSession: (sessionId: string) => void;
 	onPrefillComposer?: (text: string) => void;
@@ -1512,6 +1515,8 @@ export function WorkspaceInspectorSidebar({
 	selectedPreview,
 	onSelectPreview,
 	reviewDelegationRequest,
+	turnReviewRequest,
+	onCloseTurnReview,
 	onSelectSession,
 	onPrefillComposer,
 	onOpenMergeConflictResolver,
@@ -3443,6 +3448,8 @@ export function WorkspaceInspectorSidebar({
 							) : null}
 							<div className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border/35">
 								<InspectorChangesSection
+									turnReviewRequest={turnReviewRequest}
+									onCloseTurnReview={onCloseTurnReview}
 									workspaceRoot={changesWorkspaceRoot}
 									workspaceId={workspaceId}
 									sessionId={sessionId}

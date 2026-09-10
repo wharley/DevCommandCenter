@@ -836,6 +836,8 @@ export type InterruptNativeSubagentInput = {
 export type LastTurnReviewInput = {
 	sessionId: string,
 	workspaceId: string,
+	// Pin a historical review instead of following the latest turn.
+	turnId?: string | null,
 };
 
 export type ListChildDirectoriesInput = {

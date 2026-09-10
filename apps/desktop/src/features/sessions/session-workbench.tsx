@@ -1,3 +1,4 @@
+import type { TurnReviewTarget } from "@/features/panel/turn-review-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -222,6 +223,7 @@ type SessionWorkbenchProps = {
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
+	onReviewTurn?: (target: TurnReviewTarget) => void;
 	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
 	/** Opens the inspector and previews an implementation delegation diff. */
 	onReviewDelegation?: (delegationId: string) => void;
@@ -306,6 +308,7 @@ export function SessionWorkbench({
 	onInspectorCollapsedChange,
 	onToggleInspector,
 	onReviewChanges,
+	onReviewTurn,
 	onCompleteWorkspace,
 	onReviewDelegation,
 	onRerunDelegation,
@@ -1179,6 +1182,7 @@ export function SessionWorkbench({
 						inspectorCollapsed={inspectorCollapsed}
 						onToggleInspector={onToggleInspector}
 						onReviewChanges={onReviewChanges}
+						onReviewTurn={onReviewTurn}
 						onCompleteWorkspace={onCompleteWorkspace}
 						onOpenMultiProjectDelivery={handleOpenDelivery}
 						onReviewDelegation={onReviewDelegation}

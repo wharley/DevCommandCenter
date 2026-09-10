@@ -1,3 +1,5 @@
+import { TurnReviewTimelineCard } from "./turn-review-timeline-card";
+import type { TurnReviewTarget } from "@/features/panel/turn-review-query";
 import {
 	useCallback,
 	useEffect,
@@ -60,6 +62,7 @@ type ActiveThreadViewportProps = {
 	onSelectSession: (sessionId: string) => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
+	onReviewTurn?: (target: TurnReviewTarget) => void;
 	onReviewDelegation?: (delegationId: string) => void;
 	onRerunDelegation?: (input: {
 		delegationId: string;
@@ -96,6 +99,7 @@ export function ActiveThreadViewport({
 	autoSaveMissionValidation,
 	onSelectSession,
 	onReviewChanges,
+	onReviewTurn,
 	onReviewDelegation,
 	onRerunDelegation,
 	onDelegateTaskApprove,
@@ -150,7 +154,7 @@ export function ActiveThreadViewport({
 		lastTurnState,
 	);
 	const startingPhase = conversationStartingPhase(sessionId, lastTurnState);
-	const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottom({
+	const { contentRef, scrollRef, scrollToBottom, isAtBottom, stopScroll } = useStickToBottom({
 		initial: "instant",
 		// Token-by-token height changes should not start overlapping smooth-scroll
 		// animations. Explicit user navigation remains smooth below.
@@ -409,6 +413,14 @@ export function ActiveThreadViewport({
 												onOpenFileReference={onOpenFileReference}
 												hidePendingApprovals
 											/>
+											{message.turnSettled && message.turnId && sessionId && workspaceId && onReviewTurn ? (
+												<TurnReviewTimelineCard
+													key={`${sessionId}:${message.turnId}:${workspaceId}`}
+													target={{ sessionId, workspaceId, turnId: message.turnId }}
+													onReview={onReviewTurn}
+													onInteraction={stopScroll}
+												/>
+											) : null}
 										</div>
 									);
 								}

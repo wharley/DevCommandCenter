@@ -1,3 +1,4 @@
+import type { TurnReviewTarget, TurnReviewRequest } from "@/features/panel/turn-review-query";
 import {
 	useCallback,
 	useEffect,
@@ -1008,6 +1009,7 @@ export default function App() {
 	const [notesCompletionTaskIds, setNotesCompletionTaskIds] = useState<string[]>([]);
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 	const [delegateSignal, setDelegateSignal] = useState(0);
+	const [turnReviewRequest, setTurnReviewRequest] = useState<TurnReviewRequest | null>(null);
 	const [reviewDelegationRequest, setReviewDelegationRequest] = useState<{
 		delegationId: string;
 		nonce: number;
@@ -2038,12 +2040,27 @@ export default function App() {
 		}
 	}, [inspectorCollapsed, inspectorPresentation, setInspectorCollapsed]);
 	const openGitInspector = useCallback(() => {
+		setTurnReviewRequest(null);
 		recordUxMetric("diff_discovered");
 		setInspectorMode("git");
 		openContextualInspector();
 	}, [openContextualInspector]);
+	const handleReviewTurn = useCallback(
+		(target: TurnReviewTarget) => {
+			requestSurfaceSelection(null, () => {
+				setInspectorMode("git");
+				setTurnReviewRequest((current) => ({
+					...target,
+					nonce: (current?.nonce ?? 0) + 1,
+				}));
+				openContextualInspector();
+			});
+		},
+		[openContextualInspector, requestSurfaceSelection],
+	);
 	const handleReviewDelegation = useCallback(
 		(delegationId: string) => {
+			setTurnReviewRequest(null);
 			requestSurfaceSelection(null, () => {
 				setInspectorMode("git");
 				openContextualInspector();
@@ -5401,6 +5418,7 @@ export default function App() {
 									onInspectorCollapsedChange={setInspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
+									onReviewTurn={handleReviewTurn}
 									onCompleteWorkspace={
 									isRemoteBackend ? undefined : handleCompleteWorkspace
 								}
@@ -5528,6 +5546,8 @@ export default function App() {
 										handleInspectorContextualActionComplete
 									}
 									reviewDelegationRequest={reviewDelegationRequest}
+									turnReviewRequest={turnReviewRequest}
+									onCloseTurnReview={() => setTurnReviewRequest(null)}
 									activeTab={inspectorTab}
 									onTabChange={setInspectorTab}
 									mode={inspectorMode}

@@ -449,6 +449,8 @@ describe("projectWorkspaceMessages", () => {
 			},
 			{
 				id: "assistant-session-a-turn-1",
+				turnId: "turn-1",
+				turnSettled: false,
 				role: "assistant",
 				label: "Assistant",
 				content: "Hello world",
@@ -677,6 +679,7 @@ describe("projectWorkspaceMessages", () => {
 				content: "Resolvido.",
 				assistantPhase: "final_answer",
 				streaming: true,
+				turnSettled: false,
 				annotations: [
 					expect.objectContaining({
 						type: "commentary",
@@ -916,6 +919,8 @@ describe("projectWorkspaceMessages", () => {
 			},
 			{
 				id: "assistant-session-a-turn-1",
+				turnId: "turn-1",
+				turnSettled: true,
 				role: "assistant",
 				label: "Assistant",
 				content: "Hello from assistant",
@@ -1103,6 +1108,8 @@ describe("projectWorkspaceMessages", () => {
 			},
 			{
 				id: "assistant-session-a-turn-1",
+				turnId: "turn-1",
+				turnSettled: true,
 				role: "assistant",
 				label: "Assistant",
 				content: "Hello",
@@ -1153,6 +1160,8 @@ describe("projectWorkspaceMessages", () => {
 			},
 			{
 				id: "assistant-session-a-turn-1",
+				turnId: "turn-1",
+				turnSettled: true,
 				role: "assistant",
 				label: "Assistant",
 				content: "Continuing after approval.",

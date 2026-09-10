@@ -92,6 +92,7 @@ export type WorkspaceMessage = {
 	id: string;
 	role: WorkspaceMessageRole;
 	turnId?: string;
+	turnSettled?: boolean;
 	assistantPhase?: AssistantMessagePhase;
 	content: string;
 	label: string;
@@ -869,6 +870,7 @@ function ensureAssistantMessage(
 
 	message = {
 		id: `assistant-${sessionId}-${turnId}`,
+		turnId,
 		role: "assistant",
 		label: "Assistant",
 		content: "",
@@ -1781,6 +1783,12 @@ export function projectWorkspaceMessages(
 		const parsedPlan = parsePlanContent(message.content);
 		if (parsedPlan.isPlanLike) {
 			message.plan = parsedPlan;
+		}
+	}
+
+	for (const message of messages) {
+		if (message.role === "assistant" && message.turnId) {
+			message.turnSettled = completedTurns.has(message.turnId) || abortedTurns.has(message.turnId);
 		}
 	}
 

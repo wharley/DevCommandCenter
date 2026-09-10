@@ -1,3 +1,5 @@
+import { ActiveThreadViewport } from "@/features/panel/ActiveThreadViewport";
+import type { TurnReviewRequest, TurnReviewTarget } from "@/features/panel/turn-review-query";
 // Real review surfaces with synthetic, read-only IPC. Never reads a user repository.
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -129,6 +131,7 @@ const detail: PullRequestHubDetailOutput = {
 win.__TAURI_INTERNALS__ = {
 	invoke: async (command: string, args: any) => {
 		win.reviewIpc.push(command);
+		(win.reviewRequests ??= []).push({ command, args });
 		switch (command) {
 			case "plugin:app|set_app_theme":
 				return;
@@ -154,12 +157,15 @@ win.__TAURI_INTERNALS__ = {
 					inline: false,
 				};
 			case "last_turn_review":
-				return win.emptyReview ? null : turn;
+				return win.emptyReview ? null : args.input.turnId === "turn-history" ? {
+					...turn, turnId: "turn-history", snapshotId: "snapshot-history", insertions: 8, deletions: 3,
+					files: [changes[0], { ...changes[0], path: "src/components/composer/use-prefill.ts", insertions: 7, deletions: 2 }, { ...changes[0], path: "assets/preview.png", insertions: 0, deletions: 0, previewUnavailable: true }],
+				} : turn;
 			case "turn_review_file_diff":
 				return {
-					snapshotId: turn.snapshotId,
-					path: "src/review.ts",
-					diff: `diff --git a/src/review.ts b/src/review.ts\n--- a/src/review.ts\n+++ b/src/review.ts\n${patch}\n`,
+					snapshotId: args.input.snapshotId,
+					path: args.input.path,
+					diff: `diff --git a/${args.input.path} b/${args.input.path}\n--- a/${args.input.path}\n+++ b/${args.input.path}\n${patch}\n`,
 					previewUnavailable: false,
 				};
 			case "pull_request_hub_list":
@@ -171,6 +177,33 @@ win.__TAURI_INTERNALS__ = {
 		}
 	},
 };
+function TimelineFixture() {
+	const [request, setRequest] = useState<TurnReviewRequest | null>(null);
+	const onReview = (target: TurnReviewTarget) => setRequest((current) => ({ ...target, nonce: (current?.nonce ?? 0) + 1 }));
+	return <div className="flex min-h-0 min-w-0 flex-1">
+		<div className="flex min-w-0 flex-1 flex-col">
+			<header className="border-b border-border px-5 py-4 text-sm font-medium">Revisar o fluxo de anotações</header>
+			<ActiveThreadViewport
+				messages={[
+					{ id: "user-history", role: "user", label: "User", content: "Corrigir o preenchimento da tarefa criada a partir da anotação." },
+					{ id: "assistant-history", role: "assistant", label: "Assistant", content: "Corrigi o preenchimento do campo. A anotação continua aberta para você conferir o resultado antes de concluir.", turnId: "turn-history", turnSettled: true, streaming: false },
+					{ id: "user-new", role: "user", label: "User", content: "Também ajuste o texto do botão de revisão." },
+					{ id: "assistant-new", role: "assistant", label: "Assistant", content: "O botão agora mostra uma ação mais clara. Você pode conferir as alterações abaixo.", turnId: "turn-demo", turnSettled: true, streaming: false },
+				]}
+				hasLoaded isEmpty={false} workspaceName="Review fixture" sessionState="idle" lastTurnState="completed"
+				pendingPrompt={null} workspacePath="/fixture/review" workspaceId="workspace-demo" sessionId="session-demo"
+				planMessageId={null} planApproved={false} planReadOnly={false} activeMissionSpecRelativePath={null}
+				activeMissionSpecHash={null} autoSaveMissionValidation={false} onSelectSession={() => {}} onOpenPlan={() => {}} onReviewTurn={onReview}
+			/>
+			<div className="px-5 pb-5 pt-2"><textarea aria-label="Mensagem" placeholder="Peça um ajuste ou continue a conversa…" className="min-h-24 w-full rounded-xl border border-border bg-background p-3 text-sm" /></div>
+		</div>
+		{request && <aside className="flex w-[380px] min-h-0 shrink-0 flex-col border-l border-border" aria-label="Inspector de revisão">
+			<button className="self-end px-3 py-2 text-xs text-muted-foreground" onClick={() => setRequest(null)}>Fechar inspector</button>
+			<InspectorChangesSection workspaceRoot="/fixture/review" workspaceId="workspace-demo" sessionId="session-demo" selectedPreview={null} onSelectPreview={() => {}} turnReviewRequest={request} />
+		</aside>}
+	</div>;
+}
+
 function Fixture() {
 	const [surface, setSurface] = useState("inspector");
 	const [preview, setPreview] = useState<WorkspaceGitPreviewSelection | null>(
@@ -190,6 +223,7 @@ function Fixture() {
 			>
 				<button onClick={() => setSurface("inspector")}>Inspector</button>
 				<button onClick={() => setSurface("pr")}>Pull Requests</button>
+				<button onClick={() => setSurface("timeline")}>Timeline</button>
 				<button onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
 					Tema
 				</button>
@@ -210,7 +244,7 @@ function Fixture() {
 					justifyContent: "flex-end",
 				}}
 			>
-				{surface === "inspector" ? (
+				{surface === "timeline" ? <TimelineFixture /> : surface === "inspector" ? (
 					<div
 						style={{
 							width: "min(100%, 380px)",

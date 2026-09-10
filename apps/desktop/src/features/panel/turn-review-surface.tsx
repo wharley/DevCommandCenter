@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
 	PrepareGuardedUndoOutput,
 	TurnReviewFile,
+	TurnReviewSummary,
 } from "@dcc/contracts";
 import { getMaterialFileIcon } from "file-extension-icon-js";
 import {
@@ -26,11 +27,10 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { WorkspacePatchDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
+import { TurnReviewFilePreview } from "./turn-review-file-preview";
 import {
 	executeGuardedUndo,
 	loadLastTurnReview,
-	loadTurnReviewFileDiff,
 	prepareGuardedUndo,
 } from "@/lib/session-api";
 import { cn } from "@/lib/utils";
@@ -41,7 +41,7 @@ import {
 	resolveGuardedUndoFailureReason,
 	resolveTurnReviewOutcome,
 } from "./turn-review.logic";
-import { lastTurnReviewQueryKey } from "./turn-review-query";
+import { lastTurnReviewQueryKey, turnReviewQueryOptions } from "./turn-review-query";
 import {
 	reviewCardDiffHeight,
 	shouldEagerLoadReviewCard,
@@ -51,16 +51,17 @@ function TurnReviewCard({
 	snapshotId,
 	file,
 	index,
+	selected = false,
 }: {
 	snapshotId: string;
 	file: TurnReviewFile;
 	index: number;
+	selected?: boolean;
 }) {
-	const { t } = useTranslation("common");
 	const cardRef = useRef<HTMLElement | null>(null);
 	const [open, setOpen] = useState(true);
 	const [shouldLoad, setShouldLoad] = useState(() =>
-		shouldEagerLoadReviewCard(index),
+		selected || shouldEagerLoadReviewCard(index),
 	);
 	useEffect(() => {
 		if (shouldLoad || !open || file.previewUnavailable) return;
@@ -81,11 +82,9 @@ function TurnReviewCard({
 		observer.observe(target);
 		return () => observer.disconnect();
 	}, [file.previewUnavailable, open, shouldLoad]);
-	const diffQuery = useQuery({
-		queryKey: ["turnReviewFileDiff", snapshotId, file.path],
-		queryFn: () => loadTurnReviewFileDiff(snapshotId, file.path),
-		enabled: open && shouldLoad && !file.previewUnavailable,
-	});
+	useEffect(() => {
+		if (selected) cardRef.current?.scrollIntoView({ block: "start" });
+	}, [selected]);
 	const name = file.path.split("/").pop() ?? file.path;
 	const folder = file.path.includes("/")
 		? file.path.slice(0, file.path.lastIndexOf("/"))
@@ -94,7 +93,9 @@ function TurnReviewCard({
 	return (
 		<article
 			ref={cardRef}
-			className="dcc-review-diff-card overflow-hidden rounded-xl border border-border/60 bg-background"
+			className={cn("dcc-review-diff-card overflow-hidden rounded-xl border border-border/60 bg-background", selected && "ring-1 ring-primary")}
+			data-review-file={file.path}
+			data-review-selected={selected || undefined}
 		>
 			<div className="flex min-h-11 items-center gap-2 border-b border-border/45 px-2.5 py-1.5">
 				<button
@@ -139,24 +140,12 @@ function TurnReviewCard({
 						height: `${reviewCardDiffHeight(file.insertions, file.deletions)}px`,
 					}}
 				>
-					{file.previewUnavailable ? (
-						<div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">
-							{t("turnReview.previewUnavailable")}
-						</div>
-					) : !shouldLoad || diffQuery.isFetching ? (
+					{shouldLoad || file.previewUnavailable ? (
+						<TurnReviewFilePreview snapshotId={snapshotId} file={file} />
+					) : (
 						<div className="flex h-full items-center justify-center">
 							<Loader2 className="size-4 animate-spin text-muted-foreground" />
 						</div>
-					) : diffQuery.isError || !diffQuery.data?.diff ? (
-						<div className="flex h-full items-center justify-center p-4 text-center text-xs text-destructive">
-							{t("turnReview.diffFailed")}
-						</div>
-					) : (
-						<WorkspacePatchDiffLoader
-							path={file.path}
-							patch={diffQuery.data.diff}
-							className="h-full"
-						/>
 					)}
 				</div>
 			) : null}
@@ -167,17 +156,31 @@ function TurnReviewCard({
 export function TurnReviewSurface({
 	sessionId,
 	workspaceId,
+	turnId,
+	selectedFilePath,
 }: {
 	sessionId: string;
 	workspaceId: string;
+	turnId?: string;
+	selectedFilePath?: string;
 }) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
-	const reviewQuery = useQuery({
-		queryKey: lastTurnReviewQueryKey(sessionId, workspaceId),
-		queryFn: () => loadLastTurnReview(sessionId, workspaceId),
-	});
-	const review = reviewQuery.data ?? null;
+	const reviewQuery = useQuery<TurnReviewSummary | null>(
+		turnId
+			? turnReviewQueryOptions({ sessionId, workspaceId, turnId })
+			: {
+					queryKey: lastTurnReviewQueryKey(sessionId, workspaceId),
+					queryFn: () => loadLastTurnReview(sessionId, workspaceId),
+				},
+	);
+	const review =
+		reviewQuery.data &&
+		reviewQuery.data.sessionId === sessionId &&
+		reviewQuery.data.workspaceId === workspaceId &&
+		(!turnId || reviewQuery.data.turnId === turnId)
+			? reviewQuery.data
+			: null;
 	const stateLabel = review ? t(`turnReview.states.${review.state}`) : "";
 	const outcome = resolveTurnReviewOutcome(
 		review?.turnOutcome,
@@ -233,6 +236,7 @@ export function TurnReviewSurface({
 			queryClient.invalidateQueries({
 				predicate: (query) =>
 					[
+						"turnReview",
 						"workspaceGitStatus",
 						"workspaceGitBranchDiff",
 						"workspaceGitFilePreviewContent",
@@ -289,7 +293,7 @@ export function TurnReviewSurface({
 	return (
 		<section
 			className="relative flex h-full min-h-0 flex-col bg-background"
-			aria-label={t("turnReview.title")}
+			aria-label={t(turnId ? "turnReview.timeline.selectedTurn" : "turnReview.title")}
 		>
 			{reviewQuery.isPending ? (
 				<div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -380,7 +384,7 @@ export function TurnReviewSurface({
 									className="h-6 px-2"
 									onClick={() =>
 										void queryClient.invalidateQueries({
-											queryKey: lastTurnReviewQueryKey(sessionId, workspaceId),
+											queryKey: turnId ? turnReviewQueryOptions({ sessionId, workspaceId, turnId }).queryKey : lastTurnReviewQueryKey(sessionId, workspaceId),
 										})
 									}
 								>
@@ -425,6 +429,7 @@ export function TurnReviewSurface({
 										snapshotId={review.snapshotId}
 										file={file}
 										index={index}
+										selected={file.path === selectedFilePath}
 									/>
 								))}
 							</div>

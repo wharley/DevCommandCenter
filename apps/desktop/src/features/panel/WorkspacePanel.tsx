@@ -1,3 +1,4 @@
+import type { TurnReviewTarget } from "@/features/panel/turn-review-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -266,6 +267,7 @@ type WorkspacePanelProps = {
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
+	onReviewTurn?: (target: TurnReviewTarget) => void;
 	onOpenMultiProjectDelivery?: () => void;
 	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
 	/** Opens the inspector and previews an implementation delegation diff. */
@@ -343,6 +345,7 @@ export function WorkspacePanel({
 	inspectorCollapsed,
 	onToggleInspector,
 	onReviewChanges,
+	onReviewTurn,
 	onOpenMultiProjectDelivery,
 	onCompleteWorkspace,
 	onReviewDelegation,
@@ -1330,6 +1333,7 @@ export function WorkspacePanel({
 					autoSaveMissionValidation={autoSaveMissionValidation}
 					onSelectSession={onSelectSession}
 					onReviewChanges={onReviewChanges}
+					onReviewTurn={onReviewTurn}
 					onReviewDelegation={onReviewDelegation}
 					onRerunDelegation={onRerunDelegation}
 					onDelegateTaskApprove={onAgentDelegate}

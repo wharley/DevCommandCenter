@@ -227,6 +227,19 @@ pub struct SearchSessionsInput {
 pub struct LastTurnReviewInput {
     pub session_id: String,
     pub workspace_id: String,
+    /// Pin a historical review instead of following the latest turn.
+    #[serde(default)]
+    pub turn_id: Option<String>,
+}
+
+impl LastTurnReviewInput {
+    fn matches_scope(&self, workspace_id: &str, turn_id: &str) -> bool {
+        workspace_id == self.workspace_id.trim()
+            && self
+                .turn_id
+                .as_deref()
+                .is_none_or(|requested| requested == turn_id)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -500,7 +513,7 @@ pub async fn last_turn_review(
         .list_turn_change_sets(&session_id)
         .map_err(|error| error.to_string())?
         .into_iter()
-        .find(|item| item.workspace_id.0 == workspace_id);
+        .find(|item| input.matches_scope(&item.workspace_id.0, &item.turn_id.0));
     let Some(change_set) = change_set else {
         return Ok(None);
     };
@@ -1534,6 +1547,20 @@ pub async fn respond_to_permission_request(
 mod tests {
     use super::*;
     use dcc_core::domain::{provider::ProviderId, session::SessionId};
+
+    #[test]
+    fn historical_turn_review_never_falls_back_to_latest_or_another_workspace() {
+        let mut input: LastTurnReviewInput = serde_json::from_value(serde_json::json!({
+            "sessionId": "session", "workspaceId": "workspace"
+        })).unwrap();
+        let snapshots = [("other-workspace", "older"), ("workspace", "latest"), ("workspace", "older")];
+        let find = |input: &LastTurnReviewInput| snapshots.iter().find(|(workspace, turn)| input.matches_scope(workspace, turn));
+        assert_eq!(find(&input), Some(&("workspace", "latest")));
+        input.turn_id = Some("older".into());
+        assert_eq!(find(&input), Some(&("workspace", "older")));
+        input.turn_id = Some("missing".into());
+        assert_eq!(find(&input), None);
+    }
 
     fn status(
         definition_id: &str,

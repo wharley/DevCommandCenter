@@ -29,3 +29,37 @@ export function useCachedTurnReviewSummary(
 	});
 	return visibleTurnReviewSummary(query.data, query.isFetching);
 }
+
+export type TurnReviewTarget = {
+	sessionId: string;
+	workspaceId: string;
+	turnId: string;
+	filePath?: string;
+};
+export type TurnReviewRequest = TurnReviewTarget & { nonce: number };
+
+export function turnReviewQueryOptions(target: TurnReviewTarget) {
+	return {
+		queryKey: [
+			"turnReview",
+			target.sessionId,
+			target.workspaceId,
+			target.turnId,
+		] as const,
+		queryFn: () =>
+			loadLastTurnReview(target.sessionId, target.workspaceId, target.turnId),
+		// Result capture can finish just after the terminal event reaches the UI.
+		refetchInterval: (query: {
+			state: {
+				data: TurnReviewSummary | null | undefined;
+				dataUpdateCount: number;
+				status: string;
+			};
+		}) =>
+			query.state.status !== "error" &&
+			(query.state.data?.state === "collecting" ||
+				(query.state.data == null && query.state.dataUpdateCount < 5))
+				? 1500
+				: (false as const),
+	};
+}

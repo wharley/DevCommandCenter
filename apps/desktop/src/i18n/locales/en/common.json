@@ -3407,6 +3407,20 @@
     "empty": "No files match."
   },
   "turnReview": {
+    "timeline": {
+      "title": "Changes from this turn",
+      "fileCount_one": "{{count}} changed file",
+      "fileCount_other": "{{count}} changed files",
+      "thisTurn": "This turn",
+      "partial": "Interrupted turn",
+      "showFiles": "View files",
+      "hideFiles": "Hide files",
+      "review": "Review changes",
+      "retry": "Try again",
+      "selectedTurn": "Selected turn",
+      "currentChanges": "Current changes",
+      "selectedTurnHint": "Changes captured in the turn selected from the conversation."
+    },
     "title": "Last turn review",
     "loading": "Loading turn review…",
     "failed": "The turn review could not be loaded.",

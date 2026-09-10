@@ -263,3 +263,108 @@
 .dcc-pr-code-files button {
 	font-size: 11px;
 }
+
+.dcc-turn-review-card {
+	margin-top: 18px;
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--card) 45%, var(--background));
+	overflow: hidden;
+	font-size: 12px;
+}
+.dcc-turn-review-summary {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 13px 14px 7px;
+}
+.dcc-turn-review-mark {
+	color: var(--dcc-accent-calm);
+	flex-shrink: 0;
+}
+.dcc-turn-review-heading {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+	font-weight: 500;
+}
+.dcc-turn-review-stats {
+	display: inline-flex;
+	flex-shrink: 0;
+	gap: 6px;
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+	font-weight: 400;
+}
+.dcc-turn-review-stats > :first-child {
+	color: var(--dcc-accent-calm);
+}
+.dcc-turn-review-stats > :last-child {
+	color: var(--destructive);
+}
+.dcc-turn-review-caption {
+	margin-left: auto;
+	font-size: 10px;
+	color: var(--muted-foreground);
+	text-align: right;
+}
+.dcc-turn-review-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding: 3px 8px 8px;
+}
+.dcc-turn-review-actions button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 6px;
+	border-radius: 6px;
+	font-size: 11px;
+	color: var(--muted-foreground);
+}
+.dcc-turn-review-actions .dcc-turn-review-open {
+	color: var(--dcc-accent-calm);
+}
+.dcc-turn-review-card button:hover {
+	background: var(--accent);
+	color: var(--foreground);
+}
+.dcc-turn-review-card button:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: -2px;
+}
+.dcc-turn-review-file {
+	border-top: 1px solid var(--dcc-surface-edge);
+}
+.dcc-turn-review-file-trigger {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	gap: 8px;
+	padding: 11px 14px;
+	text-align: left;
+}
+.dcc-turn-review-file-trigger > svg {
+	flex-shrink: 0;
+	color: var(--muted-foreground);
+}
+.dcc-turn-review-path {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+.dcc-turn-review-preview {
+	height: 300px;
+	max-height: 45vh;
+	min-height: 96px;
+	overflow: hidden;
+	border-top: 1px solid var(--dcc-surface-edge);
+	background: var(--background);
+}

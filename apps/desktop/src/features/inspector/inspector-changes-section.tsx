@@ -1,3 +1,4 @@
+import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
 /**
  * Git changes list — staged / unstaged groups, list or tree view, per-file +/−,
  * extension icons and NumberTicker for diff stats.
@@ -1001,6 +1002,8 @@ function ChangesGroup({
 }
 
 type InspectorChangesSectionProps = {
+	turnReviewRequest?: TurnReviewRequest | null;
+	onCloseTurnReview?: () => void;
 	workspaceRoot: string | null;
 	workspaceId: string | null;
 	sessionId: string | null;
@@ -1015,6 +1018,8 @@ type InspectorChangesSectionProps = {
 };
 
 export function InspectorChangesSection({
+	turnReviewRequest,
+	onCloseTurnReview,
 	workspaceRoot,
 	workspaceId,
 	sessionId,
@@ -1028,6 +1033,7 @@ export function InspectorChangesSection({
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
+	const [dismissedTurnReview, setDismissedTurnReview] = useState<TurnReviewRequest | null>(null);
 	const [stagedOpen, setStagedOpen] = useState(true);
 	const [unstagedOpen, setUnstagedOpen] = useState(true);
 	const [changesTreeView, setChangesTreeView] = useState(false);
@@ -1183,6 +1189,45 @@ export function InspectorChangesSection({
 		},
 		[root, runGit],
 	);
+
+	if (
+		turnReviewRequest &&
+		turnReviewRequest !== dismissedTurnReview &&
+		turnReviewRequest.workspaceId === workspaceId &&
+		turnReviewRequest.sessionId === sessionId
+	) {
+		return (
+			<div className="flex min-h-0 flex-1 flex-col">
+				<div className="shrink-0 border-b border-border/50 px-3 py-3">
+					<div className="flex items-center justify-between gap-2">
+						<h3 className="text-xs font-medium">
+							{t("turnReview.timeline.selectedTurn")}
+						</h3>
+						<Button
+							size="sm"
+							variant="ghost"
+							onClick={() => {
+								setDismissedTurnReview(turnReviewRequest);
+								onCloseTurnReview?.();
+							}}
+						>
+							{t("turnReview.timeline.currentChanges")}
+						</Button>
+					</div>
+					<p className="mt-1 text-[11px] text-muted-foreground">
+						{t("turnReview.timeline.selectedTurnHint")}
+					</p>
+				</div>
+				<TurnReviewSurface
+					key={`${turnReviewRequest.sessionId}:${turnReviewRequest.turnId}:${turnReviewRequest.nonce}`}
+					sessionId={turnReviewRequest.sessionId}
+					workspaceId={turnReviewRequest.workspaceId}
+					turnId={turnReviewRequest.turnId}
+					selectedFilePath={turnReviewRequest.filePath}
+				/>
+			</div>
+		);
+	}
 
 	if (!root) {
 		return (

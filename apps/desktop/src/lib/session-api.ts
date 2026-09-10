@@ -189,9 +189,9 @@ export function loadSessionLiveSnapshot(sessionId: string) {
 	});
 }
 
-export function loadLastTurnReview(sessionId: string, workspaceId: string) {
+export function loadLastTurnReview(sessionId: string, workspaceId: string, turnId?: string) {
 	return invoke<TurnReviewSummary | null>(SESSION_METHODS.lastTurnReview, {
-		input: { sessionId, workspaceId },
+		input: { sessionId, workspaceId, ...(turnId ? { turnId } : {}) },
 	});
 }
 

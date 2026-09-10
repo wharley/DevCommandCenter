@@ -3407,6 +3407,20 @@
     "empty": "Nenhum arquivo encontrado."
   },
   "turnReview": {
+    "timeline": {
+      "title": "Alterações desta execução",
+      "fileCount_one": "{{count}} arquivo alterado",
+      "fileCount_other": "{{count}} arquivos alterados",
+      "thisTurn": "Nesta execução",
+      "partial": "Execução interrompida",
+      "showFiles": "Ver arquivos",
+      "hideFiles": "Ocultar arquivos",
+      "review": "Revisar alterações",
+      "retry": "Tentar novamente",
+      "selectedTurn": "Execução selecionada",
+      "currentChanges": "Alterações atuais",
+      "selectedTurnHint": "Alterações registradas na execução escolhida na conversa."
+    },
     "title": "Revisão do último turno",
     "loading": "Carregando revisão do turno…",
     "failed": "Não foi possível carregar a revisão do turno.",
