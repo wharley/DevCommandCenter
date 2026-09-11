@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Identity is unique across local and external draft injections. */
 export type ComposerPrefill = {
@@ -25,6 +25,7 @@ export function useComposerPrefill({
 	onExternalComposerPrefillConsumed?: (applied: ComposerPrefillConsumption) => void;
 }) {
 	const [composerPrefill, setComposerPrefill] = useState<ComposerPrefill | null>(null);
+	const consumedExternalRequestIdRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		// An unapplied request belongs to the workspace/conversation that produced it.
@@ -33,12 +34,16 @@ export function useComposerPrefill({
 
 	useEffect(() => {
 		if (externalComposerPrefill) {
-			setComposerPrefill((current) => {
-				const requestId = `external:${externalComposerPrefill.nonce}`;
-				return current?.requestId === requestId
+			const requestId = `external:${externalComposerPrefill.nonce}`;
+			// A child can acknowledge the write before this parent effect runs.
+			// App recreates the prop object on render, so a queued effect must not
+			// reintroduce an already consumed request while state updates settle.
+			if (consumedExternalRequestIdRef.current === requestId) return;
+			setComposerPrefill((current) =>
+				current?.requestId === requestId
 					? current
-					: { ...externalComposerPrefill, requestId };
-			});
+					: { ...externalComposerPrefill, requestId },
+			);
 		}
 	}, [externalComposerPrefill]);
 
@@ -53,6 +58,7 @@ export function useComposerPrefill({
 				applied.requestId === `external:${externalComposerPrefill?.nonce}` &&
 				externalComposerPrefill?.text === applied.text
 			) {
+				consumedExternalRequestIdRef.current = applied.requestId;
 				onExternalComposerPrefillConsumed?.(applied);
 			}
 		},
