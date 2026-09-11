@@ -1460,6 +1460,28 @@
       "edit": "Editar mensagem",
       "remove": "Remover da fila"
     },
+    "favorites": {
+      "title": "Favoritos",
+      "edit": "Editar favoritos",
+      "description": "Salve combinações de modelo e esforço. Arraste para ordenar; seus favoritos são compartilhados entre projetos.",
+      "empty": "Adicione sua primeira combinação abaixo. Você pode salvar o mesmo modelo com esforços diferentes.",
+      "emptyMenu": "Salve aqui suas combinações favoritas de modelo e esforço.",
+      "allModels": "Todos os modelos",
+      "saveCurrent": "Salvar combinação atual",
+      "saved": "Já está nos favoritos",
+      "add": "Adicionar favorito",
+      "provider": "Provedor",
+      "managed": "Automático",
+      "unavailable": "Indisponível",
+      "reorder": "Reordenar {{model}}",
+      "reorderHint": "Arraste para ordenar ou use as teclas de seta para cima e para baixo.",
+      "moveUp": "Mover {{model}} para cima",
+      "moveDown": "Mover {{model}} para baixo",
+      "remove": "Remover {{model}} dos favoritos",
+      "effortFor": "Esforço de {{model}}",
+      "autoSaved": "Alterações salvas automaticamente neste dispositivo.",
+      "done": "Concluído"
+    },
     "execution": {
       "title": "Execução",
       "open": "Abrir configurações de execução",

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	Check,
@@ -6,6 +6,8 @@ import {
 	ChevronRight,
 	LoaderCircle,
 	RefreshCcw,
+	Settings2,
+	Star,
 } from "lucide-react";
 import type { ProviderAccountUsage, ProviderCatalog } from "@dcc/contracts";
 import { ProviderIcon } from "@/features/providers/provider-icons";
@@ -20,6 +22,7 @@ import {
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
 	DropdownMenuSeparator,
@@ -39,7 +42,12 @@ import {
 	getCompactComposerModelLabel,
 } from "./WorkspaceComposer.logic";
 import { EffortBrainIcon } from "./EffortBrainIcon";
-import { getEffortDisplay } from "./effort";
+import { DEFAULT_EFFORT_LEVEL, getEffortDisplay } from "./effort";
+import { ModelFavoritesDialog } from "./ModelFavoritesDialog";
+import {
+	addModelFavorite, modelFavoriteKey, resolveModelFavorite, useModelFavorites,
+	type ModelFavorite,
+} from "./model-favorites";
 
 export const DCC_OPEN_MODEL_PICKER_EVENT = "dcc:open-model-picker";
 
@@ -91,6 +99,9 @@ export function ComposerExecutionMenu({
 	const [modelSubOpen, setModelSubOpen] = useState(false);
 	const [modelSearch, setModelSearch] = useState("");
 	const [cursorAdvancedOpen, setCursorAdvancedOpen] = useState(false);
+	const [editingFavorites, setEditingFavorites] = useState(false);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const favorites = useModelFavorites();
 
 	const selectedProvider = useMemo(() => {
 		const explicit =
@@ -118,6 +129,12 @@ export function ComposerExecutionMenu({
 			null
 		);
 	}, [selectedModelId, selectedProvider]);
+	const currentFavorite: ModelFavorite | null = selectedProvider && selectedModel
+		? { providerId: selectedProvider.id, modelId: selectedModel.id,
+			effort: selectedModel.effortLevels.length ? selectedEffortId : null }
+		: null;
+	const currentFavoriteSaved = currentFavorite && favorites.some((favorite) =>
+		modelFavoriteKey(favorite) === modelFavoriteKey(currentFavorite));
 
 	const compactModelLabel = selectedModel
 		? getCompactComposerModelLabel(selectedProvider?.id ?? null, selectedModel.label)
@@ -137,13 +154,13 @@ export function ComposerExecutionMenu({
 		const openModelPicker = () => {
 			if (disabled || providers.length === 0) return;
 			onOpenChange(true);
-			setModelSubOpen(true);
+			setModelSubOpen(favorites.length === 0);
 			onRefreshAccountUsage?.();
 		};
 		window.addEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openModelPicker);
 		return () =>
 			window.removeEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openModelPicker);
-	}, [disabled, onOpenChange, onRefreshAccountUsage, providers.length]);
+	}, [disabled, onOpenChange, onRefreshAccountUsage, providers.length, favorites.length]);
 
 	const closeModelMenu = () => {
 		setModelSubOpen(false);
@@ -188,6 +205,7 @@ export function ComposerExecutionMenu({
 	const hasModelSearch = modelSearch.trim().length > 0;
 
 	return (
+		<>
 		<DropdownMenu
 			open={open}
 			onOpenChange={(nextOpen) => {
@@ -197,6 +215,7 @@ export function ComposerExecutionMenu({
 			}}
 		>
 			<DropdownMenuTrigger
+				ref={triggerRef}
 				type="button"
 				disabled={disabled || providers.length === 0}
 				title={triggerTitle}
@@ -224,8 +243,51 @@ export function ComposerExecutionMenu({
 				<ChevronDown className="size-3 shrink-0 opacity-40" strokeWidth={2} />
 			</DropdownMenuTrigger>
 
-			<DropdownMenuContent side="top" align="end" sideOffset={4} className="w-72">
-				<DropdownMenuLabel>{t("composer.execution.title")}</DropdownMenuLabel>
+			<DropdownMenuContent side="top" align="end" sideOffset={4}
+				className="flex w-80 max-w-[calc(100vw-2rem)] flex-col"
+				onCloseAutoFocus={(event) => { if (editingFavorites) event.preventDefault(); }}>
+				<DropdownMenuLabel className="shrink-0">{t("composer.favorites.title")}</DropdownMenuLabel>
+				<DropdownMenuGroup
+					aria-label={t("composer.favorites.title")}
+					className="min-h-0 max-h-64 shrink overflow-y-auto overscroll-contain"
+				>
+				{favorites.length ? favorites.map((favorite) => {
+					const { provider, model, available } = resolveModelFavorite(favorite, providers);
+					const isActive = currentFavorite && modelFavoriteKey(currentFavorite) === modelFavoriteKey(favorite);
+					const label = favorite.effort === null ? t("composer.favorites.managed")
+						: t(`composer.effort.${favorite.effort}`, { defaultValue: getEffortDisplay(favorite.effort).label });
+					const description = `${model?.label ?? favorite.modelId} · ${provider?.label ?? favorite.providerId} · ${label}${
+						available ? "" : ` · ${t("composer.favorites.unavailable")}`
+					}`;
+					return <DropdownMenuItem key={modelFavoriteKey(favorite)}
+						disabled={disabled || !available}
+						textValue={`${model?.label ?? favorite.modelId} ${label}`}
+						title={description}
+						aria-label={description}
+						className="h-8 gap-2 py-1"
+						onSelect={() => {
+							if (disabled || !available) return;
+							if (favorite.providerId !== selectedProviderId) onSelectProvider(favorite.providerId);
+							onSelectModel(favorite.modelId);
+							if (favorite.effort === "ultrathink") onSelectUltrathink();
+							else onSelectEffort(favorite.effort ?? DEFAULT_EFFORT_LEVEL);
+							closeModelMenu();
+							onOpenChange(false);
+						}}>
+						<ProviderIcon provider={favorite.providerId} className="size-4 shrink-0" />
+						<span className="min-w-0 flex-1 truncate text-[13px]">
+							{model?.label ?? favorite.modelId}
+							{!available && <span className="text-[11px] text-muted-foreground">
+								{` · ${t("composer.favorites.unavailable")}`}
+							</span>}
+						</span>
+						<span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>
+						{isActive ? <Check className="size-3.5 shrink-0" /> : <span className="size-3.5 shrink-0" />}
+					</DropdownMenuItem>;
+				}) : <p className="px-1.5 py-2 text-xs text-muted-foreground">{t("composer.favorites.emptyMenu")}</p>}
+				</DropdownMenuGroup>
+				<div className="shrink-0">
+				<DropdownMenuSeparator />
 
 				<DropdownMenuSub
 					open={modelSubOpen}
@@ -238,10 +300,7 @@ export function ComposerExecutionMenu({
 					}}
 				>
 					<DropdownMenuSubTrigger className="justify-between gap-3">
-						<span>{t("composer.execution.model")}</span>
-						<span className="ml-auto max-w-36 truncate text-[12px] text-muted-foreground">
-							{compactModelLabel}
-						</span>
+						<span>{t("composer.favorites.allModels")}</span>
 						<ChevronRight className="size-3.5 shrink-0 opacity-50" />
 					</DropdownMenuSubTrigger>
 					<DropdownMenuSubContent
@@ -314,6 +373,20 @@ export function ComposerExecutionMenu({
 						</Command>
 					</DropdownMenuSubContent>
 				</DropdownMenuSub>
+
+				<DropdownMenuItem disabled={disabled || !currentFavorite || Boolean(currentFavoriteSaved) ||
+					Boolean(currentFavorite && !resolveModelFavorite(currentFavorite, providers).available)}
+					onSelect={(event) => {
+						event.preventDefault();
+						if (currentFavorite) addModelFavorite(currentFavorite);
+					}}>
+					<Star className="size-3.5" />
+					{t(currentFavoriteSaved ? "composer.favorites.saved" : "composer.favorites.saveCurrent")}
+				</DropdownMenuItem>
+				<DropdownMenuItem onSelect={() => { closeModelMenu(); setEditingFavorites(true); }}>
+					<Settings2 className="size-3.5" />{t("composer.favorites.edit")}
+				</DropdownMenuItem>
+				<DropdownMenuSeparator />
 
 				<DropdownMenuSub>
 					<DropdownMenuSubTrigger className="justify-between gap-3">
@@ -458,7 +531,11 @@ export function ComposerExecutionMenu({
 						</div>
 					</>
 				) : null}
+				</div>
 			</DropdownMenuContent>
 		</DropdownMenu>
+		{editingFavorites && <ModelFavoritesDialog providers={providers} initialFavorite={currentFavorite}
+			onClose={() => setEditingFavorites(false)} onRestoreFocus={() => triggerRef.current?.focus()} />}
+		</>
 	);
 }

@@ -1460,6 +1460,28 @@
       "edit": "Edit message",
       "remove": "Remove from queue"
     },
+    "favorites": {
+      "title": "Favorites",
+      "edit": "Edit favorites",
+      "description": "Save model and effort combinations. Drag to reorder; your favorites are shared across projects.",
+      "empty": "Add your first combination below. You can save the same model with different effort levels.",
+      "emptyMenu": "Save your favorite model and effort combinations here.",
+      "allModels": "All models",
+      "saveCurrent": "Save current combination",
+      "saved": "Already in favorites",
+      "add": "Add favorite",
+      "provider": "Provider",
+      "managed": "Automatic",
+      "unavailable": "Unavailable",
+      "reorder": "Reorder {{model}}",
+      "reorderHint": "Drag to reorder, or use the up and down arrow keys.",
+      "moveUp": "Move {{model}} up",
+      "moveDown": "Move {{model}} down",
+      "remove": "Remove {{model}} from favorites",
+      "effortFor": "Effort for {{model}}",
+      "autoSaved": "Changes saved automatically on this device.",
+      "done": "Done"
+    },
     "execution": {
       "title": "Execution",
       "open": "Open execution settings",
