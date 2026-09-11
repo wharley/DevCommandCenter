@@ -102,6 +102,46 @@ afterEach(async () => {
 });
 
 describe("timeline turn review", () => {
+	it("shows a new file's captured additions and immutable preview", async () => {
+		vi.mocked(loadLastTurnReview).mockResolvedValue({
+			...summary,
+			files: [{ path: "docs/new.md", status: "A", untracked: true, insertions: 148, deletions: 0, previewUnavailable: false }],
+			insertions: 148,
+			deletions: 0,
+		});
+		await render();
+		await click("turnReview.timeline.showFiles");
+		expect(container.textContent).toContain("turnReview.added");
+		expect(container.querySelector(".dcc-turn-review-file-trigger")?.textContent).toContain("+148−0");
+		await click("docs/new.md");
+		expect(loadTurnReviewFileDiff).toHaveBeenCalledExactlyOnceWith("older-snapshot", "docs/new.md");
+		expect(container.querySelector("[data-patch]")?.textContent).toContain("older-snapshot/docs/new.md");
+		expect(container.textContent).not.toContain("turnReview.previewUnavailable");
+	});
+	it("keeps old uncaptured additions visible without invented zero totals", async () => {
+		vi.mocked(loadLastTurnReview).mockResolvedValue({
+			...summary,
+			files: [{ path: "docs/new.md", status: "A", untracked: true, insertions: 0, deletions: 0, previewUnavailable: true }],
+			insertions: 0,
+			deletions: 0,
+		});
+		await render();
+		await click("turnReview.timeline.showFiles");
+		expect(container.textContent).toContain("docs/new.md");
+		expect(container.textContent).toContain("turnReview.added");
+		expect(container.querySelector(".dcc-turn-review-stats")).toBeNull();
+		expect(container.textContent).not.toContain("turnReview.previewUnavailable");
+	});
+	it("does not present a partial sum as the full turn total", async () => {
+		vi.mocked(loadLastTurnReview).mockResolvedValue({
+			...summary,
+			files: [summary.files[0]!, { path: "docs/new.md", status: "A", untracked: true, insertions: 0, deletions: 0, previewUnavailable: true }],
+		});
+		await render();
+		await click("turnReview.timeline.showFiles");
+		expect(container.querySelector(".dcc-turn-review-summary .dcc-turn-review-stats")).toBeNull();
+		expect(container.querySelector(".dcc-turn-review-file-trigger .dcc-turn-review-stats")?.textContent).toBe("+3−1");
+	});
 	it("routes selected code directly to the same conversation's composer", async () => {
 		const received = vi.fn();
 		const unsubscribe = subscribeWorkspaceDiffAnnotation(received);

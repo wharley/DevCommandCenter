@@ -353,7 +353,7 @@ fn capture_tracked_tree(root: &str, snapshot_root: &Path) -> Result<String, Stri
     let envs = with_index_env(quarantine_env(root, snapshot_root)?, &index.path);
     checked_output_limited(
         root,
-        &["add", "-u", "--", "."],
+        &["add", "-u", "--"],
         &envs,
         8 * 1024,
         "failed to snapshot tracked worktree files",
@@ -455,6 +455,172 @@ fn binary_paths_from_numstat(stdout: &[u8]) -> BTreeSet<String> {
         }
     }
     binary
+}
+
+// Anchor every component to an open directory and never follow repository
+// symlinks. The preview is captured independently of the tracked tree used by
+// compatibility/undo; a readable preview is not evidence that undo is safe.
+#[cfg(unix)]
+fn open_new_file(root: &str, path: &str) -> io::Result<fs::File> {
+    use std::os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::{ffi::OsStrExt, fs::MetadataExt},
+    };
+    let mut current = fs::File::open(root)?;
+    let components = Path::new(path).components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(io::ErrorKind::InvalidInput.into());
+        };
+        let name = std::ffi::CString::new(name.as_bytes())?;
+        let directory = if index + 1 < components.len() {
+            libc::O_DIRECTORY
+        } else {
+            0
+        };
+        let fd = unsafe {
+            libc::openat(
+                current.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK | directory,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        current = unsafe { fs::File::from_raw_fd(fd) };
+    }
+    let metadata = current.metadata()?;
+    if !metadata.is_file() || metadata.nlink() != 1 {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    Ok(current)
+}
+
+#[cfg(windows)]
+fn open_new_file(root: &str, path: &str) -> io::Result<fs::File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+    // Keep ancestor handles open without delete sharing while opening the leaf,
+    // so a directory cannot be replaced by a junction between checks.
+    let mut ancestors = Vec::new();
+    let mut candidate = PathBuf::from(root);
+    let components = Path::new(path).components().collect::<Vec<_>>();
+    for component in &components {
+        let directory = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&candidate)?;
+        let metadata = directory.metadata()?;
+        if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        ancestors.push(directory);
+        let std::path::Component::Normal(name) = component else {
+            return Err(io::ErrorKind::InvalidInput.into());
+        };
+        candidate.push(name);
+    }
+    if components.is_empty() {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(candidate)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    Ok(file)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_new_file(_root: &str, _path: &str) -> io::Result<fs::File> {
+    Err(io::ErrorKind::Unsupported.into())
+}
+
+fn quote_patch_path(path: &str) -> String {
+    let mut quoted = String::from("\"");
+    for byte in path.bytes() {
+        match byte {
+            b'"' | b'\\' => {
+                quoted.push('\\');
+                quoted.push(byte as char);
+            }
+            32..=126 => quoted.push(byte as char),
+            _ => quoted.push_str(&format!("\\{byte:03o}")),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+fn capture_new_file_preview(
+    root: &str,
+    file: &mut TurnReviewFile,
+    budget: usize,
+) -> Option<String> {
+    let source = open_new_file(root, &file.path).ok()?;
+    let before = source.metadata().ok()?;
+    if before.len() > budget as u64 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    (&source)
+        .take(budget as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    let after = source.metadata().ok()?;
+    if bytes.len() > budget
+        || bytes.len() as u64 != before.len()
+        || before.len() != after.len()
+        || before.modified().ok()? != after.modified().ok()?
+    {
+        return None;
+    }
+    let content = match std::str::from_utf8(&bytes) {
+        Ok(content) if !bytes.contains(&0) => content,
+        _ => {
+            file.binary = true;
+            return None;
+        }
+    };
+    let insertions = content.split_inclusive('\n').count() as u32;
+    let old_path = quote_patch_path(&format!("a/{}", file.path));
+    let new_path = quote_patch_path(&format!("b/{}", file.path));
+    #[cfg(unix)]
+    let executable = {
+        use std::os::unix::fs::PermissionsExt;
+        before.permissions().mode() & 0o111 != 0
+    };
+    #[cfg(not(unix))]
+    let executable = false;
+    let mode = if executable { "100755" } else { "100644" };
+    let mut patch = format!("diff --git {old_path} {new_path}\nnew file mode {mode}\n");
+    if insertions > 0 {
+        patch.push_str(&format!(
+            "--- /dev/null\n+++ {new_path}\n@@ -0,0 +1,{insertions} @@\n"
+        ));
+        for line in content.split_inclusive('\n') {
+            patch.push('+');
+            patch.push_str(line);
+        }
+        if !content.ends_with('\n') {
+            patch.push_str("\n\\ No newline at end of file\n");
+        }
+    }
+    if patch.len() > budget {
+        return None;
+    }
+    file.insertions = insertions;
+    file.preview_unavailable = false;
+    Some(patch)
 }
 
 pub fn capture_result(
@@ -588,11 +754,8 @@ pub fn capture_result(
             );
         }
     }
-    // V1 deliberately never reads untracked content. Cross-platform safe
-    // open-by-handle semantics are not available here, so these paths remain
-    // visible but cannot be previewed or used as compatibility evidence.
     for path in &new_untracked {
-        files.push(TurnReviewFile {
+        let mut file = TurnReviewFile {
             path: path.clone(),
             old_path: None,
             status: "A".to_string(),
@@ -601,7 +764,20 @@ pub fn capture_result(
             untracked: true,
             binary: false,
             preview_unavailable: true,
-        });
+        };
+        if files.len() < MAX_PREVIEW_FILES
+            && remaining_diff_budget > 0
+            && Instant::now() < diff_deadline
+        {
+            if let Some(patch) = capture_new_file_preview(root, &mut file, remaining_diff_budget) {
+                remaining_diff_budget = remaining_diff_budget.saturating_sub(patch.len());
+                file_diffs.insert(path.clone(), patch);
+            }
+        }
+        if file.preview_unavailable && !file.binary {
+            diff_truncated = true;
+        }
+        files.push(file);
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     let has_changes = !files.is_empty() || !new_untracked.is_empty();
@@ -785,8 +961,14 @@ mod tests {
             .iter()
             .find(|file| file.path == "created.txt")
             .unwrap();
-        assert!(created.preview_unavailable);
-        assert!(!result.file_diffs.contains_key("created.txt"));
+        assert!(!created.preview_unavailable);
+        assert_eq!((created.insertions, created.deletions), (1, 0));
+        let created_patch = &result.file_diffs["created.txt"];
+        assert!(created_patch.contains("--- /dev/null\n"));
+        assert!(created_patch.contains("@@ -0,0 +1,1 @@\n+new\n"));
+        fs::write(root.join("created.txt"), "later edit\n").unwrap();
+        assert!(!result.file_diffs["created.txt"].contains("later edit"));
+        assert!(result.result_untracked.is_empty());
         assert_eq!(result.status, "partial");
         assert_eq!(result.excluded_preexisting_untracked, vec!["private.local"]);
         let index_after = checked_output_limited(
@@ -801,6 +983,114 @@ mod tests {
         assert_eq!(objects_before, object_files(root));
         cleanup_snapshot(&snapshot);
         assert!(!snapshot.exists());
+    }
+
+    #[test]
+    fn new_file_patches_preserve_content_and_apply_with_git() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init"]);
+        fs::write(root.join("preexisting.txt"), "excluded\n").unwrap();
+        let snapshots = tempfile::tempdir().unwrap();
+        let snapshot = snapshot_root(snapshots.path());
+        let baseline = capture_baseline(root.to_str().unwrap(), &snapshot).unwrap();
+        fs::create_dir(root.join("docs")).unwrap();
+        let cases = [
+            ("docs/historias-biblicas.md", "# Histórias\n\nTexto\n"),
+            ("no-newline.txt", "one\ntwo"),
+            ("empty.txt", ""),
+            ("crlf.txt", "one\r\ntwo\r\n"),
+            ("with space-é.txt", "text\n"),
+        ];
+        for (path, content) in cases {
+            fs::write(root.join(path), content).unwrap();
+        }
+        let result = capture_result(root.to_str().unwrap(), &snapshot, &baseline).unwrap();
+        assert_eq!(result.files.len(), cases.len());
+        assert_eq!(file_totals(&result.files), (8, 0));
+        assert!(!result.diff_truncated);
+        let destination = tempfile::tempdir().unwrap();
+        git(destination.path(), &["init"]);
+        for (index, (path, content)) in cases.iter().enumerate() {
+            let file = result.files.iter().find(|file| file.path == *path).unwrap();
+            assert_eq!(file.status, "A");
+            assert!(file.untracked);
+            assert!(!file.preview_unavailable);
+            let patch_path = snapshots.path().join(format!("{index}.patch"));
+            fs::write(&patch_path, &result.file_diffs[*path]).unwrap();
+            git(destination.path(), &["apply", patch_path.to_str().unwrap()]);
+            assert_eq!(
+                fs::read_to_string(destination.path().join(path)).unwrap(),
+                *content
+            );
+        }
+        assert!(!result.file_diffs.contains_key("preexisting.txt"));
+    }
+
+    #[test]
+    fn new_binary_and_oversized_files_keep_metadata_without_text_previews() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init"]);
+        let snapshots = tempfile::tempdir().unwrap();
+        let snapshot = snapshot_root(snapshots.path());
+        let baseline = capture_baseline(root.to_str().unwrap(), &snapshot).unwrap();
+        fs::write(root.join("binary.bin"), b"a\0b").unwrap();
+        fs::write(root.join("huge.txt"), "a".repeat(MAX_DIFF_BYTES + 1)).unwrap();
+        fs::write(root.join("small.txt"), "still captured\n").unwrap();
+        let result = capture_result(root.to_str().unwrap(), &snapshot, &baseline).unwrap();
+        assert!(
+            result
+                .files
+                .iter()
+                .find(|file| file.path == "binary.bin")
+                .unwrap()
+                .binary
+        );
+        for path in ["binary.bin", "huge.txt"] {
+            assert!(
+                result
+                    .files
+                    .iter()
+                    .find(|file| file.path == path)
+                    .unwrap()
+                    .preview_unavailable
+            );
+            assert!(!result.file_diffs.contains_key(path));
+        }
+        assert!(result.diff_truncated);
+        assert!(result.file_diffs["small.txt"].contains("+still captured"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_file_capture_rejects_symlinks_hardlinks_and_parent_traversal() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::write(external.path().join("private.txt"), "private\n").unwrap();
+        symlink(external.path(), dir.path().join("linked-dir")).unwrap();
+        symlink(
+            external.path().join("private.txt"),
+            dir.path().join("linked.txt"),
+        )
+        .unwrap();
+        fs::hard_link(
+            external.path().join("private.txt"),
+            dir.path().join("hardlink.txt"),
+        )
+        .unwrap();
+        let root = dir.path().to_str().unwrap();
+        for path in [
+            "linked-dir/private.txt",
+            "linked.txt",
+            "hardlink.txt",
+            "../private.txt",
+            "/private.txt",
+            "",
+        ] {
+            assert!(open_new_file(root, path).is_err(), "accepted {path}");
+        }
     }
 
     #[test]

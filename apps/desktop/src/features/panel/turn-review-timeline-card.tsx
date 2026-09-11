@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { TurnReviewFilePreview } from "./turn-review-file-preview";
+import { hasTurnReviewLineStats } from "./turn-review.logic";
 import { dispatchWorkspaceDiffAnnotation } from "@/features/editor/workspace-diff-annotation-command";
 import {
 	turnReviewQueryOptions,
@@ -57,10 +58,12 @@ export function TurnReviewTimelineCard({
 					<span>
 						{t("turnReview.timeline.fileCount", { count: review.files.length })}
 					</span>
-					<span className="dcc-turn-review-stats">
-						<span>+{review.insertions}</span>
-						<span>−{review.deletions}</span>
-					</span>
+					{review.files.every(hasTurnReviewLineStats) && (
+						<span className="dcc-turn-review-stats">
+							<span>+{review.insertions}</span>
+							<span>−{review.deletions}</span>
+						</span>
+					)}
 				</div>
 				<span className="dcc-turn-review-caption">
 					{t(
@@ -129,10 +132,17 @@ export function TurnReviewTimelineCard({
 									)}
 									<FileDiff size={14} aria-hidden />
 									<span className="dcc-turn-review-path">{file.path}</span>
-									<span className="dcc-turn-review-stats">
-										<span>+{file.insertions}</span>
-										<span>−{file.deletions}</span>
-									</span>
+									{file.status === "A" && (
+										<span className="shrink-0 text-xs text-muted-foreground">
+											{t("turnReview.added")}
+										</span>
+									)}
+									{hasTurnReviewLineStats(file) && (
+										<span className="dcc-turn-review-stats">
+											<span>+{file.insertions}</span>
+											<span>−{file.deletions}</span>
+										</span>
+									)}
 								</button>
 								<div id={`${id}-diff-${index}`} hidden={!open}>
 									{open && (

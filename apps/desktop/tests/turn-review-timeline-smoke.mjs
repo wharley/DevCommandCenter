@@ -97,7 +97,7 @@ try {
 		await page.getByRole("textbox", { name: "Mensagem" }).inputValue(),
 		"Confira também o caso de erro.",
 	);
-	await inspector.getByText("Não há preview de texto capturado para este arquivo.", { exact: true }).waitFor();
+	await inspector.getByText("Prévia indisponível nesta execução.", { exact: true }).waitFor();
 	await shot("inspector-history");
 	await inspector
 		.getByRole("button", { name: "Alterações atuais", exact: true })
@@ -119,7 +119,7 @@ try {
 	await page.setViewportSize({ width: 720, height: 900 });
 	await oldCard.locator('button[title="assets/preview.png"]').click();
 	await oldCard
-		.getByText("Não há preview de texto capturado para este arquivo.", {
+		.getByText("Prévia indisponível nesta execução.", {
 			exact: true,
 		})
 		.waitFor();

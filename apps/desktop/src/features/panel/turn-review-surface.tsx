@@ -36,6 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
 	canPrepareGuardedUndo,
+	hasTurnReviewLineStats,
 	isGuardedUndoPreviewExpired,
 	resolveGuardedUndoCapture,
 	resolveGuardedUndoFailureReason,
@@ -323,9 +324,13 @@ export function TurnReviewSurface({
 								</span>
 							) : null}
 							<span className="ml-auto tabular-nums text-muted-foreground">
-								{t("turnReview.fileCount", { count: review.files.length })} ·{" "}
-								<span className="text-emerald-600">+{review.insertions}</span>{" "}
-								<span className="text-destructive">−{review.deletions}</span>
+								{t("turnReview.fileCount", { count: review.files.length })}
+								{review.files.every(hasTurnReviewLineStats) && (
+									<>
+										{" · "}<span className="text-emerald-600">+{review.insertions}</span>{" "}
+										<span className="text-destructive">−{review.deletions}</span>
+									</>
+								)}
 							</span>
 							<Tooltip>
 								<TooltipTrigger asChild>

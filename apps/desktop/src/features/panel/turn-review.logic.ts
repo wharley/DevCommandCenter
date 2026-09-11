@@ -1,4 +1,8 @@
-import type { TurnReviewSummary } from "@dcc/contracts";
+import type { TurnReviewFile, TurnReviewSummary } from "@dcc/contracts";
+
+export function hasTurnReviewLineStats(file: TurnReviewFile): boolean {
+	return !file.binary && !(file.previewUnavailable && file.insertions === 0 && file.deletions === 0);
+}
 
 export type TurnReviewOutcomePresentation = {
 	outcome: "completed" | "aborted";

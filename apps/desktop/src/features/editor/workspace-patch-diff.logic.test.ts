@@ -11,6 +11,27 @@ index c8392b9..f634d05 100644
 `;
 
 describe("parseWorkspacePatch", () => {
+	it("renders a captured new file with blank lines and no final newline", () => {
+		const patch = parseWorkspacePatch(`diff --git "a/docs/new.md" "b/docs/new.md"
+new file mode 100644
+--- /dev/null
++++ "b/docs/new.md"
+@@ -0,0 +1,3 @@
++# Histórias
++
++Text
+\\ No newline at end of file
+`);
+		expect(patch.name).toBe("docs/new.md");
+		expect(patch.additionLines).toHaveLength(3);
+		expect(patch.deletionLines).toHaveLength(0);
+		expect(patchSelectionRequests("docs/new.md", patch, { start: 1, end: 3, side: "additions" })[0]?.snippet).toBe("# Histórias\n\nText");
+	});
+	it("renders an empty added file without hunks", () => {
+		const patch = parseWorkspacePatch('diff --git "a/empty.txt" "b/empty.txt"\nnew file mode 100644\n');
+		expect(patch.name).toBe("empty.txt");
+		expect(patch.hunks).toHaveLength(0);
+	});
 	it("parses the captured single-file Git patch", () => {
 		const parsed = parseWorkspacePatch(JSON_PATCH);
 		expect(parsed.name).toBe("messages/en.json");
