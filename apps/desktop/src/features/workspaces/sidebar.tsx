@@ -56,6 +56,7 @@ import {
 	DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import { Popover, PopoverTrigger } from "../../components/ui/popover";
+import { FeedbackButton } from "@/features/feedback/feedback-button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import type { Repository, WorkspaceRemoteBranchDeletionTarget } from "@dcc/contracts";
 import { AppUpdateButton, type AppUpdateInfo } from "@/features/updater";
@@ -266,6 +267,7 @@ type WorkspacesSidebarProps = {
 	onOpenSkills: () => void;
 	onOpenUsage: () => void;
 	onOpenNotes?: () => void;
+	onOpenFeedback?: () => void;
 	notesCount?: number;
 	onOpenHelp: () => void;
 	onOpenPullRequests: () => void;
@@ -329,6 +331,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onOpenSkills,
 	onOpenUsage,
 	onOpenNotes,
+	onOpenFeedback,
 	notesCount = 0,
 	onOpenHelp,
 	onOpenPullRequests,
@@ -1262,6 +1265,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						</TooltipTrigger>
 						<TooltipContent side="right">Skills</TooltipContent>
 					</Tooltip>
+					{onOpenFeedback && (
+						<FeedbackButton onClick={onOpenFeedback} collapsed={collapsed} />
+					)}
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button
@@ -1647,6 +1653,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						</TooltipTrigger>
 						<TooltipContent side="top">Skills</TooltipContent>
 					</Tooltip>
+					{onOpenFeedback && (
+						<FeedbackButton onClick={onOpenFeedback} collapsed={collapsed} />
+					)}
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button

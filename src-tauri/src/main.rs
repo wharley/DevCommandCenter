@@ -5,6 +5,7 @@ mod browser_commands;
 mod browser_mcp_bridge;
 mod coderabbit_commands;
 mod delegation_commands;
+mod feedback_commands;
 mod forge_commands;
 mod git_support;
 mod mcp_commands;
@@ -69,6 +70,7 @@ use delegation_commands::{
     approve_delegation, cancel_delegation, complete_delegation, create_delegation, fail_delegation,
     get_delegation, list_delegations, start_delegation,
 };
+use feedback_commands::{dcc_feedback_context, dcc_feedback_create, dcc_feedback_list};
 use forge_commands::{
     pull_request_hub_comment, pull_request_hub_detail, pull_request_hub_list,
     pull_request_hub_merge, pull_request_hub_reply_thread, pull_request_hub_resolve_thread,
@@ -7036,6 +7038,9 @@ pub fn run() {
             delete_repository,
             delete_workspace,
             list_project_notes,
+            dcc_feedback_context,
+            dcc_feedback_create,
+            dcc_feedback_list,
             create_project_note,
             update_project_note,
             delete_project_notes,

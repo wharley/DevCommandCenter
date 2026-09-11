@@ -716,7 +716,7 @@ fn legacy_github_cli_status(output: ForgeCliStatusOutput) -> GithubCliStatusOutp
     }
 }
 
-fn resolve_forge_cli_snapshot(
+pub(crate) fn resolve_forge_cli_snapshot(
     state: &WorkspaceCommandState,
     provider: ForgeCliProvider,
     host: &str,

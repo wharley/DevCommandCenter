@@ -1,6 +1,7 @@
 pub mod coderabbit;
 pub mod common;
 pub mod delegation_commands;
+pub mod feedback;
 pub mod forge;
 pub mod forge_commands;
 pub mod mcp_commands;

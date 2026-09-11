@@ -38,6 +38,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { FeedbackDialog } from "@/features/feedback/feedback-dialog";
 import { NotesWorkspace } from "@/features/notes/notes-workspace";
 import { useProjectNotes } from "@/features/notes/use-project-notes";
 import { notePrompt, type ProjectNote } from "@/features/notes/notes-api";
@@ -1006,6 +1007,7 @@ export default function App() {
 	const queryClient = useQueryClient();
 	const projectNotes = useProjectNotes();
 	const [notesOpen, setNotesOpen] = useState(false);
+	const [feedbackOpen, setFeedbackOpen] = useState(false);
 	const [notesCompletionTaskIds, setNotesCompletionTaskIds] = useState<string[]>([]);
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 	const [delegateSignal, setDelegateSignal] = useState(0);
@@ -5116,6 +5118,7 @@ export default function App() {
 							onOpenSkills={() => setIsSkillsOpen(true)}
 							onOpenUsage={() => setIsUsageOpen(true)}
 							onOpenNotes={() => setNotesOpen(true)}
+							onOpenFeedback={() => setFeedbackOpen(true)}
 							notesCount={projectNotes.notes.filter(note => note.status === "open").length}
 							onOpenHelp={() => openHelp()}
 							onOpenPullRequests={() => setGlobalSurface("pullRequests")}
@@ -5636,6 +5639,7 @@ export default function App() {
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+			<FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} onOpenSettings={() => setIsSettingsOpen(true)} />
 			<NotesWorkspace
 				controller={projectNotes}
 				open={notesOpen}
