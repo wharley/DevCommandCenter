@@ -5,14 +5,17 @@ import { useTranslation } from "react-i18next";
 import { WorkspacePatchDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
 import { loadTurnReviewFileDiff } from "@/lib/session-api";
 import { Button } from "@/components/ui/button";
+import type { DiffAnnotationRequest } from "@/features/editor/diff-annotation";
 
 /** Fetch the immutable patch only while its preview is open. */
 export function TurnReviewFilePreview({
 	snapshotId,
 	file,
+	onAddToChat,
 }: {
 	snapshotId: string;
 	file: TurnReviewFile;
+	onAddToChat?: (requests: DiffAnnotationRequest[]) => void;
 }) {
 	const { t } = useTranslation("common");
 	const query = useQuery({
@@ -65,6 +68,7 @@ export function TurnReviewFilePreview({
 			path={file.path}
 			patch={query.data.diff}
 			className="h-full"
+			onAddToChat={onAddToChat}
 		/>
 	);
 }

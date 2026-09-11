@@ -70,6 +70,18 @@ afterEach(async () => {
 });
 
 describe("composer prefill lifecycle", () => {
+	it("appends diff context while preserving the draft and requests composer focus", async () => {
+		await act(async () => root.render(<Harness />));
+		await act(async () => setEditorText(editorRef.current!, "Simplifique este teste"));
+		const focus = vi.spyOn(editorRef.current!, "focus");
+		const context = "Sobre `test.ts` (linhas 19–23):\n\n```\nselected test\n```";
+		await act(async () => controller.setComposerPrefill({ requestId: "local:diff", text: context, nonce: 2, mode: "append" }));
+		const prompt = readComposerPrompt(editorRef.current!);
+		expect(prompt.startsWith("Simplifique este teste")).toBe(true);
+		expect(prompt.endsWith(context)).toBe(true);
+		expect(focus).toHaveBeenCalled();
+		expect(controller.composerPrefill).toBeNull();
+	});
 	it("keeps the editor empty after sending a note draft and creating the first session", async () => {
 		await act(async () => root.render(<Harness />));
 		expect(readComposerPrompt(editorRef.current!)).toBe(note.text);

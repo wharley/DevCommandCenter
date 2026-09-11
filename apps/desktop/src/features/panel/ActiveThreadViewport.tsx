@@ -1,5 +1,4 @@
 import { TurnReviewTimelineCard } from "./turn-review-timeline-card";
-import type { TurnReviewTarget } from "@/features/panel/turn-review-query";
 import {
 	useCallback,
 	useEffect,
@@ -62,7 +61,6 @@ type ActiveThreadViewportProps = {
 	onSelectSession: (sessionId: string) => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
-	onReviewTurn?: (target: TurnReviewTarget) => void;
 	onReviewDelegation?: (delegationId: string) => void;
 	onRerunDelegation?: (input: {
 		delegationId: string;
@@ -99,7 +97,6 @@ export function ActiveThreadViewport({
 	autoSaveMissionValidation,
 	onSelectSession,
 	onReviewChanges,
-	onReviewTurn,
 	onReviewDelegation,
 	onRerunDelegation,
 	onDelegateTaskApprove,
@@ -413,11 +410,11 @@ export function ActiveThreadViewport({
 												onOpenFileReference={onOpenFileReference}
 												hidePendingApprovals
 											/>
-											{message.turnSettled && message.turnId && sessionId && workspaceId && onReviewTurn ? (
+											{message.turnSettled && message.turnId && sessionId && workspaceId && onReviewChanges ? (
 												<TurnReviewTimelineCard
 													key={`${sessionId}:${message.turnId}:${workspaceId}`}
 													target={{ sessionId, workspaceId, turnId: message.turnId }}
-													onReview={onReviewTurn}
+													onReview={onReviewChanges}
 													onInteraction={stopScroll}
 												/>
 											) : null}

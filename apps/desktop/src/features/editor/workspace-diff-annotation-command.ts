@@ -1,10 +1,15 @@
-import type { PendingAnnotation } from "./diff-annotation";
+import type { DiffAnnotationRequest, PendingAnnotation } from "./diff-annotation";
 
 export type WorkspaceDiffAnnotationCommand = {
 	workspaceId: string;
-	pending: PendingAnnotation;
 	targetSessionId?: string | null;
-};
+} & ({
+	destination?: "popover";
+	pending: PendingAnnotation;
+} | {
+	destination: "composer";
+	requests: DiffAnnotationRequest[];
+});
 
 const WORKSPACE_DIFF_ANNOTATION_EVENT = "dcc:workspace-diff-annotation";
 

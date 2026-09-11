@@ -1,4 +1,3 @@
-import type { TurnReviewTarget } from "@/features/panel/turn-review-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -267,7 +266,6 @@ type WorkspacePanelProps = {
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
-	onReviewTurn?: (target: TurnReviewTarget) => void;
 	onOpenMultiProjectDelivery?: () => void;
 	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
 	/** Opens the inspector and previews an implementation delegation diff. */
@@ -345,7 +343,6 @@ export function WorkspacePanel({
 	inspectorCollapsed,
 	onToggleInspector,
 	onReviewChanges,
-	onReviewTurn,
 	onOpenMultiProjectDelivery,
 	onCompleteWorkspace,
 	onReviewDelegation,
@@ -437,16 +434,7 @@ export function WorkspacePanel({
 	const secondarySurfaceWidthRef = useRef(secondarySurfaceWidth);
 	secondarySurfaceWidthRef.current = secondarySurfaceWidth;
 	const restoredSecondarySurfaceWorkspaceRef = useRef<string | null>(null);
-	useEffect(() => {
-		setInspectorPendingAnnotation(null);
-		return subscribeWorkspaceDiffAnnotation((command) => {
-			if (command.workspaceId !== workspaceId) return;
-			setInspectorPendingAnnotation({
-				pending: command.pending,
-				targetSessionId: command.targetSessionId ?? null,
-			});
-		});
-	}, [workspaceId]);
+
 	const setSecondarySurfaceContainerNode = useCallback(
 		(node: HTMLDivElement | null) => {
 			setSecondarySurfaceContainer(node);
@@ -728,6 +716,31 @@ export function WorkspacePanel({
 		? selectedSessionId
 		: (sessions.find((summary) => summary.session.workspaceId === workspaceId)
 				?.session.id ?? null);
+	useEffect(() => {
+		setInspectorPendingAnnotation(null);
+		return subscribeWorkspaceDiffAnnotation((command) => {
+			if (command.workspaceId !== workspaceId) return;
+			if (command.destination === "composer") {
+				if (
+					command.targetSessionId !== effectiveSessionId ||
+					command.requests.length === 0
+				) return;
+				composerPrefillRequestSequenceRef.current += 1;
+				const requestId = `local:${composerPrefillRequestSequenceRef.current}`;
+				setComposerPrefill((prev) => ({
+					requestId,
+					text: command.requests.map(buildAnnotationContextBlock).join("\n\n"),
+					mode: "append",
+					nonce: (prev?.nonce ?? 0) + 1,
+				}));
+				return;
+			}
+			setInspectorPendingAnnotation({
+				pending: command.pending,
+				targetSessionId: command.targetSessionId ?? null,
+			});
+		});
+	}, [workspaceId, effectiveSessionId, setComposerPrefill]);
 	const hasHydratedHistory =
 		hydratedSessionHistory?.sessionId === effectiveSessionId &&
 		hydratedSessionHistory.active !== false;
@@ -1333,7 +1346,6 @@ export function WorkspacePanel({
 					autoSaveMissionValidation={autoSaveMissionValidation}
 					onSelectSession={onSelectSession}
 					onReviewChanges={onReviewChanges}
-					onReviewTurn={onReviewTurn}
 					onReviewDelegation={onReviewDelegation}
 					onRerunDelegation={onRerunDelegation}
 					onDelegateTaskApprove={onAgentDelegate}

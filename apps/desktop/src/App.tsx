@@ -1,4 +1,4 @@
-import type { TurnReviewTarget, TurnReviewRequest } from "@/features/panel/turn-review-query";
+import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
 import {
 	useCallback,
 	useEffect,
@@ -2045,19 +2045,6 @@ export default function App() {
 		setInspectorMode("git");
 		openContextualInspector();
 	}, [openContextualInspector]);
-	const handleReviewTurn = useCallback(
-		(target: TurnReviewTarget) => {
-			requestSurfaceSelection(null, () => {
-				setInspectorMode("git");
-				setTurnReviewRequest((current) => ({
-					...target,
-					nonce: (current?.nonce ?? 0) + 1,
-				}));
-				openContextualInspector();
-			});
-		},
-		[openContextualInspector, requestSurfaceSelection],
-	);
 	const handleReviewDelegation = useCallback(
 		(delegationId: string) => {
 			setTurnReviewRequest(null);
@@ -5418,7 +5405,6 @@ export default function App() {
 									onInspectorCollapsedChange={setInspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={openGitInspector}
-									onReviewTurn={handleReviewTurn}
 									onCompleteWorkspace={
 									isRemoteBackend ? undefined : handleCompleteWorkspace
 								}

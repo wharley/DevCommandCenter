@@ -3412,6 +3412,7 @@
       "fileCount_one": "{{count}} changed file",
       "fileCount_other": "{{count}} changed files",
       "thisTurn": "This turn",
+      "addToChat": "Add to chat",
       "partial": "Interrupted turn",
       "showFiles": "View files",
       "hideFiles": "Hide files",

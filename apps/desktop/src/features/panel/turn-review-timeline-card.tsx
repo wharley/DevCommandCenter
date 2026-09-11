@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { TurnReviewFilePreview } from "./turn-review-file-preview";
+import { dispatchWorkspaceDiffAnnotation } from "@/features/editor/workspace-diff-annotation-command";
 import {
 	turnReviewQueryOptions,
 	type TurnReviewTarget,
@@ -21,7 +22,7 @@ export function TurnReviewTimelineCard({
 	onInteraction,
 }: {
 	target: TurnReviewTarget;
-	onReview: (target: TurnReviewTarget) => void;
+	onReview: () => void;
 	onInteraction?: () => void;
 }) {
 	const { t } = useTranslation("common");
@@ -94,9 +95,7 @@ export function TurnReviewTimelineCard({
 				<button
 					type="button"
 					className="dcc-turn-review-open"
-					onClick={() =>
-						onReview({ ...target, filePath: selectedFile ?? undefined })
-					}
+					onClick={() => onReview()}
 				>
 					{t("turnReview.timeline.review")}
 					<ArrowUpRight size={14} aria-hidden />
@@ -155,6 +154,15 @@ export function TurnReviewTimelineCard({
 											<TurnReviewFilePreview
 												snapshotId={review.snapshotId}
 												file={file}
+												onAddToChat={(requests) => {
+													onInteraction?.();
+													dispatchWorkspaceDiffAnnotation({
+														workspaceId: target.workspaceId,
+														targetSessionId: target.sessionId,
+														destination: "composer",
+														requests,
+													});
+												}}
 											/>
 										</div>
 									)}

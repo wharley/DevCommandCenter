@@ -5,6 +5,8 @@ import type { TurnReviewSummary } from "@dcc/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadLastTurnReview, loadTurnReviewFileDiff } from "@/lib/session-api";
 import { TurnReviewTimelineCard } from "./turn-review-timeline-card";
+import { subscribeWorkspaceDiffAnnotation } from "@/features/editor/workspace-diff-annotation-command";
+import type { WorkspacePatchDiffProps } from "@/features/editor/WorkspacePatchDiff";
 
 vi.mock("@/lib/session-api", () => ({
 	loadLastTurnReview: vi.fn(),
@@ -17,10 +19,8 @@ vi.mock("@/features/editor/WorkspaceChangesDiffLoader", () => ({
 	WorkspacePatchDiffLoader: ({
 		path,
 		patch,
-	}: {
-		path: string;
-		patch: string;
-	}) => <pre data-patch={path}>{patch}</pre>,
+		onAddToChat,
+	}: WorkspacePatchDiffProps) => <pre data-patch={path}>{patch}<button onClick={() => onAddToChat?.([{ path, side: "modified", startLine: 19, endLine: 23, snippet: "selected test" }])}>Add selection</button></pre>,
 }));
 
 const target = {
@@ -102,6 +102,24 @@ afterEach(async () => {
 });
 
 describe("timeline turn review", () => {
+	it("routes selected code directly to the same conversation's composer", async () => {
+		const received = vi.fn();
+		const unsubscribe = subscribeWorkspaceDiffAnnotation(received);
+		try {
+			await render();
+			await click("turnReview.timeline.showFiles");
+			await click("src/first.ts");
+			expect(received).not.toHaveBeenCalled();
+			await click("Add selection");
+			expect(received).toHaveBeenCalledExactlyOnceWith({
+				workspaceId: "workspace", targetSessionId: "session", destination: "composer",
+				requests: [{ path: "src/first.ts", side: "modified", startLine: 19, endLine: 23, snippet: "selected test" }],
+			});
+			expect(onReview).not.toHaveBeenCalled();
+		} finally {
+			unsubscribe();
+		}
+	});
 	it("starts closed, loads only the selected patch, and keeps one file open", async () => {
 		await render();
 		expect(loadLastTurnReview).toHaveBeenCalledWith(
@@ -130,21 +148,16 @@ describe("timeline turn review", () => {
 		await click("src/second.ts");
 		expect(container.querySelector("[data-patch]")).toBeNull();
 	});
-	it("opens the inspector with the historical turn and selected file, then resets selection when collapsed", async () => {
+	it("opens the main Git inspector without a historical turn or file filter", async () => {
 		await render();
 		await click("turnReview.timeline.showFiles");
 		await click("src/second.ts");
 		await click("turnReview.timeline.review");
-		expect(onReview).toHaveBeenLastCalledWith({
-			...target,
-			filePath: "src/second.ts",
-		});
+		expect(onReview).toHaveBeenCalledExactlyOnceWith();
 		await click("turnReview.timeline.hideFiles");
 		await click("turnReview.timeline.review");
-		expect(onReview).toHaveBeenLastCalledWith({
-			...target,
-			filePath: undefined,
-		});
+		expect(onReview).toHaveBeenCalledTimes(2);
+		expect(onReview).toHaveBeenLastCalledWith();
 		await click("turnReview.timeline.showFiles");
 		expect(container.querySelector("[data-patch]")).toBeNull();
 	});

@@ -330,6 +330,9 @@
 .dcc-turn-review-actions .dcc-turn-review-open {
 	color: var(--dcc-accent-calm);
 }
+.dcc-turn-review-card button:not(:disabled) {
+	cursor: pointer;
+}
 .dcc-turn-review-card button:hover {
 	background: var(--accent);
 	color: var(--foreground);

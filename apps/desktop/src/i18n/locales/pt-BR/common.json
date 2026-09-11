@@ -3412,6 +3412,7 @@
       "fileCount_one": "{{count}} arquivo alterado",
       "fileCount_other": "{{count}} arquivos alterados",
       "thisTurn": "Nesta execução",
+      "addToChat": "Adicionar ao chat",
       "partial": "Execução interrompida",
       "showFiles": "Ver arquivos",
       "hideFiles": "Ocultar arquivos",
