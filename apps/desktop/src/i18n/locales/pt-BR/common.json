@@ -3907,5 +3907,41 @@
       "violet": "Violeta",
       "sky": "Azul"
     }
+  },
+  "appshots": {
+    "title": "Appshots",
+    "captureWindow": "Capturar janela de aplicativo",
+    "description": "Escolha até 6 janelas. Confira as capturas e anexe nesta conversa.",
+    "loading": "Buscando janelas abertas…",
+    "loadingPreview": "Capturando prévia…",
+    "permissionTitle": "Permitir captura de janelas",
+    "permissionHint": "Ative a Gravação de Tela para o DCC nos Ajustes do macOS e volte aqui. Pode ser necessário reiniciar o DCC após conceder o acesso.",
+    "grantPermission": "Abrir permissões do macOS",
+    "refresh": "Atualizar janelas",
+    "empty": "Nenhuma janela disponível. Abra a janela que deseja compartilhar e atualize.",
+    "untitled": "Janela sem título",
+    "selectionCount": "{{count}} / {{max}} selecionadas",
+    "previous": "Janelas anteriores",
+    "next": "Próximas janelas",
+    "cancel": "Cancelar",
+    "attach": "Anexar ({{count}})",
+    "shortcutTitle": "Atalho global do Appshots",
+    "shortcutHint": "Captura o aplicativo em primeiro plano e adiciona ao rascunho da conversa aberta. Clique no atalho para alterá-lo; pressione Esc para cancelar.",
+    "pressShortcut": "Pressione uma combinação…",
+    "shortcutDisabled": "Definir atalho",
+    "disableShortcut": "Desativar",
+    "errors": {
+      "backendOutdated": "Esta versão do DCC ainda não carregou o Appshots. No desenvolvimento, encerre o yarn dev e inicie novamente para recompilar o aplicativo. Na versão instalada, atualize o DCC.",
+      "unsupported": "O Appshots requer o DCC desktop no macOS 14 ou posterior.",
+      "permission": "Permita a Gravação de Tela para o DCC antes de capturar uma janela.",
+      "unavailable": "O Appshots está indisponível. Tente novamente.",
+      "captureFailed": "Não foi possível capturar esta janela. Atualize e tente novamente.",
+      "windowUnavailable": "A janela não está mais disponível. Use + → Capturar janela de aplicativo para escolher uma janela.",
+      "saveFailed": "Não foi possível salvar a captura. Confira o espaço em disco e tente novamente.",
+      "selectionInvalid": "Selecione entre 1 e 6 janelas diferentes.",
+      "previewExpired": "Uma prévia expirou. Atualize as janelas e selecione novamente.",
+      "shortcutInvalid": "Use Command, Control ou Option com uma letra, número, tecla de função ou Espaço.",
+      "shortcutUnavailable": "Não foi possível registrar este atalho. Escolha outra combinação."
+    }
   }
 }

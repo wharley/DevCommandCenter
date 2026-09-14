@@ -11,6 +11,8 @@ import {
 	GitFork,
 	ListPlus,
 	Paperclip,
+	Camera,
+	Plus,
 	Pencil,
 	Play,
 	Square,
@@ -98,6 +100,9 @@ import { EditablePlugin } from "./editor/plugins/EditablePlugin";
 import { FileMentionPlugin } from "./editor/plugins/file-mention-plugin";
 import { HasContentPlugin } from "./editor/plugins/HasContentPlugin";
 import { PasteImagePlugin } from "./editor/plugins/PasteImagePlugin";
+import { AppshotsPlugin } from "./editor/plugins/AppshotsPlugin";
+import { AppshotsDialog } from "./AppshotsDialog";
+import { isAppshotsDesktop } from "@/lib/appshots-api";
 import { SlashCommandPlugin } from "./editor/plugins/slash-command-plugin";
 import { SubmitPlugin } from "./editor/plugins/SubmitPlugin";
 import type {
@@ -230,6 +235,7 @@ export function WorkspaceComposer({
 	const [isFastMode, setIsFastMode] = useState(loadDirectResponse);
 	const [executionMenuOpen, setExecutionMenuOpen] = useState(false);
 	const [sendMenuOpen, setSendMenuOpen] = useState(false);
+	const [appshotsDraftKey, setAppshotsDraftKey] = useState<string | null>(null);
 	const [delegateAllowFileEdits, setDelegateAllowFileEdits] = useState(false);
 	const [fanOutSelection, setFanOutSelection] = useState<string[] | null>(null);
 	const lastDelegateMenuSignalRef = useRef(openDelegateMenuSignal ?? 0);
@@ -255,6 +261,7 @@ export function WorkspaceComposer({
 	);
 	const composerDraftKeyRef = useRef(composerDraftKey);
 	composerDraftKeyRef.current = composerDraftKey;
+	useEffect(() => setAppshotsDraftKey(null), [composerDraftKey]);
 	const composerEffortKey = useMemo(
 		() => getComposerEffortKey(draftKey),
 		[draftKey],
@@ -1054,6 +1061,12 @@ export function WorkspaceComposer({
 					draftKey={composerDraftKey}
 					fallbackDraftKeys={draftFallbackKeys}
 				/>
+				<AppshotsPlugin
+					draftKey={composerDraftKey}
+					workspaceRoot={workspacePath}
+					imagesSupported={imagesSupported}
+					disabled={inputDisabled}
+				/>
 				<ComposerPrefillPlugin
 					key={composerDraftKey}
 					prefill={prefill}
@@ -1061,25 +1074,40 @@ export function WorkspaceComposer({
 				/>
 				<HasContentPlugin onChange={setHasContent} />
 			</LexicalComposer>
+			{appshotsDraftKey === composerDraftKey && (
+				<AppshotsDialog
+					key={appshotsDraftKey}
+					draftKey={appshotsDraftKey}
+					onClose={() => setAppshotsDraftKey(null)}
+				/>
+			)}
 
 			<div className="mt-2.5 flex items-end justify-between gap-3">
 				<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-					<Tooltip>
-						<TooltipTrigger asChild>
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
 							<ComposerButton
 								type="button"
 								aria-label={t("composer.attachments.add")}
 								disabled={toolbarDisabled}
 								className="w-7 shrink-0 px-0 text-muted-foreground"
-								onClick={() => void openAttachmentPicker()}
 							>
-								<Paperclip className="size-[13px]" strokeWidth={1.8} />
+								<Plus className="size-[15px]" strokeWidth={1.8} />
 							</ComposerButton>
-						</TooltipTrigger>
-						<TooltipContent side="top">
-							{t("composer.attachments.add")}
-						</TooltipContent>
-					</Tooltip>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start" side="top">
+							<DropdownMenuItem onSelect={() => void openAttachmentPicker()}>
+								<Paperclip className="size-4" />
+								{t("composer.attachments.add")}
+							</DropdownMenuItem>
+							{isAppshotsDesktop() && (
+								<DropdownMenuItem onSelect={() => setAppshotsDraftKey(composerDraftKey)}>
+									<Camera className="size-4" />
+									{t("appshots.captureWindow")}
+								</DropdownMenuItem>
+							)}
+						</DropdownMenuContent>
+					</DropdownMenu>
 					<ComposerApprovalPolicyMenu
 						providerName={selectedProvider?.label ?? null}
 						supportedPolicies={supportedApprovalPolicies}

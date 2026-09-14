@@ -1204,6 +1204,59 @@ pub async fn computer_use_respond_control_request(
         .await
 }
 
+// Human-initiated Appshots reuse the native capture primitives without granting
+// agent control. A screenshot needs Screen Recording, not Accessibility.
+pub(crate) fn appshot_status() -> (bool, bool) {
+    let status = PlatformComputerNative.status();
+    (
+        cfg!(target_os = "macos") && status.major_version >= 14,
+        status.screen_recording,
+    )
+}
+
+pub(crate) fn appshot_request_access() {
+    PlatformComputerNative.request_access(ComputerAccessKind::ScreenRecording);
+}
+
+pub(crate) fn appshot_targets() -> Result<Vec<ComputerTarget>, String> {
+    let (supported, granted) = appshot_status();
+    if !supported {
+        return Err("unsupported".into());
+    }
+    if !granted {
+        return Err("permission".into());
+    }
+    Ok(PlatformComputerNative
+        .targets()?
+        .into_iter()
+        .filter(|target| target.pid != std::process::id() as i32)
+        .collect())
+}
+
+pub(crate) fn appshot_capture(target: &ComputerTarget) -> Result<Vec<u8>, String> {
+    let current = appshot_targets()?
+        .into_iter()
+        .find(|current| {
+            current.pid == target.pid
+                && current.window_id == target.window_id
+                && current.bundle_id == target.bundle_id
+        })
+        .ok_or("windowUnavailable")?;
+    PlatformComputerNative.capture(&current).map_err(|_| "captureFailed".into())
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn appshot_frontmost_target() -> Result<ComputerTarget, String> {
+    unsafe extern "C" {
+        fn dcc_appshot_frontmost_pid() -> i32;
+    }
+    let pid = unsafe { dcc_appshot_frontmost_pid() };
+    appshot_targets()?
+        .into_iter()
+        .find(|target| target.pid == pid)
+        .ok_or("windowUnavailable".into())
+}
+
 #[cfg(target_os = "macos")]
 struct PlatformComputerNative;
 #[cfg(not(target_os = "macos"))]

@@ -134,6 +134,10 @@ char *dcc_computer_status_json(void) {
   }
 }
 
+int32_t dcc_appshot_frontmost_pid(void) {
+  @autoreleasepool { return NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier; }
+}
+
 char *dcc_computer_targets_json(void) {
   @autoreleasepool {
     NSDictionary<NSNumber *, NSRunningApplication *> *apps = running_regular_apps();

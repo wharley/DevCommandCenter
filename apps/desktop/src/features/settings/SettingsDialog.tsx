@@ -83,6 +83,7 @@ import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "@/features/inspector/use-wo
 import { disconnectCodeRabbitCli } from "@/lib/coderabbit-cli";
 import { McpIntegrationsPanel } from "@/features/settings/mcp-integrations-panel";
 import { ComputerUsePanel } from "@/features/settings/computer-use-panel";
+import { AppshotsShortcut } from "@/features/settings/appshots-shortcut";
 import { ProviderAvailabilityPanel } from "@/features/providers/provider-availability-panel";
 import {
 	isProviderAvailabilityRequestCurrent,
@@ -1149,6 +1150,7 @@ export function SettingsDialog({
 
 							{activeSection === "shortcuts" ? (
 								<section className="space-y-4">
+									<AppshotsShortcut />
 									<div className="rounded-xl border border-border/60 p-4">
 										<div className="flex items-start justify-between gap-4">
 											<div>

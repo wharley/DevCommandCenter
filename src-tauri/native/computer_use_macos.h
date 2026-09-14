@@ -9,6 +9,7 @@
 // a Cocoa object across the FFI boundary.
 char *dcc_computer_status_json(void);
 char *dcc_computer_targets_json(void);
+int32_t dcc_appshot_frontmost_pid(void);
 // Returns whether the native permission request was initiated. It does not
 // indicate whether macOS has granted the permission; callers must re-check.
 bool dcc_computer_request_access(int kind);

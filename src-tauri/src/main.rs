@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod attachment_commands;
+mod appshot_commands;
 mod browser_commands;
 mod browser_sessions;
 mod browser_popups;
@@ -7043,6 +7044,14 @@ pub fn run() {
             pair_get_endpoints,
             terminal_save_temp_image,
             attachment_commands::preview_composer_attachment,
+            appshot_commands::appshots_status,
+            appshot_commands::appshots_request_access,
+            appshot_commands::appshots_preview,
+            appshot_commands::appshots_attach,
+            appshot_commands::appshots_activate,
+            appshot_commands::appshots_pending,
+            appshot_commands::appshots_acknowledge,
+            appshot_commands::appshots_set_shortcut,
             create_workspace_for_repo,
             create_workspace_bundle_for_repos,
             resolve_workspace_source_url,
@@ -7220,6 +7229,7 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from("."));
             let _ = std::fs::create_dir_all(&app_data_dir);
+            appshot_commands::setup(app.handle(), app_data_dir.clone())?;
             let db_path = app_data_dir.join("database.sqlite");
             let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
             conn.execute_batch(

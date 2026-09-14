@@ -3907,5 +3907,41 @@
       "violet": "Violet",
       "sky": "Sky"
     }
+  },
+  "appshots": {
+    "title": "Appshots",
+    "captureWindow": "Capture app window",
+    "description": "Choose up to 6 windows. Review the screenshots and attach them to this conversation.",
+    "loading": "Finding open windows…",
+    "loadingPreview": "Capturing preview…",
+    "permissionTitle": "Allow window capture",
+    "permissionHint": "Enable Screen Recording for DCC in macOS Settings. Then return here. You may need to restart DCC after granting access.",
+    "grantPermission": "Open macOS permissions",
+    "refresh": "Refresh windows",
+    "empty": "No app windows available. Open the window you want to share and refresh.",
+    "untitled": "Untitled window",
+    "selectionCount": "{{count}} / {{max}} selected",
+    "previous": "Previous windows",
+    "next": "Next windows",
+    "cancel": "Cancel",
+    "attach": "Attach ({{count}})",
+    "shortcutTitle": "Appshots global shortcut",
+    "shortcutHint": "Captures the app in front and adds it to the open conversation’s draft. Click the shortcut to change it; press Escape to cancel.",
+    "pressShortcut": "Press a key combination…",
+    "shortcutDisabled": "Set shortcut",
+    "disableShortcut": "Disable",
+    "errors": {
+      "backendOutdated": "This DCC version has not loaded Appshots yet. In development, stop yarn dev and start it again to rebuild the app. For an installed release, update DCC.",
+      "unsupported": "Appshots requires the DCC desktop app on macOS 14 or later.",
+      "permission": "Allow Screen Recording for DCC before capturing a window.",
+      "unavailable": "Appshots is unavailable. Try again.",
+      "captureFailed": "Could not capture this window. Refresh and try again.",
+      "windowUnavailable": "The app window is no longer available. Use + → Capture app window to choose a window.",
+      "saveFailed": "Could not save the capture. Check available disk space and try again.",
+      "selectionInvalid": "Select between 1 and 6 different windows.",
+      "previewExpired": "A preview expired. Refresh the windows and select them again.",
+      "shortcutInvalid": "Use Command, Control or Option with a letter, number, function key or Space.",
+      "shortcutUnavailable": "This shortcut could not be registered. Choose another combination."
+    }
   }
 }
