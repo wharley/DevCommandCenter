@@ -1,21 +1,18 @@
 import "@/features/review/review-surfaces.css";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-	ArrowUpRight,
-	ChevronDown,
-	ChevronRight,
-	FileDiff,
-	GitCompareArrows,
-} from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { TurnReviewFilePreview } from "./turn-review-file-preview";
+import { TurnReviewDialog } from "./turn-review-dialog";
+import { TurnReviewFileLabel, TurnReviewStats } from "./turn-review-file-label";
 import { hasTurnReviewLineStats } from "./turn-review.logic";
 import { dispatchWorkspaceDiffAnnotation } from "@/features/editor/workspace-diff-annotation-command";
 import {
 	turnReviewQueryOptions,
 	type TurnReviewTarget,
 } from "./turn-review-query";
+
+const VISIBLE_FILES = 3;
 
 export function TurnReviewTimelineCard({
 	target,
@@ -30,6 +27,7 @@ export function TurnReviewTimelineCard({
 	const id = useId();
 	const [expanded, setExpanded] = useState(false);
 	const [selectedFile, setSelectedFile] = useState<string | null>(null);
+	const triggerRef = useRef<HTMLButtonElement | null>(null);
 	const query = useQuery(turnReviewQueryOptions(target));
 	const review = query.data;
 	// Never substitute another turn, including when connected to an older backend.
@@ -42,6 +40,11 @@ export function TurnReviewTimelineCard({
 		review.files.length === 0
 	)
 		return null;
+	const openReview = (path: string, trigger: HTMLButtonElement) => {
+		onInteraction?.();
+		triggerRef.current = trigger;
+		setSelectedFile(path);
+	};
 	return (
 		<section
 			className="dcc-turn-review-card"
@@ -49,22 +52,49 @@ export function TurnReviewTimelineCard({
 			data-turn-review-id={target.turnId}
 		>
 			<div className="dcc-turn-review-summary">
-				<GitCompareArrows
-					className="dcc-turn-review-mark"
-					size={16}
-					aria-hidden
-				/>
 				<div className="dcc-turn-review-heading">
 					<span>
 						{t("turnReview.timeline.fileCount", { count: review.files.length })}
 					</span>
 					{review.files.every(hasTurnReviewLineStats) && (
-						<span className="dcc-turn-review-stats">
-							<span>+{review.insertions}</span>
-							<span>−{review.deletions}</span>
-						</span>
+						<TurnReviewStats {...review} />
 					)}
 				</div>
+				<button
+					type="button"
+					className="dcc-turn-review-open"
+					aria-haspopup="dialog"
+					onClick={(event) =>
+						openReview(review.files[0]!.path, event.currentTarget)
+					}
+				>
+					{t("turnReview.timeline.review")}
+					<ChevronRight size={14} aria-hidden />
+				</button>
+			</div>
+			<div id={`${id}-files`} className="dcc-turn-review-files">
+				{(expanded ? review.files : review.files.slice(0, VISIBLE_FILES)).map(
+					(file) => (
+						<div key={file.path} className="dcc-turn-review-file">
+							<button
+								type="button"
+								className="dcc-turn-review-file-trigger"
+								aria-haspopup="dialog"
+								title={file.path}
+								onClick={(event) => openReview(file.path, event.currentTarget)}
+							>
+								<TurnReviewFileLabel file={file} />
+								<ChevronRight
+									size={13}
+									aria-hidden
+									className="dcc-turn-review-file-chevron"
+								/>
+							</button>
+						</div>
+					),
+				)}
+			</div>
+			<div className="dcc-turn-review-actions">
 				<span className="dcc-turn-review-caption">
 					{t(
 						review.turnOutcome === "aborted"
@@ -72,115 +102,48 @@ export function TurnReviewTimelineCard({
 							: "turnReview.timeline.thisTurn",
 					)}
 				</span>
+				{review.files.length > VISIBLE_FILES && (
+					<button
+						type="button"
+						aria-expanded={expanded}
+						aria-controls={`${id}-files`}
+						onClick={() => {
+							onInteraction?.();
+							setExpanded(!expanded);
+						}}
+					>
+						{t(
+							expanded
+								? "turnReview.timeline.showLess"
+								: "turnReview.timeline.moreFiles",
+							{ count: review.files.length - VISIBLE_FILES },
+						)}
+						<ChevronDown
+							size={13}
+							className={expanded ? "rotate-180" : ""}
+							aria-hidden
+						/>
+					</button>
+				)}
 			</div>
-			<div className="dcc-turn-review-actions">
-				<button
-					type="button"
-					aria-expanded={expanded}
-					aria-controls={`${id}-files`}
-					onClick={() => {
-						onInteraction?.();
-						setExpanded(!expanded);
-						setSelectedFile(null);
-					}}
-				>
-					<ChevronDown
-						size={14}
-						className={expanded ? "rotate-180" : ""}
-						aria-hidden
-					/>
-					{t(
-						expanded
-							? "turnReview.timeline.hideFiles"
-							: "turnReview.timeline.showFiles",
-					)}
-				</button>
-				<button
-					type="button"
-					className="dcc-turn-review-open"
-					onClick={() => onReview()}
-				>
-					{t("turnReview.timeline.review")}
-					<ArrowUpRight size={14} aria-hidden />
-				</button>
-			</div>
-			<div
-				id={`${id}-files`}
-				hidden={!expanded}
-				className="dcc-turn-review-files"
-			>
-				{expanded &&
-					review.files.map((file, index) => {
-						const open = selectedFile === file.path;
-						return (
-							<div key={file.path} className="dcc-turn-review-file">
-								<button
-									type="button"
-									className="dcc-turn-review-file-trigger"
-									aria-expanded={open}
-									aria-controls={`${id}-diff-${index}`}
-									title={file.path}
-									onClick={() => {
-										onInteraction?.();
-										setSelectedFile(open ? null : file.path);
-									}}
-								>
-									{open ? (
-										<ChevronDown size={14} aria-hidden />
-									) : (
-										<ChevronRight size={14} aria-hidden />
-									)}
-									<FileDiff size={14} aria-hidden />
-									<span className="dcc-turn-review-path">{file.path}</span>
-									{file.status === "A" && (
-										<span className="shrink-0 text-xs text-muted-foreground">
-											{t("turnReview.added")}
-										</span>
-									)}
-									{hasTurnReviewLineStats(file) && (
-										<span className="dcc-turn-review-stats">
-											<span>+{file.insertions}</span>
-											<span>−{file.deletions}</span>
-										</span>
-									)}
-								</button>
-								<div id={`${id}-diff-${index}`} hidden={!open}>
-									{open && (
-										<div
-											className="dcc-turn-review-preview"
-											style={{
-												height: file.previewUnavailable
-													? 96
-													: Math.min(
-															300,
-															Math.max(
-																140,
-																(file.insertions + file.deletions + 5) * 18 +
-																	32,
-															),
-														),
-											}}
-										>
-											<TurnReviewFilePreview
-												snapshotId={review.snapshotId}
-												file={file}
-												onAddToChat={(requests) => {
-													onInteraction?.();
-													dispatchWorkspaceDiffAnnotation({
-														workspaceId: target.workspaceId,
-														targetSessionId: target.sessionId,
-														destination: "composer",
-														requests,
-													});
-												}}
-											/>
-										</div>
-									)}
-								</div>
-							</div>
-						);
-					})}
-			</div>
+			<TurnReviewDialog
+				review={review}
+				selectedPath={selectedFile}
+				onSelect={setSelectedFile}
+				onClose={() => setSelectedFile(null)}
+				onReview={onReview}
+				returnFocus={() => triggerRef.current?.focus()}
+				onAddToChat={(requests) => {
+					onInteraction?.();
+					setSelectedFile(null);
+					dispatchWorkspaceDiffAnnotation({
+						workspaceId: target.workspaceId,
+						targetSessionId: target.sessionId,
+						destination: "composer",
+						requests,
+					});
+				}}
+			/>
 		</section>
 	);
 }

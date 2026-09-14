@@ -3586,6 +3586,18 @@
   },
   "turnReview": {
     "timeline": {
+      "close": "Fechar revisão",
+      "previousFile": "Arquivo anterior",
+      "nextFile": "Próximo arquivo",
+      "moreFiles_one": "Mais {{count}} arquivo",
+      "moreFiles_other": "Mais {{count}} arquivos",
+      "showLess": "Mostrar menos",
+      "status": {
+        "added": "Novo",
+        "modified": "Alterado",
+        "deleted": "Excluído",
+        "renamed": "Renomeado"
+      },
       "title": "Alterações desta execução",
       "fileCount_one": "{{count}} arquivo alterado",
       "fileCount_other": "{{count}} arquivos alterados",

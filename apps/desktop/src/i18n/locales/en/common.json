@@ -3586,6 +3586,18 @@
   },
   "turnReview": {
     "timeline": {
+      "close": "Close review",
+      "previousFile": "Previous file",
+      "nextFile": "Next file",
+      "moreFiles_one": "{{count}} more file",
+      "moreFiles_other": "{{count}} more files",
+      "showLess": "Show less",
+      "status": {
+        "added": "New",
+        "modified": "Modified",
+        "deleted": "Deleted",
+        "renamed": "Renamed"
+      },
       "title": "Changes from this turn",
       "fileCount_one": "{{count}} changed file",
       "fileCount_other": "{{count}} changed files",

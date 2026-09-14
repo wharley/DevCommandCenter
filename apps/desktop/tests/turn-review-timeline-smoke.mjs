@@ -13,6 +13,7 @@ page.on("pageerror", (error) => errors.push(error.message));
 const output = "/tmp/dcc-turn-review-timeline";
 const button = (name) => page.getByRole("button", { name, exact: true });
 const oldCard = page.locator('[data-turn-review-id="turn-history"]');
+const dialog = page.getByRole("dialog", { name: "Alterações desta execução" });
 const shot = (name) => page.screenshot({ path: `${output}/${name}.png` });
 try {
 	await mkdir(output, { recursive: true });
@@ -20,32 +21,15 @@ try {
 		`${process.env.DCC_REVIEW_URL || "http://127.0.0.1:1432"}/tests/review-surfaces.html`,
 	);
 	await button("Timeline").click();
-	await page.waitForFunction(
-		() => document.querySelectorAll(".dcc-turn-review-card").length === 2,
-	);
+	await oldCard.waitFor();
 	await page
 		.getByRole("textbox", { name: "Mensagem" })
 		.fill("Confira também o caso de erro.");
-	assert.equal(await page.locator(".dcc-turn-review-file-trigger").count(), 0);
-	await page.waitForTimeout(500);
 	assert.equal(
-		await page.locator("html").evaluate((el) => el.classList.contains("dark")),
-		true,
-	);
-	await shot("closed-dark");
-	await page.evaluate(() => {
-		window.reviewRequests = [];
-	});
-	await oldCard
-		.getByRole("button", { name: "Ver arquivos", exact: true })
-		.focus();
-	await page.keyboard.press("Enter");
-	assert.equal(
-		await oldCard
-			.locator('.dcc-turn-review-file-trigger[aria-expanded="false"]')
-			.count(),
+		await oldCard.locator(".dcc-turn-review-file-trigger").count(),
 		3,
 	);
+	assert.equal(await dialog.count(), 0);
 	assert.equal(
 		await page.evaluate(
 			() =>
@@ -55,74 +39,68 @@ try {
 		),
 		0,
 	);
-	const first = oldCard.locator('button[title="src/review.ts"]');
-	const before = await first.boundingBox();
-	await first.click();
-	await oldCard.locator(".dcc-turn-review-preview").waitFor();
-	await page.waitForTimeout(500);
-	const after = await first.boundingBox();
-	assert.ok(
-		Math.abs(before.y - after.y) < 3,
-		"expanding a diff preserves the reading position",
-	);
+	await shot("card-dark");
 	await oldCard
-		.locator('button[title="src/components/composer/use-prefill.ts"]')
+		.getByRole("button", { name: "Mais 1 arquivo", exact: true })
 		.click();
-	assert.equal(await oldCard.locator(".dcc-turn-review-preview").count(), 1);
-	assert.equal(await first.getAttribute("aria-expanded"), "false");
+	assert.equal(
+		await oldCard.locator(".dcc-turn-review-file-trigger").count(),
+		4,
+	);
+	const trigger = oldCard.getByRole("button", {
+		name: "Revisar alterações",
+		exact: true,
+	});
+	await trigger.focus();
+	await page.keyboard.press("Enter");
+	await dialog.getByRole("code").waitFor();
+	assert.equal(
+		await dialog
+			.getByRole("button", { name: "Arquivo anterior", exact: true })
+			.isDisabled(),
+		true,
+	);
+	await shot("popup-dark");
+	await button("Próximo arquivo").click();
+	await dialog
+		.getByRole("region", {
+			name: "src/components/composer/use-prefill.ts",
+			exact: true,
+		})
+		.waitFor();
+	assert.equal(await dialog.locator("[data-turn-review-diff]").count(), 1);
+	await button("Próximo arquivo").click();
+	await dialog.getByRole("code").waitFor();
+	assert.match(
+		await dialog.getByRole("code").innerText(),
+		/Keep the composer draft/,
+	);
 	await page.waitForFunction(() =>
 		window.reviewRequests.some(
 			(r) =>
 				r.command === "turn_review_file_diff" &&
 				r.args.input.snapshotId === "snapshot-history" &&
-				r.args.input.path === "src/components/composer/use-prefill.ts",
+				r.args.input.path === "docs/review-notes.md",
 		),
 	);
-	await page.waitForTimeout(500);
-	await shot("inline-dark");
-	await oldCard
-		.getByRole("button", { name: "Revisar alterações", exact: true })
-		.click();
-	const inspector = page.getByRole("complementary", {
-		name: "Inspector de revisão",
-	});
-	await inspector.getByText("Execução selecionada", { exact: true }).waitFor();
-	const selected = inspector.locator('[data-review-selected="true"]');
-	await selected.waitFor();
+	await shot("new-file");
+	await page.keyboard.press("Escape");
+	await dialog.waitFor({ state: "hidden" });
 	assert.equal(
-		await selected.getAttribute("data-review-file"),
-		"src/components/composer/use-prefill.ts",
+		await trigger.evaluate((el) => document.activeElement === el),
+		true,
 	);
 	assert.equal(
 		await page.getByRole("textbox", { name: "Mensagem" }).inputValue(),
 		"Confira também o caso de erro.",
 	);
-	await inspector.getByText("Prévia indisponível nesta execução.", { exact: true }).waitFor();
-	await shot("inspector-history");
-	await inspector
-		.getByRole("button", { name: "Alterações atuais", exact: true })
-		.click();
-	await inspector
-		.getByRole("button", { name: "Workspace", exact: true })
-		.waitFor();
-	await button("Fechar inspector").click();
 	await button("Tema").click();
-	await page.waitForTimeout(300);
-	await shot("inline-light");
-	await oldCard
-		.getByRole("button", { name: "Ocultar arquivos", exact: true })
-		.click();
-	await oldCard
-		.getByRole("button", { name: "Ver arquivos", exact: true })
-		.click();
-	assert.equal(await oldCard.locator(".dcc-turn-review-preview").count(), 0);
-	await page.setViewportSize({ width: 720, height: 900 });
+	await page.setViewportSize({ width: 390, height: 844 });
 	await oldCard.locator('button[title="assets/preview.png"]').click();
-	await oldCard
-		.getByText("Prévia indisponível nesta execução.", {
-			exact: true,
-		})
+	await dialog
+		.getByText("Prévia indisponível nesta execução.", { exact: true })
 		.waitFor();
+	assert.equal(await button("Próximo arquivo").isDisabled(), true);
 	assert.equal(
 		await page.evaluate(
 			() => document.documentElement.scrollWidth <= innerWidth,
@@ -130,22 +108,29 @@ try {
 		true,
 	);
 	await shot("narrow-light");
+	await button("Alterações atuais").click();
+	await dialog.waitFor({ state: "hidden" });
+	await page
+		.getByRole("complementary", { name: "Inspector de revisão" })
+		.getByRole("button", { name: "Workspace", exact: true })
+		.waitFor();
 	assert.deepEqual(errors, []);
 	console.log(
 		JSON.stringify({
 			ok: true,
 			screenshots: output,
 			checks: [
-				"collapsed default",
-				"keyboard",
+				"visible files",
 				"lazy patches",
-				"single open diff",
-				"reading position",
-				"historical inspector",
-				"selected file",
+				"keyboard",
+				"historical diff",
+				"new file",
+				"single selected diff",
+				"focus restored",
 				"draft preserved",
 				"light/dark",
 				"narrow layout",
+				"current inspector",
 			],
 		}),
 	);

@@ -267,32 +267,32 @@
 .dcc-turn-review-card {
 	margin-top: 18px;
 	border: 1px solid var(--dcc-surface-edge);
-	border-radius: 12px;
-	background: color-mix(in srgb, var(--card) 45%, var(--background));
+	border-radius: 14px;
+	background: color-mix(in srgb, var(--card) 55%, var(--background));
 	overflow: hidden;
 	font-size: 12px;
+	box-shadow: 0 2px 6px #00000005;
 }
 .dcc-turn-review-summary {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 13px 14px 7px;
-}
-.dcc-turn-review-mark {
-	color: var(--dcc-accent-calm);
-	flex-shrink: 0;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 14px 16px;
+	border-bottom: 1px solid var(--dcc-surface-edge);
 }
 .dcc-turn-review-heading {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 10px;
-	font-weight: 500;
+	gap: 8px 12px;
+	font-weight: 550;
 }
 .dcc-turn-review-stats {
 	display: inline-flex;
 	flex-shrink: 0;
-	gap: 6px;
+	gap: 7px;
+	font-family: var(--font-mono);
 	font-size: 11px;
 	font-variant-numeric: tabular-nums;
 	font-weight: 400;
@@ -303,71 +303,278 @@
 .dcc-turn-review-stats > :last-child {
 	color: var(--destructive);
 }
-.dcc-turn-review-caption {
-	margin-left: auto;
-	font-size: 10px;
-	color: var(--muted-foreground);
-	text-align: right;
-}
-.dcc-turn-review-actions {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	justify-content: space-between;
-	gap: 6px;
-	padding: 3px 8px 8px;
-}
-.dcc-turn-review-actions button {
+.dcc-turn-review-open {
 	display: inline-flex;
+	flex-shrink: 0;
 	align-items: center;
-	justify-content: center;
 	gap: 6px;
-	padding: 6px;
-	border-radius: 6px;
+	padding: 7px 10px;
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: 8px;
+	background: var(--background);
 	font-size: 11px;
-	color: var(--muted-foreground);
+	font-weight: 500;
 }
-.dcc-turn-review-actions .dcc-turn-review-open {
-	color: var(--dcc-accent-calm);
-}
-.dcc-turn-review-card button:not(:disabled) {
-	cursor: pointer;
-}
-.dcc-turn-review-card button:hover {
-	background: var(--accent);
-	color: var(--foreground);
-}
-.dcc-turn-review-card button:focus-visible {
-	outline: 2px solid var(--ring);
-	outline-offset: -2px;
-}
-.dcc-turn-review-file {
-	border-top: 1px solid var(--dcc-surface-edge);
+.dcc-turn-review-files {
+	padding: 5px;
 }
 .dcc-turn-review-file-trigger {
 	display: flex;
 	width: 100%;
+	min-width: 0;
 	align-items: center;
-	gap: 8px;
-	padding: 11px 14px;
+	gap: 10px;
+	padding: 10px;
+	border-radius: 7px;
 	text-align: left;
+	transition: background var(--dcc-motion-fast);
 }
 .dcc-turn-review-file-trigger > svg {
 	flex-shrink: 0;
 	color: var(--muted-foreground);
 }
 .dcc-turn-review-path {
+	display: flex;
 	flex: 1;
 	min-width: 0;
-	overflow-wrap: anywhere;
+	align-items: baseline;
+	gap: 8px;
+	font-size: 11px;
+}
+.dcc-turn-review-filename,
+.dcc-turn-review-folder {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.dcc-turn-review-filename {
+	font-weight: 500;
+}
+.dcc-turn-review-folder {
+	color: var(--muted-foreground);
+	font-size: 10px;
+}
+.dcc-turn-review-status {
+	flex-shrink: 0;
+	font-size: 9px;
+	color: var(--muted-foreground);
+}
+.dcc-turn-review-status[data-status="added"] {
+	color: var(--dcc-accent-calm);
+}
+.dcc-turn-review-status[data-status="deleted"] {
+	color: var(--destructive);
+}
+.dcc-turn-review-file-chevron {
+	opacity: 0.45;
+}
+.dcc-turn-review-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 7px 15px 10px;
+	color: var(--muted-foreground);
+	font-size: 10px;
+}
+.dcc-turn-review-actions button {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 5px;
+	border-radius: 5px;
+}
+.dcc-turn-review-card button:not(:disabled),
+.dcc-turn-review-dialog button:not(:disabled) {
+	cursor: pointer;
+}
+.dcc-turn-review-card button:hover,
+.dcc-turn-review-dialog button:hover:not(:disabled) {
+	background: var(--accent);
+	color: var(--foreground);
+}
+.dcc-turn-review-card button:focus-visible,
+.dcc-turn-review-dialog button:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: -2px;
+}
+.dcc-turn-review-dialog[data-slot="dialog-content"] {
+	display: flex;
+	flex-direction: column;
+	width: calc(100vw - 48px);
+	max-width: 1180px;
+	height: min(800px, calc(100dvh - 80px));
+	gap: 0;
+	padding: 0;
+	overflow: hidden;
+	border-radius: 16px;
+	background: var(--background);
+}
+.dcc-turn-review-dialog-heading {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 18px;
+	padding: 18px 20px;
+	border-bottom: 1px solid var(--dcc-surface-edge);
+}
+.dcc-turn-review-dialog-heading > div {
+	flex: 1;
+	min-width: 0;
+}
+.dcc-turn-review-dialog-heading [data-slot="dialog-title"] {
+	font-size: 14px;
+	line-height: 1.4;
+}
+.dcc-turn-review-dialog-heading [data-slot="dialog-description"] {
+	margin-top: 4px;
+	font-size: 11px;
+}
+.dcc-turn-review-icon-button {
+	display: grid;
+	place-items: center;
+	flex-shrink: 0;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	color: var(--muted-foreground);
+}
+.dcc-turn-review-icon-button:disabled {
+	opacity: 0.3;
+}
+.dcc-turn-review-dialog-body {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+}
+.dcc-turn-review-dialog-files {
+	width: 290px;
+	flex-shrink: 0;
+	padding: 8px;
+	overflow-y: auto;
+	border-right: 1px solid var(--dcc-surface-edge);
+	background: color-mix(in srgb, var(--muted) 25%, var(--background));
+}
+.dcc-turn-review-dialog-files .dcc-turn-review-file-trigger {
+	gap: 8px;
+	margin-bottom: 3px;
+	flex-wrap: wrap;
+}
+.dcc-turn-review-dialog-files .dcc-turn-review-path {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 3px;
+}
+.dcc-turn-review-dialog-files .dcc-turn-review-status {
+	margin-left: 23px;
+}
+.dcc-turn-review-dialog-files .dcc-turn-review-stats {
+	margin-left: auto;
+}
+.dcc-turn-review-dialog-files .dcc-turn-review-path {
+	flex-basis: calc(100% - 30px);
+}
+.dcc-turn-review-dialog-files button[aria-current="true"] {
+	background: var(--accent);
+	box-shadow: inset 0 0 0 1px var(--dcc-surface-edge);
+}
+.dcc-turn-review-dialog-main {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+.dcc-turn-review-dialog-toolbar {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	gap: 4px;
+	min-height: 44px;
+	padding: 7px 12px;
+	border-bottom: 1px solid var(--dcc-surface-edge);
+}
+.dcc-turn-review-selected-path {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 	font-family: var(--font-mono);
 	font-size: 11px;
 }
-.dcc-turn-review-preview {
-	height: 300px;
-	max-height: 45vh;
-	min-height: 96px;
+.dcc-turn-review-position {
+	padding: 0 8px;
+	font-size: 10px;
+	font-variant-numeric: tabular-nums;
+	color: var(--muted-foreground);
+}
+.dcc-turn-review-dialog-preview {
+	flex: 1;
+	min-height: 0;
 	overflow: hidden;
+}
+.dcc-turn-review-dialog-footer {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
 	border-top: 1px solid var(--dcc-surface-edge);
-	background: var(--background);
+	padding: 10px 16px;
+	color: var(--muted-foreground);
+	font-size: 10px;
+}
+.dcc-turn-review-dialog-footer button {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 5px;
+	border-radius: 5px;
+	padding: 4px 6px;
+}
+@media (max-width: 760px) {
+	.dcc-turn-review-dialog[data-slot="dialog-content"] {
+		width: calc(100vw - 24px);
+		height: calc(100dvh - 32px);
+	}
+	.dcc-turn-review-dialog-body {
+		flex-direction: column;
+	}
+	.dcc-turn-review-dialog-files {
+		display: flex;
+		width: 100%;
+		max-height: 140px;
+		gap: 4px;
+		overflow-x: auto;
+		border-right: 0;
+		border-bottom: 1px solid var(--dcc-surface-edge);
+	}
+	.dcc-turn-review-dialog-files .dcc-turn-review-file-trigger {
+		width: 220px;
+		flex-shrink: 0;
+	}
+	.dcc-turn-review-dialog-heading {
+		padding: 14px;
+		gap: 8px;
+	}
+	.dcc-turn-review-dialog-footer {
+		flex-wrap: wrap;
+		gap: 4px;
+	}
+}
+@media (max-width: 480px) {
+	.dcc-turn-review-summary {
+		flex-wrap: wrap;
+		padding: 12px;
+	}
+	.dcc-turn-review-card .dcc-turn-review-path {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 2px;
+	}
+	.dcc-turn-review-card .dcc-turn-review-status {
+		display: none;
+	}
 }

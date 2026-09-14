@@ -1,5 +1,4 @@
 import { ActiveThreadViewport } from "@/features/panel/ActiveThreadViewport";
-import type { TurnReviewRequest, TurnReviewTarget } from "@/features/panel/turn-review-query";
 // Real review surfaces with synthetic, read-only IPC. Never reads a user repository.
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -158,14 +157,14 @@ win.__TAURI_INTERNALS__ = {
 				};
 			case "last_turn_review":
 				return win.emptyReview ? null : args.input.turnId === "turn-history" ? {
-					...turn, turnId: "turn-history", snapshotId: "snapshot-history", insertions: 8, deletions: 3,
-					files: [changes[0], { ...changes[0], path: "src/components/composer/use-prefill.ts", insertions: 7, deletions: 2 }, { ...changes[0], path: "assets/preview.png", insertions: 0, deletions: 0, previewUnavailable: true }],
+					...turn, turnId: "turn-history", snapshotId: "snapshot-history", insertions: 11, deletions: 3,
+					files: [changes[0], { ...changes[0], path: "src/components/composer/use-prefill.ts", insertions: 7, deletions: 2 }, { ...changes[0], path: "docs/review-notes.md", status: "A", untracked: true, insertions: 3, deletions: 0 }, { ...changes[0], path: "assets/preview.png", insertions: 0, deletions: 0, previewUnavailable: true }],
 				} : turn;
 			case "turn_review_file_diff":
 				return {
 					snapshotId: args.input.snapshotId,
 					path: args.input.path,
-					diff: `diff --git a/${args.input.path} b/${args.input.path}\n--- a/${args.input.path}\n+++ b/${args.input.path}\n${patch}\n`,
+					diff: args.input.path === "docs/review-notes.md" ? "diff --git a/docs/review-notes.md b/docs/review-notes.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/review-notes.md\n@@ -0,0 +1,3 @@\n+# Review\n+\n+Keep the composer draft when reviewing changes.\n" : `diff --git a/${args.input.path} b/${args.input.path}\n--- a/${args.input.path}\n+++ b/${args.input.path}\n${patch}\n`,
 					previewUnavailable: false,
 				};
 			case "pull_request_hub_list":
@@ -178,8 +177,7 @@ win.__TAURI_INTERNALS__ = {
 	},
 };
 function TimelineFixture() {
-	const [request, setRequest] = useState<TurnReviewRequest | null>(null);
-	const onReview = (target: TurnReviewTarget) => setRequest((current) => ({ ...target, nonce: (current?.nonce ?? 0) + 1 }));
+	const [inspectorOpen, setInspectorOpen] = useState(false);
 	return <div className="flex min-h-0 min-w-0 flex-1">
 		<div className="flex min-w-0 flex-1 flex-col">
 			<header className="border-b border-border px-5 py-4 text-sm font-medium">Revisar o fluxo de anotações</header>
@@ -193,13 +191,13 @@ function TimelineFixture() {
 				hasLoaded isEmpty={false} workspaceName="Review fixture" sessionState="idle" lastTurnState="completed"
 				pendingPrompt={null} workspacePath="/fixture/review" workspaceId="workspace-demo" sessionId="session-demo"
 				planMessageId={null} planApproved={false} planReadOnly={false} activeMissionSpecRelativePath={null}
-				activeMissionSpecHash={null} autoSaveMissionValidation={false} onSelectSession={() => {}} onOpenPlan={() => {}} onReviewTurn={onReview}
+				activeMissionSpecHash={null} autoSaveMissionValidation={false} onSelectSession={() => {}} onOpenPlan={() => {}} onReviewChanges={() => setInspectorOpen(true)}
 			/>
 			<div className="px-5 pb-5 pt-2"><textarea aria-label="Mensagem" placeholder="Peça um ajuste ou continue a conversa…" className="min-h-24 w-full rounded-xl border border-border bg-background p-3 text-sm" /></div>
 		</div>
-		{request && <aside className="flex w-[380px] min-h-0 shrink-0 flex-col border-l border-border" aria-label="Inspector de revisão">
-			<button className="self-end px-3 py-2 text-xs text-muted-foreground" onClick={() => setRequest(null)}>Fechar inspector</button>
-			<InspectorChangesSection workspaceRoot="/fixture/review" workspaceId="workspace-demo" sessionId="session-demo" selectedPreview={null} onSelectPreview={() => {}} turnReviewRequest={request} />
+		{inspectorOpen && <aside className="flex w-[380px] min-h-0 shrink-0 flex-col border-l border-border" aria-label="Inspector de revisão">
+			<button className="self-end px-3 py-2 text-xs text-muted-foreground" onClick={() => setInspectorOpen(false)}>Fechar inspector</button>
+			<InspectorChangesSection workspaceRoot="/fixture/review" workspaceId="workspace-demo" sessionId="session-demo" selectedPreview={null} onSelectPreview={() => {}} />
 		</aside>}
 	</div>;
 }
