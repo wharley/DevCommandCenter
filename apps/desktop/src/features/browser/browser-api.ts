@@ -18,6 +18,36 @@ export type BrowserSnapshot = {
 	title: string | null;
 };
 
+export type BrowserOpenRequest = {
+	requestId: string;
+	workspaceId: string;
+	sessionId: string;
+	providerId: string;
+	url: string;
+	reason: string;
+	expiresAtMs: number;
+};
+
+/** Metadata only: no cookie or credential values cross the native boundary. */
+export type BrowserSessionImportProfile = {
+	id: string;
+	browser: string;
+	name: string;
+};
+
+export type BrowserSessionProfilesResult = {
+	profiles: BrowserSessionImportProfile[];
+	supported: boolean;
+	message?: string | null;
+};
+
+export type BrowserSessionImportResult = {
+	imported: number;
+	skipped: number;
+	supported: boolean;
+	message?: string | null;
+};
+
 /** In-memory, lifecycle-bound Browser control consent; no capability token is exposed. */
 export type BrowserControlStatus = {
 	armed: boolean;
@@ -33,6 +63,8 @@ export type BrowserAuditTool =
 	| "dcc_browser_scroll"
 	| "dcc_browser_click"
 	| "dcc_browser_fill"
+	| "dcc_browser_select"
+	| "dcc_browser_press"
 	| "dcc_browser_evidence_start"
 	| "dcc_browser_evidence_read"
 	| "browser_arm_control"
@@ -83,7 +115,18 @@ export type BrowserSemanticItem = {
 	selected?: boolean;
 	expanded?: boolean;
 	pressed?: boolean;
+	/** Visible select choices supplied by the bounded native semantic map. */
+	options?: string[];
 };
+
+export type BrowserControlAction =
+	| { kind: "navigate"; url: string }
+	| { kind: "reload" }
+	| { kind: "scroll"; deltaX: number; deltaY: number }
+	| { kind: "click"; reference: string }
+	| { kind: "fill"; reference: string; text: string }
+	| { kind: "select"; reference: string; label: string }
+	| { kind: "press"; reference: string; key: "Enter" | "Tab" | "Shift+Tab" | "Escape" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Backspace" | "Delete" | "Home" | "End" | "Space" };
 
 /**
  * Complete identity of a fresh semantic map. It is consumed by the backend
@@ -174,6 +217,52 @@ export function openBrowser(input: {
 		restoreLastUrl: input.restoreLastUrl ?? false,
 		bounds: input.bounds,
 		...(input.initialOccluded ? { initialOccluded: true } : {}),
+	});
+}
+
+export function listBrowserOpenRequests(input: { workspaceId: string; sessionId: string }) {
+	return invoke<BrowserOpenRequest[]>("browser_agent_pending", { input });
+}
+
+export function listAllBrowserOpenRequests() {
+	return invoke<BrowserOpenRequest[]>("browser_agent_pending_all");
+}
+
+export type BrowserSessionImportScope = {
+	workspaceId: string;
+	sessionId: string | null;
+	lifecycleToken: number;
+};
+
+export function listBrowserSessionImportProfiles(input: BrowserSessionImportScope) {
+	return invoke<BrowserSessionProfilesResult>("browser_session_profiles", input);
+}
+
+export function importBrowserSession(input: BrowserSessionImportScope & {
+	profileId: string;
+	currentUrl: string;
+}) {
+	return invoke<BrowserSessionImportResult>("browser_session_import", input);
+}
+
+export function resolveBrowserOpenRequest(input: {
+	requestId: string; workspaceId: string; sessionId: string;
+	decision: "allow" | "deny"; lifecycleToken?: number;
+}) {
+	return invoke<{ status: string; lifecycleToken?: number; remainingMs: number; message?: string }>("browser_agent_resolve", { input });
+}
+
+export function acknowledgeBrowserOpen(input: {
+	requestId: string;
+	workspaceId: string;
+	sessionId: string;
+	lifecycleToken: number;
+}) {
+	return resolveBrowserOpenRequest({ ...input, decision: "allow" }).then((result) => {
+		if (result.status !== "approved" || result.lifecycleToken !== input.lifecycleToken) {
+			throw new Error(result.message || "Browser approval could not be confirmed");
+		}
+		return result;
 	});
 }
 

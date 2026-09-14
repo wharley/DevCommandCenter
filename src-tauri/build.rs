@@ -1,4 +1,95 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf, process::Command};
+
+fn build_macos_computer_bridge() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+        return;
+    }
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by Cargo"));
+    let source = PathBuf::from("native/computer_use_macos.m");
+    let object = out_dir.join("computer_use_macos.o");
+    let archive = out_dir.join("libdcc_computer_use_macos.a");
+    let capture_object = out_dir.join("browser_capture_macos.o");
+    let input_object = out_dir.join("browser_input_macos.o");
+    let cookies_object = out_dir.join("browser_session_cookies_macos.o");
+    let navigation_object = out_dir.join("browser_navigation_macos.o");
+    println!("cargo:rerun-if-changed=native/browser_session_cookies_macos.m");
+    println!("cargo:rerun-if-changed=native/browser_input_macos.m");
+    println!("cargo:rerun-if-changed=native/browser_capture_macos.m");
+    println!("cargo:rerun-if-changed=native/browser_navigation_macos.m");
+    println!("cargo:rerun-if-changed={}", source.display());
+    println!("cargo:rerun-if-changed=native/computer_use_macos.h");
+    println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
+    let target = env::var("TARGET").unwrap_or_default();
+    let architecture = if target.starts_with("aarch64-") {
+        "arm64"
+    } else {
+        "x86_64"
+    };
+    // Do not let the installed SDK's version become the application's minimum
+    // OS. Respect Cargo's deployment target, with conservative architecture
+    // defaults when the environment did not set one.
+    let deployment_target = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| {
+        if architecture == "arm64" {
+            "11.0".to_string()
+        } else {
+            "10.13".to_string()
+        }
+    });
+    let compiled = Command::new("xcrun")
+        .args(["clang", "-fobjc-arc", "-c"])
+        .arg(&source)
+        .args(["-arch", architecture])
+        .arg(format!("-mmacosx-version-min={deployment_target}"))
+        .args(["-o"])
+        .arg(&object)
+        .status()
+        .expect("xcrun clang must be available to build macOS computer use")
+        .success();
+    assert!(compiled, "failed to compile the macOS computer-use bridge");
+    let capture_compiled = Command::new("xcrun")
+        .args(["clang", "-fobjc-arc", "-fblocks", "-c", "native/browser_capture_macos.m"])
+        .args(["-arch", architecture])
+        .arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o").arg(&capture_object).status()
+        .expect("xcrun clang must be available to build Browser capture").success();
+    assert!(capture_compiled, "failed to compile Browser capture");
+    let input_compiled = Command::new("xcrun")
+        .args(["clang", "-fobjc-arc", "-c", "native/browser_input_macos.m"])
+        .args(["-arch", architecture]).arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o").arg(&input_object).status().expect("native Browser input compiler").success();
+    assert!(input_compiled, "failed to compile Browser input");
+    let cookies_compiled = Command::new("xcrun")
+        .args(["clang", "-fobjc-arc", "-fblocks", "-c", "native/browser_session_cookies_macos.m"])
+        .args(["-arch", architecture]).arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o").arg(&cookies_object).status().expect("native Browser cookies compiler").success();
+    assert!(cookies_compiled, "failed to compile Browser cookies");
+    let navigation_compiled = Command::new("xcrun")
+        .args(["clang", "-fobjc-arc", "-c", "native/browser_navigation_macos.m"])
+        .args(["-arch", architecture]).arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o").arg(&navigation_object).status().expect("native Browser navigation compiler").success();
+    assert!(navigation_compiled, "failed to compile Browser navigation");
+    let archived = Command::new("ar")
+        .args(["crus"])
+        .arg(&archive)
+        .arg(&object)
+        .arg(&capture_object)
+        .arg(&input_object)
+        .arg(&cookies_object)
+        .arg(&navigation_object)
+        .status()
+        .expect("ar must be available to build macOS computer use")
+        .success();
+    assert!(archived, "failed to archive the macOS computer-use bridge");
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
+    println!("cargo:rustc-link-lib=static=dcc_computer_use_macos");
+    println!("cargo:rustc-link-lib=framework=AppKit");
+    println!("cargo:rustc-link-lib=framework=WebKit");
+    println!("cargo:rustc-link-lib=framework=ApplicationServices");
+    println!("cargo:rustc-link-lib=framework=ImageIO");
+    // The bridge itself is statically archived. ScreenCaptureKit is weakly
+    // loaded because this feature is guarded at runtime on macOS 14+.
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,ScreenCaptureKit");
+}
 
 use dcc_core::{
     application::{
@@ -359,6 +450,7 @@ struct DelegationMethods {
 }
 
 fn main() {
+    build_macos_computer_bridge();
     tauri_build::build();
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("missing manifest dir"));

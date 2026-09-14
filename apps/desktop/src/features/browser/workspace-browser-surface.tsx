@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, ChevronDown, Globe2, History, LoaderCircle, RefreshCw, Shield, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Activity, ChevronDown, Globe2, History, LoaderCircle, RefreshCw, Shield, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,12 +34,14 @@ import {
 import { isBrowserOccluded, useBrowserOcclusion } from "./browser-occlusion";
 import type { BrowserEvidenceCapture } from "./browser-agent-context";
 import { resolveHumanBrowserAddress } from "./browser-address";
+import { BrowserSessionImportDialog } from "./browser-session-import-dialog";
 
 type WorkspaceBrowserSurfaceProps = {
 	workspaceId: string;
 	sessionId: string | null;
 	initialUrl?: string | null;
 	onClose: () => void;
+	onOpened?: (snapshot: BrowserSnapshot) => void;
 	onSendToAgent?: (context: BrowserAgentContext) => void;
 	/** Receives the initial page context plus events after an explicit gesture. */
 	onSendEvidenceToAgent?: (capture: BrowserEvidenceCapture) => void;
@@ -134,17 +136,21 @@ export function WorkspaceBrowserSurface({
 	sessionId,
 	initialUrl = null,
 	onClose,
+	onOpened,
 	onSendToAgent,
 	onSendEvidenceToAgent,
 	forceOccluded = false,
 }: WorkspaceBrowserSurfaceProps) {
 	const viewportRef = useRef<HTMLDivElement | null>(null);
+	const onOpenedRef = useRef(onOpened);
+	onOpenedRef.current = onOpened;
 	const boundsFrameRef = useRef<number | null>(null);
 	const { t } = useTranslation("common");
 	const [snapshot, setSnapshot] = useState<BrowserSnapshot | null>(null);
 	const [address, setAddress] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [sessionsOpen, setSessionsOpen] = useState(false);
 	const [sendingContext, setSendingContext] = useState(false);
 	const [controlStatus, setControlStatus] = useState<{ armed: boolean; remainingMs: number }>({ armed: false, remainingMs: 0 });
 	const [controlBusy, setControlBusy] = useState(false);
@@ -218,6 +224,9 @@ export function WorkspaceBrowserSurface({
 		const viewport = viewportRef.current;
 		if (!viewport) return;
 		const bounds = readBrowserBounds(viewport);
+		// ACK belongs to this open operation; changing a callback must not reopen
+		// the native surface and revoke its freshly issued control grant.
+		const acknowledgeOpened = onOpenedRef.current;
 		setLoading(true);
 		setError(null);
 		// This surface only mounts after the user explicitly opens Browser from
@@ -243,6 +252,7 @@ export function WorkspaceBrowserSurface({
 				setSnapshot(next);
 				updateLifecycleToken(next.lifecycleToken);
 				setAddress(next.url ?? "");
+				acknowledgeOpened?.(next);
 				// Do not regress a Finished event that raced ahead of this response.
 				setLoading((current) => current && next.loading);
 				scheduleBoundsUpdate();
@@ -707,6 +717,19 @@ export function WorkspaceBrowserSurface({
 				<Button
 					type="button"
 					variant="ghost"
+					size="xs"
+					onClick={() => setSessionsOpen(true)}
+					aria-label={t("browser.sessions.open")}
+					title={t("browser.sessions.open")}
+					disabled={lifecycleToken === null}
+					className="gap-1 px-1.5"
+				>
+					<UserRound className="size-3.5" />
+					{t("browser.sessions.open")}
+				</Button>
+				<Button
+					type="button"
+					variant="ghost"
 					size="icon-sm"
 					onClick={handleSendToAgent}
 					aria-label={t("browser.sendToAgent")}
@@ -884,6 +907,15 @@ export function WorkspaceBrowserSurface({
 			</div>
 			<div ref={viewportRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-white">
 			</div>
+			<BrowserSessionImportDialog
+				open={sessionsOpen}
+				onOpenChange={setSessionsOpen}
+				workspaceId={workspaceId}
+				sessionId={sessionId}
+				lifecycleToken={lifecycleToken}
+				currentUrl={(snapshot?.url ?? address) || null}
+				onImported={handleReload}
+			/>
 		</div>
 	);
 }

@@ -273,6 +273,11 @@ fn initialize_result_codex_version(result: &Value) -> Option<&str> {
         .split_whitespace()
         .next()?
         .strip_prefix("dcc/")
+        .or_else(|| {
+            user_agent
+                .strip_prefix("Codex Desktop/")
+                .and_then(|value| value.split_whitespace().next())
+        })
         .filter(|version| !version.is_empty())
 }
 
@@ -1137,6 +1142,11 @@ fn project_codex_notification_event(
 
 const MAX_PENDING_CODEX_MCP_APPROVALS: usize = 64;
 const MAX_PENDING_CODEX_NATIVE_APPROVALS: usize = 64;
+// This identifier is issued only by the ephemeral DCC Browser projection.
+// Keep the provider-side match exact so a user-configured MCP server never
+// loses its visible approval history merely because it happens to use a
+// similarly named tool.
+const DCC_BROWSER_INTERNAL_MCP_DEFINITION_ID: &str = "dcc-browser-webview-internal";
 const MAX_ACTIVE_CODEX_MCP_TOOL_CALLS: usize = 128;
 const MAX_CODEX_RPC_STRING_ID_CHARS: usize = 256;
 const MAX_CODEX_MCP_ITEM_ID_CHARS: usize = 256;
@@ -1386,6 +1396,38 @@ fn codex_mcp_tool_policy(
         .and_then(|tools| tools.get(tool_name))
         .cloned()
         .unwrap_or(McpToolPolicyDecision::Ask)
+}
+
+fn is_auto_allowed_dcc_browser_tool(
+    definition_id: &dcc_core::domain::mcp::McpDefinitionId,
+    tool_name: &str,
+    decision: McpToolPolicyDecision,
+) -> bool {
+    decision == McpToolPolicyDecision::Allow
+        && definition_id.0 == DCC_BROWSER_INTERNAL_MCP_DEFINITION_ID
+        && matches!(
+            tool_name,
+            "dcc_browser_status"
+                | "dcc_browser_open"
+                | "dcc_browser_context"
+                | "dcc_browser_navigate"
+                | "dcc_browser_reload"
+                | "dcc_browser_scroll"
+                | "dcc_browser_click"
+                | "dcc_browser_fill"
+                | "dcc_browser_select"
+                | "dcc_browser_press"
+                | "dcc_browser_screenshot"
+                | "dcc_browser_evidence_start"
+                | "dcc_browser_evidence_read"
+                | "dcc_computer_status"
+                | "dcc_computer_request_control"
+                | "dcc_computer_capture"
+                | "dcc_computer_click"
+                | "dcc_computer_scroll"
+                | "dcc_computer_type"
+                | "dcc_computer_key"
+        )
 }
 
 fn codex_turn_execution_policy(
@@ -1897,15 +1939,23 @@ async fn handle_codex_mcp_elicitation_request(
                 .await
                 .is_ok()
             {
-                let _ = runtime.events_tx.send(ProviderEvent::PermissionRequested {
-                    request,
-                    at: now_iso(),
-                });
-                let _ = runtime.events_tx.send(ProviderEvent::PermissionResolved {
-                    id: request_id,
-                    behavior: behavior.to_string(),
-                    at: now_iso(),
-                });
+                // The DCC Browser's explicit lease and consent gates remain
+                // authoritative. Do not create a chat approval card for its
+                // already-auto-allowed provider elicitation: it would be a
+                // second, non-actionable approval beside the Browser modal.
+                // Other MCP definitions retain their visible auto-resolution
+                // history, and Ask still follows the pending-approval path.
+                if !is_auto_allowed_dcc_browser_tool(&definition_id, &request.tool_name, decision) {
+                    let _ = runtime.events_tx.send(ProviderEvent::PermissionRequested {
+                        request,
+                        at: now_iso(),
+                    });
+                    let _ = runtime.events_tx.send(ProviderEvent::PermissionResolved {
+                        id: request_id,
+                        behavior: behavior.to_string(),
+                        at: now_iso(),
+                    });
+                }
             }
             return;
         }
@@ -3405,6 +3455,12 @@ unified_exec                         stable             true
         );
         assert_eq!(
             initialize_result_codex_version(&json!({
+                "userAgent": "Codex Desktop/0.154.0-alpha.6.2 (Mac OS 26.6.2; arm64) dumb (dcc; 0.1.72)"
+            })),
+            Some("0.154.0-alpha.6.2")
+        );
+        assert_eq!(
+            initialize_result_codex_version(&json!({
                 "userAgent": "other/0.145.0 (macOS 15.5; arm64)"
             })),
             None
@@ -4343,6 +4399,35 @@ unified_exec                         stable             true
             }))
         );
         assert_eq!(codex_mcp_elicitation_result("allow_session"), None);
+    }
+
+    #[test]
+    fn hides_only_auto_allowed_dcc_browser_elicitations_from_chat_approvals() {
+        let internal = dcc_core::domain::mcp::McpDefinitionId(
+            DCC_BROWSER_INTERNAL_MCP_DEFINITION_ID.to_string(),
+        );
+        let external = dcc_core::domain::mcp::McpDefinitionId("user-managed".to_string());
+
+        assert!(is_auto_allowed_dcc_browser_tool(
+            &internal,
+            "dcc_browser_status",
+            McpToolPolicyDecision::Allow,
+        ));
+        assert!(!is_auto_allowed_dcc_browser_tool(
+            &internal,
+            "dcc_browser_status",
+            McpToolPolicyDecision::Ask,
+        ));
+        assert!(!is_auto_allowed_dcc_browser_tool(
+            &external,
+            "dcc_browser_status",
+            McpToolPolicyDecision::Allow,
+        ));
+        assert!(!is_auto_allowed_dcc_browser_tool(
+            &internal,
+            "unrelated_tool",
+            McpToolPolicyDecision::Allow,
+        ));
     }
 
     #[test]

@@ -34,6 +34,7 @@ import {
 	type BrowserEvidenceCapture,
 } from "@/features/browser/browser-agent-context";
 import type { BrowserAgentContext } from "@/features/browser/browser-api";
+import type { BrowserOpenRequest } from "@/features/browser/browser-api";
 import {
 	clampBrowserSurfaceWidthForContainer,
 	BROWSER_SPLITTER_WIDTH,
@@ -236,6 +237,8 @@ type SessionWorkbenchProps = {
 	onMergeConflictStateChanged: (workspaceRoot: string) => Promise<void> | void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
 	delegateSignal?: number;
+	pendingBrowserOpen?: BrowserOpenRequest | null;
+	onBrowserOpened?: (request: BrowserOpenRequest, snapshot: { lifecycleToken: number }) => void;
 };
 
 export function SessionWorkbench({
@@ -313,12 +316,15 @@ export function SessionWorkbench({
 	onOpenAgentSession,
 	onMergeConflictStateChanged,
 	delegateSignal,
+	pendingBrowserOpen = null,
+	onBrowserOpened,
 }: SessionWorkbenchProps) {
 	const { t } = useTranslation("common");
 	const [terminalUiStates, setTerminalUiStates] =
 		useState<WorkspaceTerminalUiStates>({});
 	const [browserOpen, setBrowserOpen] = useState(false);
 	const [browserInitialUrl, setBrowserInitialUrl] = useState<string | null>(null);
+	const [browserMountKey, setBrowserMountKey] = useState(0);
 	const [browserSurfaceWidth, setBrowserSurfaceWidth] = useState(() =>
 		readBrowserSurfaceWidth(workspaceId),
 	);
@@ -335,6 +341,7 @@ export function SessionWorkbench({
 		inspectorCollapsed: boolean;
 	} | null>(null);
 	const browserCycleRef = useRef(0);
+	const openedBrowserApprovalRef = useRef<string | null>(null);
 	browserSurfaceWidthRef.current = browserSurfaceWidth;
 	const contextAttachmentLedgerRef = useRef(new ContextAttachmentLedger());
 	// Evidence-first debugging: explicit Browser/Terminal gestures land in a
@@ -769,6 +776,7 @@ export function SessionWorkbench({
 		};
 		if (previousInspectorCollapsed === false) onInspectorCollapsedChange?.(true);
 		setBrowserInitialUrl(initialUrl);
+		setBrowserMountKey((current) => current + 1);
 		setBrowserOpen(true);
 	}, [
 		handleTerminalOpenChange,
@@ -789,6 +797,18 @@ export function SessionWorkbench({
 		(url: string) => openBrowserSurface(url),
 		[openBrowserSurface],
 	);
+	useEffect(() => {
+		if (!pendingBrowserOpen) return;
+		if (pendingBrowserOpen.workspaceId !== workspaceId || pendingBrowserOpen.sessionId !== sessionId) return;
+		if (openedBrowserApprovalRef.current === pendingBrowserOpen.requestId) return;
+		openedBrowserApprovalRef.current = pendingBrowserOpen.requestId;
+		openBrowserSurface(pendingBrowserOpen.url);
+	}, [openBrowserSurface, pendingBrowserOpen, sessionId, workspaceId]);
+	const handleBrowserSurfaceOpened = useCallback((snapshot: { workspaceId: string; sessionId: string | null; lifecycleToken: number }) => {
+		if (pendingBrowserOpen && snapshot.workspaceId === pendingBrowserOpen.workspaceId && snapshot.sessionId === pendingBrowserOpen.sessionId) {
+			onBrowserOpened?.(pendingBrowserOpen, snapshot);
+		}
+	}, [onBrowserOpened, pendingBrowserOpen]);
 	useEffect(() => {
 		const restore = browserRestoreRef.current;
 		if (restore && (restore.workspaceId !== workspaceId || restore.sessionId !== sessionId)) {
@@ -1229,10 +1249,12 @@ export function SessionWorkbench({
 					/>
 					<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
 						<WorkspaceBrowserSurface
+							key={browserMountKey}
 							workspaceId={workspaceId}
 							sessionId={sessionId}
 							initialUrl={browserInitialUrl}
 							onClose={handleCloseBrowser}
+							onOpened={handleBrowserSurfaceOpened}
 							onSendToAgent={handleSendBrowserToAgent}
 							onSendEvidenceToAgent={handleSendBrowserEvidenceToAgent}
 							forceOccluded={browserResizing}

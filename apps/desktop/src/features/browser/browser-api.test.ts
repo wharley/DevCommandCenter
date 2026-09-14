@@ -16,6 +16,9 @@ import {
 	openBrowser,
 	setBrowserBounds,
 	setBrowserOccluded,
+	listBrowserOpenRequests,
+	resolveBrowserOpenRequest,
+	acknowledgeBrowserOpen,
 } from "./browser-api";
 import {
 	readBrowserBounds,
@@ -55,6 +58,21 @@ describe("browser-api", () => {
 			restoreLastUrl: false,
 			bounds: { x: 0, y: 44, width: 900, height: 700 },
 		});
+	});
+
+	it("keeps open approval bound to request, scope, and native lifecycle", async () => {
+		await listBrowserOpenRequests({ workspaceId: "workspace-1", sessionId: "session-1" });
+		expect(invokeMock).toHaveBeenCalledWith("browser_agent_pending", { input: { workspaceId: "workspace-1", sessionId: "session-1" } });
+		invokeMock.mockResolvedValueOnce({ status: "approved", lifecycleToken: 7, remainingMs: 600_000 });
+		await acknowledgeBrowserOpen({ requestId: "bo-1", workspaceId: "workspace-1", sessionId: "session-1", lifecycleToken: 7 });
+		expect(invokeMock).toHaveBeenLastCalledWith("browser_agent_resolve", { input: { requestId: "bo-1", workspaceId: "workspace-1", sessionId: "session-1", lifecycleToken: 7, decision: "allow" } });
+		await resolveBrowserOpenRequest({ requestId: "bo-1", workspaceId: "workspace-1", sessionId: "session-1", decision: "deny" });
+		expect(invokeMock).toHaveBeenLastCalledWith("browser_agent_resolve", { input: { requestId: "bo-1", workspaceId: "workspace-1", sessionId: "session-1", decision: "deny" } });
+	});
+
+	it("rejects a failed or mismatched lifecycle ACK", async () => {
+		invokeMock.mockResolvedValueOnce({ status: "failed", lifecycleToken: null, remainingMs: 0, message: "stale lifecycle" });
+		await expect(acknowledgeBrowserOpen({ requestId: "bo-1", workspaceId: "workspace-1", sessionId: "session-1", lifecycleToken: 7 })).rejects.toThrow("stale lifecycle");
 	});
 
 	it("serializes durable URL restore only when the caller explicitly opts in", async () => {

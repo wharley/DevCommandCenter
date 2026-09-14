@@ -2,8 +2,14 @@
 
 mod attachment_commands;
 mod browser_commands;
+mod browser_sessions;
+mod browser_popups;
+mod browser_input;
+mod browser_capture;
+mod browser_agent_requests;
 mod browser_mcp_bridge;
 mod coderabbit_commands;
+mod computer_use_commands;
 mod delegation_commands;
 mod feedback_commands;
 mod forge_commands;
@@ -56,6 +62,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::git_support::build_review_diffs_for_path;
 use browser_commands::BrowserState;
+use browser_agent_requests::BrowserAgentRequestBroker;
 use browser_mcp_bridge::BrowserMcpBridge;
 use coderabbit_commands::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
@@ -65,6 +72,7 @@ use coderabbit_commands::{
     workspace_coderabbit_review_load, workspace_coderabbit_review_save,
     workspace_coderabbit_review_start,
 };
+use computer_use_commands::ComputerUseState;
 use dcc_infra::mcp_db::SqliteMcpRepo;
 use delegation_commands::{
     approve_delegation, cancel_delegation, complete_delegation, create_delegation, fail_delegation,
@@ -7001,6 +7009,12 @@ pub fn run() {
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
             browser_commands::browser_open,
+            browser_sessions::browser_session_profiles,
+            browser_sessions::browser_session_import,
+            browser_agent_requests::browser_agent_pending,
+            browser_agent_requests::browser_agent_pending_all,
+            browser_agent_requests::browser_agent_resolve,
+            browser_agent_requests::browser_agent_cancel,
             browser_commands::browser_navigate,
             browser_commands::browser_reload,
             browser_commands::browser_arm_control,
@@ -7011,6 +7025,12 @@ pub fn run() {
             browser_commands::browser_start_evidence_capture,
             browser_commands::browser_read_evidence_capture,
             browser_commands::browser_extract_context,
+            computer_use_commands::computer_use_status,
+            computer_use_commands::computer_use_arm,
+            computer_use_commands::computer_use_disarm,
+            computer_use_commands::computer_use_request_access,
+            computer_use_commands::computer_use_list_pending_requests,
+            computer_use_commands::computer_use_respond_control_request,
             browser_commands::browser_set_bounds,
             browser_commands::browser_set_occluded,
             browser_commands::browser_hide,
@@ -7222,13 +7242,17 @@ pub fn run() {
             eprintln!("[DCC] Database ready at {:?}", db_path);
             let session_command_state =
                 SessionCommandState::new(app.handle().clone(), db_path.clone());
+            let computer_use_state = ComputerUseState::default();
             // The optional listener is local-only. Failure leaves the human
             // Browser and the rest of DCC available; no insecure fallback is
             // ever installed and existing sessions are not reconfigured.
             let browser_state = BrowserState::default();
+            let browser_agent_requests = BrowserAgentRequestBroker::default();
             let browser_mcp_bridge = match tauri::async_runtime::block_on(BrowserMcpBridge::start(
                 browser_state.clone(),
+                browser_agent_requests.clone(),
                 session_command_state.clone(),
+                computer_use_state.clone(),
             )) {
                 Ok(bridge) => match session_command_state
                     .install_ephemeral_mcp_projection(bridge.clone())
@@ -7298,6 +7322,8 @@ pub fn run() {
             let audit_db_path = db_path.clone();
             app.manage(state);
             app.manage(browser_state);
+            app.manage(browser_agent_requests);
+            app.manage(computer_use_state);
             if let Some(browser_mcp_bridge) = browser_mcp_bridge {
                 app.manage(browser_mcp_bridge);
             }
@@ -7315,6 +7341,7 @@ pub fn run() {
                     bridge.shutdown();
                 }
                 if let Some(browser) = app_handle.try_state::<BrowserState>() {
+                    browser_popups::close_all_browser_popups(app_handle);
                     browser_commands::shutdown(&browser);
                 }
             }

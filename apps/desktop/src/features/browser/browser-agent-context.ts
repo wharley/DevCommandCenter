@@ -83,6 +83,9 @@ export function formatBrowserAgentContext(
 			item.destination
 				? `${labels.destination}: ${escapeBrowserAgentContext(item.destination)}`
 				: null,
+			item.options?.length
+				? `options: ${item.options.map(escapeBrowserAgentContext).join(", ")}`
+				: null,
 			states ? `${labels.states}: ${states}` : null,
 		].filter(Boolean).join(" | ");
 	});

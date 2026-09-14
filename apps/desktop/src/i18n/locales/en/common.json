@@ -1813,6 +1813,7 @@
         "shortcuts": "keyboard commands shortcuts",
         "model": "agents models usage limits account runtime codex claude cursor grok gemini",
         "integrations": "mcp servers tools credentials",
+        "computerUse": "computer use apps screen recording accessibility permissions",
         "account": "github gitlab login authentication coderabbit accounts",
         "connections": "phone tablet remote pairing devices",
         "git": "automation tasks scripts merge push repository workspace",
@@ -1843,6 +1844,10 @@
       "integrations": {
         "label": "Integrations",
         "description": "External MCP servers, scopes, and credentials."
+      },
+      "computerUse": {
+        "label": "Computer Use",
+        "description": "The integrated Browser and external app control have separate authorizations."
       },
       "connections": {
         "label": "Connections",
@@ -2121,6 +2126,70 @@
         "toolPolicy": "The tool policy could not be saved.",
         "loading": "Integrations could not be loaded."
       }
+    },
+    "computerUse": {
+      "title": "Computer Use",
+      "hint": "The integrated Browser and external app control have separate authorizations.",
+      "promptHint": "For capturing and controlling windows in other apps on your computer. The availability below applies to this feature.",
+      "supported": "Available on this device",
+      "unsupported": "Unavailable",
+      "unsupportedMacHint": "Computer Use requires macOS {{version}} or later in the DCC app.",
+      "unsupportedPlatformHint": "Computer Use is available only in the DCC app on macOS.",
+      "permissionsTitle": "Permissions for external apps",
+      "permissionsHint": "Screen Recording and Accessibility enable access to the apps you choose. The agent still needs your authorization in the conversation.",
+      "devPermissionHint": "While running DCC in development, macOS may assign permission to the terminal or editor that started it. Approve the app named in the macOS request, then restart DCC if needed. Permissions granted to other apps do not grant DCC access.",
+      "permissions": {
+        "screenRecording": "Screen Recording",
+        "screenRecordingHint": "Required to capture the selected app window.",
+        "accessibility": "Accessibility",
+        "accessibilityHint": "Required to send input to the selected app."
+      },
+      "permissionState": {
+        "granted": "Granted",
+        "notGranted": "Not granted"
+      },
+      "requestPermission": "Open permission",
+      "conversationHint": "You can prepare these permissions before starting a task. When the agent requests control of external apps, choose the apps and authorize access for a limited time in the conversation.",
+      "activeTitle": "Computer Use active in this conversation",
+      "activeHint": "Access is enabled for {{time}} and is revoked automatically when the timer ends.",
+      "activeAppsCount": "{{count}} app(s) authorized",
+      "disable": "Disable now",
+      "approval": {
+        "title": "Allow Computer Use?",
+        "description": "The agent is asking to control apps in this conversation.",
+        "provider": "Provider",
+        "conversation": "Conversation",
+        "workspace": "Workspace",
+        "reason": "Reason",
+        "remaining": "Request expires in {{time}}",
+        "appsTitle": "Apps to authorize",
+        "appsHint": "Choose the running apps for this request. Nothing is selected by default.",
+        "appsEmpty": "No running apps are available.",
+        "permissions": "Grant both macOS permissions before allowing control.",
+        "openAccessibility": "Open Accessibility settings",
+        "openScreenRecording": "Open Screen Recording settings",
+        "loadingStatus": "Checking permissions…",
+        "statusError": "Could not check permissions. You can still deny this request.",
+        "unsupported": "Computer Use is unavailable on this device.",
+        "conversationNotReady": "This conversation is not ready to control apps.",
+        "expired": "The request expired. Ask the agent to request access again.",
+        "allow": "Allow for 10 minutes",
+        "deny": "Deny",
+        "unknownConversation": "Unknown conversation ({{id}})",
+        "unknownWorkspace": "Unknown workspace ({{id}})"
+      },
+      "loading": "Checking availability of external app control…",
+      "retry": "Retry",
+      "errors": {
+        "status": "Could not check Computer Use status.",
+        "statusCached": "The latest status could not be refreshed. Disable remains available if access is active.",
+        "generic": "Could not update Computer Use authorization."
+      },
+      "browserTitle": "Integrated Browser",
+      "browserHint": "For visiting websites and testing web applications. Enter your task in the prompt; the agent will request authorization in the conversation. Sign in through the DCC Browser or use the Sessions menu.",
+      "browserPermissionsHint": "Works without the Screen Recording and Accessibility permissions below.",
+      "externalAppsTitle": "External apps",
+      "experimental": "Experimental"
     },
     "shortcuts": {
       "keyboardShortcuts": "Keyboard shortcuts",
@@ -3637,6 +3706,18 @@
     }
   },
   "browser": {
+    "approval": {
+      "title": "Open a browser page?",
+      "description": "The agent requested this page in the conversation below. Review the exact destination before opening it in the integrated DCC Browser. Sign in there with your own session if needed.",
+      "destination": "Destination",
+      "conversation": "Conversation",
+      "provider": "Provider",
+      "reason": "Reason",
+      "remaining": "Request expires in {{time}}",
+      "deny": "Deny",
+      "allow": "Open and allow",
+      "example": "Example: https://example.com or http://localhost:5173"
+    },
     "open": "Open browser",
     "addressPlaceholder": "Search or enter address",
     "addressLabel": "Browser address",
@@ -3646,6 +3727,22 @@
     "disarmControl": "Disable agent control",
     "agentLabel": "Agent",
     "agentMenu": "Agent browser actions",
+    "sessions": {
+      "open": "Sessions",
+      "title": "Use an existing browser session",
+      "description": "Sign in directly in this browser, or choose an eligible local browser profile for this site.",
+      "site": "Current site",
+      "noSite": "Open a site first",
+      "manualHint": "For sign-in, verification, or payment, continue yourself in the visible browser.",
+      "loading": "Checking eligible profiles…",
+      "empty": "No eligible local browser sessions are available for this site.",
+      "notImported": "No session was imported for this site.",
+      "result": "Imported {{imported}} session(s) · skipped {{skipped}}",
+      "confirm": "Import the session for {{site}} from {{source}}?",
+      "thisSite": "this site",
+      "manual": "Sign in manually",
+      "import": "Import session"
+    },
     "controlCountdown": "On · {{seconds}}s",
     "controlActiveShort": "Agent control active",
     "evidence": {
@@ -3696,6 +3793,8 @@
         "dcc_browser_scroll": "Scroll",
         "dcc_browser_click": "Click",
         "dcc_browser_fill": "Fill field",
+        "dcc_browser_select": "Select option",
+        "dcc_browser_press": "Press key",
         "dcc_browser_evidence_start": "Start evidence",
         "dcc_browser_evidence_read": "Read evidence",
         "browser_arm_control": "Enable agent control",

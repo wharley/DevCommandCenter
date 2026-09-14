@@ -1813,6 +1813,7 @@
         "shortcuts": "teclado comandos atalhos",
         "model": "agentes modelos uso limite conta runtime codex claude cursor grok gemini",
         "integrations": "mcp servidores ferramentas credenciais",
+        "computerUse": "computer use aplicativos gravação de tela acessibilidade permissões",
         "account": "github gitlab login autenticação coderabbit contas",
         "connections": "celular tablet remoto pareamento dispositivos",
         "git": "automação tarefas scripts merge push repositório workspace",
@@ -1843,6 +1844,10 @@
       "integrations": {
         "label": "Integrações",
         "description": "Servidores MCP externos, escopos e credenciais."
+      },
+      "computerUse": {
+        "label": "Computer Use",
+        "description": "Navegador integrado e controle de aplicativos externos têm autorizações próprias."
       },
       "connections": {
         "label": "Conexões",
@@ -2121,6 +2126,70 @@
         "toolPolicy": "Não foi possível salvar a política da ferramenta.",
         "loading": "Não foi possível carregar as integrações."
       }
+    },
+    "computerUse": {
+      "title": "Computer Use",
+      "hint": "Navegador integrado e controle de aplicativos externos têm autorizações próprias.",
+      "promptHint": "Para capturar e controlar janelas de outros aplicativos do seu computador. A disponibilidade abaixo se refere a esse recurso.",
+      "supported": "Disponível neste dispositivo",
+      "unsupported": "Indisponível",
+      "unsupportedMacHint": "O Computer Use exige macOS {{version}} ou posterior no aplicativo DCC.",
+      "unsupportedPlatformHint": "O Computer Use está disponível apenas no aplicativo DCC no macOS.",
+      "permissionsTitle": "Permissões para aplicativos externos",
+      "permissionsHint": "Gravação de Tela e Acessibilidade permitem o acesso aos aplicativos que você escolher. O agente ainda precisa da sua autorização na conversa.",
+      "devPermissionHint": "Ao executar o DCC em desenvolvimento, o macOS pode atribuir a permissão ao terminal ou editor que o iniciou. Autorize o aplicativo identificado no pedido do macOS e reinicie o DCC se necessário. Permissões concedidas a outros aplicativos não liberam acesso ao DCC.",
+      "permissions": {
+        "screenRecording": "Gravação de Tela",
+        "screenRecordingHint": "Necessária para capturar a janela do aplicativo selecionado.",
+        "accessibility": "Acessibilidade",
+        "accessibilityHint": "Necessária para enviar entrada ao aplicativo selecionado."
+      },
+      "permissionState": {
+        "granted": "Concedida",
+        "notGranted": "Não concedida"
+      },
+      "requestPermission": "Abrir permissão",
+      "conversationHint": "Você pode preparar estas permissões antes de iniciar uma tarefa. Quando o agente solicitar controle de aplicativos externos, escolha os aplicativos e autorize o acesso por tempo limitado na conversa.",
+      "activeTitle": "Computer Use ativo nesta conversa",
+      "activeHint": "O acesso está ativo por {{time}} e será revogado automaticamente quando o tempo terminar.",
+      "activeAppsCount": "{{count}} aplicativo(s) autorizado(s)",
+      "disable": "Desativar agora",
+      "approval": {
+        "title": "Permitir Computer Use?",
+        "description": "O agente está pedindo para controlar aplicativos nesta conversa.",
+        "provider": "Provedor",
+        "conversation": "Conversa",
+        "workspace": "Workspace",
+        "reason": "Motivo",
+        "remaining": "O pedido expira em {{time}}",
+        "appsTitle": "Aplicativos para autorizar",
+        "appsHint": "Escolha os aplicativos em execução para este pedido. Nada é selecionado por padrão.",
+        "appsEmpty": "Nenhum aplicativo em execução está disponível.",
+        "permissions": "Conceda as duas permissões do macOS antes de permitir o controle.",
+        "openAccessibility": "Abrir ajustes de Acessibilidade",
+        "openScreenRecording": "Abrir ajustes de Gravação de Tela",
+        "loadingStatus": "Verificando permissões…",
+        "statusError": "Não foi possível verificar as permissões. Você ainda pode negar este pedido.",
+        "unsupported": "O Computer Use está indisponível neste dispositivo.",
+        "conversationNotReady": "Esta conversa ainda não está pronta para controlar aplicativos.",
+        "expired": "O pedido expirou. Peça ao agente para solicitar o acesso novamente.",
+        "allow": "Permitir por 10 minutos",
+        "deny": "Negar",
+        "unknownConversation": "Conversa desconhecida ({{id}})",
+        "unknownWorkspace": "Workspace desconhecido ({{id}})"
+      },
+      "loading": "Verificando a disponibilidade do controle de aplicativos externos…",
+      "retry": "Tentar novamente",
+      "errors": {
+        "status": "Não foi possível verificar o status do Computer Use.",
+        "statusCached": "Não foi possível atualizar o status. A desativação continua disponível se o acesso estiver ativo.",
+        "generic": "Não foi possível atualizar a autorização do Computer Use."
+      },
+      "browserTitle": "Navegador integrado",
+      "browserHint": "Para acessar sites e testar aplicações web. Envie sua tarefa no prompt; o agente solicitará autorização na conversa. Faça login no navegador do DCC ou use o menu Sessões.",
+      "browserPermissionsHint": "Funciona sem as permissões de Gravação de Tela e Acessibilidade abaixo.",
+      "externalAppsTitle": "Aplicativos externos",
+      "experimental": "Experimental"
     },
     "shortcuts": {
       "keyboardShortcuts": "Atalhos de teclado",
@@ -3637,6 +3706,18 @@
     }
   },
   "browser": {
+    "approval": {
+      "title": "Abrir uma página no navegador?",
+      "description": "O agente solicitou esta página na conversa abaixo. Revise o destino exato antes de abri-la no navegador integrado do DCC. Faça login ali com sua própria sessão, se necessário.",
+      "destination": "Destino",
+      "conversation": "Conversa",
+      "provider": "Provedor",
+      "reason": "Motivo",
+      "remaining": "A solicitação expira em {{time}}",
+      "deny": "Negar",
+      "allow": "Abrir e permitir",
+      "example": "Exemplo: https://example.com ou http://localhost:5173"
+    },
     "open": "Abrir navegador",
     "addressPlaceholder": "Pesquisar ou inserir endereço",
     "addressLabel": "Endereço do navegador",
@@ -3646,6 +3727,22 @@
     "disarmControl": "Desativar controle do agente",
     "agentLabel": "Agente",
     "agentMenu": "Ações do agente no navegador",
+    "sessions": {
+      "open": "Sessões",
+      "title": "Usar uma sessão existente do navegador",
+      "description": "Faça login diretamente neste navegador ou escolha um perfil local elegível para este site.",
+      "site": "Site atual",
+      "noSite": "Abra um site primeiro",
+      "manualHint": "Para login, verificação ou pagamento, continue você mesmo no navegador visível.",
+      "loading": "Verificando perfis elegíveis…",
+      "empty": "Não há sessões locais elegíveis para este site.",
+      "notImported": "Nenhuma sessão foi importada para este site.",
+      "result": "{{imported}} sessão(ões) importada(s) · {{skipped}} ignorada(s)",
+      "confirm": "Importar a sessão de {{source}} para {{site}}?",
+      "thisSite": "este site",
+      "manual": "Fazer login manualmente",
+      "import": "Importar sessão"
+    },
     "controlCountdown": "Ativo · {{seconds}}s",
     "controlActiveShort": "Controle do agente ativo",
     "evidence": {
@@ -3696,6 +3793,8 @@
         "dcc_browser_scroll": "Rolar",
         "dcc_browser_click": "Clicar",
         "dcc_browser_fill": "Preencher campo",
+        "dcc_browser_select": "Selecionar opção",
+        "dcc_browser_press": "Pressionar tecla",
         "dcc_browser_evidence_start": "Iniciar evidência",
         "dcc_browser_evidence_read": "Ler evidência",
         "browser_arm_control": "Permitir controle do agente",

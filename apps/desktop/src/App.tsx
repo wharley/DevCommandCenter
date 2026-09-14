@@ -75,6 +75,9 @@ import {
 	type InspectorPresentation,
 } from "./features/inspector/inspector-presentation";
 import { SettingsDialog } from "./features/settings";
+import { ComputerUseApprovalHost } from "./features/computer-use/computer-use-approval-host";
+import { BrowserApprovalHost } from "./features/browser/browser-approval-host";
+import { acknowledgeBrowserOpen, type BrowserOpenRequest } from "./features/browser/browser-api";
 import { SkillsDialog, getTotalSkillContextCount } from "./features/skills";
 import { resolveActiveSkillsCheckout } from "./features/skills/skills-path";
 import { compileSkills, detectSkillContext } from "./lib/skills-api";
@@ -1119,6 +1122,9 @@ export default function App() {
 		useState<PendingSessionClose | null>(null);
 	const [pendingSessionNavigation, setPendingSessionNavigation] =
 		useState<PendingSessionNavigation | null>(null);
+	const [pendingBrowserOpen, setPendingBrowserOpen] = useState<BrowserOpenRequest | null>(null);
+	const pendingBrowserOpenRef = useRef<BrowserOpenRequest | null>(null);
+	pendingBrowserOpenRef.current = pendingBrowserOpen;
 	const [sessionActionSessionId, setSessionActionSessionId] = useState<string | null>(null);
 	const [inspectorTab, setInspectorTab] = useState<
 		"activity" | "context" | "spec"
@@ -2272,7 +2278,7 @@ export default function App() {
 		setIsCommandPaletteOpen(false);
 		setIsCreateWorkspaceOpen(false);
 		setSelectedSessionId(null);
-		setPendingSessionNavigation(null);
+		setPendingSessionNavigation((current) => current?.workspaceId === selectedWorkspace?.id ? current : null);
 		setPendingSessionClose(null);
 		setSessionActionSessionId(null);
 		setSessionSnapshotsById({});
@@ -2305,6 +2311,27 @@ export default function App() {
 		setSelectedSessionId(pendingSessionNavigation.sessionId);
 		setPendingSessionNavigation(null);
 	}, [pendingSessionNavigation, selectedWorkspace?.id, workspaceSessions]);
+
+	const handleBrowserOpenApproved = useCallback((request: BrowserOpenRequest) => {
+		setGlobalSurface(null);
+		setIsSettingsOpen(false);
+		setPendingSessionNavigation({ workspaceId: request.workspaceId, sessionId: request.sessionId });
+		setPendingBrowserOpen(request);
+		requestWorkspaceSelection(request.workspaceId);
+	}, [requestWorkspaceSelection]);
+	const handleBrowserOpened = useCallback(async (request: BrowserOpenRequest, snapshot: { lifecycleToken: number }) => {
+		if (pendingBrowserOpenRef.current?.requestId !== request.requestId) return;
+		try {
+			await acknowledgeBrowserOpen({ requestId: request.requestId, workspaceId: request.workspaceId, sessionId: request.sessionId, lifecycleToken: snapshot.lifecycleToken });
+			setPendingBrowserOpen((current) => current?.requestId === request.requestId ? null : current);
+		} catch (error) {
+			if (pendingBrowserOpenRef.current?.requestId === request.requestId) {
+				setPendingBrowserOpen((current) => current?.requestId === request.requestId ? null : current);
+				void queryClient.invalidateQueries({ queryKey: ["browser", "pending-open-requests"] });
+				toast.error(error instanceof Error ? error.message : String(error));
+			}
+		}
+	}, [queryClient]);
 
 	useEffect(() => {
 		if (!selectedWorkspace?.id) {
@@ -5369,6 +5396,8 @@ export default function App() {
 									providerChoices={providerChoices}
 									sessions={workspaceSessions}
 									selectedSessionId={effectiveSelectedSessionId}
+									pendingBrowserOpen={pendingBrowserOpen?.workspaceId === selectedWorkspace.id && pendingBrowserOpen.sessionId === effectiveSelectedSessionId ? pendingBrowserOpen : null}
+									onBrowserOpened={(request, snapshot) => { void handleBrowserOpened(request, snapshot); }}
 									isLoadingSessions={workspaceSessionsQuery.isPending}
 									sessionSnapshot={selectedSessionSnapshot}
 									sessionEvents={timelineSessionEvents}
@@ -5701,6 +5730,8 @@ export default function App() {
 					selectedSessionSummary?.session.createdAt ?? null
 				}
 			/>
+			<ComputerUseApprovalHost workspaceSessions={workspaceSessions} />
+			<BrowserApprovalHost workspaceSessions={workspaceSessions} onApproved={handleBrowserOpenApproved} />
 			<SkillsDialog
 				open={isSkillsOpen}
 				onOpenChange={setIsSkillsOpen}

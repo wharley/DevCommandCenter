@@ -6,7 +6,7 @@ import { WorkspaceComposer } from "./WorkspaceComposer";
 import { useComposerPrefill, type ExternalComposerPrefill } from "./use-composer-prefill";
 import { FALLBACK_PROVIDER_CATALOG } from "@/lib/fallback-provider-catalog";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { loadDraft } from "./draftStorage";
+import { loadDraft, saveDraft } from "./draftStorage";
 import { getComposerConversationDraftKey } from "./WorkspaceComposer.logic";
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -19,6 +19,7 @@ let container: HTMLDivElement;
 let client: QueryClient;
 const sent = vi.fn();
 let accept: (value: boolean) => void;
+let prepareSession: (sessionId: string) => void;
 
 function Harness() {
 	const [external, setExternal] = useState<ExternalComposerPrefill | null>(note);
@@ -45,6 +46,26 @@ function Harness() {
 			await Promise.resolve();
 			setSessionId("session-created");
 			return new Promise<boolean>((resolve) => { accept = resolve; });
+		}}
+	/>;
+}
+
+function DraftTransitionHarness() {
+	const [sessionId, setSessionId] = useState<string | null>(null);
+	prepareSession = setSessionId;
+	return <WorkspaceComposer
+		draftKey="task-from-note" draftSessionId={sessionId} disabled={false}
+		providerChoices={FALLBACK_PROVIDER_CATALOG.providers}
+		selectedProviderId="codex" selectedModelId={null} selectedProviderRuntime={null}
+		sessionSnapshot={null} turnQueueEventKey={null} pendingPrompt={null}
+		prefill={null} onPrefillApplied={() => {}}
+		workspacePath={null} workspaceBranch={null} projectLabel={null} currentBranch={null}
+		isIsolatedWorkspace={true} showPlanFollowUpPrompt={false} planTitle={null}
+		planNeedsInput={false} planApproved={false} onSelectProvider={() => {}} onSelectModel={() => {}}
+		onAbortSession={() => {}} onReviewPlan={() => {}}
+		onSubmitPrompt={async (turn) => {
+			sent(turn.rawPrompt);
+			return true;
 		}}
 	/>;
 }
@@ -86,4 +107,21 @@ it.each(["click", "enter"])("clears the note draft after %s and first session cr
 	expect(input.textContent).toBe("");
 	expect(loadDraft(getComposerConversationDraftKey("task-from-note", null))).toBe("");
 	expect(loadDraft(getComposerConversationDraftKey("task-from-note", "session-created"))).toBe("");
+});
+
+it("moves a saved new-session draft into a prepared session without submitting it", async () => {
+	const draft = "Prepare the desktop app before testing it";
+	const fallbackKey = getComposerConversationDraftKey("task-from-note", null);
+	const sessionKey = getComposerConversationDraftKey("task-from-note", "prepared-session");
+	saveDraft(fallbackKey, draft);
+
+	await act(async () => root.render(<QueryClientProvider client={client}><TooltipProvider><DraftTransitionHarness /></TooltipProvider></QueryClientProvider>));
+	const input = container.querySelector<HTMLElement>("#workspace-input")!;
+	expect(input.textContent).toBe(draft);
+
+	await act(async () => prepareSession("prepared-session"));
+	expect(input.textContent).toBe(draft);
+	expect(loadDraft(fallbackKey)).toBe("");
+	expect(loadDraft(sessionKey)).toBe(draft);
+	expect(sent).not.toHaveBeenCalled();
 });

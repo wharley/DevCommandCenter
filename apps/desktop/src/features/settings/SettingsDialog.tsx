@@ -7,6 +7,7 @@ import {
 	GitBranch,
 	Keyboard,
 	ListChecks,
+	MonitorCog,
 	Package,
 	Rabbit,
 	Loader2,
@@ -81,6 +82,7 @@ import { WORKSPACE_GIT_STATUS_QUERY_KEY } from "@/features/inspector/use-workspa
 import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "@/features/inspector/use-workspace-git-branch-diff";
 import { disconnectCodeRabbitCli } from "@/lib/coderabbit-cli";
 import { McpIntegrationsPanel } from "@/features/settings/mcp-integrations-panel";
+import { ComputerUsePanel } from "@/features/settings/computer-use-panel";
 import { ProviderAvailabilityPanel } from "@/features/providers/provider-availability-panel";
 import {
 	isProviderAvailabilityRequestCurrent,
@@ -798,6 +800,14 @@ export function SettingsDialog({
 				icon: Cable,
 			},
 			{
+				id: "computerUse",
+				group: "services",
+				keywords: t("settings.navigation.keywords.computerUse"),
+				label: t("settings.sections.computerUse.label"),
+				description: t("settings.sections.computerUse.description"),
+				icon: MonitorCog,
+			},
+			{
 				id: "connections",
 				group: "services",
 				keywords: t("settings.navigation.keywords.connections"),
@@ -1124,6 +1134,12 @@ export function SettingsDialog({
 									sessionCreatedAt={sessionCreatedAt}
 									workspaceName={workspaceName}
 									providerCatalog={providerCatalog}
+								/>
+							) : null}
+
+							{activeSection === "computerUse" ? (
+								<ComputerUsePanel
+									sessionId={sessionId}
 								/>
 							) : null}
 

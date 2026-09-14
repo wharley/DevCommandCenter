@@ -38,6 +38,10 @@ sidecar/*.bun-build
 *.tsbuildinfo
 next-env.d.ts
 
+# Python test fixture caches
+__pycache__/
+*.py[cod]
+
 # Rust / Tauri (Cargo build output)
 /target
 src-tauri/target

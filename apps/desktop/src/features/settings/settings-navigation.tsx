@@ -13,6 +13,7 @@ export type SettingsSectionId =
 	| "appearance"
 	| "model"
 	| "integrations"
+	| "computerUse"
 	| "connections"
 	| "shortcuts"
 	| "git"

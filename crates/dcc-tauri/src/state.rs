@@ -112,6 +112,33 @@ const COLD_ATTACH_MAX_ITEMS: usize = 8;
 const COLD_ATTACH_ITEM_MAX_CHARS: usize = 1_200;
 const COLD_ATTACH_TOTAL_MAX_CHARS: usize = 4_000;
 const COLD_ATTACH_TAG: &str = "dcc_reanchor";
+const DCC_APP_MCP_TOOL_ROUTING_INSTRUCTIONS: &str = r#"[DCC host tool routing]
+This provider session has DCC MCP tools attached.
+
+For a web task, start with dcc_browser_status. If the target is not already open, call dcc_browser_open with the explicit HTTP(S) URL. DCC asks the user to approve opening the visible in-app Browser and, after approval, returns its lifecycle and a time-limited control grant. Then call dcc_browser_context and use its fresh anchors for browser actions. Do not substitute curl, HTTP clients, Playwright, or a shell request for the in-app Browser: a 401 or 403 from those clients does not show that the Browser is unavailable.
+
+When the Browser reaches a sign-in, MFA, CAPTCHA, payment, or any identity-sensitive step, stop and let the user complete it in the visible Browser. Never ask for, copy, import, or invent cookies, passwords, credentials, or a shared external-browser session. After the user completes the handoff, call dcc_browser_status or dcc_browser_context again.
+
+Computer Use is a separate experimental capability for an explicitly user-requested external desktop-app task. It is not an automatic fallback for Browser access. For that separate task, first call dcc_computer_status; if access is needed, call dcc_computer_request_control with the concrete reason and wait for the user's decision. Do not attempt OS automation or claim desktop access without that grant.
+[End DCC host tool routing]"#;
+
+fn append_dcc_app_mcp_tool_instructions(
+    existing: Option<String>,
+    app_mcp_attached: bool,
+) -> Option<String> {
+    if !app_mcp_attached {
+        return existing;
+    }
+    Some(match existing {
+        Some(existing) if !existing.trim().is_empty() => {
+            format!(
+                "{}\n\n{DCC_APP_MCP_TOOL_ROUTING_INSTRUCTIONS}",
+                existing.trim_end()
+            )
+        }
+        _ => DCC_APP_MCP_TOOL_ROUTING_INSTRUCTIONS.to_string(),
+    })
+}
 
 fn truncate_chars_for_reanchor(value: &str, max_chars: usize) -> String {
     let trimmed = value.trim();
@@ -5307,6 +5334,10 @@ impl SessionCommandState {
                         _ => reanchor,
                     });
                 }
+                turn.tool_instructions = append_dcc_app_mcp_tool_instructions(
+                    turn.tool_instructions,
+                    binding.ephemeral_mcp_lease_id.is_some(),
+                );
                 Input::Turn(turn)
             }
             other => other,
@@ -6404,6 +6435,31 @@ mod tests {
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
         }
+    }
+
+    #[test]
+    fn app_mcp_tool_routing_is_present_for_first_and_resumed_turns_only_when_attached() {
+        assert_eq!(
+            append_dcc_app_mcp_tool_instructions(Some("existing instructions".to_string()), false),
+            Some("existing instructions".to_string())
+        );
+        let first = append_dcc_app_mcp_tool_instructions(None, true)
+            .expect("first attached turn has host instructions");
+        assert!(first.contains("dcc_browser_status"));
+        assert!(first.contains("dcc_browser_open"));
+        assert!(first.contains("dcc_browser_context"));
+        assert!(first.contains("401 or 403"));
+        assert!(first.contains("dcc_computer_request_control"));
+        assert!(first.contains("sign-in, MFA, CAPTCHA"));
+        assert!(first.contains("not an automatic fallback"));
+
+        let resumed = append_dcc_app_mcp_tool_instructions(
+            Some("durable objective context".to_string()),
+            true,
+        )
+        .expect("resumed attached turn has host instructions");
+        assert!(resumed.starts_with("durable objective context\n\n"));
+        assert!(resumed.ends_with("[End DCC host tool routing]"));
     }
 
     #[tokio::test(flavor = "current_thread")]
