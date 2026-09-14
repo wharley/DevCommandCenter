@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import type { EditorState } from "lexical";
+import { $getRoot, type EditorState } from "lexical";
+import { $hasComposerRichText } from "../rich-text";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
@@ -65,7 +66,7 @@ export function DraftPersistencePlugin({
 	const handleChange = (editorState: EditorState) => {
 		const { value, hasContext } = editorState.read(() => ({
 			value: $extractComposerPrompt(),
-			hasContext: $readComposerContext().length > 0,
+			hasContext: $readComposerContext().length > 0 || $hasComposerRichText($getRoot()),
 		}));
 		if (value.trim().length === 0) {
 			clearDraft(draftKey);

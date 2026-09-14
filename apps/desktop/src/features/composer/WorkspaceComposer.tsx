@@ -1,3 +1,4 @@
+import { COMPOSER_LIST_NODES } from "./editor/composer-lists";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -23,7 +24,9 @@ import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
-import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
+import { ComposerRichTextPlugin } from "./editor/plugins/ComposerRichTextPlugin";
+import { COMPOSER_LINK_NODES, COMPOSER_TEXT_THEME } from "./editor/rich-text";
+import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { Button } from "@/components/ui/button";
 import {
 	DebugEvidenceTray,
@@ -746,9 +749,16 @@ export function WorkspaceComposer({
 			onError(error: Error) {
 				throw error;
 			},
-			nodes: [FileBadgeNode, ImageBadgeNode, PastedSnippetBadgeNode],
+			nodes: [
+				FileBadgeNode,
+				ImageBadgeNode,
+				PastedSnippetBadgeNode,
+				...COMPOSER_LINK_NODES,
+				...COMPOSER_LIST_NODES,
+			],
 			theme: {
 				paragraph: "min-h-[1.25rem]",
+				...COMPOSER_TEXT_THEME,
 			},
 		}),
 		[],
@@ -1011,7 +1021,7 @@ export function WorkspaceComposer({
 					disabled={inputDisabled}
 				/>
 				<div className="relative">
-					<PlainTextPlugin
+					<RichTextPlugin
 						contentEditable={
 							<ContentEditable
 								id="workspace-input"
@@ -1030,6 +1040,7 @@ export function WorkspaceComposer({
 						ErrorBoundary={LexicalErrorBoundary}
 					/>
 				</div>
+				<ComposerRichTextPlugin disabled={inputDisabled} draftKey={composerDraftKey} />
 				<HistoryPlugin />
 				<SlashCommandPlugin
 					commands={slashCommands}

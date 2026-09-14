@@ -1,9 +1,12 @@
+import { COMPOSER_LIST_NODES } from "@/features/composer/editor/composer-lists";
 // Synthetic attachment previews and real Lexical draft/editor behavior. No user files.
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
-import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
+import { ComposerRichTextPlugin } from "@/features/composer/editor/plugins/ComposerRichTextPlugin";
+import { COMPOSER_LINK_NODES, COMPOSER_TEXT_THEME } from "@/features/composer/editor/rich-text";
+import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -38,6 +41,7 @@ const win = window as any;
 let editor: LexicalEditor;
 win.__TAURI_INTERNALS__ = {
 	invoke: async (command: string, args: any) => {
+		if (command === "shell_open_external") { win.openedLink = args.url; return { success: true }; }
 		if (command !== "preview_composer_attachment")
 			throw Error(`Unexpected fixture IPC: ${command}`);
 		if (win.previewFailure) throw Error("fixture failure");
@@ -132,7 +136,14 @@ function Fixture() {
 					<LexicalComposer
 						initialConfig={{
 							namespace: "context-fixture",
-							nodes: [FileBadgeNode, ImageBadgeNode, PastedSnippetBadgeNode],
+							nodes: [
+								FileBadgeNode,
+								ImageBadgeNode,
+								PastedSnippetBadgeNode,
+								...COMPOSER_LINK_NODES,
+								...COMPOSER_LIST_NODES,
+							],
+							theme: COMPOSER_TEXT_THEME,
 							onError(error) {
 								throw error;
 							},
@@ -142,7 +153,7 @@ function Fixture() {
 							workspaceRoot="/fixture/project"
 							draftKey={draftKey}
 						/>
-						<PlainTextPlugin
+						<RichTextPlugin
 							contentEditable={
 								<ContentEditable
 									className="min-h-32 text-sm leading-8 outline-none"
@@ -151,6 +162,7 @@ function Fixture() {
 							}
 							ErrorBoundary={LexicalErrorBoundary}
 						/>
+						<ComposerRichTextPlugin draftKey={draftKey} />
 						<HistoryPlugin />
 						<BindEditor />
 						<DraftPersistencePlugin draftKey={draftKey} />

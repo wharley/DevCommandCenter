@@ -1,5 +1,10 @@
+import { $isComposerSelectionInList } from "../composer-lists";
 import { useEffect } from "react";
-import { KEY_ENTER_COMMAND, COMMAND_PRIORITY_HIGH } from "lexical";
+import {
+	KEY_ENTER_COMMAND,
+	INSERT_PARAGRAPH_COMMAND,
+	COMMAND_PRIORITY_HIGH,
+} from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 
 const TYPEAHEAD_SELECTABLE_SELECTOR = "[data-typeahead-popup] [cmdk-item]";
@@ -41,6 +46,21 @@ export function SubmitPlugin({
 				}
 
 				if (event?.shiftKey) {
+					if (!$isComposerSelectionInList() && editor.isEditable()) {
+						// A new paragraph looks like a newline and lets Markdown list
+						// prefixes work after introductory prose as well as on line one.
+						event.preventDefault();
+						return editor.dispatchCommand(INSERT_PARAGRAPH_COMMAND, undefined);
+					}
+					return false;
+				}
+
+				// Let the rich editor continue or exit a list; explicit modified Enter sends.
+				if (
+					!event?.metaKey &&
+					!event?.ctrlKey &&
+					$isComposerSelectionInList()
+				) {
 					return false;
 				}
 

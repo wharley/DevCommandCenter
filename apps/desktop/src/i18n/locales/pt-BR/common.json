@@ -1276,6 +1276,26 @@
     }
   },
   "composer": {
+    "richText": {
+      "listHint": "Enter: próximo item · ⌘/Ctrl+Enter: enviar",
+      "formatting": "Formatação de texto",
+      "bold": "Negrito",
+      "italic": "Itálico",
+      "strikethrough": "Tachado",
+      "code": "Código",
+      "insertLink": "Inserir link",
+      "link": "Link",
+      "openLink": "Abrir link",
+      "editText": "Editar texto",
+      "editLink": "Editar link",
+      "removeLink": "Remover link",
+      "text": "Texto exibido",
+      "url": "Endereço do link",
+      "save": "Salvar",
+      "cancel": "Cancelar",
+      "invalidUrl": "Informe um endereço válido com https:// ou http://.",
+      "openFailed": "Não foi possível abrir o link."
+    },
     "objective": {
       "design": {
         "subtitle": "Mantenha o resultado e os critérios de conclusão sempre à vista.",

@@ -1276,6 +1276,26 @@
     }
   },
   "composer": {
+    "richText": {
+      "listHint": "Enter: next item · ⌘/Ctrl+Enter: send",
+      "formatting": "Text formatting",
+      "bold": "Bold",
+      "italic": "Italic",
+      "strikethrough": "Strikethrough",
+      "code": "Code",
+      "insertLink": "Insert link",
+      "link": "Link",
+      "openLink": "Open link",
+      "editText": "Edit text",
+      "editLink": "Edit link",
+      "removeLink": "Remove link",
+      "text": "Display text",
+      "url": "Link address",
+      "save": "Save",
+      "cancel": "Cancel",
+      "invalidUrl": "Enter a valid address with https:// or http://.",
+      "openFailed": "Could not open the link."
+    },
     "objective": {
       "design": {
         "subtitle": "Keep the outcome and completion criteria in view.",

@@ -1,0 +1,118 @@
+.composer-link {
+	color: var(--primary);
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--primary) 9%, transparent);
+	box-decoration-break: clone;
+	-webkit-box-decoration-break: clone;
+	padding: 1px 3px;
+	text-decoration: underline;
+	text-decoration-color: color-mix(in srgb, var(--primary) 30%, transparent);
+	text-underline-offset: 3px;
+	cursor: pointer;
+	overflow-wrap: anywhere;
+}
+.composer-link:hover {
+	background: color-mix(in srgb, var(--primary) 17%, transparent);
+}
+.composer-inline-code {
+	font-family: var(--font-mono);
+	font-size: 0.92em;
+	border-radius: 4px;
+	background: var(--muted);
+	padding: 1px 4px;
+}
+.composer-format-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	margin-top: 8px;
+	color: var(--muted-foreground);
+}
+.composer-format-toolbar [aria-pressed="true"] {
+	color: var(--foreground);
+	background: var(--muted);
+}
+.composer-link-popover {
+	width: 300px;
+	max-width: calc(100vw - 24px);
+	padding: 12px;
+}
+.composer-link-heading {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.composer-link-destination {
+	color: var(--muted-foreground);
+	font-size: 11px;
+	overflow-wrap: anywhere;
+	max-height: 72px;
+	overflow-y: auto;
+}
+.composer-link-actions {
+	border-top: 1px solid var(--border);
+	padding-top: 6px;
+	display: grid;
+	gap: 2px;
+}
+.composer-link-actions button {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	padding: 7px 8px;
+	border-radius: 5px;
+	text-align: left;
+	font-size: 12px;
+}
+.composer-link-actions button:hover,
+.composer-link-actions button:focus-visible {
+	background: var(--accent);
+	outline: 2px solid transparent;
+}
+.composer-link-actions svg {
+	width: 14px;
+	height: 14px;
+	color: var(--muted-foreground);
+}
+.composer-link-input {
+	width: 100%;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 8px;
+	font-size: 13px;
+	background: var(--background);
+	color: var(--foreground);
+}
+.composer-link-input:focus {
+	outline: 2px solid var(--ring);
+	outline-offset: 1px;
+}
+
+.composer-list {
+	margin: 4px 0;
+	padding-inline-start: 1.5em;
+}
+.composer-list-bullet {
+	list-style-type: disc;
+}
+.composer-list-number {
+	list-style-type: decimal;
+}
+.composer-list-item {
+	padding-inline-start: 2px;
+}
+.composer-list-item::marker {
+	color: var(--muted-foreground);
+}
+.composer-list-nested {
+	list-style-type: none;
+}
+.composer-list-item > .composer-list {
+	margin-block: 0;
+}
+.composer-list-hint {
+	margin-inline-start: auto;
+	font-size: 10px;
+	text-align: end;
+	line-height: 1.4;
+}
