@@ -1,3 +1,5 @@
+import { useWorkspaceDeliveryBusy } from "@/features/commit/workspace-delivery-busy";
+import { TurnReviewDelivery } from "./turn-review-delivery";
 import { useCallback, useId } from "react";
 import type { TurnReviewSummary } from "@dcc/contracts";
 import { ArrowUpRight, ChevronLeft, ChevronRight, X } from "lucide-react";
@@ -16,6 +18,7 @@ import type { DiffAnnotationRequest } from "@/features/editor/diff-annotation";
 
 export function TurnReviewDialog({
 	review,
+	workspaceRoot,
 	selectedPath,
 	onSelect,
 	onClose,
@@ -24,6 +27,7 @@ export function TurnReviewDialog({
 	returnFocus,
 }: {
 	review: TurnReviewSummary;
+	workspaceRoot?: string | null;
 	selectedPath: string | null;
 	onSelect: (path: string) => void;
 	onClose: () => void;
@@ -33,6 +37,7 @@ export function TurnReviewDialog({
 }) {
 	const { t } = useTranslation("common");
 	const previewId = useId();
+	const deliveryBusy = useWorkspaceDeliveryBusy(workspaceRoot);
 	const revealSelectedFile = useCallback((node: HTMLButtonElement | null) => {
 		node?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
 	}, []);
@@ -46,7 +51,7 @@ export function TurnReviewDialog({
 		<Dialog
 			open={selectedPath !== null}
 			onOpenChange={(open) => {
-				if (!open) onClose();
+				if (!open && !deliveryBusy) onClose();
 			}}
 		>
 			<DialogContent
@@ -76,6 +81,7 @@ export function TurnReviewDialog({
 						<TurnReviewStats {...review} />
 					)}
 					<DialogClose
+						disabled={deliveryBusy}
 						className="dcc-turn-review-icon-button"
 						aria-label={t("turnReview.timeline.close")}
 					>
@@ -144,6 +150,12 @@ export function TurnReviewDialog({
 						</div>
 					</div>
 				</div>
+				{selectedPath !== null && workspaceRoot && (
+					<TurnReviewDelivery
+						workspaceRoot={workspaceRoot}
+						onReview={onReview}
+					/>
+				)}
 				<footer className="dcc-turn-review-dialog-footer">
 					<span>
 						{t(
@@ -154,6 +166,7 @@ export function TurnReviewDialog({
 					</span>
 					<button
 						type="button"
+						disabled={deliveryBusy}
 						onClick={() => {
 							onClose();
 							onReview();

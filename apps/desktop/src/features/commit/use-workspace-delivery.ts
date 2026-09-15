@@ -372,10 +372,12 @@ export function useWorkspaceDelivery({
 		if (!root || busy) return;
 		setWorkspaceDeliveryBusy(root, true);
 		try {
+			// Creating a request also pushes the branch in the backend. Run the
+			// configured checks even when local files are excluded.
+			if (!(await runBeforePushChecks(root))) {
+				throw new Error(t("composer.executionDock.actions.beforePushBlocked"));
+			}
 			if (input.includeLocalChanges && hasLocalChanges) {
-				if (!(await runBeforePushChecks(root))) {
-					throw new Error(t("composer.executionDock.actions.beforePushBlocked"));
-				}
 				if (stagedCount === 0) {
 					await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
 				}

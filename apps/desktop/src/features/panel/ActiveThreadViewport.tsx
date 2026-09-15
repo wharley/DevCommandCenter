@@ -414,6 +414,7 @@ export function ActiveThreadViewport({
 												<TurnReviewTimelineCard
 													key={`${sessionId}:${message.turnId}:${workspaceId}`}
 													target={{ sessionId, workspaceId, turnId: message.turnId }}
+													workspaceRoot={workspacePath}
 													onReview={onReviewChanges}
 													onInteraction={stopScroll}
 												/>

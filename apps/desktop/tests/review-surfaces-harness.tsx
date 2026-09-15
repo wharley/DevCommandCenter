@@ -1,5 +1,5 @@
 import { ActiveThreadViewport } from "@/features/panel/ActiveThreadViewport";
-// Real review surfaces with synthetic, read-only IPC. Never reads a user repository.
+// Real review surfaces with synthetic in-memory IPC. Never reads or mutates a user repository.
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -22,6 +22,10 @@ const client = new QueryClient({
 });
 win.reviewIpc = [];
 win.emptyReview = false;
+win.demoStaged = [];
+win.demoCommitted = false;
+win.demoAhead = 1;
+win.demoPr = false;
 localStorage.setItem("dcc.settings.coderabbit.integration-enabled", "false");
 const head =
 	"feature/review-workspace-changes-and-preserve-complete-branch-context";
@@ -136,15 +140,35 @@ win.__TAURI_INTERNALS__ = {
 				return;
 			case "workspace_git_status":
 				return {
-					staged: [],
-					unstaged: win.emptyReview ? [] : changes,
-					stagedFingerprint: "demo",
+					staged: win.demoStaged,
+					unstaged: win.emptyReview || win.demoCommitted ? [] : changes.filter((file) => !win.demoStaged.some((staged: { path: string }) => staged.path === file.path)),
+					stagedFingerprint: JSON.stringify(win.demoStaged),
 					currentBranch: head,
-					aheadOfRemoteCount: 0,
+					aheadOfRemoteCount: win.demoAhead,
 					behindOfRemoteCount: 0,
 					conflictCount: 0,
 					mergeInProgress: false,
 				};
+			case "workspace_forge_context":
+				return { provider: "github", status: "ready", remoteState: "ok", remoteName: "origin", effectiveLogin: "demo" };
+			case "workspace_pr_status":
+				return { number: win.demoPr ? 42 : null, headBranch: win.demoPr ? head : null, baseBranch: "main", state: win.demoPr ? "OPEN" : null };
+			case "workspace_git_stage_file":
+				win.demoStaged = changes.filter((file) => file.path === args.input.relativePath);
+				return;
+			case "workspace_git_unstage_file":
+				win.demoStaged = win.demoStaged.filter((file: { path: string }) => file.path !== args.input.relativePath);
+				return;
+			case "workspace_git_commit":
+				win.demoStaged = []; win.demoCommitted = true; win.demoAhead += 1; return;
+			case "workspace_git_push":
+				win.demoAhead = 0; return;
+			case "workspace_project_automation_config":
+				return { beforePush: [], configHash: "demo" };
+			case "workspace_change_request_create":
+				win.demoPr = true; return;
+			case "workspace_change_request_view_web":
+				return;
 			case "workspace_git_branch_diff":
 				return { changes: win.emptyReview ? [] : changes, baseBranch: "main" };
 			case "workspace_git_file_preview_content":

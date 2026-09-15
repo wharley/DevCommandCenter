@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +30,10 @@ type CreateChangeRequestDialogProps = {
 	localAdditions: number;
 	localDeletions: number;
 	loading?: boolean;
+	allowIncludeLocalChanges?: boolean;
+	scopeDescription?: string;
+	submitDisabled?: boolean;
+	errorMessage?: string | null;
 	initialDraft?: boolean;
 	onSubmit: (input: CreateChangeRequestInput) => Promise<void>;
 };
@@ -38,30 +49,37 @@ export function CreateChangeRequestDialog({
 	localAdditions,
 	localDeletions,
 	loading = false,
+	allowIncludeLocalChanges = true,
+	scopeDescription,
+	submitDisabled = false,
+	errorMessage,
 	initialDraft = false,
 	onSubmit,
 }: CreateChangeRequestDialogProps) {
 	const { t } = useTranslation("common");
+	const includedLocalFiles = allowIncludeLocalChanges ? localFiles : 0;
 	const [title, setTitle] = useState(defaultTitle);
 	const [body, setBody] = useState("");
-	const [includeLocalChanges, setIncludeLocalChanges] = useState(localFiles > 0);
+	const [includeLocalChanges, setIncludeLocalChanges] = useState(
+		includedLocalFiles > 0,
+	);
 	const [draft, setDraft] = useState(initialDraft);
 
 	useEffect(() => {
 		if (!open) return;
 		setTitle(defaultTitle);
 		setBody("");
-		setIncludeLocalChanges(localFiles > 0);
+		setIncludeLocalChanges(includedLocalFiles > 0);
 		setDraft(initialDraft);
-	}, [defaultTitle, initialDraft, localFiles, open]);
+	}, [defaultTitle, initialDraft, includedLocalFiles, open]);
 
 	async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
 		event.preventDefault();
-		if (!title.trim() || loading) return;
+		if (!title.trim() || loading || submitDisabled) return;
 		await onSubmit({
 			title: title.trim(),
 			body: body.trim(),
-			includeLocalChanges,
+			includeLocalChanges: allowIncludeLocalChanges && includeLocalChanges,
 			draft,
 		});
 	}
@@ -71,7 +89,11 @@ export function CreateChangeRequestDialog({
 			<DialogContent className="sm:max-w-lg">
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
-						<DialogTitle>{t("composer.executionDock.createRequest.title", { requestLabel })}</DialogTitle>
+						<DialogTitle>
+							{t("composer.executionDock.createRequest.title", {
+								requestLabel,
+							})}
+						</DialogTitle>
 						<DialogDescription>
 							{t("composer.executionDock.createRequest.route", {
 								head: headBranch ?? "HEAD",
@@ -81,29 +103,51 @@ export function CreateChangeRequestDialog({
 					</DialogHeader>
 
 					<div className="grid gap-4 py-4">
+						{errorMessage && (
+							<p role="alert" className="text-xs text-destructive">
+								{errorMessage}
+							</p>
+						)}
 						<label className="grid gap-1.5 text-[12px] font-medium">
 							{t("composer.executionDock.createRequest.titleLabel")}
-							<Input value={title} onChange={(event) => setTitle(event.target.value)} autoFocus />
+							<Input
+								value={title}
+								onChange={(event) => setTitle(event.target.value)}
+								autoFocus
+							/>
 						</label>
 						<label className="grid gap-1.5 text-[12px] font-medium">
 							{t("composer.executionDock.createRequest.descriptionLabel")}
 							<Textarea
 								value={body}
 								onChange={(event) => setBody(event.target.value)}
-								placeholder={t("composer.executionDock.createRequest.descriptionPlaceholder")}
+								placeholder={t(
+									"composer.executionDock.createRequest.descriptionPlaceholder",
+								)}
 								className="min-h-24 resize-y"
 							/>
 						</label>
-						{localFiles > 0 ? (
+						{scopeDescription && (
+							<p className="text-xs text-muted-foreground">
+								{scopeDescription}
+							</p>
+						)}
+						{allowIncludeLocalChanges && localFiles > 0 ? (
 							<label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 p-3 text-[12px]">
 								<input
 									type="checkbox"
 									checked={includeLocalChanges}
-									onChange={(event) => setIncludeLocalChanges(event.target.checked)}
+									onChange={(event) =>
+										setIncludeLocalChanges(event.target.checked)
+									}
 									className="mt-0.5 accent-primary"
 								/>
 								<span>
-									<strong className="block font-medium">{t("composer.executionDock.createRequest.includeLocalChanges")}</strong>
+									<strong className="block font-medium">
+										{t(
+											"composer.executionDock.createRequest.includeLocalChanges",
+										)}
+									</strong>
 									<span className="mt-1 block text-muted-foreground">
 										{t("composer.executionDock.createRequest.localSummary", {
 											files: localFiles,
@@ -115,17 +159,34 @@ export function CreateChangeRequestDialog({
 							</label>
 						) : null}
 						<label className="flex items-center gap-2 text-[12px] font-medium">
-							<input type="checkbox" checked={draft} onChange={(event) => setDraft(event.target.checked)} className="accent-primary" />
+							<input
+								type="checkbox"
+								checked={draft}
+								onChange={(event) => setDraft(event.target.checked)}
+								className="accent-primary"
+							/>
 							{t("composer.executionDock.createRequest.draft")}
 						</label>
 					</div>
 
 					<DialogFooter>
-						<Button type="button" variant="outline" disabled={loading} onClick={() => onOpenChange(false)}>
+						<Button
+							type="button"
+							variant="outline"
+							disabled={loading}
+							onClick={() => onOpenChange(false)}
+						>
 							{t("composer.executionDock.createRequest.cancel")}
 						</Button>
-						<Button type="submit" disabled={loading || !title.trim()}>
-							{loading ? t("composer.executionDock.createRequest.creating") : t("composer.executionDock.createRequest.submit", { requestLabel })}
+						<Button
+							type="submit"
+							disabled={loading || submitDisabled || !title.trim()}
+						>
+							{loading
+								? t("composer.executionDock.createRequest.creating")
+								: t("composer.executionDock.createRequest.submit", {
+										requestLabel,
+									})}
 						</Button>
 					</DialogFooter>
 				</form>

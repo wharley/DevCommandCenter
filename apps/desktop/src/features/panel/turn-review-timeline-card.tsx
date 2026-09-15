@@ -18,10 +18,12 @@ export function TurnReviewTimelineCard({
 	target,
 	onReview,
 	onInteraction,
+	workspaceRoot,
 }: {
 	target: TurnReviewTarget;
 	onReview: () => void;
 	onInteraction?: () => void;
+	workspaceRoot?: string | null;
 }) {
 	const { t } = useTranslation("common");
 	const id = useId();
@@ -127,6 +129,7 @@ export function TurnReviewTimelineCard({
 				)}
 			</div>
 			<TurnReviewDialog
+				workspaceRoot={workspaceRoot}
 				review={review}
 				selectedPath={selectedFile}
 				onSelect={setSelectedFile}
