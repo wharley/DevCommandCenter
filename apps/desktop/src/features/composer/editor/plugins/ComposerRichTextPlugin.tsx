@@ -50,6 +50,8 @@ import {
 } from "@/components/ui/popover";
 import { openExternal } from "@/lib/shell-api";
 import { COMPOSER_LINK_MATCHERS, normalizeComposerUrl } from "../rich-text";
+import { SiteLinkIcon } from "@/components/site-link-icon";
+import { ComposerLinkIconsPlugin } from "./ComposerLinkIconsPlugin";
 import "../../composer-rich-text.css";
 
 const validateUrl = (url: string) => normalizeComposerUrl(url) !== null;
@@ -286,6 +288,7 @@ export function ComposerRichTextPlugin({
 
 	return (
 		<>
+			<ComposerLinkIconsPlugin />
 			<ListPlugin shouldPreserveNumbering />
 			<MarkdownShortcutPlugin transformers={COMPOSER_LIST_TRANSFORMERS} />
 			<LinkPlugin validateUrl={validateUrl} />
@@ -366,7 +369,7 @@ export function ComposerRichTextPlugin({
 					{draft?.mode === "menu" ? (
 						<>
 							<div className="composer-link-heading">
-								<LinkIcon className="size-4 shrink-0" />
+								<SiteLinkIcon url={draft.url} className="composer-site-icon" />
 								<span className="truncate font-medium">{draft.text}</span>
 							</div>
 							<p className="composer-link-destination">{draft.url}</p>

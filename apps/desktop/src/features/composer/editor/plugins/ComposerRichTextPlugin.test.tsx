@@ -26,6 +26,11 @@ import { EditorRefPlugin } from "./EditorRefPlugin";
 import { DraftPersistencePlugin } from "./DraftPersistencePlugin";
 import { loadDraft, loadStructuredDraft } from "../../draftStorage";
 import { readComposerPrompt, setEditorText } from "../../editorOps";
+import { loadSiteFavicon } from "@/lib/site-favicon";
+
+vi.mock("@/lib/site-favicon", () => ({
+	loadSiteFavicon: vi.fn(async () => null),
+}));
 
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({ t: (key: string) => key.split(".").pop() }),
@@ -97,6 +102,7 @@ beforeEach(async () => {
 		value: () => [],
 	});
 	onSubmit.mockClear();
+	vi.mocked(loadSiteFavicon).mockReset().mockResolvedValue(null);
 	localStorage.clear();
 	container = document.createElement("div");
 	document.body.append(container);
@@ -277,4 +283,48 @@ it("starts an automatic list after prose and keeps inline hyphens as text", asyn
 		"Please review - this\n\n- First",
 	);
 	expect(onSubmit).not.toHaveBeenCalled();
+});
+
+it("decorates automatic links without changing the prompt or persisted draft", async () => {
+	vi.mocked(loadSiteFavicon).mockResolvedValue(
+		"https://icons.example/icon.png",
+	);
+	await seed("https://example.com/document");
+	const link = container.querySelector("a")!;
+	expect(link.dataset.faviconSrc).toBe("https://icons.example/icon.png");
+	expect(link.style.getPropertyValue("--composer-link-favicon")).toContain(
+		"icon.png",
+	);
+	expect(readComposerPrompt(editorRef.current!)).toBe(
+		"https://example.com/document",
+	);
+	expect(JSON.stringify(loadStructuredDraft("rich-test"))).not.toContain(
+		"icon.png",
+	);
+	await act(async () => link.click());
+	expect(
+		document.querySelector(".composer-site-icon")?.getAttribute("src"),
+	).toBe("https://icons.example/icon.png");
+});
+
+it("ignores an old favicon response after the link destination is edited", async () => {
+	const pending: ((value: string | null) => void)[] = [];
+	vi.mocked(loadSiteFavicon).mockImplementation(
+		() => new Promise((resolve) => pending.push(resolve)),
+	);
+	await click("insertLink");
+	await fill(0, "Reference");
+	await fill(1, "https://example.com");
+	await click("save");
+	await act(async () => container.querySelector("a")!.click());
+	await click("editLink");
+	await fill(1, "https://another.example.org");
+	await click("save");
+	await act(async () => {
+		pending[0]("https://icons.example/old.png");
+	});
+	expect(container.querySelector("a")!.dataset.faviconSrc).toBeUndefined();
+	expect(readComposerPrompt(editorRef.current!)).toBe(
+		"[Reference](https://another.example.org/)",
+	);
 });

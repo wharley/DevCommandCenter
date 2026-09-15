@@ -1,18 +1,53 @@
+/* Decorative icons do not enter the editor state or outgoing Markdown. */
+.composer-link,
+.composer-link-heading {
+	--composer-link-color: #0969da;
+	--composer-link-icon: url("./assets/globe.svg");
+	color: var(--composer-link-color);
+}
+.dark .composer-link,
+.dark .composer-link-heading {
+	--composer-link-color: #79b8ff;
+}
 .composer-link {
-	color: var(--primary);
 	border-radius: 4px;
-	background: color-mix(in srgb, var(--primary) 9%, transparent);
+	background: color-mix(in srgb, var(--composer-link-color) 9%, transparent);
 	box-decoration-break: clone;
 	-webkit-box-decoration-break: clone;
-	padding: 1px 3px;
-	text-decoration: underline;
-	text-decoration-color: color-mix(in srgb, var(--primary) 30%, transparent);
-	text-underline-offset: 3px;
+	padding: 1px 4px;
+	text-decoration: none;
 	cursor: pointer;
 	overflow-wrap: anywhere;
 }
 .composer-link:hover {
-	background: color-mix(in srgb, var(--primary) 17%, transparent);
+	background: color-mix(in srgb, var(--composer-link-color) 17%, transparent);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.composer-link::before {
+	content: "";
+	display: inline-block;
+	width: 1em;
+	height: 1em;
+	background: currentColor;
+	-webkit-mask: var(--composer-link-icon) center / contain no-repeat;
+	mask: var(--composer-link-icon) center / contain no-repeat;
+	vertical-align: -0.12em;
+	margin-inline-end: 0.3em;
+}
+.composer-link[data-favicon-src]::before {
+	background: var(--composer-link-favicon) center / contain no-repeat;
+	mask: none;
+	-webkit-mask: none;
+	border-radius: 2px;
+}
+.composer-site-icon {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	flex: 0 0 16px;
+	object-fit: contain;
+	border-radius: 2px;
 }
 .composer-inline-code {
 	font-family: var(--font-mono);
