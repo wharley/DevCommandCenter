@@ -91,6 +91,7 @@ import {
 } from "./use-workspace-agent-states";
 import { ProjectEditDialog } from "./project-edit-dialog";
 import { ProjectIdentityGlyph } from "./project-identity";
+import { ProviderIcon } from "@/features/providers/provider-icons";
 import { repositoryDisplayName } from "./repository-display-name";
 import {
 	formatDiskBytes,
@@ -1442,6 +1443,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 														: "text-foreground/85 hover:bg-accent/60 hover:text-foreground",
 												)}
 											>
+												{workspaceProviderIds[workspace.id] ? (
+													<ProviderIcon
+														provider={workspaceProviderIds[workspace.id]}
+														className="size-3.5 shrink-0"
+													/>
+												) : null}
 												<Loader2
 													className="size-3.5 shrink-0 animate-spin text-amber-600 dark:text-amber-300"
 													strokeWidth={2}

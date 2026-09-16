@@ -248,9 +248,11 @@ function WorkspaceIdentityCard({
 function WorkspaceRailAvatar({
 	title,
 	subtitle,
+	providerId,
 }: {
 	title: string;
 	subtitle: string;
+	providerId?: string | null;
 }) {
 	const initials = initialsFromWorkspaceLabel(subtitle || title);
 
@@ -258,8 +260,13 @@ function WorkspaceRailAvatar({
 		<span
 			aria-hidden
 			className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border border-transparent bg-accent/70 text-[8.5px] font-semibold uppercase text-foreground ring-1 ring-border/60"
+			title={providerId ?? undefined}
 		>
-			{initials}
+			{providerId ? (
+				<ProviderIcon provider={providerId} className="size-3.5" />
+			) : (
+				initials
+			)}
 		</span>
 	);
 }
@@ -394,15 +401,6 @@ export const WorkspaceRailRowItem = memo(
 			workspace.status !== "archived" && workspace.status !== "completed";
 		const canPin = canSelect && Boolean(onSetWorkspacePinned);
 		const hasWorkspaceMenu = Boolean(onRenameWorkspace) || canPin;
-		const providerMark = providerId ? (
-			<span
-				className="flex size-3 shrink-0 items-center justify-center"
-				title={providerId}
-			>
-				<ProviderIcon provider={providerId} className="size-3" />
-			</span>
-		) : null;
-
 		return (
 			<div className="pl-3 pr-1">
 				<div
@@ -454,7 +452,11 @@ export const WorkspaceRailRowItem = memo(
 						/>
 					) : null}
 					<div className="flex min-w-0 items-start gap-2">
-						<WorkspaceRailAvatar title={displayTitle} subtitle={workspace.name} />
+						<WorkspaceRailAvatar
+							title={displayTitle}
+							subtitle={workspace.name}
+							providerId={providerId}
+						/>
 						<Tooltip
 							open={!isEditing && identityOpen}
 							onOpenChange={setIdentityOpen}
@@ -533,7 +535,6 @@ export const WorkspaceRailRowItem = memo(
 							</div>
 							{workspaceStatusMessage ? (
 								<div className="mt-px flex min-w-0 items-center gap-1.5">
-									{providerMark}
 									<span
 										aria-hidden
 										className={cn(
@@ -559,7 +560,6 @@ export const WorkspaceRailRowItem = memo(
 							) : null}
 							{activity && !hasPriorityWorkspaceStatus && (
 								<div className="mt-px flex min-w-0 items-center gap-1.5">
-									{providerMark}
 									<span
 										aria-hidden
 										className={cn(
@@ -591,7 +591,6 @@ export const WorkspaceRailRowItem = memo(
 							)}
 							{recapMessage && railRecap && !hasPriorityWorkspaceStatus ? (
 								<div className="mt-px flex min-w-0 items-center gap-1.5">
-									{providerMark}
 									<p
 										className={cn(
 											"min-w-0 truncate text-[10.5px] leading-4",
@@ -604,7 +603,6 @@ export const WorkspaceRailRowItem = memo(
 							) : null}
 							{!activity && !recapMessage && workspace.branch ? (
 								<div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] leading-3 text-muted-foreground/70">
-									{providerMark}
 									<GitBranch className="size-2.5 shrink-0" aria-hidden />
 									<span className="truncate">{workspace.branch}</span>
 								</div>
