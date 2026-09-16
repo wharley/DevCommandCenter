@@ -1,3 +1,5 @@
+import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
+import { setFrontendErrorContext, type FrontendErrorContext } from "./lib/frontend-diagnostics";
 import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
 import {
 	useCallback,
@@ -1998,6 +2000,19 @@ export default function App() {
 				: null)
 		);
 	}, [effectiveSelectedSessionId, selectedSessionSummary, sessionSnapshotsById]);
+	const frontendErrorContext: FrontendErrorContext = {
+		appVersion: appCurrentVersion,
+		workspaceId: selectedWorkspace?.id ?? null,
+		sessionId: effectiveSelectedSessionId,
+		turnId: selectedSessionSnapshot?.activeTurnId ?? null,
+		turnState: selectedSessionSnapshot?.lastTurnState ?? null,
+		hydratedHistoryEventCount: hydratedSession.history.length,
+		liveEventCount: timelineSessionEvents.length,
+		transport: hydratedSession.active && hydratedSession.ready ? "reconciled" : "legacy",
+	};
+	useEffect(() => {
+		setFrontendErrorContext(frontendErrorContext);
+	});
 	const selectedSessionWorkspacePath = useMemo(() => {
 		if (isRemoteBackend) {
 			return null;
@@ -5338,6 +5353,11 @@ export default function App() {
 									}}
 								/>
 							) : hasWorkspace && selectedWorkspace ? (
+								<RenderErrorBoundary
+									scope="workspace"
+									resetKey={`${selectedWorkspace.id}:${effectiveSelectedSessionId ?? ""}`}
+									context={frontendErrorContext}
+								>
 								<SessionWorkbench
 									workspaceId={selectedWorkspace.id}
 									workspaceName={selectedWorkspace.name}
@@ -5458,6 +5478,7 @@ export default function App() {
 										}
 									onComposerPrefillConsumed={handleComposerPrefillConsumed}
 								/>
+								</RenderErrorBoundary>
 							) : (
 								<WorkspaceBootstrapState
 									selectedProviderLabel={selectedProvider?.label ?? null}

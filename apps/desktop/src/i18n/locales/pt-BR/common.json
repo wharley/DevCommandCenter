@@ -1,4 +1,15 @@
 {
+  "frontendRecovery": {
+    "title": "Não foi possível exibir esta tela",
+    "body": "Ocorreu um erro na interface. Copie o diagnóstico para ajudar a investigar e recarregue o aplicativo para retomar a conversa.",
+    "copy": "Copiar diagnóstico",
+    "copied": "Diagnóstico copiado.",
+    "failed": "Não foi possível copiar automaticamente. Selecione e copie o texto abaixo.",
+    "report": "Diagnóstico da interface",
+    "reload": "Recarregar aplicativo",
+    "settingsTitle": "Diagnóstico da interface",
+    "settingsBody": "Os últimos 10 erros ficam registrados localmente, quando o armazenamento está disponível, e podem ser copiados após recarregar. O histórico da conversa não é incluído automaticamente. Nada é enviado sem uma ação sua."
+  },
   "feedback": {
     "draftUnsaved": "Rascunho apenas nesta janela",
     "pendingAccount": "Envio anterior de @{{login}}. Confira no GitHub antes de repetir.",

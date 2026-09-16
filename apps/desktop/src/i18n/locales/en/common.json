@@ -1,4 +1,15 @@
 {
+  "frontendRecovery": {
+    "title": "This screen could not be displayed",
+    "body": "An interface error occurred. Copy the diagnostic report to help investigate, then reload the app to return to the conversation.",
+    "copy": "Copy diagnostic report",
+    "copied": "Diagnostic report copied.",
+    "failed": "Automatic copying failed. Select and copy the text below.",
+    "report": "Interface diagnostic report",
+    "reload": "Reload app",
+    "settingsTitle": "Interface diagnostics",
+    "settingsBody": "The last 10 errors are stored locally when storage is available and can be copied after reloading. Conversation history is not automatically included. Nothing is sent without your action."
+  },
   "feedback": {
     "draftUnsaved": "Draft only available in this window",
     "pendingAccount": "Previous submission by @{{login}}. Check GitHub before repeating it.",

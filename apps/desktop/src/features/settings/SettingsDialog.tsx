@@ -1,3 +1,4 @@
+import { FrontendDiagnostics } from "@/components/FrontendDiagnostics";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -918,6 +919,11 @@ export function SettingsDialog({
 
 							{activeSection === "general" ? (
 								<section className="space-y-4">
+									<div className="rounded-xl border border-border/60 bg-muted/15 p-4 space-y-3">
+										<h3 className="text-sm font-medium">{t("frontendRecovery.settingsTitle")}</h3>
+										<p className="text-xs text-muted-foreground">{t("frontendRecovery.settingsBody")}</p>
+										<FrontendDiagnostics />
+									</div>
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 										<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 											<div className="min-w-0">
