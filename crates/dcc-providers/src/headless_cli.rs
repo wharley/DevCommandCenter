@@ -1073,6 +1073,7 @@ mod tests {
                 supports_shadow_home: false,
                 supports_subagent_concurrency: false,
                 supports_account_usage: false,
+                supports_account_resets: false,
                 plan_mode_support: dcc_core::domain::provider::TurnControlSupport::Native,
                 fast_mode_support: dcc_core::domain::provider::TurnControlSupport::PromptFallback,
                 supports_dynamic_models: false,

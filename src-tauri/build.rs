@@ -196,8 +196,9 @@ use dcc_tauri::commands::{
     provider_commands::{
         AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
         ConnectAntigravityOutput, InstallAntigravityOutput, ListProvidersOutput,
-        ProviderAccountUsageInput, ProviderAccountUsageOutput, ProviderAvailabilityInput,
-        ProviderAvailabilityOutput, SetProviderAvailabilityInput,
+        ProviderAccountResetInput, ProviderAccountResetOutput, ProviderAccountUsageInput,
+        ProviderAccountUsageOutput, ProviderAvailabilityInput, ProviderAvailabilityOutput,
+        SetProviderAvailabilityInput,
     },
     session_commands::{
         ApplyTaskTitleInput, ApplyTaskTitleOutput, ExecuteGuardedUndoInput,
@@ -419,6 +420,7 @@ struct ProviderMethods {
     get_provider_availability: String,
     set_provider_availability: String,
     provider_account_usage: String,
+    provider_account_reset: String,
     install_antigravity: String,
     get_antigravity_status: String,
     connect_antigravity: String,
@@ -485,6 +487,9 @@ fn main() {
         .typ::<dcc_core::domain::provider::ProviderAccountUsage>()
         .typ::<dcc_core::domain::provider::ProviderAccountUsageState>()
         .typ::<dcc_core::domain::provider::ProviderUsageWindow>()
+        .typ::<dcc_core::domain::provider::ProviderResetCredit>()
+        .typ::<dcc_core::domain::provider::ProviderResetCredits>()
+        .typ::<dcc_core::domain::provider::ProviderResetOutcome>()
         .typ::<ProviderRuntimeConfig>()
         .typ::<dcc_core::domain::provider::HealthStatus>()
         .typ::<DelegationId>()
@@ -726,6 +731,8 @@ fn main() {
         .typ::<WorkspaceCodeRabbitReviewHistoryEntry>()
         .typ::<WorkspaceCodeRabbitReviewHistoryOutput>()
         .typ::<ListProvidersOutput>()
+        .typ::<ProviderAccountResetInput>()
+        .typ::<ProviderAccountResetOutput>()
         .typ::<ProviderAccountUsageInput>()
         .typ::<ProviderAccountUsageOutput>()
         .typ::<InstallAntigravityOutput>()
@@ -1015,6 +1022,7 @@ fn main() {
             get_provider_availability: "get_provider_availability".to_string(),
             set_provider_availability: "set_provider_availability".to_string(),
             provider_account_usage: "provider_account_usage".to_string(),
+            provider_account_reset: "provider_account_reset".to_string(),
             install_antigravity: "install_antigravity".to_string(),
             get_antigravity_status: "get_antigravity_status".to_string(),
             connect_antigravity: "connect_antigravity".to_string(),

@@ -7180,6 +7180,7 @@ pub fn run() {
             provider_commands::list_providers,
             provider_commands::get_provider_availability,
             provider_commands::set_provider_availability,
+            provider_commands::provider_account_reset,
             provider_commands::provider_account_usage,
             provider_commands::install_antigravity,
             provider_commands::get_antigravity_status,

@@ -36,7 +36,8 @@ use dcc_core::{
         provider::{
             Capabilities, HealthStatus, NativeSubagentStatus, ProviderAccountUsage,
             ProviderAccountUsageState, ProviderApprovalPolicy, ProviderEvent, ProviderId,
-            ProviderUsageWindow, SessionHandle,
+            ProviderResetCredit, ProviderResetCredits, ProviderResetOutcome, ProviderUsageWindow,
+            SessionHandle,
         },
         session::{AssistantMessagePhase, SessionId},
         usage::ModelTokenUsage,
@@ -369,6 +370,38 @@ fn codex_usage_window(id: &str, value: &Value) -> Option<ProviderUsageWindow> {
     })
 }
 
+fn codex_reset_credits(value: &Value) -> Option<ProviderResetCredits> {
+    let summary = value.get("rateLimitResetCredits")?;
+    let available_count = summary.get("availableCount")?.as_u64()?;
+    let credits = summary
+        .get("credits")
+        .and_then(Value::as_array)
+        .map(|credits| {
+            credits
+                .iter()
+                .filter_map(|credit| {
+                    Some(ProviderResetCredit {
+                        id: credit.get("id")?.as_str()?.to_string(),
+                        title: credit
+                            .get("title")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        description: credit
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        expires_at: credit.get("expiresAt").and_then(codex_reset_time),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(ProviderResetCredits {
+        available_count,
+        credits,
+    })
+}
+
 fn parse_codex_account_usage(value: &Value) -> Result<ProviderAccountUsage> {
     let limits = value.get("rateLimits").unwrap_or(value);
     let mut windows = Vec::new();
@@ -399,6 +432,7 @@ fn parse_codex_account_usage(value: &Value) -> Result<ProviderAccountUsage> {
         provider_id: ProviderId("codex".to_string()),
         state: ProviderAccountUsageState::Available,
         windows,
+        reset_credits: codex_reset_credits(value),
         plan_type: limits
             .get("planType")
             .and_then(Value::as_str)
@@ -456,9 +490,11 @@ where
     read_rpc_response_with_timeout(lines, expected_id, Duration::from_secs(15)).await
 }
 
-async fn fetch_codex_account_usage(
+async fn run_codex_account_rpc(
     runtime_config: Option<&ProviderRuntimeConfig>,
-) -> Result<ProviderAccountUsage> {
+    method: &str,
+    params: Value,
+) -> Result<Value> {
     let mut command = Command::new("codex");
     command
         .arg("app-server")
@@ -501,13 +537,8 @@ async fn fetch_codex_account_usage(
         .await?;
         read_rpc_response(&mut lines, 1).await?;
         write_line(&mut stdin, &rpc_notification("initialized")).await?;
-        write_line(
-            &mut stdin,
-            &rpc_request(2, "account/rateLimits/read", Value::Null),
-        )
-        .await?;
-        let response = read_rpc_response(&mut lines, 2).await?;
-        parse_codex_account_usage(&response)
+        write_line(&mut stdin, &rpc_request(2, method, params)).await?;
+        read_rpc_response(&mut lines, 2).await
     }
     .await;
 
@@ -517,6 +548,41 @@ async fn fetch_codex_account_usage(
     stderr_task.abort();
     let _ = stderr_task.await;
     result
+}
+
+async fn fetch_codex_account_usage(
+    runtime_config: Option<&ProviderRuntimeConfig>,
+) -> Result<ProviderAccountUsage> {
+    let response =
+        run_codex_account_rpc(runtime_config, "account/rateLimits/read", Value::Null).await?;
+    parse_codex_account_usage(&response)
+}
+
+async fn consume_codex_account_reset(
+    runtime_config: Option<&ProviderRuntimeConfig>,
+    credit_id: Option<&str>,
+) -> Result<ProviderResetOutcome> {
+    let response = run_codex_account_rpc(
+        runtime_config,
+        "account/rateLimitResetCredit/consume",
+        json!({
+            "creditId": credit_id,
+            "idempotencyKey": Uuid::new_v4().to_string(),
+        }),
+    )
+    .await?;
+    match response.get("outcome").and_then(Value::as_str) {
+        Some("reset") => Ok(ProviderResetOutcome::Reset),
+        Some("nothingToReset") => Ok(ProviderResetOutcome::NothingToReset),
+        Some("noCredit") => Ok(ProviderResetOutcome::NoCredit),
+        Some("alreadyRedeemed") => Ok(ProviderResetOutcome::AlreadyRedeemed),
+        Some(outcome) => Err(CoreError::Provider(format!(
+            "unknown codex account reset outcome: {outcome}"
+        ))),
+        None => Err(CoreError::Provider(
+            "codex account reset response had no outcome".to_string(),
+        )),
+    }
 }
 
 // ── Notification → ProviderEvent ────────────────────────────────────────────
@@ -3238,6 +3304,14 @@ impl Provider for CodexAppServerAdapter {
     ) -> Result<Option<ProviderAccountUsage>> {
         fetch_codex_account_usage(runtime).await.map(Some)
     }
+
+    async fn consume_account_reset(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+        credit_id: Option<&str>,
+    ) -> Result<ProviderResetOutcome> {
+        consume_codex_account_reset(runtime, credit_id).await
+    }
 }
 
 #[cfg(test)]
@@ -4479,6 +4553,18 @@ unified_exec                         stable             true
                     "resetsAt": 1_800_100_000
                 },
                 "planType": "plus"
+            },
+            "rateLimitResetCredits": {
+                "availableCount": 1,
+                "credits": [{
+                    "id": "reset-1",
+                    "title": "Full reset",
+                    "description": "Refresh Codex limits",
+                    "expiresAt": 1_800_200_000,
+                    "grantedAt": 1_800_000_000,
+                    "resetType": "codexRateLimits",
+                    "status": "available"
+                }]
             }
         }))
         .expect("usage should parse");
@@ -4486,6 +4572,11 @@ unified_exec                         stable             true
         assert_eq!(usage.windows.len(), 2);
         assert_eq!(usage.windows[0].remaining_percent, 17.5);
         assert_eq!(usage.plan_type.as_deref(), Some("plus"));
+        let reset_credits = usage.reset_credits.expect("reset credits should parse");
+        assert_eq!(reset_credits.available_count, 1);
+        assert_eq!(reset_credits.credits[0].id, "reset-1");
+        assert_eq!(reset_credits.credits[0].title.as_deref(), Some("Full reset"));
+        assert!(reset_credits.credits[0].expires_at.is_some());
     }
 
     #[tokio::test]

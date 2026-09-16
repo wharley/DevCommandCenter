@@ -54,7 +54,8 @@ pub use project::{Project, ProjectId};
 pub use provider::{
     Capabilities, HealthStatus, McpOauthSupport, NativeSubagentStatus, ProviderAccountUsage,
     ProviderAccountUsageState, ProviderCatalog, ProviderDescriptor, ProviderEvent, ProviderId,
-    ProviderUsageWindow, SessionHandle,
+    ProviderResetCredit, ProviderResetCredits, ProviderResetOutcome, ProviderUsageWindow,
+    SessionHandle,
 };
 pub use repository::{Repository, RepositoryId};
 pub use session::{

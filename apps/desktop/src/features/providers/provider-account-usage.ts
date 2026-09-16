@@ -1,17 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
 	Capabilities,
 	ProviderAccountUsage,
 	ProviderRuntimeConfig,
 	ProviderUsageWindow,
 } from "@dcc/contracts";
-import { getProviderAccountUsage } from "@/lib/provider-api";
+import {
+	consumeProviderAccountReset,
+	getProviderAccountUsage,
+} from "@/lib/provider-api";
 
 export type ProviderUsageSeverity = "warning" | "critical" | null;
 
 export type ProviderUsageCandidate = {
 	id: string;
-	capabilities: Pick<Capabilities, "supportsAccountUsage">;
+	capabilities: Pick<Capabilities, "supportsAccountUsage" | "supportsAccountResets">;
 };
 
 /**
@@ -22,6 +25,12 @@ export function supportsProviderAccountUsage(
 	provider: ProviderUsageCandidate | null | undefined,
 ): boolean {
 	return provider?.capabilities.supportsAccountUsage === true;
+}
+
+export function supportsProviderAccountResets(
+	provider: ProviderUsageCandidate | null | undefined,
+): boolean {
+	return provider?.capabilities.supportsAccountResets === true;
 }
 
 export function mostConstrainedUsageWindow(
@@ -67,5 +76,19 @@ export function useProviderAccountUsage(
 		staleTime: 30_000,
 		refetchOnWindowFocus: false,
 		retry: false,
+	});
+}
+
+export function useProviderAccountReset(
+	providerId: string,
+	providerRuntime: ProviderRuntimeConfig | null,
+) {
+	return useMutation({
+		mutationFn: (creditId?: string) =>
+			consumeProviderAccountReset({
+				providerId,
+				providerRuntime,
+				creditId,
+			}),
 	});
 }

@@ -1,8 +1,9 @@
 use dcc_tauri::commands::provider_commands::{
     AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
     ConnectAntigravityOutput, InstallAntigravityOutput, ListProvidersOutput,
-    ProviderAccountUsageInput, ProviderAccountUsageOutput, ProviderAvailabilityInput,
-    ProviderAvailabilityOutput, SetProviderAvailabilityInput,
+    ProviderAccountResetInput, ProviderAccountResetOutput, ProviderAccountUsageInput,
+    ProviderAccountUsageOutput, ProviderAvailabilityInput, ProviderAvailabilityOutput,
+    SetProviderAvailabilityInput,
 };
 use dcc_tauri::state::SessionCommandState;
 use tauri::State;
@@ -36,6 +37,14 @@ pub async fn provider_account_usage(
     input: ProviderAccountUsageInput,
 ) -> Result<ProviderAccountUsageOutput, String> {
     dcc_tauri::commands::provider_commands::provider_account_usage(state, input).await
+}
+
+#[tauri::command]
+pub async fn provider_account_reset(
+    state: State<'_, SessionCommandState>,
+    input: ProviderAccountResetInput,
+) -> Result<ProviderAccountResetOutput, String> {
+    dcc_tauri::commands::provider_commands::provider_account_reset(state, input).await
 }
 
 #[tauri::command]

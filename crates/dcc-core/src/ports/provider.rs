@@ -8,7 +8,7 @@ use crate::{
     domain::mcp::{McpDefinitionId, McpToolPolicyDecision},
     domain::provider::{
         Capabilities, HealthStatus, ProviderAccountUsage, ProviderApprovalPolicy, ProviderEvent,
-        ProviderId, SessionHandle,
+        ProviderId, ProviderResetOutcome, SessionHandle,
     },
     domain::session::SessionId,
     domain::workspace::WorkspaceId,
@@ -326,6 +326,15 @@ pub trait Provider: Send + Sync {
         _runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<Option<ProviderAccountUsage>> {
         Ok(None)
+    }
+    async fn consume_account_reset(
+        &self,
+        _runtime: Option<&ProviderRuntimeConfig>,
+        _credit_id: Option<&str>,
+    ) -> Result<ProviderResetOutcome> {
+        Err(crate::CoreError::Provider(
+            "This provider does not support account usage resets".to_string(),
+        ))
     }
     /// Runtime model discovery for adapters whose catalog is not static.
     /// `Ok(None)` means the static registry is authoritative; `Ok(Some)` is

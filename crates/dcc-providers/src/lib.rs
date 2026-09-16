@@ -99,6 +99,7 @@ pub enum ProviderCapability {
     ShadowHome,
     SubagentConcurrency,
     AccountUsage,
+    AccountResets,
     DynamicModels,
     CompactionCommand,
 }
@@ -125,6 +126,7 @@ pub fn supports_provider_capability(
         ProviderCapability::ShadowHome => capabilities.supports_shadow_home,
         ProviderCapability::SubagentConcurrency => capabilities.supports_subagent_concurrency,
         ProviderCapability::AccountUsage => capabilities.supports_account_usage,
+        ProviderCapability::AccountResets => capabilities.supports_account_resets,
         ProviderCapability::DynamicModels => capabilities.supports_dynamic_models,
         ProviderCapability::CompactionCommand => capabilities.supports_compaction_command,
     }

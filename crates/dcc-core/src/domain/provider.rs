@@ -162,6 +162,9 @@ pub struct Capabilities {
     /// Providers without this never spawn a runtime to answer usage queries.
     #[serde(default)]
     pub supports_account_usage: bool,
+    /// The adapter can expose and consume provider-issued account reset credits.
+    #[serde(default)]
+    pub supports_account_resets: bool,
     /// Whether plan mode is a native runtime switch or prompt text.
     #[serde(default)]
     pub plan_mode_support: TurnControlSupport,
@@ -254,6 +257,35 @@ pub struct ProviderUsageWindow {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct ProviderResetCredit {
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderResetCredits {
+    pub available_count: u64,
+    #[serde(default)]
+    pub credits: Vec<ProviderResetCredit>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderResetOutcome {
+    Reset,
+    NothingToReset,
+    NoCredit,
+    AlreadyRedeemed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub enum ProviderAccountUsageState {
     Available,
     AwaitingActivity,
@@ -265,6 +297,8 @@ pub struct ProviderAccountUsage {
     pub provider_id: ProviderId,
     pub state: ProviderAccountUsageState,
     pub windows: Vec<ProviderUsageWindow>,
+    #[serde(default)]
+    pub reset_credits: Option<ProviderResetCredits>,
     #[serde(default)]
     pub plan_type: Option<String>,
     pub updated_at: String,

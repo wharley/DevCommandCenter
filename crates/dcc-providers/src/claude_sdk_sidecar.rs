@@ -169,13 +169,19 @@ fn parse_claude_mcp_oauth_update(raw: &str) -> Option<Result<ProviderMcpOauthUpd
 }
 
 fn claude_reset_time(value: &Value) -> Option<String> {
-    let raw_timestamp = value.as_i64()?;
-    let timestamp = if raw_timestamp > 10_000_000_000 {
-        raw_timestamp / 1_000
-    } else {
-        raw_timestamp
-    };
-    DateTime::<Utc>::from_timestamp(timestamp, 0).map(|value| value.to_rfc3339())
+    match value {
+        Value::Number(number) => {
+            let raw_timestamp = number.as_i64()?;
+            let timestamp = if raw_timestamp > 10_000_000_000 {
+                raw_timestamp / 1_000
+            } else {
+                raw_timestamp
+            };
+            DateTime::<Utc>::from_timestamp(timestamp, 0).map(|value| value.to_rfc3339())
+        }
+        Value::String(value) if !value.trim().is_empty() => Some(value.to_string()),
+        _ => None,
+    }
 }
 
 fn parse_claude_rate_limit_window(value: &Value) -> Option<ProviderUsageWindow> {
@@ -230,8 +236,8 @@ fn parse_claude_oauth_usage_window(id: &str, value: &Value) -> Option<ProviderUs
         remaining_percent: (100.0 - used_percent).clamp(0.0, 100.0),
         resets_at: value
             .get("resets_at")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+            .or_else(|| value.get("resetsAt"))
+            .and_then(claude_reset_time),
         window_duration_minutes: match id {
             "five_hour" => Some(300),
             "seven_day" | "seven_day_opus" | "seven_day_sonnet" => Some(10_080),
@@ -267,6 +273,7 @@ fn parse_claude_oauth_account_usage(value: &Value) -> Result<ProviderAccountUsag
         provider_id: ProviderId("claude_code".to_string()),
         state: ProviderAccountUsageState::Available,
         windows,
+        reset_credits: None,
         plan_type: None,
         updated_at: Utc::now().to_rfc3339(),
         is_cached: false,
@@ -403,6 +410,7 @@ async fn cache_claude_account_usage(state: &ProviderRuntimeState, cache_key: &st
             provider_id: ProviderId("claude_code".to_string()),
             state: ProviderAccountUsageState::Available,
             windows: Vec::new(),
+            reset_credits: None,
             plan_type: None,
             updated_at: Utc::now().to_rfc3339(),
             is_cached: true,
@@ -1080,6 +1088,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
                 provider_id: self.id.clone(),
                 state: ProviderAccountUsageState::AwaitingActivity,
                 windows: Vec::new(),
+                reset_credits: None,
                 plan_type: None,
                 updated_at: Utc::now().to_rfc3339(),
                 is_cached: true,
@@ -1326,8 +1335,34 @@ exit 43
         assert_eq!(usage.windows[0].remaining_percent, 63.0);
         assert_eq!(usage.windows[0].window_duration_minutes, Some(300));
         assert_eq!(usage.windows[1].remaining_percent, 73.5);
+        assert_eq!(
+            usage.windows[1].resets_at.as_deref(),
+            Some("2026-07-27T18:00:00+00:00")
+        );
         assert_eq!(usage.windows[2].remaining_percent, 99.0);
         assert!(!usage.is_cached);
+    }
+
+    #[test]
+    fn parses_claude_oauth_numeric_reset_timestamp() {
+        let usage = parse_claude_oauth_account_usage(&json!({
+            "five_hour": {
+                "utilization": 61.0,
+                "resetsAt": 1_800_000_000_000_i64
+            },
+            "seven_day": {
+                "utilization": 42.0,
+                "resets_at": "2026-07-27T18:00:00Z"
+            }
+        }))
+        .expect("OAuth usage response should parse");
+
+        assert_eq!(usage.windows[0].used_percent, 61.0);
+        assert_eq!(
+            usage.windows[0].resets_at.as_deref(),
+            Some("2027-01-15T08:00:00+00:00")
+        );
+        assert_eq!(usage.windows[1].used_percent, 42.0);
     }
 
     #[test]

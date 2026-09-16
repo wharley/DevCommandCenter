@@ -6,7 +6,7 @@ export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","can
 
 export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
-export const PROVIDER_METHODS = {"connectAntigravity":"connect_antigravity","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviders":"list_providers","providerAccountUsage":"provider_account_usage","setProviderAvailability":"set_provider_availability"} as const;
+export const PROVIDER_METHODS = {"connectAntigravity":"connect_antigravity","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviders":"list_providers","providerAccountReset":"provider_account_reset","providerAccountUsage":"provider_account_usage","setProviderAvailability":"set_provider_availability"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","applyTaskTitle":"apply_task_title","approvePlan":"approve_plan","clearSessionObjective":"clear_session_objective","closeSession":"close_session","dispatchNextQueuedTurn":"dispatch_next_queued_turn","executeGuardedUndo":"execute_guarded_undo","getSessionObjective":"get_session_objective","inheritSessionObjective":"inherit_session_objective","interruptNativeSubagent":"interrupt_native_subagent","lastTurnReview":"last_turn_review","listMcpRuntimeStatuses":"list_mcp_runtime_statuses","listThreadEvents":"list_thread_events","listTurnQueue":"list_turn_queue","listWorkspaceSessions":"list_workspace_sessions","prepareGuardedUndo":"prepare_guarded_undo","prepareTurn":"prepare_turn","queueTurn":"queue_turn","recordPlanHandoff":"record_plan_handoff","removeQueuedTurn":"remove_queued_turn","reorderTurnQueue":"reorder_turn_queue","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","runPullRequestReviewAgent":"run_pull_request_review_agent","searchSessions":"search_sessions","sendTurn":"send_turn","sessionLiveSnapshot":"session_live_snapshot","setSessionObjective":"set_session_objective","startMcpOauth":"start_mcp_oauth","startThread":"start_thread","steerNativeSubagent":"steer_native_subagent","steerTurn":"steer_turn","transitionSessionObjective":"transition_session_objective","turnReviewFileDiff":"turn_review_file_diff","usageDashboard":"usage_dashboard","waitMcpOauth":"wait_mcp_oauth"} as const;
 
@@ -152,6 +152,8 @@ export type Capabilities = {
 	 *  Providers without this never spawn a runtime to answer usage queries.
 	 */
 	supportsAccountUsage?: boolean,
+	// The adapter can expose and consume provider-issued account reset credits.
+	supportsAccountResets?: boolean,
 	// Whether plan mode is a native runtime switch or prompt text.
 	planModeSupport?: TurnControlSupport,
 	// Whether fast/direct responses are a native runtime switch or prompt text.
@@ -1226,10 +1228,21 @@ export type PrepareTurnOutput = {
 
 export type ProjectId = string;
 
+export type ProviderAccountResetInput = {
+	providerId: string,
+	creditId?: string | null,
+	providerRuntime?: ProviderRuntimeConfig | null,
+};
+
+export type ProviderAccountResetOutput = {
+	outcome: ProviderResetOutcome,
+};
+
 export type ProviderAccountUsage = {
 	providerId: ProviderId,
 	state: ProviderAccountUsageState,
 	windows: ProviderUsageWindow[],
+	resetCredits?: ProviderResetCredits | null,
 	planType?: string | null,
 	updatedAt: string,
 	isCached: boolean,
@@ -1307,6 +1320,20 @@ export type ProviderModelDescriptor = {
 	 */
 	effortLevels: string[],
 };
+
+export type ProviderResetCredit = {
+	id: string,
+	title?: string | null,
+	description?: string | null,
+	expiresAt?: string | null,
+};
+
+export type ProviderResetCredits = {
+	availableCount: number,
+	credits?: ProviderResetCredit[],
+};
+
+export type ProviderResetOutcome = "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed";
 
 export type ProviderRuntimeConfig = {
 	/**

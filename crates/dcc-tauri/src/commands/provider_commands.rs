@@ -5,7 +5,9 @@ use tauri::State;
 
 use dcc_core::{
     domain::{
-        provider::{ProviderAccountUsage, ProviderCatalog, ProviderModelDescriptor},
+        provider::{
+            ProviderAccountUsage, ProviderCatalog, ProviderModelDescriptor, ProviderResetOutcome,
+        },
         session::SessionId,
         workspace::WorkspaceId,
     },
@@ -34,6 +36,22 @@ pub struct ProviderAccountUsageInput {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderAccountUsageOutput {
     pub usage: Option<ProviderAccountUsage>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountResetInput {
+    pub provider_id: String,
+    #[serde(default)]
+    pub credit_id: Option<String>,
+    #[serde(default)]
+    pub provider_runtime: Option<ProviderRuntimeConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountResetOutput {
+    pub outcome: ProviderResetOutcome,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
@@ -331,6 +349,44 @@ pub async fn provider_account_usage_for_state(
         .await
         .map_err(|error| error.to_string())?;
     Ok(ProviderAccountUsageOutput { usage })
+}
+
+pub async fn provider_account_reset_for_state(
+    state: &SessionCommandState,
+    input: ProviderAccountResetInput,
+) -> Result<ProviderAccountResetOutput, String> {
+    let provider_id = input.provider_id.trim();
+    let registration = state
+        .require_provider_available(provider_id)
+        .map_err(|error| error.to_string())?;
+    if !supports_provider_capability(
+        &registration.capabilities,
+        ProviderCapability::AccountResets,
+    ) {
+        return Err(format!(
+            "provider {provider_id} does not support account usage resets"
+        ));
+    }
+    let runtime = input
+        .provider_runtime
+        .as_ref()
+        .map(|runtime| state.provider_runtime_config(provider_id, Some(runtime)))
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let outcome = registration
+        .runtime
+        .consume_account_reset(runtime.as_ref(), input.credit_id.as_deref())
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ProviderAccountResetOutput { outcome })
+}
+
+#[tauri::command]
+pub async fn provider_account_reset(
+    state: State<'_, SessionCommandState>,
+    input: ProviderAccountResetInput,
+) -> Result<ProviderAccountResetOutput, String> {
+    provider_account_reset_for_state(&state, input).await
 }
 
 #[cfg(test)]

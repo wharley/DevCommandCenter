@@ -8,6 +8,8 @@ import type {
 	ProviderAvailabilityInput,
 	ProviderAvailabilityOutput,
 	ProviderAccountUsageOutput,
+	ProviderAccountResetInput,
+	ProviderAccountResetOutput,
 	ProviderCatalog,
 	ProviderRuntimeConfig,
 	SetProviderAvailabilityInput,
@@ -93,6 +95,18 @@ export async function getProviderAccountUsage(
 				providerRuntime,
 			},
 		},
+	);
+}
+
+export async function consumeProviderAccountReset(
+	input: ProviderAccountResetInput,
+): Promise<ProviderAccountResetOutput> {
+	if (!isTauriRuntime()) {
+		throw new Error("Provider account resets require the desktop runtime.");
+	}
+	return invoke<ProviderAccountResetOutput>(
+		PROVIDER_METHODS.providerAccountReset,
+		{ input },
 	);
 }
 
