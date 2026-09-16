@@ -46,6 +46,7 @@ import {
 } from "./workspace-rail-shared";
 import { useWorkspaceActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 import { ProjectIdentityGlyph } from "./project-identity";
+import { ProviderIcon } from "@/features/providers/provider-icons";
 
 const rowVariants = cva(
 	"dcc-task-card group/dccRailRow relative min-h-[70px] select-none cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
@@ -66,6 +67,7 @@ export type WorkspaceRailRowProps = {
 	workspace: WorkspaceSummary;
 	selected: boolean;
 	activity?: WorkspaceAgentActivity | null;
+	providerId?: string | null;
 	metadataEnabled?: boolean;
 	projectLabel?: string | null;
 	projectIcon?: string | null;
@@ -267,6 +269,7 @@ export const WorkspaceRailRowItem = memo(
 		workspace,
 		selected,
 		activity,
+		providerId,
 		metadataEnabled = true,
 		projectLabel,
 		projectIcon,
@@ -391,6 +394,14 @@ export const WorkspaceRailRowItem = memo(
 			workspace.status !== "archived" && workspace.status !== "completed";
 		const canPin = canSelect && Boolean(onSetWorkspacePinned);
 		const hasWorkspaceMenu = Boolean(onRenameWorkspace) || canPin;
+		const providerMark = providerId ? (
+			<span
+				className="flex size-3 shrink-0 items-center justify-center"
+				title={providerId}
+			>
+				<ProviderIcon provider={providerId} className="size-3" />
+			</span>
+		) : null;
 
 		return (
 			<div className="pl-3 pr-1">
@@ -522,6 +533,7 @@ export const WorkspaceRailRowItem = memo(
 							</div>
 							{workspaceStatusMessage ? (
 								<div className="mt-px flex min-w-0 items-center gap-1.5">
+									{providerMark}
 									<span
 										aria-hidden
 										className={cn(
@@ -547,6 +559,7 @@ export const WorkspaceRailRowItem = memo(
 							) : null}
 							{activity && !hasPriorityWorkspaceStatus && (
 								<div className="mt-px flex min-w-0 items-center gap-1.5">
+									{providerMark}
 									<span
 										aria-hidden
 										className={cn(
@@ -577,17 +590,21 @@ export const WorkspaceRailRowItem = memo(
 								</div>
 							)}
 							{recapMessage && railRecap && !hasPriorityWorkspaceStatus ? (
-								<p
-									className={cn(
-										"truncate text-[10.5px] leading-4",
-										recapToneClass[railRecap.recap.tone],
-									)}
-								>
-									{recapMessage}
-								</p>
+								<div className="mt-px flex min-w-0 items-center gap-1.5">
+									{providerMark}
+									<p
+										className={cn(
+											"min-w-0 truncate text-[10.5px] leading-4",
+											recapToneClass[railRecap.recap.tone],
+										)}
+									>
+										{recapMessage}
+									</p>
+								</div>
 							) : null}
 							{!activity && !recapMessage && workspace.branch ? (
 								<div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] leading-3 text-muted-foreground/70">
+									{providerMark}
 									<GitBranch className="size-2.5 shrink-0" aria-hidden />
 									<span className="truncate">{workspace.branch}</span>
 								</div>

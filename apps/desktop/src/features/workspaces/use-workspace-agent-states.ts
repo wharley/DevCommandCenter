@@ -106,6 +106,15 @@ export function deriveAgentStateFromSessions(
 	return deriveAgentActivityFromSessions(summaries)?.state ?? null;
 }
 
+/** The running provider wins; otherwise use the most recent workspace session. */
+export function deriveProviderIdFromSessions(
+	summaries: WorkspaceSessionSummary[],
+): string | null {
+	const summary = summaries.find(isRunningSession) ?? summaries[0];
+	const providerId = summary?.session.providerId?.trim();
+	return providerId || null;
+}
+
 export function useWorkspaceAgentActivities(
 	workspaces: Pick<WorkspaceSummary, "id" | "status">[],
 	input?: { enabled?: boolean; scope?: string },
@@ -137,6 +146,34 @@ export function useWorkspaceAgentActivities(
 				activities[workspace.id] = activity;
 			}
 			return activities;
+		},
+		{},
+	);
+}
+
+export function useWorkspaceProviderIds(
+	workspaces: Pick<WorkspaceSummary, "id">[],
+	input?: { enabled?: boolean; scope?: string },
+): Record<string, string> {
+	const isEnabled = input?.enabled ?? true;
+	const scope = input?.scope ?? "local";
+	const trackedWorkspaces = useMemo(
+		() => (isEnabled ? workspaces : []),
+		[isEnabled, workspaces],
+	);
+	const sessionQueries = useQueries({
+		queries: trackedWorkspaces.map((workspace) =>
+			workspaceSessionsQueryOptions(workspace.id, { enabled: isEnabled, scope }),
+		),
+	});
+
+	return trackedWorkspaces.reduce<Record<string, string>>(
+		(providerIds, workspace, index) => {
+			const providerId = deriveProviderIdFromSessions(sessionQueries[index]?.data ?? []);
+			if (providerId) {
+				providerIds[workspace.id] = providerId;
+			}
+			return providerIds;
 		},
 		{},
 	);

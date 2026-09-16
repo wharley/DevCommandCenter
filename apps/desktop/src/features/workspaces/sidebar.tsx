@@ -87,6 +87,7 @@ import {
 import {
 	runningWorkspaceActivities,
 	useWorkspaceAgentActivities,
+	useWorkspaceProviderIds,
 } from "./use-workspace-agent-states";
 import { ProjectEditDialog } from "./project-edit-dialog";
 import { ProjectIdentityGlyph } from "./project-identity";
@@ -351,6 +352,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 }: WorkspacesSidebarProps) {
 	const { t, i18n } = useTranslation("common");
 	const workspaceAgentActivities = useWorkspaceAgentActivities(workspaces, {
+		enabled: showAgentStates,
+		scope: sessionQueryScope,
+	});
+	const workspaceProviderIds = useWorkspaceProviderIds(workspaces, {
 		enabled: showAgentStates,
 		scope: sessionQueryScope,
 	});
@@ -1004,6 +1009,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					workspace={item.workspace}
 					selected={selectedWorkspaceId === item.workspace.id}
 					activity={workspaceAgentActivities[item.workspace.id] ?? null}
+					providerId={workspaceProviderIds[item.workspace.id] ?? null}
 					metadataEnabled={showAgentStates}
 					projectLabel={
 						workspaceRepository

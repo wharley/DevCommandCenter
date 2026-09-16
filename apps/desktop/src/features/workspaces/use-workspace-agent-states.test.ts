@@ -4,6 +4,7 @@ import type { WorkspaceSummary } from "./types";
 import {
 	deriveAgentActivityFromSessions,
 	deriveAgentStateFromSessions,
+	deriveProviderIdFromSessions,
 	runningWorkspaceActivities,
 } from "./use-workspace-agent-states";
 
@@ -115,6 +116,28 @@ describe("deriveAgentStateFromSessions", () => {
 		const summary = makeSummary({});
 
 		expect(deriveAgentStateFromSessions([summary])).toBeNull();
+	});
+});
+
+describe("deriveProviderIdFromSessions", () => {
+	it("prefers the provider of a running session", () => {
+		const latest = makeSummary({
+			session: { providerId: "gemini" },
+		});
+		const running = makeSummary({
+			session: { id: "session-running", providerId: "claude_code" },
+			thread: { id: "thread-running", session_id: "session-running" },
+			projection: { sessionId: "session-running", activeTurnId: "turn-1" },
+			lastTurnState: "running",
+		});
+
+		expect(deriveProviderIdFromSessions([latest, running])).toBe("claude_code");
+	});
+
+	it("falls back to the latest session provider", () => {
+		expect(deriveProviderIdFromSessions([makeSummary({ session: { providerId: "codex" } })])).toBe(
+			"codex",
+		);
 	});
 });
 
