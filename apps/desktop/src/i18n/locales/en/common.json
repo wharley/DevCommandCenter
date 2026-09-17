@@ -3250,7 +3250,9 @@
       "review": "Review template",
       "reviewHint": "Review the instructions and agents. Adding creates an editable copy in your project.",
       "add": "Add to project",
-      "added": "Added"
+      "added": "Added",
+      "update": "Review update",
+      "updateHint": "This version will replace the saved description and instructions. Review before saving; your selected agents and invocation preference have been preserved."
     },
     "design": {
       "subtitle": "Reusable instructions for the agents in this project.",
@@ -3263,7 +3265,7 @@
       "refresh": "Refresh skills",
       "search": "Search by name, description, or agent…",
       "retry": "Try again",
-      "presetHint": "A starting point for coordinating work across agents.",
+      "presetHint": "Coordinates the current provider's subagents when the task benefits from parallel work.",
       "usePreset": "Use template",
       "noResults": "No skills match your search.",
       "clearSearch": "Clear search",
@@ -3281,10 +3283,10 @@
       "bodyPlaceholder": "Instructions, steps, examples…",
       "targetAgents": "Target agents"
     },
-    "targetsHint": "Claude and Codex receive native skills with progressive disclosure. AGENTS.md and GEMINI.md are always-on instructions; Cursor writes one rule per skill. Keep few skills enabled in always-on targets.",
+    "targetsHint": "Claude, Codex and Grok receive native skills, available when relevant. Gemini receives instructions in GEMINI.md; Cursor receives one rule per skill. Subagents depend on the active session capabilities.",
     "disableInvocation": {
       "title": "Disable model invocation",
-      "body": "In Codex, prevents implicit activation; in AGENTS.md and GEMINI.md, excludes the always-on block. It remains explicitly available where the runtime supports it."
+      "body": "In Claude, Codex and Grok, keeps the skill for explicit use. In Gemini and legacy AGENTS.md, removes the generated block; in Cursor, removes the generated rule."
     },
     "cancel": "Cancel",
     "save": "Save skill",
@@ -3319,7 +3321,8 @@
         "claudeSkills": "Native Claude skills in the worktree; Claude can discover them through its own runtime.",
         "cursorRules": "Native Cursor rules; they enter the flow as detected workspace context.",
         "codexSkills": "Native Codex skills found in the workspace.",
-        "generic": "Agent context found in the workspace."
+        "generic": "Agent context found in the workspace.",
+        "grokSkills": "Native Grok skills in the active checkout; Grok can discover them through its own runtime."
       }
     },
     "toast": {
@@ -3332,7 +3335,9 @@
       "saveError": "Failed to save skill",
       "deleted": "Skill \"{{name}}\" deleted",
       "deleteError": "Failed to delete skill"
-    }
+    },
+    "legacyTargetHint": "This skill is still linked to legacy AGENTS.md. You can remove that link when saving.",
+    "removeLegacyTarget": "Remove AGENTS.md link"
   },
   "diffAnnotate": {
     "close": "Close annotation",

@@ -77,15 +77,16 @@ function emptyForm(): FormState {
 	};
 }
 
-function catalogForm(skill: SkillRecord): FormState {
+function catalogForm(skill: SkillRecord, existing?: SkillRecord): FormState {
 	return {
-		editingExisting: false,
+		editingExisting: Boolean(existing),
 		fromCatalog: true,
 		name: skill.name,
 		description: skill.description,
 		body: skill.body,
-		targetAgents: [...skill.targetAgents],
-		disableModelInvocation: skill.disableModelInvocation,
+		targetAgents: [...(existing?.targetAgents ?? skill.targetAgents)],
+		disableModelInvocation:
+			existing?.disableModelInvocation ?? skill.disableModelInvocation,
 	};
 }
 
@@ -223,6 +224,8 @@ export function SkillsDialog({
 					return t("skills.detected.behavior.cursorRules");
 				case "codex_skills":
 					return t("skills.detected.behavior.codexSkills");
+				case "grok_skills":
+					return t("skills.detected.behavior.grokSkills");
 				default:
 					return t("skills.detected.behavior.generic");
 			}
@@ -306,7 +309,9 @@ export function SkillsDialog({
 								<p>
 									{t(
 										form.fromCatalog
-											? "skills.catalog.reviewHint"
+											? form.editingExisting
+												? "skills.catalog.updateHint"
+												: "skills.catalog.reviewHint"
 											: "skills.design.formHint",
 									)}
 								</p>
@@ -398,7 +403,11 @@ export function SkillsDialog({
 							</Button>
 							<Button onClick={() => void handleSave()} disabled={busy}>
 								{busy && <Loader2 className="size-3.5 animate-spin" />}
-								{t(form.fromCatalog ? "skills.catalog.add" : "skills.save")}
+								{t(
+									form.fromCatalog && !form.editingExisting
+										? "skills.catalog.add"
+										: "skills.save",
+								)}
 							</Button>
 						</DialogFooter>
 					</>
@@ -496,7 +505,7 @@ export function SkillsDialog({
 										{t("skills.catalog.hint")}
 									</p>
 									{DCC_SKILL_CATALOG.map((entry) => {
-										const installed = skills.some(
+										const installed = skills.find(
 											(skill) => skill.name === entry.skill.name,
 										);
 										return (
@@ -518,12 +527,14 @@ export function SkillsDialog({
 												<Button
 													variant="outline"
 													size="sm"
-													disabled={busy || installed || !workspaceId}
-													onClick={() => setForm(catalogForm(entry.skill))}
+													disabled={busy || !workspaceId}
+													onClick={() =>
+														setForm(catalogForm(entry.skill, installed))
+													}
 												>
 													{t(
 														installed
-															? "skills.catalog.added"
+															? "skills.catalog.update"
 															: "skills.design.usePreset",
 													)}
 													{!installed && <ChevronRight size={13} />}

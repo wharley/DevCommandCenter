@@ -1,6 +1,6 @@
 interface:
   display_name: "DCC Orchestration"
-  short_description: "Delegate complex work to Codex subagents"
+  short_description: "Coordinate complex work with native subagents"
   default_prompt: "Use $dcc-orchestration to coordinate this task with suitable subagents."
 
 policy:

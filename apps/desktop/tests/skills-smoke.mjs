@@ -124,7 +124,7 @@ try {
 		),
 		0,
 	);
-	for (const agent of ["Claude", "Codex", "Gemini", "Cursor", "Droid · legacy"])
+	for (const agent of ["Claude", "Codex", "Gemini", "Cursor", "Grok"])
 		await button(agent).click();
 	await page
 		.getByRole("switch", { name: "Desativar invocação pelo modelo" })
@@ -217,16 +217,26 @@ try {
 	await page.getByText(/Ainda não há skills/).waitFor();
 	await page.getByRole("button", { name: /^Catálogo DCC/ }).click();
 	await button("Usar modelo").click();
+	for (const provider of ["Claude", "Codex", "Gemini", "Cursor", "Grok"]) {
+		assert.equal(await button(provider).getAttribute("aria-pressed"), "true");
+	}
+	assert.equal(await button("Droid · legacy").count(), 0);
 	const originalPresetBody = await page.locator("#skill-body").inputValue();
 	assert.equal(await page.locator("#skill-name").isDisabled(), true);
 	await page
 		.locator("#skill-body")
 		.fill("Instruções personalizadas do projeto.");
+	await button("Grok").click();
+	await page.getByRole("switch", { name: "Desativar invocação pelo modelo" }).click();
 	await button("Adicionar ao projeto").click();
 	await button("Editar dcc-orchestration").waitFor();
 	assert.equal(await cards.count(), 1);
 	await page.getByRole("button", { name: /^Catálogo DCC/ }).click();
-	assert.equal(await button("Adicionado").isDisabled(), true);
+	await button("Revisar atualização").click();
+	assert.equal(await page.locator("#skill-body").inputValue(), originalPresetBody);
+	assert.equal(await button("Grok").getAttribute("aria-pressed"), "false");
+	assert.equal(await page.getByRole("switch", { name: "Desativar invocação pelo modelo" }).isChecked(), true);
+	await button("Cancelar").click();
 	await page.getByRole("button", { name: /^Suas skills/ }).click();
 	await button("Editar dcc-orchestration").click();
 	assert.equal(
@@ -234,8 +244,14 @@ try {
 		"Instruções personalizadas do projeto.",
 	);
 	await button("Cancelar").click();
+	await page.getByRole("button", { name: /^Catálogo DCC/ }).click();
+	await button("Revisar atualização").click();
+	await button("Salvar skill").click();
+	await button("Editar dcc-orchestration").click();
+	assert.equal(await page.locator("#skill-body").inputValue(), originalPresetBody);
+	await button("Cancelar").click();
 	await button("Excluir dcc-orchestration").click();
-	await page.waitForFunction(() => window.skillsChanged === 2);
+	await page.waitForFunction(() => window.skillsChanged === 3);
 	await page.getByRole("button", { name: /^Catálogo DCC/ }).click();
 	await button("Usar modelo").click();
 	assert.equal(

@@ -24,7 +24,7 @@ export const ORCHESTRATION_PRESET: SkillRecord = {
 	name: frontmatterValue(orchestrationSkillMarkdown, "name"),
 	description: frontmatterValue(orchestrationSkillMarkdown, "description"),
 	body: skillBody(orchestrationSkillMarkdown),
-	targetAgents: ["codex"],
+	targetAgents: ["claude", "codex", "gemini", "cursor", "grok"],
 	disableModelInvocation: false,
 	scope: "project",
 };

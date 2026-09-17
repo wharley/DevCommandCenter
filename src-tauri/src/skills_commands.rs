@@ -1,6 +1,6 @@
 //! Provider-neutral skills: single source of truth in `.devcommandcenter/skills/`,
 //! compiled to each agent's native format. This module owns the source CRUD and the
-//! compiler. Claude and Codex targets are faithful native skill copies; legacy
+//! compiler. Claude, Codex and Grok targets are faithful native skill copies; legacy
 //! always-on targets are flattened into idempotent, delimited instruction blocks.
 
 use std::fs;
@@ -23,6 +23,8 @@ pub const TARGET_AGENTS_MD: &str = "agents";
 pub const TARGET_GEMINI: &str = "gemini";
 /// Cursor reads `.cursor/rules/<name>.mdc` (one file per rule).
 pub const TARGET_CURSOR: &str = "cursor";
+/// Grok Build discovers project-native skills in `.grok/skills`.
+pub const TARGET_GROK: &str = "grok";
 
 const AGENTS_BLOCK_START: &str = "<!-- dcc:skills:start -->";
 const AGENTS_BLOCK_END: &str = "<!-- dcc:skills:end -->";
@@ -168,9 +170,14 @@ fn is_valid_skill_name(name: &str) -> bool {
 }
 
 /// Faithful Claude/Agent-SDK SKILL.md: frontmatter + body.
-fn render_skill_md(name: &str, description: &str, body: &str) -> String {
+fn render_skill_md(name: &str, description: &str, body: &str, explicit_only: bool) -> String {
+    let invocation = if explicit_only {
+        "\ndisable-model-invocation: true"
+    } else {
+        ""
+    };
     format!(
-        "---\nname: {name}\ndescription: {description}\n---\n\n{body}\n",
+        "---\nname: {name}\ndescription: {description}{invocation}\n---\n\n{body}\n",
         body = body.trim_end()
     )
 }
@@ -429,6 +436,23 @@ fn detect_context_sources(
         });
     }
 
+    let grok_skills = target.join(".grok").join("skills");
+    let grok_count = count_skill_md_dirs(&grok_skills);
+    if grok_count > 0 {
+        let managed_count = read_managed_names(&grok_skills).len().min(grok_count);
+        detections.push(SkillContextDetection {
+            id: "grok-skills".to_string(),
+            kind: "grok_skills".to_string(),
+            title: "Grok skills".to_string(),
+            relative_path: ".grok/skills".to_string(),
+            root_kind: "target_root".to_string(),
+            count: grok_count,
+            managed_count,
+            external_count: grok_count.saturating_sub(managed_count),
+            has_dcc_block: managed_count > 0,
+        });
+    }
+
     // Keep inventory support for the pre-standard path without writing to it.
     let legacy_codex_skills = target.join(".codex").join("skills");
     let legacy_codex_count = count_skill_md_dirs(&legacy_codex_skills);
@@ -475,6 +499,12 @@ fn compile_skills(project_root: &str, target_root: &str) -> ApiResult<()> {
         &skills,
         TARGET_CODEX,
         true,
+    )?;
+    compile_native_skills(
+        &target.join(".grok").join("skills"),
+        &skills,
+        TARGET_GROK,
+        false,
     )?;
 
     // --- Always-on block targets: flatten (skip disabled-from-model skills) ---
@@ -532,7 +562,12 @@ fn compile_native_skills(
     for skill in native_skills {
         let dir = native_root.join(&skill.name);
         fs::create_dir_all(&dir).map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
-        let content = render_skill_md(&skill.name, &skill.description, &skill.body);
+        let content = render_skill_md(
+            &skill.name,
+            &skill.description,
+            &skill.body,
+            skill.disable_model_invocation && !write_codex_policy,
+        );
         write_if_changed(&dir.join("SKILL.md"), &content)
             .map_err(|e| db_error(format!("write SKILL.md: {e}")))?;
         if write_codex_policy {
@@ -628,7 +663,7 @@ fn save_skill(project_root: &str, skill: SkillRecord) -> ApiResult<()> {
     }
     let dir = skills_root(project_root).join(&skill.name);
     fs::create_dir_all(&dir).map_err(|e| db_error(format!("{}: {e}", dir.display())))?;
-    let content = render_skill_md(&skill.name, &skill.description, &skill.body);
+    let content = render_skill_md(&skill.name, &skill.description, &skill.body, false);
     fs::write(dir.join("SKILL.md"), content)
         .map_err(|e| db_error(format!("write SKILL.md: {e}")))?;
 
@@ -777,7 +812,7 @@ mod tests {
 
     #[test]
     fn renders_and_round_trips_body() {
-        let md = render_skill_md("foo", "does foo", "Line one.\nLine two.");
+        let md = render_skill_md("foo", "does foo", "Line one.\nLine two.", false);
         assert!(md.starts_with("---\nname: foo\ndescription: does foo\n---\n"));
         assert_eq!(extract_body(&md), "Line one.\nLine two.");
     }
@@ -948,6 +983,105 @@ mod tests {
         assert_eq!(
             fs::read_to_string(native.join("SKILL.md")).unwrap(),
             "committed skill"
+        );
+    }
+
+    #[test]
+    fn compiles_multi_provider_skill_in_selected_checkout() {
+        let project = tempdir().unwrap();
+        let checkout = tempdir().unwrap();
+        let source = project.path().to_str().unwrap();
+        let target = checkout.path().to_str().unwrap();
+        fs::write(
+            checkout.path().join("GEMINI.md"),
+            "Existing project instructions.\n",
+        )
+        .unwrap();
+        save_skill(
+            source,
+            skill(
+                "team",
+                &[
+                    TARGET_CLAUDE,
+                    TARGET_CODEX,
+                    TARGET_GEMINI,
+                    TARGET_CURSOR,
+                    TARGET_GROK,
+                ],
+            ),
+        )
+        .unwrap();
+        compile_skills(source, target).unwrap();
+
+        for path in [
+            ".claude/skills/team/SKILL.md",
+            ".agents/skills/team/SKILL.md",
+            ".grok/skills/team/SKILL.md",
+            ".cursor/rules/team.mdc",
+            "GEMINI.md",
+        ] {
+            assert!(fs::read_to_string(checkout.path().join(path))
+                .unwrap()
+                .contains("Body of team."));
+            assert!(
+                !project.path().join(path).exists(),
+                "must write to the selected checkout: {path}"
+            );
+        }
+        assert!(!checkout.path().join("AGENTS.md").exists());
+        assert!(fs::read_to_string(checkout.path().join("GEMINI.md"))
+            .unwrap()
+            .contains("Existing project instructions."));
+        let grok = detect_context_sources(source, Some(target))
+            .into_iter()
+            .find(|item| item.kind == "grok_skills")
+            .unwrap();
+        assert_eq!(grok.managed_count, 1);
+        assert_eq!(grok.relative_path, ".grok/skills");
+    }
+
+    #[test]
+    fn native_explicit_invocation_survives_compile_and_can_be_reenabled() {
+        let checkout = tempdir().unwrap();
+        let root = checkout.path().to_str().unwrap();
+        let mut record = skill("team", &[TARGET_CLAUDE, TARGET_CODEX, TARGET_GROK]);
+        for explicit_only in [true, false] {
+            record.disable_model_invocation = explicit_only;
+            save_skill(root, record.clone()).unwrap();
+            compile_skills(root, root).unwrap();
+            for path in [".claude/skills/team/SKILL.md", ".grok/skills/team/SKILL.md"] {
+                let content = fs::read_to_string(checkout.path().join(path)).unwrap();
+                assert_eq!(
+                    content.contains("disable-model-invocation: true"),
+                    explicit_only
+                );
+                assert!(content.contains("Body of team."));
+            }
+            let policy = fs::read_to_string(
+                checkout
+                    .path()
+                    .join(".agents/skills/team/agents/openai.yaml"),
+            )
+            .unwrap();
+            assert!(policy.contains(&format!("allow_implicit_invocation: {}", !explicit_only)));
+        }
+    }
+
+    #[test]
+    fn removing_grok_target_preserves_external_skills() {
+        let checkout = tempdir().unwrap();
+        let root = checkout.path().to_str().unwrap();
+        let external = checkout.path().join(".grok/skills/external");
+        fs::create_dir_all(&external).unwrap();
+        fs::write(external.join("SKILL.md"), "External instructions.").unwrap();
+        save_skill(root, skill("team", &[TARGET_GROK])).unwrap();
+        compile_skills(root, root).unwrap();
+        save_skill(root, skill("team", &[TARGET_CLAUDE])).unwrap();
+        compile_skills(root, root).unwrap();
+        assert!(!checkout.path().join(".grok/skills/team").exists());
+        assert_eq!(
+            fs::read_to_string(external.join("SKILL.md")).unwrap(),
+            "External instructions."
         );
     }
 

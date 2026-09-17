@@ -8,9 +8,10 @@ export const SKILL_TARGETS: Record<
 > = {
 	claude: { name: "Claude", path: ".claude/skills" },
 	codex: { name: "Codex", path: ".agents/skills" },
-	agents: { name: "Droid · legacy", path: "AGENTS.md" },
+	agents: { name: "AGENTS.md · legacy", path: "AGENTS.md" },
 	gemini: { name: "Gemini", path: "GEMINI.md" },
 	cursor: { name: "Cursor", path: ".cursor/rules" },
+	grok: { name: "Grok", path: ".grok/skills" },
 };
 
 export function SkillTargetPicker({
@@ -32,7 +33,7 @@ export function SkillTargetPicker({
 					SkillTargetAgent,
 					{ name: string; path: string },
 				][]
-			).map(([id, target]) => (
+			).filter(([id]) => id !== "agents").map(([id, target]) => (
 				<button
 					key={id}
 					type="button"
@@ -57,6 +58,18 @@ export function SkillTargetPicker({
 					</span>
 				</button>
 			))}
+			{value.includes("agents") && (
+				<div className="col-span-full text-xs text-muted-foreground">
+					<p>{t("skills.legacyTargetHint")}</p>
+					<button
+						type="button"
+						className="mt-1 underline underline-offset-2"
+						onClick={() => onChange(value.filter((id) => id !== "agents"))}
+					>
+						{t("skills.removeLegacyTarget")}
+					</button>
+				</div>
+			)}
 		</div>
 	);
 }

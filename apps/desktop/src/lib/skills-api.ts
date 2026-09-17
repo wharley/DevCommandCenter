@@ -6,7 +6,8 @@ export type SkillTargetAgent =
 	| "codex"
 	| "agents"
 	| "gemini"
-	| "cursor";
+	| "cursor"
+	| "grok";
 
 /** Provider-neutral skill. Source of truth lives in `.devcommandcenter/skills/` in the active checkout. */
 export type SkillRecord = {
@@ -25,7 +26,8 @@ export type SkillContextDetection = {
 		| "instructions_file"
 		| "claude_skills"
 		| "cursor_rules"
-		| "codex_skills";
+		| "codex_skills"
+		| "grok_skills";
 	title: string;
 	relativePath: string;
 	rootKind: "project_root" | "target_root";
