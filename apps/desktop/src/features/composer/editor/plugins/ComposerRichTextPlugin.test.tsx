@@ -1,7 +1,7 @@
 import { SubmitPlugin } from "./SubmitPlugin";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { COMPOSER_LIST_NODES } from "../composer-lists";
-import { act } from "react";
+import { act, Profiler } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
@@ -36,6 +36,7 @@ vi.mock("react-i18next", () => ({
 	useTranslation: () => ({ t: (key: string) => key.split(".").pop() }),
 }));
 const onSubmit = vi.fn();
+const onRichTextRender = vi.fn();
 let root: Root;
 let container: HTMLDivElement;
 const editorRef: { current: LexicalEditor | null } = { current: null };
@@ -54,7 +55,9 @@ const render = (key = "rich-test") =>
 				contentEditable={<ContentEditable />}
 				ErrorBoundary={LexicalErrorBoundary}
 			/>
-			<ComposerRichTextPlugin draftKey={key} />
+			<Profiler id="composer-rich-text" onRender={onRichTextRender}>
+				<ComposerRichTextPlugin draftKey={key} />
+			</Profiler>
 			<SubmitPlugin isDisabled={false} onSubmit={onSubmit} />
 			<HistoryPlugin />
 			<EditorRefPlugin editorRef={editorRef} />
@@ -115,6 +118,16 @@ afterEach(async () => {
 	vi.unstubAllGlobals();
 	Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
 	Reflect.deleteProperty(Range.prototype, "getClientRects");
+});
+it("does not schedule extra popover updates when the idle composer rerenders during streaming", async () => {
+	// Each incoming token rerenders the workspace, including the closed link menu.
+	// There must be no second commit from registering a different virtual anchor.
+	onRichTextRender.mockClear();
+	for (let token = 0; token < 80; token++) {
+		await act(async () => render());
+	}
+	expect(onRichTextRender).toHaveBeenCalledTimes(80);
+	expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
 it("edits autolink text and destination independently, then removes the link", async () => {
 	await seed("https://github.com/openai/codex");

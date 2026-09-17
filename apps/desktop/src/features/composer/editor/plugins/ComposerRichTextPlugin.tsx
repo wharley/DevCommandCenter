@@ -4,7 +4,7 @@ import {
 	COMPOSER_LIST_TRANSFORMERS,
 	$isComposerSelectionInList,
 } from "../composer-lists";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	Bold,
@@ -94,6 +94,18 @@ export function ComposerRichTextPlugin({
 	const [active, setActive] = useState<TextFormatType[]>([]);
 	const savedSelection = useRef<RangeSelection | null>(null);
 	const toolbar = useRef<HTMLDivElement>(null);
+	const linkAnchorRect = draft?.anchor;
+	// Radix stores virtualRef.current in state after every commit, even while
+	// closed. Keep its identity stable across incoming tokens and link-field edits.
+	const linkAnchorRef = useMemo(
+		() => ({
+			current: {
+				getBoundingClientRect: () =>
+					linkAnchorRect ?? toolbar.current?.getBoundingClientRect() ?? new DOMRect(),
+			},
+		}),
+		[linkAnchorRect],
+	);
 	useEffect(() => {
 		setDraft(null);
 		savedSelection.current = null;
@@ -346,16 +358,7 @@ export function ComposerRichTextPlugin({
 					if (!open) setDraft(null);
 				}}
 			>
-				<PopoverAnchor
-					virtualRef={{
-						current: {
-							getBoundingClientRect: () =>
-								draft?.anchor ??
-								toolbar.current?.getBoundingClientRect() ??
-								new DOMRect(),
-						},
-					}}
-				/>
+				<PopoverAnchor virtualRef={linkAnchorRef} />
 				<PopoverContent
 					className="composer-link-popover"
 					align="start"
