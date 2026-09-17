@@ -23,6 +23,7 @@ import {
 } from "./provider-runtime-settings";
 import {
 	providerUsageSeverity,
+	formatProviderUsageReset,
 	supportsProviderAccountResets,
 	supportsProviderAccountUsage,
 	useProviderAccountReset,
@@ -59,12 +60,7 @@ function UsageWindowRow({ window }: { window: ProviderUsageWindow }) {
 	const { t, i18n } = useTranslation("common");
 	const severity = providerUsageSeverity(window);
 	const remaining = Math.round(window.remainingPercent);
-	const reset = window.resetsAt
-		? new Intl.DateTimeFormat(i18n.language === "en" ? "en" : "pt-BR", {
-				dateStyle: "short",
-				timeStyle: "short",
-			}).format(new Date(window.resetsAt))
-		: null;
+	const reset = formatProviderUsageReset(window, i18n.language);
 
 	return (
 		<div className="space-y-1.5">

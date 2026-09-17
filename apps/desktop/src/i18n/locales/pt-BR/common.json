@@ -1675,6 +1675,7 @@
       "title": "Uso da conta",
       "refresh": "Atualizar uso da conta",
       "remaining": "{{percent}}% restante",
+      "nextReset": "Próximo reset: {{date}}",
       "fiveHour": "5 horas",
       "sevenDay": "7 dias",
       "loading": "Consultando o provedor…",

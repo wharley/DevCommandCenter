@@ -58,6 +58,19 @@ export function providerUsageSeverity(
 	return null;
 }
 
+export function formatProviderUsageReset(
+	window: ProviderUsageWindow,
+	language: string,
+): string | null {
+	if (!window.resetsAt) return null;
+	const date = new Date(window.resetsAt);
+	if (Number.isNaN(date.getTime())) return null;
+	return new Intl.DateTimeFormat(language === "en" ? "en" : "pt-BR", {
+		dateStyle: "short",
+		timeStyle: "short",
+	}).format(date);
+}
+
 export function useProviderAccountUsage(
 	provider: ProviderUsageCandidate | null | undefined,
 	providerRuntime: ProviderRuntimeConfig | null,

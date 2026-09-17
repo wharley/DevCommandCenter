@@ -1675,6 +1675,7 @@
       "title": "Account usage",
       "refresh": "Refresh account usage",
       "remaining": "{{percent}}% remaining",
+      "nextReset": "Next reset: {{date}}",
       "fiveHour": "5 hours",
       "sevenDay": "7 days",
       "loading": "Checking the provider…",

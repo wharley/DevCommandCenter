@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
+	formatProviderUsageReset,
 	providerUsageSeverity,
 	supportsProviderAccountUsage,
 } from "@/features/providers/provider-account-usage";
@@ -55,7 +56,7 @@ export function ComposerProviderModelMenu({
 	onRefreshAccountUsage,
 	disabled = false,
 }: ComposerProviderModelMenuProps) {
-	const { t } = useTranslation("common");
+	const { t, i18n } = useTranslation("common");
 	const [open, setOpen] = useState(false);
 
 	useEffect(() => {
@@ -237,17 +238,25 @@ export function ComposerProviderModelMenu({
 								<div className="space-y-1">
 									{accountUsage.windows.map((window) => {
 										const severity = providerUsageSeverity(window);
+										const reset = formatProviderUsageReset(window, i18n.language);
 										return (
 											<div
 												key={window.id}
-												className="flex items-center justify-between gap-3 text-[11px]"
+												className="flex items-start justify-between gap-3 text-[11px]"
 											>
-												<span className="truncate text-muted-foreground">
-													{window.windowDurationMinutes === 300
-														? t("composer.accountUsage.fiveHour")
-														: window.windowDurationMinutes === 10_080
-															? t("composer.accountUsage.sevenDay")
-															: window.id.replaceAll("_", " ")}
+												<span className="min-w-0 truncate text-muted-foreground">
+													<span className="block truncate">
+														{window.windowDurationMinutes === 300
+															? t("composer.accountUsage.fiveHour")
+															: window.windowDurationMinutes === 10_080
+																? t("composer.accountUsage.sevenDay")
+																: window.id.replaceAll("_", " ")}
+													</span>
+													{reset ? (
+														<span className="block truncate text-[10px] text-muted-foreground/80">
+															{t("composer.accountUsage.nextReset", { date: reset })}
+														</span>
+													) : null}
 												</span>
 												<span
 													className={cn(
