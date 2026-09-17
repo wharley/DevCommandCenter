@@ -61,7 +61,7 @@ fn repository_name_from_root_path(root_path: &str) -> String {
         .unwrap_or_else(|| "Repository".to_string())
 }
 
-fn repository_from_workspace(workspace: &Workspace) -> Repository {
+fn repository_from_workspace(workspace: &Workspace, base_branch: &str) -> Repository {
     let root_path = workspace.root_path.trim().to_string();
     Repository {
         id: RepositoryId(root_path.clone()),
@@ -72,7 +72,7 @@ fn repository_from_workspace(workspace: &Workspace) -> Repository {
         color: None,
         pinned_at: workspace.pinned_at.clone(),
         root_path,
-        base_branch: workspace.base_branch.clone(),
+        base_branch: base_branch.to_string(),
         remote: None,
         remote_url: None,
         forge_provider: None,
@@ -193,10 +193,24 @@ where
     G: GitOps + Sync,
     B: EventBus + Sync,
 {
+    let repository_base_branch = input.base_branch.clone();
+    let workspace_root = input.workspace_root.trim().to_string();
     let prepared = prepare_workspace_for_repo(git, events, input).await?;
     let finalized = finalize_workspace_for_repo(repo, events, prepared).await?;
-    repo.save_repository(&repository_from_workspace(&finalized.workspace))
+    // A workspace may have a different checked-out branch than the project's
+    // configured base branch. Never let task/worktree state overwrite the
+    // project's branch used by the New Task launcher.
+    if repo
+        .get_repository(&RepositoryId(workspace_root))
+        .await?
+        .is_none()
+    {
+        repo.save_repository(&repository_from_workspace(
+            &finalized.workspace,
+            &repository_base_branch,
+        ))
         .await?;
+    }
     Ok(finalized)
 }
 
@@ -420,5 +434,52 @@ mod tests {
         assert_eq!(finalized.workspace.base_branch, "main");
         assert_eq!(finalized.workspace.worktree_path, None);
         assert_eq!(finalized.workspace.state, WorkspaceState::Ready);
+    }
+
+    #[test]
+    fn existing_repository_base_branch_is_not_replaced_by_workspace_branch() {
+        let repo = FakeWorkspaceRepo::default();
+        let existing_repository = Repository {
+            id: RepositoryId("/tmp/repo".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            name: "repo".to_string(),
+            display_name: Some("Checkout".to_string()),
+            icon: None,
+            color: None,
+            pinned_at: None,
+            root_path: "/tmp/repo".to_string(),
+            base_branch: "main".to_string(),
+            remote: None,
+            remote_url: None,
+            forge_provider: None,
+            forge_login: None,
+            created_at: "2026-05-01T12:00:00Z".to_string(),
+            updated_at: "2026-05-01T12:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_repository(&existing_repository))
+            .expect("save existing repository");
+
+        let git = FakeGitOps {
+            worktree_path: "/tmp/dcc-worktrees/security-totp-only-confirmation-123".to_string(),
+        };
+        let events = FakeEventBus::default();
+        let input = CreateWorkspaceForRepoInput {
+            project_id: ProjectId("project-1".to_string()),
+            workspace_root: "/tmp/repo".to_string(),
+            base_branch: "security/totp-only-confirmation".to_string(),
+            name: Some("Security task".to_string()),
+            isolation_mode: None,
+        };
+
+        futures::executor::block_on(create_workspace_for_repo(&repo, &git, &events, input))
+            .expect("workspace creation should succeed");
+
+        let repositories = repo
+            .repositories
+            .lock()
+            .expect("saved repositories lock poisoned");
+        assert_eq!(repositories.len(), 1);
+        assert_eq!(repositories[0].base_branch, "main");
+        assert_eq!(repositories[0].display_name.as_deref(), Some("Checkout"));
     }
 }
