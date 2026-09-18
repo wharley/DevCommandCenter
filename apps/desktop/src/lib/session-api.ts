@@ -136,6 +136,10 @@ export function saveAiMemorySettings(input: AiMemorySettingsInput) {
 	return invoke<AiMemorySettingsOutput>(SESSION_METHODS.aiMemorySettingsSave, { input });
 }
 
+export function restartDcc() {
+	return invoke<void>("restart_dcc");
+}
+
 export function applyTaskTitle(input: ApplyTaskTitleInput) {
 	return invoke<ApplyTaskTitleOutput>(SESSION_METHODS.applyTaskTitle, { input });
 }

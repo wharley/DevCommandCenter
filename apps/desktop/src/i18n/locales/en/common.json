@@ -2259,6 +2259,7 @@
       "save": "Save configuration",
       "saved": "Configuration saved",
       "savedRestart": "Configuration saved. Restart DCC to apply the new mode.",
+      "restartNow": "Restart DCC now",
       "saveError": "Could not save the configuration.",
       "outboxTitle": "Export queue",
       "outboxHint": "Sessions waiting to be sent to ai-memory appear here with attempts, next retry, and errors.",

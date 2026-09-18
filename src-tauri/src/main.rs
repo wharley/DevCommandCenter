@@ -2954,6 +2954,11 @@ async fn app_quit_and_install(app: AppHandle) -> ApiResult<Value> {
     Ok(serde_json::json!({ "success": true }))
 }
 
+#[tauri::command]
+fn restart_dcc(app: AppHandle) {
+    app.restart();
+}
+
 /// Corpo de notificação nativa: SO costuma truncar; evita payloads enormes no IPC.
 fn truncate_notification_body(s: &str, max_chars: usize) -> String {
     let mut out = String::new();
@@ -6926,6 +6931,7 @@ pub fn run() {
             app_get_version,
             app_check_for_updates,
             app_quit_and_install,
+            restart_dcc,
             app_show_notification,
             dialog_select_directory,
             dialog_show_message,

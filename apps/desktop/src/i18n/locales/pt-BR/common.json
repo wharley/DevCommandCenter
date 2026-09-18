@@ -2259,6 +2259,7 @@
       "save": "Salvar configuração",
       "saved": "Configuração salva",
       "savedRestart": "Configuração salva. Reinicie o DCC para aplicar o novo modo.",
+      "restartNow": "Reiniciar DCC agora",
       "saveError": "Não foi possível salvar a configuração.",
       "outboxTitle": "Fila de exportação",
       "outboxHint": "Sessões que aguardam envio ao ai-memory aparecem aqui com tentativas, próximo retry e erro.",

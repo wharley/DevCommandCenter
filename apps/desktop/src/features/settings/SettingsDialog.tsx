@@ -101,6 +101,7 @@ import {
 	loadAiMemoryOutbox,
 	loadAiMemorySettings,
 	loadAiMemorySidecarStatus,
+	restartDcc,
 	retryAiMemoryOutbox,
 	saveAiMemorySettings,
 } from "@/lib/session-api";
@@ -690,6 +691,7 @@ export function SettingsDialog({
 		token: null,
 	});
 	const [aiMemorySaving, setAiMemorySaving] = useState(false);
+	const [aiMemoryRestartRequired, setAiMemoryRestartRequired] = useState(false);
 	const [aiMemoryRetrying, setAiMemoryRetrying] = useState<string | null>(null);
 	useEffect(() => {
 		const settings = aiMemorySettingsQuery.data;
@@ -833,6 +835,7 @@ export function SettingsDialog({
 					? t("settings.aiMemory.savedRestart")
 					: t("settings.aiMemory.saved"),
 			);
+			setAiMemoryRestartRequired(saved.restartRequired);
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : t("settings.aiMemory.saveError"));
 		} finally {
@@ -1366,6 +1369,11 @@ export function SettingsDialog({
 											{aiMemorySaving ? <Loader2 className="size-3.5 animate-spin" /> : null}
 											{t("settings.aiMemory.save")}
 										</Button>
+										{aiMemoryRestartRequired ? (
+											<Button type="button" variant="outline" size="sm" onClick={() => void restartDcc()}>
+												{t("settings.aiMemory.restartNow")}
+											</Button>
+										) : null}
 													</div>
 												</div>
 
