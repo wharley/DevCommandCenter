@@ -90,6 +90,18 @@ export function syncSessionToAiMemory(input: AiMemorySyncInput) {
 	return invoke<AiMemorySyncOutput>(SESSION_METHODS.syncSessionToAiMemory, { input });
 }
 
+/** Best-effort checkpoint used when the user starts another session. */
+export async function checkpointAiMemorySession(sessionId: string) {
+	const status = await loadAiMemorySidecarStatus();
+	if (!status.url || status.mode === "disabled") {
+		return null;
+	}
+	return syncSessionToAiMemory({
+		sessionId,
+		connection: { baseUrl: status.url },
+	});
+}
+
 /** Query the configured ai-memory instance without changing the active session. */
 export function queryAiMemory(input: AiMemoryQueryInput) {
 	return invoke<AiMemoryQueryHit[]>(SESSION_METHODS.queryAiMemory, { input });

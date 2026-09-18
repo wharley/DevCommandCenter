@@ -147,6 +147,7 @@ import { repositoryDisplayName } from "./features/workspaces/repository-display-
 import {
 	abortRun,
 	applyTaskTitle,
+	checkpointAiMemorySession,
 	closeSession,
 	inheritSessionObjective,
 	loadSessionThreadEvents,
@@ -2386,6 +2387,7 @@ export default function App() {
 			toast.error(selectedProviderBlockReason);
 			return;
 		}
+		const previousSessionId = selectedSessionId;
 		try {
 			const result = await startThread({
 				workspaceId: selectedWorkspace.id,
@@ -2415,6 +2417,11 @@ export default function App() {
 				[result.session.id]: snapshot,
 			}));
 			setSelectedSessionId(result.session.id);
+			if (previousSessionId && previousSessionId !== result.session.id) {
+				void checkpointAiMemorySession(previousSessionId).catch((error) => {
+					console.warn("[dcc] automatic ai-memory checkpoint failed:", error);
+				});
+			}
 			queryClient.setQueryData<WorkspaceSessionSummary[]>(
 				getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 				(current = []) => {
@@ -2451,6 +2458,7 @@ export default function App() {
 		selectedProvider,
 		selectedProviderBlockReason,
 		selectedProviderRuntime,
+		selectedSessionId,
 		selectedWorkspace,
 		selectedWorkspaceAdditionalWorkspaceIds,
 		queryClient,

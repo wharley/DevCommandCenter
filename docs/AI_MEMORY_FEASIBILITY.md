@@ -304,6 +304,12 @@ a consulta automática e o worker de exportação abrem disjuntores independente
 endpoint e aguardam 30 segundos antes de tentar novamente. A UX básica da fila mostra pendências e o
 próximo retry no cabeçalho; o instalador assinado continua como critério de endurecimento.
 
+Ao criar uma nova sessão pelo botão `+`, o DCC agora dispara um checkpoint assíncrono da sessão
+anterior. Isso evita exigir um clique manual no histórico para cada troca de provider ou etapa. O
+checkpoint reutiliza as chaves idempotentes da exportação normal, não bloqueia a criação da nova
+sessão e falhas continuam sendo registradas sem interromper o trabalho. O fechamento explícito
+permanece como finalização definitiva da sessão e inclui o evento `session-end` quando aplicável.
+
 O primeiro uso também tem uma superfície própria em **Configurações → Memória do DCC**. Ela consulta
 somente o estado já mantido pelo processo principal e informa se o modo é `managed`, `remote`,
 `disabled` ou `unavailable`, além do endpoint, versão, diretório de dados e log. A tela explica que
