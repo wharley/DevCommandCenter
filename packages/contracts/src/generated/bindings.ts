@@ -49,6 +49,7 @@ export type AiMemoryOutboxStatusOutput = {
 	attempts: number,
 	nextAttemptAt: string,
 	lastError: string | null,
+	eventCount: number,
 };
 
 export type AiMemoryQueryHit = {

@@ -1395,7 +1395,7 @@ export function SettingsDialog({
 																	<div className="min-w-0">
 																		<p className="truncate font-mono text-[11px] text-foreground" title={entry.sessionId}>{entry.sessionId}</p>
 																		<p className="mt-1 text-[11px] text-muted-foreground">
-																			{t("settings.aiMemory.outboxMeta", { attempts: entry.attempts, next: entry.nextAttemptAt })}
+									{t("settings.aiMemory.outboxMeta", { attempts: entry.attempts, next: entry.nextAttemptAt, events: entry.eventCount })}
 																		</p>
 																		{entry.lastError ? <p className="mt-1 text-[11px] text-destructive">{entry.lastError}</p> : null}
 																	</div>

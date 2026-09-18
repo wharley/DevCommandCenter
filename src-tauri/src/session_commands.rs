@@ -115,24 +115,29 @@ pub fn ai_memory_export_status(
 }
 
 #[tauri::command]
-pub fn ai_memory_outbox_list(
+pub async fn ai_memory_outbox_list(
     state: State<'_, SessionCommandState>,
     limit: Option<usize>,
 ) -> Result<Vec<AiMemoryOutboxStatusOutput>, String> {
-    state
+    let entries = state
         .list_ai_memory_exports(limit.unwrap_or(50))
-        .map(|entries| {
-            entries
-                .into_iter()
-                .map(|entry| AiMemoryOutboxStatusOutput {
-                    session_id: entry.session_id.0,
-                    attempts: entry.attempts,
-                    next_attempt_at: entry.next_attempt_at,
-                    last_error: entry.last_error,
-                })
-                .collect()
-        })
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let mut output = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let event_count =
+            dcc_core::ports::SessionEventRepo::list_events_by_session(&*state, &entry.session_id)
+                .await
+                .map(|events| events.len())
+                .unwrap_or_default();
+        output.push(AiMemoryOutboxStatusOutput {
+            session_id: entry.session_id.0,
+            attempts: entry.attempts,
+            next_attempt_at: entry.next_attempt_at,
+            last_error: entry.last_error,
+            event_count,
+        });
+    }
+    Ok(output)
 }
 
 #[tauri::command]
@@ -157,6 +162,7 @@ pub async fn ai_memory_outbox_retry(
                 attempts: entry.attempts,
                 next_attempt_at: entry.next_attempt_at,
                 last_error: entry.last_error,
+                event_count: 0,
             })
         })
         .map_err(|error| error.to_string())

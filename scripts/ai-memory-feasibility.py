@@ -22,6 +22,10 @@ import urllib.request
 
 def run(binary, expected_version=None):
     checks = []
+    query_latencies_ms = []
+    rss_kb_samples = []
+    cpu_percent_samples = []
+    disk_bytes_samples = []
 
     def check(name, condition):
         if not condition:
@@ -64,8 +68,39 @@ def run(binary, expected_version=None):
             return post("/mcp", {"jsonrpc": "2.0", "id": 1,
                                   "method": method, "params": params})
 
+        def sample_process_resources():
+            if process is None or process.poll() is not None:
+                return
+            try:
+                result = subprocess.run(
+                    ["ps", "-o", "rss=,pcpu=", "-p", str(process.pid)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                fields = result.stdout.split()
+                if len(fields) >= 2:
+                    rss_kb_samples.append(float(fields[0]))
+                    cpu_percent_samples.append(float(fields[1]))
+            except (OSError, subprocess.CalledProcessError, ValueError):
+                # Resource sampling is best effort and must never affect the protocol smoke.
+                pass
+
+        def sample_disk_usage():
+            try:
+                disk_bytes_samples.append(
+                    sum(item.stat().st_size for item in data.rglob("*") if item.is_file())
+                )
+            except OSError:
+                pass
+
         def call(name, **arguments):
+            started = time.perf_counter() if name == "memory_query" else None
             response = rpc("tools/call", {"name": name, "arguments": arguments})
+            if started is not None:
+                query_latencies_ms.append((time.perf_counter() - started) * 1000)
+                sample_process_resources()
+                sample_disk_usage()
             if "error" in response or response.get("result", {}).get("isError"):
                 return {"error": response}
             blocks = response["result"]["content"]
@@ -213,9 +248,28 @@ def run(binary, expected_version=None):
         finally:
             stop()
             log.close()
+    def percentile(values, percentile_rank):
+        if not values:
+            return None
+        ordered = sorted(values)
+        index = min(len(ordered) - 1, round((len(ordered) - 1) * percentile_rank))
+        return round(ordered[index], 2)
+
+    resource_metrics = {
+        "query_count": len(query_latencies_ms),
+        "query_latency_ms": {
+            "p50": percentile(query_latencies_ms, 0.50),
+            "p95": percentile(query_latencies_ms, 0.95),
+        },
+        "peak_rss_mb": round(max(rss_kb_samples, default=0) / 1024, 2),
+        "peak_cpu_percent": round(max(cpu_percent_samples, default=0), 2),
+        "peak_data_dir_mb": round(max(disk_bytes_samples, default=0) / (1024 * 1024), 2),
+        "measurement": "best-effort ps samples during the isolated protocol smoke",
+    }
     return {"upstream_version": upstream_version, "mcp_tool_count": tool_count,
             "test_kind": "isolated HTTP/MCP protocol smoke",
             "provider_runtime_executed": False, "llm_calls": 0,
+            "resource_metrics": resource_metrics,
             "checks_passed": len(checks), "checks": checks}
 
 

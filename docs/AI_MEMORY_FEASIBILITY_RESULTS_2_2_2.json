@@ -4,6 +4,17 @@
   "test_kind": "isolated HTTP/MCP protocol smoke",
   "provider_runtime_executed": false,
   "llm_calls": 0,
+  "resource_metrics": {
+    "query_count": 29,
+    "query_latency_ms": {
+      "p50": 1.96,
+      "p95": 5.1
+    },
+    "peak_rss_mb": 41.95,
+    "peak_cpu_percent": 36.5,
+    "peak_data_dir_mb": 3.62,
+    "measurement": "best-effort ps samples during the isolated protocol smoke"
+  },
   "checks_passed": 27,
   "checks": [
     "upstream_version",

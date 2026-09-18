@@ -266,6 +266,13 @@ Para reproduzir com o binário oficial v2.2.2:
 python3 scripts/ai-memory-feasibility.py --binary /caminho/ai-memory --expected-version 2.2.2
 ```
 
+O script também imprime `resource_metrics` com p50/p95 da consulta, pico de RSS/CPU e disco ocupado
+no diretório temporário. Na execução local em Apple Silicon com o binário 2.2.2, foram observados
+29 consultas, p50 **1,96 ms**, p95 **5,10 ms**, pico de **41,95 MiB RSS**, **36,5% CPU** (amostra
+instantânea durante a atividade) e **3,62 MiB** no diretório sintético. Isso é uma medição de
+protocolo isolado, não de uma sessão completa do DCC; o cenário real deve ser repetido antes de
+fixar um limite de produto.
+
 Esse binário passou 27 verificações e anuncia 19 ferramentas MCP. O smoke anterior contra o código
 2.3.0 em desenvolvimento anunciou 23 ferramentas. O adaptador do DCC usa apenas `/hook/batch` e
 `memory_query`, presentes nas duas linhas.
@@ -611,15 +618,16 @@ de exclusividade ou superioridade geral sobre esses produtos.
 
 ## Fase obrigatória antes de declarar a UI definitiva
 
-O estado atual é **infraestrutura e UI operacional do piloto**. A implementação não deve ser
-considerada encerrada como produto enquanto estes itens não forem validados:
+Os itens de infraestrutura e UI abaixo estão implementados. O produto só pode sair do estado de
+**piloto operacional** depois que a prova integrada real e a medição em uma sessão do DCC forem
+registradas; essas duas evidências continuam separadas da implementação local.
 
-- [ ] configurar URL, token, workspace e projeto pela interface, com armazenamento seguro e
+- [x] configurar URL, token, workspace e projeto pela interface, com armazenamento seguro e
   escopos explícitos;
-- [ ] ativar, desativar e escolher o modo local/remoto sem editar variáveis de ambiente;
+- [x] ativar, desativar e escolher o modo local/remoto sem editar variáveis de ambiente;
 - [x] exibir cada fonte recuperada com origem, data, escopo e indicação de checkout quando aplicável;
 - [x] permitir corrigir, ignorar e fixar uma memória, preservando a decisão local no DCC;
-- [ ] mostrar o histórico completo da outbox, incluindo tentativas, próximo retry, erro e payload
+- [x] mostrar o histórico completo da outbox, incluindo tentativas, próximo retry, erro e payload
   resumido, com reprocessamento manual seguro;
 - [ ] executar a prova integrada real: fechar o DCC, reiniciar, abrir uma tarefa nova e repetir
   a recuperação com outro provider;
@@ -630,10 +638,11 @@ considerada encerrada como produto enquanto estes itens não forem validados:
 Até essa matriz ter evidência registrada, o status correto é “piloto operacional”; a memória deve
 continuar opcional, reconstruível e incapaz de bloquear um turno ou o fechamento de uma sessão.
 
-O bloco de configuração já foi iniciado: URL, workspace, projeto, diretório e modo são persistidos
+O bloco de configuração está implementado: URL, workspace, projeto, diretório e modo são persistidos
 pela interface; o token fica no Keychain do sistema. A aplicação sinaliza quando é necessário
-reiniciar para trocar o processo local por remoto ou desligado. A conclusão desta etapa ainda exige
-validar o reinício e remover a dependência de configuração manual em cada ambiente.
+reiniciar para trocar o processo local por remoto ou desligado, e oferece o botão explícito para
+reiniciar. A validação restante é executar esse fluxo em uma instalação limpa e registrar a prova
+de fechamento, reinício e troca de provider.
 
 ## Complemento: validação para escolher integração, PR ou fork
 

@@ -84,8 +84,15 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	);
 	const aiMemorySourceKey = (source: { path?: string | null; title?: string | null; snippet?: string | null }) =>
 		[source.path ?? "", source.title ?? "", (source.snippet ?? "").slice(0, 160)].join("|");
-	const aiMemoryVisibleSources = (aiMemorySourcesQuery.data ?? []).filter(
-		(source) => aiMemoryActions.get(aiMemorySourceKey(source))?.action !== "ignored",
+	const aiMemoryVisibleSources = useMemo(
+		() => (aiMemorySourcesQuery.data ?? [])
+			.filter((source) => aiMemoryActions.get(aiMemorySourceKey(source))?.action !== "ignored")
+			.sort((left, right) => {
+				const leftPinned = aiMemoryActions.get(aiMemorySourceKey(left))?.action === "pinned";
+				const rightPinned = aiMemoryActions.get(aiMemorySourceKey(right))?.action === "pinned";
+				return Number(rightPinned) - Number(leftPinned);
+			}),
+		[aiMemoryActions, aiMemorySourcesQuery.data],
 	);
 	const saveSourceAction = async (sourceKey: string, action: "corrected" | "ignored" | "pinned", correction?: string) => {
 		setAiMemoryActionSaving(sourceKey);
@@ -174,7 +181,9 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 								return (
 								<div className="border-b border-border/40 px-3 py-2.5 last:border-b-0" key={`${source.path ?? source.title ?? "source"}-${index}`}>
 									<p className="truncate text-[11px] font-medium text-foreground">{source.title ?? source.path ?? t("workbench.aiMemory.untitled")}</p>
+									{action?.action === "pinned" ? <p className="mt-0.5 text-[10px] font-medium text-amber-600">{t("workbench.aiMemory.pinned")}</p> : null}
 									{source.path && source.title ? <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{source.path}</p> : null}
+									<p className="mt-0.5 truncate text-[10px] text-muted-foreground">{t("workbench.aiMemory.scope", { project: projectLabel ?? "—", checkout: workspacePath ?? "—" })}</p>
 									{source.createdAt ? <p className="mt-0.5 text-[10px] text-muted-foreground">{source.createdAt}</p> : null}
 									{source.snippet ? <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">{source.snippet}</p> : null}
 									{action?.action === "corrected" && action.correction ? <p className="mt-1 rounded bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-600">{action.correction}</p> : null}

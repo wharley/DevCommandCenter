@@ -116,6 +116,7 @@ pub struct AiMemoryOutboxStatusOutput {
     pub attempts: u32,
     pub next_attempt_at: String,
     pub last_error: Option<String>,
+    pub event_count: usize,
 }
 
 pub type AiMemoryOutboxListOutput = Vec<AiMemoryOutboxStatusOutput>;
@@ -353,6 +354,7 @@ pub fn ai_memory_export_status(
                 attempts: entry.attempts,
                 next_attempt_at: entry.next_attempt_at,
                 last_error: entry.last_error,
+                event_count: 0,
             })
         })
         .map_err(|error| error.to_string())
