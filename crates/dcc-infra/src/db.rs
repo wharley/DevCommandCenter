@@ -230,8 +230,7 @@ CREATE TABLE IF NOT EXISTS dcc_ai_memory_export_history (
 	error TEXT NULL,
 	started_at TEXT NOT NULL,
 	finished_at TEXT NOT NULL,
-	created_at TEXT NOT NULL,
-	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+	created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_dcc_ai_memory_export_history_finished
@@ -1724,6 +1723,7 @@ impl SqliteSessionRepo {
             "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Self::migrate_ai_memory_export_history(&mut conn)?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_delegations",
@@ -1886,6 +1886,65 @@ impl SqliteSessionRepo {
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::rebuild_search_index_sync(&conn)?;
         Ok(())
+    }
+
+    /// Export history is an audit trail and must outlive the local session
+    /// that produced it. Older databases created this table with a cascading
+    /// session foreign key; rebuild that table once so deleting a task cannot
+    /// erase proof that its memory export completed.
+    fn migrate_ai_memory_export_history(conn: &mut Connection) -> Result<()> {
+        let has_session_fk = {
+            let mut statement = conn
+                .prepare("PRAGMA foreign_key_list(dcc_ai_memory_export_history)")
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(2))
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let has_fk = rows
+                .filter_map(|row| row.ok())
+                .any(|table| table == "dcc_sessions");
+            has_fk
+        };
+        if !has_session_fk {
+            return Ok(());
+        }
+
+        let transaction = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .execute_batch(
+                r#"
+                ALTER TABLE dcc_ai_memory_export_history
+                    RENAME TO dcc_ai_memory_export_history_legacy;
+                CREATE TABLE dcc_ai_memory_export_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('completed', 'retrying')),
+                    attempts INTEGER NOT NULL,
+                    event_count INTEGER NOT NULL DEFAULT 0,
+                    accepted_count INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at TEXT NULL,
+                    error TEXT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                INSERT INTO dcc_ai_memory_export_history
+                    (id, session_id, status, attempts, event_count, accepted_count,
+                     next_attempt_at, error, started_at, finished_at, created_at)
+                SELECT id, session_id, status, attempts, event_count, accepted_count,
+                       next_attempt_at, error, started_at, finished_at, created_at
+                  FROM dcc_ai_memory_export_history_legacy;
+                DROP TABLE dcc_ai_memory_export_history_legacy;
+                CREATE INDEX IF NOT EXISTS idx_dcc_ai_memory_export_history_finished
+                    ON dcc_ai_memory_export_history(finished_at DESC, id DESC);
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
     }
 
     fn backfill_terminal_event_keys(conn: &Connection) -> Result<()> {
@@ -9137,6 +9196,97 @@ mod tests {
         assert_eq!(history[0].status, "completed");
         assert_eq!(history[0].event_count, 4);
         assert_eq!(history[0].accepted_count, 4);
+    }
+
+    #[test]
+    fn ai_memory_export_history_survives_session_deletion() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let session = Session {
+            id: SessionId("history-delete-session".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            workspace_id: WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Completed,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_session(&session)).expect("save session");
+        repo.record_ai_memory_export_history(
+            &session.id,
+            "completed",
+            1,
+            2,
+            2,
+            None,
+            None,
+            "2026-01-01T00:00:00.000Z",
+            "2026-01-01T00:00:01.000Z",
+        )
+        .expect("record completed export");
+
+        futures::executor::block_on(repo.delete_session(&session.id)).expect("delete session");
+        let history = repo
+            .list_ai_memory_export_history(10)
+            .expect("list export history after session deletion");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].session_id, session.id);
+    }
+
+    #[test]
+    fn ai_memory_export_history_migrates_away_from_legacy_session_fk() {
+        let conn = in_memory_conn();
+        let repo = SqliteSessionRepo::from_connection(conn.clone()).expect("create repo");
+        drop(repo);
+        {
+            let connection = conn.lock().expect("lock sqlite connection");
+            connection
+                .execute(
+                    "INSERT INTO dcc_sessions (id, project_id, workspace_id, provider_id, state, created_at, updated_at) VALUES ('legacy-history-session', 'project-1', 'workspace-1', 'codex', 'completed', 't0', 't0')",
+                    [],
+                )
+                .expect("insert session");
+            connection
+                .execute_batch(
+                    r#"
+                    DROP TABLE dcc_ai_memory_export_history;
+                    CREATE TABLE dcc_ai_memory_export_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        status TEXT NOT NULL CHECK (status IN ('completed', 'retrying')),
+                        attempts INTEGER NOT NULL,
+                        event_count INTEGER NOT NULL DEFAULT 0,
+                        accepted_count INTEGER NOT NULL DEFAULT 0,
+                        next_attempt_at TEXT NULL,
+                        error TEXT NULL,
+                        started_at TEXT NOT NULL,
+                        finished_at TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+                    );
+                    INSERT INTO dcc_ai_memory_export_history
+                        (session_id, status, attempts, event_count, accepted_count,
+                         started_at, finished_at, created_at)
+                    VALUES ('legacy-history-session', 'completed', 1, 1, 1,
+                            't0', 't1', 't1');
+                    "#,
+                )
+                .expect("create legacy history table");
+        }
+
+        let migrated = SqliteSessionRepo::from_connection(conn.clone()).expect("migrate history");
+        futures::executor::block_on(
+            migrated.delete_session(&SessionId("legacy-history-session".to_string())),
+        )
+        .expect("delete session");
+        let history = migrated
+            .list_ai_memory_export_history(10)
+            .expect("list migrated history");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].session_id.0, "legacy-history-session");
     }
 
     #[test]

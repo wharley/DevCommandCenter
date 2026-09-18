@@ -2268,7 +2268,7 @@
       "outboxMeta": "{{attempts}} tentativa(s) · {{events}} evento(s) · próximo retry {{next}}",
       "outboxEmpty": "Nenhuma exportação pendente.",
       "historyTitle": "Histórico de exportações",
-      "historyHint": "Tentativas concluídas e falhas ficam registradas para auditoria e diagnóstico.",
+      "historyHint": "Tentativas concluídas e falhas ficam registradas para auditoria e diagnóstico, mesmo depois que a tarefa local é excluída.",
       "historyMeta": "{{attempts}} tentativa(s) · {{accepted}} aceito(s) de {{events}} evento(s) · {{finished}}",
       "historySession": "Sessão {{id}}",
       "historyEmpty": "Nenhuma tentativa registrada ainda.",
