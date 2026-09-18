@@ -293,9 +293,9 @@ remoto/manual). O download verificado e a inclusão no instalador do DCC são fe
 
 O adaptador também divide automaticamente exportações maiores que 256 eventos, preserva os índices
 globais do lote e usa timeout de 500 ms na recuperação automática. A fila persistente já está ativa;
-a consulta automática abre um disjuntor após três falhas por 30 segundos. O disjuntor específico do
-worker de exportação e o instalador assinado continuam como critérios de endurecimento; a UX básica
-da fila já mostra pendências e o próximo retry no cabeçalho.
+a consulta automática e o worker de exportação abrem disjuntores independentes após três falhas por
+endpoint e aguardam 30 segundos antes de tentar novamente. A UX básica da fila mostra pendências e o
+próximo retry no cabeçalho; o instalador assinado continua como critério de endurecimento.
 
 Exemplo para testar sem manter um terminal do ai-memory aberto:
 
@@ -325,7 +325,7 @@ exigem API de modelo nem embeddings; esses recursos ficam opt-in porque alteram 
 privacidade. O DCC continua sendo a fonte da sessão e trata o ai-memory como índice/cópia
 reconstruível. Se o processo estiver indisponível, o DCC registra o diagnóstico, mantém a conversa
 funcionando; a exportação fica na outbox e pode ser repetida pelo comando explícito de sincronização.
-O disjuntor do worker e a UX de reprocessamento manual ainda são critérios de endurecimento antes de
+O instalador assinado e a UX de reprocessamento manual ainda são critérios de endurecimento antes de
 declarar o fluxo pronto para produção. A memória nunca pode impedir um turno ou o fechamento da
 sessão.
 
@@ -369,7 +369,7 @@ começar com um histórico real.
 Não avançar para curadoria ou UX definitiva antes de validar: sidecar iniciando/parando sem terminal;
 reinício após crash; atualização versionada com backup/reindex; fila de exportação para servidor
 indisponível; lotes maiores que 256 eventos divididos com retry idempotente; consulta degradando em
-menos de 500 ms; disjuntor após falhas repetidas; limite de CPU/RAM em uma sessão real; isolamento por workspace/projeto; e opção clara
+menos de 500 ms; disjuntores após falhas repetidas; limite de CPU/RAM em uma sessão real; isolamento por workspace/projeto; e opção clara
 para desligar ou usar servidor remoto.
 
 ### Piloto manual (duas janelas de terminal)

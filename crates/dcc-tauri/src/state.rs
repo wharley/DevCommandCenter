@@ -1071,6 +1071,7 @@ pub struct SessionCommandState {
     ephemeral_mcp_projection: Arc<Mutex<Option<Arc<dyn EphemeralMcpProjection>>>>,
     runtime: Arc<ProcessRuntime>,
     ai_memory_circuit: Arc<AiMemoryCircuitBreaker>,
+    ai_memory_export_circuit: Arc<AiMemoryCircuitBreaker>,
 }
 
 /// Owns the process-shared transition lock for one session's provider
@@ -1434,6 +1435,7 @@ impl SessionCommandState {
             ephemeral_mcp_projection: Arc::new(Mutex::new(None)),
             runtime,
             ai_memory_circuit: Arc::new(AiMemoryCircuitBreaker::default()),
+            ai_memory_export_circuit: Arc::new(AiMemoryCircuitBreaker::default()),
         }
     }
 
@@ -1447,6 +1449,18 @@ impl SessionCommandState {
 
     pub(crate) fn record_ai_memory_query_failure(&self, endpoint: &str) -> bool {
         self.ai_memory_circuit.record_failure(endpoint)
+    }
+
+    fn allow_ai_memory_export(&self, endpoint: &str) -> bool {
+        self.ai_memory_export_circuit.allow(endpoint)
+    }
+
+    fn record_ai_memory_export_success(&self, endpoint: &str) {
+        self.ai_memory_export_circuit.record_success(endpoint);
+    }
+
+    fn record_ai_memory_export_failure(&self, endpoint: &str) -> bool {
+        self.ai_memory_export_circuit.record_failure(endpoint)
     }
 
     pub fn process_runtime(&self) -> Arc<ProcessRuntime> {
@@ -1977,16 +1991,26 @@ impl SessionCommandState {
                 // run; enabling it again will resume the pending export.
                 continue;
             };
+            let endpoint = config.base_url.clone();
+            if !self.allow_ai_memory_export(&endpoint) {
+                eprintln!(
+                    "[DCC] ai-memory export circuit is open for {}; keeping session {} pending",
+                    endpoint, entry.session_id.0
+                );
+                continue;
+            }
             match self
                 .export_session_to_ai_memory(&entry.session_id, config)
                 .await
             {
                 Ok(ack) if ack.failed_index.is_none() => {
+                    self.record_ai_memory_export_success(&endpoint);
                     self.session_repo
                         .complete_ai_memory_export(&entry.session_id)?;
                     completed += 1;
                 }
                 Ok(ack) => {
+                    self.record_ai_memory_export_success(&endpoint);
                     let error = format!(
                         "ai-memory acknowledged a partial batch; failed event index {}",
                         ack.failed_index.unwrap_or_default()
@@ -2005,6 +2029,7 @@ impl SessionCommandState {
                     );
                 }
                 Err(error) => {
+                    let opened = self.record_ai_memory_export_failure(&endpoint);
                     let delay_seconds = (5_i64 << entry.attempts.min(9)).min(900);
                     let next_attempt = (Utc::now() + ChronoDuration::seconds(delay_seconds))
                         .to_rfc3339_opts(SecondsFormat::Millis, true);
@@ -2014,9 +2039,14 @@ impl SessionCommandState {
                         &next_attempt,
                         &bounded_error,
                     )?;
+                    let circuit_note = if opened {
+                        " (circuit opened for 30s)"
+                    } else {
+                        ""
+                    };
                     eprintln!(
-                        "[DCC] ai-memory export retry scheduled in {delay_seconds}s for session {}: {bounded_error}",
-                        entry.session_id.0
+                        "[DCC] ai-memory export retry scheduled in {delay_seconds}s for session {}{}: {bounded_error}",
+                        entry.session_id.0, circuit_note
                     );
                 }
             }
@@ -6506,6 +6536,21 @@ mod tests {
         assert!(breaker.allow("http://memory-b"));
         breaker.record_success("http://memory-b");
         assert!(breaker.allow("http://memory-b"));
+    }
+
+    #[test]
+    fn ai_memory_export_circuit_is_independent_from_query_circuit() {
+        let temp_root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(temp_root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let endpoint = "http://memory-export";
+        assert!(state.allow_ai_memory_export(endpoint));
+        assert!(!state.record_ai_memory_export_failure(endpoint));
+        assert!(!state.record_ai_memory_export_failure(endpoint));
+        assert!(state.record_ai_memory_export_failure(endpoint));
+        assert!(!state.allow_ai_memory_export(endpoint));
+        assert!(state.allow_ai_memory_query(endpoint));
     }
 
     #[test]
