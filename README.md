@@ -210,6 +210,7 @@ Before starting your first agent session, complete [Provider setup](#provider-se
 - [Security policy](SECURITY.md)
 - [Contributing guide](CONTRIBUTING.md)
 - [Support](SUPPORT.md)
+- [Third-party notices](docs/THIRD_PARTY_NOTICES.md)
 - [Release guide](docs/RELEASING.md)
 - [Codex orchestration](docs/CODEX_ORCHESTRATION.md)
 - [Last Turn Review and Guarded Undo](docs/GUARDED_UNDO.md)

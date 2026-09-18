@@ -5,6 +5,8 @@
 - Confirm the root Apache-2.0 license and workspace package metadata still
   match.
 - Verify that no third-party code or assets require attribution or removal.
+- Keep [third-party notices](THIRD_PARTY_NOTICES.md) aligned with every bundled
+  sidecar and pinned release checksum.
 - Perform a release-wide composition/notices review when required by the
   project's broader release process. For external MCP integrations, start with
   [MCP open source review](MCP_OPEN_SOURCE_REVIEW.md).
