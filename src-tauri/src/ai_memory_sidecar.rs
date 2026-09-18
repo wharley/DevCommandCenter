@@ -12,16 +12,33 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 const DEFAULT_PORT: u16 = 49_374;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(350);
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemorySidecarStatus {
+    pub mode: String,
+    pub running: bool,
+    pub url: Option<String>,
+    pub data_dir: Option<String>,
+    pub binary_path: Option<String>,
+    pub version: Option<String>,
+    pub log_path: Option<String>,
+    pub message: Option<String>,
+}
+
 pub struct AiMemorySidecar {
     child: Mutex<Option<Child>>,
     pub base_url: Option<String>,
     pub data_dir: Option<PathBuf>,
+    binary_path: Option<PathBuf>,
+    version: Option<String>,
+    startup_error: Option<String>,
 }
 
 impl AiMemorySidecar {
@@ -70,6 +87,13 @@ impl AiMemorySidecar {
         if !init_status.success() {
             return Err(format!("ai-memory init exited with status {init_status}"));
         }
+        let version = Command::new(&binary)
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|value| !value.is_empty());
 
         let log_dir = data_dir.join("logs");
         fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
@@ -112,6 +136,9 @@ impl AiMemorySidecar {
             child: Mutex::new(Some(child)),
             base_url: Some(base_url),
             data_dir: Some(data_dir),
+            binary_path: Some(binary),
+            version,
+            startup_error: None,
         })
     }
 
@@ -120,6 +147,69 @@ impl AiMemorySidecar {
             child: Mutex::new(None),
             base_url: None,
             data_dir: None,
+            binary_path: None,
+            version: None,
+            startup_error: None,
+        }
+    }
+
+    pub fn unavailable(error: impl Into<String>) -> Self {
+        Self {
+            child: Mutex::new(None),
+            base_url: None,
+            data_dir: None,
+            binary_path: None,
+            version: None,
+            startup_error: Some(error.into()),
+        }
+    }
+
+    pub fn status(&self) -> AiMemorySidecarStatus {
+        let running = self
+            .child
+            .lock()
+            .map(|child| child.is_some())
+            .unwrap_or(false);
+        let configured_url = std::env::var("DCC_AI_MEMORY_URL")
+            .ok()
+            .filter(|url| !url.trim().is_empty());
+        let mode = if running {
+            "managed"
+        } else if configured_url.is_some() {
+            "remote"
+        } else if self.startup_error.is_some() {
+            "unavailable"
+        } else {
+            "disabled"
+        };
+        let url = self.base_url.clone().or(configured_url);
+        let data_dir = self
+            .data_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .or_else(|| {
+                std::env::var_os("DCC_AI_MEMORY_DATA_DIR")
+                    .map(PathBuf::from)
+                    .map(|path| path.display().to_string())
+            });
+        let log_path = data_dir.as_ref().map(|path| {
+            PathBuf::from(path)
+                .join("logs/dcc-sidecar.log")
+                .display()
+                .to_string()
+        });
+        AiMemorySidecarStatus {
+            mode: mode.to_string(),
+            running,
+            url,
+            data_dir,
+            binary_path: self
+                .binary_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            version: self.version.clone(),
+            log_path,
+            message: self.startup_error.clone(),
         }
     }
 

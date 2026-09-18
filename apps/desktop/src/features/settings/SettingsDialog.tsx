@@ -1,7 +1,7 @@
 import { FrontendDiagnostics } from "@/components/FrontendDiagnostics";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	Cable,
 	CircleUserRound,
@@ -17,6 +17,11 @@ import {
 	TerminalSquare,
 	SunMedium,
 	Wrench,
+	Database,
+	RefreshCw,
+	Copy,
+	CircleCheck,
+	CircleAlert,
 } from "lucide-react";
 import type { ForgeCliProvider } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -91,6 +96,7 @@ import {
 	persistProviderAvailability,
 } from "@/features/providers/provider-availability.logic";
 import { setProviderAvailability } from "@/lib/provider-api";
+import { loadAiMemorySidecarStatus } from "@/lib/session-api";
 import {
 	SettingsNavigation,
 	type SettingsSectionId,
@@ -650,6 +656,12 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
 	const { t, i18n } = useTranslation("common");
 	const queryClient = useQueryClient();
+	const aiMemoryStatusQuery = useQuery({
+		queryKey: ["ai-memory", "sidecar-status"],
+		queryFn: loadAiMemorySidecarStatus,
+		enabled: open,
+		staleTime: 10_000,
+	});
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
 	const panelId = useId();
 	const headingId = useId();
@@ -794,6 +806,14 @@ export function SettingsDialog({
 				icon: Sparkles,
 			},
 			{
+				id: "aiMemory",
+				group: "services",
+				keywords: t("settings.navigation.keywords.aiMemory"),
+				label: t("settings.sections.aiMemory.label"),
+				description: t("settings.sections.aiMemory.description"),
+				icon: Database,
+			},
+			{
 				id: "integrations",
 				group: "services",
 				keywords: t("settings.navigation.keywords.integrations"),
@@ -923,6 +943,21 @@ export function SettingsDialog({
 										<h3 className="text-sm font-medium">{t("frontendRecovery.settingsTitle")}</h3>
 										<p className="text-xs text-muted-foreground">{t("frontendRecovery.settingsBody")}</p>
 										<FrontendDiagnostics />
+									</div>
+									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+										<div className="flex items-start justify-between gap-4">
+											<div className="min-w-0">
+												<h3 className="text-[14px] font-medium text-foreground">
+													{t("settings.general.aiMemoryTitle")}
+												</h3>
+												<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+													{t("settings.general.aiMemoryHint")}
+												</p>
+											</div>
+											<Button type="button" variant="outline" size="sm" onClick={() => setActiveSection("aiMemory")}>
+												{t("settings.general.openAiMemory")}
+											</Button>
+										</div>
 									</div>
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 										<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -1130,6 +1165,113 @@ export function SettingsDialog({
 										onChangeRuntime={onChangeProviderRuntime}
 										onClearRuntime={onClearProviderRuntime}
 									/>
+								</section>
+							) : null}
+
+							{activeSection === "aiMemory" ? (
+								<section className="space-y-4">
+									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+										<div className="flex items-start justify-between gap-4">
+											<div className="flex min-w-0 items-start gap-3">
+												<div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+													<Database className="size-4" />
+												</div>
+												<div className="min-w-0">
+													<h3 className="text-[14px] font-medium text-foreground">
+														{t("settings.aiMemory.title")}
+													</h3>
+													<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+														{t("settings.aiMemory.hint")}
+													</p>
+												</div>
+											</div>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												disabled={aiMemoryStatusQuery.isFetching}
+												onClick={() => void aiMemoryStatusQuery.refetch()}
+											>
+												{aiMemoryStatusQuery.isFetching ? (
+													<Loader2 className="size-3.5 animate-spin" />
+												) : (
+													<RefreshCw className="size-3.5" />
+												)}
+												{t("settings.aiMemory.refresh")}
+											</Button>
+										</div>
+										<div className="mt-4 rounded-lg border border-border/50 bg-background p-3">
+											<div className="flex items-center justify-between gap-3">
+												<div className="flex items-center gap-2 text-[12px] font-medium text-foreground">
+													{aiMemoryStatusQuery.data?.mode === "managed" || aiMemoryStatusQuery.data?.mode === "remote" ? (
+														<CircleCheck className="size-4 text-emerald-500" />
+													) : (
+														<CircleAlert className="size-4 text-amber-500" />
+													)}
+													{t("settings.aiMemory.status")}
+												</div>
+												<Badge variant="outline" className="h-7 px-2.5 text-[11px] font-normal">
+													{t(`settings.aiMemory.modes.${aiMemoryStatusQuery.data?.mode ?? "unknown"}`)}
+												</Badge>
+											</div>
+											<p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+												{aiMemoryStatusQuery.isPending
+													? t("settings.aiMemory.loading")
+													: aiMemoryStatusQuery.isError
+														? t("settings.aiMemory.error")
+															: t(`settings.aiMemory.statusBody.${aiMemoryStatusQuery.data?.mode ?? "unknown"}`)}
+													</p>
+													{aiMemoryStatusQuery.data?.message ? (
+														<p className="mt-2 text-[11px] leading-relaxed text-destructive">
+															{aiMemoryStatusQuery.data.message}
+														</p>
+													) : null}
+											</div>
+									</div>
+
+									{aiMemoryStatusQuery.data ? (
+										<div className="grid gap-3 sm:grid-cols-2">
+												{(
+													[
+														["settings.aiMemory.dataDir", aiMemoryStatusQuery.data.dataDir],
+														["settings.aiMemory.logPath", aiMemoryStatusQuery.data.logPath],
+														["settings.aiMemory.version", aiMemoryStatusQuery.data.version],
+														["settings.aiMemory.url", aiMemoryStatusQuery.data.url],
+													] as Array<[string, string | null]>
+												).map(([label, value]) => (
+												<div className="rounded-xl border border-border/60 p-3" key={label}>
+													<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+														{t(label)}
+													</p>
+													<div className="mt-2 flex items-center justify-between gap-2">
+														<p className="min-w-0 truncate font-mono text-[11px] text-foreground" title={value ?? undefined}>
+															{value ?? t("settings.aiMemory.notAvailable")}
+														</p>
+														{value ? (
+															<Button
+																type="button"
+																variant="ghost"
+																size="icon"
+																className="size-7 shrink-0"
+																aria-label={t("settings.aiMemory.copy")}
+																onClick={() => {
+																	void navigator.clipboard?.writeText(value);
+																	toast.success(t("settings.aiMemory.copied"));
+																}}
+															>
+																<Copy className="size-3.5" />
+															</Button>
+														) : null}
+													</div>
+												</div>
+											))}
+										</div>
+									) : null}
+
+									<div className="rounded-xl border border-border/60 p-4 text-[12px] leading-relaxed text-muted-foreground">
+										<p>{t("settings.aiMemory.performance")}</p>
+										<p className="mt-2">{t("settings.aiMemory.firstUse")}</p>
+									</div>
 								</section>
 							) : null}
 

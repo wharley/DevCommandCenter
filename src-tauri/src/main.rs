@@ -7193,6 +7193,7 @@ pub fn run() {
             session_commands::sync_session_to_ai_memory,
             session_commands::query_ai_memory,
             session_commands::ai_memory_export_status,
+            session_commands::ai_memory_sidecar_status,
             session_commands::send_turn,
             session_commands::steer_turn,
             session_commands::steer_native_subagent,
@@ -7238,7 +7239,7 @@ pub fn run() {
                 Ok(sidecar) => sidecar,
                 Err(error) => {
                     eprintln!("[DCC][ai-memory] sidecar unavailable: {error}");
-                    AiMemorySidecar::disabled()
+                    AiMemorySidecar::unavailable(error)
                 }
             };
             appshot_commands::setup(app.handle(), app_data_dir.clone())?;

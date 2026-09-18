@@ -297,6 +297,14 @@ a consulta automática e o worker de exportação abrem disjuntores independente
 endpoint e aguardam 30 segundos antes de tentar novamente. A UX básica da fila mostra pendências e o
 próximo retry no cabeçalho; o instalador assinado continua como critério de endurecimento.
 
+O primeiro uso também tem uma superfície própria em **Configurações → Memória do DCC**. Ela consulta
+somente o estado já mantido pelo processo principal e informa se o modo é `managed`, `remote`,
+`disabled` ou `unavailable`, além do endpoint, versão, diretório de dados e log. A tela explica que
+o sidecar é um único processo ocioso entre operações, que a consulta automática tem timeout curto e
+que o contexto é limitado a 4.000 caracteres. Atualizar o painel não inicia um novo servidor nem
+baixa arquivos; em desenvolvimento o binário continua sendo procurado apenas por `yarn dev` nos
+caminhos já documentados. Isso cobre descoberta e diagnóstico sem criar uma rotina de polling pesado.
+
 Exemplo para testar sem manter um terminal do ai-memory aberto:
 
 ```bash

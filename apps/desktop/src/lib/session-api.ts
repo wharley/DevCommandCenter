@@ -30,6 +30,7 @@ import type {
 	AiMemoryQueryHit,
 	AiMemoryQueryInput,
 	AiMemoryOutboxStatusOutput,
+	AiMemorySidecarStatus,
 	AiMemorySyncInput,
 	AiMemorySyncOutput,
 	ApplyTaskTitleInput,
@@ -95,6 +96,10 @@ export function loadAiMemoryExportStatus(sessionId: string) {
 		SESSION_METHODS.aiMemoryExportStatus,
 		{ sessionId },
 	);
+}
+
+export function loadAiMemorySidecarStatus() {
+	return invoke<AiMemorySidecarStatus>(SESSION_METHODS.aiMemorySidecarStatus);
 }
 
 export function applyTaskTitle(input: ApplyTaskTitleInput) {

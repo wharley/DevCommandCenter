@@ -1844,6 +1844,7 @@
         "appearance": "tema claro escuro idioma linguagem português inglês densidade compacta confortável",
         "shortcuts": "teclado comandos atalhos",
         "model": "agentes modelos uso limite conta runtime codex claude cursor grok gemini",
+        "aiMemory": "memória ai-memory histórico continuidade sidecar",
         "integrations": "mcp servidores ferramentas credenciais",
         "computerUse": "computer use aplicativos gravação de tela acessibilidade permissões",
         "account": "github gitlab login autenticação coderabbit contas",
@@ -1872,6 +1873,10 @@
       "model": {
         "label": "Provedores",
         "description": "Modelos, uso da conta e runtimes."
+      },
+      "aiMemory": {
+        "label": "Memória do DCC",
+        "description": "Status do ai-memory e dados de continuidade entre tarefas."
       },
       "integrations": {
         "label": "Integrações",
@@ -1914,6 +1919,9 @@
       "appVersionTitle": "Versão do app",
       "appVersionBody": "Build instalada do Dev Command Center nesta máquina.",
       "appVersionUnknown": "Desconhecida",
+      "aiMemoryTitle": "Memória do DCC",
+      "aiMemoryHint": "Veja o modo atual do ai-memory, o uso de recursos e os caminhos de diagnóstico.",
+      "openAiMemory": "Ver status",
       "checkForUpdates": "Verificar atualizações",
       "checkingUpdates": "Verificando…",
       "upToDate": "Atualizado",
@@ -2235,6 +2243,37 @@
       "browserPermissionsHint": "Funciona sem as permissões de Gravação de Tela e Acessibilidade abaixo.",
       "externalAppsTitle": "Aplicativos externos",
       "experimental": "Experimental"
+    },
+    "aiMemory": {
+      "title": "Memória do projeto (ai-memory)",
+      "hint": "A memória é opcional e local. O DCC mantém um único sidecar quando habilitado e continua funcionando se ele estiver indisponível.",
+      "refresh": "Atualizar",
+      "status": "Status do serviço",
+      "loading": "Consultando o status do sidecar…",
+      "error": "Não foi possível consultar o status agora.",
+      "modes": {
+        "managed": "Gerenciado pelo DCC",
+        "remote": "Servidor configurado",
+        "disabled": "Desativado",
+        "unavailable": "Indisponível",
+        "unknown": "Desconhecido"
+      },
+      "statusBody": {
+        "managed": "O DCC iniciou um processo local único. Consultas de memória têm limite e tempo máximo; prompts não iniciam processos novos.",
+        "remote": "O DCC usa o servidor configurado em DCC_AI_MEMORY_URL e não cria um processo local.",
+        "disabled": "A memória não está ativa nesta instalação. O restante do DCC continua normal.",
+        "unavailable": "O sidecar não pôde iniciar. A sessão não é bloqueada e o erro fica disponível no log.",
+        "unknown": "Ainda não há informação suficiente sobre o serviço."
+      },
+      "dataDir": "Diretório de dados",
+      "logPath": "Log do sidecar",
+      "version": "Versão",
+      "url": "Endpoint",
+      "notAvailable": "Não disponível",
+      "copy": "Copiar valor",
+      "copied": "Copiado",
+      "performance": "O sidecar fica ocioso entre operações. O DCC consulta memória com timeout curto, usa no máximo 4.000 caracteres de contexto e grava exportações pendentes no banco local para tentar novamente depois.",
+      "firstUse": "Primeiro uso: em uma versão distribuída com o binário incluído, basta abrir uma tarefa. Em desenvolvimento, o yarn dev usa o binário somente quando DCC_AI_MEMORY_BIN ou ~/Applications/ai-memory/ai-memory existir; não baixa nada automaticamente."
     },
     "shortcuts": {
       "keyboardShortcuts": "Atalhos de teclado",

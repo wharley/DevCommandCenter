@@ -28,6 +28,7 @@ use dcc_tauri::{
     },
     state::SessionCommandState,
 };
+use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecarStatus;
 
 #[tauri::command]
 pub async fn prepare_guarded_undo(
@@ -84,6 +85,13 @@ pub fn ai_memory_export_status(
     session_id: String,
 ) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
     session_command_impl::ai_memory_export_status(state, session_id)
+}
+
+#[tauri::command]
+pub fn ai_memory_sidecar_status(
+    sidecar: State<'_, dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar>,
+) -> Result<AiMemorySidecarStatus, String> {
+    Ok(sidecar.status())
 }
 
 #[tauri::command]
