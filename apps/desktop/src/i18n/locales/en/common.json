@@ -2547,6 +2547,22 @@
         "tip": "Want to compare providers on the same task? See usage per model in [DCC Usage], in the sidebar.",
         "keywords": "provider model switch handoff claude codex gemini cursor grok continue re-anchor"
       },
+      "memory": {
+        "label": "Project memory",
+        "summary": "Carry decisions and facts across tasks and providers.",
+        "whatIs": "Project memory keeps useful evidence from earlier sessions so another task can continue without making you repeat the whole context. It is optional, controlled by DCC, and can use the managed local sidecar or a configured server.",
+        "whenToUse": "Use it when an implementation spans several tasks, when you switch providers, or when you need to recover an earlier decision, failed attempt, or open question.",
+        "steps": [
+          "Open Settings and go to Memory to choose the mode, workspace, and project.",
+          "Keep working normally. DCC creates checkpoints automatically when you switch sessions and when you close a session.",
+          "Open a new task in the same project and ask your question normally. DCC queries relevant sources before calling the provider.",
+          "See recovered sources in the session header. You can pin, correct, or ignore a source.",
+          "Open Memory to inspect the export queue and history, including retries, failures, and completed exports."
+        ],
+        "prompt": "Query project memory and tell me which decision was made about worktree isolation, including the recovered source.",
+        "tip": "If the server is unavailable, the task continues. DCC keeps the export in the outbox and retries later.",
+        "keywords": "memory project ai-memory continuity session provider sources recover decision checkpoint outbox retry history"
+      },
       "skills": {
         "label": "Skills",
         "summary": "Reusable instructions for the project's agents.",

@@ -2547,6 +2547,22 @@
         "tip": "Quer comparar providers na mesma tarefa? Veja o consumo por modelo em [DCC Usage], na barra lateral.",
         "keywords": "provider modelo trocar handoff claude codex gemini cursor grok continuar reancorar"
       },
+      "memory": {
+        "label": "Memória do projeto",
+        "summary": "Continue decisões e fatos entre tarefas e providers.",
+        "whatIs": "A memória do projeto guarda evidências úteis de sessões anteriores para que outra tarefa possa continuar o trabalho sem você repetir todo o contexto. Ela é opcional, fica sob controle do DCC e pode usar o sidecar local ou um servidor configurado.",
+        "whenToUse": "Use quando uma implementação atravessa várias tarefas, quando você troca de provider ou quando precisa recuperar uma decisão, uma tentativa que falhou ou uma pendência antiga.",
+        "steps": [
+          "Abra Configurações e entre em Memória para escolher o modo, o workspace e o projeto.",
+          "Continue trabalhando normalmente. O DCC cria checkpoints automaticamente ao trocar de sessão e também ao fechar uma sessão.",
+          "Abra uma tarefa nova no mesmo projeto e faça a pergunta normalmente. O DCC consulta as fontes relevantes antes de chamar o provider.",
+          "Veja as fontes recuperadas no cabeçalho da sessão. Você pode fixar, corrigir ou ignorar uma fonte.",
+          "Consulte a fila e o histórico de exportação em Memória quando quiser verificar retries, falhas ou exportações concluídas."
+        ],
+        "prompt": "Consulte a memória do projeto e me diga qual decisão foi tomada sobre o isolamento do worktree, incluindo a fonte recuperada.",
+        "tip": "Se o servidor estiver indisponível, a tarefa continua. O DCC mantém a exportação na outbox e tenta novamente depois.",
+        "keywords": "memória projeto ai-memory continuidade sessão provider fontes recuperar decisão checkpoint outbox retry histórico"
+      },
       "skills": {
         "label": "Skills",
         "summary": "Instruções reutilizáveis para os agentes do projeto.",
