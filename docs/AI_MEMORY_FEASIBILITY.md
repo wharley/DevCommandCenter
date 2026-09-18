@@ -630,6 +630,11 @@ considerada encerrada como produto enquanto estes itens não forem validados:
 Até essa matriz ter evidência registrada, o status correto é “piloto operacional”; a memória deve
 continuar opcional, reconstruível e incapaz de bloquear um turno ou o fechamento de uma sessão.
 
+O bloco de configuração já foi iniciado: URL, workspace, projeto, diretório e modo são persistidos
+pela interface; o token fica no Keychain do sistema. A aplicação sinaliza quando é necessário
+reiniciar para trocar o processo local por remoto ou desligado. A conclusão desta etapa ainda exige
+validar o reinício e remover a dependência de configuração manual em cada ambiente.
+
 ## Complemento: validação para escolher integração, PR ou fork
 
 A documentação de [companions](https://github.com/akitaonrails/ai-memory/blob/v2.3.0/docs/companion-crates.md)

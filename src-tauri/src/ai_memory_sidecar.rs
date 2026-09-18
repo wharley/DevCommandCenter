@@ -15,9 +15,50 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+use dcc_core::{
+    domain::mcp::McpSecretReferenceId,
+    ports::{CredentialStore, SecretValue},
+};
+use dcc_infra::credential_store::SystemCredentialStore;
+
 const DEFAULT_PORT: u16 = 49_374;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(350);
+const SETTINGS_FILE_NAME: &str = "ai-memory-settings.json";
+const TOKEN_REFERENCE: &str = "ai-memory:default";
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemorySettingsInput {
+    pub mode: String,
+    pub base_url: Option<String>,
+    pub workspace: String,
+    pub project: String,
+    pub data_dir: Option<String>,
+    pub token: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemorySettingsOutput {
+    pub mode: String,
+    pub base_url: Option<String>,
+    pub workspace: String,
+    pub project: String,
+    pub data_dir: Option<String>,
+    pub token_configured: bool,
+    pub restart_required: bool,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedAiMemorySettings {
+    mode: String,
+    base_url: Option<String>,
+    workspace: String,
+    project: String,
+    data_dir: Option<String>,
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +83,110 @@ pub struct AiMemorySidecar {
 }
 
 impl AiMemorySidecar {
+    pub async fn load_persisted_settings(app_data_dir: &Path) -> Result<(), String> {
+        let path = app_data_dir.join(SETTINGS_FILE_NAME);
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(format!("could not read ai-memory settings: {error}")),
+        };
+        let settings: PersistedAiMemorySettings = serde_json::from_str(&contents)
+            .map_err(|error| format!("could not parse ai-memory settings: {error}"))?;
+        apply_settings_to_environment(&settings)?;
+        let token = SystemCredentialStore::default()
+            .resolve_secret(&McpSecretReferenceId(TOKEN_REFERENCE.to_string()))
+            .await
+            .map_err(|error| format!("could not read ai-memory token: {error}"))?;
+        if let Some(token) = token {
+            let token = String::from_utf8(token.expose_secret().to_vec())
+                .map_err(|_| "stored ai-memory token is not valid UTF-8".to_string())?;
+            std::env::set_var("DCC_AI_MEMORY_TOKEN", token);
+        }
+        Ok(())
+    }
+
+    pub async fn read_settings(app_data_dir: &Path) -> Result<AiMemorySettingsOutput, String> {
+        let path = app_data_dir.join(SETTINGS_FILE_NAME);
+        let persisted = match fs::read_to_string(&path) {
+            Ok(contents) => serde_json::from_str::<PersistedAiMemorySettings>(&contents)
+                .map_err(|error| format!("could not parse ai-memory settings: {error}"))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(default_settings_output(false));
+            }
+            Err(error) => return Err(format!("could not read ai-memory settings: {error}")),
+        };
+        let token_configured = SystemCredentialStore::default()
+            .resolve_secret(&McpSecretReferenceId(TOKEN_REFERENCE.to_string()))
+            .await
+            .map_err(|error| format!("could not read ai-memory token: {error}"))?
+            .is_some();
+        Ok(AiMemorySettingsOutput {
+            mode: persisted.mode,
+            base_url: persisted.base_url,
+            workspace: persisted.workspace,
+            project: persisted.project,
+            data_dir: persisted.data_dir,
+            token_configured,
+            restart_required: false,
+        })
+    }
+
+    pub async fn save_settings(
+        app_data_dir: &Path,
+        input: AiMemorySettingsInput,
+    ) -> Result<AiMemorySettingsOutput, String> {
+        validate_settings(&input)?;
+        let persisted = PersistedAiMemorySettings {
+            mode: input.mode.clone(),
+            base_url: input.base_url.clone(),
+            workspace: input.workspace.clone(),
+            project: input.project.clone(),
+            data_dir: input.data_dir.clone(),
+        };
+        let bytes = serde_json::to_vec_pretty(&persisted)
+            .map_err(|error| format!("could not encode ai-memory settings: {error}"))?;
+        let path = app_data_dir.join(SETTINGS_FILE_NAME);
+        fs::write(&path, bytes)
+            .map_err(|error| format!("could not save ai-memory settings: {error}"))?;
+        let store = SystemCredentialStore::default();
+        let reference = McpSecretReferenceId(TOKEN_REFERENCE.to_string());
+        let token_configured = match input.token.as_deref().map(str::trim) {
+            Some("") => {
+                store
+                    .delete_secret(&reference)
+                    .await
+                    .map_err(|error| format!("could not clear ai-memory token: {error}"))?;
+                std::env::remove_var("DCC_AI_MEMORY_TOKEN");
+                false
+            }
+            Some(token) => {
+                store
+                    .store_secret(
+                        &reference,
+                        SecretValue::new(token.as_bytes().to_vec())
+                            .map_err(|error| error.to_string())?,
+                    )
+                    .await
+                    .map_err(|error| format!("could not save ai-memory token: {error}"))?;
+                std::env::set_var("DCC_AI_MEMORY_TOKEN", token);
+                true
+            }
+            None => std::env::var("DCC_AI_MEMORY_TOKEN")
+                .ok()
+                .is_some_and(|value| !value.trim().is_empty()),
+        };
+        apply_settings_to_environment(&persisted)?;
+        Ok(AiMemorySettingsOutput {
+            mode: persisted.mode,
+            base_url: persisted.base_url,
+            workspace: persisted.workspace,
+            project: persisted.project,
+            data_dir: persisted.data_dir,
+            token_configured,
+            restart_required: true,
+        })
+    }
+
     pub fn start(app: &AppHandle, app_data_dir: &Path) -> Result<Self, String> {
         let release_default = !cfg!(debug_assertions) && !env_truthy("DCC_AI_MEMORY_DISABLE");
         if !env_truthy("DCC_AI_MEMORY_AUTO_START") && !release_default {
@@ -232,6 +377,85 @@ impl Drop for AiMemorySidecar {
     }
 }
 
+fn default_settings_output(token_configured: bool) -> AiMemorySettingsOutput {
+    AiMemorySettingsOutput {
+        mode: if env_truthy("DCC_AI_MEMORY_DISABLE") {
+            "disabled".to_string()
+        } else if std::env::var("DCC_AI_MEMORY_URL")
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            "remote".to_string()
+        } else {
+            "managed".to_string()
+        },
+        base_url: std::env::var("DCC_AI_MEMORY_URL").ok(),
+        workspace: std::env::var("DCC_AI_MEMORY_WORKSPACE")
+            .unwrap_or_else(|_| "dcc-workspace".to_string()),
+        project: std::env::var("DCC_AI_MEMORY_PROJECT")
+            .unwrap_or_else(|_| "dcc-project".to_string()),
+        data_dir: std::env::var("DCC_AI_MEMORY_DATA_DIR").ok(),
+        token_configured,
+        restart_required: false,
+    }
+}
+
+fn validate_settings(input: &AiMemorySettingsInput) -> Result<(), String> {
+    if !matches!(input.mode.as_str(), "managed" | "remote" | "disabled") {
+        return Err("ai-memory mode must be managed, remote, or disabled".to_string());
+    }
+    for (label, value) in [("workspace", &input.workspace), ("project", &input.project)] {
+        if value.trim().is_empty() || value.chars().count() > 200 || value.contains('\0') {
+            return Err(format!("ai-memory {label} is invalid"));
+        }
+    }
+    if input.mode == "remote" {
+        let url = input
+            .base_url
+            .as_deref()
+            .ok_or_else(|| "a URL is required for remote ai-memory mode".to_string())?;
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err("ai-memory URL must use http:// or https://".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn apply_settings_to_environment(settings: &PersistedAiMemorySettings) -> Result<(), String> {
+    std::env::set_var("DCC_AI_MEMORY_WORKSPACE", &settings.workspace);
+    std::env::set_var("DCC_AI_MEMORY_PROJECT", &settings.project);
+    match settings.mode.as_str() {
+        "managed" => {
+            std::env::remove_var("DCC_AI_MEMORY_URL");
+            std::env::remove_var("DCC_AI_MEMORY_DISABLE");
+            std::env::set_var("DCC_AI_MEMORY_AUTO_START", "1");
+        }
+        "remote" => {
+            let url = settings
+                .base_url
+                .as_deref()
+                .ok_or_else(|| "a URL is required for remote ai-memory mode".to_string())?;
+            std::env::set_var("DCC_AI_MEMORY_URL", url);
+            std::env::remove_var("DCC_AI_MEMORY_DISABLE");
+        }
+        "disabled" => {
+            std::env::remove_var("DCC_AI_MEMORY_URL");
+            std::env::set_var("DCC_AI_MEMORY_DISABLE", "1");
+        }
+        _ => return Err("ai-memory mode is invalid".to_string()),
+    }
+    if let Some(data_dir) = settings
+        .data_dir
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        std::env::set_var("DCC_AI_MEMORY_DATA_DIR", data_dir);
+    } else {
+        std::env::remove_var("DCC_AI_MEMORY_DATA_DIR");
+    }
+    Ok(())
+}
+
 fn env_truthy(name: &str) -> bool {
     std::env::var(name)
         .map(|value| {
@@ -302,4 +526,35 @@ fn is_healthy_once(base_url: &str) -> bool {
         .and_then(|client| client.get(format!("{base_url}/mcp")).send().ok())
         .map(|response| response.status().as_u16() == 405 || response.status().is_success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings(mode: &str, base_url: Option<&str>) -> AiMemorySettingsInput {
+        AiMemorySettingsInput {
+            mode: mode.to_string(),
+            base_url: base_url.map(str::to_string),
+            workspace: "workspace".to_string(),
+            project: "project".to_string(),
+            data_dir: None,
+            token: None,
+        }
+    }
+
+    #[test]
+    fn remote_mode_requires_http_url() {
+        assert!(validate_settings(&settings("remote", None)).is_err());
+        assert!(validate_settings(&settings("remote", Some("file:///tmp/memory"))).is_err());
+        assert!(validate_settings(&settings("remote", Some("http://127.0.0.1:49374"))).is_ok());
+    }
+
+    #[test]
+    fn settings_reject_unknown_modes_and_empty_scopes() {
+        assert!(validate_settings(&settings("other", None)).is_err());
+        let mut input = settings("disabled", None);
+        input.workspace.clear();
+        assert!(validate_settings(&input).is_err());
+    }
 }

@@ -24,6 +24,7 @@ import {
 	CircleAlert,
 } from "lucide-react";
 import type { ForgeCliProvider } from "@dcc/contracts";
+import type { AiMemorySettingsInput } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -96,7 +97,11 @@ import {
 	persistProviderAvailability,
 } from "@/features/providers/provider-availability.logic";
 import { setProviderAvailability } from "@/lib/provider-api";
-import { loadAiMemorySidecarStatus } from "@/lib/session-api";
+import {
+	loadAiMemorySettings,
+	loadAiMemorySidecarStatus,
+	saveAiMemorySettings,
+} from "@/lib/session-api";
 import {
 	SettingsNavigation,
 	type SettingsSectionId,
@@ -662,6 +667,34 @@ export function SettingsDialog({
 		enabled: open,
 		staleTime: 10_000,
 	});
+	const aiMemorySettingsQuery = useQuery({
+		queryKey: ["ai-memory", "settings"],
+		queryFn: loadAiMemorySettings,
+		enabled: open,
+		staleTime: 10_000,
+	});
+	const [aiMemoryDraft, setAiMemoryDraft] = useState<AiMemorySettingsInput>({
+		mode: "managed",
+		baseUrl: null,
+		workspace: "dcc-workspace",
+		project: "dcc-project",
+		dataDir: null,
+		token: null,
+	});
+	const [aiMemorySaving, setAiMemorySaving] = useState(false);
+	useEffect(() => {
+		const settings = aiMemorySettingsQuery.data;
+		if (!settings) return;
+		setAiMemoryDraft((current) => ({
+			...current,
+			mode: settings.mode,
+			baseUrl: settings.baseUrl,
+			workspace: settings.workspace,
+			project: settings.project,
+			dataDir: settings.dataDir,
+			token: null,
+		}));
+	}, [aiMemorySettingsQuery.data]);
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
 	const panelId = useId();
 	const headingId = useId();
@@ -778,6 +811,25 @@ export function SettingsDialog({
 		],
 		[],
 	);
+	const handleAiMemorySettingsSave = async () => {
+		setAiMemorySaving(true);
+		try {
+			const saved = await saveAiMemorySettings(aiMemoryDraft);
+			await Promise.all([
+				aiMemorySettingsQuery.refetch(),
+				aiMemoryStatusQuery.refetch(),
+			]);
+			toast.success(
+				saved.restartRequired
+					? t("settings.aiMemory.savedRestart")
+					: t("settings.aiMemory.saved"),
+			);
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : t("settings.aiMemory.saveError"));
+		} finally {
+			setAiMemorySaving(false);
+		}
+	};
 
 	const sections = useMemo<SettingsSectionMeta[]>(
 		() => [
@@ -1227,9 +1279,76 @@ export function SettingsDialog({
 														</p>
 													) : null}
 											</div>
-									</div>
+								</div>
 
-									{aiMemoryStatusQuery.data ? (
+								<div className="rounded-xl border border-border/60 p-4">
+									<div className="grid gap-4 sm:grid-cols-2">
+										<div className="sm:col-span-2">
+											<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+												{t("settings.aiMemory.modeLabel")}
+											</p>
+											<ToggleGroup
+												type="single"
+												value={aiMemoryDraft.mode}
+												onValueChange={(value) => {
+													if (value === "managed" || value === "remote" || value === "disabled") {
+														setAiMemoryDraft((current) => ({ ...current, mode: value }));
+													}
+												}}
+												className="mt-2 flex-wrap justify-start gap-1"
+											>
+												{(["managed", "remote", "disabled"] as const).map((mode) => (
+													<ToggleGroupItem
+														key={mode}
+														value={mode}
+														className="h-8 rounded-lg border border-border/60 px-3 text-[12px]"
+													>
+														{t(`settings.aiMemory.modes.${mode}`)}
+													</ToggleGroupItem>
+												))}
+											</ToggleGroup>
+										</div>
+										<label className="space-y-1.5">
+											<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.url")}</span>
+											<Input
+												value={aiMemoryDraft.baseUrl ?? ""}
+												disabled={aiMemoryDraft.mode !== "remote"}
+												placeholder="http://127.0.0.1:49374"
+												onChange={(event) => setAiMemoryDraft((current) => ({ ...current, baseUrl: event.target.value || null }))}
+											/>
+										</label>
+										<label className="space-y-1.5">
+											<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.tokenLabel")}</span>
+											<Input
+												type="password"
+												value={aiMemoryDraft.token ?? ""}
+												placeholder={aiMemorySettingsQuery.data?.tokenConfigured ? t("settings.aiMemory.tokenConfigured") : t("settings.aiMemory.tokenPlaceholder")}
+												onChange={(event) => setAiMemoryDraft((current) => ({ ...current, token: event.target.value }))}
+											/>
+										</label>
+										<label className="space-y-1.5">
+											<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.workspaceLabel")}</span>
+											<Input value={aiMemoryDraft.workspace} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, workspace: event.target.value }))} />
+										</label>
+										<label className="space-y-1.5">
+											<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.projectLabel")}</span>
+											<Input value={aiMemoryDraft.project} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, project: event.target.value }))} />
+										</label>
+										<label className="space-y-1.5 sm:col-span-2">
+											<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.dataDir")}</span>
+											<Input value={aiMemoryDraft.dataDir ?? ""} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, dataDir: event.target.value || null }))} placeholder={t("settings.aiMemory.dataDirPlaceholder")} />
+										</label>
+									</div>
+									<div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
+										<p className="text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.settingsHint")}</p>
+										<Button type="button" size="sm" disabled={aiMemorySaving || aiMemorySettingsQuery.isPending} onClick={() => void handleAiMemorySettingsSave()}>
+											{aiMemorySaving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+											{t("settings.aiMemory.save")}
+										</Button>
+									</div>
+								</div>
+
+								{aiMemoryStatusQuery.data ? (
 										<div className="grid gap-3 sm:grid-cols-2">
 												{(
 													[

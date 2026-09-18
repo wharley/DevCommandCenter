@@ -7194,6 +7194,8 @@ pub fn run() {
             session_commands::query_ai_memory,
             session_commands::ai_memory_export_status,
             session_commands::ai_memory_sidecar_status,
+            session_commands::ai_memory_settings_load,
+            session_commands::ai_memory_settings_save,
             session_commands::send_turn,
             session_commands::steer_turn,
             session_commands::steer_native_subagent,
@@ -7235,6 +7237,11 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from("."));
             let _ = std::fs::create_dir_all(&app_data_dir);
+            if let Err(error) = tauri::async_runtime::block_on(
+                AiMemorySidecar::load_persisted_settings(&app_data_dir),
+            ) {
+                eprintln!("[DCC][ai-memory] persisted settings unavailable: {error}");
+            }
             let ai_memory_sidecar = match AiMemorySidecar::start(app.handle(), &app_data_dir) {
                 Ok(sidecar) => sidecar,
                 Err(error) => {

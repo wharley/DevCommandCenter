@@ -31,6 +31,8 @@ import type {
 	AiMemoryQueryInput,
 	AiMemoryOutboxStatusOutput,
 	AiMemorySidecarStatus,
+	AiMemorySettingsInput,
+	AiMemorySettingsOutput,
 	AiMemorySyncInput,
 	AiMemorySyncOutput,
 	ApplyTaskTitleInput,
@@ -100,6 +102,14 @@ export function loadAiMemoryExportStatus(sessionId: string) {
 
 export function loadAiMemorySidecarStatus() {
 	return invoke<AiMemorySidecarStatus>(SESSION_METHODS.aiMemorySidecarStatus);
+}
+
+export function loadAiMemorySettings() {
+	return invoke<AiMemorySettingsOutput>(SESSION_METHODS.aiMemorySettingsLoad);
+}
+
+export function saveAiMemorySettings(input: AiMemorySettingsInput) {
+	return invoke<AiMemorySettingsOutput>(SESSION_METHODS.aiMemorySettingsSave, { input });
 }
 
 export function applyTaskTitle(input: ApplyTaskTitleInput) {

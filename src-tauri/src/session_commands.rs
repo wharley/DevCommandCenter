@@ -1,4 +1,4 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use dcc_core::application::{
     AbortRunInput, AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput,
@@ -28,7 +28,9 @@ use dcc_tauri::{
     },
     state::SessionCommandState,
 };
-use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecarStatus;
+use dev_command_center_tauri::ai_memory_sidecar::{
+    AiMemorySettingsInput, AiMemorySettingsOutput, AiMemorySidecarStatus,
+};
 
 #[tauri::command]
 pub async fn prepare_guarded_undo(
@@ -92,6 +94,31 @@ pub fn ai_memory_sidecar_status(
     sidecar: State<'_, dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar>,
 ) -> Result<AiMemorySidecarStatus, String> {
     Ok(sidecar.status())
+}
+
+#[tauri::command]
+pub async fn ai_memory_settings_load(app: AppHandle) -> Result<AiMemorySettingsOutput, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar::read_settings(&app_data_dir).await
+}
+
+#[tauri::command]
+pub async fn ai_memory_settings_save(
+    app: AppHandle,
+    input: AiMemorySettingsInput,
+) -> Result<AiMemorySettingsOutput, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar::save_settings(
+        &app_data_dir,
+        input,
+    )
+    .await
 }
 
 #[tauri::command]

@@ -313,6 +313,29 @@ struct AiMemorySidecarStatus {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+struct AiMemorySettingsInput {
+    mode: String,
+    base_url: Option<String>,
+    workspace: String,
+    project: String,
+    data_dir: Option<String>,
+    token: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+struct AiMemorySettingsOutput {
+    mode: String,
+    base_url: Option<String>,
+    workspace: String,
+    project: String,
+    data_dir: Option<String>,
+    token_configured: bool,
+    restart_required: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 struct WorkspaceMethods {
     archive_workspace_bundle: String,
     complete_workspace_bundle: String,
@@ -428,6 +451,8 @@ struct SessionMethods {
     query_ai_memory: String,
     ai_memory_export_status: String,
     ai_memory_sidecar_status: String,
+    ai_memory_settings_load: String,
+    ai_memory_settings_save: String,
     apply_task_title: String,
     prepare_turn: String,
     send_turn: String,
@@ -857,6 +882,8 @@ fn main() {
         .typ::<CloseSessionOutput>()
         .typ::<AiMemoryOutboxStatusOutput>()
         .typ::<AiMemorySidecarStatus>()
+        .typ::<AiMemorySettingsInput>()
+        .typ::<AiMemorySettingsOutput>()
         .typ::<RestoreSessionInput>()
         .typ::<RestoreSessionOutput>()
         .typ::<LastTurnReviewInput>()
@@ -1039,6 +1066,8 @@ fn main() {
             query_ai_memory: "query_ai_memory".to_string(),
             ai_memory_export_status: "ai_memory_export_status".to_string(),
             ai_memory_sidecar_status: "ai_memory_sidecar_status".to_string(),
+            ai_memory_settings_load: "ai_memory_settings_load".to_string(),
+            ai_memory_settings_save: "ai_memory_settings_save".to_string(),
             apply_task_title: "apply_task_title".to_string(),
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),
