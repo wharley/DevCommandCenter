@@ -2249,6 +2249,9 @@
       "tokenLabel": "Token (opcional)",
       "tokenConfigured": "Token já configurado; deixe vazio para manter",
       "tokenPlaceholder": "Cole o token somente se quiser alterá-lo",
+      "connectionHint": "No modo Gerenciado pelo DCC, deixe URL e token vazios. Use-os somente ao conectar um servidor remoto; esse token pertence ao ai-memory, não ao seu provider de IA.",
+      "advancedTitle": "Escopo e armazenamento avançados",
+      "advancedHint": "Workspace e Projeto são namespaces da memória, não caminhos de pastas. O DCC separa automaticamente projetos locais diferentes usando o identificador interno do projeto; altere estes valores apenas para integrar uma instalação compartilhada ou organizar namespaces manualmente.",
       "workspaceLabel": "Workspace",
       "projectLabel": "Projeto",
       "dataDirPlaceholder": "Padrão do aplicativo",
@@ -2551,14 +2554,14 @@
       "memory": {
         "label": "Memória do projeto",
         "summary": "Continue decisões e fatos entre tarefas e providers.",
-        "whatIs": "A memória do projeto guarda evidências úteis de sessões anteriores para que outra tarefa possa continuar o trabalho sem você repetir todo o contexto. Ela é opcional, fica sob controle do DCC e pode usar o sidecar local ou um servidor configurado.",
+        "whatIs": "A memória do projeto guarda evidências úteis de sessões anteriores para que outra tarefa possa continuar o trabalho sem você repetir todo o contexto. Ela é opcional, fica sob controle do DCC e pode usar o sidecar local ou um servidor configurado. No uso normal, deixe o modo Gerenciado pelo DCC e não preencha URL nem token.",
         "whenToUse": "Use quando uma implementação atravessa várias tarefas, quando você troca de provider ou quando precisa recuperar uma decisão, uma tentativa que falhou ou uma pendência antiga.",
         "steps": [
-          "Abra Configurações e entre em Memória para escolher o modo, o workspace e o projeto.",
+          "Abra Configurações e entre em Memória. Para o uso normal, escolha Gerenciado pelo DCC e deixe URL e token vazios.",
           "Continue trabalhando normalmente. O DCC cria checkpoints automaticamente ao trocar de sessão e também ao fechar uma sessão.",
           "Abra uma tarefa nova no mesmo projeto e faça a pergunta normalmente. O DCC consulta as fontes relevantes antes de chamar o provider.",
           "Veja as fontes recuperadas no cabeçalho da sessão. Você pode fixar, corrigir ou ignorar uma fonte.",
-          "Consulte a fila e o histórico de exportação em Memória quando quiser verificar retries, falhas ou exportações concluídas."
+          "Consulte a fila e o histórico de exportação em Memória quando quiser verificar retries, falhas ou exportações concluídas. Workspace e Projeto ficam em Escopo avançado; eles são namespaces da memória, e o DCC separa automaticamente repositórios diferentes."
         ],
         "prompt": "Consulte a memória do projeto e me diga qual decisão foi tomada sobre o isolamento do worktree, incluindo a fonte recuperada.",
         "tip": "Se o servidor estiver indisponível, a tarefa continua. O DCC mantém a exportação na outbox e tenta novamente depois.",

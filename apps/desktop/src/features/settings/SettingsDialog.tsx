@@ -1354,18 +1354,25 @@ export function SettingsDialog({
 												onChange={(event) => setAiMemoryDraft((current) => ({ ...current, token: event.target.value }))}
 											/>
 										</label>
-										<label className="space-y-1.5">
-											<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.workspaceLabel")}</span>
-											<Input value={aiMemoryDraft.workspace} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, workspace: event.target.value }))} />
-										</label>
-										<label className="space-y-1.5">
-											<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.projectLabel")}</span>
-											<Input value={aiMemoryDraft.project} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, project: event.target.value }))} />
-										</label>
-										<label className="space-y-1.5 sm:col-span-2">
-											<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.dataDir")}</span>
-											<Input value={aiMemoryDraft.dataDir ?? ""} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, dataDir: event.target.value || null }))} placeholder={t("settings.aiMemory.dataDirPlaceholder")} />
-										</label>
+										<p className="sm:col-span-2 text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.connectionHint")}</p>
+										<details className="sm:col-span-2 rounded-lg border border-border/50 bg-muted/10 px-3 py-2">
+											<summary className="cursor-pointer text-[12px] font-medium text-foreground">{t("settings.aiMemory.advancedTitle")}</summary>
+											<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.advancedHint")}</p>
+											<div className="mt-3 grid gap-4 sm:grid-cols-2">
+												<label className="space-y-1.5">
+													<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.workspaceLabel")}</span>
+													<Input value={aiMemoryDraft.workspace} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, workspace: event.target.value }))} />
+												</label>
+												<label className="space-y-1.5">
+													<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.projectLabel")}</span>
+													<Input value={aiMemoryDraft.project} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, project: event.target.value }))} />
+												</label>
+												<label className="space-y-1.5 sm:col-span-2">
+													<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.dataDir")}</span>
+													<Input value={aiMemoryDraft.dataDir ?? ""} onChange={(event) => setAiMemoryDraft((current) => ({ ...current, dataDir: event.target.value || null }))} placeholder={t("settings.aiMemory.dataDirPlaceholder")} />
+												</label>
+											</div>
+										</details>
 									</div>
 									<div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
 										<p className="text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.settingsHint")}</p>

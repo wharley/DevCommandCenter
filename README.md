@@ -86,6 +86,10 @@ provider-neutral session export, scoped retrieval, a durable retry outbox, expor
 history, and recovered-source curation. DCC is not a fork of ai-memory and does not
 replace its upstream protocol or wiki storage.
 
+For automatic memory, the configured Workspace is shared intentionally, while the configured
+Project is used as a prefix and combined with the DCC's stable project id. Sessions and agents
+working in the same repository therefore share memory; different repositories remain isolated.
+
 In distributed builds, DCC currently pins the upstream `v2.2.2` release and bundles
 the matching sidecar binary. Development builds never download it automatically. Users
 can run the managed local sidecar, configure an existing remote server, or disable

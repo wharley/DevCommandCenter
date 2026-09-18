@@ -59,9 +59,43 @@ impl AiMemoryConfig {
         Some(config)
     }
 
+    /// Builds the automatic DCC connection while keeping the configured
+    /// workspace as the shared namespace and isolating each DCC project.
+    ///
+    /// The settings UI stores a human-readable project prefix. Automatic
+    /// checkpoints and retrieval add the stable DCC project id so two
+    /// repositories cannot accidentally share one memory namespace.
+    pub fn from_env_for_project(project_id: impl AsRef<str>) -> Option<Self> {
+        let base_url = std::env::var("DCC_AI_MEMORY_URL").ok()?;
+        if base_url.trim().is_empty() {
+            return None;
+        }
+        let workspace = std::env::var("DCC_AI_MEMORY_WORKSPACE")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "dcc-workspace".to_string());
+        let project_prefix = std::env::var("DCC_AI_MEMORY_PROJECT")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "dcc-project".to_string());
+        let project = scoped_project_name(&project_prefix, project_id.as_ref());
+        let mut config = Self::new(base_url, workspace, project);
+        config.bearer_token = std::env::var("DCC_AI_MEMORY_TOKEN").ok();
+        Some(config)
+    }
+
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
+    }
+}
+
+fn scoped_project_name(prefix: &str, project_id: &str) -> String {
+    let project_id = project_id.trim();
+    if project_id.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}::{project_id}")
     }
 }
 
@@ -460,6 +494,16 @@ mod tests {
         let client = AiMemoryClient::new(config).expect("client");
         let result = futures::executor::block_on(client.query("test", 5));
         assert!(matches!(result, Err(AiMemoryError::InvalidUrl(_))));
+    }
+
+    #[test]
+    fn scopes_automatic_project_names_without_cross_project_collisions() {
+        assert_eq!(
+            scoped_project_name("dcc-project", "repo-a"),
+            "dcc-project::repo-a"
+        );
+        assert_eq!(scoped_project_name("team", " repo-b "), "team::repo-b");
+        assert_eq!(scoped_project_name("dcc-project", ""), "dcc-project");
     }
 
     #[test]

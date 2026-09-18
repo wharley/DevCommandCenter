@@ -401,12 +401,7 @@ pub async fn ai_memory_checkpoint(
 
     // A disabled memory configuration should remain a true no-op. In
     // particular, don't create rows that can never be drained later.
-    if AiMemoryConfig::from_env(
-        format!("dcc-workspace-{}", session.workspace_id.0),
-        format!("dcc-project-{}", session.project_id.0),
-    )
-    .is_none()
-    {
+    if AiMemoryConfig::from_env_for_project(&session.project_id.0).is_none() {
         return Ok(None);
     }
 
@@ -1142,11 +1137,8 @@ async fn ai_memory_context_for_turn(
     session: &dcc_core::domain::session::Session,
     prompt: &str,
 ) -> Option<String> {
-    let config = AiMemoryConfig::from_env(
-        format!("dcc-workspace-{}", session.workspace_id.0),
-        format!("dcc-project-{}", session.project_id.0),
-    )?
-    .with_timeout(std::time::Duration::from_millis(500));
+    let config = AiMemoryConfig::from_env_for_project(&session.project_id.0)?
+        .with_timeout(std::time::Duration::from_millis(500));
     let endpoint = config.base_url.clone();
     if !state.allow_ai_memory_query(&endpoint) {
         eprintln!(
@@ -1158,7 +1150,6 @@ async fn ai_memory_context_for_turn(
     let hits = match state.query_ai_memory(config, prompt, 6).await {
         Ok(hits) => {
             state.record_ai_memory_query_success(&endpoint);
-            state.record_ai_memory_hits(&session.id, hits.clone());
             hits
         }
         Err(error) => {
@@ -1174,6 +1165,7 @@ async fn ai_memory_context_for_turn(
             return None;
         }
     };
+    state.record_ai_memory_hits(&session.id, hits.clone());
     if hits.is_empty() {
         return None;
     }
@@ -1616,11 +1608,9 @@ pub async fn close_session(
     // close semantics. A delete-history close never exports the deleted data.
     let auto_memory_export = if !input.delete_history {
         match state.peek_session(&input.session_id).await {
-            Ok(Some(session)) => AiMemoryConfig::from_env(
-                format!("dcc-workspace-{}", session.workspace_id.0),
-                format!("dcc-project-{}", session.project_id.0),
-            )
-            .map(|_| session.id),
+            Ok(Some(session)) => {
+                AiMemoryConfig::from_env_for_project(&session.project_id.0).map(|_| session.id)
+            }
             _ => None,
         }
     } else {

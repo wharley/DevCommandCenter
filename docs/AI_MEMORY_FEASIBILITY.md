@@ -331,8 +331,9 @@ yarn dev
 ```
 
 Na configuração normal, basta instalar o `ai-memory` uma vez e executar `yarn dev`. O script injeta
-as variáveis de inicialização automaticamente; as opções acima servem apenas para escolher outro
-diretório ou escopo.
+as variáveis de inicialização automaticamente. O Workspace configurado é compartilhado; o Projeto
+é usado como prefixo e o DCC acrescenta o identificador estável do projeto local para separar
+repositórios diferentes. As opções acima servem apenas para escolher outro diretório ou namespace.
 
 O desenho recomendado para o produto é um **sidecar local gerenciado pelo DCC**. O primeiro
 incremento já cobre o ciclo de vida básico quando o binário está presente: cria o diretório de dados,

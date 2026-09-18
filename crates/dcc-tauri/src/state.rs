@@ -2089,10 +2089,7 @@ impl SessionCommandState {
                     .await?
                     .len();
             let started_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-            let Some(config) = AiMemoryConfig::from_env(
-                format!("dcc-workspace-{}", session.workspace_id.0),
-                format!("dcc-project-{}", session.project_id.0),
-            ) else {
+            let Some(config) = AiMemoryConfig::from_env_for_project(&session.project_id.0) else {
                 // Keep the request durable when memory is disabled for this
                 // run; enabling it again will resume the pending export.
                 continue;

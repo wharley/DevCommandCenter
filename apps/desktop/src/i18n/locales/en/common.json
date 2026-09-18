@@ -2249,6 +2249,9 @@
       "tokenLabel": "Token (optional)",
       "tokenConfigured": "Token already configured; leave empty to keep it",
       "tokenPlaceholder": "Paste a token only if you want to change it",
+      "connectionHint": "In DCC-managed mode, leave URL and token empty. Use them only when connecting to a remote server; this token belongs to ai-memory, not to your AI provider.",
+      "advancedTitle": "Advanced scope and storage",
+      "advancedHint": "Workspace and Project are memory namespaces, not folder paths. DCC automatically separates different local projects using the project's internal id; change these values only for a shared installation or manual namespace organization.",
       "workspaceLabel": "Workspace",
       "projectLabel": "Project",
       "dataDirPlaceholder": "Application default",
@@ -2551,14 +2554,14 @@
       "memory": {
         "label": "Project memory",
         "summary": "Carry decisions and facts across tasks and providers.",
-        "whatIs": "Project memory keeps useful evidence from earlier sessions so another task can continue without making you repeat the whole context. It is optional, controlled by DCC, and can use the managed local sidecar or a configured server.",
+        "whatIs": "Project memory keeps useful evidence from earlier sessions so another task can continue without making you repeat the whole context. It is optional, controlled by DCC, and can use the managed local sidecar or a configured server. For normal use, keep DCC-managed mode and leave URL and token empty.",
         "whenToUse": "Use it when an implementation spans several tasks, when you switch providers, or when you need to recover an earlier decision, failed attempt, or open question.",
         "steps": [
-          "Open Settings and go to Memory to choose the mode, workspace, and project.",
+          "Open Settings and go to Memory. For normal use, choose DCC-managed mode and leave URL and token empty.",
           "Keep working normally. DCC creates checkpoints automatically when you switch sessions and when you close a session.",
           "Open a new task in the same project and ask your question normally. DCC queries relevant sources before calling the provider.",
           "See recovered sources in the session header. You can pin, correct, or ignore a source.",
-          "Open Memory to inspect the export queue and history, including retries, failures, and completed exports."
+          "Open Memory to inspect the export queue and history, including retries, failures, and completed exports. Workspace and Project are under Advanced scope; they are memory namespaces, and DCC automatically separates different repositories."
         ],
         "prompt": "Query project memory and tell me which decision was made about worktree isolation, including the recovered source.",
         "tip": "If the server is unavailable, the task continues. DCC keeps the export in the outbox and retries later.",
