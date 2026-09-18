@@ -2558,7 +2558,7 @@
         "whenToUse": "Use it when an implementation spans several tasks, when you switch providers, or when you need to recover an earlier decision, failed attempt, or open question.",
         "steps": [
           "Open Settings and go to Memory. For normal use, choose DCC-managed mode and leave URL and token empty.",
-          "Keep working normally. DCC creates checkpoints automatically when you switch sessions and when you close a session.",
+          "Keep working normally. DCC creates checkpoints automatically when you switch sessions, complete a task, or close a session. Before deleting a task with content, it tries to save the final checkpoint; if memory is unavailable, the task stays intact so you can retry.",
           "Open a new task in the same project and ask your question normally. DCC queries relevant sources before calling the provider.",
           "See recovered sources in the session header. You can pin, correct, or ignore a source.",
           "Open Memory to inspect the export queue and history, including retries, failures, and completed exports. Workspace and Project are under Advanced scope; they are memory namespaces, and DCC automatically separates different repositories."

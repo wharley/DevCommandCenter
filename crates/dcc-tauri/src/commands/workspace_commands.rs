@@ -7788,10 +7788,30 @@ async fn set_workspace_bundle_state(
 ) -> Result<WorkspaceBundleStateOutput, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let summary = repo
-        .set_workspace_bundle_state(&input.bundle_id, bundle_state, Utc::now().to_rfc3339())
+        .set_workspace_bundle_state(
+            &input.bundle_id,
+            bundle_state.clone(),
+            Utc::now().to_rfc3339(),
+        )
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("workspace bundle not found: {}", input.bundle_id.0))?;
+    if bundle_state == WorkspaceBundleState::Completed {
+        let workspace_ids = summary
+            .members
+            .iter()
+            .map(|member| member.workspace_id.clone())
+            .collect::<Vec<_>>();
+        let memory_state = state.inner().clone();
+        tokio::spawn(async move {
+            if let Err(error) = memory_state
+                .checkpoint_ai_memory_for_workspaces(&workspace_ids, false)
+                .await
+            {
+                eprintln!("[DCC] ai-memory bundle completion checkpoint failed: {error}");
+            }
+        });
+    }
     Ok(WorkspaceBundleStateOutput { summary })
 }
 
@@ -7844,6 +7864,15 @@ pub async fn delete_workspace_bundle(
             .ok_or_else(|| format!("workspace not found: {}", member.workspace_id.0))?;
         created_workspaces.push(workspace);
     }
+
+    let workspace_ids = created_workspaces
+        .iter()
+        .map(|workspace| workspace.id.clone())
+        .collect::<Vec<_>>();
+    state
+        .checkpoint_ai_memory_for_workspaces(&workspace_ids, true)
+        .await
+        .map_err(|error| format!("memory export must finish before deleting this task: {error}"))?;
 
     ensure_workspace_history_deletable(&session_repo, &created_workspaces)?;
 
@@ -12045,7 +12074,22 @@ pub async fn complete_workspace(
     workspace.updated_at = Utc::now().to_rfc3339();
     repo.save_workspace(&workspace)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Completing a task is the normal happy-path checkpoint. Keep the UI
+    // responsive and let the durable outbox retry if the sidecar is busy or
+    // temporarily unavailable.
+    let memory_state = state.inner().clone();
+    let workspace_id = workspace.id.clone();
+    tokio::spawn(async move {
+        if let Err(error) = memory_state
+            .checkpoint_ai_memory_for_workspaces(&[workspace_id], false)
+            .await
+        {
+            eprintln!("[DCC] ai-memory completion checkpoint failed: {error}");
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -12144,6 +12188,13 @@ pub async fn delete_workspace(
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    // A destructive delete must not erase a session before its final memory
+    // checkpoint has reached ai-memory. If the sidecar is unavailable, leave
+    // the task intact and let the user retry after it recovers.
+    state
+        .checkpoint_ai_memory_for_workspaces(std::slice::from_ref(&id), true)
+        .await
+        .map_err(|error| format!("memory export must finish before deleting this task: {error}"))?;
     ensure_workspace_history_deletable(&session_repo, std::slice::from_ref(&workspace))?;
     cleanup_delegation_worktrees(&state, &session_repo, &workspace).await?;
     if input.delete_remote_branch {

@@ -435,6 +435,7 @@ impl M3SnapshotRef {
 pub struct WorkspaceCommandState {
     pub db_path: PathBuf,
     pub(crate) app_data_dir: PathBuf,
+    session_state: SessionCommandState,
     runtime: Arc<ProcessRuntime>,
     delivery_failures: Arc<Mutex<DeliveryFailureStore>>,
 }
@@ -521,9 +522,54 @@ impl WorkspaceCommandState {
         Self {
             db_path: session.db_path.clone(),
             app_data_dir: session.app_data_dir.clone(),
+            session_state: session.clone(),
             runtime: Arc::clone(&session.runtime),
             delivery_failures: Arc::new(Mutex::new(DeliveryFailureStore::default())),
         }
+    }
+
+    /// Creates a final memory checkpoint for every session belonging to the
+    /// supplied workspace scope. Completion uses this as a best-effort,
+    /// background operation; destructive deletion uses `require_success` so
+    /// local history is never removed while an enabled memory export is still
+    /// pending.
+    pub async fn checkpoint_ai_memory_for_workspaces(
+        &self,
+        workspace_ids: &[WorkspaceId],
+        require_success: bool,
+    ) -> Result<()> {
+        let mut seen_sessions = HashSet::new();
+        for workspace_id in workspace_ids {
+            let summaries = self.session_state.list_workspace_sessions(workspace_id)?;
+            for summary in summaries {
+                let session = summary.session;
+                if !seen_sessions.insert(session.id.0.clone()) {
+                    continue;
+                }
+                if AiMemoryConfig::from_env_for_project(&session.project_id.0).is_none() {
+                    continue;
+                }
+                self.session_state.enqueue_ai_memory_export(&session.id)?;
+                if let Err(error) = self.session_state.drain_ai_memory_outbox(1).await {
+                    if require_success {
+                        return Err(error);
+                    }
+                    eprintln!("[DCC] ai-memory automatic checkpoint failed: {error}");
+                }
+                if require_success
+                    && self
+                        .session_state
+                        .ai_memory_export_status(&session.id)?
+                        .is_some()
+                {
+                    return Err(dcc_core::CoreError::Repository(format!(
+                        "ai-memory export is still pending for session {}",
+                        session.id.0
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     #[allow(dead_code)] // Foundation API; handlers are integrated separately.
@@ -1998,7 +2044,7 @@ impl SessionCommandState {
 
     /// Persists a best-effort export request before attempting the network
     /// call. The DCC session remains authoritative; this outbox only makes a
-    /// temporary ai-memory outage recoverable after close or app restart.
+    /// temporary ai-memory outage recoverable after a checkpoint or app restart.
     pub fn enqueue_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
         self.session_repo.enqueue_ai_memory_export(session_id)
     }

@@ -350,8 +350,8 @@ fn parse_query_hits(value: Value) -> Result<Vec<AiMemoryHit>, AiMemoryError> {
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("MCP query failed");
-        // A new DCC workspace has no ai-memory scope until its first close
-        // export. Treat that first read as an empty index; it is not a
+        // A new DCC workspace has no ai-memory scope until its first
+        // checkpoint export. Treat that first read as an empty index; it is not a
         // connectivity failure and should not open the query circuit.
         let lower = message.to_ascii_lowercase();
         if (lower.contains("workspace") || lower.contains("project")) && lower.contains("not found")

@@ -2558,7 +2558,7 @@
         "whenToUse": "Use quando uma implementação atravessa várias tarefas, quando você troca de provider ou quando precisa recuperar uma decisão, uma tentativa que falhou ou uma pendência antiga.",
         "steps": [
           "Abra Configurações e entre em Memória. Para o uso normal, escolha Gerenciado pelo DCC e deixe URL e token vazios.",
-          "Continue trabalhando normalmente. O DCC cria checkpoints automaticamente ao trocar de sessão e também ao fechar uma sessão.",
+          "Continue trabalhando normalmente. O DCC cria checkpoints automaticamente ao trocar de sessão, concluir uma tarefa ou fechar uma sessão. Antes de apagar uma tarefa com conteúdo, ele tenta salvar o checkpoint final; se a memória estiver indisponível, a tarefa permanece intacta para você tentar novamente.",
           "Abra uma tarefa nova no mesmo projeto e faça a pergunta normalmente. O DCC consulta as fontes relevantes antes de chamar o provider.",
           "Veja as fontes recuperadas no cabeçalho da sessão. Você pode fixar, corrigir ou ignorar uma fonte.",
           "Consulte a fila e o histórico de exportação em Memória quando quiser verificar retries, falhas ou exportações concluídas. Workspace e Projeto ficam em Escopo avançado; eles são namespaces da memória, e o DCC separa automaticamente repositórios diferentes."
