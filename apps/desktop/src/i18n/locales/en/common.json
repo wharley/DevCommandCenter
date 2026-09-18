@@ -2265,6 +2265,14 @@
       "outboxHint": "Sessions waiting to be sent to ai-memory appear here with attempts, next retry, and errors.",
       "outboxMeta": "{{attempts}} attempt(s) · {{events}} event(s) · next retry {{next}}",
       "outboxEmpty": "No pending exports.",
+      "historyTitle": "Export history",
+      "historyHint": "Completed attempts and failures remain available for audit and diagnosis.",
+      "historyMeta": "{{attempts}} attempt(s) · {{accepted}} accepted of {{events}} event(s) · {{finished}}",
+      "historyEmpty": "No export attempts recorded yet.",
+      "historyStatus": {
+        "completed": "Completed",
+        "retrying": "Retry scheduled"
+      },
       "retry": "Retry",
       "retryQueued": "Export retried or scheduled again.",
       "retryError": "Could not retry the export.",

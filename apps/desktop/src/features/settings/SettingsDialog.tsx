@@ -99,6 +99,7 @@ import {
 import { setProviderAvailability } from "@/lib/provider-api";
 import {
 	loadAiMemoryOutbox,
+	loadAiMemoryExportHistory,
 	loadAiMemorySettings,
 	loadAiMemorySidecarStatus,
 	restartDcc,
@@ -682,6 +683,12 @@ export function SettingsDialog({
 		enabled: open,
 		staleTime: 5_000,
 	});
+	const aiMemoryExportHistoryQuery = useQuery({
+		queryKey: ["ai-memory", "export-history"],
+		queryFn: () => loadAiMemoryExportHistory(100),
+		enabled: open,
+		staleTime: 5_000,
+	});
 	const [aiMemoryDraft, setAiMemoryDraft] = useState<AiMemorySettingsInput>({
 		mode: "managed",
 		baseUrl: null,
@@ -846,7 +853,7 @@ export function SettingsDialog({
 		setAiMemoryRetrying(sessionId);
 		try {
 			await retryAiMemoryOutbox(sessionId);
-			await aiMemoryOutboxQuery.refetch();
+			await Promise.all([aiMemoryOutboxQuery.refetch(), aiMemoryExportHistoryQuery.refetch()]);
 			toast.success(t("settings.aiMemory.retryQueued"));
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : t("settings.aiMemory.retryError"));
@@ -1383,8 +1390,8 @@ export function SettingsDialog({
 															<h3 className="text-[14px] font-medium text-foreground">{t("settings.aiMemory.outboxTitle")}</h3>
 															<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.outboxHint")}</p>
 														</div>
-														<Button type="button" variant="outline" size="sm" disabled={aiMemoryOutboxQuery.isFetching} onClick={() => void aiMemoryOutboxQuery.refetch()}>
-															{aiMemoryOutboxQuery.isFetching ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+															<Button type="button" variant="outline" size="sm" disabled={aiMemoryOutboxQuery.isFetching || aiMemoryExportHistoryQuery.isFetching} onClick={() => void Promise.all([aiMemoryOutboxQuery.refetch(), aiMemoryExportHistoryQuery.refetch()])}>
+																{aiMemoryOutboxQuery.isFetching || aiMemoryExportHistoryQuery.isFetching ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
 															{t("settings.aiMemory.refresh")}
 														</Button>
 													</div>
@@ -1409,9 +1416,30 @@ export function SettingsDialog({
 													) : (
 														<p className="mt-4 rounded-lg border border-border/50 bg-background p-3 text-[12px] text-muted-foreground">{t("settings.aiMemory.outboxEmpty")}</p>
 													)}
-												</div>
+														</div>
 
-												{aiMemoryStatusQuery.data ? (
+														<div className="mt-4 border-t border-border/40 pt-4">
+															<h4 className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.historyTitle")}</h4>
+															<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.historyHint")}</p>
+															{aiMemoryExportHistoryQuery.data?.length ? (
+																<div className="mt-3 divide-y divide-border/40 rounded-lg border border-border/50 bg-background">
+																	{aiMemoryExportHistoryQuery.data.map((entry) => (
+																		<div className="p-3" key={entry.id}>
+																			<div className="flex flex-wrap items-center justify-between gap-2">
+																				<p className="truncate font-mono text-[11px] text-foreground" title={entry.sessionId}>{entry.sessionId}</p>
+																				<Badge variant={entry.status === "completed" ? "secondary" : "outline"} className="h-6 px-2 text-[10px] font-normal">{t(`settings.aiMemory.historyStatus.${entry.status}`)}</Badge>
+																			</div>
+																			<p className="mt-1 text-[11px] text-muted-foreground">{t("settings.aiMemory.historyMeta", { attempts: entry.attempts, accepted: entry.acceptedCount, events: entry.eventCount, finished: entry.finishedAt })}</p>
+																			{entry.error ? <p className="mt-1 text-[11px] text-destructive">{entry.error}</p> : null}
+																		</div>
+																	))}
+																</div>
+															) : (
+																<p className="mt-3 text-[11px] text-muted-foreground">{t("settings.aiMemory.historyEmpty")}</p>
+															)}
+														</div>
+
+														{aiMemoryStatusQuery.data ? (
 										<div className="grid gap-3 sm:grid-cols-2">
 												{(
 													[

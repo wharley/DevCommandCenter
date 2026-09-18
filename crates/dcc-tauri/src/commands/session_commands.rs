@@ -119,7 +119,24 @@ pub struct AiMemoryOutboxStatusOutput {
     pub event_count: usize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemoryExportHistoryOutput {
+    pub id: i64,
+    pub session_id: String,
+    pub status: String,
+    pub attempts: u32,
+    pub event_count: usize,
+    pub accepted_count: usize,
+    pub next_attempt_at: Option<String>,
+    pub error: Option<String>,
+    pub started_at: String,
+    pub finished_at: String,
+}
+
 pub type AiMemoryOutboxListOutput = Vec<AiMemoryOutboxStatusOutput>;
+
+pub type AiMemoryExportHistoryListOutput = Vec<AiMemoryExportHistoryOutput>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -410,6 +427,33 @@ pub async fn ai_memory_checkpoint(
                 last_error: entry.last_error,
                 event_count: 0,
             })
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn ai_memory_export_history(
+    state: State<'_, SessionCommandState>,
+    limit: Option<usize>,
+) -> Result<Vec<AiMemoryExportHistoryOutput>, String> {
+    state
+        .list_ai_memory_export_history(limit.unwrap_or(100))
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| AiMemoryExportHistoryOutput {
+                    id: entry.id,
+                    session_id: entry.session_id.0,
+                    status: entry.status,
+                    attempts: entry.attempts,
+                    event_count: entry.event_count,
+                    accepted_count: entry.accepted_count,
+                    next_attempt_at: entry.next_attempt_at,
+                    error: entry.error,
+                    started_at: entry.started_at,
+                    finished_at: entry.finished_at,
+                })
+                .collect()
         })
         .map_err(|error| error.to_string())
 }

@@ -218,7 +218,9 @@ raciocínio, deltas e chamadas de ferramenta. Ela não altera o fluxo normal de 
 
 O fluxo atual mantém uma outbox persistida no SQLite: o fechamento registra a sessão antes da
 tentativa de rede, faz uma tentativa imediata e o worker do DCC repete pendências a cada 30 segundos
-com backoff limitado. O comando explícito continua disponível para diagnóstico e reprocessamento.
+com backoff limitado. Cada tentativa também é copiada para um histórico imutável com status,
+horários, contagem de eventos, itens aceitos e erro; o comando explícito continua disponível para
+diagnóstico e reprocessamento.
 O disjuntor da recuperação automática abre após três falhas consecutivas por endpoint e fecha depois
 de 30 segundos. O cabeçalho do workbench mostra quando a sessão ainda está pendente ou aguardando
 retry; sem pendência, o indicador fica oculto para não sugerir que memória está habilitada quando a
@@ -634,8 +636,8 @@ registradas; essas duas evidências continuam separadas da implementação local
 - [x] ativar, desativar e escolher o modo local/remoto sem editar variáveis de ambiente;
 - [x] exibir cada fonte recuperada com origem, data, escopo e indicação de checkout quando aplicável;
 - [x] permitir corrigir, ignorar e fixar uma memória, preservando a decisão local no DCC;
-- [x] mostrar o histórico completo da outbox, incluindo tentativas, próximo retry, erro e payload
-  resumido, com reprocessamento manual seguro;
+- [x] mostrar a fila pendente e o histórico de tentativas da outbox, incluindo tentativas, próximo
+  retry, status, horários, erro e contagem de eventos, com reprocessamento manual seguro;
 - [ ] executar a prova integrada real: fechar o DCC, reiniciar, abrir uma tarefa nova e repetir
   a recuperação com outro provider;
 - [ ] repetir o cenário em Local e Worktree e confirmar isolamento entre projetos e sessões;

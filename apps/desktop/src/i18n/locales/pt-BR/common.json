@@ -2265,6 +2265,14 @@
       "outboxHint": "Sessões que aguardam envio ao ai-memory aparecem aqui com tentativas, próximo retry e erro.",
       "outboxMeta": "{{attempts}} tentativa(s) · {{events}} evento(s) · próximo retry {{next}}",
       "outboxEmpty": "Nenhuma exportação pendente.",
+      "historyTitle": "Histórico de exportações",
+      "historyHint": "Tentativas concluídas e falhas ficam registradas para auditoria e diagnóstico.",
+      "historyMeta": "{{attempts}} tentativa(s) · {{accepted}} aceito(s) de {{events}} evento(s) · {{finished}}",
+      "historyEmpty": "Nenhuma tentativa registrada ainda.",
+      "historyStatus": {
+        "completed": "Concluída",
+        "retrying": "Aguardando retry"
+      },
       "retry": "Reprocessar",
       "retryQueued": "Exportação reprocessada ou agendada novamente.",
       "retryError": "Não foi possível reprocessar a exportação.",

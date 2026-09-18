@@ -236,17 +236,18 @@ use dcc_tauri::commands::{
         SetProviderAvailabilityInput,
     },
     session_commands::{
-        AiMemoryOutboxStatusOutput, AiMemoryQueryHit, AiMemoryQueryInput, AiMemorySyncInput,
-        AiMemorySyncOutput, ApplyTaskTitleInput, ApplyTaskTitleOutput, ExecuteGuardedUndoInput,
-        ExecuteGuardedUndoOutput, GuardedUndoOperationSummary, GuardedUndoPreviewFile,
-        InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
-        ListMcpRuntimeStatusesOutput, McpTurnPreflightState, NativeSubagentControlOutput,
-        PrepareGuardedUndoInput, PrepareGuardedUndoOutput, PrepareTurnOutput,
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
-        SearchSessionsInput, SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput,
-        SteerNativeSubagentInput, TurnReviewFileDiffInput, TurnReviewFileDiffOutput,
-        TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
+        AiMemoryExportHistoryOutput, AiMemoryOutboxStatusOutput, AiMemoryQueryHit,
+        AiMemoryQueryInput, AiMemorySyncInput, AiMemorySyncOutput, ApplyTaskTitleInput,
+        ApplyTaskTitleOutput, ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput,
+        GuardedUndoOperationSummary, GuardedUndoPreviewFile, InterruptNativeSubagentInput,
+        LastTurnReviewInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
+        McpTurnPreflightState, NativeSubagentControlOutput, PrepareGuardedUndoInput,
+        PrepareGuardedUndoOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
+        SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
+        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
+        WaitMcpOauthOutput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -473,6 +474,7 @@ struct SessionMethods {
     ai_memory_outbox_list: String,
     ai_memory_outbox_retry: String,
     ai_memory_checkpoint: String,
+    ai_memory_export_history: String,
     ai_memory_sidecar_status: String,
     ai_memory_settings_load: String,
     ai_memory_settings_save: String,
@@ -904,6 +906,7 @@ fn main() {
         .typ::<CloseSessionInput>()
         .typ::<CloseSessionOutput>()
         .typ::<AiMemoryOutboxStatusOutput>()
+        .typ::<AiMemoryExportHistoryOutput>()
         .typ::<AiMemorySidecarStatus>()
         .typ::<AiMemorySettingsInput>()
         .typ::<AiMemorySettingsOutput>()
@@ -1096,6 +1099,7 @@ fn main() {
             ai_memory_outbox_list: "ai_memory_outbox_list".to_string(),
             ai_memory_outbox_retry: "ai_memory_outbox_retry".to_string(),
             ai_memory_checkpoint: "ai_memory_checkpoint".to_string(),
+            ai_memory_export_history: "ai_memory_export_history".to_string(),
             ai_memory_sidecar_status: "ai_memory_sidecar_status".to_string(),
             ai_memory_settings_load: "ai_memory_settings_load".to_string(),
             ai_memory_settings_save: "ai_memory_settings_save".to_string(),

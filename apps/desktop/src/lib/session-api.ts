@@ -29,6 +29,7 @@ import type {
 	AbortRunOutput,
 	AiMemoryQueryHit,
 	AiMemoryQueryInput,
+	AiMemoryExportHistoryOutput,
 	AiMemoryOutboxStatusOutput,
 	AiMemorySidecarStatus,
 	AiMemorySettingsInput,
@@ -123,6 +124,10 @@ export function loadAiMemoryExportStatus(sessionId: string) {
 
 export function loadAiMemoryOutbox(limit = 50) {
 	return invoke<AiMemoryOutboxStatusOutput[]>(SESSION_METHODS.aiMemoryOutboxList, { limit });
+}
+
+export function loadAiMemoryExportHistory(limit = 100) {
+	return invoke<AiMemoryExportHistoryOutput[]>(SESSION_METHODS.aiMemoryExportHistory, { limit });
 }
 
 export function retryAiMemoryOutbox(sessionId: string) {

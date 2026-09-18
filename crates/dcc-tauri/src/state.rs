@@ -70,8 +70,8 @@ use dcc_infra::{
     },
     credential_store::SystemCredentialStore,
     db::{
-        AiMemoryOutboxEntry, AiMemorySourceAction, ProviderAvailabilityRecord, SqliteSessionRepo,
-        SqliteWorkspaceRepo,
+        AiMemoryExportHistoryEntry, AiMemoryOutboxEntry, AiMemorySourceAction,
+        ProviderAvailabilityRecord, SqliteSessionRepo, SqliteWorkspaceRepo,
     },
     mcp_db::SqliteMcpRepo,
 };
@@ -2001,6 +2001,39 @@ impl SessionCommandState {
             .list_ai_memory_exports(limit.clamp(1, 100))
     }
 
+    pub fn record_ai_memory_export_history(
+        &self,
+        session_id: &SessionId,
+        status: &str,
+        attempts: u32,
+        event_count: usize,
+        accepted_count: usize,
+        next_attempt_at: Option<&str>,
+        error_message: Option<&str>,
+        started_at: &str,
+        finished_at: &str,
+    ) -> Result<()> {
+        self.session_repo.record_ai_memory_export_history(
+            session_id,
+            status,
+            attempts,
+            event_count,
+            accepted_count,
+            next_attempt_at,
+            error_message,
+            started_at,
+            finished_at,
+        )
+    }
+
+    pub fn list_ai_memory_export_history(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<AiMemoryExportHistoryEntry>> {
+        self.session_repo
+            .list_ai_memory_export_history(limit.clamp(1, 200))
+    }
+
     pub async fn retry_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
         self.session_repo.enqueue_ai_memory_export(session_id)?;
         self.drain_ai_memory_outbox(1).await.map(|_| ())
@@ -2033,6 +2066,11 @@ impl SessionCommandState {
                     .complete_ai_memory_export(&entry.session_id)?;
                 continue;
             };
+            let event_count =
+                SessionEventRepo::list_events_by_session(&self.session_repo, &entry.session_id)
+                    .await?
+                    .len();
+            let started_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
             let Some(config) = AiMemoryConfig::from_env(
                 format!("dcc-workspace-{}", session.workspace_id.0),
                 format!("dcc-project-{}", session.project_id.0),
@@ -2055,6 +2093,18 @@ impl SessionCommandState {
             {
                 Ok(ack) if ack.failed_index.is_none() => {
                     self.record_ai_memory_export_success(&endpoint);
+                    let finished_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+                    self.record_ai_memory_export_history(
+                        &entry.session_id,
+                        "completed",
+                        entry.attempts.saturating_add(1),
+                        event_count,
+                        ack.accepted,
+                        None,
+                        None,
+                        &started_at,
+                        &finished_at,
+                    )?;
                     self.session_repo
                         .complete_ai_memory_export(&entry.session_id)?;
                     completed += 1;
@@ -2068,6 +2118,18 @@ impl SessionCommandState {
                     let delay_seconds = (5_i64 << entry.attempts.min(9)).min(900);
                     let next_attempt = (Utc::now() + ChronoDuration::seconds(delay_seconds))
                         .to_rfc3339_opts(SecondsFormat::Millis, true);
+                    let finished_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+                    self.record_ai_memory_export_history(
+                        &entry.session_id,
+                        "retrying",
+                        entry.attempts.saturating_add(1),
+                        event_count,
+                        ack.accepted,
+                        Some(&next_attempt),
+                        Some(&error),
+                        &started_at,
+                        &finished_at,
+                    )?;
                     self.session_repo.fail_ai_memory_export(
                         &entry.session_id,
                         &next_attempt,
@@ -2084,6 +2146,18 @@ impl SessionCommandState {
                     let next_attempt = (Utc::now() + ChronoDuration::seconds(delay_seconds))
                         .to_rfc3339_opts(SecondsFormat::Millis, true);
                     let bounded_error = error.to_string().chars().take(500).collect::<String>();
+                    let finished_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+                    self.record_ai_memory_export_history(
+                        &entry.session_id,
+                        "retrying",
+                        entry.attempts.saturating_add(1),
+                        event_count,
+                        0,
+                        Some(&next_attempt),
+                        Some(&bounded_error),
+                        &started_at,
+                        &finished_at,
+                    )?;
                     self.session_repo.fail_ai_memory_export(
                         &entry.session_id,
                         &next_attempt,

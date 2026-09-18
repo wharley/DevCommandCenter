@@ -214,6 +214,27 @@ CREATE TABLE IF NOT EXISTS dcc_ai_memory_outbox (
 CREATE INDEX IF NOT EXISTS idx_dcc_ai_memory_outbox_due
 	ON dcc_ai_memory_outbox(next_attempt_at, updated_at);
 
+-- Immutable audit records for every network attempt made from the outbox.
+-- The pending row above remains short-lived; this table is the durable
+-- history shown by the settings UI.
+CREATE TABLE IF NOT EXISTS dcc_ai_memory_export_history (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id TEXT NOT NULL,
+	status TEXT NOT NULL CHECK (status IN ('completed', 'retrying')),
+	attempts INTEGER NOT NULL,
+	event_count INTEGER NOT NULL DEFAULT 0,
+	accepted_count INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NULL,
+	error TEXT NULL,
+	started_at TEXT NOT NULL,
+	finished_at TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_ai_memory_export_history_finished
+	ON dcc_ai_memory_export_history(finished_at DESC, id DESC);
+
 -- Local curation decisions are DCC metadata. They never mutate ai-memory's
 -- wiki directly and can be rebuilt or removed independently of the index.
 CREATE TABLE IF NOT EXISTS dcc_ai_memory_source_actions (
@@ -1191,6 +1212,20 @@ pub struct AiMemoryOutboxEntry {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AiMemoryExportHistoryEntry {
+    pub id: i64,
+    pub session_id: SessionId,
+    pub status: String,
+    pub attempts: u32,
+    pub event_count: usize,
+    pub accepted_count: usize,
+    pub next_attempt_at: Option<String>,
+    pub error: Option<String>,
+    pub started_at: String,
+    pub finished_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiMemorySourceAction {
     pub source_key: String,
     pub action: String,
@@ -1416,6 +1451,87 @@ impl SqliteSessionRepo {
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
+    }
+
+    pub fn record_ai_memory_export_history(
+        &self,
+        session_id: &SessionId,
+        status: &str,
+        attempts: u32,
+        event_count: usize,
+        accepted_count: usize,
+        next_attempt_at: Option<&str>,
+        error_message: Option<&str>,
+        started_at: &str,
+        finished_at: &str,
+    ) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_ai_memory_export_history
+                (session_id, status, attempts, event_count, accepted_count,
+                 next_attempt_at, error, started_at, finished_at, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+            "#,
+            params![
+                session_id.0.clone(),
+                status,
+                i64::from(attempts),
+                i64::try_from(event_count).unwrap_or(i64::MAX),
+                i64::try_from(accepted_count).unwrap_or(i64::MAX),
+                next_attempt_at,
+                error_message,
+                started_at,
+                finished_at,
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_ai_memory_export_history(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<AiMemoryExportHistoryEntry>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                r#"
+                SELECT id, session_id, status, attempts, event_count, accepted_count,
+                       next_attempt_at, error, started_at, finished_at
+                  FROM dcc_ai_memory_export_history
+                 ORDER BY finished_at DESC, id DESC
+                 LIMIT ?1
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+                let attempts = row.get::<_, i64>(3)?;
+                let event_count = row.get::<_, i64>(4)?;
+                let accepted_count = row.get::<_, i64>(5)?;
+                Ok(AiMemoryExportHistoryEntry {
+                    id: row.get(0)?,
+                    session_id: SessionId(row.get(1)?),
+                    status: row.get(2)?,
+                    attempts: u32::try_from(attempts).unwrap_or(u32::MAX),
+                    event_count: usize::try_from(event_count).unwrap_or(usize::MAX),
+                    accepted_count: usize::try_from(accepted_count).unwrap_or(usize::MAX),
+                    next_attempt_at: row.get(6)?,
+                    error: row.get(7)?,
+                    started_at: row.get(8)?,
+                    finished_at: row.get(9)?,
+                })
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        rows.map(|row| row.map_err(|error| dcc_core::CoreError::Repository(error.to_string())))
+            .collect()
     }
 
     pub fn list_ai_memory_source_actions(&self, limit: usize) -> Result<Vec<AiMemorySourceAction>> {
@@ -8823,7 +8939,7 @@ mod tests {
     }
 
     #[test]
-    fn ai_memory_outbox_survives_failure_and_is_removed_on_success() {
+    fn ai_memory_outbox_survives_failure_and_history_is_retained_on_success() {
         let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
         let session = Session {
             id: SessionId("outbox-session".to_string()),
@@ -8877,6 +8993,26 @@ mod tests {
             .list_due_ai_memory_exports("9999-01-01T00:00:00.002Z", 8)
             .expect("list completed exports")
             .is_empty());
+
+        repo.record_ai_memory_export_history(
+            &session.id,
+            "completed",
+            2,
+            4,
+            4,
+            None,
+            None,
+            "2026-01-01T00:00:00.000Z",
+            "2026-01-01T00:00:01.000Z",
+        )
+        .expect("record completed export");
+        let history = repo
+            .list_ai_memory_export_history(10)
+            .expect("list export history");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].status, "completed");
+        assert_eq!(history[0].event_count, 4);
+        assert_eq!(history[0].accepted_count, 4);
     }
 
     #[test]
