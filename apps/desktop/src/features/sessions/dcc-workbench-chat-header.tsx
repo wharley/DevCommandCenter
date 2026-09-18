@@ -19,6 +19,28 @@ import { getToggleTerminalShortcutKeys } from "@/features/shortcuts/shortcut-uti
 import { toast } from "sonner";
 import { loadAiMemoryExportStatus, loadAiMemoryRecoveredSources, loadAiMemorySidecarStatus, loadAiMemorySourceActions, saveAiMemorySourceAction } from "@/lib/session-api";
 
+function formatAiMemorySourceTimestamp(value: string, language: string) {
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime())) return value;
+	return new Intl.DateTimeFormat(
+		language === "en" || language.startsWith("en-") ? "en-US" : "pt-BR",
+		{ dateStyle: "medium", timeStyle: "short" },
+	).format(parsed);
+}
+
+/** ai-memory highlights matches with markup; show recovered text as readable plain text. */
+function cleanAiMemoryText(value: string) {
+	const withoutMarkup = value
+		.replace(/<\/?mark\b[^>]*>/gi, "")
+		.replace(/<[^>]*>/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	if (typeof document === "undefined") return withoutMarkup;
+	const decoder = document.createElement("textarea");
+	decoder.innerHTML = withoutMarkup;
+	return decoder.value;
+}
+
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
 	projectLabel: string | null;
@@ -51,7 +73,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	onCloseSession, onRestoreSession, onOpenSessionSearch, onOpenThreadFind, onResumeSession,
 	sessionActionSessionId, onOpenTerminal, onOpenBrowser, browserOpen = false, terminalScopes, workspaceActions,
 }: DccWorkbenchChatHeaderProps) {
-	const { t } = useTranslation("common");
+	const { t, i18n } = useTranslation("common");
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const visibleSessionList = visibleSessions(sessions);
 	const archivedSessionList = sessions.filter(isSessionArchived);
@@ -190,7 +212,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 								{aiMemoryVisibleSources.length > 0 ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">{aiMemoryVisibleSources.length}</span> : null}
 							</Button>
 						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" className="w-96 max-w-[min(92vw,24rem)]">
+						<DropdownMenuContent align="end" className="max-h-[min(70vh,36rem)] w-96 max-w-[min(92vw,24rem)] overflow-y-auto overscroll-contain">
 							<DropdownMenuLabel>{t("workbench.aiMemory.sourcesTitle")}</DropdownMenuLabel>
 							<DropdownMenuSeparator />
 							{aiMemorySourcesQuery.isLoading ? <div className="flex items-center gap-2 px-3 py-4 text-[11px] text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />{t("workbench.aiMemory.sourcesLoading")}</div> : null}
@@ -198,14 +220,16 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 							{!aiMemorySourcesQuery.isLoading ? aiMemoryVisibleSources.map((source, index) => {
 								const sourceKey = aiMemorySourceKey(source);
 								const action = aiMemoryActions.get(sourceKey);
+								const sourceTitle = source.title ? cleanAiMemoryText(source.title) : null;
+								const sourceSnippet = source.snippet ? cleanAiMemoryText(source.snippet) : null;
 								return (
 								<div className="border-b border-border/40 px-3 py-2.5 last:border-b-0" key={`${source.path ?? source.title ?? "source"}-${index}`}>
-									<p className="truncate text-[11px] font-medium text-foreground">{source.title ?? source.path ?? t("workbench.aiMemory.untitled")}</p>
+									<p className="truncate text-[11px] font-medium text-foreground">{sourceTitle || source.path || t("workbench.aiMemory.untitled")}</p>
 									{action?.action === "pinned" ? <p className="mt-0.5 text-[10px] font-medium text-amber-600">{t("workbench.aiMemory.pinned")}</p> : null}
 									{source.path && source.title ? <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{source.path}</p> : null}
 									<p className="mt-0.5 truncate text-[10px] text-muted-foreground">{t("workbench.aiMemory.scope", { project: projectLabel ?? "—", checkout: workspacePath ?? "—" })}</p>
-									{source.createdAt ? <p className="mt-0.5 text-[10px] text-muted-foreground">{source.createdAt}</p> : null}
-									{source.snippet ? <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">{source.snippet}</p> : null}
+									{source.createdAt ? <p className="mt-0.5 text-[10px] text-muted-foreground" title={source.createdAt}>{formatAiMemorySourceTimestamp(source.createdAt, i18n.resolvedLanguage ?? i18n.language)}</p> : null}
+									{sourceSnippet ? <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">{sourceSnippet}</p> : null}
 									{action?.action === "corrected" && action.correction ? <p className="mt-1 rounded bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-600">{action.correction}</p> : null}
 									<div className="mt-2 flex items-center gap-1">
 										<Button type="button" variant="ghost" size="icon" className="size-7" title={t("workbench.aiMemory.pin")} disabled={aiMemoryActionSaving === sourceKey} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void saveSourceAction(sourceKey, "pinned"); }}><Pin className="size-3.5" /></Button>

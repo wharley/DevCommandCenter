@@ -37,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { DccDensity, DccTheme } from "@/components/theme-provider";
@@ -1430,8 +1431,9 @@ export function SettingsDialog({
 															<h4 className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.historyTitle")}</h4>
 															<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.historyHint")}</p>
 													{aiMemoryExportHistoryQuery.data?.length ? (
-														<div className="mt-3 divide-y divide-border/40 rounded-lg border border-border/50 bg-background">
-															{aiMemoryExportHistoryQuery.data.map((entry) => (
+									<ScrollArea className="mt-3 max-h-72 rounded-lg border border-border/50 bg-background">
+										<div className="divide-y divide-border/40">
+										{aiMemoryExportHistoryQuery.data.map((entry) => (
 																<div className="p-3" key={entry.id}>
 																	<div className="flex flex-wrap items-center justify-between gap-2">
 																		<p className="truncate font-mono text-[11px] text-foreground" title={entry.sessionId}>{t("settings.aiMemory.historySession", { id: entry.sessionId.length > 12 ? `${entry.sessionId.slice(0, 8)}…${entry.sessionId.slice(-4)}` : entry.sessionId })}</p>
@@ -1439,9 +1441,10 @@ export function SettingsDialog({
 																	</div>
 															<p className="mt-1 text-[11px] text-muted-foreground" title={entry.finishedAt}>{t("settings.aiMemory.historyMeta", { attempts: entry.attempts, accepted: entry.acceptedCount, events: entry.eventCount, finished: formatAiMemoryTimestamp(entry.finishedAt, i18n.resolvedLanguage ?? i18n.language) })}</p>
 																	{entry.error ? <p className="mt-1 text-[11px] text-destructive">{entry.error}</p> : null}
-																</div>
-															))}
-														</div>
+											</div>
+										))}
+										</div>
+									</ScrollArea>
 															) : (
 																<p className="mt-3 text-[11px] text-muted-foreground">{t("settings.aiMemory.historyEmpty")}</p>
 															)}
