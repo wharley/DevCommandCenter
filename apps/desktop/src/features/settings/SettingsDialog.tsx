@@ -1260,9 +1260,15 @@ export function SettingsDialog({
 													<h3 className="text-[14px] font-medium text-foreground">
 														{t("settings.aiMemory.title")}
 													</h3>
-													<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-														{t("settings.aiMemory.hint")}
-													</p>
+														<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+															{t("settings.aiMemory.hint")}
+														</p>
+														<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/90">
+															{t("settings.aiMemory.operationsHint")}
+														</p>
+														<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/90">
+															{t("settings.aiMemory.firstUseHint")}
+														</p>
 												</div>
 											</div>
 											<Button

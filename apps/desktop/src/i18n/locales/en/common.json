@@ -2244,6 +2244,8 @@
     "aiMemory": {
       "title": "Project memory",
       "hint": "Memory is optional and local. DCC keeps one sidecar when enabled and keeps working if it is unavailable.",
+      "operationsHint": "The sidecar stays idle between operations. DCC queries memory with a short timeout, uses at most 4,000 characters of context, and stores pending exports in the local database to retry later.",
+      "firstUseHint": "First use: in a distributed build with the binary included, just open a task. In development, yarn dev uses the binary only when DCC_AI_MEMORY_BIN or ~/Applications/ai-memory/ai-memory exists; it never downloads anything automatically.",
       "refresh": "Refresh",
       "modeLabel": "Operating mode",
       "tokenLabel": "Token (optional)",
