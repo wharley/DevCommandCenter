@@ -1,9 +1,10 @@
-import { BookOpen, Cloud, CloudOff, Globe2, History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
-import { memo, type ReactNode } from "react";
+import { BookOpen, Check, Cloud, CloudOff, EyeOff, Globe2, History, LoaderCircle, Pin, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceEditorPicker } from "./workspace-editor-picker";
@@ -15,7 +16,8 @@ import { cn } from "@/lib/utils";
 import type { TerminalScopeTarget } from "@/features/terminal/terminal-scope";
 import { useActiveTerminalCount, useGlobalActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 import { getToggleTerminalShortcutKeys } from "@/features/shortcuts/shortcut-utils";
-import { loadAiMemoryExportStatus, loadAiMemoryRecoveredSources } from "@/lib/session-api";
+import { toast } from "sonner";
+import { loadAiMemoryExportStatus, loadAiMemoryRecoveredSources, loadAiMemorySourceActions, saveAiMemorySourceAction } from "@/lib/session-api";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -68,6 +70,35 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 		enabled: Boolean(selectedSessionId),
 		staleTime: 30_000,
 	});
+	const aiMemoryActionsQuery = useQuery({
+		queryKey: ["ai-memory-source-actions"],
+		queryFn: () => loadAiMemorySourceActions(),
+		enabled: Boolean(selectedSessionId),
+		staleTime: 30_000,
+	});
+	const [aiMemoryCorrection, setAiMemoryCorrection] = useState<Record<string, string>>({});
+	const [aiMemoryActionSaving, setAiMemoryActionSaving] = useState<string | null>(null);
+	const aiMemoryActions = useMemo(
+		() => new Map((aiMemoryActionsQuery.data ?? []).map((action) => [action.sourceKey, action])),
+		[aiMemoryActionsQuery.data],
+	);
+	const aiMemorySourceKey = (source: { path?: string | null; title?: string | null; snippet?: string | null }) =>
+		[source.path ?? "", source.title ?? "", (source.snippet ?? "").slice(0, 160)].join("|");
+	const aiMemoryVisibleSources = (aiMemorySourcesQuery.data ?? []).filter(
+		(source) => aiMemoryActions.get(aiMemorySourceKey(source))?.action !== "ignored",
+	);
+	const saveSourceAction = async (sourceKey: string, action: "corrected" | "ignored" | "pinned", correction?: string) => {
+		setAiMemoryActionSaving(sourceKey);
+		try {
+			await saveAiMemorySourceAction({ sourceKey, action, correction: correction ?? null });
+			await aiMemoryActionsQuery.refetch();
+			toast.success(t("workbench.aiMemory.actionSaved"));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : t("workbench.aiMemory.actionError"));
+		} finally {
+			setAiMemoryActionSaving(null);
+		}
+	};
 	const aiMemoryLabel = aiMemoryExportQuery.isFetching
 		? "Verificando sincronização com ai-memory"
 		: aiMemoryExportStatus?.lastError
@@ -126,24 +157,36 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						<TooltipContent side="bottom">{aiMemoryLabel}</TooltipContent>
 					</Tooltip>
 				) : null}
-				{selectedSessionId && aiMemorySourcesQuery.data?.length ? (
+				{selectedSessionId && aiMemoryVisibleSources.length ? (
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
 							<Button type="button" variant="ghost" size="icon-sm" className="relative text-emerald-500 hover:text-emerald-400" aria-label={t("workbench.aiMemory.sourcesAria")}>
 								<BookOpen className="size-3.5" />
-								<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">{aiMemorySourcesQuery.data.length}</span>
+								<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">{aiMemoryVisibleSources.length}</span>
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="w-96 max-w-[min(92vw,24rem)]">
 							<DropdownMenuLabel>{t("workbench.aiMemory.sourcesTitle")}</DropdownMenuLabel>
 							<DropdownMenuSeparator />
-							{aiMemorySourcesQuery.data.map((source, index) => (
+							{aiMemoryVisibleSources.map((source, index) => {
+								const sourceKey = aiMemorySourceKey(source);
+								const action = aiMemoryActions.get(sourceKey);
+								return (
 								<div className="border-b border-border/40 px-3 py-2.5 last:border-b-0" key={`${source.path ?? source.title ?? "source"}-${index}`}>
 									<p className="truncate text-[11px] font-medium text-foreground">{source.title ?? source.path ?? t("workbench.aiMemory.untitled")}</p>
 									{source.path && source.title ? <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{source.path}</p> : null}
+									{source.createdAt ? <p className="mt-0.5 text-[10px] text-muted-foreground">{source.createdAt}</p> : null}
 									{source.snippet ? <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">{source.snippet}</p> : null}
+									{action?.action === "corrected" && action.correction ? <p className="mt-1 rounded bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-600">{action.correction}</p> : null}
+									<div className="mt-2 flex items-center gap-1">
+										<Button type="button" variant="ghost" size="icon" className="size-7" title={t("workbench.aiMemory.pin")} disabled={aiMemoryActionSaving === sourceKey} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void saveSourceAction(sourceKey, "pinned"); }}><Pin className="size-3.5" /></Button>
+										<Input className="h-7 flex-1 text-[11px]" value={aiMemoryCorrection[sourceKey] ?? ""} placeholder={t("workbench.aiMemory.correctPlaceholder")} onChange={(event) => setAiMemoryCorrection((current) => ({ ...current, [sourceKey]: event.target.value }))} onClick={(event) => event.stopPropagation()} />
+										<Button type="button" variant="ghost" size="icon" className="size-7" title={t("workbench.aiMemory.correct")} disabled={aiMemoryActionSaving === sourceKey || !(aiMemoryCorrection[sourceKey] ?? "").trim()} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void saveSourceAction(sourceKey, "corrected", aiMemoryCorrection[sourceKey]); }}><Check className="size-3.5" /></Button>
+										<Button type="button" variant="ghost" size="icon" className="size-7" title={t("workbench.aiMemory.ignore")} disabled={aiMemoryActionSaving === sourceKey} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void saveSourceAction(sourceKey, "ignored"); }}><EyeOff className="size-3.5" /></Button>
+									</div>
 								</div>
-							))}
+								);
+							})}
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}

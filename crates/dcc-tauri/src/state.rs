@@ -69,7 +69,10 @@ use dcc_infra::{
         MAX_BATCH_EVENTS,
     },
     credential_store::SystemCredentialStore,
-    db::{AiMemoryOutboxEntry, ProviderAvailabilityRecord, SqliteSessionRepo, SqliteWorkspaceRepo},
+    db::{
+        AiMemoryOutboxEntry, AiMemorySourceAction, ProviderAvailabilityRecord, SqliteSessionRepo,
+        SqliteWorkspaceRepo,
+    },
     mcp_db::SqliteMcpRepo,
 };
 
@@ -2001,6 +2004,21 @@ impl SessionCommandState {
     pub async fn retry_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
         self.session_repo.enqueue_ai_memory_export(session_id)?;
         self.drain_ai_memory_outbox(1).await.map(|_| ())
+    }
+
+    pub fn list_ai_memory_source_actions(&self, limit: usize) -> Result<Vec<AiMemorySourceAction>> {
+        self.session_repo
+            .list_ai_memory_source_actions(limit.clamp(1, 500))
+    }
+
+    pub fn save_ai_memory_source_action(
+        &self,
+        source_key: &str,
+        action: &str,
+        correction: Option<&str>,
+    ) -> Result<()> {
+        self.session_repo
+            .save_ai_memory_source_action(source_key, action, correction)
     }
 
     /// Retries due exports without holding any provider/session transition

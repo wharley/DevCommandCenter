@@ -214,6 +214,16 @@ CREATE TABLE IF NOT EXISTS dcc_ai_memory_outbox (
 CREATE INDEX IF NOT EXISTS idx_dcc_ai_memory_outbox_due
 	ON dcc_ai_memory_outbox(next_attempt_at, updated_at);
 
+-- Local curation decisions are DCC metadata. They never mutate ai-memory's
+-- wiki directly and can be rebuilt or removed independently of the index.
+CREATE TABLE IF NOT EXISTS dcc_ai_memory_source_actions (
+	source_key TEXT PRIMARY KEY NOT NULL,
+	action TEXT NOT NULL CHECK (action IN ('corrected', 'ignored', 'pinned')),
+	correction TEXT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
 -- Web Push was retired in 0.1.66. Stop legacy databases from accumulating
 -- notifications without a delivery worker; keep existing user data intact.
 DROP TRIGGER IF EXISTS mobile_push_event_insert;
@@ -1180,6 +1190,14 @@ pub struct AiMemoryOutboxEntry {
     pub last_error: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AiMemorySourceAction {
+    pub source_key: String,
+    pub action: String,
+    pub correction: Option<String>,
+    pub updated_at: String,
+}
+
 /// Content-free projection of a capture-v2 restoration record for review UI.
 ///
 /// It deliberately excludes artifact locators, digests, physical identities,
@@ -1395,6 +1413,49 @@ impl SqliteSessionRepo {
         conn.execute(
             "DELETE FROM dcc_ai_memory_outbox WHERE session_id = ?1",
             params![session_id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_ai_memory_source_actions(&self, limit: usize) -> Result<Vec<AiMemorySourceAction>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                "SELECT source_key, action, correction, updated_at FROM dcc_ai_memory_source_actions ORDER BY updated_at DESC LIMIT ?1",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+                Ok(AiMemorySourceAction {
+                    source_key: row.get(0)?,
+                    action: row.get(1)?,
+                    correction: row.get(2)?,
+                    updated_at: row.get(3)?,
+                })
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        rows.map(|row| row.map_err(|error| dcc_core::CoreError::Repository(error.to_string())))
+            .collect()
+    }
+
+    pub fn save_ai_memory_source_action(
+        &self,
+        source_key: &str,
+        action: &str,
+        correction: Option<&str>,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "INSERT INTO dcc_ai_memory_source_actions (source_key, action, correction, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(source_key) DO UPDATE SET action = excluded.action, correction = excluded.correction, updated_at = excluded.updated_at",
+            params![source_key, action, correction, now],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())

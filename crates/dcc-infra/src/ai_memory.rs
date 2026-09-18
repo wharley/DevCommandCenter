@@ -94,6 +94,12 @@ pub struct AiMemoryHit {
     pub snippet: Option<String>,
     #[serde(default)]
     pub rank: Option<f64>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]

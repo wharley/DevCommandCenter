@@ -33,6 +33,8 @@ import type {
 	AiMemorySidecarStatus,
 	AiMemorySettingsInput,
 	AiMemorySettingsOutput,
+	AiMemorySourceActionInput,
+	AiMemorySourceActionOutput,
 	AiMemorySyncInput,
 	AiMemorySyncOutput,
 	ApplyTaskTitleInput,
@@ -95,6 +97,14 @@ export function queryAiMemory(input: AiMemoryQueryInput) {
 
 export function loadAiMemoryRecoveredSources(sessionId: string) {
 	return invoke<AiMemoryQueryHit[]>(SESSION_METHODS.aiMemoryRecoveredSources, { sessionId });
+}
+
+export function loadAiMemorySourceActions(limit = 200) {
+	return invoke<AiMemorySourceActionOutput[]>(SESSION_METHODS.aiMemorySourceActions, { limit });
+}
+
+export function saveAiMemorySourceAction(input: AiMemorySourceActionInput) {
+	return invoke<AiMemorySourceActionOutput>(SESSION_METHODS.aiMemorySourceActionSave, { input });
 }
 
 export function loadAiMemoryExportStatus(sessionId: string) {

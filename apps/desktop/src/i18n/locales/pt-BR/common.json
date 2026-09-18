@@ -3170,7 +3170,13 @@
     "aiMemory": {
       "sourcesAria": "Abrir fontes recuperadas da memória",
       "sourcesTitle": "Fontes recuperadas",
-      "untitled": "Observação sem título"
+      "untitled": "Observação sem título",
+      "pin": "Fixar memória",
+      "ignore": "Ignorar memória",
+      "correct": "Salvar correção",
+      "correctPlaceholder": "Correção ou fato atualizado…",
+      "actionSaved": "Ação de memória salva",
+      "actionError": "Não foi possível salvar a ação de memória"
     },
     "noGit": "Sem Git",
     "changesPill": {

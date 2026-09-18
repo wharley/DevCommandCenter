@@ -136,6 +136,26 @@ pub struct AiMemoryQueryHit {
     pub title: Option<String>,
     pub snippet: Option<String>,
     pub rank: Option<f64>,
+    pub created_at: Option<String>,
+    pub session_id: Option<String>,
+    pub kind: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemorySourceActionInput {
+    pub source_key: String,
+    pub action: String,
+    pub correction: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemorySourceActionOutput {
+    pub source_key: String,
+    pub action: String,
+    pub correction: Option<String>,
+    pub updated_at: String,
 }
 
 fn default_memory_query_limit() -> usize {
@@ -228,6 +248,9 @@ pub async fn query_ai_memory(
                     title: hit.title,
                     snippet: hit.snippet,
                     rank: hit.rank,
+                    created_at: hit.created_at,
+                    session_id: hit.session_id,
+                    kind: hit.kind,
                 })
                 .collect()
         })
@@ -251,8 +274,64 @@ pub fn ai_memory_recovered_sources(
             title: hit.title,
             snippet: hit.snippet,
             rank: hit.rank,
+            created_at: hit.created_at,
+            session_id: hit.session_id,
+            kind: hit.kind,
         })
         .collect())
+}
+
+#[tauri::command]
+pub fn ai_memory_source_actions(
+    state: State<'_, SessionCommandState>,
+    limit: Option<usize>,
+) -> Result<Vec<AiMemorySourceActionOutput>, String> {
+    state
+        .list_ai_memory_source_actions(limit.unwrap_or(200))
+        .map(|actions| {
+            actions
+                .into_iter()
+                .map(|action| AiMemorySourceActionOutput {
+                    source_key: action.source_key,
+                    action: action.action,
+                    correction: action.correction,
+                    updated_at: action.updated_at,
+                })
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn ai_memory_source_action_save(
+    state: State<'_, SessionCommandState>,
+    input: AiMemorySourceActionInput,
+) -> Result<AiMemorySourceActionOutput, String> {
+    let source_key = input.source_key.trim();
+    let action = input.action.trim();
+    if source_key.is_empty() || source_key.chars().count() > 2_000 {
+        return Err("sourceKey is required".to_string());
+    }
+    if !matches!(action, "corrected" | "ignored" | "pinned") {
+        return Err("source action is invalid".to_string());
+    }
+    if input
+        .correction
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > 4_000)
+    {
+        return Err("correction is too large".to_string());
+    }
+    state
+        .save_ai_memory_source_action(source_key, action, input.correction.as_deref())
+        .map_err(|error| error.to_string())?;
+    let updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    Ok(AiMemorySourceActionOutput {
+        source_key: source_key.to_string(),
+        action: action.to_string(),
+        correction: input.correction,
+        updated_at,
+    })
 }
 
 /// Returns the durable export status for a session. `None` means there is no

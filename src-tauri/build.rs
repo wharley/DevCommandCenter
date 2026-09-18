@@ -336,6 +336,23 @@ struct AiMemorySettingsOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+struct AiMemorySourceActionInput {
+    source_key: String,
+    action: String,
+    correction: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+struct AiMemorySourceActionOutput {
+    source_key: String,
+    action: String,
+    correction: Option<String>,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 struct WorkspaceMethods {
     archive_workspace_bundle: String,
     complete_workspace_bundle: String,
@@ -450,6 +467,8 @@ struct SessionMethods {
     sync_session_to_ai_memory: String,
     query_ai_memory: String,
     ai_memory_recovered_sources: String,
+    ai_memory_source_actions: String,
+    ai_memory_source_action_save: String,
     ai_memory_export_status: String,
     ai_memory_outbox_list: String,
     ai_memory_outbox_retry: String,
@@ -887,6 +906,8 @@ fn main() {
         .typ::<AiMemorySidecarStatus>()
         .typ::<AiMemorySettingsInput>()
         .typ::<AiMemorySettingsOutput>()
+        .typ::<AiMemorySourceActionInput>()
+        .typ::<AiMemorySourceActionOutput>()
         .typ::<RestoreSessionInput>()
         .typ::<RestoreSessionOutput>()
         .typ::<LastTurnReviewInput>()
@@ -1068,6 +1089,8 @@ fn main() {
             sync_session_to_ai_memory: "sync_session_to_ai_memory".to_string(),
             query_ai_memory: "query_ai_memory".to_string(),
             ai_memory_recovered_sources: "ai_memory_recovered_sources".to_string(),
+            ai_memory_source_actions: "ai_memory_source_actions".to_string(),
+            ai_memory_source_action_save: "ai_memory_source_action_save".to_string(),
             ai_memory_export_status: "ai_memory_export_status".to_string(),
             ai_memory_outbox_list: "ai_memory_outbox_list".to_string(),
             ai_memory_outbox_retry: "ai_memory_outbox_retry".to_string(),

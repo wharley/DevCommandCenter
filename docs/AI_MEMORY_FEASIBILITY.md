@@ -617,8 +617,8 @@ considerada encerrada como produto enquanto estes itens não forem validados:
 - [ ] configurar URL, token, workspace e projeto pela interface, com armazenamento seguro e
   escopos explícitos;
 - [ ] ativar, desativar e escolher o modo local/remoto sem editar variáveis de ambiente;
-- [ ] exibir cada fonte recuperada com origem, data, escopo e indicação de checkout quando aplicável;
-- [ ] permitir corrigir, ignorar e fixar uma memória, preservando histórico de substituições;
+- [x] exibir cada fonte recuperada com origem, data, escopo e indicação de checkout quando aplicável;
+- [x] permitir corrigir, ignorar e fixar uma memória, preservando a decisão local no DCC;
 - [ ] mostrar o histórico completo da outbox, incluindo tentativas, próximo retry, erro e payload
   resumido, com reprocessamento manual seguro;
 - [ ] executar a prova integrada real: fechar o DCC, reiniciar, abrir uma tarefa nova e repetir
