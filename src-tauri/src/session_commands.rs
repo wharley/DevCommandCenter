@@ -82,6 +82,14 @@ pub async fn query_ai_memory(
 }
 
 #[tauri::command]
+pub fn ai_memory_recovered_sources(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Vec<AiMemoryQueryHit>, String> {
+    session_command_impl::ai_memory_recovered_sources(state, session_id)
+}
+
+#[tauri::command]
 pub fn ai_memory_export_status(
     state: State<'_, SessionCommandState>,
     session_id: String,

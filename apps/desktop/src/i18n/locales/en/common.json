@@ -3167,6 +3167,11 @@
     }
   },
   "workbench": {
+    "aiMemory": {
+      "sourcesAria": "Open recovered memory sources",
+      "sourcesTitle": "Recovered sources",
+      "untitled": "Untitled observation"
+    },
     "noGit": "No Git",
     "changesPill": {
       "aria": "{{count}} changed files — open Git review",

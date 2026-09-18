@@ -93,6 +93,10 @@ export function queryAiMemory(input: AiMemoryQueryInput) {
 	return invoke<AiMemoryQueryHit[]>(SESSION_METHODS.queryAiMemory, { input });
 }
 
+export function loadAiMemoryRecoveredSources(sessionId: string) {
+	return invoke<AiMemoryQueryHit[]>(SESSION_METHODS.aiMemoryRecoveredSources, { sessionId });
+}
+
 export function loadAiMemoryExportStatus(sessionId: string) {
 	return invoke<AiMemoryOutboxStatusOutput | null>(
 		SESSION_METHODS.aiMemoryExportStatus,

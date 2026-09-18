@@ -1072,6 +1072,7 @@ pub struct SessionCommandState {
     runtime: Arc<ProcessRuntime>,
     ai_memory_circuit: Arc<AiMemoryCircuitBreaker>,
     ai_memory_export_circuit: Arc<AiMemoryCircuitBreaker>,
+    ai_memory_hits: Arc<Mutex<HashMap<String, Vec<AiMemoryHit>>>>,
 }
 
 /// Owns the process-shared transition lock for one session's provider
@@ -1436,6 +1437,7 @@ impl SessionCommandState {
             runtime,
             ai_memory_circuit: Arc::new(AiMemoryCircuitBreaker::default()),
             ai_memory_export_circuit: Arc::new(AiMemoryCircuitBreaker::default()),
+            ai_memory_hits: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -1449,6 +1451,26 @@ impl SessionCommandState {
 
     pub(crate) fn record_ai_memory_query_failure(&self, endpoint: &str) -> bool {
         self.ai_memory_circuit.record_failure(endpoint)
+    }
+
+    pub(crate) fn record_ai_memory_hits(&self, session_id: &SessionId, hits: Vec<AiMemoryHit>) {
+        let Ok(mut records) = self.ai_memory_hits.lock() else {
+            return;
+        };
+        records.insert(session_id.0.clone(), hits);
+        if records.len() > 100 {
+            if let Some(key) = records.keys().next().cloned() {
+                records.remove(&key);
+            }
+        }
+    }
+
+    pub fn ai_memory_hits(&self, session_id: &SessionId) -> Vec<AiMemoryHit> {
+        self.ai_memory_hits
+            .lock()
+            .ok()
+            .and_then(|records| records.get(&session_id.0).cloned())
+            .unwrap_or_default()
     }
 
     fn allow_ai_memory_export(&self, endpoint: &str) -> bool {

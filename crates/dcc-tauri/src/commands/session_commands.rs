@@ -234,6 +234,27 @@ pub async fn query_ai_memory(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+pub fn ai_memory_recovered_sources(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Vec<AiMemoryQueryHit>, String> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() || session_id.len() > 200 {
+        return Err("sessionId is required".to_string());
+    }
+    Ok(state
+        .ai_memory_hits(&SessionId(session_id.to_string()))
+        .into_iter()
+        .map(|hit| AiMemoryQueryHit {
+            path: hit.path,
+            title: hit.title,
+            snippet: hit.snippet,
+            rank: hit.rank,
+        })
+        .collect())
+}
+
 /// Returns the durable export status for a session. `None` means there is no
 /// pending export, which is also the steady state after a successful sync.
 #[tauri::command]
@@ -958,6 +979,7 @@ async fn ai_memory_context_for_turn(
     let hits = match state.query_ai_memory(config, prompt, 6).await {
         Ok(hits) => {
             state.record_ai_memory_query_success(&endpoint);
+            state.record_ai_memory_hits(&session.id, hits.clone());
             hits
         }
         Err(error) => {

@@ -1,4 +1,4 @@
-import { Cloud, CloudOff, Globe2, History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
+import { BookOpen, Cloud, CloudOff, Globe2, History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
 import { memo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import type { TerminalScopeTarget } from "@/features/terminal/terminal-scope";
 import { useActiveTerminalCount, useGlobalActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 import { getToggleTerminalShortcutKeys } from "@/features/shortcuts/shortcut-utils";
-import { loadAiMemoryExportStatus } from "@/lib/session-api";
+import { loadAiMemoryExportStatus, loadAiMemoryRecoveredSources } from "@/lib/session-api";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -62,6 +62,12 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 		refetchInterval: 30_000,
 	});
 	const aiMemoryExportStatus = aiMemoryExportQuery.data;
+	const aiMemorySourcesQuery = useQuery({
+		queryKey: ["ai-memory-recovered-sources", selectedSessionId],
+		queryFn: () => loadAiMemoryRecoveredSources(selectedSessionId as string),
+		enabled: Boolean(selectedSessionId),
+		staleTime: 30_000,
+	});
 	const aiMemoryLabel = aiMemoryExportQuery.isFetching
 		? "Verificando sincronização com ai-memory"
 		: aiMemoryExportStatus?.lastError
@@ -119,6 +125,27 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						</TooltipTrigger>
 						<TooltipContent side="bottom">{aiMemoryLabel}</TooltipContent>
 					</Tooltip>
+				) : null}
+				{selectedSessionId && aiMemorySourcesQuery.data?.length ? (
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button type="button" variant="ghost" size="icon-sm" className="relative text-emerald-500 hover:text-emerald-400" aria-label={t("workbench.aiMemory.sourcesAria")}>
+								<BookOpen className="size-3.5" />
+								<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">{aiMemorySourcesQuery.data.length}</span>
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-96 max-w-[min(92vw,24rem)]">
+							<DropdownMenuLabel>{t("workbench.aiMemory.sourcesTitle")}</DropdownMenuLabel>
+							<DropdownMenuSeparator />
+							{aiMemorySourcesQuery.data.map((source, index) => (
+								<div className="border-b border-border/40 px-3 py-2.5 last:border-b-0" key={`${source.path ?? source.title ?? "source"}-${index}`}>
+									<p className="truncate text-[11px] font-medium text-foreground">{source.title ?? source.path ?? t("workbench.aiMemory.untitled")}</p>
+									{source.path && source.title ? <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{source.path}</p> : null}
+									{source.snippet ? <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">{source.snippet}</p> : null}
+								</div>
+							))}
+						</DropdownMenuContent>
+					</DropdownMenu>
 				) : null}
 				<Tooltip>
 					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onStartSession} aria-label={t("workbench.newSessionAria")} className="text-muted-foreground hover:text-foreground"><Plus className="size-3.5" /></Button></TooltipTrigger>
