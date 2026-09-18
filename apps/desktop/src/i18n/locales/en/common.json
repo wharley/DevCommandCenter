@@ -3047,6 +3047,12 @@
         "description": "Your request was received. Agent activity will appear here."
       }
     },
+    "sessionStartup": {
+        "title": "Preparing the new chat…",
+        "creating": "Create session",
+        "starting": "Start agent",
+        "description": "Preparing the session and connecting the selected provider."
+    },
     "trail": {
       "label": "Conversation navigation",
       "itemLabel": "Turn {{position}}: {{preview}}"

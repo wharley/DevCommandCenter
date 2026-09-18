@@ -65,3 +65,44 @@ export function ConversationStartingIndicator({
 		</div>
 	);
 }
+
+/** Feedback shown while the header's “new chat” action waits for the
+ * provider runtime to attach. No user message exists at this point, so this
+ * uses a separate copy from the prompt startup card. */
+export function SessionStartingIndicator() {
+	const { t } = useTranslation("common");
+	const steps = [
+		{ id: "creating", icon: MessageSquarePlus },
+		{ id: "starting", icon: Bot },
+	] as const;
+
+	return (
+		<div role="status" aria-live="polite" aria-atomic="true" className="conversation-thread-enter conversation-fade-in flex min-w-0 justify-start motion-reduce:animate-none">
+			<div className="w-full max-w-[20rem] rounded-xl border border-border/60 bg-muted/15 px-3.5 py-3 shadow-[0_1px_3px_rgb(0_0_0/0.025)]">
+				<div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-foreground/90">
+					<Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+					<span>{t("conversation.sessionStartup.title")}</span>
+				</div>
+				<ol className="space-y-0.5">
+					{steps.map((step, index) => {
+						const active = index === 0;
+						const Icon = step.icon;
+						return (
+							<li key={step.id} aria-current={active ? "step" : undefined} data-startup-state={active ? "active" : "pending"} className="relative flex min-h-8 items-center gap-2.5">
+								{index < steps.length - 1 ? <span aria-hidden className="absolute left-[10px] top-[26px] h-3 w-px bg-border/70" /> : null}
+								<span aria-hidden className={cn("relative flex size-[21px] shrink-0 items-center justify-center rounded-full", active ? "bg-background text-foreground shadow-[0_0_10px_rgb(128_128_128/0.10)]" : "text-muted-foreground/35")}>
+									{active ? <span className="absolute inset-0 rounded-full border border-foreground/10 border-t-foreground/65 motion-safe:animate-[spin_1.8s_linear_infinite]" /> : null}
+									<Icon className={active ? "size-[11px]" : "size-3"} strokeWidth={1.7} />
+								</span>
+								<span className={cn("text-[12px] leading-5", active ? "font-medium text-foreground/90" : "text-muted-foreground/45")}>
+									{t(`conversation.sessionStartup.${step.id}`)}
+								</span>
+							</li>
+						);
+					})}
+				</ol>
+				<p className="mt-2 border-t border-border/40 pt-2 text-[11px] leading-[17px] text-muted-foreground">{t("conversation.sessionStartup.description")}</p>
+			</div>
+		</div>
+	);
+}

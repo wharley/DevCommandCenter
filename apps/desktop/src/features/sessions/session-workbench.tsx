@@ -173,6 +173,7 @@ type SessionWorkbenchProps = {
 		active?: boolean;
 	} | null;
 	pendingPrompt: string | null;
+	startingSession?: boolean;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onStartSession: () => void;
@@ -276,6 +277,7 @@ export function SessionWorkbench({
 	sessionEvents,
 	hydratedSessionHistory = null,
 	pendingPrompt,
+	startingSession = false,
 	onSelectProvider,
 	onSelectModel,
 	onStartSession,
@@ -1162,6 +1164,7 @@ export function SessionWorkbench({
 						sessionEvents={sessionEvents}
 						hydratedSessionHistory={hydratedSessionHistory}
 						pendingPrompt={pendingPrompt}
+						startingSession={startingSession}
 						onSelectProvider={onSelectProvider}
 						onSelectModel={onSelectModel}
 						onStartSession={onStartSession}

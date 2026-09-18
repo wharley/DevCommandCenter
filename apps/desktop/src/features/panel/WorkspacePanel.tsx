@@ -207,6 +207,7 @@ type WorkspacePanelProps = {
 		active?: boolean;
 	} | null;
 	pendingPrompt: string | null;
+	startingSession?: boolean;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
 	onStartSession: () => void;
@@ -306,6 +307,7 @@ export function WorkspacePanel({
 	sessionEvents,
 	hydratedSessionHistory = null,
 	pendingPrompt,
+	startingSession = false,
 	onSelectProvider,
 	onSelectModel,
 	onStartSession,
@@ -1289,6 +1291,7 @@ export function WorkspacePanel({
 					sessionSnapshot={sessionSnapshot}
 					onSelectSession={onSelectSession}
 					onStartSession={onStartSession}
+					startingSession={startingSession}
 					onCloseSession={onCloseSession}
 					onRestoreSession={onRestoreSession}
 					onOpenSessionSearch={onOpenSessionSearch}
@@ -1333,6 +1336,7 @@ export function WorkspacePanel({
 					sessionState={sessionState}
 					lastTurnState={lastTurnState}
 					pendingPrompt={timelinePendingPrompt}
+					startingSession={startingSession}
 					workspacePath={workspacePath}
 					workspaceId={workspaceId}
 					providers={providerChoices}
@@ -1370,7 +1374,7 @@ export function WorkspacePanel({
 					<WorkspaceComposer
 						draftKey={workspaceId}
 						draftSessionId={effectiveSessionId}
-						disabled={false}
+						disabled={startingSession}
 						providerChoices={providerChoices}
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}

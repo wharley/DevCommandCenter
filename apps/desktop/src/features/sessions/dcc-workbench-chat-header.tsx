@@ -25,6 +25,7 @@ export type DccWorkbenchChatHeaderProps = {
 	workspacePath: string | null;
 	sessions: WorkspaceSessionSummary[];
 	selectedSessionId: string | null;
+	startingSession?: boolean;
 	isLoadingSessions: boolean;
 	sessionSnapshot: DccRuntimeSessionSnapshot | null;
 	onSelectSession: (sessionId: string) => void;
@@ -45,7 +46,7 @@ export type DccWorkbenchChatHeaderProps = {
 
 /** Single-row workspace bar. Every visible action opens a concrete surface. */
 export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
-	threadTitle, projectLabel, workspacePath, sessions, selectedSessionId,
+	threadTitle, projectLabel, workspacePath, sessions, selectedSessionId, startingSession = false,
 	isLoadingSessions, sessionSnapshot, onSelectSession, onStartSession,
 	onCloseSession, onRestoreSession, onOpenSessionSearch, onOpenThreadFind, onResumeSession,
 	sessionActionSessionId, onOpenTerminal, onOpenBrowser, browserOpen = false, terminalScopes, workspaceActions,
@@ -131,7 +132,8 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 		? t("workbench.terminal.openWithBackground", { total: globalActiveTerminalCount, current: activeTerminalCount })
 		: activeTerminalCount > 0
 			? t("workbench.terminal.openWithActive", { count: activeTerminalCount })
-			: t("workbench.terminal.open");
+		: t("workbench.terminal.open");
+	const NewSessionIcon = startingSession ? LoaderCircle : Plus;
 
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 items-center justify-between gap-3 overflow-hidden">
@@ -218,7 +220,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					</DropdownMenu>
 				) : null}
 				<Tooltip>
-					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onStartSession} aria-label={t("workbench.newSessionAria")} className="text-muted-foreground hover:text-foreground"><Plus className="size-3.5" /></Button></TooltipTrigger>
+					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onStartSession} disabled={startingSession} aria-label={t("workbench.newSessionAria")} className="text-muted-foreground hover:text-foreground"><NewSessionIcon className={cn("size-3.5", startingSession && "animate-spin")} /></Button></TooltipTrigger>
 					<TooltipContent side="bottom">{t("workbench.newSessionTooltip")}</TooltipContent>
 				</Tooltip>
 				{onOpenThreadFind ? (

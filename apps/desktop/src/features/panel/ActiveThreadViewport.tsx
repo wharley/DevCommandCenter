@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import {
 	ConversationExecutionState,
 	ConversationStartingIndicator,
+	SessionStartingIndicator,
 } from "./ConversationExecutionState";
 import { ConversationLaunchState } from "./ConversationLaunchState";
 import type { ProviderCatalog } from "@dcc/contracts";
@@ -47,6 +48,8 @@ type ActiveThreadViewportProps = {
 	sessionState: string | null;
 	lastTurnState: string | null;
 	pendingPrompt: string | null;
+	/** True while the header is creating a new session and attaching its runtime. */
+	startingSession?: boolean;
 	workspacePath: string | null;
 	workspaceId?: string | null;
 	providers?: ProviderCatalog["providers"];
@@ -84,6 +87,7 @@ export function ActiveThreadViewport({
 	workspaceName,
 	lastTurnState,
 	pendingPrompt,
+	startingSession = false,
 	workspacePath,
 	workspaceId,
 	providers,
@@ -241,6 +245,16 @@ export function ActiveThreadViewport({
 					: INITIAL_CONVERSATION_MESSAGE_LIMIT) + CONVERSATION_MESSAGE_PAGE_SIZE,
 		}));
 	}, [scrollRef, sessionId]);
+
+	if (startingSession) {
+		return (
+			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+				<div className="flex min-h-full flex-1 flex-col px-5 py-6">
+					<SessionStartingIndicator />
+				</div>
+			</div>
+		);
+	}
 
 	if (shouldShowInitialConversationStarting(messages, pendingPrompt, lastTurnState)) {
 		return (

@@ -1159,6 +1159,7 @@ export default function App() {
 		Record<string, RuntimeSessionSnapshot>
 	>({});
 	const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+	const [startingSessionWorkspaceId, setStartingSessionWorkspaceId] = useState<string | null>(null);
 	const [startingPromptWorkspaceId, setStartingPromptWorkspaceId] = useState<string | null>(null);
 	const [pendingPromptSessionId, setPendingPromptSessionId] = useState<
 		string | null
@@ -2383,11 +2384,15 @@ export default function App() {
 		if (!selectedProvider || !selectedWorkspace) {
 			return;
 		}
+		if (startingSessionWorkspaceId) {
+			return;
+		}
 		if (selectedProviderBlockReason) {
 			toast.error(selectedProviderBlockReason);
 			return;
 		}
 		const previousSessionId = selectedSessionId;
+		setStartingSessionWorkspaceId(selectedWorkspace.id);
 		try {
 			const result = await startThread({
 				workspaceId: selectedWorkspace.id,
@@ -2451,6 +2456,10 @@ export default function App() {
 						: "Failed to create chat";
 			console.error("[dcc] create chat failed:", error);
 			toast.error(message);
+		} finally {
+			setStartingSessionWorkspaceId((current) =>
+				current === selectedWorkspace.id ? null : current,
+			);
 		}
 	}, [
 		backendCacheKey,
@@ -2461,6 +2470,7 @@ export default function App() {
 		selectedSessionId,
 		selectedWorkspace,
 		selectedWorkspaceAdditionalWorkspaceIds,
+		startingSessionWorkspaceId,
 		queryClient,
 	]);
 
@@ -5435,6 +5445,7 @@ export default function App() {
 											: null
 									}
 									pendingPrompt={visiblePendingPrompt}
+									startingSession={startingSessionWorkspaceId === selectedWorkspace.id}
 									onSelectProvider={handleSelectProvider}
 									onSelectModel={handleSelectModel}
 									onStartSession={handleStartSession}
