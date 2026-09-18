@@ -2265,6 +2265,7 @@
       "historyTitle": "Histórico de exportações",
       "historyHint": "Tentativas concluídas e falhas ficam registradas para auditoria e diagnóstico.",
       "historyMeta": "{{attempts}} tentativa(s) · {{accepted}} aceito(s) de {{events}} evento(s) · {{finished}}",
+      "historySession": "Sessão {{id}}",
       "historyEmpty": "Nenhuma tentativa registrada ainda.",
       "historyStatus": {
         "completed": "Concluída",
@@ -3194,6 +3195,8 @@
       "sourcesTitle": "Fontes recuperadas",
       "sourcesLoading": "Consultando a memória do projeto…",
       "sourcesEmpty": "Nenhuma fonte relevante foi recuperada nesta sessão.",
+      "statusActive": "Memória do projeto ativa",
+      "statusUnavailable": "Memória do projeto indisponível",
       "scope": "Projeto: {{project}} · checkout: {{checkout}}",
       "untitled": "Observação sem título",
       "pin": "Fixar memória",

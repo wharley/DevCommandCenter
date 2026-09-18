@@ -17,7 +17,7 @@ import type { TerminalScopeTarget } from "@/features/terminal/terminal-scope";
 import { useActiveTerminalCount, useGlobalActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 import { getToggleTerminalShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import { toast } from "sonner";
-import { loadAiMemoryExportStatus, loadAiMemoryRecoveredSources, loadAiMemorySourceActions, saveAiMemorySourceAction } from "@/lib/session-api";
+import { loadAiMemoryExportStatus, loadAiMemoryRecoveredSources, loadAiMemorySidecarStatus, loadAiMemorySourceActions, saveAiMemorySourceAction } from "@/lib/session-api";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -64,6 +64,15 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 		refetchInterval: 30_000,
 	});
 	const aiMemoryExportStatus = aiMemoryExportQuery.data;
+	const aiMemorySidecarQuery = useQuery({
+		queryKey: ["ai-memory-sidecar-status"],
+		queryFn: loadAiMemorySidecarStatus,
+		staleTime: 30_000,
+		refetchInterval: 30_000,
+	});
+	const aiMemorySidecarMode = aiMemorySidecarQuery.data?.mode;
+	const aiMemorySidecarActive = aiMemorySidecarMode === "managed" || aiMemorySidecarMode === "remote";
+	const aiMemorySidecarUnavailable = aiMemorySidecarMode === "unavailable";
 	const aiMemorySourcesQuery = useQuery({
 		queryKey: ["ai-memory-recovered-sources", selectedSessionId],
 		queryFn: () => loadAiMemoryRecoveredSources(selectedSessionId as string),
@@ -111,6 +120,13 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 		: aiMemoryExportStatus?.lastError
 			? `ai-memory aguardando nova tentativa (${aiMemoryExportStatus.attempts})`
 			: "Sessão aguardando sincronização com ai-memory";
+	const aiMemorySourcesLabel = aiMemorySourcesQuery.isLoading
+		? t("workbench.aiMemory.sourcesLoading")
+		: aiMemorySidecarActive
+			? t("workbench.aiMemory.statusActive")
+			: aiMemorySidecarUnavailable
+				? t("workbench.aiMemory.statusUnavailable")
+				: t("workbench.aiMemory.sourcesAria");
 	const terminalLabel = globalActiveTerminalCount > activeTerminalCount
 		? t("workbench.terminal.openWithBackground", { total: globalActiveTerminalCount, current: activeTerminalCount })
 		: activeTerminalCount > 0
@@ -164,10 +180,10 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						<TooltipContent side="bottom">{aiMemoryLabel}</TooltipContent>
 					</Tooltip>
 				) : null}
-				{selectedSessionId && (aiMemorySourcesQuery.isLoading || aiMemoryVisibleSources.length > 0) ? (
+				{selectedSessionId && (aiMemorySourcesQuery.isLoading || aiMemoryVisibleSources.length > 0 || aiMemorySidecarActive || aiMemorySidecarUnavailable) ? (
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button type="button" variant="ghost" size="icon-sm" className={cn("relative", aiMemorySourcesQuery.isLoading ? "text-muted-foreground" : "text-emerald-500 hover:text-emerald-400")} aria-label={t("workbench.aiMemory.sourcesAria")}>
+							<Button type="button" variant="ghost" size="icon-sm" title={aiMemorySourcesLabel} className={cn("relative", aiMemorySourcesQuery.isLoading ? "text-muted-foreground" : aiMemorySidecarUnavailable ? "text-amber-500 hover:text-amber-400" : aiMemorySidecarActive || aiMemoryVisibleSources.length > 0 ? "text-emerald-500 hover:text-emerald-400" : "text-muted-foreground hover:text-foreground")} aria-label={aiMemorySourcesLabel}>
 								{aiMemorySourcesQuery.isLoading ? <BrainCircuit className="size-3.5 animate-pulse" /> : <BrainCircuit className="size-3.5" />}
 								{aiMemoryVisibleSources.length > 0 ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">{aiMemoryVisibleSources.length}</span> : null}
 							</Button>

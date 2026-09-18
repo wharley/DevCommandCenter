@@ -2265,6 +2265,7 @@
       "historyTitle": "Export history",
       "historyHint": "Completed attempts and failures remain available for audit and diagnosis.",
       "historyMeta": "{{attempts}} attempt(s) · {{accepted}} accepted of {{events}} event(s) · {{finished}}",
+      "historySession": "Session {{id}}",
       "historyEmpty": "No export attempts recorded yet.",
       "historyStatus": {
         "completed": "Completed",
@@ -3194,6 +3195,8 @@
       "sourcesTitle": "Recovered sources",
       "sourcesLoading": "Querying project memory…",
       "sourcesEmpty": "No relevant source was recovered for this session.",
+      "statusActive": "Project memory active",
+      "statusUnavailable": "Project memory unavailable",
       "scope": "Project: {{project}} · checkout: {{checkout}}",
       "untitled": "Untitled observation",
       "pin": "Pin memory",

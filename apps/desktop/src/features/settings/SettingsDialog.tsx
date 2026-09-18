@@ -1406,19 +1406,19 @@ export function SettingsDialog({
 														<div className="mt-4 border-t border-border/40 pt-4">
 															<h4 className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.historyTitle")}</h4>
 															<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.historyHint")}</p>
-															{aiMemoryExportHistoryQuery.data?.length ? (
-																<div className="mt-3 divide-y divide-border/40 rounded-lg border border-border/50 bg-background">
-																	{aiMemoryExportHistoryQuery.data.map((entry) => (
-																		<div className="p-3" key={entry.id}>
-																			<div className="flex flex-wrap items-center justify-between gap-2">
-																				<p className="truncate font-mono text-[11px] text-foreground" title={entry.sessionId}>{entry.sessionId}</p>
-																				<Badge variant={entry.status === "completed" ? "secondary" : "outline"} className="h-6 px-2 text-[10px] font-normal">{t(`settings.aiMemory.historyStatus.${entry.status}`)}</Badge>
-																			</div>
-																			<p className="mt-1 text-[11px] text-muted-foreground">{t("settings.aiMemory.historyMeta", { attempts: entry.attempts, accepted: entry.acceptedCount, events: entry.eventCount, finished: entry.finishedAt })}</p>
-																			{entry.error ? <p className="mt-1 text-[11px] text-destructive">{entry.error}</p> : null}
-																		</div>
-																	))}
+													{aiMemoryExportHistoryQuery.data?.length ? (
+														<div className="mt-3 divide-y divide-border/40 rounded-lg border border-border/50 bg-background">
+															{aiMemoryExportHistoryQuery.data.map((entry) => (
+																<div className="p-3" key={entry.id}>
+																	<div className="flex flex-wrap items-center justify-between gap-2">
+																		<p className="truncate font-mono text-[11px] text-foreground" title={entry.sessionId}>{t("settings.aiMemory.historySession", { id: entry.sessionId.length > 12 ? `${entry.sessionId.slice(0, 8)}…${entry.sessionId.slice(-4)}` : entry.sessionId })}</p>
+																		<Badge variant={entry.status === "completed" ? "secondary" : "outline"} className="h-6 px-2 text-[10px] font-normal">{t(`settings.aiMemory.historyStatus.${entry.status}`)}</Badge>
+																	</div>
+																	<p className="mt-1 text-[11px] text-muted-foreground">{t("settings.aiMemory.historyMeta", { attempts: entry.attempts, accepted: entry.acceptedCount, events: entry.eventCount, finished: entry.finishedAt })}</p>
+																	{entry.error ? <p className="mt-1 text-[11px] text-destructive">{entry.error}</p> : null}
 																</div>
+															))}
+														</div>
 															) : (
 																<p className="mt-3 text-[11px] text-muted-foreground">{t("settings.aiMemory.historyEmpty")}</p>
 															)}

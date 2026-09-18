@@ -8,6 +8,8 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Row};
 use serde::de::DeserializeOwned;
 use serde_json::{from_str, to_string};
 
+use crate::ai_memory::AiMemoryHit;
+
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
 
@@ -234,6 +236,24 @@ CREATE TABLE IF NOT EXISTS dcc_ai_memory_export_history (
 
 CREATE INDEX IF NOT EXISTS idx_dcc_ai_memory_export_history_finished
 	ON dcc_ai_memory_export_history(finished_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS dcc_ai_memory_recovered_sources (
+	session_id TEXT NOT NULL,
+	source_key TEXT NOT NULL,
+	path TEXT NULL,
+	title TEXT NULL,
+	snippet TEXT NULL,
+	rank REAL NULL,
+	created_at TEXT NULL,
+	source_session_id TEXT NULL,
+	kind TEXT NULL,
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY (session_id, source_key),
+	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_ai_memory_recovered_sources_session
+	ON dcc_ai_memory_recovered_sources(session_id, updated_at DESC);
 
 -- Local curation decisions are DCC metadata. They never mutate ai-memory's
 -- wiki directly and can be rebuilt or removed independently of the index.
@@ -1527,6 +1547,94 @@ impl SqliteSessionRepo {
                     error: row.get(7)?,
                     started_at: row.get(8)?,
                     finished_at: row.get(9)?,
+                })
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        rows.map(|row| row.map_err(|error| dcc_core::CoreError::Repository(error.to_string())))
+            .collect()
+    }
+
+    /// Replace the recovered sources for one session with the latest query
+    /// result. Sources are session-scoped so they remain available after the
+    /// DCC restarts without becoming a second source of truth for ai-memory.
+    pub fn replace_ai_memory_recovered_sources(
+        &self,
+        session_id: &SessionId,
+        hits: &[AiMemoryHit],
+    ) -> Result<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        transaction
+            .execute(
+                "DELETE FROM dcc_ai_memory_recovered_sources WHERE session_id = ?1",
+                params![session_id.0.clone()],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let updated_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        for hit in hits {
+            let source_key = ai_memory_source_key(hit);
+            transaction
+                .execute(
+                    r#"
+                    INSERT OR REPLACE INTO dcc_ai_memory_recovered_sources
+                        (session_id, source_key, path, title, snippet, rank,
+                         created_at, source_session_id, kind, updated_at)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                    "#,
+                    params![
+                        session_id.0.clone(),
+                        source_key,
+                        hit.path.as_deref(),
+                        hit.title.as_deref(),
+                        hit.snippet.as_deref(),
+                        hit.rank,
+                        hit.created_at.as_deref(),
+                        hit.session_id.as_deref(),
+                        hit.kind.as_deref(),
+                        updated_at,
+                    ],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_ai_memory_recovered_sources(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AiMemoryHit>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                r#"
+                SELECT path, title, snippet, rank, created_at, source_session_id, kind
+                  FROM dcc_ai_memory_recovered_sources
+                 WHERE session_id = ?1
+                 ORDER BY updated_at DESC, source_key ASC
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map(params![session_id.0.clone()], |row| {
+                Ok(AiMemoryHit {
+                    path: row.get(0)?,
+                    title: row.get(1)?,
+                    snippet: row.get(2)?,
+                    rank: row.get(3)?,
+                    created_at: row.get(4)?,
+                    session_id: row.get(5)?,
+                    kind: row.get(6)?,
                 })
             })
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -4869,6 +4977,22 @@ impl SqliteSessionRepo {
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
     }
+}
+
+fn ai_memory_source_key(hit: &AiMemoryHit) -> String {
+    let snippet: String = hit
+        .snippet
+        .as_deref()
+        .unwrap_or_default()
+        .chars()
+        .take(160)
+        .collect();
+    format!(
+        "{}|{}|{}",
+        hit.path.as_deref().unwrap_or_default(),
+        hit.title.as_deref().unwrap_or_default(),
+        snippet
+    )
 }
 
 #[async_trait]
@@ -9013,6 +9137,46 @@ mod tests {
         assert_eq!(history[0].status, "completed");
         assert_eq!(history[0].event_count, 4);
         assert_eq!(history[0].accepted_count, 4);
+    }
+
+    #[test]
+    fn ai_memory_recovered_sources_survive_reload() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let session = Session {
+            id: SessionId("sources-session".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            workspace_id: WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_session(&session)).expect("save session");
+        let hits = vec![AiMemoryHit {
+            path: Some("project-decision.md".to_string()),
+            title: Some("Decision".to_string()),
+            snippet: Some("Use the isolated worktree".to_string()),
+            rank: Some(0.9),
+            created_at: Some("2026-01-01T00:00:00Z".to_string()),
+            session_id: Some("previous-session".to_string()),
+            kind: Some("notification".to_string()),
+        }];
+        repo.replace_ai_memory_recovered_sources(&session.id, &hits)
+            .expect("persist recovered sources");
+        let restored = repo
+            .list_ai_memory_recovered_sources(&session.id)
+            .expect("reload recovered sources");
+        assert_eq!(restored, hits);
+        repo.replace_ai_memory_recovered_sources(&session.id, &[])
+            .expect("clear recovered sources");
+        assert!(repo
+            .list_ai_memory_recovered_sources(&session.id)
+            .expect("list cleared sources")
+            .is_empty());
     }
 
     #[test]

@@ -1457,23 +1457,41 @@ impl SessionCommandState {
     }
 
     pub(crate) fn record_ai_memory_hits(&self, session_id: &SessionId, hits: Vec<AiMemoryHit>) {
-        let Ok(mut records) = self.ai_memory_hits.lock() else {
-            return;
-        };
-        records.insert(session_id.0.clone(), hits);
-        if records.len() > 100 {
-            if let Some(key) = records.keys().next().cloned() {
-                records.remove(&key);
+        if let Ok(mut records) = self.ai_memory_hits.lock() {
+            records.insert(session_id.0.clone(), hits.clone());
+            if records.len() > 100 {
+                if let Some(key) = records.keys().next().cloned() {
+                    records.remove(&key);
+                }
             }
+        }
+        if let Err(error) = self
+            .session_repo
+            .replace_ai_memory_recovered_sources(session_id, &hits)
+        {
+            eprintln!("[DCC][ai-memory] failed to persist recovered sources: {error}");
         }
     }
 
     pub fn ai_memory_hits(&self, session_id: &SessionId) -> Vec<AiMemoryHit> {
-        self.ai_memory_hits
+        if let Some(hits) = self
+            .ai_memory_hits
             .lock()
             .ok()
             .and_then(|records| records.get(&session_id.0).cloned())
-            .unwrap_or_default()
+        {
+            return hits;
+        }
+        let hits = self
+            .session_repo
+            .list_ai_memory_recovered_sources(session_id)
+            .unwrap_or_default();
+        if !hits.is_empty() {
+            if let Ok(mut records) = self.ai_memory_hits.lock() {
+                records.insert(session_id.0.clone(), hits.clone());
+            }
+        }
+        hits
     }
 
     fn allow_ai_memory_export(&self, endpoint: &str) -> bool {
