@@ -115,6 +115,15 @@ def run(binary, expected_version=None):
                                                 extension="dcc", ingest_key=key))
             return post("/hook?" + query, dict(session_id="dcc-synthetic-session", cwd=cwd, **body))
 
+        def batch_item(scope, event, key, session_id, **body):
+            query = urllib.parse.urlencode(dict(scope, event=event, agent="claude-code",
+                                                session_id=session_id, extension="dcc",
+                                                ingest_key=key))
+            return {
+                "url": base + "/hook?" + query,
+                "body": dict(session_id=session_id, cwd=cwd, **body),
+            }
+
         try:
             init = start()["result"]
             upstream_version = init["serverInfo"]["version"]
@@ -165,6 +174,31 @@ def run(binary, expected_version=None):
             check("automatic_handoff_contains_prompt_context", "CAPTURESENTINEL" in rows[0]["summary"])
             check("handoff_accept_succeeds", "error" not in call("memory_handoff_accept", **a, handoff_id=rows[0]["id"], cwd=cwd))
             check("accepted_handoff_leaves_open_list", not call("memory_handoff_list", **a)["handoffs"])
+
+            batch = post("/hook/batch", [
+                batch_item(a, "session-start", "batch-start", "dcc-batch-session"),
+                batch_item(a, "user-prompt", "batch-prompt", "dcc-batch-session",
+                           prompt="BATCHSENTINEL decision delivered through hook batch"),
+                batch_item(a, "session-end", "batch-end", "dcc-batch-session"),
+            ])
+            check("hook_batch_accepts_events", batch.get("accepted") == 3)
+            accepted_indices = batch.get("accepted_indices")
+            check("hook_batch_ack_is_contiguous_or_indexed",
+                  accepted_indices in (None, [0, 1, 2]))
+            check("hook_batch_event_is_searchable",
+                  bool(eventually(lambda: call("memory_query", **a,
+                                                query="BATCHSENTINEL")["hits"])))
+            batch_retry = post("/hook/batch", [
+                batch_item(a, "session-start", "batch-start", "dcc-batch-session"),
+                batch_item(a, "user-prompt", "batch-prompt", "dcc-batch-session",
+                           prompt="BATCHSENTINEL decision delivered through hook batch"),
+                batch_item(a, "session-end", "batch-end", "dcc-batch-session"),
+            ])
+            check("hook_batch_retry_acknowledges_events", batch_retry.get("accepted") == 3)
+            batch_hits = eventually(lambda: call("memory_query", **a,
+                                                  query="BATCHSENTINEL")["hits"])
+            check("hook_batch_retry_is_idempotent", len(batch_hits) == 1)
+
             stop()
             try:
                 call("memory_query", **a, query="ALPHASENTINEL")

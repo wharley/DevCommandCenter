@@ -241,7 +241,7 @@ opcional, nunca como requisito para criar ou executar uma tarefa.
 
 ## Teste executado nesta análise
 
-[Script reproduzível](../scripts/ai-memory-feasibility.py), [resultado do código 2.3.0 em desenvolvimento](AI_MEMORY_FEASIBILITY_RESULTS.json) e [resultado da release publicada 2.2.2](AI_MEMORY_FEASIBILITY_RESULTS_2_2_2.json). **22 verificações passaram** em cada execução:
+[Script reproduzível](../scripts/ai-memory-feasibility.py), [resultado histórico do código 2.3.0 em desenvolvimento](AI_MEMORY_FEASIBILITY_RESULTS.json) e [resultado atualizado da release publicada 2.2.2](AI_MEMORY_FEASIBILITY_RESULTS_2_2_2.json). O smoke histórico passou 22 verificações; a validação adicional da release 2.2.2 passou **27 verificações**, incluindo o caminho `/hook/batch`:
 
 - inicialização, descoberta das 23 ferramentas, escrita e recuperação textual;
 - separação de projetos com escopo explícito, incluindo 20 leituras concorrentes;
@@ -251,6 +251,7 @@ opcional, nunca como requisito para criar ou executar uma tarefa.
 - remoção de uma chave de API fictícia do conteúdo consultado;
 - ausência padrão da resposta do assistente;
 - criação/aceitação de handoff e remoção da lista de pendentes;
+- `/hook/batch` com três eventos, acknowledgement contíguo e retry idempotente;
 - indisponibilidade com servidor parado e persistência após reinício;
 - existência da página Markdown.
 
@@ -265,9 +266,9 @@ Para reproduzir com o binário oficial v2.2.2:
 python3 scripts/ai-memory-feasibility.py --binary /caminho/ai-memory --expected-version 2.2.2
 ```
 
-Esse binário passou as mesmas 22 verificações do protocolo; ele anuncia 19 ferramentas MCP. O
-smoke anterior contra o código 2.3.0 em desenvolvimento anunciou 23 ferramentas. O adaptador do
-DCC usa apenas `/hook/batch` e `memory_query`, presentes nas duas linhas.
+Esse binário passou 27 verificações e anuncia 19 ferramentas MCP. O smoke anterior contra o código
+2.3.0 em desenvolvimento anunciou 23 ferramentas. O adaptador do DCC usa apenas `/hook/batch` e
+`memory_query`, presentes nas duas linhas.
 
 O script cria HOME e armazenamento temporários, não herda credenciais e encerra o servidor ao sair.
 
