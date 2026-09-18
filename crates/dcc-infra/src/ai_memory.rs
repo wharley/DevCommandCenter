@@ -311,6 +311,21 @@ pub fn build_hook_batch(
 }
 
 fn parse_query_hits(value: Value) -> Result<Vec<AiMemoryHit>, AiMemoryError> {
+    if let Some(error) = value.get("error") {
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("MCP query failed");
+        // A new DCC workspace has no ai-memory scope until its first close
+        // export. Treat that first read as an empty index; it is not a
+        // connectivity failure and should not open the query circuit.
+        let lower = message.to_ascii_lowercase();
+        if (lower.contains("workspace") || lower.contains("project")) && lower.contains("not found")
+        {
+            return Ok(Vec::new());
+        }
+        return Err(AiMemoryError::Response(format!("MCP error: {message}")));
+    }
     let text = value
         .get("result")
         .and_then(|result| result.get("content"))
@@ -465,5 +480,17 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title.as_deref(), Some("Pilot"));
         assert_eq!(hits[0].path, None);
+    }
+
+    #[test]
+    fn missing_scope_is_an_empty_first_query() {
+        let value = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {"code": -32603, "message": "workspace 'new-scope' not found"}
+        });
+        assert!(parse_query_hits(value)
+            .expect("missing scope is not fatal")
+            .is_empty());
     }
 }
