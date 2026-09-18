@@ -3204,6 +3204,8 @@
       "sourcesTitle": "Recovered sources",
       "sourcesLoading": "Querying project memory…",
       "sourcesEmpty": "No relevant source was recovered for this session.",
+      "sourcesSearchPlaceholder": "Search recovered sources…",
+      "sourcesNoMatches": "No source matches that search.",
       "statusActive": "Project memory active",
       "statusUnavailable": "Project memory unavailable",
       "scope": "Project: {{project}} · checkout: {{checkout}}",

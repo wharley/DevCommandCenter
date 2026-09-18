@@ -1,5 +1,5 @@
 import { BrainCircuit, Check, Cloud, CloudOff, EyeOff, Globe2, History, LoaderCircle, Pin, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
-import { memo, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
@@ -110,6 +110,10 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	});
 	const [aiMemoryCorrection, setAiMemoryCorrection] = useState<Record<string, string>>({});
 	const [aiMemoryActionSaving, setAiMemoryActionSaving] = useState<string | null>(null);
+	const [aiMemorySourceSearch, setAiMemorySourceSearch] = useState("");
+	useEffect(() => {
+		setAiMemorySourceSearch("");
+	}, [selectedSessionId]);
 	const aiMemoryActions = useMemo(
 		() => new Map((aiMemoryActionsQuery.data ?? []).map((action) => [action.sourceKey, action])),
 		[aiMemoryActionsQuery.data],
@@ -126,6 +130,15 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 			}),
 		[aiMemoryActions, aiMemorySourcesQuery.data],
 	);
+	const aiMemoryFilteredSources = useMemo(() => {
+		const query = aiMemorySourceSearch.trim().toLocaleLowerCase();
+		if (!query) return aiMemoryVisibleSources;
+		return aiMemoryVisibleSources.filter((source) =>
+			[source.title, source.path, source.snippet]
+				.filter(Boolean)
+				.some((value) => cleanAiMemoryText(value ?? "").toLocaleLowerCase().includes(query)),
+		);
+	}, [aiMemorySourceSearch, aiMemoryVisibleSources]);
 	const saveSourceAction = async (sourceKey: string, action: "corrected" | "ignored" | "pinned", correction?: string) => {
 		setAiMemoryActionSaving(sourceKey);
 		try {
@@ -215,9 +228,24 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						<DropdownMenuContent align="end" className="max-h-[min(70vh,36rem)] w-96 max-w-[min(92vw,24rem)] overflow-y-auto overscroll-contain">
 							<DropdownMenuLabel>{t("workbench.aiMemory.sourcesTitle")}</DropdownMenuLabel>
 							<DropdownMenuSeparator />
+							{aiMemoryVisibleSources.length >= 4 ? (
+								<div className="px-3 pb-2" onKeyDown={(event) => event.stopPropagation()}>
+									<div className="relative">
+										<Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+										<Input
+											value={aiMemorySourceSearch}
+											onChange={(event) => setAiMemorySourceSearch(event.target.value)}
+											placeholder={t("workbench.aiMemory.sourcesSearchPlaceholder")}
+											className="h-8 pl-7 text-[11px]"
+											aria-label={t("workbench.aiMemory.sourcesSearchPlaceholder")}
+										/>
+									</div>
+								</div>
+							) : null}
 							{aiMemorySourcesQuery.isLoading ? <div className="flex items-center gap-2 px-3 py-4 text-[11px] text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />{t("workbench.aiMemory.sourcesLoading")}</div> : null}
 							{!aiMemorySourcesQuery.isLoading && aiMemoryVisibleSources.length === 0 ? <div className="px-3 py-4 text-[11px] text-muted-foreground">{t("workbench.aiMemory.sourcesEmpty")}</div> : null}
-							{!aiMemorySourcesQuery.isLoading ? aiMemoryVisibleSources.map((source, index) => {
+							{!aiMemorySourcesQuery.isLoading && aiMemoryVisibleSources.length > 0 && aiMemoryFilteredSources.length === 0 ? <div className="px-3 py-4 text-[11px] text-muted-foreground">{t("workbench.aiMemory.sourcesNoMatches")}</div> : null}
+							{!aiMemorySourcesQuery.isLoading ? aiMemoryFilteredSources.map((source, index) => {
 								const sourceKey = aiMemorySourceKey(source);
 								const action = aiMemoryActions.get(sourceKey);
 								const sourceTitle = source.title ? cleanAiMemoryText(source.title) : null;

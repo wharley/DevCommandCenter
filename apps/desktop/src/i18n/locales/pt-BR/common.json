@@ -3204,6 +3204,8 @@
       "sourcesTitle": "Fontes recuperadas",
       "sourcesLoading": "Consultando a memória do projeto…",
       "sourcesEmpty": "Nenhuma fonte relevante foi recuperada nesta sessão.",
+      "sourcesSearchPlaceholder": "Pesquisar nas fontes…",
+      "sourcesNoMatches": "Nenhuma fonte corresponde à pesquisa.",
       "statusActive": "Memória do projeto ativa",
       "statusUnavailable": "Memória do projeto indisponível",
       "scope": "Projeto: {{project}} · checkout: {{checkout}}",
