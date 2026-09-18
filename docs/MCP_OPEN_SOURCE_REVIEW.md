@@ -43,6 +43,7 @@ bundled:
 
 | Component | Relationship to DCC | Review outcome |
 | --- | --- | --- |
+| [ai-memory](https://github.com/akitaonrails/ai-memory) v2.2.2 | Optional bundled sidecar or user-configured remote server | Upstream MIT project; DCC pins the release, verifies its checksum during packaging, and documents the attribution in the root README |
 | Figma remote MCP | User-authenticated external service | No code is installed or redistributed by DCC |
 | `@garuhq/mcp@0.17.0` | Exact-version `npx` smoke with dedicated acknowledgement | npm metadata declares MIT; package is absent from DCC manifests and lockfiles |
 | Factory Droid SDK `0.6.0` | Public protocol reference only | Upstream SDK is Apache-2.0; DCC vendors no SDK or proprietary Droid CLI |

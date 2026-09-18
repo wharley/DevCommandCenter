@@ -75,6 +75,27 @@ persistence in one Tauri application.
 - SQLite for local persistence
 - xterm.js for terminal surfaces
 
+## Project memory
+
+DCC integrates [ai-memory](https://github.com/akitaonrails/ai-memory), an open-source
+long-term memory and handoff server for AI coding agents. DCC uses it as an optional,
+replaceable sidecar; the DCC session database remains the source of truth.
+
+The integration is maintained in DCC's own adapter and user interface. It adds
+provider-neutral session export, scoped retrieval, a durable retry outbox, export
+history, and recovered-source curation. DCC is not a fork of ai-memory and does not
+replace its upstream protocol or wiki storage.
+
+In distributed builds, DCC currently pins the upstream `v2.2.2` release and bundles
+the matching sidecar binary. Development builds never download it automatically. Users
+can run the managed local sidecar, configure an existing remote server, or disable
+memory in **Settings → Memory**. See the [ai-memory feasibility and integration notes](docs/AI_MEMORY_FEASIBILITY.md)
+for scope, performance measurements, limitations, and the exact upstream references.
+
+ai-memory is distributed under its own upstream terms; consult its [license](https://github.com/akitaonrails/ai-memory/blob/main/LICENSE)
+when redistributing or replacing the sidecar. DCC's own source remains licensed under
+Apache-2.0.
+
 ## Requirements
 
 ### Provider setup
