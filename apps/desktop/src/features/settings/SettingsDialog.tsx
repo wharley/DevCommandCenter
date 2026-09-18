@@ -115,6 +115,18 @@ import { SettingsThemePicker } from "./settings-theme-picker";
 import "./settings.css";
 export type { SettingsSectionId } from "./settings-navigation";
 
+function formatAiMemoryTimestamp(value: string, language: string) {
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime())) {
+		return value;
+	}
+
+	return new Intl.DateTimeFormat(language === "en" || language.startsWith("en-") ? "en-US" : "pt-BR", {
+		dateStyle: "medium",
+		timeStyle: "short",
+	}).format(parsed);
+}
+
 type SettingsDialogProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -1414,7 +1426,7 @@ export function SettingsDialog({
 																		<p className="truncate font-mono text-[11px] text-foreground" title={entry.sessionId}>{t("settings.aiMemory.historySession", { id: entry.sessionId.length > 12 ? `${entry.sessionId.slice(0, 8)}…${entry.sessionId.slice(-4)}` : entry.sessionId })}</p>
 																		<Badge variant={entry.status === "completed" ? "secondary" : "outline"} className="h-6 px-2 text-[10px] font-normal">{t(`settings.aiMemory.historyStatus.${entry.status}`)}</Badge>
 																	</div>
-																	<p className="mt-1 text-[11px] text-muted-foreground">{t("settings.aiMemory.historyMeta", { attempts: entry.attempts, accepted: entry.acceptedCount, events: entry.eventCount, finished: entry.finishedAt })}</p>
+															<p className="mt-1 text-[11px] text-muted-foreground" title={entry.finishedAt}>{t("settings.aiMemory.historyMeta", { attempts: entry.attempts, accepted: entry.acceptedCount, events: entry.eventCount, finished: formatAiMemoryTimestamp(entry.finishedAt, i18n.resolvedLanguage ?? i18n.language) })}</p>
 																	{entry.error ? <p className="mt-1 text-[11px] text-destructive">{entry.error}</p> : null}
 																</div>
 															))}
