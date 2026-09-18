@@ -40,6 +40,7 @@
       "target/release/dcc",
       "target/release/dccd",
       "target/release/dccd-http",
+      "target/release/ai-memory",
       "../sidecar/dist/dcc-claude-sidecar"
     ],
     "resources": {

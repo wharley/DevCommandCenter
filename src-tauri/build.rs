@@ -47,26 +47,61 @@ fn build_macos_computer_bridge() {
         .success();
     assert!(compiled, "failed to compile the macOS computer-use bridge");
     let capture_compiled = Command::new("xcrun")
-        .args(["clang", "-fobjc-arc", "-fblocks", "-c", "native/browser_capture_macos.m"])
+        .args([
+            "clang",
+            "-fobjc-arc",
+            "-fblocks",
+            "-c",
+            "native/browser_capture_macos.m",
+        ])
         .args(["-arch", architecture])
         .arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o").arg(&capture_object).status()
-        .expect("xcrun clang must be available to build Browser capture").success();
+        .arg("-o")
+        .arg(&capture_object)
+        .status()
+        .expect("xcrun clang must be available to build Browser capture")
+        .success();
     assert!(capture_compiled, "failed to compile Browser capture");
     let input_compiled = Command::new("xcrun")
         .args(["clang", "-fobjc-arc", "-c", "native/browser_input_macos.m"])
-        .args(["-arch", architecture]).arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o").arg(&input_object).status().expect("native Browser input compiler").success();
+        .args(["-arch", architecture])
+        .arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o")
+        .arg(&input_object)
+        .status()
+        .expect("native Browser input compiler")
+        .success();
     assert!(input_compiled, "failed to compile Browser input");
     let cookies_compiled = Command::new("xcrun")
-        .args(["clang", "-fobjc-arc", "-fblocks", "-c", "native/browser_session_cookies_macos.m"])
-        .args(["-arch", architecture]).arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o").arg(&cookies_object).status().expect("native Browser cookies compiler").success();
+        .args([
+            "clang",
+            "-fobjc-arc",
+            "-fblocks",
+            "-c",
+            "native/browser_session_cookies_macos.m",
+        ])
+        .args(["-arch", architecture])
+        .arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o")
+        .arg(&cookies_object)
+        .status()
+        .expect("native Browser cookies compiler")
+        .success();
     assert!(cookies_compiled, "failed to compile Browser cookies");
     let navigation_compiled = Command::new("xcrun")
-        .args(["clang", "-fobjc-arc", "-c", "native/browser_navigation_macos.m"])
-        .args(["-arch", architecture]).arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o").arg(&navigation_object).status().expect("native Browser navigation compiler").success();
+        .args([
+            "clang",
+            "-fobjc-arc",
+            "-c",
+            "native/browser_navigation_macos.m",
+        ])
+        .args(["-arch", architecture])
+        .arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o")
+        .arg(&navigation_object)
+        .status()
+        .expect("native Browser navigation compiler")
+        .success();
     assert!(navigation_compiled, "failed to compile Browser navigation");
     let archived = Command::new("ar")
         .args(["crus"])
@@ -201,7 +236,8 @@ use dcc_tauri::commands::{
         SetProviderAvailabilityInput,
     },
     session_commands::{
-        ApplyTaskTitleInput, ApplyTaskTitleOutput, ExecuteGuardedUndoInput,
+        AiMemoryOutboxStatusOutput, AiMemoryQueryHit, AiMemoryQueryInput, AiMemorySyncInput,
+        AiMemorySyncOutput, ApplyTaskTitleInput, ApplyTaskTitleOutput, ExecuteGuardedUndoInput,
         ExecuteGuardedUndoOutput, GuardedUndoOperationSummary, GuardedUndoPreviewFile,
         InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
         ListMcpRuntimeStatusesOutput, McpTurnPreflightState, NativeSubagentControlOutput,
@@ -375,6 +411,9 @@ struct WorkspaceMethods {
 struct SessionMethods {
     start_thread: String,
     run_pull_request_review_agent: String,
+    sync_session_to_ai_memory: String,
+    query_ai_memory: String,
+    ai_memory_export_status: String,
     apply_task_title: String,
     prepare_turn: String,
     send_turn: String,
@@ -665,6 +704,10 @@ fn main() {
         .typ::<PullRequestHubThreadResolveOutput>()
         .typ::<RunPullRequestReviewAgentInput>()
         .typ::<RunPullRequestReviewAgentOutput>()
+        .typ::<AiMemorySyncInput>()
+        .typ::<AiMemorySyncOutput>()
+        .typ::<AiMemoryQueryInput>()
+        .typ::<AiMemoryQueryHit>()
         .typ::<WorkspaceGitBranchDiffInput>()
         .typ::<WorkspaceGitBranchDiffOutput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitPreviewScope>()
@@ -798,6 +841,7 @@ fn main() {
         .typ::<ResumeSessionOutput>()
         .typ::<CloseSessionInput>()
         .typ::<CloseSessionOutput>()
+        .typ::<AiMemoryOutboxStatusOutput>()
         .typ::<RestoreSessionInput>()
         .typ::<RestoreSessionOutput>()
         .typ::<LastTurnReviewInput>()
@@ -976,6 +1020,9 @@ fn main() {
         SessionMethods {
             start_thread: "start_thread".to_string(),
             run_pull_request_review_agent: "run_pull_request_review_agent".to_string(),
+            sync_session_to_ai_memory: "sync_session_to_ai_memory".to_string(),
+            query_ai_memory: "query_ai_memory".to_string(),
+            ai_memory_export_status: "ai_memory_export_status".to_string(),
             apply_task_title: "apply_task_title".to_string(),
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),

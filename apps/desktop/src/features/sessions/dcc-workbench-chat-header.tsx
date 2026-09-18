@@ -1,5 +1,6 @@
-import { Globe2, History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
+import { Cloud, CloudOff, Globe2, History, LoaderCircle, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
 import { memo, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { cn } from "@/lib/utils";
 import type { TerminalScopeTarget } from "@/features/terminal/terminal-scope";
 import { useActiveTerminalCount, useGlobalActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 import { getToggleTerminalShortcutKeys } from "@/features/shortcuts/shortcut-utils";
+import { loadAiMemoryExportStatus } from "@/lib/session-api";
 
 export type DccWorkbenchChatHeaderProps = {
 	threadTitle: string;
@@ -53,6 +55,18 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	const activeTerminalCount = useActiveTerminalCount(terminalScopes);
 	const globalActiveTerminalCount = useGlobalActiveTerminalCount();
 	const terminalShortcut = getToggleTerminalShortcutKeys().join("+");
+	const aiMemoryExportQuery = useQuery({
+		queryKey: ["ai-memory-export-status", selectedSessionId],
+		queryFn: () => loadAiMemoryExportStatus(selectedSessionId as string),
+		enabled: Boolean(selectedSessionId),
+		refetchInterval: 30_000,
+	});
+	const aiMemoryExportStatus = aiMemoryExportQuery.data;
+	const aiMemoryLabel = aiMemoryExportQuery.isFetching
+		? "Verificando sincronização com ai-memory"
+		: aiMemoryExportStatus?.lastError
+			? `ai-memory aguardando nova tentativa (${aiMemoryExportStatus.attempts})`
+			: "Sessão aguardando sincronização com ai-memory";
 	const terminalLabel = globalActiveTerminalCount > activeTerminalCount
 		? t("workbench.terminal.openWithBackground", { total: globalActiveTerminalCount, current: activeTerminalCount })
 		: activeTerminalCount > 0
@@ -96,6 +110,16 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					</Tooltip>
 				) : null}
 				{workspaceActions}
+				{selectedSessionId && (aiMemoryExportQuery.isFetching || aiMemoryExportStatus) ? (
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<span className={cn("inline-flex size-7 items-center justify-center", aiMemoryExportStatus?.lastError ? "text-amber-500" : "text-muted-foreground/70")} aria-label={aiMemoryLabel}>
+								{aiMemoryExportQuery.isFetching ? <LoaderCircle className="size-3.5 animate-spin" /> : aiMemoryExportStatus?.lastError ? <CloudOff className="size-3.5" /> : <Cloud className="size-3.5" />}
+							</span>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">{aiMemoryLabel}</TooltipContent>
+					</Tooltip>
+				) : null}
 				<Tooltip>
 					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onStartSession} aria-label={t("workbench.newSessionAria")} className="text-muted-foreground hover:text-foreground"><Plus className="size-3.5" /></Button></TooltipTrigger>
 					<TooltipContent side="bottom">{t("workbench.newSessionTooltip")}</TooltipContent>
@@ -120,7 +144,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 								<span className={cn("size-1.5 shrink-0 rounded-full", session.session.id === selectedSessionId ? "bg-emerald-500" : "bg-muted-foreground/45")} />
 								<span className="min-w-0 flex-1 truncate">{session.thread.title}</span>
 								<span className="text-[10px] text-muted-foreground">{sessionStateLabel(session.projection.state, t)}</span>
-								<button type="button" disabled={sessionActionSessionId === session.session.id} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onCloseSession(session.session.id); }} aria-label={t("workbench.closeSessionAria", { title: session.thread.title })} className="grid size-5 place-items-center rounded-sm opacity-0 hover:bg-accent group-hover/session:opacity-100 focus-visible:opacity-100"><X className="size-3" /></button>
+								<button type="button" disabled={sessionActionSessionId === session.session.id} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onCloseSession(session.session.id); }} aria-label={t("workbench.closeSessionAria", { title: session.thread.title })} title={t("workbench.closeSessionTooltip")} className="grid size-5 place-items-center rounded-sm text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:text-foreground"><X className="size-3" /></button>
 							</DropdownMenuItem>
 						)) : <DropdownMenuItem disabled>{t("workbench.noSessions")}</DropdownMenuItem>}
 						{archivedSessionList.length > 0 ? <>

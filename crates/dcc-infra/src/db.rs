@@ -198,6 +198,22 @@ CREATE TABLE IF NOT EXISTS dcc_session_events (
 CREATE INDEX IF NOT EXISTS idx_dcc_session_events_session_sequence
 	ON dcc_session_events(session_id, sequence);
 
+-- Best-effort external indexes must survive a closed app or a temporary
+-- outage. The DCC session remains the source of truth; this table only records
+-- which durable sessions still need an ai-memory export.
+CREATE TABLE IF NOT EXISTS dcc_ai_memory_outbox (
+	session_id TEXT PRIMARY KEY NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NOT NULL,
+	last_error TEXT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_ai_memory_outbox_due
+	ON dcc_ai_memory_outbox(next_attempt_at, updated_at);
+
 -- Web Push was retired in 0.1.66. Stop legacy databases from accumulating
 -- notifications without a delivery worker; keep existing user data intact.
 DROP TRIGGER IF EXISTS mobile_push_event_insert;
@@ -1156,6 +1172,14 @@ pub struct SqliteSessionRepo {
     pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AiMemoryOutboxEntry {
+    pub session_id: SessionId,
+    pub attempts: u32,
+    pub next_attempt_at: String,
+    pub last_error: Option<String>,
+}
+
 /// Content-free projection of a capture-v2 restoration record for review UI.
 ///
 /// It deliberately excludes artifact locators, digests, physical identities,
@@ -1241,6 +1265,139 @@ impl SqliteSessionRepo {
         let repo = Self { conn };
         repo.ensure_schema()?;
         Ok(repo)
+    }
+
+    pub fn enqueue_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_ai_memory_outbox
+                (session_id, attempts, next_attempt_at, last_error, created_at, updated_at)
+            VALUES (?1, 0, ?2, NULL, ?2, ?2)
+            ON CONFLICT(session_id) DO UPDATE SET
+                attempts = 0,
+                next_attempt_at = excluded.next_attempt_at,
+                last_error = NULL,
+                updated_at = excluded.updated_at
+            "#,
+            params![session_id.0.clone(), now],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_due_ai_memory_exports(
+        &self,
+        now: &str,
+        limit: usize,
+    ) -> Result<Vec<AiMemoryOutboxEntry>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                r#"
+                SELECT session_id, attempts, next_attempt_at, last_error
+                  FROM dcc_ai_memory_outbox
+                 WHERE next_attempt_at <= ?1
+                 ORDER BY next_attempt_at ASC, updated_at ASC
+                 LIMIT ?2
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map(
+                params![now, i64::try_from(limit).unwrap_or(i64::MAX)],
+                |row| {
+                    let attempts = row.get::<_, i64>(1)?;
+                    Ok(AiMemoryOutboxEntry {
+                        session_id: SessionId(row.get(0)?),
+                        attempts: u32::try_from(attempts).unwrap_or(u32::MAX),
+                        next_attempt_at: row.get(2)?,
+                        last_error: row.get(3)?,
+                    })
+                },
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        rows.map(|row| row.map_err(|error| dcc_core::CoreError::Repository(error.to_string())))
+            .collect()
+    }
+
+    pub fn get_ai_memory_export(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<AiMemoryOutboxEntry>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            r#"
+            SELECT session_id, attempts, next_attempt_at, last_error
+              FROM dcc_ai_memory_outbox
+             WHERE session_id = ?1
+            "#,
+            params![session_id.0.clone()],
+            |row| {
+                let attempts = row.get::<_, i64>(1)?;
+                Ok(AiMemoryOutboxEntry {
+                    session_id: SessionId(row.get(0)?),
+                    attempts: u32::try_from(attempts).unwrap_or(u32::MAX),
+                    next_attempt_at: row.get(2)?,
+                    last_error: row.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    pub fn complete_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_ai_memory_outbox WHERE session_id = ?1",
+            params![session_id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn fail_ai_memory_export(
+        &self,
+        session_id: &SessionId,
+        next_attempt_at: &str,
+        error_message: &str,
+    ) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            UPDATE dcc_ai_memory_outbox
+               SET attempts = attempts + 1,
+                   next_attempt_at = ?2,
+                   last_error = ?3,
+                   updated_at = ?4
+             WHERE session_id = ?1
+            "#,
+            params![
+                session_id.0.clone(),
+                next_attempt_at,
+                error_message,
+                Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
     }
 
     fn ensure_schema(&self) -> Result<()> {
@@ -8572,6 +8729,63 @@ mod tests {
             summary[0].last_turn_completed_at.as_deref(),
             Some("2026-01-01T00:00:09Z")
         );
+    }
+
+    #[test]
+    fn ai_memory_outbox_survives_failure_and_is_removed_on_success() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let session = Session {
+            id: SessionId("outbox-session".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            workspace_id: WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Completed,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_session(&session)).expect("save session");
+
+        repo.enqueue_ai_memory_export(&session.id)
+            .expect("enqueue export");
+        let due = repo
+            .list_due_ai_memory_exports("9999-01-01T00:00:00.000Z", 8)
+            .expect("list due exports");
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].attempts, 0);
+        assert_eq!(
+            repo.get_ai_memory_export(&session.id)
+                .expect("read export status")
+                .expect("pending export")
+                .last_error,
+            None
+        );
+
+        repo.fail_ai_memory_export(
+            &session.id,
+            "9999-01-01T00:00:00.000Z",
+            "server unavailable",
+        )
+        .expect("record failure");
+        let retried = repo
+            .list_due_ai_memory_exports("9999-01-01T00:00:00.001Z", 8)
+            .expect("list retried export");
+        assert_eq!(retried[0].attempts, 1);
+        assert_eq!(retried[0].last_error.as_deref(), Some("server unavailable"));
+
+        repo.complete_ai_memory_export(&session.id)
+            .expect("complete export");
+        assert!(repo
+            .get_ai_memory_export(&session.id)
+            .expect("read completed export")
+            .is_none());
+        assert!(repo
+            .list_due_ai_memory_exports("9999-01-01T00:00:00.002Z", 8)
+            .expect("list completed exports")
+            .is_empty());
     }
 
     #[test]

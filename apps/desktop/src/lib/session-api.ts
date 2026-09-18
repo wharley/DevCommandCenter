@@ -27,6 +27,11 @@ import type {
 import type {
 	AbortRunInput,
 	AbortRunOutput,
+	AiMemoryQueryHit,
+	AiMemoryQueryInput,
+	AiMemoryOutboxStatusOutput,
+	AiMemorySyncInput,
+	AiMemorySyncOutput,
 	ApplyTaskTitleInput,
 	ApplyTaskTitleOutput,
 	ApprovePlanInput,
@@ -73,6 +78,23 @@ export function startThread(input: StartThreadInput) {
 
 export function runPullRequestReviewAgent(input: RunPullRequestReviewAgentInput) {
 	return invoke<RunPullRequestReviewAgentOutput>(SESSION_METHODS.runPullRequestReviewAgent, { input });
+}
+
+/** Explicit opt-in export used by the ai-memory feasibility pilot. */
+export function syncSessionToAiMemory(input: AiMemorySyncInput) {
+	return invoke<AiMemorySyncOutput>(SESSION_METHODS.syncSessionToAiMemory, { input });
+}
+
+/** Query the configured ai-memory instance without changing the active session. */
+export function queryAiMemory(input: AiMemoryQueryInput) {
+	return invoke<AiMemoryQueryHit[]>(SESSION_METHODS.queryAiMemory, { input });
+}
+
+export function loadAiMemoryExportStatus(sessionId: string) {
+	return invoke<AiMemoryOutboxStatusOutput | null>(
+		SESSION_METHODS.aiMemoryExportStatus,
+		{ sessionId },
+	);
 }
 
 export function applyTaskTitle(input: ApplyTaskTitleInput) {

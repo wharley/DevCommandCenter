@@ -1,0 +1,32 @@
+{
+  "upstream_version": "2.2.2",
+  "mcp_tool_count": 19,
+  "test_kind": "isolated HTTP/MCP protocol smoke against published macOS ARM64 release",
+  "provider_runtime_executed": false,
+  "llm_calls": 0,
+  "checks_passed": 22,
+  "checks": [
+    "upstream_version",
+    "mcp_discovers_memory_query",
+    "query_has_no_native_branch_or_task_filter",
+    "write_project-a",
+    "write_project-b",
+    "fts_recalls_written_decision",
+    "explicit_scope_excludes_other_project",
+    "unknown_project_fails_closed",
+    "20_concurrent_explicit_scope_reads_do_not_cross",
+    "same_project_query_includes_both_branch_tagged_pages",
+    "hook_start_accepted",
+    "retry_ingest_key_deduplicates_prompt",
+    "synthetic_api_key_redacted_from_retrieved_observations",
+    "assistant_text_not_captured_by_default",
+    "session_end_generates_searchable_page_without_llm",
+    "automatic_handoff_contains_prompt_context",
+    "handoff_accept_succeeds",
+    "accepted_handoff_leaves_open_list",
+    "stopped_server_reports_unavailable",
+    "decision_survives_server_restart",
+    "captured_session_survives_restart",
+    "wiki_markdown_exists"
+  ]
+}

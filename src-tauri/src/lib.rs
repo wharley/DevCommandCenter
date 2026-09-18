@@ -1,3 +1,4 @@
+pub mod ai_memory_sidecar;
 pub mod daemon_client;
 pub mod daemon_runtime;
 pub mod http_api;

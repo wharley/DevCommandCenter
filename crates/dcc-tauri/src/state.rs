@@ -8,7 +8,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -64,8 +64,12 @@ use dcc_core::{
     Result,
 };
 use dcc_infra::{
+    ai_memory::{
+        build_hook_batch, AiMemoryBatchAck, AiMemoryClient, AiMemoryConfig, AiMemoryHit,
+        MAX_BATCH_EVENTS,
+    },
     credential_store::SystemCredentialStore,
-    db::{ProviderAvailabilityRecord, SqliteSessionRepo, SqliteWorkspaceRepo},
+    db::{AiMemoryOutboxEntry, ProviderAvailabilityRecord, SqliteSessionRepo, SqliteWorkspaceRepo},
     mcp_db::SqliteMcpRepo,
 };
 
@@ -1066,6 +1070,7 @@ pub struct SessionCommandState {
     store: Arc<Mutex<SessionStore>>,
     ephemeral_mcp_projection: Arc<Mutex<Option<Arc<dyn EphemeralMcpProjection>>>>,
     runtime: Arc<ProcessRuntime>,
+    ai_memory_circuit: Arc<AiMemoryCircuitBreaker>,
 }
 
 /// Owns the process-shared transition lock for one session's provider
@@ -1258,6 +1263,69 @@ impl EventBus for NoopEventBus {
     }
 }
 
+const AI_MEMORY_CIRCUIT_FAILURE_THRESHOLD: u32 = 3;
+const AI_MEMORY_CIRCUIT_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
+#[derive(Default)]
+struct AiMemoryCircuitState {
+    endpoint: Option<String>,
+    consecutive_failures: u32,
+    open_until: Option<std::time::Instant>,
+}
+
+#[derive(Default)]
+struct AiMemoryCircuitBreaker {
+    state: Mutex<AiMemoryCircuitState>,
+}
+
+impl AiMemoryCircuitBreaker {
+    fn allow(&self, endpoint: &str) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.endpoint.as_deref() != Some(endpoint) {
+            state.endpoint = Some(endpoint.to_string());
+            state.consecutive_failures = 0;
+            state.open_until = None;
+        }
+        if let Some(open_until) = state.open_until {
+            if std::time::Instant::now() < open_until {
+                return false;
+            }
+            state.open_until = None;
+            state.consecutive_failures = 0;
+        }
+        true
+    }
+
+    fn record_success(&self, endpoint: &str) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if state.endpoint.as_deref() == Some(endpoint) {
+            state.consecutive_failures = 0;
+            state.open_until = None;
+        }
+    }
+
+    fn record_failure(&self, endpoint: &str) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.endpoint.as_deref() != Some(endpoint) {
+            state.endpoint = Some(endpoint.to_string());
+            state.consecutive_failures = 0;
+            state.open_until = None;
+        }
+        state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+        if state.consecutive_failures >= AI_MEMORY_CIRCUIT_FAILURE_THRESHOLD {
+            state.open_until = Some(std::time::Instant::now() + AI_MEMORY_CIRCUIT_COOLDOWN);
+            return true;
+        }
+        false
+    }
+}
+
 impl SessionCommandState {
     pub(crate) fn runtime_generation(&self) -> String {
         self.runtime.runtime_generation().to_string()
@@ -1365,7 +1433,20 @@ impl SessionCommandState {
             store: runtime.session_store(),
             ephemeral_mcp_projection: Arc::new(Mutex::new(None)),
             runtime,
+            ai_memory_circuit: Arc::new(AiMemoryCircuitBreaker::default()),
         }
+    }
+
+    pub(crate) fn allow_ai_memory_query(&self, endpoint: &str) -> bool {
+        self.ai_memory_circuit.allow(endpoint)
+    }
+
+    pub(crate) fn record_ai_memory_query_success(&self, endpoint: &str) {
+        self.ai_memory_circuit.record_success(endpoint);
+    }
+
+    pub(crate) fn record_ai_memory_query_failure(&self, endpoint: &str) -> bool {
+        self.ai_memory_circuit.record_failure(endpoint)
     }
 
     pub fn process_runtime(&self) -> Arc<ProcessRuntime> {
@@ -1812,6 +1893,149 @@ impl SessionCommandState {
 
     pub async fn peek_session(&self, session_id: &SessionId) -> Result<Option<Session>> {
         SessionRepo::get_session(&self.session_repo, session_id).await
+    }
+
+    /// Exports one durable DCC session to the configured ai-memory instance.
+    /// The close-session path calls this on a best-effort basis when the pilot
+    /// environment variable is set; the explicit command remains useful for
+    /// diagnostics and reprocessing.
+    pub async fn export_session_to_ai_memory(
+        &self,
+        session_id: &SessionId,
+        config: AiMemoryConfig,
+    ) -> Result<AiMemoryBatchAck> {
+        let session = SessionRepo::get_session(&self.session_repo, session_id)
+            .await?
+            .ok_or_else(|| dcc_core::CoreError::Repository("session not found".to_string()))?;
+        let events =
+            SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await?;
+        let batch = build_hook_batch(&session, &events);
+        let client = AiMemoryClient::new(config)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut ack = AiMemoryBatchAck::default();
+        let mut accepted_indices = Vec::new();
+        for (chunk_index, chunk) in batch.chunks(MAX_BATCH_EVENTS).enumerate() {
+            let chunk_ack = client
+                .ingest_batch(chunk)
+                .await
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            ack.accepted += chunk_ack.accepted;
+            if let Some(indices) = chunk_ack.accepted_indices {
+                accepted_indices.extend(
+                    indices
+                        .into_iter()
+                        .map(|index| chunk_index * MAX_BATCH_EVENTS + index),
+                );
+            }
+            if ack.failed_index.is_none() {
+                ack.failed_index = chunk_ack
+                    .failed_index
+                    .map(|index| chunk_index * MAX_BATCH_EVENTS + index);
+            }
+            ack.processed =
+                Some(ack.processed.unwrap_or(0) + chunk_ack.processed.unwrap_or(chunk.len()));
+        }
+        ack.accepted_indices = (!accepted_indices.is_empty()).then_some(accepted_indices);
+        Ok(ack)
+    }
+
+    /// Persists a best-effort export request before attempting the network
+    /// call. The DCC session remains authoritative; this outbox only makes a
+    /// temporary ai-memory outage recoverable after close or app restart.
+    pub fn enqueue_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
+        self.session_repo.enqueue_ai_memory_export(session_id)
+    }
+
+    pub fn complete_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
+        self.session_repo.complete_ai_memory_export(session_id)
+    }
+
+    pub fn ai_memory_export_status(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<AiMemoryOutboxEntry>> {
+        self.session_repo.get_ai_memory_export(session_id)
+    }
+
+    /// Retries due exports without holding any provider/session transition
+    /// lock. A failed attempt is delayed with bounded exponential backoff.
+    pub async fn drain_ai_memory_outbox(&self, limit: usize) -> Result<usize> {
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let entries = self.session_repo.list_due_ai_memory_exports(&now, limit)?;
+        let mut completed = 0;
+        for entry in entries {
+            let Some(session) = self.peek_session(&entry.session_id).await? else {
+                self.session_repo
+                    .complete_ai_memory_export(&entry.session_id)?;
+                continue;
+            };
+            let Some(config) = AiMemoryConfig::from_env(
+                format!("dcc-workspace-{}", session.workspace_id.0),
+                format!("dcc-project-{}", session.project_id.0),
+            ) else {
+                // Keep the request durable when memory is disabled for this
+                // run; enabling it again will resume the pending export.
+                continue;
+            };
+            match self
+                .export_session_to_ai_memory(&entry.session_id, config)
+                .await
+            {
+                Ok(ack) if ack.failed_index.is_none() => {
+                    self.session_repo
+                        .complete_ai_memory_export(&entry.session_id)?;
+                    completed += 1;
+                }
+                Ok(ack) => {
+                    let error = format!(
+                        "ai-memory acknowledged a partial batch; failed event index {}",
+                        ack.failed_index.unwrap_or_default()
+                    );
+                    let delay_seconds = (5_i64 << entry.attempts.min(9)).min(900);
+                    let next_attempt = (Utc::now() + ChronoDuration::seconds(delay_seconds))
+                        .to_rfc3339_opts(SecondsFormat::Millis, true);
+                    self.session_repo.fail_ai_memory_export(
+                        &entry.session_id,
+                        &next_attempt,
+                        &error,
+                    )?;
+                    eprintln!(
+                        "[DCC] ai-memory export retry scheduled in {delay_seconds}s for session {}: {error}",
+                        entry.session_id.0
+                    );
+                }
+                Err(error) => {
+                    let delay_seconds = (5_i64 << entry.attempts.min(9)).min(900);
+                    let next_attempt = (Utc::now() + ChronoDuration::seconds(delay_seconds))
+                        .to_rfc3339_opts(SecondsFormat::Millis, true);
+                    let bounded_error = error.to_string().chars().take(500).collect::<String>();
+                    self.session_repo.fail_ai_memory_export(
+                        &entry.session_id,
+                        &next_attempt,
+                        &bounded_error,
+                    )?;
+                    eprintln!(
+                        "[DCC] ai-memory export retry scheduled in {delay_seconds}s for session {}: {bounded_error}",
+                        entry.session_id.0
+                    );
+                }
+            }
+        }
+        Ok(completed)
+    }
+
+    pub async fn query_ai_memory(
+        &self,
+        config: AiMemoryConfig,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<AiMemoryHit>> {
+        let client = AiMemoryClient::new(config)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        client
+            .query(query, limit)
+            .await
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
     }
 
     pub fn list_workspace_sessions(
@@ -6270,6 +6494,19 @@ mod tests {
     };
     use dcc_core::ports::ProviderMcpTransport;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[test]
+    fn ai_memory_query_circuit_opens_after_three_failures_and_resets_per_endpoint() {
+        let breaker = AiMemoryCircuitBreaker::default();
+        assert!(breaker.allow("http://memory-a"));
+        assert!(!breaker.record_failure("http://memory-a"));
+        assert!(!breaker.record_failure("http://memory-a"));
+        assert!(breaker.record_failure("http://memory-a"));
+        assert!(!breaker.allow("http://memory-a"));
+        assert!(breaker.allow("http://memory-b"));
+        breaker.record_success("http://memory-b");
+        assert!(breaker.allow("http://memory-b"));
+    }
 
     #[test]
     fn capture_v2_terminal_mode_uses_durable_insert_and_source() {

@@ -13,17 +13,18 @@ use dcc_core::domain::session::{
 use dcc_core::domain::usage::{UsageDashboard, UsageDashboardInput};
 use dcc_tauri::{
     commands::session_commands::{
-        self as session_command_impl, ApplyTaskTitleInput, ApplyTaskTitleOutput,
-        ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput, InheritSessionObjectiveInput,
-        InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
-        ListMcpRuntimeStatusesOutput, NativeSubagentControlOutput, PrepareGuardedUndoInput,
-        PrepareGuardedUndoOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
-        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
-        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
-        SessionLiveSnapshot, SessionObjectiveOutput, SetSessionObjectiveInput, StartMcpOauthInput,
-        StartMcpOauthOutput, SteerNativeSubagentInput, TransitionSessionObjectiveInput,
-        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
-        WaitMcpOauthOutput,
+        self as session_command_impl, AiMemoryOutboxStatusOutput, AiMemoryQueryHit,
+        AiMemoryQueryInput, AiMemorySyncInput, AiMemorySyncOutput, ApplyTaskTitleInput,
+        ApplyTaskTitleOutput, ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput,
+        InheritSessionObjectiveInput, InterruptNativeSubagentInput, LastTurnReviewInput,
+        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, NativeSubagentControlOutput,
+        PrepareGuardedUndoInput, PrepareGuardedUndoOutput, PrepareTurnOutput,
+        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
+        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
+        SearchSessionsInput, SessionLiveSnapshot, SessionObjectiveOutput, SetSessionObjectiveInput,
+        StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
+        TransitionSessionObjectiveInput, TurnReviewFileDiffInput, TurnReviewFileDiffOutput,
+        TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     state::SessionCommandState,
 };
@@ -59,6 +60,30 @@ pub async fn run_pull_request_review_agent(
     input: RunPullRequestReviewAgentInput,
 ) -> Result<RunPullRequestReviewAgentOutput, String> {
     session_command_impl::run_pull_request_review_agent(state, input).await
+}
+
+#[tauri::command]
+pub async fn sync_session_to_ai_memory(
+    state: State<'_, SessionCommandState>,
+    input: AiMemorySyncInput,
+) -> Result<AiMemorySyncOutput, String> {
+    session_command_impl::sync_session_to_ai_memory(state, input).await
+}
+
+#[tauri::command]
+pub async fn query_ai_memory(
+    state: State<'_, SessionCommandState>,
+    input: AiMemoryQueryInput,
+) -> Result<Vec<AiMemoryQueryHit>, String> {
+    session_command_impl::query_ai_memory(state, input).await
+}
+
+#[tauri::command]
+pub fn ai_memory_export_status(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
+    session_command_impl::ai_memory_export_status(state, session_id)
 }
 
 #[tauri::command]

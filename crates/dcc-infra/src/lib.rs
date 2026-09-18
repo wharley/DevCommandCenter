@@ -1,3 +1,4 @@
+pub mod ai_memory;
 pub mod credential_store;
 pub mod db;
 pub mod events;

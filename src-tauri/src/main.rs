@@ -1,14 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod attachment_commands;
 mod appshot_commands;
-mod browser_commands;
-mod browser_sessions;
-mod browser_popups;
-mod browser_input;
-mod browser_capture;
+mod attachment_commands;
 mod browser_agent_requests;
+mod browser_capture;
+mod browser_commands;
+mod browser_input;
 mod browser_mcp_bridge;
+mod browser_popups;
+mod browser_sessions;
 mod coderabbit_commands;
 mod computer_use_commands;
 mod delegation_commands;
@@ -28,6 +28,7 @@ use dcc_tauri::{
     commands::coderabbit::CodeRabbitReviewJobsState,
     state::{SessionCommandState, WorkspaceCommandState},
 };
+use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar;
 use dev_command_center_tauri::daemon_client::{
     ensure_sidecar_running, rpc_with_info, sidecar_binary_candidates_for, DaemonRuntimeInfo,
 };
@@ -62,8 +63,8 @@ use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::git_support::build_review_diffs_for_path;
-use browser_commands::BrowserState;
 use browser_agent_requests::BrowserAgentRequestBroker;
+use browser_commands::BrowserState;
 use browser_mcp_bridge::BrowserMcpBridge;
 use coderabbit_commands::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
@@ -7189,6 +7190,9 @@ pub fn run() {
             session_commands::apply_task_title,
             session_commands::prepare_turn,
             session_commands::run_pull_request_review_agent,
+            session_commands::sync_session_to_ai_memory,
+            session_commands::query_ai_memory,
+            session_commands::ai_memory_export_status,
             session_commands::send_turn,
             session_commands::steer_turn,
             session_commands::steer_native_subagent,
@@ -7230,6 +7234,13 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from("."));
             let _ = std::fs::create_dir_all(&app_data_dir);
+            let ai_memory_sidecar = match AiMemorySidecar::start(app.handle(), &app_data_dir) {
+                Ok(sidecar) => sidecar,
+                Err(error) => {
+                    eprintln!("[DCC][ai-memory] sidecar unavailable: {error}");
+                    AiMemorySidecar::disabled()
+                }
+            };
             appshot_commands::setup(app.handle(), app_data_dir.clone())?;
             let db_path = app_data_dir.join("database.sqlite");
             let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
@@ -7295,8 +7306,22 @@ pub fn run() {
                 }
             }
             app.manage(workspace_command_state);
+            app.manage(ai_memory_sidecar);
             app.manage(CodeRabbitReviewJobsState::default());
             app.manage(session_command_state);
+            let ai_memory_retry_state = app
+                .try_state::<SessionCommandState>()
+                .expect("session command state managed")
+                .inner()
+                .clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    if let Err(error) = ai_memory_retry_state.drain_ai_memory_outbox(8).await {
+                        eprintln!("[DCC] ai-memory outbox drain failed: {error}");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                }
+            });
             let state = AppState {
                 db_path: Arc::new(db_path.clone()),
                 app_data_dir: Arc::new(app_data_dir.clone()),
@@ -7354,6 +7379,9 @@ pub fn run() {
                 if let Some(browser) = app_handle.try_state::<BrowserState>() {
                     browser_popups::close_all_browser_popups(app_handle);
                     browser_commands::shutdown(&browser);
+                }
+                if let Some(ai_memory) = app_handle.try_state::<AiMemorySidecar>() {
+                    ai_memory.shutdown();
                 }
             }
         });
