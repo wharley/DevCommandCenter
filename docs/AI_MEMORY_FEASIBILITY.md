@@ -609,6 +609,27 @@ Isso é uma hipótese de diferenciação que precisa ser demonstrada em fluxos r
 não fez auditoria atual das funcionalidades de memória de Synara/T3 Code e não sustenta alegação
 de exclusividade ou superioridade geral sobre esses produtos.
 
+## Fase obrigatória antes de declarar a UI definitiva
+
+O estado atual é **infraestrutura e UI operacional do piloto**. A implementação não deve ser
+considerada encerrada como produto enquanto estes itens não forem validados:
+
+- [ ] configurar URL, token, workspace e projeto pela interface, com armazenamento seguro e
+  escopos explícitos;
+- [ ] ativar, desativar e escolher o modo local/remoto sem editar variáveis de ambiente;
+- [ ] exibir cada fonte recuperada com origem, data, escopo e indicação de checkout quando aplicável;
+- [ ] permitir corrigir, ignorar e fixar uma memória, preservando histórico de substituições;
+- [ ] mostrar o histórico completo da outbox, incluindo tentativas, próximo retry, erro e payload
+  resumido, com reprocessamento manual seguro;
+- [ ] executar a prova integrada real: fechar o DCC, reiniciar, abrir uma tarefa nova e repetir
+  a recuperação com outro provider;
+- [ ] repetir o cenário em Local e Worktree e confirmar isolamento entre projetos e sessões;
+- [ ] medir p50/p95 de consulta, RAM, CPU, disco, tokens adicionados e comportamento quando o
+  servidor estiver ausente ou reiniciar.
+
+Até essa matriz ter evidência registrada, o status correto é “piloto operacional”; a memória deve
+continuar opcional, reconstruível e incapaz de bloquear um turno ou o fechamento de uma sessão.
+
 ## Complemento: validação para escolher integração, PR ou fork
 
 A documentação de [companions](https://github.com/akitaonrails/ai-memory/blob/v2.3.0/docs/companion-crates.md)
