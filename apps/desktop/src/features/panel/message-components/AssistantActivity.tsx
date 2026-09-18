@@ -43,7 +43,9 @@ export const AssistantActivity = memo(function AssistantActivity({
 			),
 		[annotations, turnStreaming, interrupted, waitingForInput],
 	);
-	const [isOpen, setIsOpen] = useState(summary.live || summary.failures > 0);
+	// Keep the live activity compact by default. The latest record remains
+	// visible in the summary row, and the user can expand the full timeline.
+	const [isOpen, setIsOpen] = useState(summary.failures > 0);
 	const [filter, setFilter] = useState<ActivityFilter>("all");
 	const [limit, setLimit] = useState(ASSISTANT_ACTIVITY_PAGE_SIZE);
 	const manualRef = useRef(false);
@@ -54,7 +56,7 @@ export const AssistantActivity = memo(function AssistantActivity({
 		manualRef.current = true;
 	};
 	const contentId = useId();
-	const shouldStayOpen = summary.live || summary.failures > 0;
+	const shouldStayOpen = summary.failures > 0;
 	useEffect(() => {
 		if (manualRef.current) return;
 		if (shouldStayOpen) {
