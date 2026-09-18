@@ -3192,6 +3192,8 @@
     "aiMemory": {
       "sourcesAria": "Open recovered memory sources",
       "sourcesTitle": "Recovered sources",
+      "sourcesLoading": "Querying project memory…",
+      "sourcesEmpty": "No relevant source was recovered for this session.",
       "scope": "Project: {{project}} · checkout: {{checkout}}",
       "untitled": "Untitled observation",
       "pin": "Pin memory",

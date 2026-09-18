@@ -3192,6 +3192,8 @@
     "aiMemory": {
       "sourcesAria": "Abrir fontes recuperadas da memória",
       "sourcesTitle": "Fontes recuperadas",
+      "sourcesLoading": "Consultando a memória do projeto…",
+      "sourcesEmpty": "Nenhuma fonte relevante foi recuperada nesta sessão.",
       "scope": "Projeto: {{project}} · checkout: {{checkout}}",
       "untitled": "Observação sem título",
       "pin": "Fixar memória",

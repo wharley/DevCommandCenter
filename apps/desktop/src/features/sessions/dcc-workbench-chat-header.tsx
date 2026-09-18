@@ -164,18 +164,20 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						<TooltipContent side="bottom">{aiMemoryLabel}</TooltipContent>
 					</Tooltip>
 				) : null}
-				{selectedSessionId && aiMemoryVisibleSources.length ? (
+				{selectedSessionId && (aiMemorySourcesQuery.isLoading || aiMemoryVisibleSources.length > 0) ? (
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button type="button" variant="ghost" size="icon-sm" className="relative text-emerald-500 hover:text-emerald-400" aria-label={t("workbench.aiMemory.sourcesAria")}>
-								<BrainCircuit className="size-3.5" />
-								<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">{aiMemoryVisibleSources.length}</span>
+							<Button type="button" variant="ghost" size="icon-sm" className={cn("relative", aiMemorySourcesQuery.isLoading ? "text-muted-foreground" : "text-emerald-500 hover:text-emerald-400")} aria-label={t("workbench.aiMemory.sourcesAria")}>
+								{aiMemorySourcesQuery.isLoading ? <BrainCircuit className="size-3.5 animate-pulse" /> : <BrainCircuit className="size-3.5" />}
+								{aiMemoryVisibleSources.length > 0 ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">{aiMemoryVisibleSources.length}</span> : null}
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="w-96 max-w-[min(92vw,24rem)]">
 							<DropdownMenuLabel>{t("workbench.aiMemory.sourcesTitle")}</DropdownMenuLabel>
 							<DropdownMenuSeparator />
-							{aiMemoryVisibleSources.map((source, index) => {
+							{aiMemorySourcesQuery.isLoading ? <div className="flex items-center gap-2 px-3 py-4 text-[11px] text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />{t("workbench.aiMemory.sourcesLoading")}</div> : null}
+							{!aiMemorySourcesQuery.isLoading && aiMemoryVisibleSources.length === 0 ? <div className="px-3 py-4 text-[11px] text-muted-foreground">{t("workbench.aiMemory.sourcesEmpty")}</div> : null}
+							{!aiMemorySourcesQuery.isLoading ? aiMemoryVisibleSources.map((source, index) => {
 								const sourceKey = aiMemorySourceKey(source);
 								const action = aiMemoryActions.get(sourceKey);
 								return (
@@ -195,7 +197,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 									</div>
 								</div>
 								);
-							})}
+							}) : null}
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}
