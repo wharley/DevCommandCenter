@@ -1875,8 +1875,8 @@
         "description": "Models, account usage, and runtimes."
       },
       "aiMemory": {
-        "label": "DCC memory",
-        "description": "ai-memory status and continuity data across tasks."
+        "label": "Memory",
+        "description": "Project memory and continuity across tasks."
       },
       "integrations": {
         "label": "Integrations",
@@ -1919,9 +1919,6 @@
       "appVersionTitle": "App version",
       "appVersionBody": "Installed build of Dev Command Center on this machine.",
       "appVersionUnknown": "Unknown",
-      "aiMemoryTitle": "DCC memory",
-      "aiMemoryHint": "See the current ai-memory mode, resource behavior, and diagnostic paths.",
-      "openAiMemory": "View status",
       "checkForUpdates": "Check for updates",
       "checkingUpdates": "Checking…",
       "upToDate": "Up to date",
@@ -2245,7 +2242,7 @@
       "experimental": "Experimental"
     },
     "aiMemory": {
-      "title": "Project memory (ai-memory)",
+      "title": "Project memory",
       "hint": "Memory is optional and local. DCC keeps one sidecar when enabled and keeps working if it is unavailable.",
       "refresh": "Refresh",
       "modeLabel": "Operating mode",

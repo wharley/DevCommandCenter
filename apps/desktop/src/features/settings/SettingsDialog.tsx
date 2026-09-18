@@ -1028,21 +1028,6 @@ export function SettingsDialog({
 										<FrontendDiagnostics />
 									</div>
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-										<div className="flex items-start justify-between gap-4">
-											<div className="min-w-0">
-												<h3 className="text-[14px] font-medium text-foreground">
-													{t("settings.general.aiMemoryTitle")}
-												</h3>
-												<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-													{t("settings.general.aiMemoryHint")}
-												</p>
-											</div>
-											<Button type="button" variant="outline" size="sm" onClick={() => setActiveSection("aiMemory")}>
-												{t("settings.general.openAiMemory")}
-											</Button>
-										</div>
-									</div>
-									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 										<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 											<div className="min-w-0">
 												<h3 className="text-[14px] font-medium text-foreground">

@@ -1875,8 +1875,8 @@
         "description": "Modelos, uso da conta e runtimes."
       },
       "aiMemory": {
-        "label": "Memória do DCC",
-        "description": "Status do ai-memory e dados de continuidade entre tarefas."
+        "label": "Memória",
+        "description": "Memória do projeto e continuidade entre tarefas."
       },
       "integrations": {
         "label": "Integrações",
@@ -1919,9 +1919,6 @@
       "appVersionTitle": "Versão do app",
       "appVersionBody": "Build instalada do Dev Command Center nesta máquina.",
       "appVersionUnknown": "Desconhecida",
-      "aiMemoryTitle": "Memória do DCC",
-      "aiMemoryHint": "Veja o modo atual do ai-memory, o uso de recursos e os caminhos de diagnóstico.",
-      "openAiMemory": "Ver status",
       "checkForUpdates": "Verificar atualizações",
       "checkingUpdates": "Verificando…",
       "upToDate": "Atualizado",
@@ -2245,7 +2242,7 @@
       "experimental": "Experimental"
     },
     "aiMemory": {
-      "title": "Memória do projeto (ai-memory)",
+      "title": "Memória do projeto",
       "hint": "A memória é opcional e local. O DCC mantém um único sidecar quando habilitado e continua funcionando se ele estiver indisponível.",
       "refresh": "Atualizar",
       "modeLabel": "Modo de operação",
