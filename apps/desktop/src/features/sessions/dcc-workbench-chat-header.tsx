@@ -1,4 +1,4 @@
-import { BookOpen, Check, Cloud, CloudOff, EyeOff, Globe2, History, LoaderCircle, Pin, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
+import { BrainCircuit, Check, Cloud, CloudOff, EyeOff, Globe2, History, LoaderCircle, Pin, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -168,7 +168,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
 							<Button type="button" variant="ghost" size="icon-sm" className="relative text-emerald-500 hover:text-emerald-400" aria-label={t("workbench.aiMemory.sourcesAria")}>
-								<BookOpen className="size-3.5" />
+								<BrainCircuit className="size-3.5" />
 								<span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-emerald-500 px-1 text-[9px] font-medium leading-none text-white">{aiMemoryVisibleSources.length}</span>
 							</Button>
 						</DropdownMenuTrigger>
