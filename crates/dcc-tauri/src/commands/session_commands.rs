@@ -360,6 +360,60 @@ pub fn ai_memory_export_status(
         .map_err(|error| error.to_string())
 }
 
+/// Queues a session checkpoint before the renderer starts another session.
+/// The export is deliberately best effort: the durable outbox keeps the
+/// session pending when ai-memory is unavailable, so changing sessions never
+/// depends on the sidecar being reachable at that exact moment.
+#[tauri::command]
+pub async fn ai_memory_checkpoint(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() || session_id.len() > 200 {
+        return Err("sessionId is required".to_string());
+    }
+    let session_id = SessionId(session_id.to_string());
+    let Some(session) = state
+        .peek_session(&session_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Err("session not found".to_string());
+    };
+
+    // A disabled memory configuration should remain a true no-op. In
+    // particular, don't create rows that can never be drained later.
+    if AiMemoryConfig::from_env(
+        format!("dcc-workspace-{}", session.workspace_id.0),
+        format!("dcc-project-{}", session.project_id.0),
+    )
+    .is_none()
+    {
+        return Ok(None);
+    }
+
+    state
+        .enqueue_ai_memory_export(&session_id)
+        .map_err(|error| error.to_string())?;
+    if let Err(error) = state.drain_ai_memory_outbox(1).await {
+        eprintln!("[DCC] ai-memory automatic checkpoint failed: {error}");
+    }
+
+    state
+        .ai_memory_export_status(&session_id)
+        .map(|status| {
+            status.map(|entry| AiMemoryOutboxStatusOutput {
+                session_id: entry.session_id.0,
+                attempts: entry.attempts,
+                next_attempt_at: entry.next_attempt_at,
+                last_error: entry.last_error,
+                event_count: 0,
+            })
+        })
+        .map_err(|error| error.to_string())
+}
+
 const SESSION_LIVE_SNAPSHOT_MAX_EVENTS: usize = 4096;
 const SESSION_LIVE_SNAPSHOT_MAX_RECORD_BYTES: usize = 512 * 1024;
 const SESSION_LIVE_SNAPSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;

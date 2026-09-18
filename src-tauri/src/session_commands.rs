@@ -169,6 +169,14 @@ pub async fn ai_memory_outbox_retry(
 }
 
 #[tauri::command]
+pub async fn ai_memory_checkpoint(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
+    session_command_impl::ai_memory_checkpoint(state, session_id).await
+}
+
+#[tauri::command]
 pub fn ai_memory_sidecar_status(
     sidecar: State<'_, dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar>,
 ) -> Result<AiMemorySidecarStatus, String> {

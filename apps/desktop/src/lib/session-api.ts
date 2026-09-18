@@ -90,15 +90,10 @@ export function syncSessionToAiMemory(input: AiMemorySyncInput) {
 	return invoke<AiMemorySyncOutput>(SESSION_METHODS.syncSessionToAiMemory, { input });
 }
 
-/** Best-effort checkpoint used when the user starts another session. */
-export async function checkpointAiMemorySession(sessionId: string) {
-	const status = await loadAiMemorySidecarStatus();
-	if (!status.url || status.mode === "disabled") {
-		return null;
-	}
-	return syncSessionToAiMemory({
+/** Durable checkpoint used when the user starts another session. */
+export function checkpointAiMemorySession(sessionId: string) {
+	return invoke<AiMemoryOutboxStatusOutput | null>(SESSION_METHODS.aiMemoryCheckpoint, {
 		sessionId,
-		connection: { baseUrl: status.url },
 	});
 }
 
