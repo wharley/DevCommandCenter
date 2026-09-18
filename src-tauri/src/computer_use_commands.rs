@@ -238,13 +238,8 @@ trait ComputerNative: Send + Sync {
     fn request_access(&self, kind: ComputerAccessKind) -> bool;
     fn targets(&self) -> Result<Vec<ComputerTarget>, String>;
     fn capture(&self, target: &ComputerTarget) -> Result<Vec<u8>, String>;
-    fn click(
-        &self,
-        target: &ComputerTarget,
-        x: f64,
-        y: f64,
-        click_count: u8,
-    ) -> Result<(), String>;
+    fn click(&self, target: &ComputerTarget, x: f64, y: f64, click_count: u8)
+        -> Result<(), String>;
     fn scroll(
         &self,
         target: &ComputerTarget,
@@ -1242,7 +1237,9 @@ pub(crate) fn appshot_capture(target: &ComputerTarget) -> Result<Vec<u8>, String
                 && current.bundle_id == target.bundle_id
         })
         .ok_or("windowUnavailable")?;
-    PlatformComputerNative.capture(&current).map_err(|_| "captureFailed".into())
+    PlatformComputerNative
+        .capture(&current)
+        .map_err(|_| "captureFailed".into())
 }
 
 #[cfg(target_os = "macos")]
@@ -1489,14 +1486,7 @@ mod tests {
             *self.effects.lock().unwrap() += 1;
             Ok(())
         }
-        fn scroll(
-            &self,
-            _: &ComputerTarget,
-            _: f64,
-            _: f64,
-            _: i32,
-            _: i32,
-        ) -> Result<(), String> {
+        fn scroll(&self, _: &ComputerTarget, _: f64, _: f64, _: i32, _: i32) -> Result<(), String> {
             *self.effects.lock().unwrap() += 1;
             Ok(())
         }
@@ -1967,14 +1957,7 @@ impl ComputerNative for PlatformComputerNative {
     fn click(&self, _: &ComputerTarget, _: f64, _: f64, _: u8) -> Result<(), String> {
         Err("desktop computer use is unsupported on this platform".to_string())
     }
-    fn scroll(
-        &self,
-        _: &ComputerTarget,
-        _: f64,
-        _: f64,
-        _: i32,
-        _: i32,
-    ) -> Result<(), String> {
+    fn scroll(&self, _: &ComputerTarget, _: f64, _: f64, _: i32, _: i32) -> Result<(), String> {
         Err("desktop computer use is unsupported on this platform".to_string())
     }
     fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), String> {
@@ -2008,14 +1991,7 @@ impl ComputerNative for SupportedTestNative {
     fn click(&self, _: &ComputerTarget, _: f64, _: f64, _: u8) -> Result<(), String> {
         Err("test native does not click".to_string())
     }
-    fn scroll(
-        &self,
-        _: &ComputerTarget,
-        _: f64,
-        _: f64,
-        _: i32,
-        _: i32,
-    ) -> Result<(), String> {
+    fn scroll(&self, _: &ComputerTarget, _: f64, _: f64, _: i32, _: i32) -> Result<(), String> {
         Err("test native does not scroll".to_string())
     }
     fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), String> {

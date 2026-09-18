@@ -18,15 +18,15 @@ use tokio::sync::{oneshot, Mutex as AsyncMutex};
 use tokio::time::{timeout, Duration};
 use url::{Host, Url};
 
-use crate::browser_popups::{
-    browser_popup_registry, choose_download_destination, open_browser_popup,
-};
 #[cfg(not(target_os = "macos"))]
 use crate::browser_popups::browser_profile_data_dir;
 #[cfg(target_os = "macos")]
 use crate::browser_popups::named_browser_store_is_available;
 #[cfg(target_os = "macos")]
 use crate::browser_popups::BROWSER_DATA_STORE_IDENTIFIER;
+use crate::browser_popups::{
+    browser_popup_registry, choose_download_destination, open_browser_popup,
+};
 use dcc_core::domain::session::SessionId;
 use dcc_tauri::state::SessionCommandState;
 
@@ -1309,9 +1309,19 @@ fn normalize_browser_semantic_map(
             selected: supports_selected.then_some(extracted.selected).flatten(),
             expanded: extracted.expanded,
             pressed: (role == "button").then_some(extracted.pressed).flatten(),
-            options: if role == "select" { extracted.options.iter().take(30)
-                .map(|label| normalize_browser_semantic_text(label, MAX_BROWSER_SEMANTIC_NAME_CHARS).0)
-                .filter(|label| !label.is_empty()).collect() } else { Vec::new() },
+            options: if role == "select" {
+                extracted
+                    .options
+                    .iter()
+                    .take(30)
+                    .map(|label| {
+                        normalize_browser_semantic_text(label, MAX_BROWSER_SEMANTIC_NAME_CHARS).0
+                    })
+                    .filter(|label| !label.is_empty())
+                    .collect()
+            } else {
+                Vec::new()
+            },
         };
         if name_truncated || destination_truncated {
             truncated = true;
@@ -1564,7 +1574,10 @@ pub(crate) fn arm_browser_control_for_approved_open(
     lifecycle_token: u64,
     lease_id: &str,
 ) -> Result<BrowserControlStatus, String> {
-    if lease_id.is_empty() || lease_id.chars().count() > 128 || lease_id.chars().any(char::is_control) {
+    if lease_id.is_empty()
+        || lease_id.chars().count() > 128
+        || lease_id.chars().any(char::is_control)
+    {
         return Err("browser open lease is invalid".to_string());
     }
     require_current_lifecycle(
@@ -1604,13 +1617,19 @@ pub(crate) fn browser_approved_lease_matches(
     lease_id: &str,
 ) -> bool {
     state.control_grant.lock().is_ok_and(|mut grant| {
-        if grant.as_ref().is_some_and(|grant| grant.expires_at <= Instant::now()) {
+        if grant
+            .as_ref()
+            .is_some_and(|grant| grant.expires_at <= Instant::now())
+        {
             *grant = None;
         }
         grant.as_ref().is_some_and(|grant| {
             grant.scope == scope_key(workspace_id, session_id)
                 && grant.lifecycle_token == lifecycle_token
-                && grant.lease_id.as_deref().is_none_or(|bound| bound == lease_id)
+                && grant
+                    .lease_id
+                    .as_deref()
+                    .is_none_or(|bound| bound == lease_id)
         })
     })
 }
@@ -1653,7 +1672,9 @@ pub(crate) async fn capture_browser_viewport_for_lease(
             lifecycle_token,
             lease_id,
         ) {
-            return Err("browser screenshot grant does not belong to this provider session".to_string());
+            return Err(
+                "browser screenshot grant does not belong to this provider session".to_string(),
+            );
         }
         require_browser_control_grant(
             state,
@@ -1665,10 +1686,17 @@ pub(crate) async fn capture_browser_viewport_for_lease(
     };
     authorize()?;
     let before = current_snapshot(state)?;
-    if !browser_surface_matches_visibility_policy(state, before.visible, BrowserVisibilityPolicy::RequireVisible)? {
+    if !browser_surface_matches_visibility_policy(
+        state,
+        before.visible,
+        BrowserVisibilityPolicy::RequireVisible,
+    )? {
         return Err("browser is not visible".to_string());
     }
-    let initial_url = before.url.as_deref().ok_or_else(|| "browser page URL is unavailable".to_string())?;
+    let initial_url = before
+        .url
+        .as_deref()
+        .ok_or_else(|| "browser page URL is unavailable".to_string())?;
     let revision = current_page_load_revision(state, workspace_id, Some(session_id), initial_url)?;
     if !context_ready_for_scope(state, workspace_id, Some(session_id), initial_url)? {
         return Err("browser page is still loading".to_string());
@@ -1682,10 +1710,15 @@ pub(crate) async fn capture_browser_viewport_for_lease(
     let bytes = crate::browser_capture::capture(webview).await?;
     authorize()?;
     let after = current_snapshot(state)?;
-    if !browser_surface_matches_visibility_policy(state, after.visible, BrowserVisibilityPolicy::RequireVisible)?
-        || after.url != before.url
+    if !browser_surface_matches_visibility_policy(
+        state,
+        after.visible,
+        BrowserVisibilityPolicy::RequireVisible,
+    )? || after.url != before.url
         || !context_ready_for_scope(state, workspace_id, Some(session_id), initial_url)?
-        || current_page_load_revision(state, workspace_id, Some(session_id), initial_url)? != revision {
+        || current_page_load_revision(state, workspace_id, Some(session_id), initial_url)?
+            != revision
+    {
         return Err("browser page changed while taking screenshot".to_string());
     }
     Ok(bytes)
@@ -2070,10 +2103,11 @@ fn prepare_browser_control_action(
         }
         BrowserControlAction::Press { reference, key } => {
             validate_browser_reference(&reference)?;
-            if !crate::browser_input::valid_key(&key) { return Err("browser key is invalid".into()); }
+            if !crate::browser_input::valid_key(&key) {
+                return Err("browser key is invalid".into());
+            }
             Ok(PreparedBrowserControlAction::Press { reference, key })
         }
-
     }
 }
 
@@ -2108,7 +2142,13 @@ fn browser_semantic_action_script(
     expected_url: &str,
     expected_document_identity: f64,
 ) -> Result<String, String> {
-    browser_element_action_script(target, if fill_text.is_some() { "fill" } else { "click" }, fill_text.unwrap_or_default(), expected_url, expected_document_identity)
+    browser_element_action_script(
+        target,
+        if fill_text.is_some() { "fill" } else { "click" },
+        fill_text.unwrap_or_default(),
+        expected_url,
+        expected_document_identity,
+    )
 }
 
 fn browser_element_action_script(
@@ -2120,8 +2160,8 @@ fn browser_element_action_script(
 ) -> Result<String, String> {
     let target_json = serde_json::to_string(target)
         .map_err(|_| "browser action target is invalid".to_string())?;
-    let text_json = serde_json::to_string(text)
-        .map_err(|_| "browser fill text is invalid".to_string())?;
+    let text_json =
+        serde_json::to_string(text).map_err(|_| "browser fill text is invalid".to_string())?;
     let url_json = serde_json::to_string(expected_url)
         .map_err(|_| "browser action URL is invalid".to_string())?;
     if !expected_document_identity.is_finite() || expected_document_identity <= 0.0 {
@@ -2379,7 +2419,10 @@ async fn eval_browser_action_with_callback(
     parse_browser_action_callback(&raw)
 }
 
-async fn eval_browser_action_response(state: &BrowserState, script: String) -> Result<String, String> {
+async fn eval_browser_action_response(
+    state: &BrowserState,
+    script: String,
+) -> Result<String, String> {
     let (sender, receiver) = oneshot::channel();
     let sender = Arc::new(Mutex::new(Some(sender)));
     {
@@ -2405,7 +2448,9 @@ async fn eval_browser_action_response(state: &BrowserState, script: String) -> R
         .await
         .map_err(|_| "browser action timed out".to_string())?
         .map_err(|_| "browser action confirmation was cancelled".to_string())?;
-    if raw.len() > 1024 { return Err("browser action response is invalid".into()); }
+    if raw.len() > 1024 {
+        return Err("browser action response is invalid".into());
+    }
     Ok(raw)
 }
 
@@ -2460,23 +2505,62 @@ fn validate_browser_reference(reference: &str) -> Result<(), String> {
 }
 
 fn click_target_is_compatible(target: &BrowserSemanticTargetRecord) -> bool {
-    if target.disabled == Some(true) || target.content_editable { return false; }
-    let custom_control = !matches!(target.tag.as_str(), "input" | "textarea" | "select" | "option" | "a");
-    if custom_control && matches!(target.role.as_str(), "button" | "link" | "checkbox" | "radio" | "switch" | "select" | "option" | "tab" | "menuitem") { return true; }
+    if target.disabled == Some(true) || target.content_editable {
+        return false;
+    }
+    let custom_control = !matches!(
+        target.tag.as_str(),
+        "input" | "textarea" | "select" | "option" | "a"
+    );
+    if custom_control
+        && matches!(
+            target.role.as_str(),
+            "button"
+                | "link"
+                | "checkbox"
+                | "radio"
+                | "switch"
+                | "select"
+                | "option"
+                | "tab"
+                | "menuitem"
+        )
+    {
+        return true;
+    }
     match target.role.as_str() {
-        "button" => target.tag == "input" && target.input_type.as_deref().is_some_and(|t| matches!(t, "button" | "submit" | "reset" | "image")),
+        "button" => {
+            target.tag == "input"
+                && target
+                    .input_type
+                    .as_deref()
+                    .is_some_and(|t| matches!(t, "button" | "submit" | "reset" | "image"))
+        }
         "link" => target.tag == "a" && target.destination.is_some(),
-        "checkbox" | "radio" | "switch" => target.tag == "input" && target.input_type.as_deref().is_some_and(|t| matches!(t, "checkbox" | "radio")),
+        "checkbox" | "radio" | "switch" => {
+            target.tag == "input"
+                && target
+                    .input_type
+                    .as_deref()
+                    .is_some_and(|t| matches!(t, "checkbox" | "radio"))
+        }
         _ => false,
     }
 }
 
 fn fill_target_is_compatible(target: &BrowserSemanticTargetRecord) -> bool {
-    if target.disabled == Some(true) { return false; }
-    if target.content_editable { return target.role == "textbox"; }
+    if target.disabled == Some(true) {
+        return false;
+    }
+    if target.content_editable {
+        return target.role == "textbox";
+    }
     match (target.role.as_str(), target.tag.as_str()) {
         ("textbox", "textarea") => true,
-        ("textbox", "input") => target.input_type.as_deref().is_some_and(|t| matches!(t, "text" | "search" | "email" | "tel" | "url")),
+        ("textbox", "input") => target
+            .input_type
+            .as_deref()
+            .is_some_and(|t| matches!(t, "text" | "search" | "email" | "tel" | "url")),
         ("spinbutton", "input") => target.input_type.as_deref() == Some("number"),
         _ => false,
     }
@@ -3379,7 +3463,10 @@ pub(crate) fn browser_open_lifecycle_matches_request(
         lifecycle_token,
         "browser open lifecycle is stale",
     )?;
-    let contexts = state.contexts.lock().map_err(|_| "browser state lock poisoned".to_string())?;
+    let contexts = state
+        .contexts
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
     let context = contexts
         .get(&scope_key(workspace_id, session_id))
         .ok_or_else(|| "browser open context is unavailable".to_string())?;
@@ -3562,7 +3649,8 @@ fn apply_main_frame_navigation(context: &mut BrowserContext, url: &str, loading:
         // already committed URL. The explicit navigation intent has already
         // made the context loading; do not replace it before WebKit reports
         // the new main document.
-        if context.ready_url.is_none() && context.url.as_deref() == Some(url)
+        if context.ready_url.is_none()
+            && context.url.as_deref() == Some(url)
             && context.expected_url.as_deref() != Some(url)
         {
             return false;
@@ -3611,7 +3699,11 @@ fn main_frame_navigation_observers() -> &'static Mutex<HashMap<u64, MainFrameNav
 /// Wry's navigation-policy hook, those are properties of the top-level frame;
 /// an iframe may therefore never replace the Browser's document identity.
 #[cfg(target_os = "macos")]
-extern "C" fn main_frame_navigation_changed(token: u64, url: *const std::ffi::c_char, loading: bool) {
+extern "C" fn main_frame_navigation_changed(
+    token: u64,
+    url: *const std::ffi::c_char,
+    loading: bool,
+) {
     if url.is_null() {
         return;
     }
@@ -3628,16 +3720,36 @@ extern "C" fn main_frame_navigation_changed(token: u64, url: *const std::ffi::c_
     let Some(observer) = observer else {
         return;
     };
-    if observer.state.lifecycle_token.lock().map(|current| *current != token).unwrap_or(true)
-        || observer.state.lifecycle_open.lock().map(|open| !*open).unwrap_or(true)
+    if observer
+        .state
+        .lifecycle_token
+        .lock()
+        .map(|current| *current != token)
+        .unwrap_or(true)
+        || observer
+            .state
+            .lifecycle_open
+            .lock()
+            .map(|open| !*open)
+            .unwrap_or(true)
     {
         return;
     }
-    let Some(scope) = observer.state.active_scope.lock().ok().and_then(|scope| scope.clone()) else {
+    let Some(scope) = observer
+        .state
+        .active_scope
+        .lock()
+        .ok()
+        .and_then(|scope| scope.clone())
+    else {
         return;
     };
     let changed = if let Ok(mut contexts) = observer.state.contexts.lock() {
-        apply_main_frame_navigation(contexts.entry(scope.clone()).or_default(), url.as_str(), loading)
+        apply_main_frame_navigation(
+            contexts.entry(scope.clone()).or_default(),
+            url.as_str(),
+            loading,
+        )
     } else {
         false
     };
@@ -3651,8 +3763,15 @@ extern "C" fn main_frame_navigation_changed(token: u64, url: *const std::ffi::c_
 }
 
 #[cfg(target_os = "macos")]
-fn track_main_frame_navigation(webview: &Webview<Wry>, app: AppHandle<Wry>, state: BrowserState) -> Result<(), String> {
-    let token = *state.lifecycle_token.lock().map_err(|_| "browser state lock poisoned".to_string())?;
+fn track_main_frame_navigation(
+    webview: &Webview<Wry>,
+    app: AppHandle<Wry>,
+    state: BrowserState,
+) -> Result<(), String> {
+    let token = *state
+        .lifecycle_token
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
     let mut observers = main_frame_navigation_observers()
         .lock()
         .map_err(|_| "browser navigation observer lock poisoned".to_string())?;
@@ -3668,7 +3787,11 @@ fn track_main_frame_navigation(webview: &Webview<Wry>, app: AppHandle<Wry>, stat
     }
     webview
         .with_webview(move |webview| unsafe {
-            dcc_browser_track_main_frame_navigation(webview.inner(), token, main_frame_navigation_changed)
+            dcc_browser_track_main_frame_navigation(
+                webview.inner(),
+                token,
+                main_frame_navigation_changed,
+            )
         })
         .map_err(|_| "Browser viewport is unavailable".to_string())
 }
@@ -3842,19 +3965,29 @@ fn build_browser(
             // they have a platform-specific main-document observer.
             #[cfg(not(target_os = "macos"))]
             {
-                let Some(scope) = navigation_state.active_scope.lock().ok()
-                    .and_then(|scope| scope.clone()) else {
+                let Some(scope) = navigation_state
+                    .active_scope
+                    .lock()
+                    .ok()
+                    .and_then(|scope| scope.clone())
+                else {
                     return false;
                 };
                 if let Ok(mut contexts) = navigation_state.contexts.lock() {
-                    mark_context_loading(contexts.entry(scope.clone()).or_default(), url.to_string());
+                    mark_context_loading(
+                        contexts.entry(scope.clone()).or_default(),
+                        url.to_string(),
+                    );
                 }
                 invalidate_browser_evidence_for_scope_key(&navigation_state, &scope);
             }
             true
         })
         .on_new_window(move |url, features| {
-            let Some(scope) = popup_active_scope.lock().ok().and_then(|scope| scope.clone())
+            let Some(scope) = popup_active_scope
+                .lock()
+                .ok()
+                .and_then(|scope| scope.clone())
             else {
                 return NewWindowResponse::Deny;
             };
@@ -4157,8 +4290,15 @@ pub async fn browser_open(
         restore_last_url,
     )?;
     if let Some(previous_scope) = previous_scope.as_deref() {
-        let previous_token = *state.lifecycle_token.lock().map_err(|_| "browser state lock poisoned")?;
-        crate::browser_popups::close_browser_popups_for_lifecycle(&app, previous_scope, previous_token);
+        let previous_token = *state
+            .lifecycle_token
+            .lock()
+            .map_err(|_| "browser state lock poisoned")?;
+        crate::browser_popups::close_browser_popups_for_lifecycle(
+            &app,
+            previous_scope,
+            previous_token,
+        );
     }
     set_active_scope(&state, &workspace_id, session_id.as_deref())?;
     let should_navigate = requested_url || previous_scope.as_deref() != Some(key.as_str());
@@ -4513,38 +4653,71 @@ pub async fn browser_disarm_control(
 /// The user can import a session while its native view is occluded by DCC's
 /// consent dialog. Scope, complete URL and load revision still have to match.
 pub(crate) async fn browser_session_import_target(
-    state: &BrowserState, workspace_id: &str, session_id: Option<&str>,
-    lifecycle_token: u64, url: &str,
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    lifecycle_token: u64,
+    url: &str,
 ) -> Result<(Webview<Wry>, u64), String> {
     let _operation = state.operation_lock.lock().await;
-    browser_session_import_target_locked(state, workspace_id, session_id, lifecycle_token, url).await
+    browser_session_import_target_locked(state, workspace_id, session_id, lifecycle_token, url)
+        .await
 }
 
 async fn browser_session_import_target_locked(
-    state: &BrowserState, workspace_id: &str, session_id: Option<&str>,
-    lifecycle_token: u64, url: &str,
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    lifecycle_token: u64,
+    url: &str,
 ) -> Result<(Webview<Wry>, u64), String> {
     validate_browser_url(url)?;
-    require_current_lifecycle(state, workspace_id, session_id, lifecycle_token, "browser session import is stale")?;
+    require_current_lifecycle(
+        state,
+        workspace_id,
+        session_id,
+        lifecycle_token,
+        "browser session import is stale",
+    )?;
     let revision = {
-        let contexts = state.contexts.lock().map_err(|_| "browser state lock poisoned")?;
-        let context = contexts.get(&scope_key(workspace_id, session_id)).ok_or("browser page unavailable")?;
-        if !context_is_ready_for_url(context, url) { return Err("browser changed page; reopen Sessions and try again".into()); }
+        let contexts = state
+            .contexts
+            .lock()
+            .map_err(|_| "browser state lock poisoned")?;
+        let context = contexts
+            .get(&scope_key(workspace_id, session_id))
+            .ok_or("browser page unavailable")?;
+        if !context_is_ready_for_url(context, url) {
+            return Err("browser changed page; reopen Sessions and try again".into());
+        }
         context.page_load_revision
     };
     eval_browser_action_with_callback(state, browser_action_url_check_script(url)?).await?;
-    let view = state.webview.lock().map_err(|_| "browser state lock poisoned")?.clone().ok_or("browser is not open")?;
+    let view = state
+        .webview
+        .lock()
+        .map_err(|_| "browser state lock poisoned")?
+        .clone()
+        .ok_or("browser is not open")?;
     Ok((view, revision))
 }
 
 pub(crate) async fn apply_browser_session_cookies(
-    state: &BrowserState, workspace_id: &str, session_id: Option<&str>,
-    lifecycle_token: u64, url: &str, expected_revision: u64,
+    state: &BrowserState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    lifecycle_token: u64,
+    url: &str,
+    expected_revision: u64,
     cookies: Vec<crate::browser_sessions::PreparedSessionCookie>,
 ) -> Result<(usize, usize), String> {
     let _operation = state.operation_lock.lock().await;
-    let (view, revision) = browser_session_import_target_locked(state, workspace_id, session_id, lifecycle_token, url).await?;
-    if revision != expected_revision { return Err("browser changed page; reopen Sessions and try again".into()); }
+    let (view, revision) =
+        browser_session_import_target_locked(state, workspace_id, session_id, lifecycle_token, url)
+            .await?;
+    if revision != expected_revision {
+        return Err("browser changed page; reopen Sessions and try again".into());
+    }
     let counts = crate::browser_sessions::apply_prepared_cookies(view, cookies).await?;
     invalidate_semantic_map_for_scope(state, workspace_id, session_id);
     invalidate_browser_evidence_for_scope(state, workspace_id, session_id);
@@ -4630,12 +4803,18 @@ pub(crate) async fn execute_browser_control_action(
             }
             Some((target, document_identity))
         }
-        PreparedBrowserControlAction::Select { reference, .. } | PreparedBrowserControlAction::Press { reference, .. } => {
+        PreparedBrowserControlAction::Select { reference, .. }
+        | PreparedBrowserControlAction::Press { reference, .. } => {
             let (target, document_identity) = browser_action_target(state, &anchor, reference)?;
-            if target.disabled == Some(true) || target.role == "heading" || target.role == "file-input" {
+            if target.disabled == Some(true)
+                || target.role == "heading"
+                || target.role == "file-input"
+            {
                 return Err("browser action target is incompatible".into());
             }
-            if matches!(&action, PreparedBrowserControlAction::Select { .. }) && (target.tag != "select" || target.role != "select") {
+            if matches!(&action, PreparedBrowserControlAction::Select { .. })
+                && (target.tag != "select" || target.role != "select")
+            {
                 return Err("browser action target is incompatible".into());
             }
             Some((target, document_identity))
@@ -4761,16 +4940,47 @@ pub(crate) async fn execute_browser_control_action(
             )?;
             #[cfg(target_os = "macos")]
             {
-                let raw = eval_browser_action_response(state, browser_element_action_script(&target, "point", "", &anchor.url, document_identity)?).await?;
+                let raw = eval_browser_action_response(
+                    state,
+                    browser_element_action_script(
+                        &target,
+                        "point",
+                        "",
+                        &anchor.url,
+                        document_identity,
+                    )?,
+                )
+                .await?;
                 parse_browser_action_callback(&raw)?;
-                let point: BrowserActionCallback = serde_json::from_str(&raw).map_err(|_| "browser click point is invalid")?;
+                let point: BrowserActionCallback =
+                    serde_json::from_str(&raw).map_err(|_| "browser click point is invalid")?;
                 require_action_page_revision(state, &anchor)?;
-                require_browser_control_grant(state, &anchor.workspace_id, anchor.session_id.as_deref(), anchor.lifecycle_token, Instant::now())?;
-                let view = state.webview.lock().map_err(|_| "browser state lock poisoned")?.clone().ok_or("browser is not open")?;
-                crate::browser_input::click(view, point.x.ok_or("browser click point is unavailable")?, point.y.ok_or("browser click point is unavailable")?).await?;
+                require_browser_control_grant(
+                    state,
+                    &anchor.workspace_id,
+                    anchor.session_id.as_deref(),
+                    anchor.lifecycle_token,
+                    Instant::now(),
+                )?;
+                let view = state
+                    .webview
+                    .lock()
+                    .map_err(|_| "browser state lock poisoned")?
+                    .clone()
+                    .ok_or("browser is not open")?;
+                crate::browser_input::click(
+                    view,
+                    point.x.ok_or("browser click point is unavailable")?,
+                    point.y.ok_or("browser click point is unavailable")?,
+                )
+                .await?;
             }
             #[cfg(not(target_os = "macos"))]
-            eval_browser_action_with_callback(state, browser_semantic_action_script(&target, None, &anchor.url, document_identity)?).await?;
+            eval_browser_action_with_callback(
+                state,
+                browser_semantic_action_script(&target, None, &anchor.url, document_identity)?,
+            )
+            .await?;
         }
         PreparedBrowserControlAction::Fill { text, .. } => {
             let (target, document_identity) =
@@ -4794,22 +5004,48 @@ pub(crate) async fn execute_browser_control_action(
             )
             .await?;
         }
-        PreparedBrowserControlAction::Select { label, .. } | PreparedBrowserControlAction::Press { key: label, .. } => {
-            let (target, document_identity) = target.ok_or_else(|| "browser action target is stale".to_string())?;
+        PreparedBrowserControlAction::Select { label, .. }
+        | PreparedBrowserControlAction::Press { key: label, .. } => {
+            let (target, document_identity) =
+                target.ok_or_else(|| "browser action target is stale".to_string())?;
             require_action_page_revision(state, &anchor)?;
-            require_browser_control_grant(state, &anchor.workspace_id, anchor.session_id.as_deref(), anchor.lifecycle_token, Instant::now())?;
+            require_browser_control_grant(
+                state,
+                &anchor.workspace_id,
+                anchor.session_id.as_deref(),
+                anchor.lifecycle_token,
+                Instant::now(),
+            )?;
             let is_key = action_name == "press";
-            eval_browser_action_with_callback(state, browser_element_action_script(
-                &target, if is_key { "focus" } else { "select" }, &label, &anchor.url, document_identity,
-            )?).await?;
+            eval_browser_action_with_callback(
+                state,
+                browser_element_action_script(
+                    &target,
+                    if is_key { "focus" } else { "select" },
+                    &label,
+                    &anchor.url,
+                    document_identity,
+                )?,
+            )
+            .await?;
             if is_key {
                 require_action_page_revision(state, &anchor)?;
-                require_browser_control_grant(state, &anchor.workspace_id, anchor.session_id.as_deref(), anchor.lifecycle_token, Instant::now())?;
-                let webview = state.webview.lock().map_err(|_| "browser state lock poisoned")?.clone().ok_or("browser is not open")?;
+                require_browser_control_grant(
+                    state,
+                    &anchor.workspace_id,
+                    anchor.session_id.as_deref(),
+                    anchor.lifecycle_token,
+                    Instant::now(),
+                )?;
+                let webview = state
+                    .webview
+                    .lock()
+                    .map_err(|_| "browser state lock poisoned")?
+                    .clone()
+                    .ok_or("browser is not open")?;
                 crate::browser_input::press(webview, &label).await?;
             }
         }
-
     }
 
     Ok(BrowserActionResult {
@@ -5547,7 +5783,11 @@ pub async fn browser_hide(
         lifecycle_token,
         "browser close lifecycle is stale",
     )?;
-    crate::browser_popups::close_browser_popups_for_lifecycle(&app, &scope_key(&workspace_id, session_id.as_deref()), lifecycle_token);
+    crate::browser_popups::close_browser_popups_for_lifecycle(
+        &app,
+        &scope_key(&workspace_id, session_id.as_deref()),
+        lifecycle_token,
+    );
     clear_browser_control_grant(&state);
     invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
     {
@@ -5603,16 +5843,17 @@ mod tests {
     use std::time::{Duration as StdDuration, Instant};
 
     use super::{
-        advance_lifecycle_token, append_browser_audit, arm_browser_control_grant,
-        browser_action_anchor_matches_context, browser_action_url_check_script,
-        browser_audit_outcome, browser_context_is_loading, browser_evidence_cleanup_script,
-        browser_evidence_read_script, browser_evidence_start_script, browser_location_cache_insert,
+        advance_lifecycle_token, append_browser_audit, apply_main_frame_navigation,
+        arm_browser_control_grant, browser_action_anchor_matches_context,
+        browser_action_url_check_script, browser_audit_outcome, browser_context_is_loading,
+        browser_evidence_cleanup_script, browser_evidence_read_script,
+        browser_evidence_start_script, browser_location_cache_insert,
         browser_location_cache_matches_current, browser_location_cache_purge_expired,
         browser_location_cache_remove, browser_scroll_script, browser_semantic_action_script,
         browser_surface_matches_visibility_policy, clear_browser_control_grant,
         click_target_is_compatible, consume_browser_evidence_anchor,
         consume_semantic_map_for_anchor, context_is_ready_for_url, control_grant_is_current,
-        apply_main_frame_navigation, control_grant_status, fill_target_is_compatible, mark_context_loading,
+        control_grant_status, fill_target_is_compatible, mark_context_loading,
         normalize_browser_bounds, normalize_browser_context_text,
         normalize_browser_evidence_events, normalize_browser_evidence_resource_initiator_type,
         normalize_browser_evidence_resource_status, normalize_browser_fill_text,
@@ -6442,7 +6683,10 @@ mod tests {
             "https://example.test/old",
             false
         ));
-        assert_eq!(context.expected_url.as_deref(), Some("https://example.test/new"));
+        assert_eq!(
+            context.expected_url.as_deref(),
+            Some("https://example.test/new")
+        );
         assert!(browser_context_is_loading(&context));
     }
 
@@ -6462,7 +6706,10 @@ mod tests {
             false
         ));
         assert!(browser_context_is_loading(&context));
-        assert_eq!(context.expected_url.as_deref(), Some("https://example.test/new"));
+        assert_eq!(
+            context.expected_url.as_deref(),
+            Some("https://example.test/new")
+        );
     }
 
     #[test]
@@ -6479,13 +6726,19 @@ mod tests {
             "https://example.test/redirected",
             false
         ));
-        assert!(context_is_ready_for_url(&context, "https://example.test/redirected"));
+        assert!(context_is_ready_for_url(
+            &context,
+            "https://example.test/redirected"
+        ));
         assert!(apply_main_frame_navigation(
             &mut context,
             "https://example.test/profile",
             false
         ));
-        assert!(context_is_ready_for_url(&context, "https://example.test/profile"));
+        assert!(context_is_ready_for_url(
+            &context,
+            "https://example.test/profile"
+        ));
     }
 
     #[test]
@@ -6507,7 +6760,10 @@ mod tests {
             "https://example.test/current",
             false
         ));
-        assert!(context_is_ready_for_url(&context, "https://example.test/current"));
+        assert!(context_is_ready_for_url(
+            &context,
+            "https://example.test/current"
+        ));
     }
 
     #[test]
@@ -6681,12 +6937,26 @@ mod tests {
 
     #[test]
     fn click_and_fill_targets_are_narrowly_compatible() {
-        for role in ["button", "checkbox", "switch", "select", "option", "tab", "menuitem"] {
+        for role in [
+            "button", "checkbox", "switch", "select", "option", "tab", "menuitem",
+        ] {
             assert!(click_target_is_compatible(&target(role, "div", None)));
         }
-        assert!(fill_target_is_compatible(&target("spinbutton", "input", Some("number"))));
-        assert!(!click_target_is_compatible(&target("button", "input", Some("file"))));
-        assert!(!click_target_is_compatible(&target("button", "input", Some("password"))));
+        assert!(fill_target_is_compatible(&target(
+            "spinbutton",
+            "input",
+            Some("number")
+        )));
+        assert!(!click_target_is_compatible(&target(
+            "button",
+            "input",
+            Some("file")
+        )));
+        assert!(!click_target_is_compatible(&target(
+            "button",
+            "input",
+            Some("password")
+        )));
         assert!(click_target_is_compatible(&target(
             "button", "button", None
         )));

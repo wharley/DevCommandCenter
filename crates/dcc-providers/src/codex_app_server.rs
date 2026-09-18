@@ -4575,7 +4575,10 @@ unified_exec                         stable             true
         let reset_credits = usage.reset_credits.expect("reset credits should parse");
         assert_eq!(reset_credits.available_count, 1);
         assert_eq!(reset_credits.credits[0].id, "reset-1");
-        assert_eq!(reset_credits.credits[0].title.as_deref(), Some("Full reset"));
+        assert_eq!(
+            reset_credits.credits[0].title.as_deref(),
+            Some("Full reset")
+        );
         assert!(reset_credits.credits[0].expires_at.is_some());
     }
 

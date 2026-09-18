@@ -878,12 +878,18 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
             .as_ref()
             .is_some_and(fill_args_are_well_formed),
         "dcc_browser_select" => call.arguments.as_ref().is_some_and(|arguments| {
-            serde_json::from_value::<SelectArgs>(arguments.clone()).is_ok_and(|args|
-                valid_browser_reference(&args.reference) && valid_fill_text(&args.label) && !args.label.is_empty() && args.label.chars().count() <= 120)
+            serde_json::from_value::<SelectArgs>(arguments.clone()).is_ok_and(|args| {
+                valid_browser_reference(&args.reference)
+                    && valid_fill_text(&args.label)
+                    && !args.label.is_empty()
+                    && args.label.chars().count() <= 120
+            })
         }),
         "dcc_browser_press" => call.arguments.as_ref().is_some_and(|arguments| {
-            serde_json::from_value::<PressArgs>(arguments.clone()).is_ok_and(|args|
-                valid_browser_reference(&args.reference) && crate::browser_input::valid_key(&args.key))
+            serde_json::from_value::<PressArgs>(arguments.clone()).is_ok_and(|args| {
+                valid_browser_reference(&args.reference)
+                    && crate::browser_input::valid_key(&args.key)
+            })
         }),
         "dcc_browser_screenshot" => call.arguments.as_ref().is_some_and(|arguments| {
             serde_json::from_value::<BrowserScreenshotArgs>(arguments.clone()).is_ok()
@@ -1463,12 +1469,40 @@ async fn dispatch_tool(
             }
             _ => ToolDispatch::rejected(),
         },
-        "dcc_browser_select" => match call.arguments.and_then(|args| serde_json::from_value::<SelectArgs>(args).ok()) {
-            Some(args) if anchor_belongs_to_binding(&args.anchor, binding) => action_result(bridge, binding, args.anchor, BrowserControlAction::Select { reference: args.reference, label: args.label }).await,
+        "dcc_browser_select" => match call
+            .arguments
+            .and_then(|args| serde_json::from_value::<SelectArgs>(args).ok())
+        {
+            Some(args) if anchor_belongs_to_binding(&args.anchor, binding) => {
+                action_result(
+                    bridge,
+                    binding,
+                    args.anchor,
+                    BrowserControlAction::Select {
+                        reference: args.reference,
+                        label: args.label,
+                    },
+                )
+                .await
+            }
             _ => ToolDispatch::rejected(),
         },
-        "dcc_browser_press" => match call.arguments.and_then(|args| serde_json::from_value::<PressArgs>(args).ok()) {
-            Some(args) if anchor_belongs_to_binding(&args.anchor, binding) => action_result(bridge, binding, args.anchor, BrowserControlAction::Press { reference: args.reference, key: args.key }).await,
+        "dcc_browser_press" => match call
+            .arguments
+            .and_then(|args| serde_json::from_value::<PressArgs>(args).ok())
+        {
+            Some(args) if anchor_belongs_to_binding(&args.anchor, binding) => {
+                action_result(
+                    bridge,
+                    binding,
+                    args.anchor,
+                    BrowserControlAction::Press {
+                        reference: args.reference,
+                        key: args.key,
+                    },
+                )
+                .await
+            }
             _ => ToolDispatch::rejected(),
         },
         "dcc_browser_evidence_start" => match call
@@ -2808,8 +2842,8 @@ mod tests {
                 "dcc_browser_scroll",
                 "dcc_browser_click",
                 "dcc_browser_fill",
-    "dcc_browser_select",
-    "dcc_browser_press",
+                "dcc_browser_select",
+                "dcc_browser_press",
                 "dcc_browser_screenshot",
                 "dcc_browser_evidence_start",
                 "dcc_browser_evidence_read",
