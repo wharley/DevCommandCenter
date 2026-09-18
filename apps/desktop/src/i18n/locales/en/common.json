@@ -2302,9 +2302,7 @@
       "url": "Endpoint",
       "notAvailable": "Not available",
       "copy": "Copy value",
-      "copied": "Copied",
-      "performance": "The sidecar stays idle between operations. DCC uses a short query timeout, caps memory context at 4,000 characters, and stores pending exports locally for later retry.",
-      "firstUse": "First use: in a distributed build with the binary included, just open a task. During development, yarn dev uses the binary only when DCC_AI_MEMORY_BIN or ~/Applications/ai-memory/ai-memory exists; it never downloads anything automatically."
+      "copied": "Copied"
     },
     "shortcuts": {
       "keyboardShortcuts": "Keyboard shortcuts",

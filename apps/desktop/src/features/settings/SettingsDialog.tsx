@@ -1486,10 +1486,6 @@ export function SettingsDialog({
 										</div>
 									) : null}
 
-									<div className="rounded-xl border border-border/60 p-4 text-[12px] leading-relaxed text-muted-foreground">
-										<p>{t("settings.aiMemory.performance")}</p>
-										<p className="mt-2">{t("settings.aiMemory.firstUse")}</p>
-									</div>
 								</section>
 							) : null}
 
