@@ -2244,8 +2244,7 @@
     "aiMemory": {
       "title": "Memória do projeto",
       "hint": "A memória é opcional e local. O DCC mantém um único sidecar quando habilitado e continua funcionando se ele estiver indisponível.",
-      "operationsHint": "O sidecar fica ocioso entre operações. O DCC consulta memória com timeout curto, usa no máximo 4.000 caracteres de contexto e grava exportações pendentes no banco local para tentar novamente depois.",
-      "firstUseHint": "Primeiro uso: em uma versão distribuída com o binário incluído, basta abrir uma tarefa. Em desenvolvimento, o yarn dev usa o binário somente quando DCC_AI_MEMORY_BIN ou ~/Applications/ai-memory/ai-memory existir; não baixa nada automaticamente.",
+      "operationsHint": "A memória funciona em segundo plano e fica ociosa entre operações. Se o serviço estiver indisponível, suas tarefas continuam normalmente.",
       "refresh": "Atualizar",
       "modeLabel": "Modo de operação",
       "tokenLabel": "Token (opcional)",
@@ -2254,6 +2253,7 @@
       "connectionHint": "No modo Gerenciado pelo DCC, deixe URL e token vazios. Use-os somente ao conectar um servidor remoto; esse token pertence ao ai-memory, não ao seu provider de IA.",
       "advancedTitle": "Escopo e armazenamento avançados",
       "advancedHint": "Workspace e Projeto são namespaces da memória, não caminhos de pastas. O DCC separa automaticamente projetos locais diferentes usando o identificador interno do projeto; altere estes valores apenas para integrar uma instalação compartilhada ou organizar namespaces manualmente.",
+      "technicalHint": "Detalhes operacionais: o DCC usa timeout curto, limita o contexto automático a 4.000 caracteres e mantém exportações pendentes no banco local. Em desenvolvimento, yarn dev só usa um binário já encontrado em DCC_AI_MEMORY_BIN ou ~/Applications/ai-memory/ai-memory; nunca baixa arquivos automaticamente.",
       "workspaceLabel": "Workspace",
       "projectLabel": "Projeto",
       "dataDirPlaceholder": "Padrão do aplicativo",

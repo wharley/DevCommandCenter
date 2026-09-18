@@ -1266,9 +1266,6 @@ export function SettingsDialog({
 														<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/90">
 															{t("settings.aiMemory.operationsHint")}
 														</p>
-														<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/90">
-															{t("settings.aiMemory.firstUseHint")}
-														</p>
 												</div>
 											</div>
 											<Button
@@ -1363,7 +1360,8 @@ export function SettingsDialog({
 										<p className="sm:col-span-2 text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.connectionHint")}</p>
 										<details className="sm:col-span-2 rounded-lg border border-border/50 bg-muted/10 px-3 py-2">
 											<summary className="cursor-pointer text-[12px] font-medium text-foreground">{t("settings.aiMemory.advancedTitle")}</summary>
-											<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.advancedHint")}</p>
+													<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.advancedHint")}</p>
+													<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/90">{t("settings.aiMemory.technicalHint")}</p>
 											<div className="mt-3 grid gap-4 sm:grid-cols-2">
 												<label className="space-y-1.5">
 													<span className="text-[12px] font-medium text-foreground">{t("settings.aiMemory.workspaceLabel")}</span>
