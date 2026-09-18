@@ -7193,6 +7193,8 @@ pub fn run() {
             session_commands::sync_session_to_ai_memory,
             session_commands::query_ai_memory,
             session_commands::ai_memory_export_status,
+            session_commands::ai_memory_outbox_list,
+            session_commands::ai_memory_outbox_retry,
             session_commands::ai_memory_sidecar_status,
             session_commands::ai_memory_settings_load,
             session_commands::ai_memory_settings_save,

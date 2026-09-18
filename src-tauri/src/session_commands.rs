@@ -90,6 +90,54 @@ pub fn ai_memory_export_status(
 }
 
 #[tauri::command]
+pub fn ai_memory_outbox_list(
+    state: State<'_, SessionCommandState>,
+    limit: Option<usize>,
+) -> Result<Vec<AiMemoryOutboxStatusOutput>, String> {
+    state
+        .list_ai_memory_exports(limit.unwrap_or(50))
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| AiMemoryOutboxStatusOutput {
+                    session_id: entry.session_id.0,
+                    attempts: entry.attempts,
+                    next_attempt_at: entry.next_attempt_at,
+                    last_error: entry.last_error,
+                })
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn ai_memory_outbox_retry(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() || session_id.len() > 200 {
+        return Err("sessionId is required".to_string());
+    }
+    let session_id = dcc_core::domain::session::SessionId(session_id.to_string());
+    state
+        .retry_ai_memory_export(&session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    state
+        .ai_memory_export_status(&session_id)
+        .map(|status| {
+            status.map(|entry| AiMemoryOutboxStatusOutput {
+                session_id: entry.session_id.0,
+                attempts: entry.attempts,
+                next_attempt_at: entry.next_attempt_at,
+                last_error: entry.last_error,
+            })
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn ai_memory_sidecar_status(
     sidecar: State<'_, dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar>,
 ) -> Result<AiMemorySidecarStatus, String> {

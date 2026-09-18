@@ -1357,6 +1357,36 @@ impl SqliteSessionRepo {
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
     }
 
+    pub fn list_ai_memory_exports(&self, limit: usize) -> Result<Vec<AiMemoryOutboxEntry>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                r#"
+                SELECT session_id, attempts, next_attempt_at, last_error
+                  FROM dcc_ai_memory_outbox
+                 ORDER BY updated_at DESC
+                 LIMIT ?1
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+                let attempts = row.get::<_, i64>(1)?;
+                Ok(AiMemoryOutboxEntry {
+                    session_id: SessionId(row.get(0)?),
+                    attempts: u32::try_from(attempts).unwrap_or(u32::MAX),
+                    next_attempt_at: row.get(2)?,
+                    last_error: row.get(3)?,
+                })
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        rows.map(|row| row.map_err(|error| dcc_core::CoreError::Repository(error.to_string())))
+            .collect()
+    }
+
     pub fn complete_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
         let conn = self
             .conn

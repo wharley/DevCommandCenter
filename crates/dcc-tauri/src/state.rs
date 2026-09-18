@@ -1971,6 +1971,16 @@ impl SessionCommandState {
         self.session_repo.get_ai_memory_export(session_id)
     }
 
+    pub fn list_ai_memory_exports(&self, limit: usize) -> Result<Vec<AiMemoryOutboxEntry>> {
+        self.session_repo
+            .list_ai_memory_exports(limit.clamp(1, 100))
+    }
+
+    pub async fn retry_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
+        self.session_repo.enqueue_ai_memory_export(session_id)?;
+        self.drain_ai_memory_outbox(1).await.map(|_| ())
+    }
+
     /// Retries due exports without holding any provider/session transition
     /// lock. A failed attempt is delayed with bounded exponential backoff.
     pub async fn drain_ai_memory_outbox(&self, limit: usize) -> Result<usize> {

@@ -98,8 +98,10 @@ import {
 } from "@/features/providers/provider-availability.logic";
 import { setProviderAvailability } from "@/lib/provider-api";
 import {
+	loadAiMemoryOutbox,
 	loadAiMemorySettings,
 	loadAiMemorySidecarStatus,
+	retryAiMemoryOutbox,
 	saveAiMemorySettings,
 } from "@/lib/session-api";
 import {
@@ -673,6 +675,12 @@ export function SettingsDialog({
 		enabled: open,
 		staleTime: 10_000,
 	});
+	const aiMemoryOutboxQuery = useQuery({
+		queryKey: ["ai-memory", "outbox"],
+		queryFn: () => loadAiMemoryOutbox(50),
+		enabled: open,
+		staleTime: 5_000,
+	});
 	const [aiMemoryDraft, setAiMemoryDraft] = useState<AiMemorySettingsInput>({
 		mode: "managed",
 		baseUrl: null,
@@ -682,6 +690,7 @@ export function SettingsDialog({
 		token: null,
 	});
 	const [aiMemorySaving, setAiMemorySaving] = useState(false);
+	const [aiMemoryRetrying, setAiMemoryRetrying] = useState<string | null>(null);
 	useEffect(() => {
 		const settings = aiMemorySettingsQuery.data;
 		if (!settings) return;
@@ -828,6 +837,18 @@ export function SettingsDialog({
 			toast.error(error instanceof Error ? error.message : t("settings.aiMemory.saveError"));
 		} finally {
 			setAiMemorySaving(false);
+		}
+	};
+	const handleAiMemoryRetry = async (sessionId: string) => {
+		setAiMemoryRetrying(sessionId);
+		try {
+			await retryAiMemoryOutbox(sessionId);
+			await aiMemoryOutboxQuery.refetch();
+			toast.success(t("settings.aiMemory.retryQueued"));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : t("settings.aiMemory.retryError"));
+		} finally {
+			setAiMemoryRetrying(null);
 		}
 	};
 
@@ -1345,10 +1366,44 @@ export function SettingsDialog({
 											{aiMemorySaving ? <Loader2 className="size-3.5 animate-spin" /> : null}
 											{t("settings.aiMemory.save")}
 										</Button>
-									</div>
-								</div>
+													</div>
+												</div>
 
-								{aiMemoryStatusQuery.data ? (
+												<div className="rounded-xl border border-border/60 p-4">
+													<div className="flex items-start justify-between gap-4">
+														<div>
+															<h3 className="text-[14px] font-medium text-foreground">{t("settings.aiMemory.outboxTitle")}</h3>
+															<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{t("settings.aiMemory.outboxHint")}</p>
+														</div>
+														<Button type="button" variant="outline" size="sm" disabled={aiMemoryOutboxQuery.isFetching} onClick={() => void aiMemoryOutboxQuery.refetch()}>
+															{aiMemoryOutboxQuery.isFetching ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+															{t("settings.aiMemory.refresh")}
+														</Button>
+													</div>
+													{aiMemoryOutboxQuery.data?.length ? (
+														<div className="mt-4 divide-y divide-border/40 rounded-lg border border-border/50 bg-background">
+															{aiMemoryOutboxQuery.data.map((entry) => (
+																<div className="flex flex-wrap items-center justify-between gap-3 p-3" key={entry.sessionId}>
+																	<div className="min-w-0">
+																		<p className="truncate font-mono text-[11px] text-foreground" title={entry.sessionId}>{entry.sessionId}</p>
+																		<p className="mt-1 text-[11px] text-muted-foreground">
+																			{t("settings.aiMemory.outboxMeta", { attempts: entry.attempts, next: entry.nextAttemptAt })}
+																		</p>
+																		{entry.lastError ? <p className="mt-1 text-[11px] text-destructive">{entry.lastError}</p> : null}
+																	</div>
+																	<Button type="button" variant="outline" size="sm" disabled={aiMemoryRetrying === entry.sessionId} onClick={() => void handleAiMemoryRetry(entry.sessionId)}>
+																	{aiMemoryRetrying === entry.sessionId ? <Loader2 className="size-3.5 animate-spin" /> : null}
+																	{t("settings.aiMemory.retry")}
+																</Button>
+															</div>
+															))}
+														</div>
+													) : (
+														<p className="mt-4 rounded-lg border border-border/50 bg-background p-3 text-[12px] text-muted-foreground">{t("settings.aiMemory.outboxEmpty")}</p>
+													)}
+												</div>
+
+												{aiMemoryStatusQuery.data ? (
 										<div className="grid gap-3 sm:grid-cols-2">
 												{(
 													[

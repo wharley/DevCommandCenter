@@ -100,6 +100,16 @@ export function loadAiMemoryExportStatus(sessionId: string) {
 	);
 }
 
+export function loadAiMemoryOutbox(limit = 50) {
+	return invoke<AiMemoryOutboxStatusOutput[]>(SESSION_METHODS.aiMemoryOutboxList, { limit });
+}
+
+export function retryAiMemoryOutbox(sessionId: string) {
+	return invoke<AiMemoryOutboxStatusOutput | null>(SESSION_METHODS.aiMemoryOutboxRetry, {
+		sessionId,
+	});
+}
+
 export function loadAiMemorySidecarStatus() {
 	return invoke<AiMemorySidecarStatus>(SESSION_METHODS.aiMemorySidecarStatus);
 }

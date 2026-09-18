@@ -118,6 +118,8 @@ pub struct AiMemoryOutboxStatusOutput {
     pub last_error: Option<String>,
 }
 
+pub type AiMemoryOutboxListOutput = Vec<AiMemoryOutboxStatusOutput>;
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiMemoryQueryInput {
