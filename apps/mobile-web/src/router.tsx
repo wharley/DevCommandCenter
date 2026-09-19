@@ -90,7 +90,7 @@ const routeTree = rootRoute.addChildren([
 ]);
 
 // The SPA is mounted at /m/ in production (served by dccd-http) and at / in
-// `vite dev`. Matches Vite's `base: "/m/"` config so links and matches resolve
+// `oj dev`. Matches OJ's `base: "/m/"` config so links and matches resolve
 // consistently in both modes.
 const basepath = import.meta.env.BASE_URL.replace(/\/$/, "") || "/";
 

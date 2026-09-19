@@ -2,7 +2,6 @@
 .composer-link,
 .composer-link-heading {
 	--composer-link-color: #0969da;
-	--composer-link-icon: url("./assets/globe.svg");
 	color: var(--composer-link-color);
 }
 .dark .composer-link,
@@ -30,8 +29,8 @@
 	width: 1em;
 	height: 1em;
 	background: currentColor;
-	-webkit-mask: var(--composer-link-icon) center / contain no-repeat;
-	mask: var(--composer-link-icon) center / contain no-repeat;
+	-webkit-mask: url("./assets/globe.svg") center / contain no-repeat;
+	mask: url("./assets/globe.svg") center / contain no-repeat;
 	vertical-align: -0.12em;
 	margin-inline-end: 0.3em;
 }

@@ -5,8 +5,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node ../../scripts/ensure-oj.mjs && oj dev ../.. --port 5173",
+    "build": "node ../../scripts/ensure-oj.mjs && oj build ../.. --emptyOutDir",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -68,11 +68,9 @@
     "@tailwindcss/postcss": "^4.1.9",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vitejs/plugin-react": "^6.0.1",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
     "typescript": "^5",
-    "vite": "^8.0.10",
     "vitest": "^4.1.2"
   }
 }

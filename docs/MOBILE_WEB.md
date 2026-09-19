@@ -10,8 +10,8 @@ There are two different servers during development:
 
 | Server | Port | Serves | Use it for |
 |---|---:|---|---|
-| `dccd-http` | `9876` | The HTTP API (`/api`, `/auth`) and the built SPA at `/m/` from `apps/mobile-web/dist/` | QR pairing and phone testing without Vite |
-| Vite dev server | `5174` | The SPA at `/m/` with HMR, proxying `/api`, `/auth`, `/health`, and `/rpc` to `127.0.0.1:9876` | Live mobile UI development |
+| `dccd-http` | `9876` | The HTTP API (`/api`, `/auth`) and the built SPA at `/m/` from `apps/mobile-web/dist/` | QR pairing and phone testing without OJ |
+| OJ dev server | `5174` | The SPA at `/m/` with HMR, proxying `/api`, `/auth`, `/health`, and `/rpc` to `127.0.0.1:9876` | Live mobile UI development |
 
 Important details:
 
@@ -19,8 +19,8 @@ Important details:
   same application database as the desktop app.
 - The desktop QR code points at `http://<host>:9876/m/`, so QR pairing expects a
   built `apps/mobile-web/dist/`.
-- When using the Vite server, open the Vite URL manually and omit the `be`
-  fragment parameter so the SPA uses the Vite origin and its API proxy.
+- When using the OJ server, open the OJ URL manually and omit the `be`
+  fragment parameter so the SPA uses the OJ origin and its API proxy.
 
 ## Start The HTTP Daemon
 
@@ -69,12 +69,12 @@ that serves the API.
 
 The generated `apps/mobile-web/dist/` directory is intentionally ignored by Git.
 
-## Phone With Vite HMR
+## Phone With OJ HMR
 
 Use this when changing the mobile UI and testing on a physical phone.
 
 1. Start `dccd-http`.
-2. Expose Vite on the network:
+2. Expose OJ on the network:
 
    ```bash
    cd apps/mobile-web
@@ -82,7 +82,7 @@ Use this when changing the mobile UI and testing on a physical phone.
    ```
 
 3. In the desktop app, create a new pairing and copy the nonce plus PIN.
-4. On the phone, open the Vite URL manually:
+4. On the phone, open the OJ URL manually:
 
    ```text
    http://<lan-ip>:5174/m/pair#nonce=<NONCE>
@@ -90,7 +90,7 @@ Use this when changing the mobile UI and testing on a physical phone.
 
 5. Enter the PIN shown by the desktop app.
 
-Do not scan the QR code for the Vite flow. The QR code points to `:9876`, not
+Do not scan the QR code for the OJ flow. The QR code points to `:9876`, not
 `:5174`.
 
 ## Notebook Browser Loop
@@ -102,7 +102,7 @@ http://localhost:5174/m/
 http://localhost:5174/m/pair#nonce=<NONCE>
 ```
 
-The Vite proxy sends API calls to the local `dccd-http` daemon.
+The OJ proxy sends API calls to the local `dccd-http` daemon.
 
 ## Tailscale
 
@@ -129,7 +129,7 @@ yarn build
 Then choose the Tailscale endpoint in the desktop pairing UI and scan the QR code
 from the phone while Tailscale is connected.
 
-For Vite HMR:
+For OJ HMR:
 
 ```bash
 cd apps/mobile-web
@@ -142,9 +142,8 @@ Open:
 http://<tailscale-ip>:5174/m/pair#nonce=<NONCE>
 ```
 
-Prefer the numeric Tailscale IP for Vite. MagicDNS hostnames can be blocked by
-Vite's allowed-host checks unless explicitly configured in
-`apps/mobile-web/vite.config.ts`.
+Prefer the numeric Tailscale IP for OJ. If the phone cannot reach the server,
+pass `--host` to the dev command and use the displayed network URL.
 
 ## Smoke Test
 
@@ -161,8 +160,8 @@ After pairing, verify these mobile paths:
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | The QR URL does not open on the phone | `dccd-http` is not reachable or `apps/mobile-web/dist/` is missing | Start `dccd-http` and run `yarn build` in `apps/mobile-web` |
-| `localhost:5174/m/` does not load | The wrong path or server was opened | Use `http://localhost:5174/m/` while Vite is running |
-| The phone cannot reach Vite | Vite is bound to localhost only | Run `yarn dev --host` and use the displayed network URL |
-| API calls fail in the Vite flow | The URL includes `be=` and bypasses the Vite proxy | Use `/m/pair#nonce=<NONCE>` without `be=` |
+| `localhost:5174/m/` does not load | The wrong path or server was opened | Use `http://localhost:5174/m/` while OJ is running |
+| The phone cannot reach OJ | OJ is bound to localhost only | Run `yarn dev --host` and use the displayed network URL |
+| API calls fail in the OJ flow | The URL includes `be=` and bypasses the OJ proxy | Use `/m/pair#nonce=<NONCE>` without `be=` |
 | Pairing says the nonce is invalid | The pairing window expired | Create a new pairing in the desktop app |
 | Port `9876` refuses connections | The HTTP daemon is not running or another process owns the port | Restart `dccd-http` and check the daemon logs |

@@ -21,9 +21,10 @@
     "build:contracts": "yarn workspace @dcc/contracts build",
     "build:desktop": "yarn workspace @dcc/desktop build",
     "build:sidecars": "node scripts/build-sidecars.mjs",
+    "oj:dev": "node scripts/ensure-oj.mjs && oj dev --port 5173",
+    "oj:build": "node scripts/ensure-oj.mjs && oj build --emptyOutDir",
+    "oj:build:mobile": "yarn workspace @dcc/mobile-web build",
     "test:mcp:release-local": "bash scripts/validate-mcp-release-local.sh",
-    "vite": "node scripts/ensure-node.mjs && vite",
-    "vite:build": "node scripts/ensure-node.mjs && vite build",
     "lint": "eslint .",
     "preinstall": "node scripts/check-node-version.mjs",
     "postinstall": "node scripts/patch-xterm-viewport.mjs && node scripts/patch-mcp-remote.mjs"
@@ -31,7 +32,8 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.0",
     "@types/node": "^22",
-    "@vitejs/plugin-react": "^6.0.1",
+    "esbuild": "^0.25.0",
+    "postcss": "^8.5.10",
     "typescript": "^5",
     "vite": "^8.0.10"
   },

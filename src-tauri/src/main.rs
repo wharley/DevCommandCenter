@@ -2951,8 +2951,7 @@ async fn app_quit_and_install(app: AppHandle) -> ApiResult<Value> {
             code: "UPDATER_INSTALL",
             message: e.to_string(),
         })?;
-    app.restart();
-    Ok(serde_json::json!({ "success": true }))
+    app.restart()
 }
 
 #[tauri::command]

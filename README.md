@@ -71,7 +71,7 @@ persistence in one Tauri application.
 ## Stack
 
 - Tauri 2 + Rust
-- React 19 + TypeScript + Vite
+- React 19 + TypeScript + OJ
 - SQLite for local persistence
 - xterm.js for terminal surfaces
 
@@ -146,7 +146,11 @@ desktop release. Individual provider CLIs may have their own runtime requirement
 - Node.js 22 recommended
 - Yarn v1
 - Rust stable
+- OJ 0.2.2 (`cargo install oj --version 0.2.2 --locked`)
 - Git
+
+OJ is the desktop and mobile build/dev tool. Vite remains only as the peer
+runtime used by Vitest 4 for the test suites.
 
 ## Development
 

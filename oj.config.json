@@ -1,0 +1,20 @@
+{
+  "base": "./",
+  "resolve": {
+    "alias": {
+      "@": "./apps/desktop/src"
+    }
+  },
+  "build": {
+    "outDir": "dist",
+    "emptyOutDir": true,
+    "sourcemap": true
+  },
+  "server": {
+    "port": 5173,
+    "strictPort": true
+  },
+  "optimizeDeps": {
+    "include": ["react", "react-dom"]
+  }
+}

@@ -4,8 +4,8 @@
   "version": "0.1.75",
   "identifier": "com.devcommandcenter.app",
   "build": {
-    "beforeDevCommand": "node scripts/build-sidecars.mjs --dev && node scripts/ensure-node.mjs && yarn vite",
-    "beforeBuildCommand": "yarn workspace @dcc/mobile-web build && node scripts/build-sidecars.mjs && yarn vite:build",
+    "beforeDevCommand": "node scripts/build-sidecars.mjs --dev && node scripts/ensure-node.mjs && yarn oj:dev",
+    "beforeBuildCommand": "node scripts/ensure-node.mjs && yarn workspace @dcc/mobile-web build && node scripts/build-sidecars.mjs && yarn oj:build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },

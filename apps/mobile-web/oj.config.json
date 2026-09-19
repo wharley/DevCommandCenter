@@ -1,0 +1,21 @@
+{
+  "base": "/m/",
+  "resolve": {
+    "alias": {
+      "@": "./src"
+    }
+  },
+  "server": {
+    "port": 5174,
+    "proxy": {
+      "/api": "http://127.0.0.1:9876",
+      "/auth": "http://127.0.0.1:9876",
+      "/health": "http://127.0.0.1:9876",
+      "/rpc": "http://127.0.0.1:9876"
+    }
+  },
+  "build": {
+    "outDir": "dist",
+    "emptyOutDir": true
+  }
+}

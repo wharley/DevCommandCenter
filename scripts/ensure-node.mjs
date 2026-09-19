@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * A toolchain de build exige Node >=22.12; o app distribuído não usa este script.
- * Com Node mais antigo o `yarn vite` falha ou emite avisos inconsistentes → Tauri pode abrir em branco.
+ * Com Node mais antigo a toolchain pode falhar ou emitir avisos inconsistentes → Tauri pode abrir em branco.
  */
 const [majS, minS, patS] = process.versions.node.split(".");
 const major = parseInt(majS, 10);

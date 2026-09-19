@@ -2,6 +2,7 @@
 
 # dependencies (any depth — /node_modules only matched repo root)
 node_modules/
+.oj-cache/
 
 # next.js
 /.next/
