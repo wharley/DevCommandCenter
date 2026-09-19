@@ -32,6 +32,7 @@ use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar;
 use dev_command_center_tauri::daemon_client::{
     ensure_sidecar_running, rpc_with_info, sidecar_binary_candidates_for, DaemonRuntimeInfo,
 };
+use dev_command_center_tauri::decision_provider_settings::DecisionProviderSettings;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -7209,6 +7210,8 @@ pub fn run() {
             session_commands::ai_memory_sidecar_status,
             session_commands::ai_memory_settings_load,
             session_commands::ai_memory_settings_save,
+            session_commands::decision_provider_settings_load,
+            session_commands::decision_provider_settings_save,
             session_commands::send_turn,
             session_commands::steer_turn,
             session_commands::steer_native_subagent,
@@ -7254,6 +7257,11 @@ pub fn run() {
                 AiMemorySidecar::load_persisted_settings(&app_data_dir),
             ) {
                 eprintln!("[DCC][ai-memory] persisted settings unavailable: {error}");
+            }
+            if let Err(error) = tauri::async_runtime::block_on(
+                DecisionProviderSettings::load_persisted_settings(&app_data_dir),
+            ) {
+                eprintln!("[DCC][decision-provider] persisted settings unavailable: {error}");
             }
             let ai_memory_sidecar = match AiMemorySidecar::start(app.handle(), &app_data_dir) {
                 Ok(sidecar) => sidecar,

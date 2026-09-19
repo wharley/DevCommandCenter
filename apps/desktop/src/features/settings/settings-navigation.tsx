@@ -12,6 +12,7 @@ export type SettingsSectionId =
 	| "general"
 	| "appearance"
 	| "model"
+	| "decisionProvider"
 	| "aiMemory"
 	| "integrations"
 	| "computerUse"

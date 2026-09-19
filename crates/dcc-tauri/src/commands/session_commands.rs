@@ -38,10 +38,13 @@ use dcc_core::{
         SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
     },
 };
-use dcc_infra::ai_memory::AiMemoryConfig;
+use dcc_infra::ai_memory::{AiMemoryConfig, AiMemoryHit};
 use dcc_infra::db::{
     GuardedUndoCaptureSummary as InfraGuardedUndoCaptureSummary, SqliteSessionRepo,
     SqliteWorkspaceRepo,
+};
+use dcc_infra::decision_provider::{
+    DecisionMode, DecisionProvider, MemoryFilterInput, TypeSafeDecisionProvider,
 };
 
 use crate::guarded_undo_runtime::{GuardedUndoExecuteResult, GuardedUndoPrepareResult};
@@ -1165,6 +1168,7 @@ async fn ai_memory_context_for_turn(
             return None;
         }
     };
+    let hits = apply_decision_provider_memory_filter(prompt, hits).await;
     state.record_ai_memory_hits(&session.id, hits.clone());
     if hits.is_empty() {
         return None;
@@ -1196,6 +1200,49 @@ async fn ai_memory_context_for_turn(
         }
     }
     (context.len() > 100).then_some(context)
+}
+
+async fn apply_decision_provider_memory_filter(
+    prompt: &str,
+    hits: Vec<AiMemoryHit>,
+) -> Vec<AiMemoryHit> {
+    let Some(provider) = TypeSafeDecisionProvider::from_env() else {
+        return hits;
+    };
+
+    let result = match provider
+        .filter_memory(MemoryFilterInput {
+            prompt,
+            hits: &hits,
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("[DCC] decision provider memory filter failed: {error}");
+            return hits;
+        }
+    };
+
+    let selected = provider.filter_hits(hits.clone(), &result);
+    let selected_indices = result
+        .decisions
+        .iter()
+        .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
+        .map(|decision| decision.index)
+        .collect::<Vec<_>>();
+    eprintln!(
+        "[DCC] decision provider memory_filter mode={:?} model={} candidates={} selected={:?}",
+        provider.config().mode,
+        result.model,
+        result.decisions.len(),
+        selected_indices,
+    );
+
+    match provider.config().mode {
+        DecisionMode::Observe => hits,
+        DecisionMode::Enforce => selected,
+    }
 }
 
 #[tauri::command]

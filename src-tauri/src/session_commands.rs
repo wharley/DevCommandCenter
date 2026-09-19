@@ -32,6 +32,9 @@ use dcc_tauri::{
 use dev_command_center_tauri::ai_memory_sidecar::{
     AiMemorySettingsInput, AiMemorySettingsOutput, AiMemorySidecarStatus,
 };
+use dev_command_center_tauri::decision_provider_settings::{
+    DecisionProviderSettings, DecisionProviderSettingsInput, DecisionProviderSettingsOutput,
+};
 
 #[tauri::command]
 pub async fn prepare_guarded_undo(
@@ -214,6 +217,29 @@ pub async fn ai_memory_settings_save(
         input,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn decision_provider_settings_load(
+    app: AppHandle,
+) -> Result<DecisionProviderSettingsOutput, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    DecisionProviderSettings::read_settings(&app_data_dir).await
+}
+
+#[tauri::command]
+pub async fn decision_provider_settings_save(
+    app: AppHandle,
+    input: DecisionProviderSettingsInput,
+) -> Result<DecisionProviderSettingsOutput, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    DecisionProviderSettings::save_settings(&app_data_dir, input).await
 }
 
 #[tauri::command]

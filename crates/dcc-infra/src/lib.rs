@@ -1,6 +1,7 @@
 pub mod ai_memory;
 pub mod credential_store;
 pub mod db;
+pub mod decision_provider;
 pub mod events;
 pub mod fs;
 pub mod git;

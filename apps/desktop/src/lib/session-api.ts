@@ -38,6 +38,8 @@ import type {
 	AiMemorySourceActionOutput,
 	AiMemorySyncInput,
 	AiMemorySyncOutput,
+	DecisionProviderSettingsInput,
+	DecisionProviderSettingsOutput,
 	ApplyTaskTitleInput,
 	ApplyTaskTitleOutput,
 	ApprovePlanInput,
@@ -146,6 +148,14 @@ export function loadAiMemorySettings() {
 
 export function saveAiMemorySettings(input: AiMemorySettingsInput) {
 	return invoke<AiMemorySettingsOutput>(SESSION_METHODS.aiMemorySettingsSave, { input });
+}
+
+export function loadDecisionProviderSettings() {
+	return invoke<DecisionProviderSettingsOutput>(SESSION_METHODS.decisionProviderSettingsLoad);
+}
+
+export function saveDecisionProviderSettings(input: DecisionProviderSettingsInput) {
+	return invoke<DecisionProviderSettingsOutput>(SESSION_METHODS.decisionProviderSettingsSave, { input });
 }
 
 export function restartDcc() {

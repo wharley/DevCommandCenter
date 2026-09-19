@@ -18,13 +18,14 @@ import {
 	SunMedium,
 	Wrench,
 	Database,
+	BrainCircuit,
 	RefreshCw,
 	Copy,
 	CircleCheck,
 	CircleAlert,
 } from "lucide-react";
 import type { ForgeCliProvider } from "@dcc/contracts";
-import type { AiMemorySettingsInput } from "@dcc/contracts";
+import type { AiMemorySettingsInput, DecisionProviderSettingsInput } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -103,9 +104,11 @@ import {
 	loadAiMemoryExportHistory,
 	loadAiMemorySettings,
 	loadAiMemorySidecarStatus,
+	loadDecisionProviderSettings,
 	restartDcc,
 	retryAiMemoryOutbox,
 	saveAiMemorySettings,
+	saveDecisionProviderSettings,
 } from "@/lib/session-api";
 import {
 	SettingsNavigation,
@@ -713,6 +716,34 @@ export function SettingsDialog({
 	const [aiMemorySaving, setAiMemorySaving] = useState(false);
 	const [aiMemoryRestartRequired, setAiMemoryRestartRequired] = useState(false);
 	const [aiMemoryRetrying, setAiMemoryRetrying] = useState<string | null>(null);
+	const decisionProviderSettingsQuery = useQuery({
+		queryKey: ["decision-provider", "settings"],
+		queryFn: loadDecisionProviderSettings,
+		enabled: open,
+		staleTime: 10_000,
+	});
+	const [decisionProviderDraft, setDecisionProviderDraft] = useState<DecisionProviderSettingsInput>({
+		provider: "disabled",
+		mode: "observe",
+		baseUrl: "https://api.typesafe.ai",
+		model: "jev-latest",
+		memoryThreshold: 0.65,
+		apiKey: null,
+	});
+	const [decisionProviderSaving, setDecisionProviderSaving] = useState(false);
+	useEffect(() => {
+		const settings = decisionProviderSettingsQuery.data;
+		if (!settings) return;
+		setDecisionProviderDraft((current) => ({
+			...current,
+			provider: settings.provider,
+			mode: settings.mode,
+			baseUrl: settings.baseUrl,
+			model: settings.model,
+			memoryThreshold: settings.memoryThreshold,
+			apiKey: null,
+		}));
+	}, [decisionProviderSettingsQuery.data]);
 	useEffect(() => {
 		const settings = aiMemorySettingsQuery.data;
 		if (!settings) return;
@@ -874,6 +905,18 @@ export function SettingsDialog({
 			setAiMemoryRetrying(null);
 		}
 	};
+	const handleDecisionProviderSettingsSave = async () => {
+		setDecisionProviderSaving(true);
+		try {
+			await saveDecisionProviderSettings(decisionProviderDraft);
+			await decisionProviderSettingsQuery.refetch();
+			toast.success(t("settings.decisionProvider.saved"));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : t("settings.decisionProvider.saveError"));
+		} finally {
+			setDecisionProviderSaving(false);
+		}
+	};
 
 	const sections = useMemo<SettingsSectionMeta[]>(
 		() => [
@@ -900,6 +943,14 @@ export function SettingsDialog({
 				label: t("settings.sections.model.label"),
 				description: t("settings.sections.model.description"),
 				icon: Sparkles,
+			},
+			{
+				id: "decisionProvider",
+				group: "services",
+				keywords: t("settings.navigation.keywords.decisionProvider"),
+				label: t("settings.sections.decisionProvider.label"),
+				description: t("settings.sections.decisionProvider.description"),
+				icon: BrainCircuit,
 			},
 			{
 				id: "aiMemory",
@@ -1246,6 +1297,92 @@ export function SettingsDialog({
 										onChangeRuntime={onChangeProviderRuntime}
 										onClearRuntime={onClearProviderRuntime}
 									/>
+								</section>
+							) : null}
+
+							{activeSection === "decisionProvider" ? (
+								<section className="space-y-4">
+									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
+										<div className="flex items-start gap-3">
+											<div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+												<BrainCircuit className="size-4" />
+											</div>
+											<div className="min-w-0">
+												<h3 className="text-[14px] font-medium text-foreground">
+													{t("settings.decisionProvider.title")}
+												</h3>
+												<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+													{t("settings.decisionProvider.hint")}
+												</p>
+											</div>
+										</div>
+										<div className="mt-4 grid gap-4 sm:grid-cols-2">
+											<div className="space-y-2">
+												<span className="text-[12px] font-medium text-foreground">
+													{t("settings.decisionProvider.providerLabel")}
+												</span>
+												<ToggleGroup
+													type="single"
+													value={decisionProviderDraft.provider}
+													onValueChange={(provider) => {
+														if (provider) setDecisionProviderDraft((current) => ({ ...current, provider }));
+													}}
+													className="justify-start"
+												>
+													<ToggleGroupItem value="disabled">{t("settings.decisionProvider.providers.disabled")}</ToggleGroupItem>
+													<ToggleGroupItem value="typesafe">{t("settings.decisionProvider.providers.typesafe")}</ToggleGroupItem>
+												</ToggleGroup>
+											</div>
+											<div className="space-y-2">
+												<span className="text-[12px] font-medium text-foreground">
+													{t("settings.decisionProvider.modeLabel")}
+												</span>
+												<ToggleGroup
+													type="single"
+													value={decisionProviderDraft.mode}
+													onValueChange={(mode) => {
+														if (mode) setDecisionProviderDraft((current) => ({ ...current, mode }));
+													}}
+													className="justify-start"
+												>
+													<ToggleGroupItem value="observe">{t("settings.decisionProvider.modes.observe")}</ToggleGroupItem>
+													<ToggleGroupItem value="enforce">{t("settings.decisionProvider.modes.enforce")}</ToggleGroupItem>
+												</ToggleGroup>
+											</div>
+											<label className="space-y-2">
+												<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.apiKeyLabel")}</span>
+												<Input
+													type="password"
+													value={decisionProviderDraft.apiKey ?? ""}
+													onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, apiKey: event.target.value }))}
+													placeholder={decisionProviderSettingsQuery.data?.apiKeyConfigured ? t("settings.decisionProvider.apiKeyConfigured") : t("settings.decisionProvider.apiKeyPlaceholder")}
+													autoComplete="new-password"
+												/>
+											</label>
+											<label className="space-y-2">
+												<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.baseUrlLabel")}</span>
+												<Input value={decisionProviderDraft.baseUrl ?? ""} onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, baseUrl: event.target.value || null }))} />
+											</label>
+											<label className="space-y-2">
+												<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.modelLabel")}</span>
+												<Input value={decisionProviderDraft.model ?? ""} onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, model: event.target.value || null }))} />
+											</label>
+											<label className="space-y-2">
+												<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.thresholdLabel")}</span>
+												<Input type="number" min={0} max={1} step={0.05} value={decisionProviderDraft.memoryThreshold ?? 0.65} onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, memoryThreshold: Number(event.target.value) }))} />
+											</label>
+										</div>
+										<p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
+											{t("settings.decisionProvider.securityHint")}
+										</p>
+										<div className="mt-4 flex flex-wrap items-center gap-2">
+											<Button type="button" size="sm" disabled={decisionProviderSaving || decisionProviderSettingsQuery.isPending} onClick={() => void handleDecisionProviderSettingsSave()}>
+												{decisionProviderSaving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+												{t("settings.decisionProvider.save")}
+											</Button>
+											{decisionProviderSettingsQuery.data?.apiKeyConfigured ? <Badge variant="secondary">{t("settings.decisionProvider.configured")}</Badge> : null}
+										</div>
+									</div>
 								</section>
 							) : null}
 

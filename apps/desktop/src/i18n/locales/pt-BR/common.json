@@ -1844,6 +1844,7 @@
         "appearance": "tema claro escuro idioma linguagem português inglês densidade compacta confortável",
         "shortcuts": "teclado comandos atalhos",
         "model": "agentes modelos uso limite conta runtime codex claude cursor grok gemini",
+        "decisionProvider": "decision provider Jev TypeSafe classificador filtro de memória roteamento validador",
         "aiMemory": "memória ai-memory histórico continuidade sidecar",
         "integrations": "mcp servidores ferramentas credenciais",
         "computerUse": "computer use aplicativos gravação de tela acessibilidade permissões",
@@ -1873,6 +1874,10 @@
       "model": {
         "label": "Provedores",
         "description": "Modelos, uso da conta e runtimes."
+      },
+      "decisionProvider": {
+        "label": "Decision Provider",
+        "description": "Classificação opcional do Jev para o contexto da memória."
       },
       "aiMemory": {
         "label": "Memória",
@@ -2240,6 +2245,31 @@
       "browserPermissionsHint": "Funciona sem as permissões de Gravação de Tela e Acessibilidade abaixo.",
       "externalAppsTitle": "Aplicativos externos",
       "experimental": "Experimental"
+    },
+    "decisionProvider": {
+      "title": "Decision Provider",
+      "hint": "O Jev pode classificar candidatos recuperados da memória do projeto antes que eles cheguem ao agente. Comece em Observe; Enforce mantém somente os candidatos acima do limiar de relevância.",
+      "providerLabel": "Provider",
+      "providers": {
+        "disabled": "Desativado",
+        "typesafe": "TypeSafe Jev"
+      },
+      "modeLabel": "Modo de decisão",
+      "modes": {
+        "observe": "Observar",
+        "enforce": "Aplicar"
+      },
+      "apiKeyLabel": "API key do TypeSafe",
+      "apiKeyConfigured": "Chave já configurada; deixe vazio para manter",
+      "apiKeyPlaceholder": "Cole a chave somente se quiser alterá-la",
+      "baseUrlLabel": "URL base da API",
+      "modelLabel": "Modelo",
+      "thresholdLabel": "Limiar de relevância da memória",
+      "securityHint": "A API key é salva no Keychain do sistema e nunca vai para arquivos do projeto, exportações ou logs. O modo Observe registra o caminho da decisão sem alterar a memória recuperada.",
+      "save": "Salvar configuração",
+      "saved": "Configuração do Decision Provider salva",
+      "saveError": "Não foi possível salvar a configuração do Decision Provider.",
+      "configured": "Configurada no Keychain"
     },
     "aiMemory": {
       "title": "Memória do projeto",

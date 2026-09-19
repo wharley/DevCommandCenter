@@ -337,6 +337,29 @@ struct AiMemorySettingsOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+struct DecisionProviderSettingsInput {
+    provider: String,
+    mode: String,
+    base_url: Option<String>,
+    model: Option<String>,
+    memory_threshold: Option<f64>,
+    api_key: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+struct DecisionProviderSettingsOutput {
+    provider: String,
+    mode: String,
+    base_url: String,
+    model: String,
+    memory_threshold: f64,
+    api_key_configured: bool,
+    restart_required: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 struct AiMemorySourceActionInput {
     source_key: String,
     action: String,
@@ -478,6 +501,8 @@ struct SessionMethods {
     ai_memory_sidecar_status: String,
     ai_memory_settings_load: String,
     ai_memory_settings_save: String,
+    decision_provider_settings_load: String,
+    decision_provider_settings_save: String,
     apply_task_title: String,
     prepare_turn: String,
     send_turn: String,
@@ -910,6 +935,8 @@ fn main() {
         .typ::<AiMemorySidecarStatus>()
         .typ::<AiMemorySettingsInput>()
         .typ::<AiMemorySettingsOutput>()
+        .typ::<DecisionProviderSettingsInput>()
+        .typ::<DecisionProviderSettingsOutput>()
         .typ::<AiMemorySourceActionInput>()
         .typ::<AiMemorySourceActionOutput>()
         .typ::<RestoreSessionInput>()
@@ -1103,6 +1130,8 @@ fn main() {
             ai_memory_sidecar_status: "ai_memory_sidecar_status".to_string(),
             ai_memory_settings_load: "ai_memory_settings_load".to_string(),
             ai_memory_settings_save: "ai_memory_settings_save".to_string(),
+            decision_provider_settings_load: "decision_provider_settings_load".to_string(),
+            decision_provider_settings_save: "decision_provider_settings_save".to_string(),
             apply_task_title: "apply_task_title".to_string(),
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),

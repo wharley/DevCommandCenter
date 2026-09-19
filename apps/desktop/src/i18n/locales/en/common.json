@@ -1844,6 +1844,7 @@
         "appearance": "theme light dark language portuguese english density compact comfortable",
         "shortcuts": "keyboard commands shortcuts",
         "model": "agents models usage limits account runtime codex claude cursor grok gemini",
+        "decisionProvider": "decision provider Jev TypeSafe classifier memory filter routing validator",
         "aiMemory": "memory ai-memory history continuity sidecar",
         "integrations": "mcp servers tools credentials",
         "computerUse": "computer use apps screen recording accessibility permissions",
@@ -1873,6 +1874,10 @@
       "model": {
         "label": "Providers",
         "description": "Models, account usage, and runtimes."
+      },
+      "decisionProvider": {
+        "label": "Decision Provider",
+        "description": "Optional TypeSafe Jev classification for memory context."
       },
       "aiMemory": {
         "label": "Memory",
@@ -2240,6 +2245,31 @@
       "browserPermissionsHint": "Works without the Screen Recording and Accessibility permissions below.",
       "externalAppsTitle": "External apps",
       "experimental": "Experimental"
+    },
+    "decisionProvider": {
+      "title": "Decision Provider",
+      "hint": "Jev can classify retrieved project-memory candidates before they reach the agent. Start in Observe mode; Enforce only keeps candidates that clear the relevance threshold.",
+      "providerLabel": "Provider",
+      "providers": {
+        "disabled": "Disabled",
+        "typesafe": "TypeSafe Jev"
+      },
+      "modeLabel": "Decision mode",
+      "modes": {
+        "observe": "Observe",
+        "enforce": "Enforce"
+      },
+      "apiKeyLabel": "TypeSafe API key",
+      "apiKeyConfigured": "Key already configured; leave empty to keep it",
+      "apiKeyPlaceholder": "Paste the key only if you want to change it",
+      "baseUrlLabel": "API base URL",
+      "modelLabel": "Model",
+      "thresholdLabel": "Memory relevance threshold",
+      "securityHint": "The API key is stored in the system Keychain and is never written to project files, exports, or logs. Observe mode records the decision path without changing retrieved memory.",
+      "save": "Save configuration",
+      "saved": "Decision Provider configuration saved",
+      "saveError": "Could not save the Decision Provider configuration.",
+      "configured": "Keychain configured"
     },
     "aiMemory": {
       "title": "Project memory",
