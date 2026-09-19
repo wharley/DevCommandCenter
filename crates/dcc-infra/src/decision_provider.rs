@@ -15,7 +15,10 @@ use crate::ai_memory::AiMemoryHit;
 
 const DEFAULT_TYPESAFE_BASE_URL: &str = "https://api.typesafe.ai";
 const DEFAULT_MODEL: &str = "jev-latest";
-const DEFAULT_TIMEOUT: Duration = Duration::from_millis(500);
+// Network setup (especially the first TLS connection) can exceed the model's
+// decision latency. Keep this bounded, but do not make a healthy provider look
+// unavailable because of an overly aggressive sub-second client timeout.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_MEMORY_RELEVANCE_THRESHOLD: f64 = 0.65;
 const MAX_STATE_CHARS: usize = 12_000;
 const MAX_MEMORY_SNIPPET_CHARS: usize = 1_500;

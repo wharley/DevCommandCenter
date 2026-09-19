@@ -1209,6 +1209,10 @@ async fn apply_decision_provider_memory_filter(
     let Some(provider) = TypeSafeDecisionProvider::from_env() else {
         return hits;
     };
+    if hits.is_empty() {
+        eprintln!("[DCC] decision provider memory_filter skipped: no memory candidates");
+        return hits;
+    }
 
     let result = match provider
         .filter_memory(MemoryFilterInput {

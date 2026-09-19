@@ -1321,17 +1321,26 @@ export function SettingsDialog({
 												<span className="text-[12px] font-medium text-foreground">
 													{t("settings.decisionProvider.providerLabel")}
 												</span>
-												<ToggleGroup
-													type="single"
-													value={decisionProviderDraft.provider}
-													onValueChange={(provider) => {
-														if (provider) setDecisionProviderDraft((current) => ({ ...current, provider }));
-													}}
-													className="justify-start"
-												>
-													<ToggleGroupItem value="disabled">{t("settings.decisionProvider.providers.disabled")}</ToggleGroupItem>
-													<ToggleGroupItem value="typesafe">{t("settings.decisionProvider.providers.typesafe")}</ToggleGroupItem>
-												</ToggleGroup>
+												<div className="flex h-8 items-center gap-3">
+													<Switch
+														checked={decisionProviderDraft.provider === "typesafe"}
+														onCheckedChange={(enabled) =>
+															setDecisionProviderDraft((current) => ({
+																...current,
+																provider: enabled ? "typesafe" : "disabled",
+															}))
+														}
+														aria-label={t("settings.decisionProvider.providerLabel")}
+													/>
+													<span className="text-[12px] text-muted-foreground">
+														{decisionProviderDraft.provider === "typesafe"
+															? t("settings.decisionProvider.active")
+															: t("settings.decisionProvider.inactive")}
+													</span>
+												</div>
+												<p className="text-[11px] text-muted-foreground">
+													TypeSafe Jev
+												</p>
 											</div>
 											<div className="space-y-2">
 												<span className="text-[12px] font-medium text-foreground">

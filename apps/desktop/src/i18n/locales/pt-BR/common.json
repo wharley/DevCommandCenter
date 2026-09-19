@@ -2249,7 +2249,9 @@
     "decisionProvider": {
       "title": "Decision Provider",
       "hint": "O Jev pode classificar candidatos recuperados da memória do projeto antes que eles cheguem ao agente. Comece em Observe; Enforce mantém somente os candidatos acima do limiar de relevância.",
-      "providerLabel": "Provider",
+      "providerLabel": "Ativar Decision Provider",
+      "active": "Ativo",
+      "inactive": "Desativado",
       "providers": {
         "disabled": "Desativado",
         "typesafe": "TypeSafe Jev"

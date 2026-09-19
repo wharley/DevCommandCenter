@@ -2249,7 +2249,9 @@
     "decisionProvider": {
       "title": "Decision Provider",
       "hint": "Jev can classify retrieved project-memory candidates before they reach the agent. Start in Observe mode; Enforce only keeps candidates that clear the relevance threshold.",
-      "providerLabel": "Provider",
+      "providerLabel": "Enable Decision Provider",
+      "active": "Active",
+      "inactive": "Inactive",
       "providers": {
         "disabled": "Disabled",
         "typesafe": "TypeSafe Jev"
