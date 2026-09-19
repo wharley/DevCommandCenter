@@ -344,6 +344,8 @@ struct DecisionProviderSettingsInput {
     model: Option<String>,
     memory_threshold: Option<f64>,
     api_key: Option<String>,
+    #[serde(default)]
+    clear_api_key: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

@@ -708,6 +708,7 @@ export type DecisionProviderSettingsInput = {
 	model: string | null,
 	memoryThreshold: number | null,
 	apiKey: string | null,
+	clearApiKey?: boolean,
 };
 
 export type DecisionProviderSettingsOutput = {

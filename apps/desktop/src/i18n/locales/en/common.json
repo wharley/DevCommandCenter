@@ -2264,6 +2264,8 @@
       "apiKeyLabel": "TypeSafe API key",
       "apiKeyConfigured": "Key already configured; leave empty to keep it",
       "apiKeyPlaceholder": "Paste the key only if you want to change it",
+      "clearKey": "Remove saved key",
+      "clearPending": "Key will be removed on save",
       "baseUrlLabel": "API base URL",
       "modelLabel": "Model",
       "thresholdLabel": "Memory relevance threshold",

@@ -30,6 +30,8 @@ pub struct DecisionProviderSettingsInput {
     pub model: Option<String>,
     pub memory_threshold: Option<f64>,
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub clear_api_key: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -130,24 +132,27 @@ impl DecisionProviderSettings {
 
         let store = SystemCredentialStore::default();
         let reference = McpSecretReferenceId(API_KEY_REFERENCE.to_string());
-        if let Some(api_key) = input.api_key.as_deref().map(str::trim) {
-            if api_key.is_empty() {
-                store
-                    .delete_secret(&reference)
-                    .await
-                    .map_err(|error| format!("could not clear TypeSafe API key: {error}"))?;
-                std::env::remove_var("TYPESAFE_API_KEY");
-            } else {
-                store
-                    .store_secret(
-                        &reference,
-                        SecretValue::new(api_key.as_bytes().to_vec())
-                            .map_err(|error| error.to_string())?,
-                    )
-                    .await
-                    .map_err(|error| format!("could not save TypeSafe API key: {error}"))?;
-                std::env::set_var("TYPESAFE_API_KEY", api_key);
-            }
+        if input.clear_api_key {
+            store
+                .delete_secret(&reference)
+                .await
+                .map_err(|error| format!("could not clear TypeSafe API key: {error}"))?;
+            std::env::remove_var("TYPESAFE_API_KEY");
+        } else if let Some(api_key) = input
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            store
+                .store_secret(
+                    &reference,
+                    SecretValue::new(api_key.as_bytes().to_vec())
+                        .map_err(|error| error.to_string())?,
+                )
+                .await
+                .map_err(|error| format!("could not save TypeSafe API key: {error}"))?;
+            std::env::set_var("TYPESAFE_API_KEY", api_key);
         } else {
             if persisted.provider == "typesafe" {
                 Self::load_api_key_into_process().await?;
@@ -291,6 +296,7 @@ fn validate_persisted(settings: &PersistedDecisionProviderSettings) -> Result<()
         model: Some(settings.model.clone()),
         memory_threshold: Some(settings.memory_threshold),
         api_key: None,
+        clear_api_key: false,
     })
 }
 
@@ -322,6 +328,7 @@ mod tests {
             model: Some(DEFAULT_MODEL.to_string()),
             memory_threshold: Some(DEFAULT_THRESHOLD),
             api_key: None,
+            clear_api_key: false,
         };
         assert!(validate_input(&input).is_ok());
     }
@@ -335,6 +342,7 @@ mod tests {
             model: None,
             memory_threshold: Some(2.0),
             api_key: None,
+            clear_api_key: false,
         };
         assert!(validate_input(&input).is_err());
     }

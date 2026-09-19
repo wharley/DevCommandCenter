@@ -2264,6 +2264,8 @@
       "apiKeyLabel": "API key do TypeSafe",
       "apiKeyConfigured": "Chave já configurada; deixe vazio para manter",
       "apiKeyPlaceholder": "Cole a chave somente se quiser alterá-la",
+      "clearKey": "Remover chave salva",
+      "clearPending": "A chave será removida ao salvar",
       "baseUrlLabel": "URL base da API",
       "modelLabel": "Modelo",
       "thresholdLabel": "Limiar de relevância da memória",

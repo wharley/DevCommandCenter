@@ -729,6 +729,7 @@ export function SettingsDialog({
 		model: "jev-latest",
 		memoryThreshold: 0.65,
 		apiKey: null,
+		clearApiKey: false,
 	});
 	const [decisionProviderSaving, setDecisionProviderSaving] = useState(false);
 	useEffect(() => {
@@ -742,6 +743,7 @@ export function SettingsDialog({
 			model: settings.model,
 			memoryThreshold: settings.memoryThreshold,
 			apiKey: null,
+			clearApiKey: false,
 		}));
 	}, [decisionProviderSettingsQuery.data]);
 	useEffect(() => {
@@ -1358,16 +1360,27 @@ export function SettingsDialog({
 													<ToggleGroupItem value="enforce">{t("settings.decisionProvider.modes.enforce")}</ToggleGroupItem>
 												</ToggleGroup>
 											</div>
-											<label className="space-y-2">
-												<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.apiKeyLabel")}</span>
-												<Input
-													type="password"
-													value={decisionProviderDraft.apiKey ?? ""}
-													onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, apiKey: event.target.value }))}
-													placeholder={decisionProviderSettingsQuery.data?.apiKeyConfigured ? t("settings.decisionProvider.apiKeyConfigured") : t("settings.decisionProvider.apiKeyPlaceholder")}
-													autoComplete="new-password"
-												/>
-											</label>
+			<div className="space-y-2">
+				<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.apiKeyLabel")}</span>
+				<Input
+					type="password"
+					value={decisionProviderDraft.apiKey ?? ""}
+					onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, apiKey: event.target.value || null, clearApiKey: false }))}
+					placeholder={decisionProviderSettingsQuery.data?.apiKeyConfigured ? t("settings.decisionProvider.apiKeyConfigured") : t("settings.decisionProvider.apiKeyPlaceholder")}
+					autoComplete="new-password"
+				/>
+				{decisionProviderSettingsQuery.data?.apiKeyConfigured ? (
+					<Button
+						type="button"
+						variant="ghost"
+						size="sm"
+						className="h-7 px-2 text-[11px]"
+						onClick={() => setDecisionProviderDraft((current) => ({ ...current, apiKey: null, clearApiKey: true }))}
+					>
+						{decisionProviderDraft.clearApiKey ? t("settings.decisionProvider.clearPending") : t("settings.decisionProvider.clearKey")}
+					</Button>
+				) : null}
+			</div>
 											<label className="space-y-2">
 												<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.baseUrlLabel")}</span>
 												<Input value={decisionProviderDraft.baseUrl ?? ""} onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, baseUrl: event.target.value || null }))} />
