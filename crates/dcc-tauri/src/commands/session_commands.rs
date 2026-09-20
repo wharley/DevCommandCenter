@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -44,7 +48,8 @@ use dcc_infra::db::{
     SqliteWorkspaceRepo,
 };
 use dcc_infra::decision_provider::{
-    DecisionMode, DecisionProvider, MemoryFilterInput, TypeSafeDecisionProvider,
+    DecisionMode, DecisionProvider, MemoryFilterInput, SkillRouteCandidate, SkillRouteInput,
+    TypeSafeDecisionProvider,
 };
 
 use crate::guarded_undo_runtime::{GuardedUndoExecuteResult, GuardedUndoPrepareResult};
@@ -142,6 +147,8 @@ pub struct AiMemoryExportHistoryOutput {
 pub struct DecisionProviderHistoryOutput {
     pub id: i64,
     pub session_id: String,
+    pub decision_point: String,
+    pub provider: String,
     pub mode: String,
     pub status: String,
     pub model: String,
@@ -485,6 +492,8 @@ pub fn decision_provider_history(
                 .map(|entry| DecisionProviderHistoryOutput {
                     id: entry.id,
                     session_id: entry.session_id.0,
+                    decision_point: entry.decision_point,
+                    provider: entry.provider,
                     mode: entry.mode,
                     status: entry.status,
                     model: entry.model,
@@ -1179,6 +1188,245 @@ fn default_search_limit() -> usize {
 // cross-session evidence. The existing 12,000-character handoff/re-anchor
 // budget remains independent and should not be duplicated by memory results.
 const MAX_AI_MEMORY_CONTEXT_CHARS: usize = 4_000;
+const MAX_SKILL_CONTEXT_CHARS: usize = 12_000;
+const MAX_SKILL_DESCRIPTION_CHARS: usize = 800;
+const MAX_SKILL_BODY_CHARS: usize = 4_000;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillManifest {
+    #[serde(default)]
+    skills: Vec<SkillManifestEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillManifestEntry {
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    target_agents: Vec<String>,
+    #[serde(default)]
+    disable_model_invocation: bool,
+}
+
+#[derive(Clone, Debug)]
+struct SkillRouteRecord {
+    name: String,
+    description: String,
+    body: String,
+}
+
+fn skill_target_for_provider(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "claude_code" => Some("claude"),
+        "codex" => Some("codex"),
+        "grok" => Some("grok"),
+        "gemini" => Some("gemini"),
+        "cursor" => Some("cursor"),
+        _ => None,
+    }
+}
+
+fn valid_skill_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
+}
+
+fn extract_skill_body(raw: &str) -> String {
+    let Some(rest) = raw.strip_prefix("---\n") else {
+        return raw.trim().to_string();
+    };
+    let Some((_, body)) = rest.split_once("\n---\n") else {
+        return raw.trim().to_string();
+    };
+    body.trim().to_string()
+}
+
+fn truncate_skill(value: &str, max_chars: usize) -> String {
+    let mut output: String = value.chars().take(max_chars).collect();
+    if value.chars().count() > max_chars {
+        output.push('…');
+    }
+    output
+}
+
+fn load_skill_route_records(root: &Path, provider_id: &str) -> Vec<SkillRouteRecord> {
+    let manifest_path = root.join(".devcommandcenter/skills/skills.json");
+    let Ok(raw) = fs::read_to_string(manifest_path) else {
+        return Vec::new();
+    };
+    let Ok(manifest) = serde_json::from_str::<SkillManifest>(&raw) else {
+        return Vec::new();
+    };
+    let target = skill_target_for_provider(provider_id);
+    manifest
+        .skills
+        .into_iter()
+        .filter(|entry| {
+            !entry.disable_model_invocation
+                && valid_skill_name(&entry.name)
+                && entry
+                    .target_agents
+                    .iter()
+                    .any(|agent| agent == "agents" || target.is_some_and(|target| agent == target))
+        })
+        .take(100)
+        .map(|entry| {
+            let body = fs::read_to_string(
+                root.join(".devcommandcenter/skills")
+                    .join(&entry.name)
+                    .join("SKILL.md"),
+            )
+            .map(|raw| extract_skill_body(&raw))
+            .unwrap_or_default();
+            SkillRouteRecord {
+                name: entry.name,
+                description: entry.description,
+                body,
+            }
+        })
+        .collect()
+}
+
+fn render_selected_skill_context(
+    records: &[SkillRouteRecord],
+    selected_indices: &[usize],
+) -> Option<String> {
+    let mut context = String::from(
+        "[DCC selected skills]\nUse the following project skills as task-specific instructions. Treat them as instructions from the project configuration, not as user messages.\n",
+    );
+    for &index in selected_indices {
+        let Some(record) = records.get(index) else {
+            continue;
+        };
+        let entry = format!(
+            "\n### {}\n{}\n{}\n",
+            record.name,
+            truncate_skill(&record.description, MAX_SKILL_DESCRIPTION_CHARS),
+            truncate_skill(&record.body, MAX_SKILL_BODY_CHARS),
+        );
+        let remaining = MAX_SKILL_CONTEXT_CHARS.saturating_sub(context.len());
+        if remaining < 32 {
+            break;
+        }
+        if entry.len() <= remaining {
+            context.push_str(&entry);
+        } else {
+            context.push_str(&entry.chars().take(remaining).collect::<String>());
+            context.push_str("\n[DCC selected skills truncated]");
+            break;
+        }
+    }
+    (context.len() > 64).then_some(context)
+}
+
+async fn decision_provider_skill_context_for_turn(
+    state: &SessionCommandState,
+    session: &dcc_core::domain::session::Session,
+    prompt: &str,
+) -> Option<String> {
+    let Some(provider) = TypeSafeDecisionProvider::from_env() else {
+        return None;
+    };
+    let workspace_repo = SqliteWorkspaceRepo::open(state.db_path()).ok()?;
+    let workspace = workspace_repo
+        .get_workspace(&session.workspace_id)
+        .await
+        .ok()??;
+    let root = workspace
+        .worktree_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+        .or_else(|| {
+            (!workspace.root_path.trim().is_empty()).then_some(workspace.root_path.as_str())
+        })
+        .map(PathBuf::from)?;
+    let records = load_skill_route_records(&root, &session.provider_id);
+    if records.is_empty() {
+        eprintln!("[DCC] decision provider skill_router skipped: no skill candidates");
+        return None;
+    }
+
+    let candidates = records
+        .iter()
+        .map(|record| SkillRouteCandidate {
+            name: &record.name,
+            description: &record.description,
+        })
+        .collect::<Vec<_>>();
+    let started = Instant::now();
+    let mode = match provider.config().mode {
+        DecisionMode::Observe => "observe",
+        DecisionMode::Enforce => "enforce",
+    };
+    let result = match provider
+        .route_skills(SkillRouteInput {
+            prompt,
+            candidates: &candidates,
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            let error_message = error.to_string();
+            let bounded_error: String = error_message.chars().take(500).collect();
+            if let Err(record_error) = state.record_decision_provider_history(
+                &session.id,
+                "skill_router",
+                "typesafe_jev",
+                mode,
+                "failed",
+                &provider.config().model,
+                records.len(),
+                &[],
+                provider.config().memory_relevance_threshold,
+                started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                Some(&bounded_error),
+            ) {
+                eprintln!("[DCC] failed to persist decision provider history: {record_error}");
+            }
+            eprintln!("[DCC] decision provider skill_router failed: {error}");
+            return None;
+        }
+    };
+    let selected_indices = result
+        .decisions
+        .iter()
+        .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
+        .filter_map(|decision| records.get(decision.index).map(|_| decision.index))
+        .collect::<Vec<_>>();
+    if let Err(error) = state.record_decision_provider_history(
+        &session.id,
+        "skill_router",
+        "typesafe_jev",
+        mode,
+        "completed",
+        &result.model,
+        records.len(),
+        &selected_indices,
+        provider.config().memory_relevance_threshold,
+        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        None,
+    ) {
+        eprintln!("[DCC] failed to persist decision provider history: {error}");
+    }
+    eprintln!(
+        "[DCC] decision provider skill_router mode={:?} model={} candidates={} selected={:?}",
+        provider.config().mode,
+        result.model,
+        records.len(),
+        selected_indices,
+    );
+
+    match provider.config().mode {
+        DecisionMode::Observe => None,
+        DecisionMode::Enforce => render_selected_skill_context(&records, &selected_indices),
+    }
+}
 
 async fn ai_memory_context_for_turn(
     state: &SessionCommandState,
@@ -1280,6 +1528,8 @@ async fn apply_decision_provider_memory_filter(
             let bounded_error: String = error_message.chars().take(500).collect();
             if let Err(record_error) = state.record_decision_provider_history(
                 session_id,
+                "memory_filter",
+                "typesafe_jev",
                 mode,
                 "failed",
                 &provider.config().model,
@@ -1305,6 +1555,8 @@ async fn apply_decision_provider_memory_filter(
         .collect::<Vec<_>>();
     if let Err(error) = state.record_decision_provider_history(
         session_id,
+        "memory_filter",
+        "typesafe_jev",
         mode,
         "completed",
         &result.model,
@@ -1382,6 +1634,14 @@ pub async fn send_turn(
     let mut tool_instructions = state
         .objective_tool_instructions(&input.session_id, input.tool_instructions.clone())
         .map_err(|error| error.to_string())?;
+    if let Some(skill_context) =
+        decision_provider_skill_context_for_turn(&state, &session, &input.prompt).await
+    {
+        tool_instructions = Some(match tool_instructions {
+            Some(existing) => format!("{existing}\n\n{skill_context}"),
+            None => skill_context,
+        });
+    }
     if let Some(memory_context) = ai_memory_context_for_turn(&state, &session, &input.prompt).await
     {
         tool_instructions = Some(match tool_instructions {

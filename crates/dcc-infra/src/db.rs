@@ -270,6 +270,8 @@ CREATE TABLE IF NOT EXISTS dcc_ai_memory_source_actions (
 CREATE TABLE IF NOT EXISTS dcc_decision_provider_history (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT NOT NULL,
+	decision_point TEXT NOT NULL DEFAULT 'memory_filter',
+	provider TEXT NOT NULL DEFAULT 'typesafe_jev',
 	mode TEXT NOT NULL CHECK (mode IN ('observe', 'enforce')),
 	status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
 	model TEXT NOT NULL,
@@ -1277,6 +1279,8 @@ pub struct AiMemorySourceAction {
 pub struct DecisionProviderHistoryEntry {
     pub id: i64,
     pub session_id: SessionId,
+    pub decision_point: String,
+    pub provider: String,
     pub mode: String,
     pub status: String,
     pub model: String,
@@ -1593,6 +1597,8 @@ impl SqliteSessionRepo {
     pub fn record_decision_provider_history(
         &self,
         session_id: &SessionId,
+        decision_point: &str,
+        provider: &str,
         mode: &str,
         status: &str,
         model: &str,
@@ -1612,12 +1618,15 @@ impl SqliteSessionRepo {
         conn.execute(
             r#"
             INSERT INTO dcc_decision_provider_history
-                (session_id, mode, status, model, candidate_count, selected_count,
-                 selected_indices_json, threshold, duration_ms, error, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                (session_id, decision_point, provider, mode, status, model,
+                 candidate_count, selected_count, selected_indices_json, threshold,
+                 duration_ms, error, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             params![
                 session_id.0.clone(),
+                decision_point,
+                provider,
                 mode,
                 status,
                 model,
@@ -1645,9 +1654,9 @@ impl SqliteSessionRepo {
         let mut statement = conn
             .prepare(
                 r#"
-                SELECT id, session_id, mode, status, model, candidate_count,
-                       selected_count, selected_indices_json, threshold, duration_ms,
-                       error, created_at
+                SELECT id, session_id, decision_point, provider, mode, status, model,
+                       candidate_count, selected_count, selected_indices_json, threshold,
+                       duration_ms, error, created_at
                   FROM dcc_decision_provider_history
                  ORDER BY created_at DESC, id DESC
                  LIMIT ?1
@@ -1656,31 +1665,33 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let rows = statement
             .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-                let candidate_count = row.get::<_, i64>(5)?;
-                let selected_count = row.get::<_, i64>(6)?;
-                let selected_indices_json = row.get::<_, String>(7)?;
+                let candidate_count = row.get::<_, i64>(7)?;
+                let selected_count = row.get::<_, i64>(8)?;
+                let selected_indices_json = row.get::<_, String>(9)?;
                 let selected_indices =
                     serde_json::from_str(&selected_indices_json).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
-                            7,
+                            9,
                             rusqlite::types::Type::Text,
                             Box::new(error),
                         )
                     })?;
-                let duration_ms = row.get::<_, i64>(9)?;
+                let duration_ms = row.get::<_, i64>(11)?;
                 Ok(DecisionProviderHistoryEntry {
                     id: row.get(0)?,
                     session_id: SessionId(row.get(1)?),
-                    mode: row.get(2)?,
-                    status: row.get(3)?,
-                    model: row.get(4)?,
+                    decision_point: row.get(2)?,
+                    provider: row.get(3)?,
+                    mode: row.get(4)?,
+                    status: row.get(5)?,
+                    model: row.get(6)?,
                     candidate_count: usize::try_from(candidate_count).unwrap_or(usize::MAX),
                     selected_count: usize::try_from(selected_count).unwrap_or(usize::MAX),
                     selected_indices,
-                    threshold: row.get(8)?,
+                    threshold: row.get(10)?,
                     duration_ms: u64::try_from(duration_ms).unwrap_or(u64::MAX),
-                    error: row.get(10)?,
-                    created_at: row.get(11)?,
+                    error: row.get(12)?,
+                    created_at: row.get(13)?,
                 })
             })
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -1859,6 +1870,18 @@ impl SqliteSessionRepo {
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_decision_provider_history",
+            "decision_point",
+            "TEXT NOT NULL DEFAULT 'memory_filter'",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_decision_provider_history",
+            "provider",
+            "TEXT NOT NULL DEFAULT 'typesafe_jev'",
+        )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_delegations",

@@ -2287,6 +2287,10 @@
         "observe": "Observe",
         "enforce": "Enforce"
       },
+      "historyPoints": {
+        "memory_filter": "Memory filter",
+        "skill_router": "Skill router"
+      },
       "historyMeta": "{{candidates}} candidate(s) · {{selected}} selected · threshold {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidate(s) · request failed after {{duration}} ms",
       "selectedIndices": "Selected candidate indexes: {{indices}}",

@@ -2102,6 +2102,8 @@ impl SessionCommandState {
     pub fn record_decision_provider_history(
         &self,
         session_id: &SessionId,
+        decision_point: &str,
+        provider: &str,
         mode: &str,
         status: &str,
         model: &str,
@@ -2114,6 +2116,8 @@ impl SessionCommandState {
         let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
         self.session_repo.record_decision_provider_history(
             session_id,
+            decision_point,
+            provider,
             mode,
             status,
             model,

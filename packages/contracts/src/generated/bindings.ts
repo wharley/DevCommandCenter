@@ -704,6 +704,8 @@ export type DailyUsageSummary = {
 export type DecisionProviderHistoryOutput = {
 	id: number,
 	sessionId: string,
+	decisionPoint: string,
+	provider: string,
 	mode: string,
 	status: string,
 	model: string,

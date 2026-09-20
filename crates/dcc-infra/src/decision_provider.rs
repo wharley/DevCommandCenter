@@ -116,6 +116,31 @@ pub struct MemoryFilterResult {
     pub model: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillRouteCandidate<'a> {
+    pub name: &'a str,
+    pub description: &'a str,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillRouteInput<'a> {
+    pub prompt: &'a str,
+    pub candidates: &'a [SkillRouteCandidate<'a>],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillRouteDecision {
+    pub index: usize,
+    pub relevance: f64,
+    pub confidence: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillRouteResult {
+    pub decisions: Vec<SkillRouteDecision>,
+    pub model: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DecisionProviderError {
     #[error("decision provider request failed: {0}")]
@@ -134,6 +159,13 @@ pub trait DecisionProvider: Send + Sync {
         &self,
         input: MemoryFilterInput<'_>,
     ) -> Result<MemoryFilterResult, DecisionProviderError>;
+
+    async fn route_skills(
+        &self,
+        _input: SkillRouteInput<'_>,
+    ) -> Result<SkillRouteResult, DecisionProviderError> {
+        Err(DecisionProviderError::Unsupported("skill_router"))
+    }
 }
 
 #[derive(Clone)]
@@ -284,6 +316,64 @@ impl DecisionProvider for TypeSafeDecisionProvider {
             .collect();
 
         Ok(MemoryFilterResult {
+            decisions,
+            model: response.model.unwrap_or_else(|| self.config.model.clone()),
+        })
+    }
+
+    async fn route_skills(
+        &self,
+        input: SkillRouteInput<'_>,
+    ) -> Result<SkillRouteResult, DecisionProviderError> {
+        if input.candidates.is_empty() {
+            return Ok(SkillRouteResult {
+                decisions: Vec::new(),
+                model: self.config.model.clone(),
+            });
+        }
+
+        let mut state = format!("Current task:\n{}\n\nAvailable DCC skills:\n", input.prompt);
+        let mut questions = BTreeMap::new();
+        for (index, candidate) in input.candidates.iter().enumerate() {
+            state.push_str(&format!(
+                "\n[{}] {}\n{}\n",
+                index,
+                candidate.name,
+                truncate(candidate.description, MAX_MEMORY_SNIPPET_CHARS)
+            ));
+            questions.insert(
+                format!("skill_{index}"),
+                json!({
+                    "type": "noul",
+                    "instructions": format!(
+                        "How directly relevant is skill '{}' to the current task? Return a high score only when the skill should be loaded for this task.",
+                        candidate.name
+                    ),
+                }),
+            );
+        }
+
+        let response = self
+            .request(truncate(&state, MAX_STATE_CHARS), questions)
+            .await?;
+        let decisions = input
+            .candidates
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                let answer = response.answers.get(&format!("skill_{index}"));
+                SkillRouteDecision {
+                    index,
+                    relevance: answer
+                        .and_then(|answer| answer.noul)
+                        .unwrap_or(0.0)
+                        .clamp(0.0, 1.0),
+                    confidence: answer.and_then(|answer| answer.confidence),
+                }
+            })
+            .collect();
+
+        Ok(SkillRouteResult {
             decisions,
             model: response.model.unwrap_or_else(|| self.config.model.clone()),
         })

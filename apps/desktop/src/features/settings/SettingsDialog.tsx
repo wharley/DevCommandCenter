@@ -1446,6 +1446,9 @@ export function SettingsDialog({
 																	<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
 																		{t(`settings.decisionProvider.historyModes.${entry.mode}`)}
 																	</Badge>
+																	<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
+																		{t(`settings.decisionProvider.historyPoints.${entry.decisionPoint}`)}
+																	</Badge>
 																	<span className="font-mono text-[11px] text-foreground">{entry.model}</span>
 																</div>
 																<span className="text-[11px] text-muted-foreground">{formatAiMemoryTimestamp(entry.createdAt, i18n.resolvedLanguage ?? i18n.language)}</span>
