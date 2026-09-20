@@ -2345,6 +2345,10 @@
       "none": "none"
     },
     "aiMemory": {
+      "tabs": {
+        "configuration": "Configuration",
+        "history": "Export history"
+      },
       "title": "Project memory",
       "hint": "Memory is optional and local. DCC keeps one sidecar when enabled and keeps working if it is unavailable.",
       "operationsHint": "Memory runs in the background and stays idle between operations. If the service is unavailable, your tasks continue normally.",

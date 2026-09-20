@@ -682,6 +682,10 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
 	const { t, i18n } = useTranslation("common");
 	const queryClient = useQueryClient();
+	const [aiMemoryTab, setAiMemoryTab] = useState("configuration");
+	useEffect(() => {
+		if (!open) setAiMemoryTab("configuration");
+	}, [open]);
 	const aiMemoryStatusQuery = useQuery({
 		queryKey: ["ai-memory", "sidecar-status"],
 		queryFn: loadAiMemorySidecarStatus,
@@ -697,13 +701,13 @@ export function SettingsDialog({
 	const aiMemoryOutboxQuery = useQuery({
 		queryKey: ["ai-memory", "outbox"],
 		queryFn: () => loadAiMemoryOutbox(50),
-		enabled: open,
+		enabled: open && aiMemoryTab === "history",
 		staleTime: 5_000,
 	});
 	const aiMemoryExportHistoryQuery = useQuery({
 		queryKey: ["ai-memory", "export-history"],
 		queryFn: () => loadAiMemoryExportHistory(100),
-		enabled: open,
+		enabled: open && aiMemoryTab === "history",
 		staleTime: 5_000,
 	});
 	const [aiMemoryDraft, setAiMemoryDraft] = useState<AiMemorySettingsInput>({
@@ -1653,6 +1657,24 @@ export function SettingsDialog({
 
 							{activeSection === "aiMemory" ? (
 								<section className="space-y-4">
+									<Tabs
+										value={aiMemoryTab}
+										onValueChange={setAiMemoryTab}
+										className="space-y-4"
+									>
+										<TabsList className="w-full">
+											<TabsTrigger value="configuration" className="flex-1">
+												{t("settings.aiMemory.tabs.configuration", {
+													defaultValue: "Configuração",
+												})}
+											</TabsTrigger>
+											<TabsTrigger value="history" className="flex-1">
+												{t("settings.aiMemory.tabs.history", {
+													defaultValue: "Histórico de exportações",
+												})}
+											</TabsTrigger>
+										</TabsList>
+										<TabsContent value="configuration" className="mt-0 space-y-4">
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 										<div className="flex items-start justify-between gap-4">
 											<div className="flex min-w-0 items-start gap-3">
@@ -1712,11 +1734,10 @@ export function SettingsDialog({
 															{aiMemoryStatusQuery.data.message}
 														</p>
 													) : null}
-											</div>
-								</div>
-
-								<div className="rounded-xl border border-border/60 p-4">
-									<div className="grid gap-4 sm:grid-cols-2">
+																		</div>
+																		</div>
+																		<div className="rounded-xl border border-border/60 p-4">
+																		<div className="grid gap-4 sm:grid-cols-2">
 										<div className="sm:col-span-2">
 											<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
 												{t("settings.aiMemory.modeLabel")}
@@ -1792,10 +1813,50 @@ export function SettingsDialog({
 												{t("settings.aiMemory.restartNow")}
 											</Button>
 										) : null}
-													</div>
-												</div>
+																																				</div>
+																																				</div>
+																																				{aiMemoryStatusQuery.data ? (
+																																					<div className="grid gap-3 sm:grid-cols-2">
+																																						{(
+																																							[
+																																							["settings.aiMemory.dataDir", aiMemoryStatusQuery.data.dataDir],
+																																							["settings.aiMemory.logPath", aiMemoryStatusQuery.data.logPath],
+																																							["settings.aiMemory.version", aiMemoryStatusQuery.data.version],
+																																							["settings.aiMemory.url", aiMemoryStatusQuery.data.url],
+																																						] as Array<[string, string | null]>
+																																					).map(([label, value]) => (
+																																					<div className="rounded-xl border border-border/60 p-3" key={label}>
+																																						<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+																																							{t(label)}
+																																						</p>
+																																						<div className="mt-2 flex items-center justify-between gap-2">
+																																							<p className="min-w-0 truncate font-mono text-[11px] text-foreground" title={value ?? undefined}>
+																																							{value ?? t("settings.aiMemory.notAvailable")}
+																																						</p>
+																																						{value ? (
+																																							<Button
+																																								type="button"
+																																								variant="ghost"
+																																								size="icon"
+																																								className="size-7 shrink-0"
+																																								aria-label={t("settings.aiMemory.copy")}
+																																								onClick={() => {
+																																								void navigator.clipboard?.writeText(value);
+																																								toast.success(t("settings.aiMemory.copied"));
+																																							}}
+																																							>
+																																								<Copy className="size-3.5" />
+																																							</Button>
+																																						) : null}
+																																				</div>
+																																				</div>
+																																				))}
+																																				</div>
+																																				) : null}
+																																				</TabsContent>
 
-												<div className="rounded-xl border border-border/60 p-4">
+															<TabsContent value="history" className="mt-0 space-y-4">
+															<div className="rounded-xl border border-border/60 p-4">
 													<div className="flex items-start justify-between gap-4">
 														<div>
 															<h3 className="text-[14px] font-medium text-foreground">{t("settings.aiMemory.outboxTitle")}</h3>
@@ -1852,45 +1913,8 @@ export function SettingsDialog({
 															)}
 														</div>
 
-														{aiMemoryStatusQuery.data ? (
-										<div className="grid gap-3 sm:grid-cols-2">
-												{(
-													[
-														["settings.aiMemory.dataDir", aiMemoryStatusQuery.data.dataDir],
-														["settings.aiMemory.logPath", aiMemoryStatusQuery.data.logPath],
-														["settings.aiMemory.version", aiMemoryStatusQuery.data.version],
-														["settings.aiMemory.url", aiMemoryStatusQuery.data.url],
-													] as Array<[string, string | null]>
-												).map(([label, value]) => (
-												<div className="rounded-xl border border-border/60 p-3" key={label}>
-													<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-														{t(label)}
-													</p>
-													<div className="mt-2 flex items-center justify-between gap-2">
-														<p className="min-w-0 truncate font-mono text-[11px] text-foreground" title={value ?? undefined}>
-															{value ?? t("settings.aiMemory.notAvailable")}
-														</p>
-														{value ? (
-															<Button
-																type="button"
-																variant="ghost"
-																size="icon"
-																className="size-7 shrink-0"
-																aria-label={t("settings.aiMemory.copy")}
-																onClick={() => {
-																	void navigator.clipboard?.writeText(value);
-																	toast.success(t("settings.aiMemory.copied"));
-																}}
-															>
-																<Copy className="size-3.5" />
-															</Button>
-														) : null}
-													</div>
-												</div>
-											))}
-										</div>
-									) : null}
-
+										</TabsContent>
+									</Tabs>
 								</section>
 							) : null}
 

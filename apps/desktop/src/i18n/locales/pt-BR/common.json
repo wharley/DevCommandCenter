@@ -2345,6 +2345,10 @@
       "none": "nenhum"
     },
     "aiMemory": {
+      "tabs": {
+        "configuration": "Configuração",
+        "history": "Histórico de exportações"
+      },
       "title": "Memória do projeto",
       "hint": "A memória é opcional e local. O DCC mantém um único sidecar quando habilitado e continua funcionando se ele estiver indisponível.",
       "operationsHint": "A memória funciona em segundo plano e fica ociosa entre operações. Se o serviço estiver indisponível, suas tarefas continuam normalmente.",
