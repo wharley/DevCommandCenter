@@ -168,6 +168,23 @@ pub struct ModelRouteResult {
     pub model: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolGuardInput<'a> {
+    pub prompt: &'a str,
+    pub tool_name: &'a str,
+    pub title: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub command: Option<&'a str>,
+    pub file: Option<&'a str>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolGuardResult {
+    pub risk: f64,
+    pub confidence: Option<f64>,
+    pub model: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DecisionProviderError {
     #[error("decision provider request failed: {0}")]
@@ -199,6 +216,13 @@ pub trait DecisionProvider: Send + Sync {
         _input: ModelRouteInput<'_>,
     ) -> Result<ModelRouteResult, DecisionProviderError> {
         Err(DecisionProviderError::Unsupported("model_router"))
+    }
+
+    async fn guard_tool(
+        &self,
+        _input: ToolGuardInput<'_>,
+    ) -> Result<ToolGuardResult, DecisionProviderError> {
+        Err(DecisionProviderError::Unsupported("tool_guard"))
     }
 }
 
@@ -472,6 +496,41 @@ impl DecisionProvider for TypeSafeDecisionProvider {
 
         Ok(ModelRouteResult {
             decisions,
+            model: response.model.unwrap_or_else(|| self.config.model.clone()),
+        })
+    }
+
+    async fn guard_tool(
+        &self,
+        input: ToolGuardInput<'_>,
+    ) -> Result<ToolGuardResult, DecisionProviderError> {
+        let state = format!(
+            "Current task:\n{}\n\nRequested tool action:\nname: {}\ntitle: {}\ndescription: {}\ncommand: {}\nfile: {}\n",
+            input.prompt,
+            input.tool_name,
+            input.title.unwrap_or("not specified"),
+            input.description.unwrap_or("not specified"),
+            input.command.unwrap_or("not specified"),
+            input.file.unwrap_or("not specified"),
+        );
+        let mut questions = BTreeMap::new();
+        questions.insert(
+            "tool_guard".to_string(),
+            json!({
+                "type": "noul",
+                "instructions": "How risky or sensitive is this requested tool action? Return a high score for destructive, credential-related, external-side-effect, permission-changing, or otherwise irreversible actions. Return a low score for safe read-only inspection.",
+            }),
+        );
+        let response = self
+            .request(truncate(&state, MAX_STATE_CHARS), questions)
+            .await?;
+        let answer = response.answers.get("tool_guard");
+        Ok(ToolGuardResult {
+            risk: answer
+                .and_then(|answer| answer.noul)
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0),
+            confidence: answer.and_then(|answer| answer.confidence),
             model: response.model.unwrap_or_else(|| self.config.model.clone()),
         })
     }

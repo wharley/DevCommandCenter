@@ -2290,7 +2290,8 @@
       "historyPoints": {
         "memory_filter": "Filtro de memória",
         "skill_router": "Roteador de skills",
-        "model_router": "Roteador de modelos"
+        "model_router": "Roteador de modelos",
+        "tool_guard": "Proteção de ferramentas"
       },
       "historyMeta": "{{candidates}} candidato(s) · {{selected}} selecionado(s) · limiar {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidato(s) · requisição falhou após {{duration}} ms",

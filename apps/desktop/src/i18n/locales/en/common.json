@@ -2290,7 +2290,8 @@
       "historyPoints": {
         "memory_filter": "Memory filter",
         "skill_router": "Skill router",
-        "model_router": "Model router"
+        "model_router": "Model router",
+        "tool_guard": "Tool guard"
       },
       "historyMeta": "{{candidates}} candidate(s) · {{selected}} selected · threshold {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidate(s) · request failed after {{duration}} ms",

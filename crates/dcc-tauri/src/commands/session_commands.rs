@@ -30,17 +30,19 @@ use dcc_core::{
         mcp::{McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
         provider::McpOauthSupport,
         session::{
-            QueuedTurn, SessionEventRecord, SessionId, SessionProjection, SessionSearchResult,
-            TurnReviewFile, WorkspaceSessionSummary,
+            QueuedTurn, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
+            SessionSearchResult, TurnReviewFile, WorkspaceSessionSummary,
         },
         thread::Thread,
         usage::{UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
     },
     ports::{
-        provider::ProviderPermissionResponse, provider::ProviderUserInputAnswer,
-        provider::ProviderUserInputResponse, Input, ProviderRuntimeConfig, ProviderTurnInput,
-        SessionEventRepo, SessionRepo, ThreadRepo, WorkspaceRepo,
+        provider::ProviderUserInputAnswer,
+        provider::ProviderUserInputResponse,
+        provider::{ProviderPermissionRequest, ProviderPermissionResponse},
+        Input, ProviderRuntimeConfig, ProviderTurnInput, SessionEventRepo, SessionRepo, ThreadRepo,
+        WorkspaceRepo,
     },
 };
 use dcc_infra::ai_memory::{AiMemoryConfig, AiMemoryHit};
@@ -50,7 +52,7 @@ use dcc_infra::db::{
 };
 use dcc_infra::decision_provider::{
     DecisionMode, DecisionProvider, MemoryFilterInput, ModelRouteCandidate, ModelRouteInput,
-    SkillRouteCandidate, SkillRouteInput, TypeSafeDecisionProvider,
+    SkillRouteCandidate, SkillRouteInput, ToolGuardInput, TypeSafeDecisionProvider,
 };
 
 use crate::guarded_undo_runtime::{GuardedUndoExecuteResult, GuardedUndoPrepareResult};
@@ -1435,6 +1437,136 @@ async fn record_decision_provider_model_route(
     );
 }
 
+async fn pending_tool_guard_context(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+    request_id: &str,
+) -> Option<(String, ProviderPermissionRequest)> {
+    let events = SessionEventRepo::list_events_by_session(state, session_id)
+        .await
+        .ok()?;
+    let (turn_id, request) = events.iter().rev().find_map(|event| {
+        let SessionEventKind::TurnPermissionRequested {
+            turn_id,
+            request_id: event_request_id,
+            tool_name,
+            title,
+            description,
+            command,
+            file,
+        } = &event.kind
+        else {
+            return None;
+        };
+        (event_request_id == request_id).then(|| {
+            (
+                turn_id.clone(),
+                ProviderPermissionRequest {
+                    request_id: event_request_id.clone(),
+                    tool_name: tool_name.clone(),
+                    title: title.clone(),
+                    description: description.clone(),
+                    command: command.clone(),
+                    file: file.clone(),
+                },
+            )
+        })
+    })?;
+    let prompt = events.iter().rev().find_map(|event| {
+        let SessionEventKind::TurnStarted {
+            turn_id: event_turn_id,
+            prompt,
+            ..
+        } = &event.kind
+        else {
+            return None;
+        };
+        (event_turn_id == &turn_id).then(|| prompt.clone())
+    })?;
+    Some((prompt, request))
+}
+
+async fn decision_provider_tool_guard(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+    prompt: &str,
+    request: &ProviderPermissionRequest,
+) -> Option<bool> {
+    let Some(provider) = TypeSafeDecisionProvider::from_env() else {
+        return None;
+    };
+    let started = Instant::now();
+    let mode = match provider.config().mode {
+        DecisionMode::Observe => "observe",
+        DecisionMode::Enforce => "enforce",
+    };
+    let result = match provider
+        .guard_tool(ToolGuardInput {
+            prompt,
+            tool_name: &request.tool_name,
+            title: request.title.as_deref(),
+            description: request.description.as_deref(),
+            command: request.command.as_deref(),
+            file: request.file.as_deref(),
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            let error_message = error.to_string();
+            let bounded_error: String = error_message.chars().take(500).collect();
+            if let Err(record_error) = state.record_decision_provider_history(
+                session_id,
+                "tool_guard",
+                "typesafe_jev",
+                mode,
+                "failed",
+                &provider.config().model,
+                1,
+                &[],
+                &[],
+                provider.config().memory_relevance_threshold,
+                started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                Some(&bounded_error),
+            ) {
+                eprintln!("[DCC] failed to persist decision provider history: {record_error}");
+            }
+            eprintln!("[DCC] decision provider tool_guard failed: {error}");
+            return Some(provider.config().mode == DecisionMode::Enforce);
+        }
+    };
+    let risky = result.risk >= provider.config().memory_relevance_threshold;
+    let selected_indices = risky.then_some(vec![0]).unwrap_or_default();
+    let selected_labels = risky
+        .then_some(vec![format!("risk:{:.2}", result.risk)])
+        .unwrap_or_default();
+    if let Err(error) = state.record_decision_provider_history(
+        session_id,
+        "tool_guard",
+        "typesafe_jev",
+        mode,
+        "completed",
+        &result.model,
+        1,
+        &selected_indices,
+        &selected_labels,
+        provider.config().memory_relevance_threshold,
+        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        None,
+    ) {
+        eprintln!("[DCC] failed to persist decision provider history: {error}");
+    }
+    eprintln!(
+        "[DCC] decision provider tool_guard mode={:?} model={} tool={} risk={:.2} risky={}",
+        provider.config().mode,
+        result.model,
+        request.tool_name,
+        result.risk,
+        risky,
+    );
+    Some(risky && provider.config().mode == DecisionMode::Enforce)
+}
+
 async fn decision_provider_skill_context_for_turn(
     state: &SessionCommandState,
     session: &dcc_core::domain::session::Session,
@@ -2516,12 +2648,28 @@ pub async fn respond_to_permission_request(
     input: RespondToPermissionRequestInput,
 ) -> Result<RespondToPermissionRequestOutput, String> {
     let session_id = dcc_core::domain::session::SessionId(input.session_id);
+    let mut behavior = input.behavior;
+    if behavior == "allow" {
+        if let Some((prompt, request)) =
+            pending_tool_guard_context(&state, &session_id, &input.request_id).await
+        {
+            if decision_provider_tool_guard(&state, &session_id, &prompt, &request).await
+                == Some(true)
+            {
+                eprintln!(
+                    "[DCC] decision provider tool_guard blocked allow request_id={} tool={}",
+                    input.request_id, request.tool_name
+                );
+                behavior = "deny".to_string();
+            }
+        }
+    }
     state
         .send_provider_input(
             &session_id,
             Input::PermissionResponse(ProviderPermissionResponse {
                 request_id: input.request_id,
-                behavior: input.behavior,
+                behavior,
             }),
         )
         .await
