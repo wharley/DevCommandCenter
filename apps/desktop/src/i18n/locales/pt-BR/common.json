@@ -2248,6 +2248,10 @@
     },
     "decisionProvider": {
       "title": "Decision Provider",
+      "tabs": {
+        "configuration": "Configuração",
+        "history": "Histórico de decisões"
+      },
       "hint": "O Jev pode classificar memória, skills, modelos e respostas em pontos independentes. Comece em Observe; Enforce mantém somente os candidatos acima do limiar configurado.",
       "providerLabel": "Ativar Decision Provider",
       "active": "Ativo",

@@ -2248,6 +2248,10 @@
     },
     "decisionProvider": {
       "title": "Decision Provider",
+      "tabs": {
+        "configuration": "Configuration",
+        "history": "Decision history"
+      },
       "hint": "Jev can classify memory, skills, models and responses at independent decision points. Start in Observe; Enforce keeps only candidates above each configured threshold.",
       "providerLabel": "Enable Decision Provider",
       "active": "Active",

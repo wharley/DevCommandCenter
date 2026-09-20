@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -717,6 +717,10 @@ export function SettingsDialog({
 	const [aiMemorySaving, setAiMemorySaving] = useState(false);
 	const [aiMemoryRestartRequired, setAiMemoryRestartRequired] = useState(false);
 	const [aiMemoryRetrying, setAiMemoryRetrying] = useState<string | null>(null);
+	const [decisionProviderTab, setDecisionProviderTab] = useState("configuration");
+	useEffect(() => {
+		if (!open) setDecisionProviderTab("configuration");
+	}, [open]);
 	const decisionProviderSettingsQuery = useQuery({
 		queryKey: ["decision-provider", "settings"],
 		queryFn: loadDecisionProviderSettings,
@@ -726,9 +730,9 @@ export function SettingsDialog({
 	const decisionProviderHistoryQuery = useQuery({
 		queryKey: ["decision-provider", "history"],
 		queryFn: () => loadDecisionProviderHistory(100),
-		enabled: open,
+		enabled: open && decisionProviderTab === "history",
 		staleTime: 5_000,
-		refetchInterval: open ? 10_000 : false,
+		refetchInterval: open && decisionProviderTab === "history" ? 10_000 : false,
 	});
 	const [decisionProviderDraft, setDecisionProviderDraft] = useState<DecisionProviderSettingsInput>({
 		provider: "disabled",
@@ -1328,6 +1332,24 @@ export function SettingsDialog({
 
 							{activeSection === "decisionProvider" ? (
 								<section className="space-y-4">
+									<Tabs
+										value={decisionProviderTab}
+										onValueChange={setDecisionProviderTab}
+										className="space-y-4"
+									>
+										<TabsList className="w-full">
+											<TabsTrigger value="configuration" className="flex-1">
+												{t("settings.decisionProvider.tabs.configuration", {
+													defaultValue: "Configuração",
+												})}
+											</TabsTrigger>
+											<TabsTrigger value="history" className="flex-1">
+												{t("settings.decisionProvider.tabs.history", {
+													defaultValue: "Histórico de decisões",
+												})}
+											</TabsTrigger>
+										</TabsList>
+										<TabsContent value="configuration" className="mt-0">
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 										<div className="flex items-start gap-3">
 											<div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -1540,10 +1562,12 @@ export function SettingsDialog({
 												{t("settings.decisionProvider.save")}
 											</Button>
 											{decisionProviderSettingsQuery.data?.apiKeyConfigured ? <Badge variant="secondary">{t("settings.decisionProvider.configured")}</Badge> : null}
-										</div>
+											</div>
 									</div>
+										</TabsContent>
+										<TabsContent value="history" className="mt-0">
 
-									<div className="rounded-xl border border-border/60 p-4">
+									<div className="flex min-h-0 flex-col rounded-xl border border-border/60 p-4">
 										<div className="flex items-start justify-between gap-4">
 											<div>
 												<h3 className="text-[14px] font-medium text-foreground">{t("settings.decisionProvider.historyTitle")}</h3>
@@ -1563,7 +1587,7 @@ export function SettingsDialog({
 										{decisionProviderHistoryQuery.isPending ? (
 											<p className="mt-4 text-[12px] text-muted-foreground">{t("settings.decisionProvider.historyLoading")}</p>
 										) : decisionProviderHistoryQuery.data?.length ? (
-											<ScrollArea className="mt-4 max-h-96 rounded-lg border border-border/50 bg-background">
+													<ScrollArea className="mt-4 h-[min(60dvh,480px)] min-h-0 rounded-lg border border-border/50 bg-background">
 												<div className="divide-y divide-border/40">
 													{decisionProviderHistoryQuery.data.map((entry) => (
 														<div className="space-y-1.5 p-3" key={entry.id}>
@@ -1620,8 +1644,10 @@ export function SettingsDialog({
 											</ScrollArea>
 										) : (
 											<p className="mt-4 text-[12px] text-muted-foreground">{t("settings.decisionProvider.historyEmpty")}</p>
-										)}
-									</div>
+											)}
+										</div>
+										</TabsContent>
+									</Tabs>
 								</section>
 							) : null}
 
