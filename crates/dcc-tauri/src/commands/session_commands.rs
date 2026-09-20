@@ -1414,6 +1414,21 @@ async fn evaluate_decision_provider_model_route(
         };
     };
     let routing_mode = provider.config().model_routing.as_str().to_string();
+    if !provider.config().model_router_enabled {
+        return DecisionProviderModelRouteOutput {
+            status: "disabled".to_string(),
+            routing_mode,
+            decision_model: provider.config().model.clone(),
+            current_model: input.current_model.clone(),
+            recommended_model: None,
+            recommended_index: None,
+            recommended_score: None,
+            confidence: None,
+            candidate_count: 0,
+            duration_ms: 0,
+            error: None,
+        };
+    }
     let Some(entries) = model_registry::entries_for(&input.provider_id) else {
         return DecisionProviderModelRouteOutput {
             status: "skipped".to_string(),
@@ -1486,7 +1501,10 @@ async fn evaluate_decision_provider_model_route(
     let recommendation = result
         .decisions
         .iter()
-        .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
+        .filter(|decision| {
+            decision.confidence.unwrap_or(decision.relevance)
+                >= provider.config().model_confidence_threshold
+        })
         .max_by(|left, right| left.relevance.total_cmp(&right.relevance));
     let (recommended_index, recommended_model, recommended_score, confidence) = recommendation
         .and_then(|decision| {
@@ -1553,7 +1571,7 @@ fn record_model_route_output(
             output.candidate_count,
             &selected_indices,
             &selected_labels,
-            provider.config().memory_relevance_threshold,
+            provider.config().model_confidence_threshold,
             output.duration_ms,
             output.error.as_deref(),
         ),
@@ -1567,7 +1585,7 @@ fn record_model_route_output(
             output.candidate_count,
             &selected_indices,
             &selected_labels,
-            provider.config().memory_relevance_threshold,
+            provider.config().model_confidence_threshold,
             output.duration_ms,
             output.error.as_deref(),
         ),
@@ -1743,6 +1761,10 @@ async fn decision_provider_skill_context_for_turn(
     let Some(provider) = TypeSafeDecisionProvider::from_env() else {
         return None;
     };
+    if !provider.config().skill_router_enabled {
+        eprintln!("[DCC] decision provider skill_router skipped: disabled");
+        return None;
+    }
     let workspace_repo = SqliteWorkspaceRepo::open(state.db_path()).ok()?;
     let workspace = workspace_repo
         .get_workspace(&session.workspace_id)
@@ -1795,7 +1817,7 @@ async fn decision_provider_skill_context_for_turn(
                 records.len(),
                 &[],
                 &[],
-                provider.config().memory_relevance_threshold,
+                provider.config().skill_confidence_threshold,
                 started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
                 Some(&bounded_error),
             ) {
@@ -1808,7 +1830,10 @@ async fn decision_provider_skill_context_for_turn(
     let selected_indices = result
         .decisions
         .iter()
-        .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
+        .filter(|decision| {
+            decision.confidence.unwrap_or(decision.relevance)
+                >= provider.config().skill_confidence_threshold
+        })
         .filter_map(|decision| records.get(decision.index).map(|_| decision.index))
         .collect::<Vec<_>>();
     let selected_labels = selected_indices
@@ -1825,7 +1850,7 @@ async fn decision_provider_skill_context_for_turn(
         records.len(),
         &selected_indices,
         &selected_labels,
-        provider.config().memory_relevance_threshold,
+        provider.config().skill_confidence_threshold,
         started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
         None,
     ) {
@@ -1921,6 +1946,10 @@ async fn apply_decision_provider_memory_filter(
     let Some(provider) = TypeSafeDecisionProvider::from_env() else {
         return hits;
     };
+    if !provider.config().memory_filter_enabled {
+        eprintln!("[DCC] decision provider memory_filter skipped: disabled");
+        return hits;
+    }
     if hits.is_empty() {
         eprintln!("[DCC] decision provider memory_filter skipped: no memory candidates");
         return hits;

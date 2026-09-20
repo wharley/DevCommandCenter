@@ -20,6 +20,8 @@ const DEFAULT_MODEL: &str = "jev-latest";
 // unavailable because of an overly aggressive sub-second client timeout.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_MEMORY_RELEVANCE_THRESHOLD: f64 = 0.65;
+const DEFAULT_CONFIDENCE_THRESHOLD: f64 = 0.65;
+const DEFAULT_COMPLETENESS_THRESHOLD: f64 = 0.65;
 const MAX_STATE_CHARS: usize = 12_000;
 const MAX_MEMORY_SNIPPET_CHARS: usize = 1_500;
 
@@ -78,7 +80,14 @@ pub struct DecisionProviderConfig {
     pub api_key: String,
     pub model: String,
     pub timeout: Duration,
+    pub memory_filter_enabled: bool,
+    pub skill_router_enabled: bool,
+    pub model_router_enabled: bool,
+    pub completion_review_enabled: bool,
     pub memory_relevance_threshold: f64,
+    pub skill_confidence_threshold: f64,
+    pub model_confidence_threshold: f64,
+    pub completion_completeness_threshold: f64,
     pub mode: DecisionMode,
     pub model_routing: ModelRoutingMode,
 }
@@ -109,18 +118,51 @@ impl DecisionProviderConfig {
             .and_then(|value| value.parse::<u64>().ok())
             .map(Duration::from_millis)
             .unwrap_or(DEFAULT_TIMEOUT);
-        let threshold = env::var("DCC_DECISION_MEMORY_THRESHOLD")
+        let memory_threshold = env::var("DCC_DECISION_MEMORY_THRESHOLD")
             .ok()
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| (0.0..=1.0).contains(value))
             .unwrap_or(DEFAULT_MEMORY_RELEVANCE_THRESHOLD);
+        let skill_threshold = env::var("DCC_DECISION_SKILL_CONFIDENCE_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| (0.0..=1.0).contains(value))
+            .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD);
+        let model_threshold = env::var("DCC_DECISION_MODEL_CONFIDENCE_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| (0.0..=1.0).contains(value))
+            .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD);
+        let completion_threshold = env::var("DCC_DECISION_COMPLETION_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| (0.0..=1.0).contains(value))
+            .unwrap_or(DEFAULT_COMPLETENESS_THRESHOLD);
+        let enabled = |name: &str| {
+            env::var(name)
+                .ok()
+                .map(|value| {
+                    matches!(
+                        value.trim().to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes" | "on"
+                    )
+                })
+                .unwrap_or(true)
+        };
 
         Some(Self {
             base_url,
             api_key,
             model,
             timeout,
-            memory_relevance_threshold: threshold,
+            memory_filter_enabled: enabled("DCC_DECISION_MEMORY_FILTER_ENABLED"),
+            skill_router_enabled: enabled("DCC_DECISION_SKILL_ROUTER_ENABLED"),
+            model_router_enabled: enabled("DCC_DECISION_MODEL_ROUTER_ENABLED"),
+            completion_review_enabled: enabled("DCC_DECISION_COMPLETION_REVIEW_ENABLED"),
+            memory_relevance_threshold: memory_threshold,
+            skill_confidence_threshold: skill_threshold,
+            model_confidence_threshold: model_threshold,
+            completion_completeness_threshold: completion_threshold,
             mode: DecisionMode::from_env(),
             model_routing: ModelRoutingMode::from_env(),
         })
@@ -668,7 +710,14 @@ mod tests {
             api_key: "test-key".to_string(),
             model: DEFAULT_MODEL.to_string(),
             timeout: DEFAULT_TIMEOUT,
+            memory_filter_enabled: true,
+            skill_router_enabled: true,
+            model_router_enabled: true,
+            completion_review_enabled: true,
             memory_relevance_threshold: 0.65,
+            skill_confidence_threshold: 0.65,
+            model_confidence_threshold: 0.65,
+            completion_completeness_threshold: 0.65,
             mode: DecisionMode::Enforce,
             model_routing: ModelRoutingMode::Manual,
         })
@@ -699,7 +748,14 @@ mod tests {
             api_key: "test-key".to_string(),
             model: DEFAULT_MODEL.to_string(),
             timeout: DEFAULT_TIMEOUT,
+            memory_filter_enabled: true,
+            skill_router_enabled: true,
+            model_router_enabled: true,
+            completion_review_enabled: true,
             memory_relevance_threshold: 0.65,
+            skill_confidence_threshold: 0.65,
+            model_confidence_threshold: 0.65,
+            completion_completeness_threshold: 0.65,
             mode: DecisionMode::Enforce,
             model_routing: ModelRoutingMode::Manual,
         })

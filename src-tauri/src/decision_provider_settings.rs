@@ -4,8 +4,8 @@
 //! API key is kept in the OS credential store and is only materialised in the
 //! current DCC process when the provider is enabled.
 
-use std::fs;
 use std::path::Path;
+use std::{env, fs};
 
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,33 @@ const SETTINGS_FILE_NAME: &str = "decision-provider-settings.json";
 const API_KEY_REFERENCE: &str = "decision-provider:typesafe";
 const DEFAULT_BASE_URL: &str = "https://api.typesafe.ai";
 const DEFAULT_MODEL: &str = "jev-latest";
-const DEFAULT_THRESHOLD: f64 = 0.65;
+const DEFAULT_MEMORY_THRESHOLD: f64 = 0.65;
+const DEFAULT_CONFIDENCE_THRESHOLD: f64 = 0.65;
+const DEFAULT_COMPLETENESS_THRESHOLD: f64 = 0.65;
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_confidence_threshold() -> f64 {
+    DEFAULT_CONFIDENCE_THRESHOLD
+}
+
+fn default_completeness_threshold() -> f64 {
+    DEFAULT_COMPLETENESS_THRESHOLD
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
+}
 
 fn default_model_routing() -> String {
     "manual".to_string()
@@ -38,9 +64,20 @@ pub struct DecisionProviderSettingsInput {
     pub provider: String,
     pub mode: String,
     pub model_routing: String,
+    #[serde(default = "default_true")]
+    pub memory_filter_enabled: bool,
+    #[serde(default = "default_true")]
+    pub skill_router_enabled: bool,
+    #[serde(default = "default_true")]
+    pub model_router_enabled: bool,
+    #[serde(default = "default_true")]
+    pub completion_review_enabled: bool,
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub memory_threshold: Option<f64>,
+    pub skill_confidence_threshold: Option<f64>,
+    pub model_confidence_threshold: Option<f64>,
+    pub completion_threshold: Option<f64>,
     pub api_key: Option<String>,
     #[serde(default)]
     pub clear_api_key: bool,
@@ -52,9 +89,16 @@ pub struct DecisionProviderSettingsOutput {
     pub provider: String,
     pub mode: String,
     pub model_routing: String,
+    pub memory_filter_enabled: bool,
+    pub skill_router_enabled: bool,
+    pub model_router_enabled: bool,
+    pub completion_review_enabled: bool,
     pub base_url: String,
     pub model: String,
     pub memory_threshold: f64,
+    pub skill_confidence_threshold: f64,
+    pub model_confidence_threshold: f64,
+    pub completion_threshold: f64,
     pub api_key_configured: bool,
     pub restart_required: bool,
 }
@@ -66,9 +110,23 @@ struct PersistedDecisionProviderSettings {
     mode: String,
     #[serde(default = "default_model_routing")]
     model_routing: String,
+    #[serde(default = "default_true")]
+    memory_filter_enabled: bool,
+    #[serde(default = "default_true")]
+    skill_router_enabled: bool,
+    #[serde(default = "default_true")]
+    model_router_enabled: bool,
+    #[serde(default = "default_true")]
+    completion_review_enabled: bool,
     base_url: String,
     model: String,
     memory_threshold: f64,
+    #[serde(default = "default_confidence_threshold")]
+    skill_confidence_threshold: f64,
+    #[serde(default = "default_confidence_threshold")]
+    model_confidence_threshold: f64,
+    #[serde(default = "default_completeness_threshold")]
+    completion_threshold: f64,
 }
 
 pub struct DecisionProviderSettings;
@@ -127,6 +185,10 @@ impl DecisionProviderSettings {
             provider: input.provider.trim().to_ascii_lowercase(),
             mode: input.mode.trim().to_ascii_lowercase(),
             model_routing: normalize_model_routing(&input.model_routing),
+            memory_filter_enabled: input.memory_filter_enabled,
+            skill_router_enabled: input.skill_router_enabled,
+            model_router_enabled: input.model_router_enabled,
+            completion_review_enabled: input.completion_review_enabled,
             base_url: input
                 .base_url
                 .as_deref()
@@ -139,7 +201,16 @@ impl DecisionProviderSettings {
                 .unwrap_or(DEFAULT_MODEL)
                 .trim()
                 .to_string(),
-            memory_threshold: input.memory_threshold.unwrap_or(DEFAULT_THRESHOLD),
+            memory_threshold: input.memory_threshold.unwrap_or(DEFAULT_MEMORY_THRESHOLD),
+            skill_confidence_threshold: input
+                .skill_confidence_threshold
+                .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
+            model_confidence_threshold: input
+                .model_confidence_threshold
+                .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
+            completion_threshold: input
+                .completion_threshold
+                .unwrap_or(DEFAULT_COMPLETENESS_THRESHOLD),
         };
         let bytes = serde_json::to_vec_pretty(&persisted)
             .map_err(|error| format!("could not encode decision provider settings: {error}"))?;
@@ -229,6 +300,10 @@ fn default_settings_from_environment() -> PersistedDecisionProviderSettings {
         model_routing: normalize_model_routing(
             &std::env::var("DCC_MODEL_ROUTING_MODE").unwrap_or_else(|_| default_model_routing()),
         ),
+        memory_filter_enabled: env_bool("DCC_DECISION_MEMORY_FILTER_ENABLED", true),
+        skill_router_enabled: env_bool("DCC_DECISION_SKILL_ROUTER_ENABLED", true),
+        model_router_enabled: env_bool("DCC_DECISION_MODEL_ROUTER_ENABLED", true),
+        completion_review_enabled: env_bool("DCC_DECISION_COMPLETION_REVIEW_ENABLED", true),
         base_url: std::env::var("TYPESAFE_BASE_URL")
             .unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
             .trim_end_matches('/')
@@ -240,7 +315,19 @@ fn default_settings_from_environment() -> PersistedDecisionProviderSettings {
         memory_threshold: std::env::var("DCC_DECISION_MEMORY_THRESHOLD")
             .ok()
             .and_then(|value| value.parse().ok())
-            .unwrap_or(DEFAULT_THRESHOLD),
+            .unwrap_or(DEFAULT_MEMORY_THRESHOLD),
+        skill_confidence_threshold: std::env::var("DCC_DECISION_SKILL_CONFIDENCE_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
+        model_confidence_threshold: std::env::var("DCC_DECISION_MODEL_CONFIDENCE_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
+        completion_threshold: std::env::var("DCC_DECISION_COMPLETION_THRESHOLD")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(DEFAULT_COMPLETENESS_THRESHOLD),
     }
 }
 
@@ -253,9 +340,16 @@ fn output_for(
         provider: settings.provider.clone(),
         mode: settings.mode.clone(),
         model_routing: normalize_model_routing(&settings.model_routing),
+        memory_filter_enabled: settings.memory_filter_enabled,
+        skill_router_enabled: settings.skill_router_enabled,
+        model_router_enabled: settings.model_router_enabled,
+        completion_review_enabled: settings.completion_review_enabled,
         base_url: settings.base_url.clone(),
         model: settings.model.clone(),
         memory_threshold: settings.memory_threshold,
+        skill_confidence_threshold: settings.skill_confidence_threshold,
+        model_confidence_threshold: settings.model_confidence_threshold,
+        completion_threshold: settings.completion_threshold,
         api_key_configured,
         restart_required,
     }
@@ -301,14 +395,22 @@ fn validate_input(input: &DecisionProviderSettingsInput) -> Result<(), String> {
             return Err("decision provider model is invalid".to_string());
         }
     }
-    if let Some(threshold) = input.memory_threshold {
-        if !(0.0..=1.0).contains(&threshold) || !threshold.is_finite() {
-            return Err("memory relevance threshold must be between 0 and 1".to_string());
-        }
-    }
+    validate_threshold(input.memory_threshold, "memory relevance")?;
+    validate_threshold(input.skill_confidence_threshold, "skill confidence")?;
+    validate_threshold(input.model_confidence_threshold, "model confidence")?;
+    validate_threshold(input.completion_threshold, "completion")?;
     if let Some(api_key) = input.api_key.as_deref() {
         if api_key.chars().count() > 500 || api_key.contains('\0') {
             return Err("TypeSafe API key is invalid".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn validate_threshold(value: Option<f64>, label: &str) -> Result<(), String> {
+    if let Some(threshold) = value {
+        if !(0.0..=1.0).contains(&threshold) || !threshold.is_finite() {
+            return Err(format!("{label} threshold must be between 0 and 1"));
         }
     }
     Ok(())
@@ -319,9 +421,16 @@ fn validate_persisted(settings: &PersistedDecisionProviderSettings) -> Result<()
         provider: settings.provider.clone(),
         mode: settings.mode.clone(),
         model_routing: settings.model_routing.clone(),
+        memory_filter_enabled: settings.memory_filter_enabled,
+        skill_router_enabled: settings.skill_router_enabled,
+        model_router_enabled: settings.model_router_enabled,
+        completion_review_enabled: settings.completion_review_enabled,
         base_url: Some(settings.base_url.clone()),
         model: Some(settings.model.clone()),
         memory_threshold: Some(settings.memory_threshold),
+        skill_confidence_threshold: Some(settings.skill_confidence_threshold),
+        model_confidence_threshold: Some(settings.model_confidence_threshold),
+        completion_threshold: Some(settings.completion_threshold),
         api_key: None,
         clear_api_key: false,
     })
@@ -333,11 +442,39 @@ fn apply_settings_to_environment(settings: &PersistedDecisionProviderSettings) {
         "DCC_MODEL_ROUTING_MODE",
         normalize_model_routing(&settings.model_routing),
     );
+    std::env::set_var(
+        "DCC_DECISION_MEMORY_FILTER_ENABLED",
+        settings.memory_filter_enabled.to_string(),
+    );
+    std::env::set_var(
+        "DCC_DECISION_SKILL_ROUTER_ENABLED",
+        settings.skill_router_enabled.to_string(),
+    );
+    std::env::set_var(
+        "DCC_DECISION_MODEL_ROUTER_ENABLED",
+        settings.model_router_enabled.to_string(),
+    );
+    std::env::set_var(
+        "DCC_DECISION_COMPLETION_REVIEW_ENABLED",
+        settings.completion_review_enabled.to_string(),
+    );
     std::env::set_var("TYPESAFE_BASE_URL", &settings.base_url);
     std::env::set_var("TYPESAFE_MODEL", &settings.model);
     std::env::set_var(
         "DCC_DECISION_MEMORY_THRESHOLD",
         settings.memory_threshold.to_string(),
+    );
+    std::env::set_var(
+        "DCC_DECISION_SKILL_CONFIDENCE_THRESHOLD",
+        settings.skill_confidence_threshold.to_string(),
+    );
+    std::env::set_var(
+        "DCC_DECISION_MODEL_CONFIDENCE_THRESHOLD",
+        settings.model_confidence_threshold.to_string(),
+    );
+    std::env::set_var(
+        "DCC_DECISION_COMPLETION_THRESHOLD",
+        settings.completion_threshold.to_string(),
     );
     if settings.provider == "typesafe" {
         std::env::set_var("DCC_DECISION_PROVIDER", "typesafe");
@@ -356,9 +493,16 @@ mod tests {
             provider: "typesafe".to_string(),
             mode: "observe".to_string(),
             model_routing: "manual".to_string(),
+            memory_filter_enabled: true,
+            skill_router_enabled: true,
+            model_router_enabled: true,
+            completion_review_enabled: true,
             base_url: Some(DEFAULT_BASE_URL.to_string()),
             model: Some(DEFAULT_MODEL.to_string()),
-            memory_threshold: Some(DEFAULT_THRESHOLD),
+            memory_threshold: Some(DEFAULT_MEMORY_THRESHOLD),
+            skill_confidence_threshold: Some(DEFAULT_CONFIDENCE_THRESHOLD),
+            model_confidence_threshold: Some(DEFAULT_CONFIDENCE_THRESHOLD),
+            completion_threshold: Some(DEFAULT_COMPLETENESS_THRESHOLD),
             api_key: None,
             clear_api_key: false,
         };
@@ -371,9 +515,16 @@ mod tests {
             provider: "typesafe".to_string(),
             mode: "observe".to_string(),
             model_routing: "manual".to_string(),
+            memory_filter_enabled: true,
+            skill_router_enabled: true,
+            model_router_enabled: true,
+            completion_review_enabled: true,
             base_url: None,
             model: None,
             memory_threshold: Some(2.0),
+            skill_confidence_threshold: Some(DEFAULT_CONFIDENCE_THRESHOLD),
+            model_confidence_threshold: Some(DEFAULT_CONFIDENCE_THRESHOLD),
+            completion_threshold: Some(DEFAULT_COMPLETENESS_THRESHOLD),
             api_key: None,
             clear_api_key: false,
         };

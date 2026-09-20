@@ -734,9 +734,16 @@ export function SettingsDialog({
 		provider: "disabled",
 		mode: "observe",
 		modelRouting: "manual",
+		memoryFilterEnabled: true,
+		skillRouterEnabled: true,
+		modelRouterEnabled: true,
+		completionReviewEnabled: true,
 		baseUrl: "https://api.typesafe.ai",
 		model: "jev-latest",
 		memoryThreshold: 0.65,
+		skillConfidenceThreshold: 0.65,
+		modelConfidenceThreshold: 0.65,
+		completionThreshold: 0.65,
 		apiKey: null,
 		clearApiKey: false,
 	});
@@ -749,9 +756,16 @@ export function SettingsDialog({
 			provider: settings.provider,
 			mode: settings.mode,
 			modelRouting: settings.modelRouting,
+			memoryFilterEnabled: settings.memoryFilterEnabled,
+			skillRouterEnabled: settings.skillRouterEnabled,
+			modelRouterEnabled: settings.modelRouterEnabled,
+			completionReviewEnabled: settings.completionReviewEnabled,
 			baseUrl: settings.baseUrl,
 			model: settings.model,
 			memoryThreshold: settings.memoryThreshold,
+			skillConfidenceThreshold: settings.skillConfidenceThreshold,
+			modelConfidenceThreshold: settings.modelConfidenceThreshold,
+			completionThreshold: settings.completionThreshold,
 			apiKey: null,
 			clearApiKey: false,
 		}));
@@ -1372,7 +1386,7 @@ export function SettingsDialog({
 													</div>
 													<div className="space-y-2">
 														<span className="text-[12px] font-medium text-foreground">
-															{t("settings.decisionProvider.modelRoutingLabel")}
+																{t("settings.decisionProvider.modelRoutingModeLabel")}
 														</span>
 														<div className="flex h-8 items-center gap-3">
 														<Switch
@@ -1424,10 +1438,98 @@ export function SettingsDialog({
 												<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.modelLabel")}</span>
 												<Input value={decisionProviderDraft.model ?? ""} onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, model: event.target.value || null }))} />
 											</label>
-											<label className="space-y-2">
-												<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.thresholdLabel")}</span>
-												<Input type="number" min={0} max={1} step={0.05} value={decisionProviderDraft.memoryThreshold ?? 0.65} onChange={(event) => setDecisionProviderDraft((current) => ({ ...current, memoryThreshold: Number(event.target.value) }))} />
-											</label>
+										</div>
+										<div className="mt-5 border-t border-border/50 pt-4">
+											<h4 className="text-[13px] font-medium text-foreground">
+												{t("settings.decisionProvider.pointsTitle")}
+											</h4>
+											<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+												{t("settings.decisionProvider.pointsHint")}
+											</p>
+											<div className="mt-3 grid gap-4 sm:grid-cols-2">
+												{([
+													{
+														key: "memory_filter",
+														enabled: decisionProviderDraft.memoryFilterEnabled,
+														threshold: decisionProviderDraft.memoryThreshold,
+														thresholdKey: "memoryThreshold",
+														enabledKey: "memoryFilterEnabled",
+														label: t("settings.decisionProvider.points.memory_filter.label"),
+														hint: t("settings.decisionProvider.points.memory_filter.hint"),
+														thresholdLabel: t("settings.decisionProvider.points.memory_filter.threshold"),
+													},
+													{
+														key: "skill_router",
+														enabled: decisionProviderDraft.skillRouterEnabled,
+														threshold: decisionProviderDraft.skillConfidenceThreshold,
+														thresholdKey: "skillConfidenceThreshold",
+														enabledKey: "skillRouterEnabled",
+														label: t("settings.decisionProvider.points.skill_router.label"),
+														hint: t("settings.decisionProvider.points.skill_router.hint"),
+														thresholdLabel: t("settings.decisionProvider.points.skill_router.threshold"),
+													},
+													{
+														key: "model_router",
+														enabled: decisionProviderDraft.modelRouterEnabled,
+														threshold: decisionProviderDraft.modelConfidenceThreshold,
+														thresholdKey: "modelConfidenceThreshold",
+														enabledKey: "modelRouterEnabled",
+														label: t("settings.decisionProvider.points.model_router.label"),
+														hint: t("settings.decisionProvider.points.model_router.hint"),
+														thresholdLabel: t("settings.decisionProvider.points.model_router.threshold"),
+													},
+													{
+														key: "completion_review",
+														enabled: decisionProviderDraft.completionReviewEnabled,
+														threshold: decisionProviderDraft.completionThreshold,
+														thresholdKey: "completionThreshold",
+														enabledKey: "completionReviewEnabled",
+														label: t("settings.decisionProvider.points.completion_review.label"),
+														hint: t("settings.decisionProvider.points.completion_review.hint"),
+														thresholdLabel: t("settings.decisionProvider.points.completion_review.threshold"),
+													},
+												] as const).map((point) => (
+														<div key={point.key} className="rounded-lg border border-border/50 p-3">
+															<div className="flex items-center justify-between gap-3">
+																<span className="text-[12px] font-medium text-foreground">{point.label}</span>
+																<div className="flex items-center gap-2">
+																<Switch
+																checked={point.enabled}
+																onCheckedChange={(enabled) =>
+																	setDecisionProviderDraft((current) => ({
+																		...current,
+																		[point.enabledKey]: enabled,
+																	}))
+															}
+																	aria-label={point.label}
+																/>
+																	<span className="text-[11px] text-muted-foreground">
+																		{point.enabled
+																			? t("settings.decisionProvider.active")
+																		: t("settings.decisionProvider.inactive")}
+																	</span>
+																</div>
+															</div>
+														<p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{point.hint}</p>
+														<label className="mt-2 block space-y-1">
+															<span className="text-[11px] text-muted-foreground">{point.thresholdLabel}</span>
+															<Input
+																type="number"
+																min={0}
+																max={1}
+																step={0.05}
+																value={point.threshold ?? 0.65}
+																onChange={(event) =>
+																	setDecisionProviderDraft((current) => ({
+																		...current,
+																		[point.thresholdKey]: Number(event.target.value),
+																	}))
+																}
+															/>
+														</label>
+													</div>
+												))}
+											</div>
 										</div>
 										<p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
 											{t("settings.decisionProvider.securityHint")}

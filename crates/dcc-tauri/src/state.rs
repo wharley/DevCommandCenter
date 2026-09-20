@@ -2221,6 +2221,10 @@ impl SessionCommandState {
         let Some(provider) = TypeSafeDecisionProvider::from_env() else {
             return;
         };
+        if !provider.config().completion_review_enabled {
+            eprintln!("[DCC] decision provider completion_review skipped: disabled");
+            return;
+        }
         let events =
             match SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await {
                 Ok(events) => events,
@@ -2289,7 +2293,7 @@ impl SessionCommandState {
                     1,
                     &[],
                     &[],
-                    provider.config().memory_relevance_threshold,
+                    provider.config().completion_completeness_threshold,
                     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
                     Some(&bounded_error),
                 ) {
@@ -2299,7 +2303,8 @@ impl SessionCommandState {
                 return;
             }
         };
-        let needs_review = result.completeness < provider.config().memory_relevance_threshold;
+        let needs_review =
+            result.completeness < provider.config().completion_completeness_threshold;
         let selected_indices = needs_review.then_some(vec![0]).unwrap_or_default();
         let selected_labels = needs_review
             .then_some(vec![format!("needs_review:{:.2}", result.completeness)])
@@ -2315,7 +2320,7 @@ impl SessionCommandState {
             1,
             &selected_indices,
             &selected_labels,
-            provider.config().memory_relevance_threshold,
+            provider.config().completion_completeness_threshold,
             started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
             None,
         ) {

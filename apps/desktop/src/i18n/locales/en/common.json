@@ -2248,7 +2248,7 @@
     },
     "decisionProvider": {
       "title": "Decision Provider",
-      "hint": "Jev can classify retrieved project-memory candidates before they reach the agent. Start in Observe mode; Enforce only keeps candidates that clear the relevance threshold.",
+      "hint": "Jev can classify memory, skills, models and responses at independent decision points. Start in Observe; Enforce keeps only candidates above each configured threshold.",
       "providerLabel": "Enable Decision Provider",
       "active": "Active",
       "inactive": "Inactive",
@@ -2262,10 +2262,35 @@
         "enforce": "Enforce"
       },
       "modelRoutingLabel": "Model routing",
-      "modelRoutingHint": "Off: Jev recommends and you decide. On: DCC applies the recommendation before the agent starts.",
+      "modelRoutingModeLabel": "Model routing mode",
+      "modelRoutingHint": "Manual: Jev recommends and you decide. Automatic: DCC applies the recommendation before the agent starts. Enable the point below.",
       "modelRoutingModes": {
         "manual": "Manual",
         "automatic": "Automatic"
+      },
+      "pointsTitle": "Decision points",
+      "pointsHint": "Each point can be disabled separately. Thresholds control the signal used by each classification.",
+      "points": {
+        "memory_filter": {
+          "label": "Memory filter",
+          "hint": "Selects relevant memories before they reach the agent.",
+          "threshold": "Minimum relevance"
+        },
+        "skill_router": {
+          "label": "Skill router",
+          "hint": "Recommends which skills to load for the task.",
+          "threshold": "Minimum confidence"
+        },
+        "model_router": {
+          "label": "Model router",
+          "hint": "Recommends the most suitable model for the task.",
+          "threshold": "Minimum confidence"
+        },
+        "completion_review": {
+          "label": "Completion review",
+          "hint": "Evaluates whether the response appears complete before finishing.",
+          "threshold": "Minimum completeness"
+        }
       },
       "apiKeyLabel": "TypeSafe API key",
       "apiKeyConfigured": "Key already configured; leave empty to keep it",
@@ -2274,7 +2299,6 @@
       "clearPending": "Key will be removed on save",
       "baseUrlLabel": "API base URL",
       "modelLabel": "Model",
-      "thresholdLabel": "Memory relevance threshold",
       "securityHint": "The API key is stored in the system Keychain and is never written to project files, exports, or logs. Observe mode records the decision path without changing retrieved memory.",
       "save": "Save configuration",
       "saved": "Decision Provider configuration saved",
