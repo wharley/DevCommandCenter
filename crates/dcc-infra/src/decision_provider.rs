@@ -141,6 +141,33 @@ pub struct SkillRouteResult {
     pub model: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelRouteCandidate<'a> {
+    pub id: &'a str,
+    pub label: &'a str,
+    pub description: &'a str,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelRouteInput<'a> {
+    pub prompt: &'a str,
+    pub current_model: Option<&'a str>,
+    pub candidates: &'a [ModelRouteCandidate<'a>],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelRouteDecision {
+    pub index: usize,
+    pub relevance: f64,
+    pub confidence: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelRouteResult {
+    pub decisions: Vec<ModelRouteDecision>,
+    pub model: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DecisionProviderError {
     #[error("decision provider request failed: {0}")]
@@ -165,6 +192,13 @@ pub trait DecisionProvider: Send + Sync {
         _input: SkillRouteInput<'_>,
     ) -> Result<SkillRouteResult, DecisionProviderError> {
         Err(DecisionProviderError::Unsupported("skill_router"))
+    }
+
+    async fn route_model(
+        &self,
+        _input: ModelRouteInput<'_>,
+    ) -> Result<ModelRouteResult, DecisionProviderError> {
+        Err(DecisionProviderError::Unsupported("model_router"))
     }
 }
 
@@ -374,6 +408,69 @@ impl DecisionProvider for TypeSafeDecisionProvider {
             .collect();
 
         Ok(SkillRouteResult {
+            decisions,
+            model: response.model.unwrap_or_else(|| self.config.model.clone()),
+        })
+    }
+
+    async fn route_model(
+        &self,
+        input: ModelRouteInput<'_>,
+    ) -> Result<ModelRouteResult, DecisionProviderError> {
+        if input.candidates.is_empty() {
+            return Ok(ModelRouteResult {
+                decisions: Vec::new(),
+                model: self.config.model.clone(),
+            });
+        }
+
+        let current_model = input.current_model.unwrap_or("not specified");
+        let mut state = format!(
+            "Current task:\n{}\n\nCurrent user-selected model: {}\n\nAvailable models:\n",
+            input.prompt, current_model
+        );
+        let mut questions = BTreeMap::new();
+        for (index, candidate) in input.candidates.iter().enumerate() {
+            state.push_str(&format!(
+                "\n[{}] {} ({})\n{}\n",
+                index,
+                candidate.label,
+                candidate.id,
+                truncate(candidate.description, MAX_MEMORY_SNIPPET_CHARS)
+            ));
+            questions.insert(
+                format!("model_{index}"),
+                json!({
+                    "type": "noul",
+                    "instructions": format!(
+                        "How appropriate is model '{}' for the current task? Consider reasoning difficulty, expected context, speed, and cost.",
+                        candidate.id
+                    ),
+                }),
+            );
+        }
+
+        let response = self
+            .request(truncate(&state, MAX_STATE_CHARS), questions)
+            .await?;
+        let decisions = input
+            .candidates
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                let answer = response.answers.get(&format!("model_{index}"));
+                ModelRouteDecision {
+                    index,
+                    relevance: answer
+                        .and_then(|answer| answer.noul)
+                        .unwrap_or(0.0)
+                        .clamp(0.0, 1.0),
+                    confidence: answer.and_then(|answer| answer.confidence),
+                }
+            })
+            .collect();
+
+        Ok(ModelRouteResult {
             decisions,
             model: response.model.unwrap_or_else(|| self.config.model.clone()),
         })

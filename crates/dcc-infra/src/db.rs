@@ -278,6 +278,7 @@ CREATE TABLE IF NOT EXISTS dcc_decision_provider_history (
 	candidate_count INTEGER NOT NULL,
 	selected_count INTEGER NOT NULL,
 	selected_indices_json TEXT NOT NULL,
+	selected_labels_json TEXT NOT NULL DEFAULT '[]',
 	threshold REAL NOT NULL,
 	duration_ms INTEGER NOT NULL,
 	error TEXT NULL,
@@ -1287,6 +1288,7 @@ pub struct DecisionProviderHistoryEntry {
     pub candidate_count: usize,
     pub selected_count: usize,
     pub selected_indices: Vec<usize>,
+    pub selected_labels: Vec<String>,
     pub threshold: f64,
     pub duration_ms: u64,
     pub error: Option<String>,
@@ -1604,6 +1606,7 @@ impl SqliteSessionRepo {
         model: &str,
         candidate_count: usize,
         selected_indices: &[usize],
+        selected_labels: &[String],
         threshold: f64,
         duration_ms: u64,
         error_message: Option<&str>,
@@ -1619,9 +1622,9 @@ impl SqliteSessionRepo {
             r#"
             INSERT INTO dcc_decision_provider_history
                 (session_id, decision_point, provider, mode, status, model,
-                 candidate_count, selected_count, selected_indices_json, threshold,
+                 candidate_count, selected_count, selected_indices_json, selected_labels_json, threshold,
                  duration_ms, error, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             "#,
             params![
                 session_id.0.clone(),
@@ -1633,6 +1636,8 @@ impl SqliteSessionRepo {
                 i64::try_from(candidate_count).unwrap_or(i64::MAX),
                 i64::try_from(selected_indices.len()).unwrap_or(i64::MAX),
                 selected_indices_json,
+                serde_json::to_string(selected_labels)
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
                 threshold,
                 i64::try_from(duration_ms).unwrap_or(i64::MAX),
                 error_message,
@@ -1655,8 +1660,8 @@ impl SqliteSessionRepo {
             .prepare(
                 r#"
                 SELECT id, session_id, decision_point, provider, mode, status, model,
-                       candidate_count, selected_count, selected_indices_json, threshold,
-                       duration_ms, error, created_at
+                       candidate_count, selected_count, selected_indices_json,
+                       selected_labels_json, threshold, duration_ms, error, created_at
                   FROM dcc_decision_provider_history
                  ORDER BY created_at DESC, id DESC
                  LIMIT ?1
@@ -1676,7 +1681,16 @@ impl SqliteSessionRepo {
                             Box::new(error),
                         )
                     })?;
-                let duration_ms = row.get::<_, i64>(11)?;
+                let selected_labels_json = row.get::<_, String>(10)?;
+                let selected_labels =
+                    serde_json::from_str(&selected_labels_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            10,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                let duration_ms = row.get::<_, i64>(12)?;
                 Ok(DecisionProviderHistoryEntry {
                     id: row.get(0)?,
                     session_id: SessionId(row.get(1)?),
@@ -1688,10 +1702,11 @@ impl SqliteSessionRepo {
                     candidate_count: usize::try_from(candidate_count).unwrap_or(usize::MAX),
                     selected_count: usize::try_from(selected_count).unwrap_or(usize::MAX),
                     selected_indices,
-                    threshold: row.get(10)?,
+                    selected_labels,
+                    threshold: row.get(11)?,
                     duration_ms: u64::try_from(duration_ms).unwrap_or(u64::MAX),
-                    error: row.get(12)?,
-                    created_at: row.get(13)?,
+                    error: row.get(13)?,
+                    created_at: row.get(14)?,
                 })
             })
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -1881,6 +1896,12 @@ impl SqliteSessionRepo {
             "dcc_decision_provider_history",
             "provider",
             "TEXT NOT NULL DEFAULT 'typesafe_jev'",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_decision_provider_history",
+            "selected_labels_json",
+            "TEXT NOT NULL DEFAULT '[]'",
         )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,

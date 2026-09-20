@@ -712,6 +712,7 @@ export type DecisionProviderHistoryOutput = {
 	candidateCount: number,
 	selectedCount: number,
 	selectedIndices: number[],
+	selectedLabels: string[],
 	threshold: number,
 	durationMs: number,
 	error: string | null,

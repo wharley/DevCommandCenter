@@ -2289,10 +2289,12 @@
       },
       "historyPoints": {
         "memory_filter": "Memory filter",
-        "skill_router": "Skill router"
+        "skill_router": "Skill router",
+        "model_router": "Model router"
       },
       "historyMeta": "{{candidates}} candidate(s) · {{selected}} selected · threshold {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidate(s) · request failed after {{duration}} ms",
+      "selectedLabels": "Selected: {{labels}}",
       "selectedIndices": "Selected candidate indexes: {{indices}}",
       "none": "none"
     },

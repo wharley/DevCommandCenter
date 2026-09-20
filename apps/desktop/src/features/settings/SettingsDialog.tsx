@@ -1463,12 +1463,14 @@ export function SettingsDialog({
 																		duration: entry.durationMs,
 																	})}
 															</p>
-															{entry.status === "completed" ? (
-																<p className="font-mono text-[11px] text-muted-foreground">
-																	{t("settings.decisionProvider.selectedIndices", {
-																		indices: entry.selectedIndices.length ? entry.selectedIndices.join(", ") : t("settings.decisionProvider.none"),
-																	})}
-																</p>
+																	{entry.status === "completed" ? (
+																		<p className="font-mono text-[11px] text-muted-foreground">
+																			{entry.selectedLabels.length
+																			? t("settings.decisionProvider.selectedLabels", { labels: entry.selectedLabels.join(", ") })
+																			: t("settings.decisionProvider.selectedIndices", {
+																				indices: entry.selectedIndices.length ? entry.selectedIndices.join(", ") : t("settings.decisionProvider.none"),
+																			})}
+																		</p>
 															) : null}
 															{entry.error ? <p className="text-[11px] text-destructive">{entry.error}</p> : null}
 														</div>

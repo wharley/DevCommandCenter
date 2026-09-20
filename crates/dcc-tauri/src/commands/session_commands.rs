@@ -9,6 +9,7 @@ use specta::Type;
 use tauri::{AppHandle, State};
 use tokio::time::sleep;
 
+use dcc_core::domain::model_registry;
 use dcc_core::domain::objective::{ObjectiveTransition, SessionObjective, SessionObjectiveDraft};
 use dcc_core::{
     application::{
@@ -48,8 +49,8 @@ use dcc_infra::db::{
     SqliteWorkspaceRepo,
 };
 use dcc_infra::decision_provider::{
-    DecisionMode, DecisionProvider, MemoryFilterInput, SkillRouteCandidate, SkillRouteInput,
-    TypeSafeDecisionProvider,
+    DecisionMode, DecisionProvider, MemoryFilterInput, ModelRouteCandidate, ModelRouteInput,
+    SkillRouteCandidate, SkillRouteInput, TypeSafeDecisionProvider,
 };
 
 use crate::guarded_undo_runtime::{GuardedUndoExecuteResult, GuardedUndoPrepareResult};
@@ -155,6 +156,7 @@ pub struct DecisionProviderHistoryOutput {
     pub candidate_count: usize,
     pub selected_count: usize,
     pub selected_indices: Vec<usize>,
+    pub selected_labels: Vec<String>,
     pub threshold: f64,
     pub duration_ms: u64,
     pub error: Option<String>,
@@ -500,6 +502,7 @@ pub fn decision_provider_history(
                     candidate_count: entry.candidate_count,
                     selected_count: entry.selected_count,
                     selected_indices: entry.selected_indices,
+                    selected_labels: entry.selected_labels,
                     threshold: entry.threshold,
                     duration_ms: entry.duration_ms,
                     error: entry.error,
@@ -1324,6 +1327,114 @@ fn render_selected_skill_context(
     (context.len() > 64).then_some(context)
 }
 
+async fn record_decision_provider_model_route(
+    state: &SessionCommandState,
+    session: &dcc_core::domain::session::Session,
+    prompt: &str,
+) {
+    let Some(provider) = TypeSafeDecisionProvider::from_env() else {
+        return;
+    };
+    let Some(entries) = model_registry::entries_for(&session.provider_id) else {
+        eprintln!(
+            "[DCC] decision provider model_router skipped: dynamic model catalog for provider {}",
+            session.provider_id
+        );
+        return;
+    };
+    let candidates = entries
+        .iter()
+        .map(|entry| ModelRouteCandidate {
+            id: entry.id,
+            label: entry.label,
+            description: entry.description,
+        })
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        eprintln!("[DCC] decision provider model_router skipped: no model candidates");
+        return;
+    }
+
+    let started = Instant::now();
+    let mode = match provider.config().mode {
+        DecisionMode::Observe => "observe",
+        DecisionMode::Enforce => "enforce",
+    };
+    let result = match provider
+        .route_model(ModelRouteInput {
+            prompt,
+            current_model: session.model.as_deref(),
+            candidates: &candidates,
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            let error_message = error.to_string();
+            let bounded_error: String = error_message.chars().take(500).collect();
+            if let Err(record_error) = state.record_decision_provider_history(
+                &session.id,
+                "model_router",
+                "typesafe_jev",
+                mode,
+                "failed",
+                &provider.config().model,
+                candidates.len(),
+                &[],
+                &[],
+                provider.config().memory_relevance_threshold,
+                started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                Some(&bounded_error),
+            ) {
+                eprintln!("[DCC] failed to persist decision provider history: {record_error}");
+            }
+            eprintln!("[DCC] decision provider model_router failed: {error}");
+            return;
+        }
+    };
+    let recommended_index = result
+        .decisions
+        .iter()
+        .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
+        .max_by(|left, right| left.relevance.total_cmp(&right.relevance))
+        .and_then(|decision| candidates.get(decision.index).map(|_| decision.index));
+    let selected_indices = recommended_index.into_iter().collect::<Vec<_>>();
+    let selected_labels = selected_indices
+        .iter()
+        .filter_map(|index| {
+            candidates
+                .get(*index)
+                .map(|candidate| candidate.id.to_string())
+        })
+        .collect::<Vec<_>>();
+    if let Err(error) = state.record_decision_provider_history(
+        &session.id,
+        "model_router",
+        "typesafe_jev",
+        mode,
+        "completed",
+        &result.model,
+        candidates.len(),
+        &selected_indices,
+        &selected_labels,
+        provider.config().memory_relevance_threshold,
+        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        None,
+    ) {
+        eprintln!("[DCC] failed to persist decision provider history: {error}");
+    }
+    let recommended = recommended_index
+        .and_then(|index| candidates.get(index).map(|candidate| candidate.id))
+        .unwrap_or("none");
+    eprintln!(
+        "[DCC] decision provider model_router mode={:?} model={} current={} recommended={}",
+        provider.config().mode,
+        result.model,
+        session.model.as_deref().unwrap_or("none"),
+        recommended,
+    );
+}
+
 async fn decision_provider_skill_context_for_turn(
     state: &SessionCommandState,
     session: &dcc_core::domain::session::Session,
@@ -1383,6 +1494,7 @@ async fn decision_provider_skill_context_for_turn(
                 &provider.config().model,
                 records.len(),
                 &[],
+                &[],
                 provider.config().memory_relevance_threshold,
                 started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
                 Some(&bounded_error),
@@ -1399,6 +1511,10 @@ async fn decision_provider_skill_context_for_turn(
         .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
         .filter_map(|decision| records.get(decision.index).map(|_| decision.index))
         .collect::<Vec<_>>();
+    let selected_labels = selected_indices
+        .iter()
+        .filter_map(|index| records.get(*index).map(|record| record.name.clone()))
+        .collect::<Vec<_>>();
     if let Err(error) = state.record_decision_provider_history(
         &session.id,
         "skill_router",
@@ -1408,6 +1524,7 @@ async fn decision_provider_skill_context_for_turn(
         &result.model,
         records.len(),
         &selected_indices,
+        &selected_labels,
         provider.config().memory_relevance_threshold,
         started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
         None,
@@ -1535,6 +1652,7 @@ async fn apply_decision_provider_memory_filter(
                 &provider.config().model,
                 hits.len(),
                 &[],
+                &[],
                 provider.config().memory_relevance_threshold,
                 started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
                 Some(&bounded_error),
@@ -1562,6 +1680,7 @@ async fn apply_decision_provider_memory_filter(
         &result.model,
         hits.len(),
         &selected_indices,
+        &[],
         provider.config().memory_relevance_threshold,
         started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
         None,
@@ -1631,6 +1750,7 @@ pub async fn send_turn(
         }
     }
 
+    record_decision_provider_model_route(&state, &session, &input.prompt).await;
     let mut tool_instructions = state
         .objective_tool_instructions(&input.session_id, input.tool_instructions.clone())
         .map_err(|error| error.to_string())?;
