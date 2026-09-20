@@ -270,6 +270,7 @@ CREATE TABLE IF NOT EXISTS dcc_ai_memory_source_actions (
 CREATE TABLE IF NOT EXISTS dcc_decision_provider_history (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT NOT NULL,
+	turn_id TEXT NULL,
 	decision_point TEXT NOT NULL DEFAULT 'memory_filter',
 	provider TEXT NOT NULL DEFAULT 'typesafe_jev',
 	mode TEXT NOT NULL CHECK (mode IN ('observe', 'enforce')),
@@ -1280,6 +1281,7 @@ pub struct AiMemorySourceAction {
 pub struct DecisionProviderHistoryEntry {
     pub id: i64,
     pub session_id: SessionId,
+    pub turn_id: Option<TurnId>,
     pub decision_point: String,
     pub provider: String,
     pub mode: String,
@@ -1612,6 +1614,41 @@ impl SqliteSessionRepo {
         error_message: Option<&str>,
         created_at: &str,
     ) -> Result<()> {
+        self.record_decision_provider_history_with_turn(
+            session_id,
+            None,
+            decision_point,
+            provider,
+            mode,
+            status,
+            model,
+            candidate_count,
+            selected_indices,
+            selected_labels,
+            threshold,
+            duration_ms,
+            error_message,
+            created_at,
+        )
+    }
+
+    pub fn record_decision_provider_history_with_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: Option<&TurnId>,
+        decision_point: &str,
+        provider: &str,
+        mode: &str,
+        status: &str,
+        model: &str,
+        candidate_count: usize,
+        selected_indices: &[usize],
+        selected_labels: &[String],
+        threshold: f64,
+        duration_ms: u64,
+        error_message: Option<&str>,
+        created_at: &str,
+    ) -> Result<()> {
         let conn = self
             .conn
             .lock()
@@ -1621,13 +1658,14 @@ impl SqliteSessionRepo {
         conn.execute(
             r#"
             INSERT INTO dcc_decision_provider_history
-                (session_id, decision_point, provider, mode, status, model,
+                (session_id, turn_id, decision_point, provider, mode, status, model,
                  candidate_count, selected_count, selected_indices_json, selected_labels_json, threshold,
                  duration_ms, error, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             "#,
             params![
                 session_id.0.clone(),
+                turn_id.map(|turn_id| turn_id.0.clone()),
                 decision_point,
                 provider,
                 mode,
@@ -1659,7 +1697,7 @@ impl SqliteSessionRepo {
         let mut statement = conn
             .prepare(
                 r#"
-                SELECT id, session_id, decision_point, provider, mode, status, model,
+                SELECT id, session_id, turn_id, decision_point, provider, mode, status, model,
                        candidate_count, selected_count, selected_indices_json,
                        selected_labels_json, threshold, duration_ms, error, created_at
                   FROM dcc_decision_provider_history
@@ -1670,43 +1708,44 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let rows = statement
             .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-                let candidate_count = row.get::<_, i64>(7)?;
-                let selected_count = row.get::<_, i64>(8)?;
-                let selected_indices_json = row.get::<_, String>(9)?;
+                let candidate_count = row.get::<_, i64>(8)?;
+                let selected_count = row.get::<_, i64>(9)?;
+                let selected_indices_json = row.get::<_, String>(10)?;
                 let selected_indices =
                     serde_json::from_str(&selected_indices_json).map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            9,
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?;
-                let selected_labels_json = row.get::<_, String>(10)?;
-                let selected_labels =
-                    serde_json::from_str(&selected_labels_json).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
                             10,
                             rusqlite::types::Type::Text,
                             Box::new(error),
                         )
                     })?;
-                let duration_ms = row.get::<_, i64>(12)?;
+                let selected_labels_json = row.get::<_, String>(11)?;
+                let selected_labels =
+                    serde_json::from_str(&selected_labels_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            11,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                let duration_ms = row.get::<_, i64>(13)?;
                 Ok(DecisionProviderHistoryEntry {
                     id: row.get(0)?,
                     session_id: SessionId(row.get(1)?),
-                    decision_point: row.get(2)?,
-                    provider: row.get(3)?,
-                    mode: row.get(4)?,
-                    status: row.get(5)?,
-                    model: row.get(6)?,
+                    turn_id: row.get::<_, Option<String>>(2)?.map(TurnId),
+                    decision_point: row.get(3)?,
+                    provider: row.get(4)?,
+                    mode: row.get(5)?,
+                    status: row.get(6)?,
+                    model: row.get(7)?,
                     candidate_count: usize::try_from(candidate_count).unwrap_or(usize::MAX),
                     selected_count: usize::try_from(selected_count).unwrap_or(usize::MAX),
                     selected_indices,
                     selected_labels,
-                    threshold: row.get(11)?,
+                    threshold: row.get(12)?,
                     duration_ms: u64::try_from(duration_ms).unwrap_or(u64::MAX),
-                    error: row.get(13)?,
-                    created_at: row.get(14)?,
+                    error: row.get(14)?,
+                    created_at: row.get(15)?,
                 })
             })
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -1885,6 +1924,12 @@ impl SqliteSessionRepo {
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_decision_provider_history",
+            "turn_id",
+            "TEXT NULL",
+        )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_decision_provider_history",

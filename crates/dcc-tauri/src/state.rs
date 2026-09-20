@@ -2135,6 +2135,42 @@ impl SessionCommandState {
         )
     }
 
+    pub fn record_decision_provider_history_for_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        decision_point: &str,
+        provider: &str,
+        mode: &str,
+        status: &str,
+        model: &str,
+        candidate_count: usize,
+        selected_indices: &[usize],
+        selected_labels: &[String],
+        threshold: f64,
+        duration_ms: u64,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        self.session_repo
+            .record_decision_provider_history_with_turn(
+                session_id,
+                Some(turn_id),
+                decision_point,
+                provider,
+                mode,
+                status,
+                model,
+                candidate_count,
+                selected_indices,
+                selected_labels,
+                threshold,
+                duration_ms,
+                error_message,
+                &created_at,
+            )
+    }
+
     pub fn list_decision_provider_history(
         &self,
         limit: usize,
@@ -2208,8 +2244,9 @@ impl SessionCommandState {
             Err(error) => {
                 let error_message = error.to_string();
                 let bounded_error: String = error_message.chars().take(500).collect();
-                if let Err(record_error) = self.record_decision_provider_history(
+                if let Err(record_error) = self.record_decision_provider_history_for_turn(
                     session_id,
+                    turn_id,
                     "completion_review",
                     "typesafe_jev",
                     mode,
@@ -2233,8 +2270,9 @@ impl SessionCommandState {
         let selected_labels = needs_review
             .then_some(vec![format!("needs_review:{:.2}", result.completeness)])
             .unwrap_or_default();
-        if let Err(error) = self.record_decision_provider_history(
+        if let Err(error) = self.record_decision_provider_history_for_turn(
             session_id,
+            turn_id,
             "completion_review",
             "typesafe_jev",
             mode,

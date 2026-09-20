@@ -150,6 +150,7 @@ pub struct AiMemoryExportHistoryOutput {
 pub struct DecisionProviderHistoryOutput {
     pub id: i64,
     pub session_id: String,
+    pub turn_id: Option<String>,
     pub decision_point: String,
     pub provider: String,
     pub mode: String,
@@ -496,6 +497,7 @@ pub fn decision_provider_history(
                 .map(|entry| DecisionProviderHistoryOutput {
                     id: entry.id,
                     session_id: entry.session_id.0,
+                    turn_id: entry.turn_id.map(|turn_id| turn_id.0),
                     decision_point: entry.decision_point,
                     provider: entry.provider,
                     mode: entry.mode,

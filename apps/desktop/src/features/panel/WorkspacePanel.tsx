@@ -64,6 +64,7 @@ import { projectWorkspaceMessages } from "./thread-projection";
 import type {
 	ProviderCatalog,
 	CoreEvent,
+	DecisionProviderHistoryOutput,
 	ProviderRuntimeConfig,
 } from "@dcc/contracts";
 import { derivePlanFollowUpState } from "./plan-follow-up";
@@ -104,7 +105,11 @@ import {
 	isPlanVersionApproved,
 	isPlanVersionHandedOff,
 } from "./plan-approval";
-import { approvePlan, recordPlanHandoff } from "@/lib/session-api";
+import {
+	approvePlan,
+	loadDecisionProviderHistory,
+	recordPlanHandoff,
+} from "@/lib/session-api";
 import {
 	loadApprovalPolicy,
 	loadEffortSelection,
@@ -282,6 +287,11 @@ type WorkspacePanelProps = {
 	onMergeConflictStateChanged: (workspaceRoot: string) => Promise<void> | void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
 	delegateSignal?: number;
+};
+
+export type CompletionReviewStatus = {
+	needsReview: boolean;
+	score: number | null;
 };
 
 export function WorkspacePanel({
@@ -759,6 +769,57 @@ export function WorkspacePanel({
 	const historyEvents = hasHydratedHistory
 		? (hydratedSessionHistory?.history ?? [])
 		: (threadHistoryQuery.data ?? []);
+	const latestCompletedTurnId = useMemo(() => {
+		for (const event of [...historyEvents].reverse()) {
+			if (event.kind.type === "turn_completed") return event.kind.turnId;
+		}
+		return null;
+	}, [historyEvents]);
+	const decisionProviderHistoryQuery = useQuery<DecisionProviderHistoryOutput[]>({
+		queryKey: ["decision-provider-history", effectiveSessionId],
+		queryFn: () => loadDecisionProviderHistory(100),
+		enabled: Boolean(effectiveSessionId),
+		staleTime: 0,
+		refetchInterval: (query) => {
+			if (!effectiveSessionId || !latestCompletedTurnId) return false;
+			const hasCurrentReview = (query.state.data ?? []).some(
+				(entry) =>
+					entry.sessionId === effectiveSessionId &&
+					entry.decisionPoint === "completion_review" &&
+					entry.status === "completed" &&
+					entry.turnId === latestCompletedTurnId,
+			);
+			return !hasCurrentReview && query.state.dataUpdateCount < 5 ? 1_500 : false;
+		},
+	});
+	useEffect(() => {
+		if (!effectiveSessionId || !latestCompletedTurnId) return;
+		const timeout = window.setTimeout(() => {
+			void decisionProviderHistoryQuery.refetch();
+		}, 750);
+		return () => window.clearTimeout(timeout);
+	}, [decisionProviderHistoryQuery.refetch, effectiveSessionId, latestCompletedTurnId]);
+	const completionReviews = useMemo(() => {
+		const reviews = new Map<string, CompletionReviewStatus>();
+		for (const entry of decisionProviderHistoryQuery.data ?? []) {
+			if (
+				entry.sessionId !== effectiveSessionId ||
+				entry.decisionPoint !== "completion_review" ||
+				entry.status !== "completed" ||
+				!entry.turnId
+			) {
+				continue;
+			}
+			const label = entry.selectedLabels.find((value) => value.startsWith("needs_review:"));
+			const scoreText = label?.split(":")[1];
+			const score = scoreText ? Number(scoreText) : null;
+			reviews.set(entry.turnId, {
+				needsReview: Boolean(label),
+				score: score !== null && Number.isFinite(score) ? score : null,
+			});
+		}
+		return reviews;
+	}, [decisionProviderHistoryQuery.data, effectiveSessionId]);
 	const hasLoaded = sessionSnapshot
 		? Boolean(
 				hasHydratedHistory
@@ -1359,6 +1420,7 @@ export function WorkspacePanel({
 					onRetryInterrupted={handleRetryInterrupted}
 					onOpenPlan={onOpenPlanSurface}
 					onOpenFileReference={onOpenFileReference}
+					completionReviews={completionReviews}
 				/>
 
 				{effectiveSessionId ? (

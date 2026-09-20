@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDown } from "lucide-react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
 	ConversationExecutionState,
 	ConversationStartingIndicator,
@@ -78,6 +79,10 @@ type ActiveThreadViewportProps = {
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	/** Reveals and highlights one message (find-in-thread); nonce re-fires the same id. */
 	focusRequest?: { messageId: string; nonce: number } | null;
+	completionReviews?: ReadonlyMap<
+		string,
+		{ needsReview: boolean; score: number | null }
+	>;
 };
 
 export function ActiveThreadViewport({
@@ -111,6 +116,7 @@ export function ActiveThreadViewport({
 	onOpenPlan,
 	onOpenFileReference,
 	focusRequest = null,
+	completionReviews,
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
 	const [hasNewActivity, setHasNewActivity] = useState(false);
@@ -355,6 +361,9 @@ export function ActiveThreadViewport({
 									);
 								}
 								if (message.role === "assistant") {
+									const completionReview = message.turnId
+										? completionReviews?.get(message.turnId)
+										: undefined;
 									return (
 										<div
 											key={message.id}
@@ -424,6 +433,21 @@ export function ActiveThreadViewport({
 												onOpenFileReference={onOpenFileReference}
 												hidePendingApprovals
 											/>
+											{completionReview && !message.streaming ? (
+												<div className="mt-2 flex items-center gap-2">
+													<Badge
+														variant={completionReview.needsReview ? "destructive" : "secondary"}
+														className="text-[10px] font-normal"
+													>
+														{completionReview.needsReview
+															? t("settings.decisionProvider.completionNeedsReview")
+															: t("settings.decisionProvider.completionComplete")}
+														{completionReview.score !== null
+															? ` · ${(completionReview.score * 100).toFixed(0)}%`
+															: ""}
+													</Badge>
+												</div>
+											) : null}
 											{message.turnSettled && message.turnId && sessionId && workspaceId && onReviewChanges ? (
 												<TurnReviewTimelineCard
 													key={`${sessionId}:${message.turnId}:${workspaceId}`}
