@@ -1043,6 +1043,27 @@ export function WorkspacePanel({
 		},
 		[buildAnnotationTurn, onResumeSession, onSubmitPrompt, sessionState, t],
 	);
+	const handleReviewCompletion = useCallback(
+		() => {
+			replaceComposerDraft(t("settings.decisionProvider.completionReviewPrompt"));
+		},
+		[replaceComposerDraft, t],
+	);
+	const handleRegenerateCompletion = useCallback(
+		async ({ prompt }: { prompt: string; turnId: string }) => {
+			try {
+				if (sessionState === "aborted") {
+					await onResumeSession();
+				}
+				await onSubmitPrompt(buildAnnotationTurn(prompt));
+			} catch (error) {
+				toast.error(t("settings.decisionProvider.completionRegenerateFailed"), {
+					description: error instanceof Error ? error.message : undefined,
+				});
+			}
+		},
+		[buildAnnotationTurn, onResumeSession, onSubmitPrompt, sessionState, t],
+	);
 	const pendingPermissionRequests = useMemo(
 		() => collectPendingPermissionRequests(messages),
 		[messages],
@@ -1418,6 +1439,8 @@ export function WorkspacePanel({
 					onForkFromMessage={onForkFromMessage}
 					onContinueInterrupted={handleContinueInterrupted}
 					onRetryInterrupted={handleRetryInterrupted}
+					onReviewCompletion={handleReviewCompletion}
+					onRegenerateCompletion={handleRegenerateCompletion}
 					onOpenPlan={onOpenPlanSurface}
 					onOpenFileReference={onOpenFileReference}
 					completionReviews={completionReviews}

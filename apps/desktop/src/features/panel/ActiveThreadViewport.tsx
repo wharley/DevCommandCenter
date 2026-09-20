@@ -75,6 +75,8 @@ type ActiveThreadViewportProps = {
 	onForkFromMessage?: (messageId: string) => void;
 	onContinueInterrupted?: (originalPrompt: string | null) => Promise<void> | void;
 	onRetryInterrupted?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
+	onReviewCompletion?: (input: { prompt: string; turnId: string }) => void;
+	onRegenerateCompletion?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
 	onOpenPlan: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	/** Reveals and highlights one message (find-in-thread); nonce re-fires the same id. */
@@ -113,6 +115,8 @@ export function ActiveThreadViewport({
 	onForkFromMessage,
 	onContinueInterrupted,
 	onRetryInterrupted,
+	onReviewCompletion,
+	onRegenerateCompletion,
 	onOpenPlan,
 	onOpenFileReference,
 	focusRequest = null,
@@ -364,6 +368,9 @@ export function ActiveThreadViewport({
 									const completionReview = message.turnId
 										? completionReviews?.get(message.turnId)
 										: undefined;
+									const sourceTurn = message.turnId
+										? precedingUserTurn(messages, messageIndex)
+										: null;
 									return (
 										<div
 											key={message.id}
@@ -433,8 +440,8 @@ export function ActiveThreadViewport({
 												onOpenFileReference={onOpenFileReference}
 												hidePendingApprovals
 											/>
-											{completionReview && !message.streaming ? (
-												<div className="mt-2 flex items-center gap-2">
+											{completionReview && message.turnSettled && !message.streaming ? (
+												<div className="mt-2 flex flex-wrap items-center gap-2">
 													<Badge
 														variant={completionReview.needsReview ? "destructive" : "secondary"}
 														className="text-[10px] font-normal"
@@ -446,6 +453,38 @@ export function ActiveThreadViewport({
 															? ` · ${(completionReview.score * 100).toFixed(0)}%`
 															: ""}
 													</Badge>
+													{completionReview.needsReview && sourceTurn?.turnId && onReviewCompletion ? (
+														<Button
+															type="button"
+															variant="ghost"
+															size="xs"
+															className="h-6 px-2 text-[11px]"
+															onClick={() =>
+																onReviewCompletion({
+																	prompt: sourceTurn.prompt,
+																	turnId: sourceTurn.turnId!,
+																})
+															}
+														>
+															{t("settings.decisionProvider.completionReviewAction")}
+														</Button>
+													) : null}
+													{completionReview.needsReview && sourceTurn?.turnId && onRegenerateCompletion ? (
+														<Button
+															type="button"
+															variant="ghost"
+															size="xs"
+															className="h-6 px-2 text-[11px]"
+															onClick={() =>
+																void onRegenerateCompletion({
+																	prompt: sourceTurn.prompt,
+																	turnId: sourceTurn.turnId!,
+																})
+															}
+														>
+															{t("settings.decisionProvider.completionRegenerateAction")}
+														</Button>
+													) : null}
 												</div>
 											) : null}
 											{message.turnSettled && message.turnId && sessionId && workspaceId && onReviewChanges ? (
