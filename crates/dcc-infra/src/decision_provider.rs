@@ -185,6 +185,19 @@ pub struct ToolGuardResult {
     pub model: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompletionReviewInput<'a> {
+    pub prompt: &'a str,
+    pub response: &'a str,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompletionReviewResult {
+    pub completeness: f64,
+    pub confidence: Option<f64>,
+    pub model: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DecisionProviderError {
     #[error("decision provider request failed: {0}")]
@@ -223,6 +236,13 @@ pub trait DecisionProvider: Send + Sync {
         _input: ToolGuardInput<'_>,
     ) -> Result<ToolGuardResult, DecisionProviderError> {
         Err(DecisionProviderError::Unsupported("tool_guard"))
+    }
+
+    async fn review_completion(
+        &self,
+        _input: CompletionReviewInput<'_>,
+    ) -> Result<CompletionReviewResult, DecisionProviderError> {
+        Err(DecisionProviderError::Unsupported("completion_review"))
     }
 }
 
@@ -529,6 +549,36 @@ impl DecisionProvider for TypeSafeDecisionProvider {
             risk: answer
                 .and_then(|answer| answer.noul)
                 .unwrap_or(1.0)
+                .clamp(0.0, 1.0),
+            confidence: answer.and_then(|answer| answer.confidence),
+            model: response.model.unwrap_or_else(|| self.config.model.clone()),
+        })
+    }
+
+    async fn review_completion(
+        &self,
+        input: CompletionReviewInput<'_>,
+    ) -> Result<CompletionReviewResult, DecisionProviderError> {
+        let state = format!(
+            "Current task:\n{}\n\nAssistant response to review:\n{}\n",
+            input.prompt, input.response
+        );
+        let mut questions = BTreeMap::new();
+        questions.insert(
+            "completion_review".to_string(),
+            json!({
+                "type": "noul",
+                "instructions": "How complete and useful is this assistant response for the current task? Return a high score when it answers the request directly, covers important constraints, and is ready for the user. Return a low score when it is incomplete, evasive, unsupported, or clearly needs another pass.",
+            }),
+        );
+        let response = self
+            .request(truncate(&state, MAX_STATE_CHARS), questions)
+            .await?;
+        let answer = response.answers.get("completion_review");
+        Ok(CompletionReviewResult {
+            completeness: answer
+                .and_then(|answer| answer.noul)
+                .unwrap_or(0.0)
                 .clamp(0.0, 1.0),
             confidence: answer.and_then(|answer| answer.confidence),
             model: response.model.unwrap_or_else(|| self.config.model.clone()),

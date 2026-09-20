@@ -74,6 +74,9 @@ use dcc_infra::{
         DecisionProviderHistoryEntry, ProviderAvailabilityRecord, SqliteSessionRepo,
         SqliteWorkspaceRepo,
     },
+    decision_provider::{
+        CompletionReviewInput, DecisionMode, DecisionProvider, TypeSafeDecisionProvider,
+    },
     mcp_db::SqliteMcpRepo,
 };
 
@@ -2138,6 +2141,121 @@ impl SessionCommandState {
     ) -> Result<Vec<DecisionProviderHistoryEntry>> {
         self.session_repo
             .list_decision_provider_history(limit.clamp(1, 200))
+    }
+
+    pub async fn review_completed_turn_with_decision_provider(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) {
+        let Some(provider) = TypeSafeDecisionProvider::from_env() else {
+            return;
+        };
+        let events =
+            match SessionEventRepo::list_events_by_session(&self.session_repo, session_id).await {
+                Ok(events) => events,
+                Err(error) => {
+                    eprintln!("[DCC] decision provider completion_review skipped: {error}");
+                    return;
+                }
+            };
+        let prompt = events.iter().rev().find_map(|event| {
+            let SessionEventKind::TurnStarted {
+                turn_id: event_turn_id,
+                prompt,
+                ..
+            } = &event.kind
+            else {
+                return None;
+            };
+            (event_turn_id == turn_id).then(|| prompt.clone())
+        });
+        let response = events.iter().rev().find_map(|event| match &event.kind {
+            SessionEventKind::TurnAssistantMessageCompleted {
+                turn_id: event_turn_id,
+                phase,
+                content: Some(content),
+                ..
+            } if event_turn_id == turn_id
+                && *phase != AssistantMessagePhase::Commentary
+                && !content.trim().is_empty() =>
+            {
+                Some(content.clone())
+            }
+            _ => None,
+        });
+        let (Some(prompt), Some(response)) = (prompt, response) else {
+            eprintln!(
+                "[DCC] decision provider completion_review skipped: no final response turn={}",
+                turn_id.0
+            );
+            return;
+        };
+
+        let started = std::time::Instant::now();
+        let mode = match provider.config().mode {
+            DecisionMode::Observe => "observe",
+            DecisionMode::Enforce => "enforce",
+        };
+        let result = match provider
+            .review_completion(CompletionReviewInput {
+                prompt: &prompt,
+                response: &response,
+            })
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let error_message = error.to_string();
+                let bounded_error: String = error_message.chars().take(500).collect();
+                if let Err(record_error) = self.record_decision_provider_history(
+                    session_id,
+                    "completion_review",
+                    "typesafe_jev",
+                    mode,
+                    "failed",
+                    &provider.config().model,
+                    1,
+                    &[],
+                    &[],
+                    provider.config().memory_relevance_threshold,
+                    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                    Some(&bounded_error),
+                ) {
+                    eprintln!("[DCC] failed to persist decision provider history: {record_error}");
+                }
+                eprintln!("[DCC] decision provider completion_review failed: {error}");
+                return;
+            }
+        };
+        let needs_review = result.completeness < provider.config().memory_relevance_threshold;
+        let selected_indices = needs_review.then_some(vec![0]).unwrap_or_default();
+        let selected_labels = needs_review
+            .then_some(vec![format!("needs_review:{:.2}", result.completeness)])
+            .unwrap_or_default();
+        if let Err(error) = self.record_decision_provider_history(
+            session_id,
+            "completion_review",
+            "typesafe_jev",
+            mode,
+            "completed",
+            &result.model,
+            1,
+            &selected_indices,
+            &selected_labels,
+            provider.config().memory_relevance_threshold,
+            started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+            None,
+        ) {
+            eprintln!("[DCC] failed to persist decision provider history: {error}");
+        }
+        eprintln!(
+            "[DCC] decision provider completion_review mode={:?} model={} completeness={:.2} needs_review={}",
+            provider.config().mode,
+            result.model,
+            result.completeness,
+            needs_review,
+        );
     }
 
     pub async fn retry_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {
@@ -5638,18 +5756,34 @@ impl SessionCommandState {
                     Ok(ProviderEvent::Completed { .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         let mut completed = false;
+                        let mut completed_turn_id = None;
                         if let Some(turn_id) = turn_id {
-                            match state
-                                .emit_turn_completed(&session_id, &TurnId(turn_id))
-                                .await
-                            {
-                                Ok(emitted) => completed = emitted,
+                            let turn_id = TurnId(turn_id);
+                            match state.emit_turn_completed(&session_id, &turn_id).await {
+                                Ok(emitted) => {
+                                    completed = emitted;
+                                    if emitted {
+                                        completed_turn_id = Some(turn_id);
+                                    }
+                                }
                                 Err(error) => {
                                     eprintln!("[DCC] completed turn finalization failed: {error}")
                                 }
                             }
                         }
                         if completed {
+                            if let Some(review_turn_id) = completed_turn_id {
+                                let review_state = state.clone();
+                                let review_session_id = session_id.clone();
+                                tokio::spawn(async move {
+                                    review_state
+                                        .review_completed_turn_with_decision_provider(
+                                            &review_session_id,
+                                            &review_turn_id,
+                                        )
+                                        .await;
+                                });
+                            }
                             if let Err(error) = state
                                 .dispatch_next_queued_turn_if_objective_allows(&session_id)
                                 .await

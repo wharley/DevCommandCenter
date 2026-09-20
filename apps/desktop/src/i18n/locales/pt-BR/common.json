@@ -2291,7 +2291,8 @@
         "memory_filter": "Filtro de memória",
         "skill_router": "Roteador de skills",
         "model_router": "Roteador de modelos",
-        "tool_guard": "Proteção de ferramentas"
+        "tool_guard": "Proteção de ferramentas",
+        "completion_review": "Revisão da resposta"
       },
       "historyMeta": "{{candidates}} candidato(s) · {{selected}} selecionado(s) · limiar {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidato(s) · requisição falhou após {{duration}} ms",

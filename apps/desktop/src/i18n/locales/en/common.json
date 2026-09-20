@@ -2291,7 +2291,8 @@
         "memory_filter": "Memory filter",
         "skill_router": "Skill router",
         "model_router": "Model router",
-        "tool_guard": "Tool guard"
+        "tool_guard": "Tool guard",
+        "completion_review": "Completion review"
       },
       "historyMeta": "{{candidates}} candidate(s) · {{selected}} selected · threshold {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidate(s) · request failed after {{duration}} ms",
