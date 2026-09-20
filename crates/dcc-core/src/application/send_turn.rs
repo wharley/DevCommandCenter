@@ -55,6 +55,26 @@ pub struct SendTurnInput {
     /// durable history; the retry is a normal turn for every budget.
     #[serde(default)]
     pub retry_of_turn_id: Option<TurnId>,
+    /// Result of the DCC model-routing preflight. When present, the backend
+    /// reuses it instead of spending a second Jev request for this turn.
+    #[serde(default)]
+    pub decision_provider_model_route: Option<DecisionProviderModelRouteSelection>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionProviderModelRouteSelection {
+    pub status: String,
+    pub decision_model: String,
+    pub current_model: Option<String>,
+    pub recommended_model: Option<String>,
+    pub recommended_index: Option<usize>,
+    pub recommended_score: Option<f64>,
+    pub confidence: Option<f64>,
+    pub candidate_count: usize,
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// Merge UI selection into session fields for per-turn model routing.
@@ -459,6 +479,7 @@ mod tests {
                 approval_policy: None,
                 evidence: None,
                 retry_of_turn_id: None,
+                decision_provider_model_route: None,
             },
         ))
         .expect("send_turn should succeed");
@@ -548,6 +569,7 @@ mod tests {
                 approval_policy: None,
                 evidence: None,
                 retry_of_turn_id: None,
+                decision_provider_model_route: None,
             },
         ))
         .expect("send_turn should succeed");
@@ -604,6 +626,7 @@ mod tests {
                 approval_policy: None,
                 evidence: None,
                 retry_of_turn_id: None,
+                decision_provider_model_route: None,
             },
         ))
         .expect("preflight should update the provider selection");

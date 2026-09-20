@@ -21,11 +21,23 @@ const DEFAULT_BASE_URL: &str = "https://api.typesafe.ai";
 const DEFAULT_MODEL: &str = "jev-latest";
 const DEFAULT_THRESHOLD: f64 = 0.65;
 
+fn default_model_routing() -> String {
+    "manual".to_string()
+}
+
+fn normalize_model_routing(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "automatic" => "automatic".to_string(),
+        _ => "manual".to_string(),
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionProviderSettingsInput {
     pub provider: String,
     pub mode: String,
+    pub model_routing: String,
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub memory_threshold: Option<f64>,
@@ -39,6 +51,7 @@ pub struct DecisionProviderSettingsInput {
 pub struct DecisionProviderSettingsOutput {
     pub provider: String,
     pub mode: String,
+    pub model_routing: String,
     pub base_url: String,
     pub model: String,
     pub memory_threshold: f64,
@@ -51,6 +64,8 @@ pub struct DecisionProviderSettingsOutput {
 struct PersistedDecisionProviderSettings {
     provider: String,
     mode: String,
+    #[serde(default = "default_model_routing")]
+    model_routing: String,
     base_url: String,
     model: String,
     memory_threshold: f64,
@@ -111,6 +126,7 @@ impl DecisionProviderSettings {
         let persisted = PersistedDecisionProviderSettings {
             provider: input.provider.trim().to_ascii_lowercase(),
             mode: input.mode.trim().to_ascii_lowercase(),
+            model_routing: normalize_model_routing(&input.model_routing),
             base_url: input
                 .base_url
                 .as_deref()
@@ -210,6 +226,9 @@ fn default_settings_from_environment() -> PersistedDecisionProviderSettings {
             .unwrap_or_else(|_| "observe".to_string())
             .trim()
             .to_ascii_lowercase(),
+        model_routing: normalize_model_routing(
+            &std::env::var("DCC_MODEL_ROUTING_MODE").unwrap_or_else(|_| default_model_routing()),
+        ),
         base_url: std::env::var("TYPESAFE_BASE_URL")
             .unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
             .trim_end_matches('/')
@@ -233,6 +252,7 @@ fn output_for(
     DecisionProviderSettingsOutput {
         provider: settings.provider.clone(),
         mode: settings.mode.clone(),
+        model_routing: normalize_model_routing(&settings.model_routing),
         base_url: settings.base_url.clone(),
         model: settings.model.clone(),
         memory_threshold: settings.memory_threshold,
@@ -253,6 +273,12 @@ fn validate_input(input: &DecisionProviderSettingsInput) -> Result<(), String> {
         "observe" | "enforce"
     ) {
         return Err("decision provider mode must be observe or enforce".to_string());
+    }
+    if !matches!(
+        input.model_routing.trim().to_ascii_lowercase().as_str(),
+        "disabled" | "manual" | "automatic"
+    ) {
+        return Err("model routing must be disabled, manual, or automatic".to_string());
     }
     if let Some(base_url) = input
         .base_url
@@ -292,6 +318,7 @@ fn validate_persisted(settings: &PersistedDecisionProviderSettings) -> Result<()
     validate_input(&DecisionProviderSettingsInput {
         provider: settings.provider.clone(),
         mode: settings.mode.clone(),
+        model_routing: settings.model_routing.clone(),
         base_url: Some(settings.base_url.clone()),
         model: Some(settings.model.clone()),
         memory_threshold: Some(settings.memory_threshold),
@@ -302,6 +329,10 @@ fn validate_persisted(settings: &PersistedDecisionProviderSettings) -> Result<()
 
 fn apply_settings_to_environment(settings: &PersistedDecisionProviderSettings) {
     std::env::set_var("DCC_DECISION_MODE", &settings.mode);
+    std::env::set_var(
+        "DCC_MODEL_ROUTING_MODE",
+        normalize_model_routing(&settings.model_routing),
+    );
     std::env::set_var("TYPESAFE_BASE_URL", &settings.base_url);
     std::env::set_var("TYPESAFE_MODEL", &settings.model);
     std::env::set_var(
@@ -324,6 +355,7 @@ mod tests {
         let input = DecisionProviderSettingsInput {
             provider: "typesafe".to_string(),
             mode: "observe".to_string(),
+            model_routing: "manual".to_string(),
             base_url: Some(DEFAULT_BASE_URL.to_string()),
             model: Some(DEFAULT_MODEL.to_string()),
             memory_threshold: Some(DEFAULT_THRESHOLD),
@@ -338,6 +370,7 @@ mod tests {
         let input = DecisionProviderSettingsInput {
             provider: "typesafe".to_string(),
             mode: "observe".to_string(),
+            model_routing: "manual".to_string(),
             base_url: None,
             model: None,
             memory_threshold: Some(2.0),

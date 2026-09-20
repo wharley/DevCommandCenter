@@ -18,6 +18,7 @@ import {
 	ConversationStartingIndicator,
 	SessionStartingIndicator,
 } from "./ConversationExecutionState";
+import { ModelRouteDecisionCard, type ModelRouteDecision } from "./ModelRouteDecisionCard";
 import { ConversationLaunchState } from "./ConversationLaunchState";
 import type { ProviderCatalog } from "@dcc/contracts";
 import type { WorkspaceMessage } from "./thread-projection";
@@ -77,6 +78,7 @@ type ActiveThreadViewportProps = {
 	onRetryInterrupted?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
 	onReviewCompletion?: (input: { prompt: string; turnId: string }) => void;
 	onRegenerateCompletion?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
+	onKeepCompletion?: (turnId: string) => void;
 	onOpenPlan: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	/** Reveals and highlights one message (find-in-thread); nonce re-fires the same id. */
@@ -85,6 +87,11 @@ type ActiveThreadViewportProps = {
 		string,
 		{ needsReview: boolean; score: number | null }
 	>;
+	completionReviewActionsDismissed?: ReadonlySet<string>;
+	isModelRouting?: boolean;
+	modelRouteDecision?: ModelRouteDecision | null;
+	onResolveModelRoute?: (modelId: string) => void;
+	modelLabel?: (modelId: string | null) => string;
 };
 
 export function ActiveThreadViewport({
@@ -117,10 +124,16 @@ export function ActiveThreadViewport({
 	onRetryInterrupted,
 	onReviewCompletion,
 	onRegenerateCompletion,
+	onKeepCompletion,
 	onOpenPlan,
 	onOpenFileReference,
 	focusRequest = null,
 	completionReviews,
+	completionReviewActionsDismissed,
+	isModelRouting = false,
+	modelRouteDecision = null,
+	onResolveModelRoute,
+	modelLabel = (modelId) => modelId ?? "—",
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
 	const [hasNewActivity, setHasNewActivity] = useState(false);
@@ -164,7 +177,9 @@ export function ActiveThreadViewport({
 		pendingPrompt,
 		lastTurnState,
 	);
-	const startingPhase = conversationStartingPhase(sessionId, lastTurnState);
+	const startingPhase = isModelRouting
+		? "routing"
+		: conversationStartingPhase(sessionId, lastTurnState);
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom, stopScroll } = useStickToBottom({
 		initial: "instant",
 		// Token-by-token height changes should not start overlapping smooth-scroll
@@ -256,12 +271,32 @@ export function ActiveThreadViewport({
 		}));
 	}, [scrollRef, sessionId]);
 
+	if (modelRouteDecision && onResolveModelRoute) {
+		return (
+			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+				<ModelRouteDecisionCard
+					decision={modelRouteDecision}
+					modelLabel={modelLabel}
+					onSelect={onResolveModelRoute}
+				/>
+			</div>
+		);
+	}
+
 	if (startingSession) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 				<div className="flex min-h-full flex-1 flex-col px-5 py-6">
 					<SessionStartingIndicator />
 				</div>
+			</div>
+		);
+	}
+
+	if (isModelRouting) {
+		return (
+			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+				<ConversationExecutionState phase="routing" />
 			</div>
 		);
 	}
@@ -453,7 +488,7 @@ export function ActiveThreadViewport({
 															? ` · ${(completionReview.score * 100).toFixed(0)}%`
 															: ""}
 													</Badge>
-													{completionReview.needsReview && sourceTurn?.turnId && onReviewCompletion ? (
+					{completionReview.needsReview && sourceTurn?.turnId && onReviewCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
 														<Button
 															type="button"
 															variant="ghost"
@@ -469,7 +504,7 @@ export function ActiveThreadViewport({
 															{t("settings.decisionProvider.completionReviewAction")}
 														</Button>
 													) : null}
-													{completionReview.needsReview && sourceTurn?.turnId && onRegenerateCompletion ? (
+					{completionReview.needsReview && sourceTurn?.turnId && onRegenerateCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
 														<Button
 															type="button"
 															variant="ghost"
@@ -484,7 +519,18 @@ export function ActiveThreadViewport({
 														>
 															{t("settings.decisionProvider.completionRegenerateAction")}
 														</Button>
-													) : null}
+					) : null}
+					{completionReview.needsReview && sourceTurn?.turnId && onKeepCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="xs"
+							className="h-6 px-2 text-[11px]"
+							onClick={() => onKeepCompletion(sourceTurn.turnId!)}
+						>
+							{t("settings.decisionProvider.completionKeepAction")}
+						</Button>
+					) : null}
 												</div>
 											) : null}
 											{message.turnSettled && message.turnId && sessionId && workspaceId && onReviewChanges ? (

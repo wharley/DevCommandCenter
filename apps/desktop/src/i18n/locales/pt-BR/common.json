@@ -2261,6 +2261,12 @@
         "observe": "Observar",
         "enforce": "Aplicar"
       },
+      "modelRoutingLabel": "Roteamento de modelo",
+      "modelRoutingHint": "Desligado: o Jev recomenda e você decide. Ligado: o DCC aplica a recomendação antes de iniciar o agente.",
+      "modelRoutingModes": {
+        "manual": "Manual",
+        "automatic": "Automático"
+      },
       "apiKeyLabel": "API key do TypeSafe",
       "apiKeyConfigured": "Chave já configurada; deixe vazio para manter",
       "apiKeyPlaceholder": "Cole a chave somente se quiser alterá-la",
@@ -2300,6 +2306,8 @@
       "completionReviewPrompt": "Revise a resposta anterior desta tarefa. Verifique se ela atende completamente ao pedido original, corrija as lacunas e entregue uma resposta final completa. Aplique as correções diretamente, sem apenas descrever o que faltou.",
       "completionRegenerateAction": "Regenerar",
       "completionRegenerateFailed": "Não foi possível regenerar a resposta.",
+      "completionKeepAction": "Manter resposta",
+      "completionKept": "Resposta mantida sem nova execução.",
       "historyMeta": "{{candidates}} candidato(s) · {{selected}} selecionado(s) · limiar {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidato(s) · requisição falhou após {{duration}} ms",
       "selectedLabels": "Selecionados: {{labels}}",
@@ -3110,6 +3118,11 @@
         "step": "Iniciar agente",
         "title": "Aguardando o agente…",
         "description": "Sua solicitação foi recebida. A atividade do agente aparecerá aqui."
+      },
+      "routing": {
+        "step": "Analisar modelo",
+        "title": "Escolhendo o modelo…",
+        "description": "O Jev está avaliando o modelo mais adequado antes de iniciar o agente."
       }
     },
     "sessionStartup": {
@@ -3117,6 +3130,14 @@
         "creating": "Criar sessão",
         "starting": "Iniciar agente",
         "description": "Estamos preparando a sessão e conectando o provedor selecionado."
+    },
+    "modelRouting": {
+      "title": "Recomendação de modelo",
+      "description": "Você selecionou {{current}}, e o Jev recomenda {{recommended}} para esta tarefa.",
+      "score": "Adequação: {{score}}% · confiança: {{confidence}}%",
+      "useRecommended": "Usar {{model}} neste turno",
+      "keepCurrent": "Continuar com {{model}}",
+      "currentUnknown": "o modelo selecionado"
     },
     "trail": {
       "label": "Navegação da conversa",

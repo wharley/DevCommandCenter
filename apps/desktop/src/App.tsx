@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { Toaster } from "sonner";
 import type {
 	CoreEvent,
+	DecisionProviderModelRouteSelection,
 	Delegation,
 	DelegationContextPolicy,
 	MissionSpecEntry,
@@ -3233,6 +3234,9 @@ export default function App() {
 			forceNewSession?: boolean;
 			targetSessionId?: string | null;
 			retryOfTurnId?: string | null;
+			modelOverride?: string | null;
+			skipDecisionProviderModelRoute?: boolean;
+			decisionProviderModelRoute?: DecisionProviderModelRouteSelection | null;
 		},
 	) => {
 		const trimmedPrompt = turn.rawPrompt.trim();
@@ -3304,7 +3308,7 @@ export default function App() {
 					additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
 					projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
 					providerId: selectedProvider.id,
-					model: selectedModel?.id ?? null,
+					model: options?.modelOverride ?? selectedModel?.id ?? null,
 					providerRuntime: selectedProviderRuntime,
 					title: automaticTaskTitle ?? selectedWorkspace.name,
 				});
@@ -3358,9 +3362,10 @@ export default function App() {
 
 			const turnProvider = targetSessionProvider ?? selectedProvider;
 			const turnModel =
-				targetSessionSummary != null
+				options?.modelOverride ??
+				(targetSessionSummary != null
 					? targetSessionSummary.session.model
-					: (selectedModel?.id ?? null);
+					: (selectedModel?.id ?? null));
 			const turnProviderRuntime =
 				targetSessionSummary?.session.providerRuntime ?? selectedProviderRuntime;
 
@@ -3512,6 +3517,7 @@ export default function App() {
 				approvalPolicy: turn.envelope.approvalPolicy,
 				evidence: turn.envelope.evidence ?? null,
 				retryOfTurnId: options?.retryOfTurnId ?? null,
+				decisionProviderModelRoute: options?.decisionProviderModelRoute ?? null,
 			});
 			promptAccepted = true;
 			pendingForkReanchorsRef.current.consume(currentSessionId);

@@ -30,6 +30,34 @@ pub enum DecisionMode {
     Enforce,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ModelRoutingMode {
+    #[default]
+    Manual,
+    Automatic,
+}
+
+impl ModelRoutingMode {
+    pub fn from_env() -> Self {
+        match env::var("DCC_MODEL_ROUTING_MODE")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "automatic" => Self::Automatic,
+            _ => Self::Manual,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Automatic => "automatic",
+        }
+    }
+}
+
 impl DecisionMode {
     pub fn from_env() -> Self {
         match env::var("DCC_DECISION_MODE")
@@ -52,6 +80,7 @@ pub struct DecisionProviderConfig {
     pub timeout: Duration,
     pub memory_relevance_threshold: f64,
     pub mode: DecisionMode,
+    pub model_routing: ModelRoutingMode,
 }
 
 impl DecisionProviderConfig {
@@ -93,6 +122,7 @@ impl DecisionProviderConfig {
             timeout,
             memory_relevance_threshold: threshold,
             mode: DecisionMode::from_env(),
+            model_routing: ModelRoutingMode::from_env(),
         })
     }
 }
@@ -640,6 +670,7 @@ mod tests {
             timeout: DEFAULT_TIMEOUT,
             memory_relevance_threshold: 0.65,
             mode: DecisionMode::Enforce,
+            model_routing: ModelRoutingMode::Manual,
         })
         .expect("provider");
         let hits = vec![hit("one", "first"), hit("two", "second")];
@@ -670,6 +701,7 @@ mod tests {
             timeout: DEFAULT_TIMEOUT,
             memory_relevance_threshold: 0.65,
             mode: DecisionMode::Enforce,
+            model_routing: ModelRoutingMode::Manual,
         })
         .expect("provider");
         let hits = vec![hit("one", "first"), hit("two", "second")];

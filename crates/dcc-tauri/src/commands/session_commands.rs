@@ -166,6 +166,30 @@ pub struct DecisionProviderHistoryOutput {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionProviderModelRouteInput {
+    pub prompt: String,
+    pub provider_id: String,
+    pub current_model: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionProviderModelRouteOutput {
+    pub status: String,
+    pub routing_mode: String,
+    pub decision_model: String,
+    pub current_model: Option<String>,
+    pub recommended_model: Option<String>,
+    pub recommended_index: Option<usize>,
+    pub recommended_score: Option<f64>,
+    pub confidence: Option<f64>,
+    pub candidate_count: usize,
+    pub duration_ms: u64,
+    pub error: Option<String>,
+}
+
 pub type AiMemoryOutboxListOutput = Vec<AiMemoryOutboxStatusOutput>;
 
 pub type AiMemoryExportHistoryListOutput = Vec<AiMemoryExportHistoryOutput>;
@@ -515,6 +539,23 @@ pub fn decision_provider_history(
                 .collect()
         })
         .map_err(|error| error.to_string())
+}
+
+/// Runs the model-routing preflight before a turn exists. This is deliberately
+/// side-effect free; the result is attached to the eventual turn so the
+/// decision is recorded exactly once after the user chooses a model.
+pub async fn decision_provider_model_route(
+    input: DecisionProviderModelRouteInput,
+) -> Result<DecisionProviderModelRouteOutput, String> {
+    let output = evaluate_decision_provider_model_route(&input).await;
+    eprintln!(
+        "[DCC] decision provider model_router preflight routing={} status={} current={} recommended={}",
+        output.routing_mode,
+        output.status,
+        output.current_model.as_deref().unwrap_or("none"),
+        output.recommended_model.as_deref().unwrap_or("none"),
+    );
+    Ok(output)
 }
 
 const SESSION_LIVE_SNAPSHOT_MAX_EVENTS: usize = 4096;
@@ -1331,20 +1372,42 @@ fn render_selected_skill_context(
     (context.len() > 64).then_some(context)
 }
 
-async fn record_decision_provider_model_route(
-    state: &SessionCommandState,
-    session: &dcc_core::domain::session::Session,
-    prompt: &str,
-) {
+async fn evaluate_decision_provider_model_route(
+    input: &DecisionProviderModelRouteInput,
+) -> DecisionProviderModelRouteOutput {
     let Some(provider) = TypeSafeDecisionProvider::from_env() else {
-        return;
+        return DecisionProviderModelRouteOutput {
+            status: "disabled".to_string(),
+            routing_mode: "manual".to_string(),
+            decision_model: String::new(),
+            current_model: input.current_model.clone(),
+            recommended_model: None,
+            recommended_index: None,
+            recommended_score: None,
+            confidence: None,
+            candidate_count: 0,
+            duration_ms: 0,
+            error: None,
+        };
     };
-    let Some(entries) = model_registry::entries_for(&session.provider_id) else {
-        eprintln!(
-            "[DCC] decision provider model_router skipped: dynamic model catalog for provider {}",
-            session.provider_id
-        );
-        return;
+    let routing_mode = provider.config().model_routing.as_str().to_string();
+    let Some(entries) = model_registry::entries_for(&input.provider_id) else {
+        return DecisionProviderModelRouteOutput {
+            status: "skipped".to_string(),
+            routing_mode,
+            decision_model: provider.config().model.clone(),
+            current_model: input.current_model.clone(),
+            recommended_model: None,
+            recommended_index: None,
+            recommended_score: None,
+            confidence: None,
+            candidate_count: 0,
+            duration_ms: 0,
+            error: Some(format!(
+                "dynamic model catalog for provider {}",
+                input.provider_id
+            )),
+        };
     };
     let candidates = entries
         .iter()
@@ -1355,88 +1418,168 @@ async fn record_decision_provider_model_route(
         })
         .collect::<Vec<_>>();
     if candidates.is_empty() {
-        eprintln!("[DCC] decision provider model_router skipped: no model candidates");
-        return;
+        return DecisionProviderModelRouteOutput {
+            status: "skipped".to_string(),
+            routing_mode,
+            decision_model: provider.config().model.clone(),
+            current_model: input.current_model.clone(),
+            recommended_model: None,
+            recommended_index: None,
+            recommended_score: None,
+            confidence: None,
+            candidate_count: 0,
+            duration_ms: 0,
+            error: Some("no model candidates".to_string()),
+        };
     }
 
     let started = Instant::now();
-    let mode = match provider.config().mode {
-        DecisionMode::Observe => "observe",
-        DecisionMode::Enforce => "enforce",
-    };
     let result = match provider
         .route_model(ModelRouteInput {
-            prompt,
-            current_model: session.model.as_deref(),
+            prompt: &input.prompt,
+            current_model: input.current_model.as_deref(),
             candidates: &candidates,
         })
         .await
     {
         Ok(result) => result,
         Err(error) => {
-            let error_message = error.to_string();
-            let bounded_error: String = error_message.chars().take(500).collect();
-            if let Err(record_error) = state.record_decision_provider_history(
-                &session.id,
-                "model_router",
-                "typesafe_jev",
-                mode,
-                "failed",
-                &provider.config().model,
-                candidates.len(),
-                &[],
-                &[],
-                provider.config().memory_relevance_threshold,
-                started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
-                Some(&bounded_error),
-            ) {
-                eprintln!("[DCC] failed to persist decision provider history: {record_error}");
-            }
-            eprintln!("[DCC] decision provider model_router failed: {error}");
-            return;
+            let error_message: String = error.to_string().chars().take(500).collect();
+            return DecisionProviderModelRouteOutput {
+                status: "failed".to_string(),
+                routing_mode,
+                decision_model: provider.config().model.clone(),
+                current_model: input.current_model.clone(),
+                recommended_model: None,
+                recommended_index: None,
+                recommended_score: None,
+                confidence: None,
+                candidate_count: candidates.len(),
+                duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                error: Some(error_message),
+            };
         }
     };
-    let recommended_index = result
+    let recommendation = result
         .decisions
         .iter()
         .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
-        .max_by(|left, right| left.relevance.total_cmp(&right.relevance))
-        .and_then(|decision| candidates.get(decision.index).map(|_| decision.index));
-    let selected_indices = recommended_index.into_iter().collect::<Vec<_>>();
-    let selected_labels = selected_indices
-        .iter()
-        .filter_map(|index| {
-            candidates
-                .get(*index)
-                .map(|candidate| candidate.id.to_string())
+        .max_by(|left, right| left.relevance.total_cmp(&right.relevance));
+    let (recommended_index, recommended_model, recommended_score, confidence) = recommendation
+        .and_then(|decision| {
+            candidates.get(decision.index).map(|candidate| {
+                (
+                    Some(decision.index),
+                    Some(candidate.id.to_string()),
+                    Some(decision.relevance),
+                    decision.confidence,
+                )
+            })
         })
+        .unwrap_or((None, None, None, None));
+
+    DecisionProviderModelRouteOutput {
+        status: "completed".to_string(),
+        routing_mode,
+        decision_model: result.model,
+        current_model: input.current_model.clone(),
+        recommended_model,
+        recommended_index,
+        recommended_score,
+        confidence,
+        candidate_count: candidates.len(),
+        duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        error: None,
+    }
+}
+
+fn decision_mode_name(mode: DecisionMode) -> &'static str {
+    match mode {
+        DecisionMode::Observe => "observe",
+        DecisionMode::Enforce => "enforce",
+    }
+}
+
+fn record_model_route_output(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+    turn_id: Option<&dcc_core::domain::session::TurnId>,
+    output: &DecisionProviderModelRouteOutput,
+) {
+    if output.status == "disabled" {
+        return;
+    }
+    let Some(provider) = TypeSafeDecisionProvider::from_env() else {
+        return;
+    };
+    let selected_indices = output.recommended_index.into_iter().collect::<Vec<_>>();
+    let selected_labels = output
+        .recommended_model
+        .clone()
+        .into_iter()
         .collect::<Vec<_>>();
-    if let Err(error) = state.record_decision_provider_history(
-        &session.id,
-        "model_router",
-        "typesafe_jev",
-        mode,
-        "completed",
-        &result.model,
-        candidates.len(),
-        &selected_indices,
-        &selected_labels,
-        provider.config().memory_relevance_threshold,
-        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
-        None,
-    ) {
+    let result = match turn_id {
+        Some(turn_id) => state.record_decision_provider_history_for_turn(
+            session_id,
+            turn_id,
+            "model_router",
+            "typesafe_jev",
+            decision_mode_name(provider.config().mode),
+            &output.status,
+            &output.decision_model,
+            output.candidate_count,
+            &selected_indices,
+            &selected_labels,
+            provider.config().memory_relevance_threshold,
+            output.duration_ms,
+            output.error.as_deref(),
+        ),
+        None => state.record_decision_provider_history(
+            session_id,
+            "model_router",
+            "typesafe_jev",
+            decision_mode_name(provider.config().mode),
+            &output.status,
+            &output.decision_model,
+            output.candidate_count,
+            &selected_indices,
+            &selected_labels,
+            provider.config().memory_relevance_threshold,
+            output.duration_ms,
+            output.error.as_deref(),
+        ),
+    };
+    if let Err(error) = result {
         eprintln!("[DCC] failed to persist decision provider history: {error}");
     }
-    let recommended = recommended_index
-        .and_then(|index| candidates.get(index).map(|candidate| candidate.id))
-        .unwrap_or("none");
-    eprintln!(
-        "[DCC] decision provider model_router mode={:?} model={} current={} recommended={}",
-        provider.config().mode,
-        result.model,
-        session.model.as_deref().unwrap_or("none"),
-        recommended,
-    );
+}
+
+async fn record_decision_provider_model_route(
+    state: &SessionCommandState,
+    session: &dcc_core::domain::session::Session,
+    prompt: &str,
+) {
+    let output = evaluate_decision_provider_model_route(&DecisionProviderModelRouteInput {
+        prompt: prompt.to_string(),
+        provider_id: session.provider_id.clone(),
+        current_model: session.model.clone(),
+    })
+    .await;
+    record_model_route_output(state, &session.id, None, &output);
+    if output.status == "failed" {
+        eprintln!(
+            "[DCC] decision provider model_router failed: {}",
+            output.error.as_deref().unwrap_or("unknown error")
+        );
+    } else if output.status == "completed" {
+        eprintln!(
+            "[DCC] decision provider model_router mode={} model={} current={} recommended={}",
+            output.routing_mode,
+            output.decision_model,
+            output.current_model.as_deref().unwrap_or("none"),
+            output.recommended_model.as_deref().unwrap_or("none"),
+        );
+    }
 }
 
 async fn pending_tool_guard_context(
@@ -1884,7 +2027,13 @@ pub async fn send_turn(
         }
     }
 
-    record_decision_provider_model_route(&state, &session, &input.prompt).await;
+    let preflight_model_route = input.decision_provider_model_route.clone();
+    if preflight_model_route.is_none() {
+        // Keep the backend/API path compatible with callers that do not have
+        // the desktop preflight yet. The desktop path supplies the result and
+        // therefore avoids spending a second Jev request here.
+        record_decision_provider_model_route(&state, &session, &input.prompt).await;
+    }
     let mut tool_instructions = state
         .objective_tool_instructions(&input.session_id, input.tool_instructions.clone())
         .map_err(|error| error.to_string())?;
@@ -1916,6 +2065,28 @@ pub async fn send_turn(
     let output = run_send_turn(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
+
+    if let Some(model_route) = preflight_model_route {
+        let route_output = DecisionProviderModelRouteOutput {
+            status: model_route.status,
+            routing_mode: String::new(),
+            decision_model: model_route.decision_model,
+            current_model: model_route.current_model,
+            recommended_model: model_route.recommended_model,
+            recommended_index: model_route.recommended_index,
+            recommended_score: model_route.recommended_score,
+            confidence: model_route.confidence,
+            candidate_count: model_route.candidate_count,
+            duration_ms: model_route.duration_ms,
+            error: model_route.error,
+        };
+        record_model_route_output(
+            &state,
+            &output.session.id,
+            Some(&output.turn.id),
+            &route_output,
+        );
+    }
 
     // Turn is now recorded in the event store. Any failure from here must emit
     // TurnAborted so the UI does not get stuck on session.turn.started.

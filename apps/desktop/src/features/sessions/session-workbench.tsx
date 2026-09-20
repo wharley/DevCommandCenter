@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type {
 	CoreEvent,
+	DecisionProviderModelRouteSelection,
 	ProviderCatalog,
 	ProviderRuntimeConfig,
 	SessionEventRecord,
@@ -188,6 +189,9 @@ type SessionWorkbenchProps = {
 			forceNewSession?: boolean;
 			targetSessionId?: string | null;
 			retryOfTurnId?: string | null;
+			modelOverride?: string | null;
+			skipDecisionProviderModelRoute?: boolean;
+			decisionProviderModelRoute?: DecisionProviderModelRouteSelection | null;
 		},
 	) => Promise<boolean>;
 	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;

@@ -2261,6 +2261,12 @@
         "observe": "Observe",
         "enforce": "Enforce"
       },
+      "modelRoutingLabel": "Model routing",
+      "modelRoutingHint": "Off: Jev recommends and you decide. On: DCC applies the recommendation before the agent starts.",
+      "modelRoutingModes": {
+        "manual": "Manual",
+        "automatic": "Automatic"
+      },
       "apiKeyLabel": "TypeSafe API key",
       "apiKeyConfigured": "Key already configured; leave empty to keep it",
       "apiKeyPlaceholder": "Paste the key only if you want to change it",
@@ -2300,6 +2306,8 @@
       "completionReviewPrompt": "Review the previous response in this task. Check that it fully answers the original request, fix any gaps, and deliver a complete final response. Apply the corrections directly instead of only describing what was missing.",
       "completionRegenerateAction": "Regenerate",
       "completionRegenerateFailed": "The response could not be regenerated.",
+      "completionKeepAction": "Keep response",
+      "completionKept": "Response kept without another run.",
       "historyMeta": "{{candidates}} candidate(s) · {{selected}} selected · threshold {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidate(s) · request failed after {{duration}} ms",
       "selectedLabels": "Selected: {{labels}}",
@@ -3110,6 +3118,11 @@
         "step": "Start agent",
         "title": "Waiting for the agent…",
         "description": "Your request was received. Agent activity will appear here."
+      },
+      "routing": {
+        "step": "Analyze model",
+        "title": "Choosing a model…",
+        "description": "Jev is evaluating the best-fit model before the agent starts."
       }
     },
     "sessionStartup": {
@@ -3117,6 +3130,14 @@
         "creating": "Create session",
         "starting": "Start agent",
         "description": "Preparing the session and connecting the selected provider."
+    },
+    "modelRouting": {
+      "title": "Model recommendation",
+      "description": "You selected {{current}}, and Jev recommends {{recommended}} for this task.",
+      "score": "Fit: {{score}}% · confidence: {{confidence}}%",
+      "useRecommended": "Use {{model}} for this turn",
+      "keepCurrent": "Continue with {{model}}",
+      "currentUnknown": "the selected model"
     },
     "trail": {
       "label": "Conversation navigation",

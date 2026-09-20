@@ -7212,6 +7212,7 @@ pub fn run() {
             session_commands::ai_memory_settings_save,
             session_commands::decision_provider_settings_load,
             session_commands::decision_provider_settings_save,
+            session_commands::decision_provider_model_route,
             session_commands::send_turn,
             session_commands::steer_turn,
             session_commands::steer_native_subagent,

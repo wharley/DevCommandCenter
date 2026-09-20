@@ -401,6 +401,7 @@ mod tests {
                 approval_policy: None,
                 evidence: None,
                 retry_of_turn_id: None,
+                decision_provider_model_route: None,
             },
         };
         let _ = futures::executor::block_on(queue_turn(&repo, &bus, input))

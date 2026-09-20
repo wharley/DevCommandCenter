@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Bot, Check, MessageSquarePlus, Send, Sparkles } from "lucide-react";
+import { Bot, Check, MessageSquarePlus, Route, Send, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ConversationStartingPhase } from "./conversation-starting.logic";
 
@@ -27,6 +27,7 @@ export function ConversationStartingIndicator({
 	const { t } = useTranslation("common");
 	const steps = [
 		{ id: "creating", icon: MessageSquarePlus },
+		{ id: "routing", icon: Route },
 		{ id: "sending", icon: Send },
 		{ id: "waiting", icon: Bot },
 	] as const;

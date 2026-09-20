@@ -238,16 +238,17 @@ use dcc_tauri::commands::{
     session_commands::{
         AiMemoryExportHistoryOutput, AiMemoryOutboxStatusOutput, AiMemoryQueryHit,
         AiMemoryQueryInput, AiMemorySyncInput, AiMemorySyncOutput, ApplyTaskTitleInput,
-        ApplyTaskTitleOutput, DecisionProviderHistoryOutput, ExecuteGuardedUndoInput,
-        ExecuteGuardedUndoOutput, GuardedUndoOperationSummary, GuardedUndoPreviewFile,
-        InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
-        ListMcpRuntimeStatusesOutput, McpTurnPreflightState, NativeSubagentControlOutput,
-        PrepareGuardedUndoInput, PrepareGuardedUndoOutput, PrepareTurnOutput,
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
-        SearchSessionsInput, SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput,
-        SteerNativeSubagentInput, TurnReviewFileDiffInput, TurnReviewFileDiffOutput,
-        TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
+        ApplyTaskTitleOutput, DecisionProviderHistoryOutput, DecisionProviderModelRouteInput,
+        DecisionProviderModelRouteOutput, ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput,
+        GuardedUndoOperationSummary, GuardedUndoPreviewFile, InterruptNativeSubagentInput,
+        LastTurnReviewInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
+        McpTurnPreflightState, NativeSubagentControlOutput, PrepareGuardedUndoInput,
+        PrepareGuardedUndoOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
+        SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
+        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
+        WaitMcpOauthOutput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -340,6 +341,7 @@ struct AiMemorySettingsOutput {
 struct DecisionProviderSettingsInput {
     provider: String,
     mode: String,
+    model_routing: String,
     base_url: Option<String>,
     model: Option<String>,
     memory_threshold: Option<f64>,
@@ -353,6 +355,7 @@ struct DecisionProviderSettingsInput {
 struct DecisionProviderSettingsOutput {
     provider: String,
     mode: String,
+    model_routing: String,
     base_url: String,
     model: String,
     memory_threshold: f64,
@@ -506,6 +509,7 @@ struct SessionMethods {
     ai_memory_settings_save: String,
     decision_provider_settings_load: String,
     decision_provider_settings_save: String,
+    decision_provider_model_route: String,
     apply_task_title: String,
     prepare_turn: String,
     send_turn: String,
@@ -936,6 +940,8 @@ fn main() {
         .typ::<AiMemoryOutboxStatusOutput>()
         .typ::<AiMemoryExportHistoryOutput>()
         .typ::<DecisionProviderHistoryOutput>()
+        .typ::<DecisionProviderModelRouteInput>()
+        .typ::<DecisionProviderModelRouteOutput>()
         .typ::<AiMemorySidecarStatus>()
         .typ::<AiMemorySettingsInput>()
         .typ::<AiMemorySettingsOutput>()
@@ -1137,6 +1143,7 @@ fn main() {
             ai_memory_settings_save: "ai_memory_settings_save".to_string(),
             decision_provider_settings_load: "decision_provider_settings_load".to_string(),
             decision_provider_settings_save: "decision_provider_settings_save".to_string(),
+            decision_provider_model_route: "decision_provider_model_route".to_string(),
             apply_task_title: "apply_task_title".to_string(),
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),

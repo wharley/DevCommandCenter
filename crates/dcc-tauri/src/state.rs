@@ -6226,6 +6226,7 @@ impl SessionCommandState {
             approval_policy: queued.approval_policy,
             evidence: queued.evidence.clone(),
             retry_of_turn_id: None,
+            decision_provider_model_route: None,
         };
         // Recheck before `run_send_turn`: persisted queues from before this
         // guard must never create TurnStarted or remove themselves on failure.
@@ -7090,6 +7091,7 @@ mod tests {
             approval_policy,
             evidence: None,
             retry_of_turn_id: None,
+            decision_provider_model_route: None,
         }
     }
 

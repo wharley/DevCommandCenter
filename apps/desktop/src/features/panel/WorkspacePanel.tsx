@@ -65,6 +65,9 @@ import type {
 	ProviderCatalog,
 	CoreEvent,
 	DecisionProviderHistoryOutput,
+	DecisionProviderModelRouteInput,
+	DecisionProviderModelRouteOutput,
+	DecisionProviderModelRouteSelection,
 	ProviderRuntimeConfig,
 } from "@dcc/contracts";
 import { derivePlanFollowUpState } from "./plan-follow-up";
@@ -109,6 +112,7 @@ import {
 	approvePlan,
 	loadDecisionProviderHistory,
 	recordPlanHandoff,
+	routeDecisionProviderModel,
 } from "@/lib/session-api";
 import {
 	loadApprovalPolicy,
@@ -146,6 +150,15 @@ import {
 type InspectorPendingAnnotation = {
 	pending: PendingAnnotation;
 	targetSessionId: string | null;
+};
+
+type ModelRouteSubmitOptions = {
+	forceNewSession?: boolean;
+	targetSessionId?: string | null;
+	retryOfTurnId?: string | null;
+	modelOverride?: string | null;
+	skipDecisionProviderModelRoute?: boolean;
+	decisionProviderModelRoute?: DecisionProviderModelRouteSelection | null;
 };
 
 /** Formats a diff selection as a markdown context block for the agent prompt. */
@@ -224,12 +237,7 @@ type WorkspacePanelProps = {
 	onForkFromMessage?: (messageId: string) => void;
 	onSubmitPrompt: (
 		turn: ComposerSubmittedTurn,
-		options?: {
-			forceNewSession?: boolean;
-			targetSessionId?: string | null;
-			/** Explicit retry linkage to an aborted turn of the same session. */
-			retryOfTurnId?: string | null;
-		},
+		options?: ModelRouteSubmitOptions,
 	) => Promise<boolean>;
 	onSteerPrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onQueuePrompt: (turn: ComposerSubmittedTurn) => Promise<void>;
@@ -425,6 +433,15 @@ export function WorkspacePanel({
 	const composerPrefillRequestSequenceRef = useRef(0);
 	const [inspectorPendingAnnotation, setInspectorPendingAnnotation] =
 		useState<InspectorPendingAnnotation | null>(null);
+	const [modelRouting, setModelRouting] = useState(false);
+	const [pendingModelRoute, setPendingModelRoute] = useState<{
+		turn: ComposerSubmittedTurn;
+		options?: ModelRouteSubmitOptions;
+		route: DecisionProviderModelRouteOutput;
+	} | null>(null);
+	const [completionReviewActionsDismissed, setCompletionReviewActionsDismissed] = useState<
+		ReadonlySet<string>
+	>(new Set());
 	const [isApprovingPlan, setIsApprovingPlan] = useState(false);
 	const [secondarySurfaceWidth, setSecondarySurfaceWidth] = useState(() =>
 		readSecondarySurfaceWidth(workspaceId),
@@ -469,6 +486,9 @@ export function WorkspacePanel({
 	// be offered or submitted from the newly selected one.
 	useEffect(() => {
 		setIsApprovingPlan(false);
+		setModelRouting(false);
+		setPendingModelRoute(null);
+		setCompletionReviewActionsDismissed(new Set());
 		planHandoffInFlightRef.current = false;
 		setSecondarySurfaceWidth(readSecondarySurfaceWidth(workspaceId));
 		restoredSecondarySurfaceWorkspaceRef.current = null;
@@ -623,19 +643,133 @@ export function WorkspacePanel({
 		[providerChoices, selectedModelId, selectedProviderId, workspaceId],
 	);
 
+	const submitPromptWithModelRouting = useCallback(
+		async (
+			turn: ComposerSubmittedTurn,
+			options?: ModelRouteSubmitOptions,
+		): Promise<boolean> => {
+			if (options?.skipDecisionProviderModelRoute) {
+				return onSubmitPrompt(turn, options);
+			}
+			const providerId = selectedProviderId ?? sessionSnapshot?.providerId ?? null;
+			if (!providerId) return onSubmitPrompt(turn, options);
+			const currentModel = selectedModelId ?? sessionSnapshot?.model ?? null;
+			setModelRouting(true);
+			let route: DecisionProviderModelRouteOutput;
+			try {
+				route = await routeDecisionProviderModel({
+					prompt: turn.rawPrompt,
+					providerId,
+					currentModel,
+				} satisfies DecisionProviderModelRouteInput);
+			} catch (error) {
+				console.warn("[dcc] model routing preflight failed:", error);
+				route = {
+					status: "failed",
+					routingMode: "manual",
+					decisionModel: "jev-latest",
+					currentModel,
+					recommendedModel: null,
+					recommendedIndex: null,
+					recommendedScore: null,
+					confidence: null,
+					candidateCount: 0,
+					durationMs: 0,
+					error: error instanceof Error ? error.message : String(error),
+				};
+			}
+			setModelRouting(false);
+
+			const selection: DecisionProviderModelRouteSelection = {
+				status: route.status,
+				decisionModel: route.decisionModel,
+				currentModel: route.currentModel,
+				recommendedModel: route.recommendedModel,
+				recommendedIndex: route.recommendedIndex,
+				recommendedScore: route.recommendedScore,
+				confidence: route.confidence,
+				candidateCount: route.candidateCount,
+				durationMs: route.durationMs,
+				error: route.error,
+			};
+			const hasDifferentRecommendation = Boolean(
+				route.status === "completed" &&
+					route.recommendedModel &&
+				route.recommendedModel !== currentModel,
+			);
+			if (hasDifferentRecommendation && route.routingMode === "manual") {
+				setPendingModelRoute({ turn, options, route });
+				return false;
+			}
+			return onSubmitPrompt(turn, {
+				...options,
+				modelOverride: hasDifferentRecommendation
+					? route.recommendedModel
+					: options?.modelOverride ?? currentModel,
+				skipDecisionProviderModelRoute: true,
+				decisionProviderModelRoute: selection,
+			});
+		},
+		[
+			onSubmitPrompt,
+			selectedModelId,
+			selectedProviderId,
+			sessionSnapshot?.model,
+			sessionSnapshot?.providerId,
+		],
+	);
+
+	const resolvePendingModelRoute = useCallback(
+		(modelId: string) => {
+			const pending = pendingModelRoute;
+			if (!pending) return;
+			setPendingModelRoute(null);
+			void onSubmitPrompt(pending.turn, {
+				...pending.options,
+				modelOverride: modelId,
+				skipDecisionProviderModelRoute: true,
+				decisionProviderModelRoute: {
+					status: pending.route.status,
+					decisionModel: pending.route.decisionModel,
+					currentModel: pending.route.currentModel,
+					recommendedModel: pending.route.recommendedModel,
+					recommendedIndex: pending.route.recommendedIndex,
+					recommendedScore: pending.route.recommendedScore,
+					confidence: pending.route.confidence,
+					candidateCount: pending.route.candidateCount,
+					durationMs: pending.route.durationMs,
+					error: pending.route.error,
+				},
+			});
+		},
+		[pendingModelRoute, onSubmitPrompt],
+	);
+
+	const modelLabel = useCallback(
+		(modelId: string | null) => {
+			if (!modelId) return t("conversation.modelRouting.currentUnknown");
+			return (
+				providerChoices
+					.flatMap((provider) => provider.models)
+					.find((model) => model.id === modelId)?.label ?? modelId
+			);
+		},
+		[providerChoices, t],
+	);
+
 	const handleSubmitAnnotation = useCallback(
 		({ request, instruction, newSession }: DiffAnnotationSubmit) => {
 			const turn = buildAnnotationTurn(
 				buildAnnotationContent(request, instruction),
 			);
-			void onSubmitPrompt(turn, {
+			void submitPromptWithModelRouting(turn, {
 				forceNewSession: newSession,
 				targetSessionId: workspaceSurfaceSelection?.kind === "git-diff"
 					? workspaceSurfaceSelection.file.targetSessionId ?? null
 					: null,
 			});
 		},
-		[buildAnnotationTurn, onSubmitPrompt, workspaceSurfaceSelection],
+		[buildAnnotationTurn, submitPromptWithModelRouting, workspaceSurfaceSelection],
 	);
 	const handleEditAnnotationInComposer = useCallback(
 		({
@@ -686,13 +820,13 @@ export function WorkspacePanel({
 					instruction,
 				),
 			);
-			void onSubmitPrompt(turn, {
+			void submitPromptWithModelRouting(turn, {
 				forceNewSession: newSession,
 				targetSessionId: inspectorPendingAnnotation.targetSessionId,
 			});
 			setInspectorPendingAnnotation(null);
 		},
-		[buildAnnotationTurn, inspectorPendingAnnotation, onSubmitPrompt],
+		[buildAnnotationTurn, inspectorPendingAnnotation, submitPromptWithModelRouting],
 	);
 	const handleEditInspectorAnnotation = useCallback(
 		(instruction: string) => {
@@ -1034,14 +1168,14 @@ export function WorkspacePanel({
 				if (sessionState === "aborted") {
 					await onResumeSession();
 				}
-				await onSubmitPrompt(buildAnnotationTurn(prompt), { retryOfTurnId: turnId });
+				await submitPromptWithModelRouting(buildAnnotationTurn(prompt), { retryOfTurnId: turnId });
 			} catch (error) {
 				toast.error(t("conversation.message.retryFailed"), {
 					description: error instanceof Error ? error.message : undefined,
 				});
 			}
 		},
-		[buildAnnotationTurn, onResumeSession, onSubmitPrompt, sessionState, t],
+		[buildAnnotationTurn, onResumeSession, sessionState, submitPromptWithModelRouting, t],
 	);
 	const handleReviewCompletion = useCallback(
 		() => {
@@ -1049,20 +1183,31 @@ export function WorkspacePanel({
 		},
 		[replaceComposerDraft, t],
 	);
+	const handleKeepCompletion = useCallback(
+		(turnId: string) => {
+			setCompletionReviewActionsDismissed((current) => {
+				const next = new Set(current);
+				next.add(turnId);
+				return next;
+			});
+			toast.success(t("settings.decisionProvider.completionKept"));
+		},
+		[t],
+	);
 	const handleRegenerateCompletion = useCallback(
 		async ({ prompt }: { prompt: string; turnId: string }) => {
 			try {
 				if (sessionState === "aborted") {
 					await onResumeSession();
 				}
-				await onSubmitPrompt(buildAnnotationTurn(prompt));
+				await submitPromptWithModelRouting(buildAnnotationTurn(prompt));
 			} catch (error) {
 				toast.error(t("settings.decisionProvider.completionRegenerateFailed"), {
 					description: error instanceof Error ? error.message : undefined,
 				});
 			}
 		},
-		[buildAnnotationTurn, onResumeSession, onSubmitPrompt, sessionState, t],
+		[buildAnnotationTurn, onResumeSession, sessionState, submitPromptWithModelRouting, t],
 	);
 	const pendingPermissionRequests = useMemo(
 		() => collectPendingPermissionRequests(messages),
@@ -1189,7 +1334,7 @@ export function WorkspacePanel({
 	const handleRequestPlanRevision = useCallback(
 		(prompt: string) => {
 			const turn = buildAnnotationTurn(prompt);
-			void onSubmitPrompt({
+			void submitPromptWithModelRouting({
 				...turn,
 				envelope: {
 					...turn.envelope,
@@ -1198,7 +1343,7 @@ export function WorkspacePanel({
 				},
 			});
 		},
-		[buildAnnotationTurn, onSubmitPrompt],
+		[buildAnnotationTurn, submitPromptWithModelRouting],
 	);
 	const recordCurrentPlanHandoff = useCallback(
 		async (action: "delegation" | "new_thread") => {
@@ -1441,9 +1586,20 @@ export function WorkspacePanel({
 					onRetryInterrupted={handleRetryInterrupted}
 					onReviewCompletion={handleReviewCompletion}
 					onRegenerateCompletion={handleRegenerateCompletion}
+					onKeepCompletion={handleKeepCompletion}
 					onOpenPlan={onOpenPlanSurface}
 					onOpenFileReference={onOpenFileReference}
 					completionReviews={completionReviews}
+					completionReviewActionsDismissed={completionReviewActionsDismissed}
+					isModelRouting={modelRouting}
+					modelRouteDecision={pendingModelRoute ? {
+						currentModel: pendingModelRoute.route.currentModel,
+						recommendedModel: pendingModelRoute.route.recommendedModel!,
+						recommendedScore: pendingModelRoute.route.recommendedScore,
+						confidence: pendingModelRoute.route.confidence,
+					} : null}
+					onResolveModelRoute={resolvePendingModelRoute}
+					modelLabel={modelLabel}
 				/>
 
 				{effectiveSessionId ? (
@@ -1459,7 +1615,7 @@ export function WorkspacePanel({
 					<WorkspaceComposer
 						draftKey={workspaceId}
 						draftSessionId={effectiveSessionId}
-						disabled={startingSession}
+						disabled={startingSession || modelRouting || pendingModelRoute !== null}
 						providerChoices={providerChoices}
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}
@@ -1486,7 +1642,7 @@ export function WorkspacePanel({
 						planApproved={isLatestPlanApproved}
 						onSelectProvider={onSelectProvider}
 						onSelectModel={onSelectModel}
-						onSubmitPrompt={onSubmitPrompt}
+						onSubmitPrompt={submitPromptWithModelRouting}
 						onSteerPrompt={onSteerPrompt}
 						onQueuePrompt={onQueuePrompt}
 						onDelegatePrompt={sessionSnapshot ? onDelegatePrompt : undefined}

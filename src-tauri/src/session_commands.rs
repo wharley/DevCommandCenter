@@ -16,16 +16,17 @@ use dcc_tauri::{
         self as session_command_impl, AiMemoryExportHistoryOutput, AiMemoryOutboxStatusOutput,
         AiMemoryQueryHit, AiMemoryQueryInput, AiMemorySourceActionInput,
         AiMemorySourceActionOutput, AiMemorySyncInput, AiMemorySyncOutput, ApplyTaskTitleInput,
-        ApplyTaskTitleOutput, ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput,
-        InheritSessionObjectiveInput, InterruptNativeSubagentInput, LastTurnReviewInput,
-        ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput, NativeSubagentControlOutput,
-        PrepareGuardedUndoInput, PrepareGuardedUndoOutput, PrepareTurnOutput,
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
-        SearchSessionsInput, SessionLiveSnapshot, SessionObjectiveOutput, SetSessionObjectiveInput,
-        StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
-        TransitionSessionObjectiveInput, TurnReviewFileDiffInput, TurnReviewFileDiffOutput,
-        TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
+        ApplyTaskTitleOutput, DecisionProviderModelRouteInput, DecisionProviderModelRouteOutput,
+        ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput, InheritSessionObjectiveInput,
+        InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
+        ListMcpRuntimeStatusesOutput, NativeSubagentControlOutput, PrepareGuardedUndoInput,
+        PrepareGuardedUndoOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
+        SessionLiveSnapshot, SessionObjectiveOutput, SetSessionObjectiveInput, StartMcpOauthInput,
+        StartMcpOauthOutput, SteerNativeSubagentInput, TransitionSessionObjectiveInput,
+        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
+        WaitMcpOauthOutput,
     },
     state::SessionCommandState,
 };
@@ -248,6 +249,13 @@ pub async fn decision_provider_settings_save(
         .app_data_dir()
         .map_err(|error| error.to_string())?;
     DecisionProviderSettings::save_settings(&app_data_dir, input).await
+}
+
+#[tauri::command]
+pub async fn decision_provider_model_route(
+    input: DecisionProviderModelRouteInput,
+) -> Result<DecisionProviderModelRouteOutput, String> {
+    session_command_impl::decision_provider_model_route(input).await
 }
 
 #[tauri::command]

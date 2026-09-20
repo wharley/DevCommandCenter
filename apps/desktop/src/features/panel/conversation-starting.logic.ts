@@ -1,6 +1,6 @@
 import type { WorkspaceMessage } from "./thread-projection";
 
-export type ConversationStartingPhase = "creating" | "sending" | "waiting";
+export type ConversationStartingPhase = "creating" | "routing" | "sending" | "waiting";
 
 export function conversationStartingPhase(
 	sessionId: string | null,

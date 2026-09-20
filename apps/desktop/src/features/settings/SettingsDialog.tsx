@@ -733,6 +733,7 @@ export function SettingsDialog({
 	const [decisionProviderDraft, setDecisionProviderDraft] = useState<DecisionProviderSettingsInput>({
 		provider: "disabled",
 		mode: "observe",
+		modelRouting: "manual",
 		baseUrl: "https://api.typesafe.ai",
 		model: "jev-latest",
 		memoryThreshold: 0.65,
@@ -747,6 +748,7 @@ export function SettingsDialog({
 			...current,
 			provider: settings.provider,
 			mode: settings.mode,
+			modelRouting: settings.modelRouting,
 			baseUrl: settings.baseUrl,
 			model: settings.model,
 			memoryThreshold: settings.memoryThreshold,
@@ -1363,11 +1365,36 @@ export function SettingsDialog({
 														if (mode) setDecisionProviderDraft((current) => ({ ...current, mode }));
 													}}
 													className="justify-start"
-												>
-													<ToggleGroupItem value="observe">{t("settings.decisionProvider.modes.observe")}</ToggleGroupItem>
-													<ToggleGroupItem value="enforce">{t("settings.decisionProvider.modes.enforce")}</ToggleGroupItem>
-												</ToggleGroup>
-											</div>
+														>
+															<ToggleGroupItem value="observe">{t("settings.decisionProvider.modes.observe")}</ToggleGroupItem>
+															<ToggleGroupItem value="enforce">{t("settings.decisionProvider.modes.enforce")}</ToggleGroupItem>
+														</ToggleGroup>
+													</div>
+													<div className="space-y-2">
+														<span className="text-[12px] font-medium text-foreground">
+															{t("settings.decisionProvider.modelRoutingLabel")}
+														</span>
+														<div className="flex h-8 items-center gap-3">
+														<Switch
+															checked={decisionProviderDraft.modelRouting === "automatic"}
+															onCheckedChange={(automatic) =>
+																setDecisionProviderDraft((current) => ({
+																	...current,
+																	modelRouting: automatic ? "automatic" : "manual",
+																}))
+															}
+															aria-label={t("settings.decisionProvider.modelRoutingLabel")}
+														/>
+														<span className="text-[12px] text-muted-foreground">
+															{decisionProviderDraft.modelRouting === "automatic"
+																? t("settings.decisionProvider.modelRoutingModes.automatic")
+																: t("settings.decisionProvider.modelRoutingModes.manual")}
+														</span>
+													</div>
+															<p className="text-[11px] text-muted-foreground">
+																{t("settings.decisionProvider.modelRoutingHint")}
+															</p>
+														</div>
 			<div className="space-y-2">
 				<span className="text-[12px] font-medium text-foreground">{t("settings.decisionProvider.apiKeyLabel")}</span>
 				<Input

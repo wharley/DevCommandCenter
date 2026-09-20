@@ -41,6 +41,8 @@ import type {
 	DecisionProviderSettingsInput,
 	DecisionProviderSettingsOutput,
 	DecisionProviderHistoryOutput,
+	DecisionProviderModelRouteInput,
+	DecisionProviderModelRouteOutput,
 	ApplyTaskTitleInput,
 	ApplyTaskTitleOutput,
 	ApprovePlanInput,
@@ -161,6 +163,12 @@ export function saveDecisionProviderSettings(input: DecisionProviderSettingsInpu
 
 export function loadDecisionProviderHistory(limit = 100) {
 	return invoke<DecisionProviderHistoryOutput[]>(SESSION_METHODS.decisionProviderHistory, { limit });
+}
+
+export function routeDecisionProviderModel(input: DecisionProviderModelRouteInput) {
+	return invoke<DecisionProviderModelRouteOutput>(SESSION_METHODS.decisionProviderModelRoute, {
+		input,
+	});
 }
 
 export function restartDcc() {
