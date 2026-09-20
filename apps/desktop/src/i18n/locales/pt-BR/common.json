@@ -2294,6 +2294,8 @@
         "tool_guard": "Proteção de ferramentas",
         "completion_review": "Revisão da resposta"
       },
+      "completionNeedsReview": "Precisa de revisão",
+      "completionComplete": "Pronta",
       "historyMeta": "{{candidates}} candidato(s) · {{selected}} selecionado(s) · limiar {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidato(s) · requisição falhou após {{duration}} ms",
       "selectedLabels": "Selecionados: {{labels}}",

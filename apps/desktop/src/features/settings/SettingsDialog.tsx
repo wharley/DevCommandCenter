@@ -1449,6 +1449,16 @@ export function SettingsDialog({
 																	<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
 																		{t(`settings.decisionProvider.historyPoints.${entry.decisionPoint}`)}
 																	</Badge>
+																	{entry.status === "completed" && entry.decisionPoint === "completion_review" ? (
+																		<Badge
+																			variant={entry.selectedLabels.some((label) => label.startsWith("needs_review:")) ? "destructive" : "secondary"}
+																			className="h-6 px-2 text-[10px] font-normal"
+																		>
+																			{entry.selectedLabels.some((label) => label.startsWith("needs_review:"))
+																				? t("settings.decisionProvider.completionNeedsReview")
+																				: t("settings.decisionProvider.completionComplete")}
+																		</Badge>
+																	) : null}
 																	<span className="font-mono text-[11px] text-foreground">{entry.model}</span>
 																</div>
 																<span className="text-[11px] text-muted-foreground">{formatAiMemoryTimestamp(entry.createdAt, i18n.resolvedLanguage ?? i18n.language)}</span>

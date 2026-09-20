@@ -2294,6 +2294,8 @@
         "tool_guard": "Tool guard",
         "completion_review": "Completion review"
       },
+      "completionNeedsReview": "Needs review",
+      "completionComplete": "Ready",
       "historyMeta": "{{candidates}} candidate(s) · {{selected}} selected · threshold {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidate(s) · request failed after {{duration}} ms",
       "selectedLabels": "Selected: {{labels}}",
