@@ -1,3 +1,4 @@
+use dcc_core::domain::decision::DecisionEvaluation;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     path::{Component, Path, PathBuf},
@@ -2171,6 +2172,43 @@ impl SessionCommandState {
             )
     }
 
+    pub fn record_decision_provider_evaluation(
+        &self,
+        session_id: &SessionId,
+        turn_id: Option<&TurnId>,
+        decision_point: &str,
+        provider: &str,
+        mode: &str,
+        status: &str,
+        model: &str,
+        candidate_count: usize,
+        selected_indices: &[usize],
+        selected_labels: &[String],
+        threshold: f64,
+        duration_ms: u64,
+        error_message: Option<&str>,
+        evaluation: &DecisionEvaluation,
+    ) -> Result<()> {
+        self.session_repo
+            .record_decision_provider_history_evaluated(
+                session_id,
+                turn_id,
+                decision_point,
+                provider,
+                mode,
+                status,
+                model,
+                candidate_count,
+                selected_indices,
+                selected_labels,
+                threshold,
+                duration_ms,
+                error_message,
+                &Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+                Some(evaluation),
+            )
+    }
+
     pub fn record_decision_provider_completion_action(
         &self,
         session_id: &SessionId,
@@ -2266,6 +2304,10 @@ impl SessionCommandState {
             return;
         };
 
+        let context = dcc_infra::decision_context::conversation_context(&events, Some(turn_id));
+        let snapshots = self.list_turn_change_sets(session_id).unwrap_or_default();
+        let evidence =
+            dcc_infra::decision_context::execution_evidence(&events, turn_id, &snapshots);
         let started = std::time::Instant::now();
         let mode = match provider.config().mode {
             DecisionMode::Observe => "observe",
@@ -2273,6 +2315,9 @@ impl SessionCommandState {
         };
         let result = match provider
             .review_completion(CompletionReviewInput {
+                context: &context.text,
+                evidence: &evidence.text,
+                evidence_truncated: evidence.truncated || context.truncated,
                 prompt: &prompt,
                 response: &response,
             })
@@ -2306,12 +2351,21 @@ impl SessionCommandState {
         let needs_review =
             result.completeness < provider.config().completion_completeness_threshold;
         let selected_indices = needs_review.then_some(vec![0]).unwrap_or_default();
-        let selected_labels = needs_review
-            .then_some(vec![format!("needs_review:{:.2}", result.completeness)])
-            .unwrap_or_default();
-        if let Err(error) = self.record_decision_provider_history_for_turn(
+        let mut selected_labels = vec![format!("score:{:.4}", result.completeness)];
+        if needs_review {
+            selected_labels.push(format!("needs_review:{:.4}", result.completeness));
+        }
+        selected_labels.extend(
+            result
+                .evaluation
+                .scores
+                .iter()
+                .filter(|s| s.probability < provider.config().completion_completeness_threshold)
+                .map(|s| format!("criterion:{}", s.key)),
+        );
+        if let Err(error) = self.record_decision_provider_evaluation(
             session_id,
-            turn_id,
+            Some(turn_id),
             "completion_review",
             "typesafe_jev",
             mode,
@@ -2323,6 +2377,7 @@ impl SessionCommandState {
             provider.config().completion_completeness_threshold,
             started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
             None,
+            &result.evaluation,
         ) {
             eprintln!("[DCC] failed to persist decision provider history: {error}");
         }

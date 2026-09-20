@@ -1,3 +1,4 @@
+use dcc_core::domain::decision::DecisionEvaluation;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::{fmt, path::Path};
@@ -1279,6 +1280,7 @@ pub struct AiMemorySourceAction {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecisionProviderHistoryEntry {
+    pub evaluation: Option<DecisionEvaluation>,
     pub id: i64,
     pub session_id: SessionId,
     pub turn_id: Option<TurnId>,
@@ -1649,6 +1651,43 @@ impl SqliteSessionRepo {
         error_message: Option<&str>,
         created_at: &str,
     ) -> Result<()> {
+        self.record_decision_provider_history_evaluated(
+            session_id,
+            turn_id,
+            decision_point,
+            provider,
+            mode,
+            status,
+            model,
+            candidate_count,
+            selected_indices,
+            selected_labels,
+            threshold,
+            duration_ms,
+            error_message,
+            created_at,
+            None,
+        )
+    }
+
+    pub fn record_decision_provider_history_evaluated(
+        &self,
+        session_id: &SessionId,
+        turn_id: Option<&TurnId>,
+        decision_point: &str,
+        provider: &str,
+        mode: &str,
+        status: &str,
+        model: &str,
+        candidate_count: usize,
+        selected_indices: &[usize],
+        selected_labels: &[String],
+        threshold: f64,
+        duration_ms: u64,
+        error_message: Option<&str>,
+        created_at: &str,
+        evaluation: Option<&DecisionEvaluation>,
+    ) -> Result<()> {
         let conn = self
             .conn
             .lock()
@@ -1660,8 +1699,8 @@ impl SqliteSessionRepo {
             INSERT INTO dcc_decision_provider_history
                 (session_id, turn_id, decision_point, provider, mode, status, model,
                  candidate_count, selected_count, selected_indices_json, selected_labels_json, threshold,
-                 duration_ms, error, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                 duration_ms, error, created_at, evaluation_json)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             "#,
             params![
                 session_id.0.clone(),
@@ -1680,6 +1719,7 @@ impl SqliteSessionRepo {
                 i64::try_from(duration_ms).unwrap_or(i64::MAX),
                 error_message,
                 created_at,
+                evaluation.map(serde_json::to_string).transpose().map_err(|e| dcc_core::CoreError::Repository(e.to_string()))?,
             ],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -1699,7 +1739,7 @@ impl SqliteSessionRepo {
                 r#"
                 SELECT id, session_id, turn_id, decision_point, provider, mode, status, model,
                        candidate_count, selected_count, selected_indices_json,
-                       selected_labels_json, threshold, duration_ms, error, created_at
+                       selected_labels_json, threshold, duration_ms, error, created_at, evaluation_json
                   FROM dcc_decision_provider_history
                  ORDER BY created_at DESC, id DESC
                  LIMIT ?1
@@ -1730,6 +1770,17 @@ impl SqliteSessionRepo {
                     })?;
                 let duration_ms = row.get::<_, i64>(13)?;
                 Ok(DecisionProviderHistoryEntry {
+                    evaluation: row
+                        .get::<_, Option<String>>(16)?
+                        .map(|s| serde_json::from_str(&s))
+                        .transpose()
+                        .map_err(|e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                16,
+                                rusqlite::types::Type::Text,
+                                Box::new(e),
+                            )
+                        })?,
                     id: row.get(0)?,
                     session_id: SessionId(row.get(1)?),
                     turn_id: row.get::<_, Option<String>>(2)?.map(TurnId),
@@ -1924,6 +1975,12 @@ impl SqliteSessionRepo {
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_decision_provider_history",
+            "evaluation_json",
+            "TEXT NULL",
+        )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_decision_provider_history",
@@ -12035,6 +12092,66 @@ mod tests {
         assert!(repo
             .list_referenced_artifact_keys(&authority, &[RestoreSetId("missing".to_owned())],)
             .is_err());
+    }
+
+    #[test]
+    fn decision_provider_evaluation_roundtrips_alongside_legacy_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("decisions.sqlite");
+        let repo = SqliteSessionRepo::open(&path).unwrap();
+        event_session(&repo, "decision-test");
+        let session = SessionId("decision-test".into());
+        repo.record_decision_provider_history(
+            &session,
+            "completion_review",
+            "typesafe_jev",
+            "observe",
+            "completed",
+            "jev",
+            1,
+            &[],
+            &[],
+            0.65,
+            12,
+            None,
+            "2026-09-19",
+        )
+        .unwrap();
+        let evaluation = DecisionEvaluation {
+            version: "jev-v2".into(),
+            scores: vec![dcc_core::domain::decision::DecisionScore {
+                key: "evidence_support".into(),
+                probability: 0.2,
+            }],
+            context_truncated: true,
+        };
+        repo.record_decision_provider_history_evaluated(
+            &session,
+            Some(&TurnId("turn".into())),
+            "completion_review",
+            "typesafe_jev",
+            "observe",
+            "completed",
+            "jev",
+            4,
+            &[0],
+            &["needs_review:0.20".into()],
+            0.8,
+            20,
+            None,
+            "2026-09-20",
+            Some(&evaluation),
+        )
+        .unwrap();
+        drop(repo);
+        let rows = SqliteSessionRepo::open(&path)
+            .unwrap()
+            .list_decision_provider_history(10)
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].evaluation, Some(evaluation));
+        assert_eq!(rows[0].turn_id, Some(TurnId("turn".into())));
+        assert_eq!(rows[1].evaluation, None);
     }
 
     fn event_session(repo: &SqliteSessionRepo, session_id: &str) {

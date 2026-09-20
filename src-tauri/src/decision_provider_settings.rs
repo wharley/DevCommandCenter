@@ -21,7 +21,12 @@ const DEFAULT_BASE_URL: &str = "https://api.typesafe.ai";
 const DEFAULT_MODEL: &str = "jev-latest";
 const DEFAULT_MEMORY_THRESHOLD: f64 = 0.65;
 const DEFAULT_CONFIDENCE_THRESHOLD: f64 = 0.65;
-const DEFAULT_COMPLETENESS_THRESHOLD: f64 = 0.65;
+const DEFAULT_COMPLETENESS_THRESHOLD: f64 = 0.80;
+const DEFAULT_MODEL_THRESHOLD: f64 = 0.80;
+
+fn default_model_threshold() -> f64 {
+    DEFAULT_MODEL_THRESHOLD
+}
 
 fn default_true() -> bool {
     true
@@ -72,12 +77,15 @@ pub struct DecisionProviderSettingsInput {
     pub model_router_enabled: bool,
     #[serde(default = "default_true")]
     pub completion_review_enabled: bool,
+    #[serde(default = "default_true")]
+    pub tool_guard_enabled: bool,
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub memory_threshold: Option<f64>,
     pub skill_confidence_threshold: Option<f64>,
     pub model_confidence_threshold: Option<f64>,
     pub completion_threshold: Option<f64>,
+    pub tool_risk_threshold: Option<f64>,
     pub api_key: Option<String>,
     #[serde(default)]
     pub clear_api_key: bool,
@@ -93,12 +101,15 @@ pub struct DecisionProviderSettingsOutput {
     pub skill_router_enabled: bool,
     pub model_router_enabled: bool,
     pub completion_review_enabled: bool,
+    #[serde(default = "default_true")]
+    pub tool_guard_enabled: bool,
     pub base_url: String,
     pub model: String,
     pub memory_threshold: f64,
     pub skill_confidence_threshold: f64,
     pub model_confidence_threshold: f64,
     pub completion_threshold: f64,
+    pub tool_risk_threshold: f64,
     pub api_key_configured: bool,
     pub restart_required: bool,
 }
@@ -118,15 +129,19 @@ struct PersistedDecisionProviderSettings {
     model_router_enabled: bool,
     #[serde(default = "default_true")]
     completion_review_enabled: bool,
+    #[serde(default = "default_true")]
+    tool_guard_enabled: bool,
     base_url: String,
     model: String,
     memory_threshold: f64,
     #[serde(default = "default_confidence_threshold")]
     skill_confidence_threshold: f64,
-    #[serde(default = "default_confidence_threshold")]
+    #[serde(default = "default_model_threshold")]
     model_confidence_threshold: f64,
     #[serde(default = "default_completeness_threshold")]
     completion_threshold: f64,
+    #[serde(default = "default_confidence_threshold")]
+    tool_risk_threshold: f64,
 }
 
 pub struct DecisionProviderSettings;
@@ -189,6 +204,10 @@ impl DecisionProviderSettings {
             skill_router_enabled: input.skill_router_enabled,
             model_router_enabled: input.model_router_enabled,
             completion_review_enabled: input.completion_review_enabled,
+            tool_guard_enabled: input.tool_guard_enabled,
+            tool_risk_threshold: input
+                .tool_risk_threshold
+                .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
             base_url: input
                 .base_url
                 .as_deref()
@@ -207,7 +226,7 @@ impl DecisionProviderSettings {
                 .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
             model_confidence_threshold: input
                 .model_confidence_threshold
-                .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
+                .unwrap_or(DEFAULT_MODEL_THRESHOLD),
             completion_threshold: input
                 .completion_threshold
                 .unwrap_or(DEFAULT_COMPLETENESS_THRESHOLD),
@@ -304,6 +323,11 @@ fn default_settings_from_environment() -> PersistedDecisionProviderSettings {
         skill_router_enabled: env_bool("DCC_DECISION_SKILL_ROUTER_ENABLED", true),
         model_router_enabled: env_bool("DCC_DECISION_MODEL_ROUTER_ENABLED", true),
         completion_review_enabled: env_bool("DCC_DECISION_COMPLETION_REVIEW_ENABLED", true),
+        tool_guard_enabled: env_bool("DCC_DECISION_TOOL_GUARD_ENABLED", true),
+        tool_risk_threshold: env::var("DCC_DECISION_TOOL_RISK_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
         base_url: std::env::var("TYPESAFE_BASE_URL")
             .unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
             .trim_end_matches('/')
@@ -323,7 +347,7 @@ fn default_settings_from_environment() -> PersistedDecisionProviderSettings {
         model_confidence_threshold: std::env::var("DCC_DECISION_MODEL_CONFIDENCE_THRESHOLD")
             .ok()
             .and_then(|value| value.parse().ok())
-            .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
+            .unwrap_or(DEFAULT_MODEL_THRESHOLD),
         completion_threshold: std::env::var("DCC_DECISION_COMPLETION_THRESHOLD")
             .ok()
             .and_then(|value| value.parse().ok())
@@ -344,12 +368,14 @@ fn output_for(
         skill_router_enabled: settings.skill_router_enabled,
         model_router_enabled: settings.model_router_enabled,
         completion_review_enabled: settings.completion_review_enabled,
+        tool_guard_enabled: settings.tool_guard_enabled,
         base_url: settings.base_url.clone(),
         model: settings.model.clone(),
         memory_threshold: settings.memory_threshold,
         skill_confidence_threshold: settings.skill_confidence_threshold,
         model_confidence_threshold: settings.model_confidence_threshold,
         completion_threshold: settings.completion_threshold,
+        tool_risk_threshold: settings.tool_risk_threshold,
         api_key_configured,
         restart_required,
     }
@@ -399,6 +425,7 @@ fn validate_input(input: &DecisionProviderSettingsInput) -> Result<(), String> {
     validate_threshold(input.skill_confidence_threshold, "skill confidence")?;
     validate_threshold(input.model_confidence_threshold, "model confidence")?;
     validate_threshold(input.completion_threshold, "completion")?;
+    validate_threshold(input.tool_risk_threshold, "tool risk")?;
     if let Some(api_key) = input.api_key.as_deref() {
         if api_key.chars().count() > 500 || api_key.contains('\0') {
             return Err("TypeSafe API key is invalid".to_string());
@@ -425,18 +452,28 @@ fn validate_persisted(settings: &PersistedDecisionProviderSettings) -> Result<()
         skill_router_enabled: settings.skill_router_enabled,
         model_router_enabled: settings.model_router_enabled,
         completion_review_enabled: settings.completion_review_enabled,
+        tool_guard_enabled: settings.tool_guard_enabled,
         base_url: Some(settings.base_url.clone()),
         model: Some(settings.model.clone()),
         memory_threshold: Some(settings.memory_threshold),
         skill_confidence_threshold: Some(settings.skill_confidence_threshold),
         model_confidence_threshold: Some(settings.model_confidence_threshold),
         completion_threshold: Some(settings.completion_threshold),
+        tool_risk_threshold: Some(settings.tool_risk_threshold),
         api_key: None,
         clear_api_key: false,
     })
 }
 
 fn apply_settings_to_environment(settings: &PersistedDecisionProviderSettings) {
+    env::set_var(
+        "DCC_DECISION_TOOL_GUARD_ENABLED",
+        settings.tool_guard_enabled.to_string(),
+    );
+    env::set_var(
+        "DCC_DECISION_TOOL_RISK_THRESHOLD",
+        settings.tool_risk_threshold.to_string(),
+    );
     std::env::set_var("DCC_DECISION_MODE", &settings.mode);
     std::env::set_var(
         "DCC_MODEL_ROUTING_MODE",
@@ -497,6 +534,8 @@ mod tests {
             skill_router_enabled: true,
             model_router_enabled: true,
             completion_review_enabled: true,
+            tool_guard_enabled: true,
+            tool_risk_threshold: Some(0.65),
             base_url: Some(DEFAULT_BASE_URL.to_string()),
             model: Some(DEFAULT_MODEL.to_string()),
             memory_threshold: Some(DEFAULT_MEMORY_THRESHOLD),
@@ -519,6 +558,8 @@ mod tests {
             skill_router_enabled: true,
             model_router_enabled: true,
             completion_review_enabled: true,
+            tool_guard_enabled: true,
+            tool_risk_threshold: Some(0.65),
             base_url: None,
             model: None,
             memory_threshold: Some(2.0),
@@ -529,5 +570,30 @@ mod tests {
             clear_api_key: false,
         };
         assert!(validate_input(&input).is_err());
+    }
+    #[test]
+    fn legacy_settings_preserve_thresholds_and_default_independent_tool_policy() {
+        let persisted: PersistedDecisionProviderSettings = serde_json::from_value(serde_json::json!({
+            "provider":"typesafe", "mode":"observe", "baseUrl":DEFAULT_BASE_URL, "model":DEFAULT_MODEL,
+            "memoryThreshold":0.3, "modelConfidenceThreshold":0.65, "completionThreshold":0.65
+        })).unwrap();
+        assert_eq!(persisted.model_confidence_threshold, 0.65);
+        assert_eq!(persisted.completion_threshold, 0.65);
+        assert_eq!(persisted.tool_risk_threshold, 0.65);
+        assert!(persisted.tool_guard_enabled);
+        assert!(validate_persisted(&persisted).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_tool_threshold_independently() {
+        let mut persisted: PersistedDecisionProviderSettings = serde_json::from_value(serde_json::json!({
+            "provider":"typesafe", "mode":"observe", "baseUrl":DEFAULT_BASE_URL, "model":DEFAULT_MODEL,
+            "memoryThreshold":0.65, "toolRiskThreshold":1.5
+        })).unwrap();
+        assert!(validate_persisted(&persisted).is_err());
+        persisted.tool_risk_threshold = 0.4;
+        assert!(validate_persisted(&persisted).is_ok());
+        assert_eq!(persisted.model_confidence_threshold, 0.8);
+        assert_eq!(persisted.completion_threshold, 0.8);
     }
 }

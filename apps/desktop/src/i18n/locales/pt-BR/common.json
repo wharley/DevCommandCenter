@@ -1877,7 +1877,7 @@
       },
       "decisionProvider": {
         "label": "Decision Provider",
-        "description": "Classificação opcional do Jev para o contexto da memória."
+        "description": "Avaliação de modelos, memória, skills, ferramentas e respostas com o Jev."
       },
       "aiMemory": {
         "label": "Memória",
@@ -2252,7 +2252,7 @@
         "configuration": "Configuração",
         "history": "Histórico de decisões"
       },
-      "hint": "O Jev pode classificar memória, skills, modelos e respostas em pontos independentes. Comece em Observe; Enforce mantém somente os candidatos acima do limiar configurado.",
+      "hint": "O Jev avalia critérios independentes. Observe registra memória, skills e risco; Enforce aplica essas decisões. O roteamento de modelos usa seu próprio modo manual ou automático.",
       "providerLabel": "Ativar Decision Provider",
       "active": "Ativo",
       "inactive": "Desativado",
@@ -2272,6 +2272,13 @@
         "manual": "Manual",
         "automatic": "Automático"
       },
+      "reviewOriginalRequest": "Pedido original a revisar:\n{{prompt}}",
+      "reviewCriteriaPrompt": "Sinais do Jev (probabilidades, não prova de defeito): {{criteria}}. Confira as evidências e corrija as lacunas confirmadas.",
+      "evaluationDetails": "Ver critérios avaliados",
+      "probabilityHint": "Os valores estimam a probabilidade de cada critério ser verdadeiro; não medem porcentagem de trabalho concluído.",
+      "contextIncomplete": "Parte do contexto foi resumida ou omitida. Confira as evidências antes de concluir.",
+      "reviewSignal": "menor sinal: {{score}}%",
+      "criteria": {"request_coverage": "Pedido atendido", "constraints": "Restrições respeitadas", "evidence_support": "Execução sustentada por evidências", "validation": "Validação adequada", "tool_guard": "Ação requer revisão"},
       "pointsTitle": "Pontos de decisão",
       "pointsHint": "Cada ponto pode ser desativado separadamente. Os limiares controlam o tipo de sinal usado por cada classificação.",
       "points": {
@@ -2283,17 +2290,22 @@
         "skill_router": {
           "label": "Roteador de skills",
           "hint": "Recomenda quais skills carregar para a tarefa.",
-          "threshold": "Confiança mínima"
+          "threshold": "Probabilidade mínima de utilidade"
         },
         "model_router": {
           "label": "Roteador de modelos",
-          "hint": "Recomenda o modelo mais adequado para a tarefa.",
-          "threshold": "Confiança mínima"
+          "hint": "Prioriza qualidade usando o pedido e a conversa. Mantém o modelo atual quando a diferença é pequena.",
+          "threshold": "Probabilidade mínima de adequação"
         },
         "completion_review": {
           "label": "Revisão da resposta",
-          "hint": "Avalia se a resposta parece completa antes de encerrar.",
-          "threshold": "Completude mínima"
+          "hint": "Após o turno, avalia pedido, restrições, evidências e validação. Valores maiores sinalizam mais respostas para revisão.",
+          "threshold": "Probabilidade mínima por critério"
+        },
+        "tool_guard": {
+          "label": "Revisão de ferramentas",
+          "hint": "Avalia ações sensíveis. Valores menores sinalizam mais ações; este controle é independente do filtro de memória.",
+          "threshold": "Probabilidade de risco para revisão"
         }
       },
       "apiKeyLabel": "API key do TypeSafe",
@@ -2309,7 +2321,7 @@
       "saveError": "Não foi possível salvar a configuração do Decision Provider.",
       "configured": "Configurada no Keychain",
       "historyTitle": "Histórico de decisões",
-      "historyHint": "Classificações recentes do Jev ao filtrar a memória do projeto. Snippets e API keys não são armazenados aqui.",
+      "historyHint": "Probabilidades e resultados das decisões. Conteúdo da conversa, saídas de ferramentas e API keys não são armazenados neste histórico.",
       "refreshHistory": "Atualizar histórico",
       "historyLoading": "Carregando histórico de decisões…",
       "historyEmpty": "Nenhuma decisão do Jev registrada ainda.",
@@ -2329,7 +2341,7 @@
         "completion_review": "Revisão da resposta"
       },
       "completionNeedsReview": "Precisa de revisão",
-      "completionComplete": "Pronta",
+      "completionComplete": "Critérios atendidos",
       "completionReviewAction": "Revisar resposta",
       "completionReviewPrompt": "Revise a resposta anterior desta tarefa. Verifique se ela atende completamente ao pedido original, corrija as lacunas e entregue uma resposta final completa. Aplique as correções diretamente, sem apenas descrever o que faltou.",
       "completionRegenerateAction": "Regenerar",
@@ -3168,7 +3180,7 @@
     "modelRouting": {
       "title": "Recomendação de modelo",
       "description": "Você selecionou {{current}}, e o Jev recomenda {{recommended}} para esta tarefa.",
-      "score": "Adequação: {{score}}% · confiança: {{confidence}}%",
+      "score": "Probabilidade de adequação: {{score}}%",
       "useRecommended": "Usar {{model}} neste turno",
       "keepCurrent": "Continuar com {{model}}",
       "currentUnknown": "o modelo selecionado"

@@ -253,9 +253,10 @@ pub async fn decision_provider_settings_save(
 
 #[tauri::command]
 pub async fn decision_provider_model_route(
+    state: State<'_, SessionCommandState>,
     input: DecisionProviderModelRouteInput,
 ) -> Result<DecisionProviderModelRouteOutput, String> {
-    session_command_impl::decision_provider_model_route(input).await
+    session_command_impl::decision_provider_model_route(state.inner(), input).await
 }
 
 #[tauri::command]

@@ -701,6 +701,13 @@ export type DailyUsageSummary = {
 	totalTokens: number,
 };
 
+// Numeric decision evidence only; never stores prompts, tool output or secrets.
+export type DecisionEvaluation = {
+	version: string,
+	scores: DecisionScore[],
+	contextTruncated: boolean,
+};
+
 export type DecisionProviderCompletionActionInput = {
 	sessionId: string,
 	turnId: string,
@@ -709,6 +716,7 @@ export type DecisionProviderCompletionActionInput = {
 };
 
 export type DecisionProviderHistoryOutput = {
+	evaluation: DecisionEvaluation | null,
 	id: number,
 	sessionId: string,
 	turnId: string | null,
@@ -728,12 +736,14 @@ export type DecisionProviderHistoryOutput = {
 };
 
 export type DecisionProviderModelRouteInput = {
+	sessionId?: string | null,
 	prompt: string,
 	providerId: string,
 	currentModel: string | null,
 };
 
 export type DecisionProviderModelRouteOutput = {
+	evaluation: DecisionEvaluation | null,
 	status: string,
 	routingMode: string,
 	decisionModel: string,
@@ -748,6 +758,7 @@ export type DecisionProviderModelRouteOutput = {
 };
 
 export type DecisionProviderModelRouteSelection = {
+	evaluation?: DecisionEvaluation | null,
 	status: string,
 	decisionModel: string,
 	currentModel: string | null,
@@ -768,12 +779,14 @@ export type DecisionProviderSettingsInput = {
 	skillRouterEnabled: boolean,
 	modelRouterEnabled: boolean,
 	completionReviewEnabled: boolean,
+	toolGuardEnabled: boolean,
 	baseUrl: string | null,
 	model: string | null,
 	memoryThreshold: number | null,
 	skillConfidenceThreshold: number | null,
 	modelConfidenceThreshold: number | null,
 	completionThreshold: number | null,
+	toolRiskThreshold: number | null,
 	apiKey: string | null,
 	clearApiKey?: boolean,
 };
@@ -786,14 +799,21 @@ export type DecisionProviderSettingsOutput = {
 	skillRouterEnabled: boolean,
 	modelRouterEnabled: boolean,
 	completionReviewEnabled: boolean,
+	toolGuardEnabled: boolean,
 	baseUrl: string,
 	model: string,
 	memoryThreshold: number,
 	skillConfidenceThreshold: number,
 	modelConfidenceThreshold: number,
 	completionThreshold: number,
+	toolRiskThreshold: number,
 	apiKeyConfigured: boolean,
 	restartRequired: boolean,
+};
+
+export type DecisionScore = {
+	key: string,
+	probability: number,
 };
 
 export type Delegation = {

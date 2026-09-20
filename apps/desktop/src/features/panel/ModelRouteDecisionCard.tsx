@@ -47,9 +47,6 @@ export function ModelRouteDecisionCard({
 							<p className="mt-1 text-[10px] text-muted-foreground/80">
 								{t("conversation.modelRouting.score", {
 									score: Math.round(decision.recommendedScore * 100),
-									confidence: decision.confidence === null
-										? "—"
-										: Math.round(decision.confidence * 100),
 								})}
 							</p>
 						) : null}

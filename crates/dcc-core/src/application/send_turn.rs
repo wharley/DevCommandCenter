@@ -64,6 +64,8 @@ pub struct SendTurnInput {
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionProviderModelRouteSelection {
+    #[serde(default)]
+    pub evaluation: Option<crate::domain::decision::DecisionEvaluation>,
     pub status: String,
     pub decision_model: String,
     pub current_model: Option<String>,

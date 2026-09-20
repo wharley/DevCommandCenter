@@ -299,6 +299,7 @@ type WorkspacePanelProps = {
 };
 
 export type CompletionReviewStatus = {
+	evaluation: import("@dcc/contracts").DecisionEvaluation | null;
 	needsReview: boolean;
 	score: number | null;
 	kept: boolean;
@@ -645,6 +646,19 @@ export function WorkspacePanel({
 		[providerChoices, selectedModelId, selectedProviderId, workspaceId],
 	);
 
+	const selectedSessionBelongsToWorkspace = Boolean(
+		selectedSessionId &&
+			sessions.some(
+				(summary) =>
+					summary.session.id === selectedSessionId &&
+					summary.session.workspaceId === workspaceId,
+			),
+	);
+	const effectiveSessionId = selectedSessionBelongsToWorkspace
+		? selectedSessionId
+		: (sessions.find((summary) => summary.session.workspaceId === workspaceId)
+				?.session.id ?? null);
+
 	const submitPromptWithModelRouting = useCallback(
 		async (
 			turn: ComposerSubmittedTurn,
@@ -661,12 +675,14 @@ export function WorkspacePanel({
 			try {
 				route = await routeDecisionProviderModel({
 					prompt: turn.rawPrompt,
+					sessionId: effectiveSessionId ?? null,
 					providerId,
 					currentModel,
 				} satisfies DecisionProviderModelRouteInput);
 			} catch (error) {
 				console.warn("[dcc] model routing preflight failed:", error);
 				route = {
+					evaluation: null,
 					status: "failed",
 					routingMode: "manual",
 					decisionModel: "jev-latest",
@@ -683,6 +699,7 @@ export function WorkspacePanel({
 			setModelRouting(false);
 
 			const selection: DecisionProviderModelRouteSelection = {
+				evaluation: route.evaluation,
 				status: route.status,
 				decisionModel: route.decisionModel,
 				currentModel: route.currentModel,
@@ -713,6 +730,7 @@ export function WorkspacePanel({
 			});
 		},
 		[
+			effectiveSessionId,
 			onSubmitPrompt,
 			selectedModelId,
 			selectedProviderId,
@@ -731,6 +749,7 @@ export function WorkspacePanel({
 				modelOverride: modelId,
 				skipDecisionProviderModelRoute: true,
 				decisionProviderModelRoute: {
+					evaluation: pending.route.evaluation,
 					status: pending.route.status,
 					decisionModel: pending.route.decisionModel,
 					currentModel: pending.route.currentModel,
@@ -852,18 +871,6 @@ export function WorkspacePanel({
 		},
 		[handleAddToReview, inspectorPendingAnnotation],
 	);
-	const selectedSessionBelongsToWorkspace = Boolean(
-		selectedSessionId &&
-			sessions.some(
-				(summary) =>
-					summary.session.id === selectedSessionId &&
-					summary.session.workspaceId === workspaceId,
-			),
-	);
-	const effectiveSessionId = selectedSessionBelongsToWorkspace
-		? selectedSessionId
-		: (sessions.find((summary) => summary.session.workspaceId === workspaceId)
-				?.session.id ?? null);
 	useEffect(() => {
 		setInspectorPendingAnnotation(null);
 		return subscribeWorkspaceDiffAnnotation((command) => {
@@ -952,6 +959,7 @@ export function WorkspacePanel({
 			const scoreText = label?.split(":")[1] ?? scoreLabel?.split(":")[1];
 			const score = scoreText ? Number(scoreText) : null;
 			reviews.set(entry.turnId, {
+				evaluation: entry.evaluation,
 				needsReview: Boolean(label),
 				score: score !== null && Number.isFinite(score) ? score : null,
 				kept: entry.selectedLabels.includes("kept"),
@@ -1183,10 +1191,18 @@ export function WorkspacePanel({
 		[buildAnnotationTurn, onResumeSession, sessionState, submitPromptWithModelRouting, t],
 	);
 	const handleReviewCompletion = useCallback(
-		() => {
-			replaceComposerDraft(t("settings.decisionProvider.completionReviewPrompt"));
+		({ prompt, turnId }: { prompt: string; turnId: string }) => {
+			const review = completionReviews.get(turnId);
+			const criteria = review?.evaluation?.scores
+				.map((item) => `${t(`settings.decisionProvider.criteria.${item.key}`, { defaultValue: item.key })}: ${Math.round(item.probability * 100)}%`)
+				.join("; ");
+			replaceComposerDraft([
+				t("settings.decisionProvider.completionReviewPrompt"),
+				t("settings.decisionProvider.reviewOriginalRequest", { prompt }),
+				criteria ? t("settings.decisionProvider.reviewCriteriaPrompt", { criteria }) : "",
+			].filter(Boolean).join("\n\n"));
 		},
-		[replaceComposerDraft, t],
+		[completionReviews, replaceComposerDraft, t],
 	);
 	const handleKeepCompletion = useCallback(
 		async ({ turnId, score }: { turnId: string; score: number | null }) => {

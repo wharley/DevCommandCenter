@@ -1,3 +1,4 @@
+import { DecisionEvaluationDetails } from "./DecisionEvaluationDetails";
 import { TurnReviewTimelineCard } from "./turn-review-timeline-card";
 import {
 	useCallback,
@@ -85,7 +86,7 @@ type ActiveThreadViewportProps = {
 	focusRequest?: { messageId: string; nonce: number } | null;
 	completionReviews?: ReadonlyMap<
 		string,
-		{ needsReview: boolean; score: number | null; kept: boolean }
+		{ needsReview: boolean; score: number | null; kept: boolean; evaluation?: import("@dcc/contracts").DecisionEvaluation | null }
 	>;
 	completionReviewActionsDismissed?: ReadonlySet<string>;
 	isModelRouting?: boolean;
@@ -487,9 +488,10 @@ export function ActiveThreadViewport({
 											? t("settings.decisionProvider.completionNeedsReview")
 											: t("settings.decisionProvider.completionComplete")}
 														{completionReview.score !== null
-															? ` · ${(completionReview.score * 100).toFixed(0)}%`
+															? ` · ${t("settings.decisionProvider.reviewSignal", { score: Math.round(completionReview.score * 100) })}`
 															: ""}
 													</Badge>
+												<DecisionEvaluationDetails evaluation={completionReview.evaluation} />
 					{completionReview.needsReview && !completionReview.kept && sourceTurn?.turnId && onReviewCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
 														<Button
 															type="button"

@@ -194,7 +194,7 @@ pub const CODEX: &[ModelEntry] = &[
     ModelEntry {
         id: "gpt-5.6-sol",
         label: "GPT-5.6 Sol",
-        description: "Flagship GPT-5.6 model for the most demanding coding and reasoning work. Preview access required.",
+        description: "General-purpose agentic coding and reasoning model for demanding everyday work. Preview access required.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
@@ -215,7 +215,7 @@ pub const CODEX: &[ModelEntry] = &[
     ModelEntry {
         id: "gpt-5.5",
         label: "GPT-5.5",
-        description: "Newest Codex model with the strongest reasoning.",
+        description: "Previous-generation model for coding and general reasoning.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },

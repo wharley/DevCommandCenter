@@ -1,3 +1,4 @@
+import { DecisionEvaluationDetails } from "@/features/panel/DecisionEvaluationDetails";
 import { FrontendDiagnostics } from "@/components/FrontendDiagnostics";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -746,12 +747,14 @@ export function SettingsDialog({
 		skillRouterEnabled: true,
 		modelRouterEnabled: true,
 		completionReviewEnabled: true,
+		toolGuardEnabled: true,
+		toolRiskThreshold: 0.65,
 		baseUrl: "https://api.typesafe.ai",
 		model: "jev-latest",
 		memoryThreshold: 0.65,
 		skillConfidenceThreshold: 0.65,
-		modelConfidenceThreshold: 0.65,
-		completionThreshold: 0.65,
+		modelConfidenceThreshold: 0.80,
+		completionThreshold: 0.80,
 		apiKey: null,
 		clearApiKey: false,
 	});
@@ -768,6 +771,8 @@ export function SettingsDialog({
 			skillRouterEnabled: settings.skillRouterEnabled,
 			modelRouterEnabled: settings.modelRouterEnabled,
 			completionReviewEnabled: settings.completionReviewEnabled,
+			toolGuardEnabled: settings.toolGuardEnabled,
+			toolRiskThreshold: settings.toolRiskThreshold,
 			baseUrl: settings.baseUrl,
 			model: settings.model,
 			memoryThreshold: settings.memoryThreshold,
@@ -1514,6 +1519,16 @@ export function SettingsDialog({
 														hint: t("settings.decisionProvider.points.completion_review.hint"),
 														thresholdLabel: t("settings.decisionProvider.points.completion_review.threshold"),
 													},
+												{
+													key: "tool_guard",
+													enabled: decisionProviderDraft.toolGuardEnabled,
+													threshold: decisionProviderDraft.toolRiskThreshold,
+													thresholdKey: "toolRiskThreshold",
+													enabledKey: "toolGuardEnabled",
+													label: t("settings.decisionProvider.points.tool_guard.label"),
+													hint: t("settings.decisionProvider.points.tool_guard.hint"),
+													thresholdLabel: t("settings.decisionProvider.points.tool_guard.threshold"),
+												},
 												] as const).map((point) => (
 														<div key={point.key} className="rounded-lg border border-border/50 p-3">
 															<div className="flex items-center justify-between gap-3">
@@ -1632,7 +1647,8 @@ export function SettingsDialog({
 																		duration: entry.durationMs,
 																	})}
 															</p>
-																	{entry.status === "completed" ? (
+																	<DecisionEvaluationDetails evaluation={entry.evaluation} />
+														{entry.status === "completed" ? (
 																		<p className="font-mono text-[11px] text-muted-foreground">
 																			{entry.selectedLabels.length
 																			? t("settings.decisionProvider.selectedLabels", { labels: entry.selectedLabels.join(", ") })

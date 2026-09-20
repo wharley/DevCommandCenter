@@ -1877,7 +1877,7 @@
       },
       "decisionProvider": {
         "label": "Decision Provider",
-        "description": "Optional TypeSafe Jev classification for memory context."
+        "description": "Jev decisions for models, memory, skills, tools and responses."
       },
       "aiMemory": {
         "label": "Memory",
@@ -2252,7 +2252,7 @@
         "configuration": "Configuration",
         "history": "Decision history"
       },
-      "hint": "Jev can classify memory, skills, models and responses at independent decision points. Start in Observe; Enforce keeps only candidates above each configured threshold.",
+      "hint": "Jev evaluates independent criteria. Observe records memory, skill and risk decisions; Enforce applies them. Model routing has its own manual or automatic mode.",
       "providerLabel": "Enable Decision Provider",
       "active": "Active",
       "inactive": "Inactive",
@@ -2272,6 +2272,13 @@
         "manual": "Manual",
         "automatic": "Automatic"
       },
+      "reviewOriginalRequest": "Original request to review:\n{{prompt}}",
+      "reviewCriteriaPrompt": "Jev signals (probabilities, not proof of a defect): {{criteria}}. Check the evidence and address confirmed gaps.",
+      "evaluationDetails": "View evaluated criteria",
+      "probabilityHint": "Values estimate the probability that each criterion is true; they do not measure percentage of work completed.",
+      "contextIncomplete": "Some context was shortened or omitted. Check the evidence before concluding.",
+      "reviewSignal": "lowest signal: {{score}}%",
+      "criteria": {"request_coverage": "Request fulfilled", "constraints": "Constraints respected", "evidence_support": "Execution supported by evidence", "validation": "Appropriate validation", "tool_guard": "Action requires review"},
       "pointsTitle": "Decision points",
       "pointsHint": "Each point can be disabled separately. Thresholds control the signal used by each classification.",
       "points": {
@@ -2283,17 +2290,22 @@
         "skill_router": {
           "label": "Skill router",
           "hint": "Recommends which skills to load for the task.",
-          "threshold": "Minimum confidence"
+          "threshold": "Minimum usefulness probability"
         },
         "model_router": {
           "label": "Model router",
-          "hint": "Recommends the most suitable model for the task.",
-          "threshold": "Minimum confidence"
+          "hint": "Prioritizes quality using the request and conversation. Keeps the current model when the difference is small.",
+          "threshold": "Minimum suitability probability"
         },
         "completion_review": {
           "label": "Completion review",
-          "hint": "Evaluates whether the response appears complete before finishing.",
-          "threshold": "Minimum completeness"
+          "hint": "After the turn, checks request coverage, constraints, evidence and validation. Higher values flag more responses for review.",
+          "threshold": "Minimum probability per criterion"
+        },
+        "tool_guard": {
+          "label": "Tool review",
+          "hint": "Checks sensitive actions. Lower values flag more actions; this control is independent of memory filtering.",
+          "threshold": "Risk probability requiring review"
         }
       },
       "apiKeyLabel": "TypeSafe API key",
@@ -2309,7 +2321,7 @@
       "saveError": "Could not save the Decision Provider configuration.",
       "configured": "Keychain configured",
       "historyTitle": "Decision history",
-      "historyHint": "Recent Jev classifications made while filtering project memory. Snippets and API keys are not stored here.",
+      "historyHint": "Decision probabilities and outcomes. Conversation content, tool output and API keys are not stored in this history.",
       "refreshHistory": "Refresh history",
       "historyLoading": "Loading decision history…",
       "historyEmpty": "No Jev decisions recorded yet.",
@@ -2329,7 +2341,7 @@
         "completion_review": "Completion review"
       },
       "completionNeedsReview": "Needs review",
-      "completionComplete": "Ready",
+      "completionComplete": "Criteria satisfied",
       "completionReviewAction": "Review response",
       "completionReviewPrompt": "Review the previous response in this task. Check that it fully answers the original request, fix any gaps, and deliver a complete final response. Apply the corrections directly instead of only describing what was missing.",
       "completionRegenerateAction": "Regenerate",
@@ -3168,7 +3180,7 @@
     "modelRouting": {
       "title": "Model recommendation",
       "description": "You selected {{current}}, and Jev recommends {{recommended}} for this task.",
-      "score": "Fit: {{score}}% · confidence: {{confidence}}%",
+      "score": "Suitability probability: {{score}}%",
       "useRecommended": "Use {{model}} for this turn",
       "keepCurrent": "Continue with {{model}}",
       "currentUnknown": "the selected model"

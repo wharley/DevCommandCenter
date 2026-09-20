@@ -1,3 +1,4 @@
+pub mod decision;
 pub mod delegation;
 pub mod delegation_apply;
 pub mod delegation_worktree;
