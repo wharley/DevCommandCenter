@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useId, useMemo, useRef, useState } from "react";
 import {
 	Activity,
 	AlertCircle,
@@ -12,8 +12,8 @@ import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { ToolCall } from "@/components/ai/tool-call";
 import { Reasoning } from "@/components/ai/reasoning";
 import {
-	ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS,
 	ASSISTANT_ACTIVITY_PAGE_SIZE,
+	classifyAssistantActivityAction,
 	selectAssistantActivity,
 	summarizeAssistantActivity,
 	type AssistantActivityAnnotation,
@@ -45,40 +45,16 @@ export const AssistantActivity = memo(function AssistantActivity({
 	);
 	// Keep the live activity compact by default. The latest record remains
 	// visible in the summary row, and the user can expand the full timeline.
-	const [isOpen, setIsOpen] = useState(summary.failures > 0);
+	const [isOpen, setIsOpen] = useState(false);
 	const [filter, setFilter] = useState<ActivityFilter>("all");
 	const [limit, setLimit] = useState(ASSISTANT_ACTIVITY_PAGE_SIZE);
 	const manualRef = useRef(false);
-	const rootRef = useRef<HTMLDivElement>(null);
 	const readingBaselineRef = useRef(annotations.length);
 	const markManual = () => {
 		if (!manualRef.current) readingBaselineRef.current = annotations.length;
 		manualRef.current = true;
 	};
 	const contentId = useId();
-	const shouldStayOpen = summary.failures > 0;
-	useEffect(() => {
-		if (manualRef.current) return;
-		if (shouldStayOpen) {
-			setIsOpen(true);
-			return;
-		}
-		if (!isOpen) return;
-		const timer = setTimeout(() => {
-			const selection = window.getSelection();
-			if (
-				!manualRef.current &&
-				!rootRef.current?.contains(document.activeElement) &&
-				!(
-					selection &&
-					!selection.isCollapsed &&
-					rootRef.current?.contains(selection.anchorNode)
-				)
-			)
-				setIsOpen(false);
-		}, ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS);
-		return () => clearTimeout(timer);
-	}, [shouldStayOpen, isOpen]);
 	// Retain already visible entries while the user reads and new events arrive.
 	const visibleLimit =
 		limit +
@@ -99,9 +75,7 @@ export const AssistantActivity = memo(function AssistantActivity({
 	const latest = summary.latest;
 	const preview =
 		latest?.type === "tool-call"
-			? [latest.action, latest.command || latest.file]
-					.filter(Boolean)
-					.join(" · ")
+			? getToolActionLabel(latest.action, t)
 			: latest?.content.trim() ||
 				(latest?.type === "reasoning"
 					? latest.label || t("conversation.reasoning.label")
@@ -115,7 +89,6 @@ export const AssistantActivity = memo(function AssistantActivity({
 	const running = summary.state === "running";
 	return (
 		<div
-			ref={rootRef}
 			className="dcc-assistant-activity dcc-activity-timeline"
 			data-live={summary.live ? "true" : "false"}
 			data-state={isOpen ? "open" : "closed"}
@@ -191,6 +164,14 @@ export const AssistantActivity = memo(function AssistantActivity({
 						{preview.length > 280 ? "…" : ""}
 					</p>
 				</div>
+			)}
+			{summary.failures > 0 && (
+				<p className="dcc-activity-attention">
+					<AlertCircle size={13} aria-hidden />
+					{t("conversation.activity.timeline.attention", {
+						count: summary.failures,
+					})}
+				</p>
 			)}
 			{isOpen && (
 				<div id={contentId} className="dcc-activity-body">
@@ -301,7 +282,7 @@ function ActivityEntry({
 	const failed = annotation.status?.type === "failed";
 	return (
 		<ToolCall
-			action={annotation.action}
+			action={getToolActionLabel(annotation.action, t)}
 			command={annotation.command}
 			file={annotation.file}
 			isLive={!failed && live && Boolean(annotation.streaming)}
@@ -320,4 +301,15 @@ function ActivityEntry({
 			</div>
 		</ToolCall>
 	);
+}
+
+function getToolActionLabel(
+	action: string,
+	t: ReturnType<typeof useTranslation>["t"],
+) {
+	const kind = classifyAssistantActivityAction(action);
+	if (kind) return t(`conversation.activity.timeline.actions.${kind}`);
+	return /\s/.test(action.trim())
+		? action
+		: t("conversation.activity.timeline.actions.generic");
 }

@@ -7,7 +7,7 @@ import {
 	FilePenLine,
 	Terminal,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
 import { cn } from "@/lib/utils";
@@ -38,10 +38,7 @@ export function ToolCall({
 	isUnfinished?: boolean;
 }) {
 	const { t } = useTranslation("common");
-	const shouldStayOpen = isLive || isError;
-	const [isOpen, setIsOpen] = useState(shouldStayOpen);
-	// Once the user toggles by hand, auto open/close stops driving this disclosure.
-	const userToggledRef = useRef(false);
+	const [isOpen, setIsOpen] = useState(false);
 	const displayFile = useMemo(
 		() => (file ? getDisplayPath(file) : null),
 		[file],
@@ -52,29 +49,14 @@ export function ToolCall({
 			? CircleDashed
 			: CheckCircle2;
 
-	useEffect(() => {
-		if (userToggledRef.current) {
-			return;
-		}
-
-		setIsOpen(shouldStayOpen);
-	}, [shouldStayOpen]);
-
 	return (
 		<details
-			onPointerDown={() => {
-				userToggledRef.current = true;
-			}}
-			onFocusCapture={() => {
-				userToggledRef.current = true;
-			}}
 			className="group/tool-call dcc-activity-tool flex min-w-0 flex-col"
 			open={isOpen}
 		>
 			<summary
 				onClick={(event) => {
 					event.preventDefault();
-					userToggledRef.current = true;
 					setIsOpen((open) => !open);
 				}}
 				className={cn(
@@ -100,24 +82,6 @@ export function ToolCall({
 				<span className="min-w-0 break-words font-medium text-foreground/85">
 					{action}
 				</span>
-				{file ? (
-					<span
-						title={file}
-						className="inline-flex min-w-0 items-center gap-1 truncate rounded bg-accent/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-					>
-						<FilePenLine className="size-3 shrink-0" aria-hidden />
-						<span className="truncate">{displayFile}</span>
-					</span>
-				) : null}
-				{command ? (
-					<code
-						title={command}
-						className="inline-flex min-w-0 items-center gap-1 truncate rounded bg-accent/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-					>
-						<Terminal className="size-3 shrink-0" aria-hidden />
-						<span className="truncate">{command}</span>
-					</code>
-				) : null}
 				{isLive ? (
 					<span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground/70">
 						{t("conversation.toolCall.running")}
@@ -138,6 +102,22 @@ export function ToolCall({
 					tabIndex={0}
 					className="mt-1 max-h-64 overflow-auto rounded-md border border-border/45 bg-muted/20 px-3 py-2 text-[12px] leading-6 text-muted-foreground"
 				>
+					{file ? (
+						<div className="mb-2 flex min-w-0 items-center gap-1.5 border-b border-border/40 pb-2 font-mono text-[11px]">
+							<FilePenLine className="size-3 shrink-0" aria-hidden />
+							<span className="truncate" title={file}>
+								{displayFile}
+							</span>
+						</div>
+					) : null}
+					{command ? (
+						<code className="mb-2 flex min-w-0 items-center gap-1.5 overflow-hidden border-b border-border/40 pb-2 text-[11px]">
+							<Terminal className="size-3 shrink-0" aria-hidden />
+							<span className="truncate" title={command}>
+								{command}
+							</span>
+						</code>
+					) : null}
 					{children}
 				</div>
 			)}

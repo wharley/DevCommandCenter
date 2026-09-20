@@ -37,8 +37,13 @@ try {
 	);
 	await root
 		.locator(".dcc-activity-latest")
-		.getByText("read src/module-999.ts", { exact: false })
+		.getByText("Ler arquivo", { exact: true })
 		.waitFor();
+	assert.equal(
+		await root.getByText("read src/module-999.ts", { exact: false }).count(),
+		0,
+		"technical commands stay hidden in the compact summary",
+	);
 	await button("Mostrar atividades").focus();
 	await page.keyboard.press("Enter");
 	assert.equal(await steps.count(), 20);
@@ -63,15 +68,34 @@ try {
 	await filter("Atualizações");
 	await root.getByText("Nenhum registro neste filtro.").waitFor();
 	await button("Falha antiga").click();
+	assert.equal(
+		await root.getAttribute("data-state"),
+		"closed",
+		"failures do not expand the technical timeline automatically",
+	);
+	await root
+		.getByText(
+			"Uma etapa encontrou um problema. Os detalhes técnicos estão disponíveis.",
+		)
+		.waitFor();
 	await button("Ver 1 falha").click();
 	assert.equal(await steps.count(), 1);
+	assert.equal(
+		await root.getByText("EXPECTED-FAILURE", { exact: false }).count(),
+		0,
+		"failed output remains collapsed until requested",
+	);
+	await steps.locator("summary").click();
 	await root.getByText("EXPECTED-FAILURE", { exact: false }).waitFor();
 	await button("Recolher atividades").click();
 	assert.equal(await steps.count(), 0);
 	await button("Ver 1 falha").click();
+	await steps.locator("summary").click();
 	await root.getByText("EXPECTED-FAILURE", { exact: false }).waitFor();
 	await button("Execução ativa").click();
 	await root.getByRole("status").getByText("Agente trabalhando").waitFor();
+	await root.getByText("Executando uma verificação", { exact: true }).waitFor();
+	assert.equal(await root.getByText("Bash", { exact: true }).count(), 0);
 	await button("Concluir").click();
 	await page.waitForFunction(
 		() =>
@@ -79,6 +103,7 @@ try {
 			"closed",
 	);
 	await button("Execução ativa").click();
+	await button("Mostrar atividades").click();
 	const readTool = root.locator('[data-activity-id="read"] summary');
 	await readTool.click();
 	await button("Concluir").click();
@@ -89,6 +114,8 @@ try {
 		"manual inspection is preserved after completion",
 	);
 	await button("Execução ativa").click();
+	await button("Mostrar atividades").click();
+	await root.locator('[data-activity-id="test"] summary').click();
 	const liveOutput = root.locator('[data-activity-id="test"] details > div');
 	await liveOutput.focus();
 	await button("Concluir").click();
@@ -99,7 +126,7 @@ try {
 		"inspected live output stays open after completion",
 	);
 	await button("Execução ativa").click();
-	await button("Recolher atividades").click();
+	assert.equal(await root.getAttribute("data-state"), "closed");
 	await button("Adicionar evento").click();
 	assert.equal(
 		await root.getAttribute("data-state"),
@@ -117,6 +144,7 @@ try {
 	await root.getByText("Sem conclusão registrada").first().waitFor();
 	await button("Pedir aprovação").click();
 	await root.getByText("Aguardando você").waitFor();
+	await button("Mostrar atividades").click();
 	await filter("Falhas");
 	await page.getByText("Executar verificação local", { exact: true }).waitFor();
 	await page.getByText("Revisão de testes", { exact: true }).waitFor();

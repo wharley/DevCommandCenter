@@ -3245,6 +3245,15 @@
         "expand": "Mostrar atividades",
         "showFailures_one": "Ver {{count}} falha",
         "showFailures_other": "Ver {{count}} falhas",
+        "attention_one": "Uma etapa encontrou um problema. Os detalhes técnicos estão disponíveis.",
+        "attention_other": "{{count}} etapas encontraram problemas. Os detalhes técnicos estão disponíveis.",
+        "actions": {
+          "command": "Executando uma verificação",
+          "files": "Consultando ou atualizando arquivos",
+          "research": "Pesquisando informações",
+          "planning": "Organizando as próximas etapas",
+          "generic": "Executando uma ação"
+        },
         "filterLabel": "Filtrar atividades",
         "filters": {
           "all": "Todas",

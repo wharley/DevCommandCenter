@@ -98,6 +98,20 @@
 	-webkit-box-orient: vertical;
 	overflow: hidden;
 }
+.dcc-activity-attention {
+	display: flex;
+	align-items: flex-start;
+	gap: 7px;
+	margin: 8px 0 0 38px;
+	font-size: 11px;
+	line-height: 1.5;
+	color: var(--muted-foreground);
+}
+.dcc-activity-attention svg {
+	margin-top: 2px;
+	flex-shrink: 0;
+	color: var(--destructive);
+}
 .dcc-activity-body {
 	margin-top: 12px;
 	border-top: 1px solid var(--dcc-surface-edge);
@@ -226,6 +240,9 @@
 	.dcc-activity-latest {
 		flex-direction: column;
 		gap: 2px;
+		margin-left: 0;
+	}
+	.dcc-activity-attention {
 		margin-left: 0;
 	}
 	.dcc-activity-heading-copy {

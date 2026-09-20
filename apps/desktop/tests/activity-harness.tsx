@@ -53,7 +53,7 @@ const liveHistory = (): WorkspaceMessageAnnotation[] => [
 	{
 		type: "tool-call",
 		id: "test",
-		action: "Executar testes",
+		action: "Bash",
 		command: "yarn test session --run",
 		content: "RUN session.test.ts\n✓ restores saved sessions\n",
 		streaming: true,

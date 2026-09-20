@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-	ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS,
 	ASSISTANT_ACTIVITY_PAGE_SIZE,
+	classifyAssistantActivityAction,
 	isActivityAnnotation,
 	selectAssistantActivity,
 	summarizeAssistantActivity,
@@ -133,10 +133,12 @@ describe("assistant activity presentation", () => {
 			}),
 		).toBe(false);
 	});
-	it("uses a short grace period before automatic collapse", () => {
-		expect(ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS).toBeGreaterThanOrEqual(
-			300,
-		);
-		expect(ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS).toBeLessThanOrEqual(500);
+	it("classifies provider tool names for human-friendly activity labels", () => {
+		expect(classifyAssistantActivityAction("Bash")).toBe("command");
+		expect(classifyAssistantActivityAction("exec_command")).toBe("command");
+		expect(classifyAssistantActivityAction("apply_patch")).toBe("files");
+		expect(classifyAssistantActivityAction("WebSearch")).toBe("research");
+		expect(classifyAssistantActivityAction("TodoWrite")).toBe("planning");
+		expect(classifyAssistantActivityAction("custom integration")).toBeNull();
 	});
 });

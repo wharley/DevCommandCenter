@@ -3245,6 +3245,15 @@
         "expand": "Show activity",
         "showFailures_one": "View {{count}} failure",
         "showFailures_other": "View {{count}} failures",
+        "attention_one": "One step encountered a problem. Technical details are available.",
+        "attention_other": "{{count}} steps encountered problems. Technical details are available.",
+        "actions": {
+          "command": "Running a check",
+          "files": "Reviewing or updating files",
+          "research": "Researching information",
+          "planning": "Organizing the next steps",
+          "generic": "Running an action"
+        },
         "filterLabel": "Filter activity",
         "filters": {
           "all": "All",

@@ -1,12 +1,42 @@
 import type { WorkspaceMessageAnnotation } from "../../sessions/session-thread-history.logic";
 
-export const ASSISTANT_ACTIVITY_AUTO_COLLAPSE_DELAY_MS = 400;
 export const ASSISTANT_ACTIVITY_PAGE_SIZE = 20;
 export type AssistantActivityAnnotation = Extract<
 	WorkspaceMessageAnnotation,
 	{ type: "commentary" | "reasoning" | "tool-call" }
 >;
 export type ActivityFilter = "all" | "tools" | "updates" | "failures";
+export type ActivityActionKind =
+	| "command"
+	| "files"
+	| "research"
+	| "planning";
+
+export function classifyAssistantActivityAction(
+	action: string,
+): ActivityActionKind | null {
+	const normalized = action.toLowerCase().replace(/[^a-z0-9]/g, "");
+	if (
+		["bash", "shell", "commandexecution", "execcommand", "terminal"].includes(
+			normalized,
+		)
+	)
+		return "command";
+	if (
+		["applypatch", "filechange", "write", "writefile", "edit"].includes(
+			normalized,
+		)
+	)
+		return "files";
+	if (
+		["read", "readfile", "glob", "grep", "searchfiles"].includes(normalized)
+	)
+		return "files";
+	if (["websearch", "webfetch", "browser"].includes(normalized))
+		return "research";
+	if (["todowrite", "updateplan"].includes(normalized)) return "planning";
+	return null;
+}
 
 export function isActivityAnnotation(
 	annotation: WorkspaceMessageAnnotation,
