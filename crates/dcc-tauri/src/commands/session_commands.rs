@@ -190,6 +190,15 @@ pub struct DecisionProviderModelRouteOutput {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionProviderCompletionActionInput {
+    pub session_id: String,
+    pub turn_id: String,
+    pub action: String,
+    pub score: Option<f64>,
+}
+
 pub type AiMemoryOutboxListOutput = Vec<AiMemoryOutboxStatusOutput>;
 
 pub type AiMemoryExportHistoryListOutput = Vec<AiMemoryExportHistoryOutput>;
@@ -538,6 +547,20 @@ pub fn decision_provider_history(
                 })
                 .collect()
         })
+        .map_err(|error| error.to_string())
+}
+
+pub fn decision_provider_completion_action(
+    state: &SessionCommandState,
+    input: DecisionProviderCompletionActionInput,
+) -> Result<(), String> {
+    state
+        .record_decision_provider_completion_action(
+            &SessionId(input.session_id),
+            &dcc_core::domain::session::TurnId(input.turn_id),
+            &input.action,
+            input.score,
+        )
         .map_err(|error| error.to_string())
 }
 

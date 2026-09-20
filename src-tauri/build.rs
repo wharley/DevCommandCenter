@@ -238,17 +238,17 @@ use dcc_tauri::commands::{
     session_commands::{
         AiMemoryExportHistoryOutput, AiMemoryOutboxStatusOutput, AiMemoryQueryHit,
         AiMemoryQueryInput, AiMemorySyncInput, AiMemorySyncOutput, ApplyTaskTitleInput,
-        ApplyTaskTitleOutput, DecisionProviderHistoryOutput, DecisionProviderModelRouteInput,
-        DecisionProviderModelRouteOutput, ExecuteGuardedUndoInput, ExecuteGuardedUndoOutput,
-        GuardedUndoOperationSummary, GuardedUndoPreviewFile, InterruptNativeSubagentInput,
-        LastTurnReviewInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
-        McpTurnPreflightState, NativeSubagentControlOutput, PrepareGuardedUndoInput,
-        PrepareGuardedUndoOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
-        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
-        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
-        SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
-        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
-        WaitMcpOauthOutput,
+        ApplyTaskTitleOutput, DecisionProviderCompletionActionInput, DecisionProviderHistoryOutput,
+        DecisionProviderModelRouteInput, DecisionProviderModelRouteOutput, ExecuteGuardedUndoInput,
+        ExecuteGuardedUndoOutput, GuardedUndoOperationSummary, GuardedUndoPreviewFile,
+        InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
+        ListMcpRuntimeStatusesOutput, McpTurnPreflightState, NativeSubagentControlOutput,
+        PrepareGuardedUndoInput, PrepareGuardedUndoOutput, PrepareTurnOutput,
+        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
+        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
+        SearchSessionsInput, SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput,
+        SteerNativeSubagentInput, TurnReviewFileDiffInput, TurnReviewFileDiffOutput,
+        TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -510,6 +510,7 @@ struct SessionMethods {
     decision_provider_settings_load: String,
     decision_provider_settings_save: String,
     decision_provider_model_route: String,
+    decision_provider_completion_action: String,
     apply_task_title: String,
     prepare_turn: String,
     send_turn: String,
@@ -940,6 +941,7 @@ fn main() {
         .typ::<AiMemoryOutboxStatusOutput>()
         .typ::<AiMemoryExportHistoryOutput>()
         .typ::<DecisionProviderHistoryOutput>()
+        .typ::<DecisionProviderCompletionActionInput>()
         .typ::<DecisionProviderModelRouteInput>()
         .typ::<DecisionProviderModelRouteOutput>()
         .typ::<AiMemorySidecarStatus>()
@@ -1144,6 +1146,7 @@ fn main() {
             decision_provider_settings_load: "decision_provider_settings_load".to_string(),
             decision_provider_settings_save: "decision_provider_settings_save".to_string(),
             decision_provider_model_route: "decision_provider_model_route".to_string(),
+            decision_provider_completion_action: "decision_provider_completion_action".to_string(),
             apply_task_title: "apply_task_title".to_string(),
             prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),

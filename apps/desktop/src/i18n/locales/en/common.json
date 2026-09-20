@@ -2308,6 +2308,8 @@
       "completionRegenerateFailed": "The response could not be regenerated.",
       "completionKeepAction": "Keep response",
       "completionKept": "Response kept without another run.",
+      "completionKeptLabel": "Response kept",
+      "completionKeepFailed": "The decision to keep the response could not be saved.",
       "historyMeta": "{{candidates}} candidate(s) · {{selected}} selected · threshold {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidate(s) · request failed after {{duration}} ms",
       "selectedLabels": "Selected: {{labels}}",

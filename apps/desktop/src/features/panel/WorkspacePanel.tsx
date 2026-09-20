@@ -111,6 +111,7 @@ import {
 import {
 	approvePlan,
 	loadDecisionProviderHistory,
+	recordDecisionProviderCompletionAction,
 	recordPlanHandoff,
 	routeDecisionProviderModel,
 } from "@/lib/session-api";
@@ -300,6 +301,7 @@ type WorkspacePanelProps = {
 export type CompletionReviewStatus = {
 	needsReview: boolean;
 	score: number | null;
+	kept: boolean;
 };
 
 export function WorkspacePanel({
@@ -944,12 +946,15 @@ export function WorkspacePanel({
 			) {
 				continue;
 			}
+			if (reviews.has(entry.turnId)) continue;
 			const label = entry.selectedLabels.find((value) => value.startsWith("needs_review:"));
-			const scoreText = label?.split(":")[1];
+			const scoreLabel = entry.selectedLabels.find((value) => value.startsWith("score:"));
+			const scoreText = label?.split(":")[1] ?? scoreLabel?.split(":")[1];
 			const score = scoreText ? Number(scoreText) : null;
 			reviews.set(entry.turnId, {
 				needsReview: Boolean(label),
 				score: score !== null && Number.isFinite(score) ? score : null,
+				kept: entry.selectedLabels.includes("kept"),
 			});
 		}
 		return reviews;
@@ -1184,15 +1189,29 @@ export function WorkspacePanel({
 		[replaceComposerDraft, t],
 	);
 	const handleKeepCompletion = useCallback(
-		(turnId: string) => {
-			setCompletionReviewActionsDismissed((current) => {
-				const next = new Set(current);
-				next.add(turnId);
-				return next;
-			});
-			toast.success(t("settings.decisionProvider.completionKept"));
+		async ({ turnId, score }: { turnId: string; score: number | null }) => {
+			if (!effectiveSessionId) return;
+			try {
+				await recordDecisionProviderCompletionAction({
+					sessionId: effectiveSessionId,
+					turnId,
+					action: "keep",
+					score,
+				});
+				setCompletionReviewActionsDismissed((current) => {
+					const next = new Set(current);
+					next.add(turnId);
+					return next;
+				});
+				await decisionProviderHistoryQuery.refetch();
+				toast.success(t("settings.decisionProvider.completionKept"));
+			} catch (error) {
+				toast.error(t("settings.decisionProvider.completionKeepFailed"), {
+					description: error instanceof Error ? error.message : undefined,
+				});
+			}
 		},
-		[t],
+		[decisionProviderHistoryQuery.refetch, effectiveSessionId, t],
 	);
 	const handleRegenerateCompletion = useCallback(
 		async ({ prompt }: { prompt: string; turnId: string }) => {

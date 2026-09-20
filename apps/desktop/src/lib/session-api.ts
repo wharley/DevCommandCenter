@@ -41,6 +41,7 @@ import type {
 	DecisionProviderSettingsInput,
 	DecisionProviderSettingsOutput,
 	DecisionProviderHistoryOutput,
+	DecisionProviderCompletionActionInput,
 	DecisionProviderModelRouteInput,
 	DecisionProviderModelRouteOutput,
 	ApplyTaskTitleInput,
@@ -169,6 +170,10 @@ export function routeDecisionProviderModel(input: DecisionProviderModelRouteInpu
 	return invoke<DecisionProviderModelRouteOutput>(SESSION_METHODS.decisionProviderModelRoute, {
 		input,
 	});
+}
+
+export function recordDecisionProviderCompletionAction(input: DecisionProviderCompletionActionInput) {
+	return invoke<void>(SESSION_METHODS.decisionProviderCompletionAction, { input });
 }
 
 export function restartDcc() {

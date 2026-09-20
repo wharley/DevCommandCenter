@@ -1481,9 +1481,11 @@ export function SettingsDialog({
 																			variant={entry.selectedLabels.some((label) => label.startsWith("needs_review:")) ? "destructive" : "secondary"}
 																			className="h-6 px-2 text-[10px] font-normal"
 																		>
-																			{entry.selectedLabels.some((label) => label.startsWith("needs_review:"))
-																				? t("settings.decisionProvider.completionNeedsReview")
-																				: t("settings.decisionProvider.completionComplete")}
+																{entry.selectedLabels.includes("kept")
+																	? t("settings.decisionProvider.completionKeptLabel")
+																	: entry.selectedLabels.some((label) => label.startsWith("needs_review:"))
+																		? t("settings.decisionProvider.completionNeedsReview")
+																		: t("settings.decisionProvider.completionComplete")}
 																		</Badge>
 																	) : null}
 																	<span className="font-mono text-[11px] text-foreground">{entry.model}</span>

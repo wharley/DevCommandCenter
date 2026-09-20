@@ -78,14 +78,14 @@ type ActiveThreadViewportProps = {
 	onRetryInterrupted?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
 	onReviewCompletion?: (input: { prompt: string; turnId: string }) => void;
 	onRegenerateCompletion?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
-	onKeepCompletion?: (turnId: string) => void;
+	onKeepCompletion?: (input: { turnId: string; score: number | null }) => void | Promise<void>;
 	onOpenPlan: () => void;
 	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	/** Reveals and highlights one message (find-in-thread); nonce re-fires the same id. */
 	focusRequest?: { messageId: string; nonce: number } | null;
 	completionReviews?: ReadonlyMap<
 		string,
-		{ needsReview: boolean; score: number | null }
+		{ needsReview: boolean; score: number | null; kept: boolean }
 	>;
 	completionReviewActionsDismissed?: ReadonlySet<string>;
 	isModelRouting?: boolean;
@@ -481,14 +481,16 @@ export function ActiveThreadViewport({
 														variant={completionReview.needsReview ? "destructive" : "secondary"}
 														className="text-[10px] font-normal"
 													>
-														{completionReview.needsReview
-															? t("settings.decisionProvider.completionNeedsReview")
-															: t("settings.decisionProvider.completionComplete")}
+										{completionReview.kept
+											? t("settings.decisionProvider.completionKeptLabel")
+											: completionReview.needsReview
+											? t("settings.decisionProvider.completionNeedsReview")
+											: t("settings.decisionProvider.completionComplete")}
 														{completionReview.score !== null
 															? ` · ${(completionReview.score * 100).toFixed(0)}%`
 															: ""}
 													</Badge>
-					{completionReview.needsReview && sourceTurn?.turnId && onReviewCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
+					{completionReview.needsReview && !completionReview.kept && sourceTurn?.turnId && onReviewCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
 														<Button
 															type="button"
 															variant="ghost"
@@ -504,7 +506,7 @@ export function ActiveThreadViewport({
 															{t("settings.decisionProvider.completionReviewAction")}
 														</Button>
 													) : null}
-					{completionReview.needsReview && sourceTurn?.turnId && onRegenerateCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
+					{completionReview.needsReview && !completionReview.kept && sourceTurn?.turnId && onRegenerateCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
 														<Button
 															type="button"
 															variant="ghost"
@@ -520,13 +522,18 @@ export function ActiveThreadViewport({
 															{t("settings.decisionProvider.completionRegenerateAction")}
 														</Button>
 					) : null}
-					{completionReview.needsReview && sourceTurn?.turnId && onKeepCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
+					{completionReview.needsReview && !completionReview.kept && sourceTurn?.turnId && onKeepCompletion && !completionReviewActionsDismissed?.has(message.turnId ?? "") ? (
 						<Button
 							type="button"
 							variant="ghost"
 							size="xs"
 							className="h-6 px-2 text-[11px]"
-							onClick={() => onKeepCompletion(sourceTurn.turnId!)}
+							onClick={() =>
+								void onKeepCompletion({
+									turnId: sourceTurn.turnId!,
+									score: completionReview.score,
+								})
+							}
 						>
 							{t("settings.decisionProvider.completionKeepAction")}
 						</Button>

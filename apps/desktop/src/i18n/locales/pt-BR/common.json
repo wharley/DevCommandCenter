@@ -2308,6 +2308,8 @@
       "completionRegenerateFailed": "Não foi possível regenerar a resposta.",
       "completionKeepAction": "Manter resposta",
       "completionKept": "Resposta mantida sem nova execução.",
+      "completionKeptLabel": "Resposta mantida",
+      "completionKeepFailed": "Não foi possível salvar a decisão de manter a resposta.",
       "historyMeta": "{{candidates}} candidato(s) · {{selected}} selecionado(s) · limiar {{threshold}} · {{duration}} ms",
       "historyFailedMeta": "{{candidates}} candidato(s) · requisição falhou após {{duration}} ms",
       "selectedLabels": "Selecionados: {{labels}}",

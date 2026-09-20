@@ -2171,6 +2171,40 @@ impl SessionCommandState {
             )
     }
 
+    pub fn record_decision_provider_completion_action(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        action: &str,
+        score: Option<f64>,
+    ) -> Result<()> {
+        if action != "keep" {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "unsupported completion review action".to_string(),
+            ));
+        }
+        let mut selected_labels = vec!["kept".to_string()];
+        if let Some(score) = score.filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+        {
+            selected_labels.push(format!("score:{score:.2}"));
+        }
+        self.record_decision_provider_history_for_turn(
+            session_id,
+            turn_id,
+            "completion_review",
+            "dcc_user",
+            "observe",
+            "completed",
+            "user",
+            1,
+            &[],
+            &selected_labels,
+            0.0,
+            0,
+            None,
+        )
+    }
+
     pub fn list_decision_provider_history(
         &self,
         limit: usize,
