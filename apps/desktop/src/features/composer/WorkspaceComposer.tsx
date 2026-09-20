@@ -513,7 +513,7 @@ export function WorkspaceComposer({
 			isSubmittingRef.current = true;
 			setIsSubmitting(true);
 			try {
-				await submitComposerDraftOptimistically({
+				const accepted = await submitComposerDraftOptimistically({
 					clearSubmittedDraft: () => {
 						clearDraft(submittedDraftKey);
 						setEditorText(editor, "");
@@ -521,6 +521,17 @@ export function WorkspaceComposer({
 					submit: () => submitFromComposer(prompt, behavior),
 					restoreSubmittedDraft,
 				});
+				if (accepted) {
+					// Model routing may create the session while the request is in
+					// flight, changing the draft key. Clear the active key again after
+					// acceptance so the submitted prompt cannot be rehydrated into the
+					// new conversation and sent twice by a later Enter.
+					const activeEditor = editorRef.current;
+					clearDraft(composerDraftKeyRef.current);
+					if (activeEditor) {
+						setEditorText(activeEditor, "");
+					}
+				}
 			} finally {
 				isSubmittingRef.current = false;
 				setIsSubmitting(false);
