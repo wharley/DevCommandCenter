@@ -105,6 +105,7 @@ import {
 	loadAiMemorySettings,
 	loadAiMemorySidecarStatus,
 	loadDecisionProviderSettings,
+	loadDecisionProviderHistory,
 	restartDcc,
 	retryAiMemoryOutbox,
 	saveAiMemorySettings,
@@ -721,6 +722,13 @@ export function SettingsDialog({
 		queryFn: loadDecisionProviderSettings,
 		enabled: open,
 		staleTime: 10_000,
+	});
+	const decisionProviderHistoryQuery = useQuery({
+		queryKey: ["decision-provider", "history"],
+		queryFn: () => loadDecisionProviderHistory(100),
+		enabled: open,
+		staleTime: 5_000,
+		refetchInterval: open ? 10_000 : false,
 	});
 	const [decisionProviderDraft, setDecisionProviderDraft] = useState<DecisionProviderSettingsInput>({
 		provider: "disabled",
@@ -1404,6 +1412,69 @@ export function SettingsDialog({
 											</Button>
 											{decisionProviderSettingsQuery.data?.apiKeyConfigured ? <Badge variant="secondary">{t("settings.decisionProvider.configured")}</Badge> : null}
 										</div>
+									</div>
+
+									<div className="rounded-xl border border-border/60 p-4">
+										<div className="flex items-start justify-between gap-4">
+											<div>
+												<h3 className="text-[14px] font-medium text-foreground">{t("settings.decisionProvider.historyTitle")}</h3>
+												<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{t("settings.decisionProvider.historyHint")}</p>
+											</div>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												disabled={decisionProviderHistoryQuery.isFetching}
+												onClick={() => void decisionProviderHistoryQuery.refetch()}
+											>
+												{decisionProviderHistoryQuery.isFetching ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+												{t("settings.decisionProvider.refreshHistory")}
+											</Button>
+										</div>
+										{decisionProviderHistoryQuery.isPending ? (
+											<p className="mt-4 text-[12px] text-muted-foreground">{t("settings.decisionProvider.historyLoading")}</p>
+										) : decisionProviderHistoryQuery.data?.length ? (
+											<ScrollArea className="mt-4 max-h-96 rounded-lg border border-border/50 bg-background">
+												<div className="divide-y divide-border/40">
+													{decisionProviderHistoryQuery.data.map((entry) => (
+														<div className="space-y-1.5 p-3" key={entry.id}>
+															<div className="flex flex-wrap items-center justify-between gap-2">
+																<div className="flex flex-wrap items-center gap-2">
+																	<Badge variant={entry.status === "completed" ? "secondary" : "destructive"} className="h-6 px-2 text-[10px] font-normal">
+																		{t(`settings.decisionProvider.historyStatus.${entry.status}`)}
+																	</Badge>
+																	<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
+																		{t(`settings.decisionProvider.historyModes.${entry.mode}`)}
+																	</Badge>
+																	<span className="font-mono text-[11px] text-foreground">{entry.model}</span>
+																</div>
+																<span className="text-[11px] text-muted-foreground">{formatAiMemoryTimestamp(entry.createdAt, i18n.resolvedLanguage ?? i18n.language)}</span>
+															</div>
+															<p className="text-[11px] text-muted-foreground">
+																{entry.status === "failed"
+																	? t("settings.decisionProvider.historyFailedMeta", { candidates: entry.candidateCount, duration: entry.durationMs })
+																	: t("settings.decisionProvider.historyMeta", {
+																		candidates: entry.candidateCount,
+																		selected: entry.selectedCount,
+																		threshold: entry.threshold,
+																		duration: entry.durationMs,
+																	})}
+															</p>
+															{entry.status === "completed" ? (
+																<p className="font-mono text-[11px] text-muted-foreground">
+																	{t("settings.decisionProvider.selectedIndices", {
+																		indices: entry.selectedIndices.length ? entry.selectedIndices.join(", ") : t("settings.decisionProvider.none"),
+																	})}
+																</p>
+															) : null}
+															{entry.error ? <p className="text-[11px] text-destructive">{entry.error}</p> : null}
+														</div>
+													))}
+												</div>
+											</ScrollArea>
+										) : (
+											<p className="mt-4 text-[12px] text-muted-foreground">{t("settings.decisionProvider.historyEmpty")}</p>
+										)}
 									</div>
 								</section>
 							) : null}

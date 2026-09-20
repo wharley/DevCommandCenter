@@ -188,6 +188,14 @@ pub fn ai_memory_export_history(
 }
 
 #[tauri::command]
+pub fn decision_provider_history(
+    state: State<'_, SessionCommandState>,
+    limit: Option<usize>,
+) -> Result<Vec<session_command_impl::DecisionProviderHistoryOutput>, String> {
+    session_command_impl::decision_provider_history(state.inner(), limit.unwrap_or(100))
+}
+
+#[tauri::command]
 pub fn ai_memory_sidecar_status(
     sidecar: State<'_, dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar>,
 ) -> Result<AiMemorySidecarStatus, String> {

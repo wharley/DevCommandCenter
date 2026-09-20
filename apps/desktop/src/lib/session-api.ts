@@ -40,6 +40,7 @@ import type {
 	AiMemorySyncOutput,
 	DecisionProviderSettingsInput,
 	DecisionProviderSettingsOutput,
+	DecisionProviderHistoryOutput,
 	ApplyTaskTitleInput,
 	ApplyTaskTitleOutput,
 	ApprovePlanInput,
@@ -156,6 +157,10 @@ export function loadDecisionProviderSettings() {
 
 export function saveDecisionProviderSettings(input: DecisionProviderSettingsInput) {
 	return invoke<DecisionProviderSettingsOutput>(SESSION_METHODS.decisionProviderSettingsSave, { input });
+}
+
+export function loadDecisionProviderHistory(limit = 100) {
+	return invoke<DecisionProviderHistoryOutput[]>(SESSION_METHODS.decisionProviderHistory, { limit });
 }
 
 export function restartDcc() {

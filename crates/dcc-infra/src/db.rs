@@ -264,6 +264,27 @@ CREATE TABLE IF NOT EXISTS dcc_ai_memory_source_actions (
 	updated_at TEXT NOT NULL
 );
 
+-- Local audit history for Decision Provider classifications. This stores
+-- bounded metadata only: source snippets and provider credentials are never
+-- copied into this table.
+CREATE TABLE IF NOT EXISTS dcc_decision_provider_history (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id TEXT NOT NULL,
+	mode TEXT NOT NULL CHECK (mode IN ('observe', 'enforce')),
+	status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+	model TEXT NOT NULL,
+	candidate_count INTEGER NOT NULL,
+	selected_count INTEGER NOT NULL,
+	selected_indices_json TEXT NOT NULL,
+	threshold REAL NOT NULL,
+	duration_ms INTEGER NOT NULL,
+	error TEXT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_decision_provider_history_created
+	ON dcc_decision_provider_history(created_at DESC, id DESC);
+
 -- Web Push was retired in 0.1.66. Stop legacy databases from accumulating
 -- notifications without a delivery worker; keep existing user data intact.
 DROP TRIGGER IF EXISTS mobile_push_event_insert;
@@ -1252,6 +1273,22 @@ pub struct AiMemorySourceAction {
     pub updated_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct DecisionProviderHistoryEntry {
+    pub id: i64,
+    pub session_id: SessionId,
+    pub mode: String,
+    pub status: String,
+    pub model: String,
+    pub candidate_count: usize,
+    pub selected_count: usize,
+    pub selected_indices: Vec<usize>,
+    pub threshold: f64,
+    pub duration_ms: u64,
+    pub error: Option<String>,
+    pub created_at: String,
+}
+
 /// Content-free projection of a capture-v2 restoration record for review UI.
 ///
 /// It deliberately excludes artifact locators, digests, physical identities,
@@ -1546,6 +1583,104 @@ impl SqliteSessionRepo {
                     error: row.get(7)?,
                     started_at: row.get(8)?,
                     finished_at: row.get(9)?,
+                })
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        rows.map(|row| row.map_err(|error| dcc_core::CoreError::Repository(error.to_string())))
+            .collect()
+    }
+
+    pub fn record_decision_provider_history(
+        &self,
+        session_id: &SessionId,
+        mode: &str,
+        status: &str,
+        model: &str,
+        candidate_count: usize,
+        selected_indices: &[usize],
+        threshold: f64,
+        duration_ms: u64,
+        error_message: Option<&str>,
+        created_at: &str,
+    ) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let selected_indices_json = serde_json::to_string(selected_indices)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_decision_provider_history
+                (session_id, mode, status, model, candidate_count, selected_count,
+                 selected_indices_json, threshold, duration_ms, error, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
+            params![
+                session_id.0.clone(),
+                mode,
+                status,
+                model,
+                i64::try_from(candidate_count).unwrap_or(i64::MAX),
+                i64::try_from(selected_indices.len()).unwrap_or(i64::MAX),
+                selected_indices_json,
+                threshold,
+                i64::try_from(duration_ms).unwrap_or(i64::MAX),
+                error_message,
+                created_at,
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn list_decision_provider_history(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<DecisionProviderHistoryEntry>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                r#"
+                SELECT id, session_id, mode, status, model, candidate_count,
+                       selected_count, selected_indices_json, threshold, duration_ms,
+                       error, created_at
+                  FROM dcc_decision_provider_history
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ?1
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+                let candidate_count = row.get::<_, i64>(5)?;
+                let selected_count = row.get::<_, i64>(6)?;
+                let selected_indices_json = row.get::<_, String>(7)?;
+                let selected_indices =
+                    serde_json::from_str(&selected_indices_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                let duration_ms = row.get::<_, i64>(9)?;
+                Ok(DecisionProviderHistoryEntry {
+                    id: row.get(0)?,
+                    session_id: SessionId(row.get(1)?),
+                    mode: row.get(2)?,
+                    status: row.get(3)?,
+                    model: row.get(4)?,
+                    candidate_count: usize::try_from(candidate_count).unwrap_or(usize::MAX),
+                    selected_count: usize::try_from(selected_count).unwrap_or(usize::MAX),
+                    selected_indices,
+                    threshold: row.get(8)?,
+                    duration_ms: u64::try_from(duration_ms).unwrap_or(u64::MAX),
+                    error: row.get(10)?,
+                    created_at: row.get(11)?,
                 })
             })
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;

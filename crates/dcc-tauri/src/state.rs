@@ -71,7 +71,8 @@ use dcc_infra::{
     credential_store::SystemCredentialStore,
     db::{
         AiMemoryExportHistoryEntry, AiMemoryOutboxEntry, AiMemorySourceAction,
-        ProviderAvailabilityRecord, SqliteSessionRepo, SqliteWorkspaceRepo,
+        DecisionProviderHistoryEntry, ProviderAvailabilityRecord, SqliteSessionRepo,
+        SqliteWorkspaceRepo,
     },
     mcp_db::SqliteMcpRepo,
 };
@@ -2096,6 +2097,41 @@ impl SessionCommandState {
     ) -> Result<Vec<AiMemoryExportHistoryEntry>> {
         self.session_repo
             .list_ai_memory_export_history(limit.clamp(1, 200))
+    }
+
+    pub fn record_decision_provider_history(
+        &self,
+        session_id: &SessionId,
+        mode: &str,
+        status: &str,
+        model: &str,
+        candidate_count: usize,
+        selected_indices: &[usize],
+        threshold: f64,
+        duration_ms: u64,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        self.session_repo.record_decision_provider_history(
+            session_id,
+            mode,
+            status,
+            model,
+            candidate_count,
+            selected_indices,
+            threshold,
+            duration_ms,
+            error_message,
+            &created_at,
+        )
+    }
+
+    pub fn list_decision_provider_history(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<DecisionProviderHistoryEntry>> {
+        self.session_repo
+            .list_decision_provider_history(limit.clamp(1, 200))
     }
 
     pub async fn retry_ai_memory_export(&self, session_id: &SessionId) -> Result<()> {

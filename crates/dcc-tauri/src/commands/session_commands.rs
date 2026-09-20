@@ -137,6 +137,23 @@ pub struct AiMemoryExportHistoryOutput {
     pub finished_at: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionProviderHistoryOutput {
+    pub id: i64,
+    pub session_id: String,
+    pub mode: String,
+    pub status: String,
+    pub model: String,
+    pub candidate_count: usize,
+    pub selected_count: usize,
+    pub selected_indices: Vec<usize>,
+    pub threshold: f64,
+    pub duration_ms: u64,
+    pub error: Option<String>,
+    pub created_at: String,
+}
+
 pub type AiMemoryOutboxListOutput = Vec<AiMemoryOutboxStatusOutput>;
 
 pub type AiMemoryExportHistoryListOutput = Vec<AiMemoryExportHistoryOutput>;
@@ -450,6 +467,34 @@ pub fn ai_memory_export_history(
                     error: entry.error,
                     started_at: entry.started_at,
                     finished_at: entry.finished_at,
+                })
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+}
+
+pub fn decision_provider_history(
+    state: &SessionCommandState,
+    limit: usize,
+) -> Result<Vec<DecisionProviderHistoryOutput>, String> {
+    state
+        .list_decision_provider_history(limit)
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| DecisionProviderHistoryOutput {
+                    id: entry.id,
+                    session_id: entry.session_id.0,
+                    mode: entry.mode,
+                    status: entry.status,
+                    model: entry.model,
+                    candidate_count: entry.candidate_count,
+                    selected_count: entry.selected_count,
+                    selected_indices: entry.selected_indices,
+                    threshold: entry.threshold,
+                    duration_ms: entry.duration_ms,
+                    error: entry.error,
+                    created_at: entry.created_at,
                 })
                 .collect()
         })
@@ -1168,7 +1213,7 @@ async fn ai_memory_context_for_turn(
             return None;
         }
     };
-    let hits = apply_decision_provider_memory_filter(prompt, hits).await;
+    let hits = apply_decision_provider_memory_filter(state, &session.id, prompt, hits).await;
     state.record_ai_memory_hits(&session.id, hits.clone());
     if hits.is_empty() {
         return None;
@@ -1203,6 +1248,8 @@ async fn ai_memory_context_for_turn(
 }
 
 async fn apply_decision_provider_memory_filter(
+    state: &SessionCommandState,
+    session_id: &SessionId,
     prompt: &str,
     hits: Vec<AiMemoryHit>,
 ) -> Vec<AiMemoryHit> {
@@ -1214,6 +1261,12 @@ async fn apply_decision_provider_memory_filter(
         return hits;
     }
 
+    let started = Instant::now();
+    let mode = match provider.config().mode {
+        DecisionMode::Observe => "observe",
+        DecisionMode::Enforce => "enforce",
+    };
+
     let result = match provider
         .filter_memory(MemoryFilterInput {
             prompt,
@@ -1223,6 +1276,21 @@ async fn apply_decision_provider_memory_filter(
     {
         Ok(result) => result,
         Err(error) => {
+            let error_message = error.to_string();
+            let bounded_error: String = error_message.chars().take(500).collect();
+            if let Err(record_error) = state.record_decision_provider_history(
+                session_id,
+                mode,
+                "failed",
+                &provider.config().model,
+                hits.len(),
+                &[],
+                provider.config().memory_relevance_threshold,
+                started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+                Some(&bounded_error),
+            ) {
+                eprintln!("[DCC] failed to persist decision provider history: {record_error}");
+            }
             eprintln!("[DCC] decision provider memory filter failed: {error}");
             return hits;
         }
@@ -1235,6 +1303,19 @@ async fn apply_decision_provider_memory_filter(
         .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
         .map(|decision| decision.index)
         .collect::<Vec<_>>();
+    if let Err(error) = state.record_decision_provider_history(
+        session_id,
+        mode,
+        "completed",
+        &result.model,
+        hits.len(),
+        &selected_indices,
+        provider.config().memory_relevance_threshold,
+        started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        None,
+    ) {
+        eprintln!("[DCC] failed to persist decision provider history: {error}");
+    }
     eprintln!(
         "[DCC] decision provider memory_filter mode={:?} model={} candidates={} selected={:?}",
         provider.config().mode,

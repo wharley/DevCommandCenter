@@ -2273,7 +2273,24 @@
       "save": "Save configuration",
       "saved": "Decision Provider configuration saved",
       "saveError": "Could not save the Decision Provider configuration.",
-      "configured": "Keychain configured"
+      "configured": "Keychain configured",
+      "historyTitle": "Decision history",
+      "historyHint": "Recent Jev classifications made while filtering project memory. Snippets and API keys are not stored here.",
+      "refreshHistory": "Refresh history",
+      "historyLoading": "Loading decision history…",
+      "historyEmpty": "No Jev decisions recorded yet.",
+      "historyStatus": {
+        "completed": "Completed",
+        "failed": "Failed"
+      },
+      "historyModes": {
+        "observe": "Observe",
+        "enforce": "Enforce"
+      },
+      "historyMeta": "{{candidates}} candidate(s) · {{selected}} selected · threshold {{threshold}} · {{duration}} ms",
+      "historyFailedMeta": "{{candidates}} candidate(s) · request failed after {{duration}} ms",
+      "selectedIndices": "Selected candidate indexes: {{indices}}",
+      "none": "none"
     },
     "aiMemory": {
       "title": "Project memory",
