@@ -2951,7 +2951,8 @@ fn push_current_branch_inner(
     // workspace binding before starting any network command, then release the
     // repository so no SQLite handle/transaction is carried across fetch,
     // push, hooks, or branch materialization.
-    let workspace = futures::executor::block_on(find_workspace_by_root(&repo, root))?;
+    let workspace = futures::executor::block_on(find_workspace_by_root(&repo, root))?
+        .filter(|workspace| resolve_workspace_active_root(workspace) == root);
     drop(repo);
     let protected_branch = workspace
         .as_ref()
@@ -3019,10 +3020,26 @@ fn push_current_branch_inner(
         );
     }
 
-    let preferred_branch = workspace
+    let branch = if workspace
         .as_ref()
-        .and_then(|workspace| preferred_workspace_branch_name(workspace.name.as_deref()));
-    let branch = ensure_pushable_branch(root, protected_branch, preferred_branch.as_deref())?;
+        .is_some_and(|workspace| workspace.worktree_path.is_some())
+    {
+        let preferred_branch = workspace
+            .as_ref()
+            .and_then(|workspace| preferred_workspace_branch_name(workspace.name.as_deref()));
+        ensure_pushable_branch(root, protected_branch, preferred_branch.as_deref())?
+    } else {
+        // Local-direct execution uses the current checkout, including its
+        // base branch. Publishing must not silently switch it to a DCC branch.
+        let branch = resolve_current_branch_name(root)?;
+        if branch == "HEAD" {
+            return Err(
+                "cannot push a local-direct checkout with detached HEAD; switch to a branch first"
+                    .to_string(),
+            );
+        }
+        branch
+    };
     let identity = observe_push_identity(root)?;
     if identity.branch != branch {
         return Err("workspace branch changed while preparing the push".to_string());
@@ -9970,6 +9987,165 @@ mod editor_workspace_file_tests {
             "main"
         );
         assert!(resolve_commitish_sha(repo.as_str(), "refs/heads/continued").is_err());
+    }
+
+    #[test]
+    fn push_respects_local_direct_and_protected_worktree_modes() {
+        for (local_branch, protected, commit_first, other_task) in [
+            ("main", false, true, false),
+            ("main", false, false, false),
+            ("main", false, true, true),
+            ("user/existing-work", false, true, true),
+            ("main", true, true, true),
+        ] {
+            let dir = TestDir::new("push-isolation-mode");
+            let root = dir.path.join("repository");
+            let remote = dir.path.join("remote.git");
+            fs::create_dir_all(&root).expect("create repository");
+            fs::create_dir_all(&remote).expect("create remote");
+            let root = root.to_str().unwrap();
+            let remote = remote.to_str().unwrap();
+            for args in [
+                vec!["init", "-b", local_branch],
+                vec!["config", "user.name", "DCC Tests"],
+                vec!["config", "user.email", "dcc@example.invalid"],
+                vec!["commit", "--allow-empty", "-m", "initial"],
+            ] {
+                assert!(run_git_output(root, &args).unwrap().status.success());
+            }
+            assert!(run_git_output(remote, &["init", "--bare"])
+                .unwrap()
+                .status
+                .success());
+            assert!(run_git_output(root, &["remote", "add", "origin", remote])
+                .unwrap()
+                .status
+                .success());
+
+            let worktree = dir.path.join("protected");
+            let worktree = worktree.to_str().unwrap();
+            assert!(
+                run_git_output(root, &["worktree", "add", "--detach", worktree, "HEAD"])
+                    .unwrap()
+                    .status
+                    .success()
+            );
+            let db_path = dir.path.join("workspaces.sqlite");
+            let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+            let mut local = workspace_for_rename("local", "Adicionar documentação");
+            local.root_path = root.to_string();
+            local.worktree_path = None;
+            let mut isolated = local.clone();
+            isolated.id = WorkspaceId("protected".to_string());
+            isolated.worktree_path = Some(worktree.to_string());
+            // A newer protected task for the same repository must not supply
+            // its isolation mode or PR push target to the local task.
+            isolated.updated_at = "2026-09-21T00:00:00Z".to_string();
+            if !protected {
+                isolated.source = imported_fork_workspace("other", root, "origin").source;
+            }
+            futures::executor::block_on(repo.save_workspace(&local)).unwrap();
+            if protected || other_task {
+                futures::executor::block_on(repo.save_workspace(&isolated)).unwrap();
+            }
+            drop(repo);
+
+            let active = if protected { worktree } else { root };
+            let worktrees_before = run_git_output(root, &["worktree", "list", "--porcelain"])
+                .unwrap()
+                .stdout;
+            let branch_list_before = list_local_branch_names(root).unwrap();
+            let committed = if commit_first {
+                fs::write(Path::new(active).join("change.txt"), "local change\n").unwrap();
+                assert!(run_git_output(active, &["add", "change.txt"])
+                    .unwrap()
+                    .status
+                    .success());
+                let snapshot = capture_staged_snapshot(active).expect("staged snapshot");
+                commit_staged_workspace_changes_for_push(
+                    active,
+                    "Update docs",
+                    None,
+                    &snapshot.fingerprint,
+                )
+                .expect("commit staged changes");
+                Some(observe_push_identity(active).unwrap())
+            } else {
+                None
+            };
+            push_current_branch_inner(
+                &db_path,
+                active,
+                Some("main"),
+                None,
+                committed.as_ref(),
+                None,
+            )
+            .expect("push using the selected isolation mode");
+
+            let expected_branch = if protected {
+                "dcc/feat/adicionar-documentacao"
+            } else {
+                local_branch
+            };
+            assert_eq!(
+                resolve_current_branch_name(active).unwrap(),
+                expected_branch
+            );
+            assert_eq!(resolve_current_branch_name(root).unwrap(), local_branch);
+            assert_eq!(
+                resolve_commitish_sha(remote, &format!("refs/heads/{expected_branch}")).unwrap(),
+                observe_push_identity(active).unwrap().head,
+            );
+            if !protected {
+                assert_eq!(list_local_branch_names(root).unwrap(), branch_list_before);
+                assert_eq!(
+                    run_git_output(root, &["worktree", "list", "--porcelain"])
+                        .unwrap()
+                        .stdout
+                        .split(|byte| *byte == b'\n')
+                        .filter(|line| line.starts_with(b"worktree "))
+                        .collect::<Vec<_>>(),
+                    worktrees_before
+                        .split(|byte| *byte == b'\n')
+                        .filter(|line| line.starts_with(b"worktree "))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn local_direct_push_with_detached_head_does_not_create_a_branch() {
+        let dir = TestDir::new("local-direct-detached-push");
+        initialize_branch_test_repository(dir.as_str(), "user/work");
+        assert!(run_git_output(dir.as_str(), &["switch", "--detach"])
+            .unwrap()
+            .status
+            .success());
+        let db_path = dir.path.join("workspaces.sqlite");
+        let repo = SqliteWorkspaceRepo::open(&db_path).unwrap();
+        let mut workspace = workspace_for_rename("local", "Adicionar documentação");
+        workspace.root_path = dir.as_str().to_string();
+        workspace.worktree_path = None;
+        futures::executor::block_on(repo.save_workspace(&workspace)).unwrap();
+        drop(repo);
+        // No network access is needed to reject a detached local checkout.
+        assert!(
+            run_git_output(dir.as_str(), &["remote", "remove", "origin"])
+                .unwrap()
+                .status
+                .success()
+        );
+        let branches = list_local_branch_names(dir.as_str()).unwrap();
+
+        let error =
+            push_current_branch_inner(&db_path, dir.as_str(), Some("main"), None, None, None)
+                .expect_err("local direct requires an existing checked-out branch");
+
+        assert!(error.contains("detached HEAD"), "{error}");
+        assert_eq!(resolve_current_branch_name(dir.as_str()).unwrap(), "HEAD");
+        assert_eq!(list_local_branch_names(dir.as_str()).unwrap(), branches);
     }
 
     #[test]

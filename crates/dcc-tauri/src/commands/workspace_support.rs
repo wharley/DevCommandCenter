@@ -148,10 +148,17 @@ pub(crate) async fn find_workspace_by_root(
         .list_workspaces()
         .await
         .map_err(|error| error.to_string())?;
-    Ok(workspaces.into_iter().find(|workspace| {
-        workspace.root_path == workspace_root
-            || workspace.worktree_path.as_deref() == Some(workspace_root)
-    }))
+    // Local-direct and protected tasks can share a repository root. Prefer
+    // the task executing at this path over another task's parent checkout.
+    Ok(workspaces
+        .iter()
+        .find(|workspace| resolve_workspace_active_root(workspace) == workspace_root)
+        .or_else(|| {
+            workspaces
+                .iter()
+                .find(|workspace| workspace.root_path == workspace_root)
+        })
+        .cloned())
 }
 
 /// Checks whether a registered workspace is unavailable without changing its
