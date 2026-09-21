@@ -67,7 +67,7 @@ jobs:
     needs: define-matrix
     name: Publish (${{ matrix.name }})
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 90
+    timeout-minutes: 180
     environment:
       name: release
       url: https://github.com/wharley/DevCommandCenter/releases
