@@ -1,0 +1,55 @@
+name: Setup cached OJ
+description: Reuse a validated OJ installation, falling back to a locked Cargo build.
+
+inputs:
+  version:
+    description: Exact OJ version to install
+    default: "0.2.2"
+
+runs:
+  using: composite
+  steps:
+    - name: Identify OJ cache
+      id: identity
+      shell: bash
+      env:
+        OJ_VERSION: ${{ inputs.version }}
+        OJ_RUNNER_OS: ${{ runner.os }}
+        OJ_RUNNER_ARCH: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+        [[ "$OJ_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        case "$OJ_RUNNER_OS" in
+          Linux)
+            . /etc/os-release
+            image="$ID-$VERSION_ID"
+            ;;
+          macOS)
+            image="macos-$(sw_vers -productVersion | cut -d. -f1)"
+            ;;
+          *) echo "Unsupported OJ runner: $OJ_RUNNER_OS" >&2; exit 1 ;;
+        esac
+        echo "key=oj-install-v1-$OJ_RUNNER_OS-$OJ_RUNNER_ARCH-$image-$OJ_VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Restore OJ installation
+      id: cache
+      uses: actions/cache/restore@v4
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/dcc-oj
+        key: ${{ steps.identity.outputs.key }}
+    - name: Validate or install OJ
+      shell: bash
+      env:
+        DCC_OJ_VERSION: ${{ inputs.version }}
+        DCC_OJ_ROOT: ${{ runner.temp }}/dcc-oj
+      run: node "$GITHUB_ACTION_PATH/install.mjs"
+
+    # Save immediately, so a later app build/signing failure does not lose OJ.
+    - name: Save OJ installation
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/dcc-oj
+        key: ${{ steps.identity.outputs.key }}

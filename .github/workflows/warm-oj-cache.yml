@@ -1,0 +1,39 @@
+name: Prepare OJ cache
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/actions/setup-oj/**"
+      - ".github/workflows/warm-oj-cache.yml"
+      - "scripts/ensure-oj.mjs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warm-oj-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    # Caches written on main can be restored by future release tags.
+    if: github.ref == 'refs/heads/main'
+    name: Prepare OJ (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-24.04, macos-latest, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install OJ
+        uses: ./.github/actions/setup-oj
+      - name: Verify project OJ version
+        run: node scripts/ensure-oj.mjs

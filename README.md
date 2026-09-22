@@ -209,6 +209,14 @@ Before starting your first agent session, complete [Provider setup](#provider-se
 - Signed public releases are prepared through GitHub Releases via `.github/workflows/publish-release.yml`.
 - Public release publication is intentionally limited to manual dispatch or version tags.
 - Manual release dispatch can target `all`, `linux-x64`, `macos-arm64`, or `macos-intel`.
+- OJ installation is cached by exact version, runner OS/architecture, and OS
+  version. Each restored executable is checked before use; a missing or unusable
+  cache falls back to `cargo install --locked`.
+- `Prepare OJ cache` runs on `main` when its setup changes, and supports manual
+  dispatch on `main`. It prepares Linux and both macOS binaries for future release
+  tags, which cannot directly reuse caches saved under other tags. The first run
+  still compiles OJ; an evicted cache also requires recompilation. After upgrading
+  OJ or changing runner OS versions, run this workflow on `main` before releasing.
 - The in-app updater is configured to read `latest.json` from GitHub Releases after the first signed release is published.
 - Validation workflows and release publishing are intentionally separated so signing secrets stay isolated to the protected `release` environment.
 

@@ -43,7 +43,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install OJ
-        run: cargo install oj --version 0.2.2 --locked
+        uses: ./.github/actions/setup-oj
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
