@@ -1,3 +1,4 @@
+import { LocalBranchPicker } from "@/features/workspaces/local-branch-picker";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -387,6 +388,7 @@ export function WorkspacePanel({
 		[onFileSurfaceClosed, onCloseSurface],
 	);
 	const queryClient = useQueryClient();
+	const [localBranchSwitching, setLocalBranchSwitching] = useState(false);
 	// Find-in-thread is per conversation; a focus request carries a nonce so
 	// re-selecting the same match still re-scrolls.
 	const [threadFindOpen, setThreadFindOpen] = useState(false);
@@ -1648,9 +1650,17 @@ export function WorkspacePanel({
 				<div className="shrink-0 px-3 pb-3 pt-2 sm:px-4">
 					<div className="mx-auto w-full max-w-[52rem]">
 					<WorkspaceComposer
+						localBranchControl={!isIsolatedWorkspace && sessionQueryScope === "local" ? <LocalBranchPicker
+							key={workspaceId}
+							workspaceId={workspaceId}
+							fallbackBranch={currentBranch ?? workspaceBranch}
+							conversationStarted={messages.length > 0 || sessions.some((session) => session.projection.turnCount > 0)}
+							busy={startingSession || modelRouting || pendingPrompt !== null}
+							onBusyChange={setLocalBranchSwitching}
+						/> : undefined}
 						draftKey={workspaceId}
 						draftSessionId={effectiveSessionId}
-						disabled={startingSession || modelRouting || pendingModelRoute !== null}
+						disabled={startingSession || modelRouting || pendingModelRoute !== null || localBranchSwitching}
 						providerChoices={providerChoices}
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}

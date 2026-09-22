@@ -1,3 +1,4 @@
+use dcc_tauri::commands::local_branches::{LocalBranchesInput, LocalBranchesOutput, SwitchLocalBranchInput};
 use std::{env, fs, path::PathBuf, process::Command};
 
 fn build_macos_computer_bridge() {
@@ -429,6 +430,8 @@ struct WorkspaceMethods {
     workspace_retry_repository_forge_binding: String,
     workspace_forge_context: String,
     list_local_branches: String,
+    workspace_local_branches: String,
+    workspace_switch_local_branch: String,
     list_git_tracked_files: String,
     read_workspace_file: String,
     write_workspace_file: String,
@@ -706,6 +709,9 @@ fn main() {
         .typ::<WorkspaceSetupStatus>()
         .typ::<WorkspaceSetupStepReport>()
         .typ::<WorkspaceSetupReport>()
+        .typ::<LocalBranchesInput>()
+        .typ::<LocalBranchesOutput>()
+        .typ::<SwitchLocalBranchInput>()
         .typ::<ListLocalBranchesInput>()
         .typ::<ListLocalBranchesOutput>()
         .typ::<ListGitTrackedFilesInput>()
@@ -1052,6 +1058,8 @@ fn main() {
                     "workspace_retry_repository_forge_binding".to_string(),
                 workspace_forge_context: "workspace_forge_context".to_string(),
                 list_local_branches: "list_local_branches".to_string(),
+                workspace_local_branches: "workspace_local_branches".to_string(),
+                workspace_switch_local_branch: "workspace_switch_local_branch".to_string(),
                 list_git_tracked_files: "list_git_tracked_files".to_string(),
                 read_workspace_file: "read_workspace_file".to_string(),
                 write_workspace_file: "write_workspace_file".to_string(),

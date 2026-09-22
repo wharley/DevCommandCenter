@@ -111,7 +111,7 @@ const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
 const DCC_SPEC_CONTEXT_END: &str = "<!-- dcc:spec:end -->";
 const DCC_SPEC_CONTEXT_MANIFEST_PATH: &str = ".devcommandcenter/context.json";
 
-fn workspace_mutation_error(error: WorkspaceMutationRequestError<String>) -> String {
+pub(crate) fn workspace_mutation_error(error: WorkspaceMutationRequestError<String>) -> String {
     match error {
         WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(error)) => {
             error
@@ -7209,8 +7209,15 @@ pub async fn create_workspace_from_source_url(
 async fn create_workspace_for_repo_with_repo(
     repo: &SqliteWorkspaceRepo,
     app: &AppHandle,
-    input: CreateWorkspaceForRepoInput,
+    mut input: CreateWorkspaceForRepoInput,
 ) -> Result<CreateWorkspaceForRepoOutput, String> {
+    if matches!(
+        input.isolation_mode,
+        Some(dcc_core::application::WorkspaceIsolationMode::LocalDirect)
+    ) {
+        input.base_branch = super::local_branches::current_branch(&input.workspace_root)?
+            .unwrap_or_else(|| "HEAD".into());
+    }
     if let Some(existing) = recover_existing_workspace_for_create(repo, Some(app), &input).await? {
         return Ok(existing);
     }

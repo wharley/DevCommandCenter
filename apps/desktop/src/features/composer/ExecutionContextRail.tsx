@@ -6,7 +6,7 @@ import {
 	ShieldCheck,
 	Terminal,
 } from "lucide-react";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSetupReport } from "@dcc/contracts";
 import {
@@ -19,6 +19,7 @@ import { ProjectIdentityGlyph } from "@/features/workspaces/project-identity";
 import { NoteCaptureButton } from "@/features/notes/note-capture-button";
 
 type ExecutionContextRailProps = {
+	localBranchControl?: ReactNode;
 	noteSessionId?: string | null;
 	projectLabel: string | null;
 	projectIcon?: string | null;
@@ -38,6 +39,7 @@ type ExecutionContextRailProps = {
 };
 
 export const ExecutionContextRail = memo(function ExecutionContextRail({
+	localBranchControl,
 	noteSessionId,
 	projectLabel,
 	projectIcon = null,
@@ -192,7 +194,7 @@ export const ExecutionContextRail = memo(function ExecutionContextRail({
 								: displayedProject}
 						</span>
 					</span>
-					{workingBranch ? (
+					{!isIsolatedWorkspace && localBranchControl ? localBranchControl : workingBranch ? (
 						<span
 							className="dcc-execution-branch flex min-w-0 items-center gap-1.5"
 							title={workingBranch}

@@ -555,3 +555,19 @@ pub async fn delete_repository(
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::delete_repository(state, input).await
 }
+
+#[tauri::command]
+pub async fn workspace_local_branches(
+    state: State<'_, WorkspaceCommandState>,
+    input: dcc_tauri::commands::local_branches::LocalBranchesInput,
+) -> Result<dcc_tauri::commands::local_branches::LocalBranchesOutput, String> {
+    dcc_tauri::commands::local_branches::workspace_local_branches(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_switch_local_branch(
+    state: State<'_, WorkspaceCommandState>,
+    input: dcc_tauri::commands::local_branches::SwitchLocalBranchInput,
+) -> Result<dcc_tauri::commands::local_branches::LocalBranchesOutput, String> {
+    dcc_tauri::commands::local_branches::workspace_switch_local_branch(state, input).await
+}

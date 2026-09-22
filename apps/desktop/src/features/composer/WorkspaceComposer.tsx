@@ -1,5 +1,5 @@
 import { COMPOSER_LIST_NODES } from "./editor/composer-lists";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -140,6 +140,7 @@ import {
 } from "@/lib/session-api";
 
 type WorkspaceComposerProps = {
+	localBranchControl?: ReactNode;
 	draftKey: string;
 	draftSessionId: string | null;
 	disabled: boolean;
@@ -190,6 +191,7 @@ type WorkspaceComposerProps = {
 };
 
 export function WorkspaceComposer({
+	localBranchControl,
 	draftKey,
 	draftSessionId,
 	disabled,
@@ -1431,6 +1433,7 @@ export function WorkspaceComposer({
 		</div>,
 		<ExecutionContextRail
 			key="execution-context"
+			localBranchControl={localBranchControl}
 			noteSessionId={sessionId}
 			projectLabel={projectLabel}
 			projectIcon={projectIcon}

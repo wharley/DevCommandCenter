@@ -6380,6 +6380,13 @@ impl SessionCommandState {
     }
 
     pub async fn steer_provider_turn(&self, session_id: &SessionId, prompt: &str) -> Result<()> {
+        // All steering entry points must validate the checkout before provider input.
+        let _branch_guards = crate::commands::local_branches::guard_conversation_event(
+            self.db_path(),
+            session_id,
+        )
+        .await
+        .map_err(dcc_core::CoreError::InvalidInput)?;
         let binding = self.provider_binding(session_id)?.ok_or_else(|| {
             dcc_core::CoreError::Provider(format!(
                 "no provider binding for session {}",
@@ -6711,6 +6718,18 @@ impl SessionEventRepo for SessionCommandState {
         &self,
         event: &SessionEventRecord,
     ) -> Result<dcc_core::ports::AppendEventOutcome> {
+        let _branch_guards = if matches!(
+            event.kind,
+            SessionEventKind::TurnStarted { .. }
+                | SessionEventKind::TurnQueued { .. }
+                | SessionEventKind::TurnSteered { .. }
+        ) {
+            crate::commands::local_branches::guard_conversation_event(self.db_path(), &event.session_id)
+                .await
+                .map_err(dcc_core::CoreError::InvalidInput)?
+        } else {
+            Vec::new()
+        };
         SessionEventRepo::append_event(&self.session_repo, event).await
     }
 

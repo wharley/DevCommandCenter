@@ -1,4 +1,21 @@
 {
+  "localBranch": {
+    "choose": "Choose branch",
+    "locked": "The branch cannot be changed after the conversation has started.",
+    "agentRunning": "An agent is working in this folder. Wait before switching branches.",
+    "detached": "Detached HEAD",
+    "search": "Search branches…",
+    "refresh": "Refresh remote branches",
+    "refreshFailed": "Could not refresh remotes. Known branches are still available.",
+    "local": "Local branches",
+    "remote": "Remote branches",
+    "empty": "No branches found.",
+    "from": "Create from {{branch}}",
+    "name": "New branch name",
+    "create": "Create and checkout new branch…",
+    "mismatch": "This conversation belongs to {{expected}}, but the folder is on {{actual}}. Restore the branch in the terminal or start another task to continue.",
+    "retry": "Could not read branches. Try again"
+  },
   "frontendRecovery": {
     "title": "This screen could not be displayed",
     "body": "An interface error occurred. Copy the diagnostic report to help investigate, then reload the app to return to the conversation.",

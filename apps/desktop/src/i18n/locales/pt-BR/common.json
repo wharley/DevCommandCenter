@@ -1,4 +1,21 @@
 {
+  "localBranch": {
+    "choose": "Escolher branch",
+    "locked": "A branch não pode ser alterada após o início da conversa.",
+    "agentRunning": "Há um agente trabalhando nesta pasta. Aguarde antes de trocar de branch.",
+    "detached": "HEAD destacado",
+    "search": "Buscar branches…",
+    "refresh": "Atualizar branches remotas",
+    "refreshFailed": "Não foi possível atualizar as remotas. As branches conhecidas continuam disponíveis.",
+    "local": "Branches locais",
+    "remote": "Branches remotas",
+    "empty": "Nenhuma branch encontrada.",
+    "from": "Criar a partir de {{branch}}",
+    "name": "Nome da nova branch",
+    "create": "Criar e mudar para nova branch…",
+    "mismatch": "Esta conversa pertence a {{expected}}, mas a pasta está em {{actual}}. Restaure a branch no terminal ou inicie outra tarefa para continuar.",
+    "retry": "Não foi possível ler as branches. Tentar novamente"
+  },
   "frontendRecovery": {
     "title": "Não foi possível exibir esta tela",
     "body": "Ocorreu um erro na interface. Copie o diagnóstico para ajudar a investigar e recarregue o aplicativo para retomar a conversa.",

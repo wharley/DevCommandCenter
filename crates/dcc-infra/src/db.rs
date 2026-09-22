@@ -81,6 +81,14 @@ CREATE TABLE IF NOT EXISTS dcc_workspaces (
 
 CREATE INDEX IF NOT EXISTS idx_dcc_workspaces_project_id
 ON dcc_workspaces(project_id);
+
+-- The branch chosen when a local conversation starts is independent of the
+-- project base branch and survives closed/deleted sessions until task deletion.
+CREATE TABLE IF NOT EXISTS dcc_local_branch_bindings (
+    workspace_id TEXT PRIMARY KEY NOT NULL,
+    branch TEXT NOT NULL,
+    FOREIGN KEY (workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
+);
 "#;
 
 const REPOSITORY_TABLE_SQL: &str = r#"
@@ -759,6 +767,34 @@ impl SqliteWorkspaceRepo {
         let repo = Self { conn };
         repo.ensure_schema()?;
         Ok(repo)
+    }
+
+    pub fn local_branch_binding(&self, id: &WorkspaceId) -> Result<Option<String>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            "SELECT branch FROM dcc_local_branch_bindings WHERE workspace_id = ?1",
+            [&id.0],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Insert once: only deleting the task removes its conversation's branch binding.
+    pub fn bind_local_branch(&self, id: &WorkspaceId, branch: &str) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "INSERT INTO dcc_local_branch_bindings (workspace_id, branch) VALUES (?1, ?2) ON CONFLICT(workspace_id) DO NOTHING",
+            params![id.0, branch],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
     }
 
     fn ensure_schema(&self) -> Result<()> {

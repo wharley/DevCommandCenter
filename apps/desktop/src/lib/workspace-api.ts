@@ -776,3 +776,11 @@ export function workspaceGitFilePreviewContent(input: WorkspaceGitFilePreviewInp
 		{ input },
 	);
 }
+
+export function workspaceLocalBranches(input: import("@dcc/contracts").LocalBranchesInput) {
+	return invoke<import("@dcc/contracts").LocalBranchesOutput>(WORKSPACE_METHODS.workspaceLocalBranches, { input });
+}
+
+export function workspaceSwitchLocalBranch(input: import("@dcc/contracts").SwitchLocalBranchInput) {
+	return invoke<import("@dcc/contracts").LocalBranchesOutput>(WORKSPACE_METHODS.workspaceSwitchLocalBranch, { input });
+}
