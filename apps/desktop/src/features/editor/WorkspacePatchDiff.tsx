@@ -117,7 +117,7 @@ export default function WorkspacePatchDiff({
 		>
 			<CodeView
 				ref={viewRef}
-				className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto"
+				className="h-full min-h-0 min-w-0 overflow-x-auto overflow-y-auto"
 				items={items}
 				disableWorkerPool
 				selectedLines={selectedLines}
