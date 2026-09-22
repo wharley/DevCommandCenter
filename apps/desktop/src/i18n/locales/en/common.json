@@ -3521,6 +3521,23 @@
       "update": "Review update",
       "updateHint": "This version will replace the saved description and instructions. Review before saving; your selected agents and invocation preference have been preserved."
     },
+    "github": {
+      "urlLabel": "Import a skill from GitHub",
+      "urlPlaceholder": "https://github.com/owner/repo/tree/main/path/to/skill",
+      "urlHint": "Paste a public GitHub folder URL containing SKILL.md. DCC checks it before showing the import review.",
+      "previewImport": "Find skill",
+      "reviewTitle": "Review GitHub skill",
+      "reviewHint": "Check the imported instructions and choose the agents that should receive this skill.",
+      "recognized": "SKILL.md validated",
+      "resourceCount_one": "{{count}} supporting file will be copied",
+      "resourceCount_other": "{{count}} supporting files will be copied",
+      "moreFiles": "and {{count}} more",
+      "trustHint": "Review third-party instructions before importing. Imported scripts are copied as files and are not run by DCC.",
+      "confirmImport": "Import skill",
+      "duplicateName": "A skill with this name already exists. Rename it before importing.",
+      "importedFrom": "Imported from GitHub",
+      "importError": "Could not read a skill from GitHub"
+    },
     "design": {
       "subtitle": "Reusable instructions for the agents in this project.",
       "project": "Project",

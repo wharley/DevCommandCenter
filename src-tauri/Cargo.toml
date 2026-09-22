@@ -35,6 +35,7 @@ tauri-plugin-notification = "2"
 chrono = { version = "0.4", features = ["serde"] }
 sysinfo = "0.30"
 reqwest = { version = "0.11", features = ["blocking", "json"] }
+serde_yaml = "0.9"
 flate2 = "1"
 libc = "0.2"
 axum = "0.7"

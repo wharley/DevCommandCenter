@@ -3521,6 +3521,23 @@
       "update": "Revisar atualização",
       "updateHint": "Esta versão substituirá a descrição e as instruções salvas. Revise antes de salvar; seus agentes selecionados e a preferência de ativação foram mantidos."
     },
+    "github": {
+      "urlLabel": "Importar skill do GitHub",
+      "urlPlaceholder": "https://github.com/owner/repo/tree/main/caminho/da/skill",
+      "urlHint": "Cole a URL pública de uma pasta do GitHub que contenha SKILL.md. O DCC valida o conteúdo antes de mostrar a revisão.",
+      "previewImport": "Localizar skill",
+      "reviewTitle": "Revisar skill do GitHub",
+      "reviewHint": "Confira as instruções importadas e escolha quais agentes receberão esta skill.",
+      "recognized": "SKILL.md validado",
+      "resourceCount_one": "{{count}} arquivo auxiliar será copiado",
+      "resourceCount_other": "{{count}} arquivos auxiliares serão copiados",
+      "moreFiles": "e mais {{count}}",
+      "trustHint": "Revise instruções de terceiros antes de importar. Scripts são copiados como arquivos e não são executados pelo DCC.",
+      "confirmImport": "Importar skill",
+      "duplicateName": "Já existe uma skill com este nome. Altere o nome antes de importar.",
+      "importedFrom": "Importada do GitHub",
+      "importError": "Não foi possível ler uma skill do GitHub"
+    },
     "design": {
       "subtitle": "Instruções reutilizáveis para os agentes deste projeto.",
       "project": "Projeto",

@@ -6,8 +6,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::{command, State};
+use url::Url;
 
 use crate::{db_error, ApiResult};
 use dcc_core::domain::workspace::WorkspaceId;
@@ -58,6 +60,8 @@ pub struct SkillRecord {
     pub disable_model_invocation: bool,
     #[serde(default = "default_scope")]
     pub scope: String,
+    #[serde(default)]
+    pub source_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +78,39 @@ pub struct SkillContextDetection {
     pub has_dcc_block: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillImportFile {
+    path: String,
+    content_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillImportPreview {
+    source_url: String,
+    skill: SkillRecord,
+    files: Vec<SkillImportFile>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubContentEntry {
+    name: String,
+    path: String,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    content: String,
+    encoding: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SkillFrontmatter {
+    name: Option<String>,
+    description: Option<String>,
+}
+
 /// Metadata persisted in the manifest (everything except the body, which lives in SKILL.md).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +123,8 @@ struct ManifestEntry {
     disable_model_invocation: bool,
     #[serde(default = "default_scope")]
     scope: String,
+    #[serde(default)]
+    source_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -167,6 +206,10 @@ fn is_valid_skill_name(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+fn is_valid_agent_skill_name(name: &str) -> bool {
+    is_valid_skill_name(name) && !name.ends_with('-') && !name.contains("--")
 }
 
 /// Faithful Claude/Agent-SDK SKILL.md: frontmatter + body.
@@ -328,6 +371,7 @@ fn load_skills(project_root: &str) -> Vec<SkillRecord> {
                 target_agents: entry.target_agents,
                 disable_model_invocation: entry.disable_model_invocation,
                 scope: entry.scope,
+                source_url: entry.source_url,
             }
         })
         .collect()
@@ -489,18 +533,21 @@ fn compile_skills(project_root: &str, target_root: &str) -> ApiResult<()> {
 
     // --- Native progressive-disclosure targets ---
     compile_native_skills(
+        &skills_root(project_root),
         &target.join(".claude").join("skills"),
         &skills,
         TARGET_CLAUDE,
         false,
     )?;
     compile_native_skills(
+        &skills_root(project_root),
         &target.join(".agents").join("skills"),
         &skills,
         TARGET_CODEX,
         true,
     )?;
     compile_native_skills(
+        &skills_root(project_root),
         &target.join(".grok").join("skills"),
         &skills,
         TARGET_GROK,
@@ -527,6 +574,7 @@ fn compile_skills(project_root: &str, target_root: &str) -> ApiResult<()> {
 
 /// Writes native skill directories and removes only directories recorded as DCC-managed.
 fn compile_native_skills(
+    source_root: &Path,
     native_root: &Path,
     skills: &[SkillRecord],
     target_name: &str,
@@ -579,6 +627,11 @@ fn compile_native_skills(
                 &render_codex_openai_yaml(skill.disable_model_invocation),
             )
             .map_err(|e| db_error(format!("write agents/openai.yaml: {e}")))?;
+        }
+        let source_dir = source_root.join(&skill.name);
+        for resource_dir in ["scripts", "references", "assets"] {
+            let target_dir = dir.join(resource_dir);
+            copy_resource_directory(&source_dir.join(resource_dir), &target_dir)?;
         }
     }
     if native_root.exists() {
@@ -654,6 +707,396 @@ fn compile_cursor(target: &Path, cursor_skills: &[SkillRecord]) -> ApiResult<()>
 // Tauri commands
 // ---------------------------------------------------------------------------
 
+const MAX_IMPORTED_SKILL_FILES: usize = 100;
+const MAX_IMPORTED_SKILL_FILE_BYTES: usize = 1_000_000;
+
+fn parse_github_skill_url(raw_url: &str) -> ApiResult<(String, String, String, String)> {
+    let url = Url::parse(raw_url.trim()).map_err(|_| db_error("invalid GitHub skill URL"))?;
+    if url.scheme() != "https" || url.host_str() != Some("github.com") {
+        return Err(db_error("use a GitHub HTTPS URL"));
+    }
+    let parts: Vec<&str> = url
+        .path_segments()
+        .ok_or_else(|| db_error("invalid GitHub skill URL"))?
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() < 4 || !matches!(parts[2], "tree" | "blob") {
+        return Err(db_error(
+            "use https://github.com/owner/repo/tree/branch/path-to-skill",
+        ));
+    }
+    let owner = parts[0];
+    let repo = parts[1].strip_suffix(".git").unwrap_or(parts[1]);
+    let reference = parts[3];
+    let mut path = parts[4..].join("/");
+    if parts[2] == "blob" {
+        if !path.ends_with("/SKILL.md") && path != "SKILL.md" {
+            return Err(db_error("a GitHub file URL must point to SKILL.md"));
+        }
+        path = path.strip_suffix("/SKILL.md").unwrap_or("").to_string();
+    }
+    if [owner, repo, reference]
+        .iter()
+        .any(|value| value.is_empty())
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(db_error("invalid GitHub skill path"));
+    }
+    Ok((
+        owner.to_string(),
+        repo.to_string(),
+        reference.to_string(),
+        path,
+    ))
+}
+
+async fn github_contents(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    reference: &str,
+    path: &str,
+) -> ApiResult<Vec<GitHubContentEntry>> {
+    let mut url = Url::parse("https://api.github.com/")
+        .map_err(|error| db_error(format!("GitHub URL: {error}")))?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| db_error("cannot build GitHub API URL"))?;
+        segments
+            .pop_if_empty()
+            .push("repos")
+            .push(owner)
+            .push(repo)
+            .push("contents");
+        for part in path.split('/').filter(|part| !part.is_empty()) {
+            segments.push(part);
+        }
+    }
+    url.query_pairs_mut().append_pair("ref", reference);
+    let response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|error| db_error(format!("GitHub request failed: {error}")))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(db_error(format!(
+            "GitHub could not read this path ({status}); check that the repository and branch are public and the URL points to a folder"
+        )));
+    }
+    let value: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| db_error(format!("invalid GitHub response: {error}")))?;
+    if value.is_array() {
+        serde_json::from_value(value).map_err(|error| db_error(format!("GitHub response: {error}")))
+    } else {
+        let entry: GitHubContentEntry = serde_json::from_value(value)
+            .map_err(|error| db_error(format!("GitHub response: {error}")))?;
+        Ok(vec![entry])
+    }
+}
+
+fn decode_github_content(entry: &GitHubContentEntry) -> ApiResult<Vec<u8>> {
+    if entry.kind != "file" || entry.encoding.as_deref() != Some("base64") {
+        return Err(db_error(format!(
+            "{} is not a readable GitHub file",
+            entry.path
+        )));
+    }
+    let compact: String = entry
+        .content
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(compact)
+        .map_err(|error| db_error(format!("invalid base64 in {}: {error}", entry.path)))?;
+    if decoded.len() > MAX_IMPORTED_SKILL_FILE_BYTES {
+        return Err(db_error(format!("{} is larger than 1 MB", entry.path)));
+    }
+    Ok(decoded)
+}
+
+async fn collect_skill_resources(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    reference: &str,
+    path: &str,
+    files: &mut Vec<SkillImportFile>,
+) -> ApiResult<()> {
+    let mut pending = vec![path.to_string()];
+    let mut visited_directories = 0usize;
+    while let Some(current_path) = pending.pop() {
+        visited_directories += 1;
+        if visited_directories > MAX_IMPORTED_SKILL_FILES {
+            return Err(db_error("a skill may contain at most 100 resource folders"));
+        }
+        let entries = github_contents(client, owner, repo, reference, &current_path).await?;
+        for entry in entries {
+            if files.len() >= MAX_IMPORTED_SKILL_FILES {
+                return Err(db_error(
+                    "a skill may contain at most 100 imported resource files",
+                ));
+            }
+            match entry.kind.as_str() {
+                "dir" => pending.push(entry.path),
+                "file" => {
+                    let prefix = if path.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{}/", path.trim_end_matches('/'))
+                    };
+                    let relative = entry.path.strip_prefix(&prefix).ok_or_else(|| {
+                        db_error("GitHub returned a file outside the skill folder")
+                    })?;
+                    if relative
+                        .split('/')
+                        .any(|part| part.is_empty() || part == "." || part == "..")
+                    {
+                        return Err(db_error("GitHub returned an unsafe skill resource path"));
+                    }
+                    let content = decode_github_content(&entry)?;
+                    let already_imported_bytes: usize =
+                        files.iter().map(|file| file.content_base64.len()).sum();
+                    if already_imported_bytes.saturating_add(content.len()) > 13_981_016 {
+                        return Err(db_error(
+                            "supporting files for a skill must total 10 MB or less",
+                        ));
+                    }
+                    files.push(SkillImportFile {
+                        path: relative.to_string(),
+                        content_base64: base64::engine::general_purpose::STANDARD.encode(content),
+                    });
+                }
+                // Do not follow symlinks or submodules when importing third-party content.
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_imported_skill(
+    raw: &str,
+    folder_name: &str,
+) -> ApiResult<(String, String, String, Vec<String>)> {
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
+    let frontmatter_and_body = raw
+        .strip_prefix("---")
+        .ok_or_else(|| db_error("SKILL.md must begin with YAML frontmatter delimited by ---"))?;
+    let frontmatter_and_body = frontmatter_and_body
+        .strip_prefix('\n')
+        .or_else(|| frontmatter_and_body.strip_prefix("\r\n"))
+        .ok_or_else(|| db_error("SKILL.md has invalid frontmatter delimiters"))?;
+    let end = frontmatter_and_body
+        .find("\n---")
+        .ok_or_else(|| db_error("SKILL.md has no closing frontmatter delimiter"))?;
+    let yaml = &frontmatter_and_body[..end];
+    let yaml: SkillFrontmatter = serde_yaml::from_str(yaml)
+        .map_err(|error| db_error(format!("SKILL.md frontmatter is not valid YAML: {error}")))?;
+    let name = yaml.name.unwrap_or_default().trim().to_string();
+    let description = yaml.description.unwrap_or_default().trim().to_string();
+    if !is_valid_agent_skill_name(&name) {
+        return Err(db_error(
+            "SKILL.md needs a lower-case, hyphenated name (up to 64 characters)",
+        ));
+    }
+    if description.is_empty() {
+        return Err(db_error(
+            "SKILL.md needs a non-empty description in its YAML frontmatter",
+        ));
+    }
+    if description.chars().count() > 1024 {
+        return Err(db_error(
+            "SKILL.md description must be 1,024 characters or fewer",
+        ));
+    }
+    let body = frontmatter_and_body[end + 4..].trim().to_string();
+    if body.is_empty() {
+        return Err(db_error(
+            "SKILL.md needs Markdown instructions after the frontmatter",
+        ));
+    }
+    let warnings = if name != folder_name {
+        vec![format!("The SKILL.md name '{name}' differs from its folder '{folder_name}'. DCC will use the SKILL.md name.")]
+    } else {
+        Vec::new()
+    };
+    Ok((name, description, body, warnings))
+}
+
+async fn load_github_skill_preview(source_url: &str) -> ApiResult<SkillImportPreview> {
+    let (owner, repo, reference, path) = parse_github_skill_url(source_url)?;
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("DevCommandCenter/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|error| db_error(format!("HTTP client: {error}")))?;
+    let entries = github_contents(&client, &owner, &repo, &reference, &path).await?;
+    let skill_entry = entries
+        .iter()
+        .find(|entry| entry.name == "SKILL.md" && entry.kind == "file")
+        .ok_or_else(|| db_error("This folder is not a skill: it has no SKILL.md file"))?;
+    let markdown = String::from_utf8(decode_github_content(skill_entry)?)
+        .map_err(|_| db_error("SKILL.md must be UTF-8 text"))?;
+    let folder_name = path
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&repo);
+    let (name, description, body, warnings) = parse_imported_skill(&markdown, folder_name)?;
+    let mut files = Vec::new();
+    for directory in ["scripts", "references", "assets"] {
+        if entries
+            .iter()
+            .any(|entry| entry.name == directory && entry.kind == "dir")
+        {
+            let resource_path = if path.is_empty() {
+                directory.to_string()
+            } else {
+                format!("{path}/{directory}")
+            };
+            collect_skill_resources(
+                &client,
+                &owner,
+                &repo,
+                &reference,
+                &resource_path,
+                &mut files,
+            )
+            .await?;
+        }
+    }
+    Ok(SkillImportPreview {
+        source_url: source_url.trim().to_string(),
+        skill: SkillRecord {
+            name,
+            description,
+            body,
+            target_agents: vec![TARGET_CLAUDE.to_string()],
+            disable_model_invocation: false,
+            scope: default_scope(),
+            source_url: Some(source_url.trim().to_string()),
+        },
+        files,
+        warnings,
+    })
+}
+
+fn write_imported_resources(root: &Path, files: &[SkillImportFile]) -> ApiResult<()> {
+    if files.len() > MAX_IMPORTED_SKILL_FILES {
+        return Err(db_error(
+            "a skill may contain at most 100 imported resource files",
+        ));
+    }
+    if fs::symlink_metadata(root)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(db_error("cannot import resources through a symbolic link"));
+    }
+    let mut total_bytes = 0usize;
+    for file in files {
+        let relative = Path::new(&file.path);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+            || !matches!(
+                relative
+                    .components()
+                    .next()
+                    .and_then(|part| part.as_os_str().to_str()),
+                Some("scripts" | "references" | "assets")
+            )
+        {
+            return Err(db_error("skill import contains an unsafe resource path"));
+        }
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(&file.content_base64)
+            .map_err(|error| db_error(format!("invalid imported resource encoding: {error}")))?;
+        if content.len() > MAX_IMPORTED_SKILL_FILE_BYTES {
+            return Err(db_error("an imported resource is larger than 1 MB"));
+        }
+        total_bytes = total_bytes.saturating_add(content.len());
+        if total_bytes > 10 * 1024 * 1024 {
+            return Err(db_error(
+                "supporting files for a skill must total 10 MB or less",
+            ));
+        }
+        let destination = root.join(relative);
+        let mut current = root.to_path_buf();
+        let components: Vec<_> = relative.components().collect();
+        for (index, component) in components.iter().enumerate() {
+            current.push(component.as_os_str());
+            let is_final = index + 1 == components.len();
+            if fs::symlink_metadata(&current)
+                .map(|metadata| metadata.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                return Err(db_error("cannot import resources through a symbolic link"));
+            }
+            if !is_final && !current.exists() {
+                fs::create_dir(&current).map_err(|error| {
+                    db_error(format!("create imported resource folder: {error}"))
+                })?;
+            }
+        }
+        fs::write(destination, content)
+            .map_err(|error| db_error(format!("write imported resource: {error}")))?;
+    }
+    Ok(())
+}
+
+fn reject_import_symlink(path: &Path) -> ApiResult<()> {
+    if fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(db_error(format!(
+            "cannot import a skill through symbolic link {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn copy_resource_directory(source: &Path, destination: &Path) -> ApiResult<()> {
+    if !source.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(destination)
+        .map_err(|error| db_error(format!("{}: {error}", destination.display())))?;
+    for entry in
+        fs::read_dir(source).map_err(|error| db_error(format!("{}: {error}", source.display())))?
+    {
+        let entry = entry.map_err(|error| db_error(format!("read skill resource: {error}")))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| db_error(format!("read skill resource type: {error}")))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let target = destination.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_resource_directory(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| db_error(format!("{}: {error}", parent.display())))?;
+            }
+            fs::copy(entry.path(), &target)
+                .map_err(|error| db_error(format!("copy skill resource: {error}")))?;
+        }
+    }
+    Ok(())
+}
+
 fn save_skill(project_root: &str, skill: SkillRecord) -> ApiResult<()> {
     if !is_valid_skill_name(&skill.name) {
         return Err(db_error(format!(
@@ -674,6 +1117,7 @@ fn save_skill(project_root: &str, skill: SkillRecord) -> ApiResult<()> {
         target_agents: skill.target_agents,
         disable_model_invocation: skill.disable_model_invocation,
         scope: skill.scope,
+        source_url: skill.source_url,
     };
     match manifest
         .skills
@@ -684,6 +1128,67 @@ fn save_skill(project_root: &str, skill: SkillRecord) -> ApiResult<()> {
         None => manifest.skills.push(entry),
     }
     write_manifest(project_root, &manifest)
+}
+
+#[command]
+pub async fn skills_import_preview(source_url: String) -> ApiResult<SkillImportPreview> {
+    load_github_skill_preview(&source_url).await
+}
+
+#[command]
+pub async fn skills_import(
+    state: State<'_, WorkspaceCommandState>,
+    project_root: String,
+    workspace_id: String,
+    mut preview: SkillImportPreview,
+    skill: SkillRecord,
+) -> ApiResult<()> {
+    preview.skill = skill;
+    match state
+        .run_registered_workspace_mutation_for_workspace_id(
+            &WorkspaceId(workspace_id),
+            &project_root,
+            move |authorized| {
+                let authorized = authorized
+                    .to_str()
+                    .ok_or_else(|| db_error("workspace path encoding is unsupported"))?;
+                if !is_valid_agent_skill_name(&preview.skill.name) {
+                    return Err(db_error(
+                        "skill name must use lower-case letters, digits and single hyphens",
+                    ));
+                }
+                let project = Path::new(authorized);
+                let source_root = skills_root(authorized);
+                let skill_dir = source_root.join(&preview.skill.name);
+                for protected_path in [
+                    project.join(".devcommandcenter"),
+                    source_root.clone(),
+                    manifest_path(authorized),
+                    skill_dir.clone(),
+                ] {
+                    reject_import_symlink(&protected_path)?;
+                }
+                let manifest = read_manifest(authorized);
+                if manifest
+                    .skills
+                    .iter()
+                    .any(|entry| entry.name == preview.skill.name)
+                {
+                    return Err(db_error(format!(
+                        "skill '{}' already exists in this project",
+                        preview.skill.name
+                    )));
+                }
+                save_skill(authorized, preview.skill)?;
+                write_imported_resources(&skill_dir, &preview.files)?;
+                Ok(())
+            },
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => Err(db_error(error)),
+    }
 }
 
 #[command]
@@ -796,6 +1301,7 @@ mod tests {
             target_agents: targets.iter().map(|s| s.to_string()).collect(),
             disable_model_invocation: false,
             scope: "project".to_string(),
+            source_url: None,
         }
     }
 

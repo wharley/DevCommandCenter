@@ -7007,6 +7007,8 @@ pub fn run() {
             terminal_kill_by_mission_id,
             terminal_get_or_create_for_pane,
             skills_commands::skills_list,
+            skills_commands::skills_import_preview,
+            skills_commands::skills_import,
             skills_commands::skills_save,
             skills_commands::skills_delete,
             skills_commands::skills_compile,

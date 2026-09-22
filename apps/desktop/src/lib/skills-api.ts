@@ -17,6 +17,14 @@ export type SkillRecord = {
 	targetAgents: SkillTargetAgent[];
 	disableModelInvocation: boolean;
 	scope: string;
+	sourceUrl?: string | null;
+};
+
+export type SkillImportPreview = {
+	sourceUrl: string;
+	skill: SkillRecord;
+	files: Array<{ path: string; contentBase64: string }>;
+	warnings: string[];
 };
 
 export type SkillContextDetection = {
@@ -43,6 +51,19 @@ export function listSkills(projectRoot: string) {
 
 export function saveSkill(projectRoot: string, workspaceId: string, skill: SkillRecord) {
 	return invoke<void>("skills_save", { projectRoot, workspaceId, skill });
+}
+
+export function previewSkillImport(sourceUrl: string) {
+	return invoke<SkillImportPreview>("skills_import_preview", { sourceUrl });
+}
+
+export function importSkill(
+	projectRoot: string,
+	workspaceId: string,
+	preview: SkillImportPreview,
+	skill: SkillRecord,
+) {
+	return invoke<void>("skills_import", { projectRoot, workspaceId, preview, skill });
 }
 
 export function deleteSkill(projectRoot: string, workspaceId: string, name: string) {

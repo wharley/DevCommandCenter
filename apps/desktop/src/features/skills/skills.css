@@ -113,6 +113,70 @@
 	align-items: center;
 	padding: 18px 28px 12px;
 }
+.skills-github-import {
+	padding: 0 28px 14px;
+}
+.skills-github-import > label {
+	display: block;
+	margin-bottom: 6px;
+	font-size: 11px;
+	font-weight: 600;
+}
+.skills-github-import > div {
+	display: flex;
+	gap: 8px;
+}
+.skills-github-import input {
+	min-width: 0;
+	flex: 1;
+}
+.skills-github-import > p,
+.skills-import-review > p {
+	margin-top: 6px;
+	font-size: 10px;
+	line-height: 1.5;
+	color: var(--muted-foreground);
+}
+.skills-import-review {
+	display: grid;
+	gap: 6px;
+	padding: 11px 12px;
+	border: 1px solid var(--dcc-surface-edge);
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--dcc-accent-calm) 5%, var(--background));
+}
+.skills-import-review > div {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: 11px;
+}
+.skills-import-review > div span {
+	color: var(--muted-foreground);
+}
+.skills-import-review > a {
+	font-size: 10px;
+	overflow-wrap: anywhere;
+	color: var(--dcc-accent-calm);
+}
+.skills-import-review ul {
+	max-height: 90px;
+	overflow: auto;
+	padding-left: 18px;
+	font-size: 10px;
+	color: var(--muted-foreground);
+}
+.skills-import-review li + li {
+	margin-top: 3px;
+}
+.skills-import-review code {
+	font-size: 9px;
+	overflow-wrap: anywhere;
+}
+.skills-import-review > p {
+	margin: 0;
+}
 .skills-search {
 	display: flex;
 	flex: 1;
@@ -233,6 +297,12 @@
 	line-height: 1.65;
 	color: var(--muted-foreground);
 	overflow-wrap: anywhere;
+}
+.skills-origin-link {
+	display: inline-block;
+	margin-top: 5px;
+	font-size: 10px;
+	color: var(--dcc-accent-calm);
 }
 .skills-target-badges {
 	display: flex;

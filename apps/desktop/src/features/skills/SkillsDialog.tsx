@@ -11,6 +11,7 @@ import {
 	Loader2,
 	RefreshCw,
 	ChevronRight,
+	Download,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -37,8 +38,11 @@ import {
 	deleteSkill,
 	detectSkillContext,
 	listSkills,
+	importSkill,
+	previewSkillImport,
 	saveSkill,
 	type SkillContextDetection,
+	type SkillImportPreview,
 	type SkillRecord,
 	type SkillTargetAgent,
 } from "@/lib/skills-api";
@@ -54,11 +58,13 @@ export type SkillsDialogProps = {
 	workspaceId: string | null;
 };
 
-const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 type FormState = {
 	editingExisting: boolean;
 	fromCatalog?: boolean;
+	githubImport?: SkillImportPreview;
+	sourceUrl?: string | null;
 	name: string;
 	description: string;
 	body: string;
@@ -110,6 +116,7 @@ export function SkillsDialog({
 	const [loading, setLoading] = useState(false);
 	const [form, setForm] = useState<FormState | null>(null);
 	const [busy, setBusy] = useState(false);
+	const [githubUrl, setGithubUrl] = useState("");
 
 	const refresh = useCallback(async () => {
 		if (!projectRoot) {
@@ -137,6 +144,7 @@ export function SkillsDialog({
 		if (open) {
 			setForm(null);
 			setSearch("");
+			setGithubUrl("");
 			setSection("library");
 			void refresh();
 		}
@@ -168,14 +176,20 @@ export function SkillsDialog({
 		}
 		setBusy(true);
 		try {
-			await saveSkill(projectRoot, workspaceId, {
+			const skill: SkillRecord = {
 				name,
 				description: form.description.trim(),
 				body: form.body,
 				targetAgents: form.targetAgents,
 				disableModelInvocation: form.disableModelInvocation,
 				scope: "project",
-			});
+				sourceUrl: form.sourceUrl ?? null,
+			};
+			if (form.githubImport) {
+				await importSkill(projectRoot, workspaceId, form.githubImport, skill);
+			} else {
+				await saveSkill(projectRoot, workspaceId, skill);
+			}
 			await recompile();
 			toast.success(t("skills.toast.saved", { name }));
 			setForm(null);
@@ -246,6 +260,29 @@ export function SkillsDialog({
 		});
 	};
 
+	const handleGithubImport = async () => {
+		if (!workspaceId || !githubUrl.trim()) return;
+		setBusy(true);
+		try {
+			const preview = await previewSkillImport(githubUrl.trim());
+			setForm({
+				editingExisting: false,
+				githubImport: preview,
+				name: preview.skill.name,
+				description: preview.skill.description,
+				body: preview.skill.body,
+				targetAgents: ["claude"],
+				disableModelInvocation: false,
+				sourceUrl: preview.sourceUrl,
+			});
+			setGithubUrl("");
+		} catch (error) {
+			toast.error(skillsErrorMessage(error, t("skills.github.importError")));
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	return (
 		<Dialog
 			open={open}
@@ -300,7 +337,9 @@ export function SkillsDialog({
 								<h2>
 									{form.editingExisting
 										? t("skills.design.edit")
-										: t(
+										: form.githubImport
+											? t("skills.github.reviewTitle")
+											: t(
 												form.fromCatalog
 													? "skills.catalog.review"
 													: "skills.newSkill",
@@ -308,7 +347,9 @@ export function SkillsDialog({
 								</h2>
 								<p>
 									{t(
-										form.fromCatalog
+										form.githubImport
+											? "skills.github.reviewHint"
+											: form.fromCatalog
 											? form.editingExisting
 												? "skills.catalog.updateHint"
 												: "skills.catalog.reviewHint"
@@ -327,6 +368,7 @@ export function SkillsDialog({
 											</Label>
 											<Input
 												id="skill-name"
+												maxLength={64}
 												autoFocus={!form.editingExisting && !form.fromCatalog}
 												placeholder={t("skills.fields.namePlaceholder")}
 												value={form.name}
@@ -365,6 +407,34 @@ export function SkillsDialog({
 										/>
 									</div>
 								</section>
+								{form.githubImport && (
+									<section className="skills-import-review" aria-live="polite">
+										<div>
+											<strong>{t("skills.github.recognized")}</strong>
+											<span>{t("skills.github.resourceCount", { count: form.githubImport.files.length })}</span>
+										</div>
+										<a href={form.githubImport.sourceUrl} target="_blank" rel="noreferrer">
+											{form.githubImport.sourceUrl}
+										</a>
+										{form.githubImport.warnings.map((warning) => (
+											<p key={warning}>{warning}</p>
+										))}
+										{skills.some((skill) => skill.name === form.name.trim()) && (
+											<p>{t("skills.github.duplicateName")}</p>
+										)}
+										{form.githubImport.files.length > 0 && (
+											<ul>
+												{form.githubImport.files.slice(0, 8).map((file) => (
+													<li key={file.path}><code>{file.path}</code></li>
+												))}
+												{form.githubImport.files.length > 8 && (
+													<li>{t("skills.github.moreFiles", { count: form.githubImport.files.length - 8 })}</li>
+												)}
+											</ul>
+										)}
+										<p>{t("skills.github.trustHint")}</p>
+									</section>
+								)}
 								<section className="skills-form-section">
 									<h3 className="skills-section-title">
 										{t("skills.fields.targetAgents")}
@@ -401,12 +471,14 @@ export function SkillsDialog({
 							<Button variant="ghost" onClick={backToLibrary} disabled={busy}>
 								{t("skills.cancel")}
 							</Button>
-							<Button onClick={() => void handleSave()} disabled={busy}>
+								<Button onClick={() => void handleSave()} disabled={busy}>
 								{busy && <Loader2 className="size-3.5 animate-spin" />}
 								{t(
 									form.fromCatalog && !form.editingExisting
 										? "skills.catalog.add"
-										: "skills.save",
+										: form.githubImport
+											? "skills.github.confirmImport"
+											: "skills.save",
 								)}
 							</Button>
 						</DialogFooter>
@@ -460,6 +532,7 @@ export function SkillsDialog({
 							</Button>
 						</div>
 						{section === "library" && (
+							<>
 							<div className="skills-toolbar">
 								<label className="skills-search">
 									<Search size={15} aria-hidden />
@@ -480,6 +553,29 @@ export function SkillsDialog({
 									{t("skills.newSkill")}
 								</Button>
 							</div>
+							<div className="skills-github-import">
+								<label htmlFor="skills-github-url">{t("skills.github.urlLabel")}</label>
+								<div>
+									<Input
+										id="skills-github-url"
+										value={githubUrl}
+										onChange={(event) => setGithubUrl(event.target.value)}
+										placeholder={t("skills.github.urlPlaceholder")}
+										disabled={busy || loading || !workspaceId}
+									/>
+									<Button
+										variant="outline"
+										size="sm"
+										disabled={busy || loading || !workspaceId || !githubUrl.trim()}
+										onClick={() => void handleGithubImport()}
+									>
+										{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Download size={14} />}
+										{t("skills.github.previewImport")}
+									</Button>
+								</div>
+								<p>{t("skills.github.urlHint")}</p>
+							</div>
+							</>
 						)}
 						<div className="skills-scroll" aria-busy={loading}>
 							{loadError ? (
@@ -579,8 +675,18 @@ export function SkillsDialog({
 																</Badge>
 															)}
 														</div>
-														<p>{skill.description}</p>
-														<div className="skills-target-badges">
+											<p>{skill.description}</p>
+											{skill.sourceUrl && (
+											<a
+												className="skills-origin-link"
+												href={skill.sourceUrl}
+												target="_blank"
+												rel="noreferrer"
+											>
+												{t("skills.github.importedFrom")}
+											</a>
+										)}
+										<div className="skills-target-badges">
 															{skill.targetAgents.map((target) => (
 																<span
 																	key={target}
@@ -604,7 +710,8 @@ export function SkillsDialog({
 																	editingExisting: true,
 																	name: skill.name,
 																	description: skill.description,
-																	body: skill.body,
+															body: skill.body,
+														sourceUrl: skill.sourceUrl,
 																	targetAgents:
 																		skill.targetAgents.length > 0
 																			? skill.targetAgents
