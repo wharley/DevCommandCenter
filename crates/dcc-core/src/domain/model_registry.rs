@@ -123,14 +123,18 @@ pub const DROID_ALIASES: &[(&str, &str)] = &[
 ];
 
 pub const GROK_ALIASES: &[(&str, &str)] = &[
-    ("grok", "grok-build"),
-    ("4.6", "grok-build"),
-    ("grok-4.6", "grok-build"),
-    ("grok-4-6", "grok-build"),
-    ("grok-build-latest", "grok-build"),
-    ("4.5", "grok-build"),
-    ("grok-4.5", "grok-build"),
-    ("grok-4-5", "grok-build"),
+    ("grok", "grok-4.7"),
+    ("4.7", "grok-4.7"),
+    ("grok-4-7", "grok-4.7"),
+    ("grok-4.7-build", "grok-4.7"),
+    ("grok-build", "grok-4.7"),
+    ("grok-build-latest", "grok-4.7"),
+    ("4.6", "grok-4.7"),
+    ("grok-4.6", "grok-4.7"),
+    ("grok-4-6", "grok-4.7"),
+    ("4.5", "grok-4.7"),
+    ("grok-4.5", "grok-4.7"),
+    ("grok-4-5", "grok-4.7"),
 ];
 
 /// Resolves a model alias or legacy ID to its canonical form for the given provider.
@@ -298,11 +302,11 @@ pub const DROID: &[ModelEntry] = &[
 ];
 
 pub const GROK: &[ModelEntry] = &[ModelEntry {
-    id: "grok-build",
-    label: "Grok 4.6",
-    description: "Current Grok Build coding and agentic model through the local ACP CLI.",
-    recommended: true,
-    effort_levels: &["low", "medium", "high"],
+	id: "grok-4.7",
+	label: "Grok 4.7",
+	description: "Latest Grok Build model for coding, agentic tasks, and knowledge work through the local ACP CLI.",
+	recommended: true,
+	effort_levels: &["low", "medium", "high", "xhigh"],
 }];
 
 #[cfg(test)]
@@ -348,11 +352,21 @@ mod tests {
     }
 
     #[test]
-    fn grok_aliases_resolve_to_the_current_grok_build_model() {
-        for alias in ["grok", "4.6", "grok-4.6", "4.5", "grok-4.5"] {
-            assert_eq!(resolve_alias("grok", alias), "grok-build");
+    fn grok_aliases_resolve_to_the_current_grok_47_model() {
+        for alias in [
+            "grok",
+            "4.7",
+            "grok-4.7",
+            "grok-build",
+            "4.6",
+            "grok-4.6",
+            "4.5",
+            "grok-4.5",
+        ] {
+            assert_eq!(resolve_alias("grok", alias), "grok-4.7");
         }
-        assert!(GROK.iter().any(|model| model.id == "grok-build"));
+        assert!(GROK.iter().any(|model| model.id == "grok-4.7"));
+        assert_eq!(GROK[0].effort_levels, &["low", "medium", "high", "xhigh"]);
     }
 
     #[test]
