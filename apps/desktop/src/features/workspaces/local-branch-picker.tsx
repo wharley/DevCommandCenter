@@ -101,7 +101,7 @@ export function LocalBranchPicker({ workspaceId, fallbackBranch, conversationSta
 		}}>
 			<PopoverTrigger asChild>
 				<button type="button" disabled={disabled} title={reason} aria-label={`${t("localBranch.choose")}: ${branch ?? ""}`}
-					className="flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[10.5px] hover:bg-muted/45 disabled:cursor-default disabled:opacity-70">
+					className="flex max-w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[10.5px] hover:bg-muted/45 disabled:cursor-default disabled:opacity-70">
 					{switching || query.isLoading ? <LoaderCircle className="size-3.5 shrink-0 animate-spin" /> : <GitBranch className="size-3.5 shrink-0" />}
 					<span className="truncate">{branch}</span>
 					{locked ? <LockKeyhole className="size-3 shrink-0" /> : null}
