@@ -75,25 +75,51 @@ describe("provider-model-registry", () => {
 		expect(resolveModelAlias("droid", "5.4")).toBe("gpt-5.4");
 	});
 
-	it("recommends GPT-6 Astra while retaining the GPT-5.6 Codex models", () => {
+	it("matches the current Codex picker and keeps Astra as the default", () => {
 		const models = PROVIDER_MODEL_REGISTRY.codex;
-		expect(models.map((model) => model.id)).toEqual(
-			expect.arrayContaining([
-				"gpt-6-astra",
-				"gpt-5.6-sol",
-				"gpt-5.6-terra",
-				"gpt-5.6-luna",
-			]),
-		);
+		expect(models.map((model) => model.id)).toEqual([
+			"gpt-6-astra",
+			"gpt-6-sol",
+			"gpt-6-luna",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
+			"gpt-5.5",
+		]);
 		expect(getDefaultModelId("codex")).toBe("gpt-6-astra");
 		expect(resolveModelAlias("codex", "astra")).toBe("gpt-6-astra");
 		expect(resolveModelAlias("codex", "6-astra")).toBe("gpt-6-astra");
-		expect(models.find((model) => model.id === "gpt-6-astra")?.effortLevels).toEqual(
-			["low", "medium", "high", "xhigh", "max"],
-		);
-		expect(resolveModelAlias("codex", "sol")).toBe("gpt-5.6-sol");
+		for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
+			expect(models.find((model) => model.id === id)?.effortLevels).toEqual(
+				["low", "medium", "high", "xhigh", "max"],
+			);
+		}
+		expect(resolveModelAlias("codex", "sol")).toBe("gpt-6-sol");
+		expect(resolveModelAlias("codex", "6-sol")).toBe("gpt-6-sol");
+		expect(resolveModelAlias("codex", "5.6-sol")).toBe("gpt-5.6-sol");
 		expect(resolveModelAlias("codex", "5.6-terra")).toBe("gpt-5.6-terra");
-		expect(resolveModelAlias("codex", "luna")).toBe("gpt-5.6-luna");
+		expect(resolveModelAlias("codex", "luna")).toBe("gpt-6-luna");
+		expect(resolveModelAlias("codex", "6-luna")).toBe("gpt-6-luna");
+		expect(resolveModelAlias("codex", "5.6-luna")).toBe("gpt-5.6-luna");
+		expect(
+			FALLBACK_PROVIDER_CATALOG.providers.find((provider) => provider.id === "codex")?.models,
+		).toEqual(models);
+	});
+
+	it.each([
+		["gpt-5-codex", "gpt-6-sol"],
+		["gpt-5.4", "gpt-6-sol"],
+		["gpt-5.4-mini", "gpt-6-luna"],
+		["gpt-5.3-codex", "gpt-6-sol"],
+		["gpt-5.3-codex-spark", "gpt-6-luna"],
+	])("resolves retired Codex selection %s to %s", (legacy, replacement) => {
+		expect(resolveModelAlias("codex", legacy)).toBe(replacement);
+		expect(
+			PROVIDER_MODEL_REGISTRY.codex.some((model) => model.id === replacement),
+		).toBe(true);
+		expect(
+			PROVIDER_MODEL_REGISTRY.codex.some((model) => model.id === legacy),
+		).toBe(false);
 	});
 
 	it("keeps the Gemini catalog focused on 3.8 Flash and the 2.5 Pro fallback", () => {

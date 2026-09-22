@@ -487,6 +487,7 @@ mod tests {
         .expect("send_turn should succeed");
 
         assert_eq!(output.session.id, session_id);
+        assert_eq!(output.session.model.as_deref(), Some("gpt-6-sol"));
         assert_eq!(output.turn.state, TurnState::Running);
         assert_eq!(output.projection.turn_count, 0);
 
@@ -498,7 +499,7 @@ mod tests {
         assert!(matches!(
             &session_events[1].kind,
             SessionEventKind::TurnStarted { model: Some(model), .. }
-                if model == "gpt-5.4"
+                if model == "gpt-6-sol"
         ));
     }
 

@@ -78,21 +78,27 @@ pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
 ];
 
 pub const CODEX_ALIASES: &[(&str, &str)] = &[
-    ("gpt-5-codex", "gpt-5.4"),
+    ("gpt-5-codex", "gpt-6-sol"),
     ("astra", "gpt-6-astra"),
     ("6-astra", "gpt-6-astra"),
-    ("sol", "gpt-5.6-sol"),
+    ("sol", "gpt-6-sol"),
+    ("6-sol", "gpt-6-sol"),
     ("5.6-sol", "gpt-5.6-sol"),
     ("terra", "gpt-5.6-terra"),
     ("5.6-terra", "gpt-5.6-terra"),
-    ("luna", "gpt-5.6-luna"),
+    ("luna", "gpt-6-luna"),
+    ("6-luna", "gpt-6-luna"),
     ("5.6-luna", "gpt-5.6-luna"),
     ("5.5", "gpt-5.5"),
-    ("5.4", "gpt-5.4"),
-    ("5.4-mini", "gpt-5.4-mini"),
-    ("5.3", "gpt-5.3-codex"),
-    ("gpt-5.3", "gpt-5.3-codex"),
-    ("gpt-5.3-spark", "gpt-5.3-codex-spark"),
+    ("5.4", "gpt-6-sol"),
+    ("gpt-5.4", "gpt-6-sol"),
+    ("5.4-mini", "gpt-6-luna"),
+    ("gpt-5.4-mini", "gpt-6-luna"),
+    ("5.3", "gpt-6-sol"),
+    ("gpt-5.3", "gpt-6-sol"),
+    ("gpt-5.3-codex", "gpt-6-sol"),
+    ("gpt-5.3-spark", "gpt-6-luna"),
+    ("gpt-5.3-codex-spark", "gpt-6-luna"),
 ];
 
 pub const GEMINI_ALIASES: &[(&str, &str)] = &[
@@ -199,23 +205,37 @@ pub const CODEX: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
+        id: "gpt-6-sol",
+        label: "GPT-6 Sol",
+        description: "Complex coding and agentic workflows with stronger factual reliability and clearer communication.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
+    ModelEntry {
+        id: "gpt-6-luna",
+        label: "GPT-6 Luna",
+        description: "Efficient model for focused coding and repeatable, high-volume tasks.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
+    ModelEntry {
         id: "gpt-5.6-sol",
         label: "GPT-5.6 Sol",
-        description: "General-purpose agentic coding and reasoning model for demanding everyday work. Preview access required.",
+        description: "General-purpose agentic coding and reasoning model for demanding everyday work.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "gpt-5.6-terra",
         label: "GPT-5.6 Terra",
-        description: "Strong lower-cost GPT-5.6 option for coding and reasoning. Preview access required.",
+        description: "Strong lower-cost GPT-5.6 option for coding and reasoning.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "gpt-5.6-luna",
         label: "GPT-5.6 Luna",
-        description: "Fastest and most cost-efficient GPT-5.6 option. Preview access required.",
+        description: "Fastest and most cost-efficient GPT-5.6 option.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
@@ -225,27 +245,6 @@ pub const CODEX: &[ModelEntry] = &[
         description: "Previous-generation model for coding and general reasoning.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
-    },
-    ModelEntry {
-        id: "gpt-5.4",
-        label: "GPT-5.4",
-        description: "Balanced model for agentic coding workflows.",
-        recommended: false,
-        effort_levels: &["low", "medium", "high", "xhigh", "max"],
-    },
-    ModelEntry {
-        id: "gpt-5.4-mini",
-        label: "GPT-5.4 Mini",
-        description: "Fast, lightweight variant for quick tasks.",
-        recommended: false,
-        effort_levels: &["low", "medium", "high"],
-    },
-    ModelEntry {
-        id: "gpt-5.3-codex",
-        label: "GPT-5.3 Codex",
-        description: "Previous-generation Codex with strong repo-aware reasoning.",
-        recommended: false,
-        effort_levels: &["low", "medium", "high", "xhigh"],
     },
 ];
 
@@ -317,24 +316,50 @@ mod tests {
     use super::{resolve_alias, CLAUDE_CODE, CODEX, GEMINI, GROK};
 
     #[test]
-    fn codex_recommends_astra_and_retains_gpt_56_models() {
-        for id in [
-            "gpt-6-astra",
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna",
-        ] {
-            assert!(CODEX.iter().any(|model| model.id == id));
-        }
+    fn codex_catalog_matches_the_current_picker() {
+        assert_eq!(
+            CODEX.iter().map(|model| model.id).collect::<Vec<_>>(),
+            [
+                "gpt-6-astra",
+                "gpt-6-sol",
+                "gpt-6-luna",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+                "gpt-5.5",
+            ]
+        );
         assert_eq!(
             CODEX.iter().find(|model| model.recommended).unwrap().id,
             "gpt-6-astra"
         );
         assert_eq!(resolve_alias("codex", "astra"), "gpt-6-astra");
         assert_eq!(resolve_alias("codex", "6-astra"), "gpt-6-astra");
-        assert_eq!(resolve_alias("codex", "sol"), "gpt-5.6-sol");
+        assert_eq!(resolve_alias("codex", "sol"), "gpt-6-sol");
+        assert_eq!(resolve_alias("codex", "6-sol"), "gpt-6-sol");
+        assert_eq!(resolve_alias("codex", "5.6-sol"), "gpt-5.6-sol");
         assert_eq!(resolve_alias("codex", "5.6-terra"), "gpt-5.6-terra");
-        assert_eq!(resolve_alias("codex", "luna"), "gpt-5.6-luna");
+        assert_eq!(resolve_alias("codex", "luna"), "gpt-6-luna");
+        assert_eq!(resolve_alias("codex", "6-luna"), "gpt-6-luna");
+        assert_eq!(resolve_alias("codex", "5.6-luna"), "gpt-5.6-luna");
+    }
+
+    #[test]
+    fn retired_codex_selections_resolve_to_selectable_models() {
+        for (legacy, replacement) in [
+            ("gpt-5-codex", "gpt-6-sol"),
+            ("gpt-5.4", "gpt-6-sol"),
+            ("gpt-5.4-mini", "gpt-6-luna"),
+            ("gpt-5.3-codex", "gpt-6-sol"),
+            ("gpt-5.3-codex-spark", "gpt-6-luna"),
+        ] {
+            assert_eq!(resolve_alias("codex", legacy), replacement);
+            assert_eq!(super::is_known_model("codex", legacy), Some(true));
+            assert!(!CODEX.iter().any(|model| model.id == legacy));
+        }
+        for (_, canonical) in super::CODEX_ALIASES {
+            assert!(CODEX.iter().any(|model| model.id == *canonical));
+        }
     }
 
     #[test]

@@ -306,9 +306,11 @@ fn validate_codex_mcp_projection(
 }
 
 fn codex_reasoning_effort(model: Option<&str>, effort: Option<&str>) -> Option<&'static str> {
-    let astra = matches!(
-        model.map(str::trim),
-        Some("gpt-6-astra" | "astra" | "6-astra")
+    let supports_max = matches!(
+        model
+            .map(|model| dcc_core::domain::model_registry::resolve_alias("codex", model.trim()))
+            .as_deref(),
+        Some("gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna")
     );
     match effort.map(str::trim).filter(|value| !value.is_empty()) {
         Some("none") => Some("none"),
@@ -316,7 +318,7 @@ fn codex_reasoning_effort(model: Option<&str>, effort: Option<&str>) -> Option<&
         Some("low") => Some("low"),
         Some("balanced") | Some("medium") => Some("medium"),
         Some("high") => Some("high"),
-        Some("max") if astra => Some("max"),
+        Some("max") if supports_max => Some("max"),
         Some("xhigh") | Some("max") | Some("ultrathink") => Some("xhigh"),
         Some(_) | None => None,
     }
@@ -3319,15 +3321,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn preserves_astra_max_reasoning_effort_without_changing_existing_models() {
-        assert_eq!(
-            codex_reasoning_effort(Some("gpt-6-astra"), Some("max")),
-            Some("max")
-        );
-        assert_eq!(
-            codex_reasoning_effort(Some("astra"), Some("max")),
-            Some("max")
-        );
+    fn preserves_gpt_6_max_reasoning_effort_without_changing_existing_models() {
+        for model in [
+            "gpt-6-astra",
+            "astra",
+            "6-astra",
+            "gpt-6-sol",
+            "sol",
+            "6-sol",
+            "gpt-6-luna",
+            "luna",
+            "6-luna",
+        ] {
+            assert_eq!(codex_reasoning_effort(Some(model), Some("max")), Some("max"));
+            assert_eq!(
+                codex_reasoning_effort(Some(model), Some("high")),
+                Some("high")
+            );
+        }
         assert_eq!(
             codex_reasoning_effort(Some("gpt-5.6-sol"), Some("max")),
             Some("xhigh")
