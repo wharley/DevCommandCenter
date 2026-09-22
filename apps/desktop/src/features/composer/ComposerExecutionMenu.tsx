@@ -42,7 +42,6 @@ import {
 	composerToolbarTriggerClassName,
 	getCompactComposerModelLabel,
 } from "./WorkspaceComposer.logic";
-import { EffortBrainIcon } from "./EffortBrainIcon";
 import { DEFAULT_EFFORT_LEVEL, getEffortDisplay } from "./effort";
 import { ModelFavoritesDialog } from "./ModelFavoritesDialog";
 import {
@@ -238,9 +237,6 @@ export function ComposerExecutionMenu({
 				<span className="dcc-composer-model-summary min-w-0 truncate text-[12px] font-medium leading-4 text-foreground">
 					{compactModelLabel}
 				</span>
-				<span className="dcc-composer-effort-summary shrink-0 text-[12px] leading-4 text-muted-foreground">
-					· {effortLabel}
-				</span>
 				<ChevronDown className="size-3 shrink-0 opacity-40" strokeWidth={2} />
 			</DropdownMenuTrigger>
 
@@ -388,43 +384,6 @@ export function ComposerExecutionMenu({
 					<Settings2 className="size-3.5" />{t("composer.favorites.edit")}
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
-
-				<DropdownMenuSub>
-					<DropdownMenuSubTrigger className="justify-between gap-3">
-						<span>{t("composer.execution.effort")}</span>
-						<span className="ml-auto text-[12px] text-muted-foreground">{effortLabel}</span>
-						<ChevronRight className="size-3.5 shrink-0 opacity-50" />
-					</DropdownMenuSubTrigger>
-					<DropdownMenuSubContent sideOffset={6} className="w-56">
-						<DropdownMenuLabel>{t("composer.execution.effort")}</DropdownMenuLabel>
-						{availableEffortLevels.map((id) => {
-							const display = getEffortDisplay(id);
-							return (
-								<DropdownMenuItem
-									key={id}
-									className="justify-between gap-3"
-									onClick={() => onSelectEffort(id)}
-								>
-									<span className="flex items-center gap-2.5">
-										<EffortBrainIcon level={display.icon} />
-										{t(`composer.effort.${id}`, { defaultValue: display.label })}
-									</span>
-									{selectedEffortId === id ? <Check className="size-4" /> : null}
-								</DropdownMenuItem>
-							);
-						})}
-						<DropdownMenuItem
-							className="justify-between gap-3"
-							onClick={onSelectUltrathink}
-						>
-							<span className="flex items-center gap-2.5">
-								<EffortBrainIcon level="max" />
-								{t("composer.effort.ultrathink")}
-							</span>
-							{selectedEffortId === "ultrathink" ? <Check className="size-4" /> : null}
-						</DropdownMenuItem>
-					</DropdownMenuSubContent>
-				</DropdownMenuSub>
 
 				<DropdownMenuSub>
 					<DropdownMenuSubTrigger className="justify-between gap-3">

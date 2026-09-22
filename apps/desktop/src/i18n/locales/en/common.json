@@ -1540,6 +1540,8 @@
       "fastMode": "Fast responses",
       "fastModeHint": "Prefer shorter, more direct replies.",
       "effort": "Effort",
+      "resetEffort": "Reset effort",
+      "ultrathinkHint": "Highest supported level",
       "response": {
         "title": "Response style",
         "standard": "Standard",

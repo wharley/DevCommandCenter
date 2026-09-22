@@ -1540,6 +1540,8 @@
       "fastMode": "Respostas rápidas",
       "fastModeHint": "Prefere respostas mais curtas e diretas.",
       "effort": "Esforço",
+      "resetEffort": "Redefinir esforço",
+      "ultrathinkHint": "Maior nível disponível",
       "response": {
         "title": "Estilo de resposta",
         "standard": "Padrão",
