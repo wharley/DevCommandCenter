@@ -124,17 +124,17 @@ describe("resolveSelectedModelId", () => {
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
 			},
 			{
-				id: "claude-opus-5",
-				label: "Claude Opus 5",
+				id: "claude-opus-5-5",
+				label: "Claude Opus 5.5",
 				description: "",
-				recommended: false,
+				recommended: true,
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
 			},
 			{
 				id: "claude-sonnet-5",
 				label: "Claude Sonnet 5",
 				description: "",
-				recommended: true,
+				recommended: false,
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
 			},
 		],
@@ -158,12 +158,25 @@ describe("resolveSelectedModelId", () => {
 		expect(resolveSelectedModelId(provider, "alpha-default")).toBe("alpha-default");
 	});
 
-	it("upgrades legacy Claude Opus selections to Claude Opus 5", () => {
-		expect(resolveSelectedModelId(claudeProvider, "opus-4.7")).toBe(
-			"claude-opus-5",
-		);
-		expect(resolveSelectedModelId(claudeProvider, "claude-opus-4-7")).toBe(
-			"claude-opus-5",
+	it.each([
+		"opus",
+		"opus-5.5",
+		"opus-5",
+		"claude-opus-5",
+		"opus-4.7",
+		"claude-opus-4-7",
+	])(
+		"upgrades stored Claude Opus selection %s to Claude Opus 5.5",
+		(storedModelId) => {
+			expect(resolveSelectedModelId(claudeProvider, storedModelId)).toBe(
+				"claude-opus-5-5",
+			);
+		},
+	);
+
+	it("preserves an explicit Sonnet selection when Opus becomes recommended", () => {
+		expect(resolveSelectedModelId(claudeProvider, "claude-sonnet-5")).toBe(
+			"claude-sonnet-5",
 		);
 	});
 
@@ -186,11 +199,14 @@ describe("resolveSelectedModelId", () => {
 		expect(resolveSelectedModelId(provider, "missing")).toBe("alpha-default");
 	});
 
-	it("keeps Claude Sonnet 5 as the recommended fallback", () => {
-		expect(resolveSelectedModelId(claudeProvider, "missing")).toBe(
-			"claude-sonnet-5",
-		);
-	});
+	it.each([null, "missing"])(
+		"defaults to Claude Opus 5.5 for selection %s",
+		(storedModelId) => {
+			expect(resolveSelectedModelId(claudeProvider, storedModelId)).toBe(
+				"claude-opus-5-5",
+			);
+		},
+	);
 
 	it("returns null when the provider has no models", () => {
 		expect(resolveSelectedModelId({ ...provider, models: [] }, "missing")).toBeNull();

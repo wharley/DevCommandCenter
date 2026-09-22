@@ -14,7 +14,7 @@ function buildNativeSubagentInstructions(provider: Provider) {
 	if (provider.id === "claude_code") {
 		return [
 			...shared,
-			'- When the user requests a Claude subagent or a Claude model family, use Claude\'s native Agent tool. Set Agent.model to the matching family alias: "opus", "sonnet", or "haiku". For example, "Opus 5" means Agent.model = "opus".',
+			'- When the user requests a Claude subagent or a Claude model family, use Claude\'s native Agent tool. Set Agent.model to the matching family alias: "opus", "sonnet", or "haiku". For example, "Opus 5.5" means Agent.model = "opus".',
 			"- Do not search for a Claude model in the external-provider target list and do not ask the user to choose another provider for a Claude-native request.",
 		];
 	}

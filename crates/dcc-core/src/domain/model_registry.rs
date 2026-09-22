@@ -55,15 +55,18 @@ pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
     ("fable-5-1", "claude-fable-5-1"),
     ("fable-5", "claude-fable-5-1"),
     ("claude-fable-5", "claude-fable-5-1"),
-    ("opus", "claude-opus-5"),
-    ("opus-5", "claude-opus-5"),
-    ("opus-4.8", "claude-opus-5"),
-    ("claude-opus-4-8", "claude-opus-5"),
-    ("opus-4.7", "claude-opus-5"),
-    ("claude-opus-4-7", "claude-opus-5"),
-    ("opus-4.6", "claude-opus-5"),
-    ("claude-opus-4-6", "claude-opus-5"),
-    ("claude-opus-4-6-20251117", "claude-opus-5"),
+    ("opus", "claude-opus-5-5"),
+    ("opus-5.5", "claude-opus-5-5"),
+    ("opus-5-5", "claude-opus-5-5"),
+    ("opus-5", "claude-opus-5-5"),
+    ("claude-opus-5", "claude-opus-5-5"),
+    ("opus-4.8", "claude-opus-5-5"),
+    ("claude-opus-4-8", "claude-opus-5-5"),
+    ("opus-4.7", "claude-opus-5-5"),
+    ("claude-opus-4-7", "claude-opus-5-5"),
+    ("opus-4.6", "claude-opus-5-5"),
+    ("claude-opus-4-6", "claude-opus-5-5"),
+    ("claude-opus-4-6-20251117", "claude-opus-5-5"),
     ("sonnet", "claude-sonnet-5"),
     ("sonnet-5", "claude-sonnet-5"),
     ("sonnet-4.6", "claude-sonnet-5"),
@@ -165,17 +168,17 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
-        id: "claude-opus-5",
-        label: "Claude Opus 5",
-        description: "Complex agentic coding and enterprise work with a 1M-token context window.",
-        recommended: false,
+        id: "claude-opus-5-5",
+        label: "Claude Opus 5.5",
+        description: "Everyday and complex tasks with a 1M-token context window.",
+        recommended: true,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "claude-sonnet-5",
         label: "Claude Sonnet 5",
         description: "Best balance of speed and intelligence for coding and analysis.",
-        recommended: true,
+        recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
@@ -381,18 +384,35 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_aliases_upgrade_opus_versions_to_opus_5() {
-        assert_eq!(resolve_alias("claude_code", "opus"), "claude-opus-5");
-        assert_eq!(resolve_alias("claude_code", "opus-5"), "claude-opus-5");
-        assert_eq!(resolve_alias("claude_code", "opus-4.8"), "claude-opus-5");
-        assert_eq!(
-            resolve_alias("claude_code", "claude-opus-4-7"),
-            "claude-opus-5"
-        );
-        assert!(CLAUDE_CODE.iter().any(|model| model.id == "claude-opus-5"));
-        assert!(!CLAUDE_CODE
+    fn claude_code_aliases_upgrade_opus_versions_to_opus_55() {
+        for alias in [
+            "opus",
+            "opus-5.5",
+            "opus-5-5",
+            "claude-opus-5-5",
+            "opus-5",
+            "claude-opus-5",
+            "opus-4.8",
+            "claude-opus-4-8",
+            "opus-4.7",
+            "claude-opus-4-7",
+            "opus-4.6",
+            "claude-opus-4-6",
+            "claude-opus-4-6-20251117",
+        ] {
+            assert_eq!(resolve_alias("claude_code", alias), "claude-opus-5-5");
+        }
+        let recommended: Vec<_> = CLAUDE_CODE
             .iter()
-            .any(|model| model.id == "claude-opus-4-8"));
+            .filter(|model| model.recommended)
+            .collect();
+        assert_eq!(recommended.len(), 1);
+        assert_eq!(recommended[0].id, "claude-opus-5-5");
+        assert_eq!(
+            recommended[0].effort_levels,
+            &["low", "medium", "high", "xhigh", "max"]
+        );
+        assert!(!CLAUDE_CODE.iter().any(|model| model.id == "claude-opus-5"));
     }
 
     #[test]

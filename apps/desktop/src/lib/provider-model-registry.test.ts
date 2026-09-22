@@ -25,27 +25,39 @@ describe("provider-model-registry", () => {
 		);
 	});
 
-	it("upgrades Claude Opus aliases to Claude Opus 5", () => {
-		expect(resolveModelAlias("claude_code", "opus")).toBe("claude-opus-5");
-		expect(resolveModelAlias("claude_code", "opus-5")).toBe("claude-opus-5");
-		expect(resolveModelAlias("claude_code", "opus-4.8")).toBe("claude-opus-5");
-		expect(resolveModelAlias("claude_code", "claude-opus-4-7")).toBe(
+	it.each([
+		"opus",
+		"opus-5.5",
+		"opus-5-5",
+		"claude-opus-5-5",
+		"opus-5",
+		"claude-opus-5",
+		"opus-4.8",
+		"claude-opus-4-8",
+		"opus-4.7",
+		"claude-opus-4-7",
+		"opus-4.6",
+		"claude-opus-4-6",
+		"claude-opus-4-6-20251117",
+	])("resolves Claude Opus alias %s to Claude Opus 5.5", (alias) => {
+		expect(resolveModelAlias("claude_code", alias)).toBe("claude-opus-5-5");
+	});
+
+	it("registers Claude Opus 5.5 with its full effort ladder", () => {
+		const opus = PROVIDER_MODEL_REGISTRY.claude_code.find(
+			(model) => model.id === "claude-opus-5-5",
+		);
+		expect(opus?.effortLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+		expect(PROVIDER_MODEL_REGISTRY.claude_code.map((model) => model.id)).not.toContain(
 			"claude-opus-5",
 		);
 	});
 
-	it("registers Claude Opus 5 with its full effort ladder", () => {
-		const opus = PROVIDER_MODEL_REGISTRY.claude_code.find(
-			(model) => model.id === "claude-opus-5",
-		);
-		expect(opus?.effortLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
-		expect(PROVIDER_MODEL_REGISTRY.claude_code.map((model) => model.id)).not.toContain(
-			"claude-opus-4-8",
-		);
-	});
-
-	it("keeps Claude Sonnet 5 as the default Claude model", () => {
-		expect(getDefaultModelId("claude_code")).toBe("claude-sonnet-5");
+	it("recommends Claude Opus 5.5 as the default Claude model", () => {
+		expect(getDefaultModelId("claude_code")).toBe("claude-opus-5-5");
+		expect(
+			PROVIDER_MODEL_REGISTRY.claude_code.filter((model) => model.recommended),
+		).toHaveLength(1);
 	});
 
 	it("upgrades Claude Sonnet aliases to Claude Sonnet 5", () => {

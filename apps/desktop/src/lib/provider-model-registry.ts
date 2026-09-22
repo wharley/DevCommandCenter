@@ -7,9 +7,9 @@ export type ModelEntry = {
 };
 
 /**
- * Single source of truth for provider model lists.
+ * Frontend catalog for provider model lists.
  * Keys match the Rust provider IDs (e.g. "claude_code").
- * To add a new model version, update only this file.
+ * Keep model versions and aliases aligned with crates/dcc-core/src/domain/model_registry.rs.
  */
 export const PROVIDER_MODEL_REGISTRY = {
 	claude_code: [
@@ -22,18 +22,18 @@ export const PROVIDER_MODEL_REGISTRY = {
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
 		{
-			id: "claude-opus-5",
-			label: "Claude Opus 5",
+			id: "claude-opus-5-5",
+			label: "Claude Opus 5.5",
 			description:
-				"Complex agentic coding and enterprise work with a 1M-token context window.",
-			recommended: false,
+				"Everyday and complex tasks with a 1M-token context window.",
+			recommended: true,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
 		{
 			id: "claude-sonnet-5",
 			label: "Claude Sonnet 5",
 			description: "Best balance of speed and intelligence for coding and analysis.",
-			recommended: true,
+			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
 		{
@@ -212,15 +212,18 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 		"fable-5-1": "claude-fable-5-1",
 		"fable-5": "claude-fable-5-1",
 		"claude-fable-5": "claude-fable-5-1",
-		opus: "claude-opus-5",
-		"opus-5": "claude-opus-5",
-		"opus-4.8": "claude-opus-5",
-		"claude-opus-4-8": "claude-opus-5",
-		"opus-4.7": "claude-opus-5",
-		"claude-opus-4-7": "claude-opus-5",
-		"opus-4.6": "claude-opus-5",
-		"claude-opus-4-6": "claude-opus-5",
-		"claude-opus-4-6-20251117": "claude-opus-5",
+		opus: "claude-opus-5-5",
+		"opus-5.5": "claude-opus-5-5",
+		"opus-5-5": "claude-opus-5-5",
+		"opus-5": "claude-opus-5-5",
+		"claude-opus-5": "claude-opus-5-5",
+		"opus-4.8": "claude-opus-5-5",
+		"claude-opus-4-8": "claude-opus-5-5",
+		"opus-4.7": "claude-opus-5-5",
+		"claude-opus-4-7": "claude-opus-5-5",
+		"opus-4.6": "claude-opus-5-5",
+		"claude-opus-4-6": "claude-opus-5-5",
+		"claude-opus-4-6-20251117": "claude-opus-5-5",
 		sonnet: "claude-sonnet-5",
 		"sonnet-5": "claude-sonnet-5",
 		"sonnet-4.6": "claude-sonnet-5",

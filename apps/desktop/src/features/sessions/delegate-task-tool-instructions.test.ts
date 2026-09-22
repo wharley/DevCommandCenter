@@ -14,7 +14,7 @@ describe("delegate task tool instructions", () => {
 		);
 
 		expect(instructions).toContain("use Claude's native Agent tool");
-		expect(instructions).toContain('"Opus 5" means Agent.model = "opus"');
+		expect(instructions).toContain('"Opus 5.5" means Agent.model = "opus"');
 		expect(instructions).toContain(
 			"delegate_task is exclusively for delegation to a different provider",
 		);
