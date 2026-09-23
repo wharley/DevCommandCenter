@@ -133,6 +133,15 @@ current injection and child-lifecycle path, but it is deliberately not stored
 as conformance evidence: it does not prove tool inventory, tool calls,
 permission mediation, disable/remove behavior, or both transports.
 
+A follow-up probe on the installed `2026.09.18-9a7762b` runtime placed a
+credential-free fixture in a private temporary project's `.cursor/mcp.json`,
+then created an ACP session with an empty `mcpServers` list. Cursor emitted a
+structured `dcc-fixture: fixture.echo` tool call and completion. This confirms
+that project-file configuration is read by the ACP runtime, while the inline
+session projection was not observed by the authenticated gates. The probe did
+not emit `session/request_permission` for the tool call, so it does not satisfy
+DCC's approval contract and is not conformance evidence.
+
 ## Remaining verification gate
 
 The production adapter now:
@@ -145,10 +154,13 @@ The production adapter now:
 
 On September 23, the installed `cursor-agent 2026.09.18-9a7762b` failed the
 experimental Computer Use gate: the model did not produce an observed,
-authorized fixture image call. The currently audited `2026.07.23-e383d2b`
-binary was unavailable locally, and the exact-version gate refused to use the
-newer binary. This leaves the ACP projection unsupported on the installed
-runtime until its MCP behavior is understood and the gates pass.
+authorized fixture image call through DCC's inline session projection. A
+separate private-project probe confirmed that file-based MCP configuration can
+reach the model through ACP, but it did not establish DCC permission mediation.
+The currently audited `2026.07.23-e383d2b` binary was unavailable locally, and
+the exact-version gate refused to use the newer binary. DCC must test an
+isolated configuration path that keeps credential handling and approval
+enforcement intact before the current runtime can be certified.
 
 The release gate remains the ignored, authenticated shared conformance test:
 

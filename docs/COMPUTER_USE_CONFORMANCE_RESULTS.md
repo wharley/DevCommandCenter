@@ -35,5 +35,12 @@ the adapter exercises its tool path directly.
 The current Cursor CLI's official ACP guidance documents MCP configured in a
 project or user `.cursor/mcp.json`. DCC's inline session configuration was not
 observed as connected by the newer CLI during the experimental gates. The
-older exact-version gate remains in place until the DCC adapter is updated and
-the shared MCP and Computer Use contracts pass on a Cursor runtime.
+exact-version gate remains in place until the DCC adapter is updated and the
+shared MCP and Computer Use contracts pass on a Cursor runtime.
+
+A separate September 23 probe used a credential-free fixture in a private
+temporary project's `.cursor/mcp.json` and an ACP session with an empty inline
+`mcpServers` list. Cursor emitted and completed `dcc-fixture: fixture.echo`.
+It did not emit an ACP permission request for that call, so the result only
+confirms the file-based connection path; it does not pass DCC's authorization
+contract or the Computer Use gate.
