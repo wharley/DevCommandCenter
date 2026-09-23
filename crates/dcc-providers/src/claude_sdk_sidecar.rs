@@ -29,7 +29,7 @@ use dcc_core::{
 };
 
 use crate::claude_mcp::{
-    parse_claude_mcp_status_snapshot, write_initial_mcp_configuration, CLAUDE_MCP_RUNTIME_VERSION,
+    claude_mcp_runtime_version, parse_claude_mcp_status_snapshot, write_initial_mcp_configuration,
 };
 use crate::common::{
     apply_cli_spawn_environment, augmented_path, now_iso, parse_provider_stream_line,
@@ -50,6 +50,24 @@ pub struct ClaudeSdkSidecarAdapter {
 struct ProviderRuntimeState {
     sessions: Mutex<HashMap<String, Arc<SessionRuntime>>>,
     account_usage: Mutex<HashMap<String, ProviderAccountUsage>>,
+    claude_cli_version: std::sync::RwLock<Option<String>>,
+}
+
+impl ProviderRuntimeState {
+    fn set_claude_cli_version(&self, version: String) {
+        *self
+            .claude_cli_version
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(version);
+    }
+
+    fn claude_mcp_runtime_version(&self) -> String {
+        let version = self
+            .claude_cli_version
+            .read()
+            .unwrap_or_else(|error| error.into_inner());
+        claude_mcp_runtime_version(version.as_deref())
+    }
 }
 
 struct SessionRuntime {
@@ -559,6 +577,8 @@ impl ClaudeSdkSidecarAdapter {
         // Resolve before creating a session so missing installations surface as
         // actionable errors, and retain the same executable for the session.
         let executable = self.resolve_claude_executable().await?;
+        self.runtime
+            .set_claude_cli_version(executable.version.clone());
         let account_usage_key = provider_runtime_cache_key(cfg.provider_runtime.as_ref());
         let mut command = self.interactive_command()?;
         apply_cli_spawn_environment(&mut command, &self.id.0, &cfg)?;
@@ -667,7 +687,11 @@ impl ClaudeSdkSidecarAdapter {
                         &runtime_session_id,
                     ) {
                         match snapshot {
-                            Ok(statuses) => {
+                            Ok(mut statuses) => {
+                                let provider_version = runtime_state.claude_mcp_runtime_version();
+                                for status in &mut statuses {
+                                    status.provider_version = provider_version.clone();
+                                }
                                 let _ = runtime_for_task
                                     .events_tx
                                     .send(ProviderEvent::McpRuntimeStatusSnapshot { statuses });
@@ -766,7 +790,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
     }
 
     fn dcc_mcp_projection_version(&self) -> Option<String> {
-        Some(CLAUDE_MCP_RUNTIME_VERSION.to_string())
+        Some(self.runtime.claude_mcp_runtime_version())
     }
 
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
@@ -1023,6 +1047,8 @@ impl Provider for ClaudeSdkSidecarAdapter {
                 })
             }
         };
+        self.runtime
+            .set_claude_cli_version(executable.version.clone());
         let mut auth_command = self.binary_command(&["--auth-status"])?;
         auth_command.env("DCC_CLAUDE_CODE_BIN_PATH", executable.path);
         let auth_output =

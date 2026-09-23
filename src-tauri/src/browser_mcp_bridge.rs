@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+use tauri::Emitter;
 use tokio::sync::oneshot;
 use tower::limit::ConcurrencyLimitLayer;
 use url::Url;
@@ -194,6 +195,7 @@ impl TokenRegistry {
 /// The loopback listener and its lease-bound session registry. No plaintext
 /// bearer token is retained after `project_for_session` returns.
 pub struct BrowserMcpBridge {
+    app: Option<tauri::AppHandle>,
     browser: BrowserState,
     browser_requests: BrowserAgentRequestBroker,
     sessions: SessionCommandState,
@@ -206,6 +208,7 @@ pub struct BrowserMcpBridge {
 
 impl BrowserMcpBridge {
     pub async fn start(
+        app: Option<tauri::AppHandle>,
         browser: BrowserState,
         browser_requests: BrowserAgentRequestBroker,
         sessions: SessionCommandState,
@@ -223,6 +226,7 @@ impl BrowserMcpBridge {
         );
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let bridge = Arc::new(Self {
+            app,
             browser,
             browser_requests,
             sessions,
@@ -271,6 +275,38 @@ impl BrowserMcpBridge {
 
     fn is_shutting_down(&self) -> bool {
         self.shutting_down.load(Ordering::Acquire)
+    }
+
+    fn emit_computer_activity(
+        &self,
+        binding: &TokenBinding,
+        activity_id: &str,
+        tool: &str,
+        phase: &'static str,
+    ) {
+        let Some(app) = self.app.as_ref() else { return };
+        let _ = app.emit(
+            "computer-use-activity",
+            ComputerUseActivityNotice {
+                session_id: binding.session_id.clone(),
+                provider_id: binding.provider_id.clone(),
+                activity_id: activity_id.to_string(),
+                tool: tool.to_string(),
+                phase,
+            },
+        );
+    }
+
+    fn emit_computer_preview_updated(&self, session_id: &str) {
+        if let Some(app) = self.app.as_ref() {
+            let _ = app.emit("computer-use-preview-updated", session_id.to_string());
+        }
+    }
+
+    fn emit_computer_preview_cleared(&self, session_id: &str) {
+        if let Some(app) = self.app.as_ref() {
+            let _ = app.emit("computer-use-preview-cleared", session_id.to_string());
+        }
     }
 
     fn authenticate(&self, headers: &HeaderMap) -> Option<TokenBinding> {
@@ -425,9 +461,34 @@ impl BrowserMcpBridge {
         // All fallible credential/config construction is above this point, so
         // a failed projection cannot leave an authenticated orphaned lease.
         registry.by_lease.insert(lease_id.clone(), binding);
+        drop(registry);
         self.computer.record_projection(&session.id.0, &lease_id);
+        self.emit_computer_preview_cleared(&session.id.0);
         Ok(Some(EphemeralMcpProjectionLease { server, lease_id }))
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComputerUseActivityNotice {
+    session_id: String,
+    provider_id: String,
+    activity_id: String,
+    tool: String,
+    phase: &'static str,
+}
+
+fn is_computer_activity_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "dcc_computer_status"
+            | "dcc_computer_request_control"
+            | "dcc_computer_capture"
+            | "dcc_computer_click"
+            | "dcc_computer_scroll"
+            | "dcc_computer_type"
+            | "dcc_computer_key"
+    )
 }
 
 /// The production listener and local conformance tests share the exact same
@@ -467,6 +528,7 @@ impl EphemeralMcpProjection for BrowserMcpBridge {
                 .revoke_lease(&binding.session_id, lease_id, &self.browser);
             self.computer
                 .revoke_projection(&binding.session_id, lease_id);
+            self.emit_computer_preview_cleared(&binding.session_id);
             for capture_id in capture_ids {
                 discard_browser_evidence_capture(
                     &self.browser,
@@ -633,7 +695,33 @@ async fn handle_rpc(
                         StatusCode::SERVICE_UNAVAILABLE.into_response()
                     } else {
                         let tool_name = call.name.clone();
+                        let computer_activity_id = is_computer_activity_tool(&tool_name)
+                            .then(|| format!("mcp-{:016x}", rand::random::<u64>()));
+                        if let Some(activity_id) = computer_activity_id.as_deref() {
+                            bridge.emit_computer_activity(
+                                &binding,
+                                activity_id,
+                                &tool_name,
+                                "started",
+                            );
+                        }
                         let dispatched = dispatch_tool(&bridge, &binding, call).await;
+                        if let Some(activity_id) = computer_activity_id.as_deref() {
+                            let failed = dispatched
+                                .response
+                                .get("isError")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false);
+                            bridge.emit_computer_activity(
+                                &binding,
+                                activity_id,
+                                &tool_name,
+                                if failed { "failed" } else { "completed" },
+                            );
+                            if tool_name == "dcc_computer_capture" && !failed {
+                                bridge.emit_computer_preview_updated(&binding.session_id);
+                            }
+                        }
                         append_mcp_tool_audit(&bridge.browser, &binding, &tool_name, &dispatched);
                         rpc_result(id, dispatched.response, None)
                     }
@@ -1955,6 +2043,7 @@ mod tests {
             phase,
         };
         let bridge = Arc::new(BrowserMcpBridge {
+            app: None,
             browser: BrowserState::default(),
             browser_requests: BrowserAgentRequestBroker::default(),
             sessions,
@@ -1981,6 +2070,7 @@ mod tests {
         let sessions =
             SessionCommandState::new_headless(root.join("sessions.sqlite"), root.join("app-data"));
         let bridge = BrowserMcpBridge::start(
+            None,
             BrowserState::default(),
             BrowserAgentRequestBroker::default(),
             sessions,

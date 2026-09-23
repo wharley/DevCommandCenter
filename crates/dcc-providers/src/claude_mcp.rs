@@ -34,6 +34,20 @@ const MAX_TOOL_COUNT: usize = 256;
 // Projection identity pins our integration, not the user's independently updated CLI.
 pub(crate) const CLAUDE_MCP_RUNTIME_VERSION: &str = "claude-agent-sdk@0.2.126+claude-code@external";
 
+pub(crate) fn claude_mcp_runtime_version(cli_version: Option<&str>) -> String {
+    let sdk_identity = CLAUDE_MCP_RUNTIME_VERSION
+        .split_once("+claude-code@")
+        .map(|(sdk, _)| sdk)
+        .unwrap_or("claude-agent-sdk@unknown");
+    match cli_version
+        .and_then(|version| version.split_ascii_whitespace().next())
+        .filter(|version| !version.is_empty())
+    {
+        Some(version) => format!("{sdk_identity}+claude-code@{version}"),
+        None => CLAUDE_MCP_RUNTIME_VERSION.to_string(),
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaudeMcpConfiguration<'a> {
@@ -708,6 +722,11 @@ mod tests {
         );
 
         assert_eq!(CLAUDE_MCP_RUNTIME_VERSION, expected);
+        assert_eq!(
+            claude_mcp_runtime_version(Some("2.1.280 (Claude Code)")),
+            "claude-agent-sdk@0.2.126+claude-code@2.1.280"
+        );
+        assert_eq!(claude_mcp_runtime_version(None), CLAUDE_MCP_RUNTIME_VERSION);
         assert!(!dependencies.contains_key("@anthropic-ai/claude-code"));
     }
 

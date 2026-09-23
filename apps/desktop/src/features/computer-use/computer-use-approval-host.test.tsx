@@ -40,7 +40,6 @@ const status = {
 	supported: true,
 	unsupportedReason: null,
 	minimumMacosVersion: 14,
-	providerSupported: true,
 	runtimeAttached: true,
 	accessibility: { granted: true, canRequest: false },
 	screenRecording: { granted: true, canRequest: false },

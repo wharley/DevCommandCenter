@@ -33,6 +33,77 @@ test adapters implement `McpConformanceAdapter` and translate each stable step
 into calls against their real runtime protocol. Returning the expected enum
 without exercising that runtime is not conformance.
 
+## Computer Use compatibility is a separate contract
+
+The MCP fixture suite proves tool discovery, calls, approval behavior, and
+failure handling. It does not prove that a provider accepts image content from
+`dcc_computer_capture`, interprets screenshots usefully, or honors a stop
+request during a Computer Use turn. Do not use `mcpSupport` or `vision` alone
+as a Computer Use certification.
+
+The Computer Use settings matrix therefore reports these facts separately for
+each provider in the live catalog:
+
+| Column | Evidence shown | What it does not establish |
+| --- | --- | --- |
+| MCP in DCC | Adapter-declared MCP level: verified bridge, runtime bridge, native configuration, or unsupported | A live attachment to the conversation or image handling |
+| Declared vision | The adapter's existing `capabilities.vision` value | That the exact provider runtime accepts MCP image blocks |
+| Stop execution | Whether a conversation exists for which the DCC stop action can be offered | Whether the provider stopped immediately or cancelled an in-flight tool |
+
+The session badge is driven separately by the live MCP projection attached to
+that conversation. `ComputerUseStatus.runtimeAttached` means only that the
+authenticated DCC MCP projection is attached to the session. It is not proof
+of screenshot interpretation or interruption.
+
+End-to-end promotion requires a provider-backed gate that captures a harmless
+fixture image through the actual MCP result path, confirms the runtime receives
+it as image content, checks the provider's response against a visual fixture
+assertion, and verifies that stopping the turn cancels or terminates the active
+provider operation. Record the exact provider/runtime version and keep image
+and interruption evidence separate from the MCP fixture evidence. Until a
+provider passes that gate, the settings matrix intentionally presents adapter
+declarations rather than claiming end-to-end support.
+
+The separate gate is now implemented as
+`run_provider_computer_use_conformance` in `dcc-core`. It exercises both stdio
+and HTTP MCP transports. The image check chooses one of four eight-digit codes
+per transport and expects the provider to report the exact code from an image
+content block; the tool result contains no answer text. Codex publishes an
+asynchronous MCP readiness snapshot, so its test adapter waits until both
+fixture tools are connected before prompting. Claude's SDK uses its first turn
+to exercise this path directly. The interruption check waits until
+`fixture.hold` confirms the MCP call is in flight, calls the provider adapter's
+real `cancel`, and requires a terminal event or a rejected follow-up turn while
+the fixture confirms the call did not reach its safety timeout. Evidence is
+private-constructor, version-bound metadata with independent suite and fixture
+versions; it does not contain prompts, images, or model output. Latest
+account-backed results are recorded in
+[Computer Use conformance results](COMPUTER_USE_CONFORMANCE_RESULTS.md).
+
+Authenticated opt-in provider gates are available for Claude Code, Codex, and
+Cursor:
+
+```sh
+DCC_RUN_CLAUDE_COMPUTER_USE_CONFORMANCE=1 \
+  cargo test -p dcc-mcp-fixture --test provider_conformance \
+  authenticated_claude_passes_computer_use_conformance -- --ignored --exact
+
+DCC_RUN_CODEX_COMPUTER_USE_CONFORMANCE=1 \
+  cargo test -p dcc-mcp-fixture --test provider_conformance \
+  authenticated_codex_passes_computer_use_conformance -- --ignored --exact
+
+DCC_RUN_CURSOR_COMPUTER_USE_CONFORMANCE=1 \
+  cargo test -p dcc-mcp-fixture --test provider_conformance \
+  authenticated_cursor_passes_computer_use_conformance -- --ignored --exact
+```
+
+Each successful gate emits one `COMPUTER_USE_CONFORMANCE_EVIDENCE=` JSON record
+with the exact runtime version, both transport results, and the verification
+timestamp. The gates remain ignored by default and require an authenticated
+provider account. The current DCC catalog does not advertise the resulting
+evidence automatically; the records are available for a later catalog
+promotion workflow.
+
 The in-memory fake in the core test suite verifies harness sequencing and
 failure behavior only. It does not verify any production provider and cannot
 promote Claude, Codex, or another adapter.

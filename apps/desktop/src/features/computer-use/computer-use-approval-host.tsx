@@ -157,7 +157,6 @@ export function ComputerUseApprovalHost({
 	const canAllow = Boolean(
 		request &&
 		status?.supported &&
-		status.providerSupported &&
 		status.runtimeAttached &&
 		permissionReady &&
 		targets.length > 0 &&
@@ -304,7 +303,7 @@ export function ComputerUseApprovalHost({
 						)}
 						{statusQuery.isError && <p className="text-xs text-muted-foreground">{t("settings.computerUse.approval.statusError")}</p>}
 						{status && !status.supported && <p className="text-xs text-muted-foreground">{t("settings.computerUse.approval.unsupported")}</p>}
-						{status && status.supported && (!status.providerSupported || !status.runtimeAttached) && <p className="text-xs text-muted-foreground">{t("settings.computerUse.approval.conversationNotReady")}</p>}
+						{status && status.supported && !status.runtimeAttached && <p className="text-xs text-muted-foreground">{t("settings.computerUse.approval.conversationNotReady")}</p>}
 						{accessError && <p role="alert" className="text-xs text-destructive">{accessError}</p>}
 						{decisionError && <p role="alert" className="text-xs text-destructive">{decisionError}</p>}
 					</div>

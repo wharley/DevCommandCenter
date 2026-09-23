@@ -1613,6 +1613,7 @@ export function WorkspacePanel({
 					activeMissionSpecHash={activeMissionSpecHash}
 					autoSaveMissionValidation={autoSaveMissionValidation}
 					onSelectSession={onSelectSession}
+					onAbortSession={onAbortSession}
 					onReviewChanges={onReviewChanges}
 					onReviewDelegation={onReviewDelegation}
 					onRerunDelegation={onRerunDelegation}

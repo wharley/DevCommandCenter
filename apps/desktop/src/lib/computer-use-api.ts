@@ -30,7 +30,6 @@ export type ComputerUseStatus = {
 	supported: boolean;
 	unsupportedReason: string | null;
 	minimumMacosVersion: number | null;
-	providerSupported: boolean;
 	runtimeAttached: boolean;
 	accessibility: ComputerUsePermission;
 	screenRecording: ComputerUsePermission;
@@ -62,6 +61,29 @@ export type ComputerUseRespondControlRequestInput = {
 	allowedBundleIds: string[];
 };
 
+export type ComputerUsePreviewFrame = {
+	sessionId: string;
+	target: {
+		bundleId: string;
+		name: string;
+		windowId: number;
+		title: string;
+		width: number;
+		height: number;
+	};
+	mimeType: string;
+	imageBase64: string;
+	capturedAtMs: number;
+};
+
+export type ComputerUseActivityEvent = {
+	sessionId: string;
+	providerId: string;
+	activityId: string;
+	tool: string;
+	phase: "started" | "completed" | "failed";
+};
+
 const COMPUTER_USE_METHODS = {
 	status: "computer_use_status",
 	arm: "computer_use_arm",
@@ -75,13 +97,16 @@ function isTauriRuntime(): boolean {
 	return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+export function isComputerUseDesktop(): boolean {
+	return isTauriRuntime();
+}
+
 function unsupportedDesktopStatus(): ComputerUseStatus {
 	return {
 		platform: "web",
 		supported: false,
 		unsupportedReason: "Computer Use requires the supported desktop runtime.",
 		minimumMacosVersion: null,
-		providerSupported: false,
 		runtimeAttached: false,
 		accessibility: { granted: false, canRequest: false },
 		screenRecording: { granted: false, canRequest: false },
@@ -92,10 +117,11 @@ function unsupportedDesktopStatus(): ComputerUseStatus {
 
 export async function getComputerUseStatus(
 	sessionId?: string | null,
+	includeTargets = true,
 ): Promise<ComputerUseStatus> {
 	if (!isTauriRuntime()) return unsupportedDesktopStatus();
 	return invoke<ComputerUseStatus>(COMPUTER_USE_METHODS.status, {
-		input: { sessionId: sessionId ?? null, includeTargets: true },
+		input: { sessionId: sessionId ?? null, includeTargets },
 	});
 }
 
@@ -154,4 +180,13 @@ export async function respondComputerUseControlRequest(
 		COMPUTER_USE_METHODS.respondControlRequest,
 		{ input },
 	);
+}
+
+export async function getComputerUsePreviewFrame(
+	sessionId: string,
+): Promise<ComputerUsePreviewFrame | null> {
+	if (!isTauriRuntime()) return null;
+	return invoke<ComputerUsePreviewFrame | null>("computer_use_preview_frame", {
+		input: { sessionId },
+	});
 }

@@ -13,13 +13,14 @@ use base64::Engine;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::State;
+use tauri::{Emitter, State};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 const GRANT_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_ALLOWED_APPS: usize = 16;
 const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_PREVIEW_SESSIONS: usize = 8;
 const MAX_TYPE_CHARS: usize = 2_000;
 const MAX_SCROLL_DELTA: i32 = 1_000;
 const CONTROL_REQUEST_TTL: Duration = Duration::from_secs(45);
@@ -63,7 +64,6 @@ pub struct ComputerUseStatus {
     pub minimum_macos_version: Option<u8>,
     pub accessibility: ComputerPermissionStatus,
     pub screen_recording: ComputerPermissionStatus,
-    pub provider_supported: bool,
     pub runtime_attached: bool,
     pub grant: ComputerGrantStatus,
     pub targets: Vec<ComputerTarget>,
@@ -91,6 +91,30 @@ pub struct ComputerCapture {
     pub target: ComputerTargetSnapshot,
     pub mime_type: &'static str,
     pub image_base64: String,
+}
+
+/// Latest locally captured frame for an explicitly authorized provider
+/// session. It is separate from the MCP result so the renderer can preview it
+/// without depending on provider-specific tool-call UI.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerUsePreviewTarget {
+    pub bundle_id: String,
+    pub name: String,
+    pub window_id: u32,
+    pub title: String,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerUsePreviewFrame {
+    pub session_id: String,
+    pub target: ComputerUsePreviewTarget,
+    pub mime_type: &'static str,
+    pub image_base64: String,
+    pub captured_at_ms: u64,
 }
 
 /// A renderer-visible request created by an authenticated provider tool. This
@@ -156,6 +180,11 @@ pub struct ComputerUseRespondControlRequestInput {
     pub allowed: bool,
     #[serde(default)]
     pub allowed_bundle_ids: Vec<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ComputerUsePreviewFrameInput {
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -258,6 +287,7 @@ pub struct ComputerUseState {
     grants: Arc<Mutex<HashMap<String, ComputerGrant>>>,
     projected_sessions: Arc<Mutex<HashMap<String, String>>>,
     pending_control_requests: Arc<Mutex<HashMap<String, PendingControlRequest>>>,
+    preview_frames: Arc<Mutex<HashMap<String, ComputerUsePreviewFrame>>>,
 }
 
 impl Default for ComputerUseState {
@@ -273,6 +303,7 @@ impl ComputerUseState {
             grants: Arc::new(Mutex::new(HashMap::new())),
             projected_sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_control_requests: Arc::new(Mutex::new(HashMap::new())),
+            preview_frames: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -290,6 +321,7 @@ impl ComputerUseState {
         if let Ok(mut grants) = self.grants.lock() {
             grants.remove(session_id);
         }
+        self.clear_preview_frame(session_id);
         self.cancel_control_requests_for_session(session_id, None);
     }
     pub(crate) fn revoke_projection(&self, session_id: &str, lease_id: &str) {
@@ -309,6 +341,7 @@ impl ComputerUseState {
                 grants.remove(session_id);
             }
             self.cancel_control_requests_for_session(session_id, Some(lease_id));
+            self.clear_preview_frame(session_id);
         }
     }
     pub(crate) fn revoke_all(&self) {
@@ -320,6 +353,9 @@ impl ComputerUseState {
         }
         if let Ok(mut requests) = self.pending_control_requests.lock() {
             requests.clear();
+        }
+        if let Ok(mut frames) = self.preview_frames.lock() {
+            frames.clear();
         }
     }
     fn is_projected(&self, session_id: &str) -> bool {
@@ -333,6 +369,42 @@ impl ComputerUseState {
             .ok()?
             .get(session_id)
             .cloned()
+    }
+
+    fn clear_preview_frame(&self, session_id: &str) {
+        if let Ok(mut frames) = self.preview_frames.lock() {
+            frames.remove(session_id);
+        }
+    }
+
+    pub(crate) fn preview_frame(&self, session_id: &str) -> Option<ComputerUsePreviewFrame> {
+        let current_lease = self.projection_lease(session_id);
+        let now = Instant::now();
+        let authorized = current_lease.as_ref().is_some_and(|lease_id| {
+            self.grants.lock().is_ok_and(|mut grants| {
+                prune_expired(&mut grants);
+                grants
+                    .get(session_id)
+                    .is_some_and(|grant| grant.lease_id == *lease_id && grant.expires_at > now)
+            })
+        });
+        if !authorized {
+            self.clear_preview_frame(session_id);
+            return None;
+        }
+        let frame = self.preview_frames.lock().ok()?.get(session_id).cloned()?;
+        let still_allowed = self.grants.lock().is_ok_and(|mut grants| {
+            prune_expired(&mut grants);
+            grants.get(session_id).is_some_and(|grant| {
+                current_lease.as_ref() == Some(&grant.lease_id)
+                    && grant.allowed_bundle_ids.contains(&frame.target.bundle_id)
+            })
+        });
+        if !still_allowed {
+            self.clear_preview_frame(session_id);
+            return None;
+        }
+        Some(frame)
     }
     pub(crate) fn lease_matches(&self, session_id: &str, lease_id: &str) -> bool {
         self.projected_sessions.lock().is_ok_and(|sessions| {
@@ -439,7 +511,6 @@ impl ComputerUseState {
             minimum_macos_version: cfg!(target_os = "macos").then_some(14),
             accessibility,
             screen_recording,
-            provider_supported: runtime_attached,
             runtime_attached,
             grant,
             targets,
@@ -530,12 +601,14 @@ impl ComputerUseState {
             },
         );
         drop(grants);
+        self.clear_preview_frame(session_id);
         Ok(self.grant_status(Some(session_id)))
     }
     pub(crate) fn disarm(&self, session_id: &str) -> ComputerGrantStatus {
         if let Ok(mut grants) = self.grants.lock() {
             grants.remove(session_id);
         }
+        self.clear_preview_frame(session_id);
         self.grant_status(Some(session_id))
     }
     pub(crate) fn request_access(
@@ -867,10 +940,40 @@ impl ComputerUseState {
         if !accepted {
             return Err("desktop computer use grant changed while capturing".to_string());
         }
+        let image_base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+        let preview_frame = ComputerUsePreviewFrame {
+            session_id: session_id.to_string(),
+            target: ComputerUsePreviewTarget {
+                bundle_id: snapshot.bundle_id.clone(),
+                name: snapshot.name.clone(),
+                window_id: snapshot.window_id,
+                title: snapshot.title.clone(),
+                width: snapshot.width,
+                height: snapshot.height,
+            },
+            mime_type: "image/png",
+            image_base64: image_base64.clone(),
+            captured_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+                .unwrap_or_default(),
+        };
+        if let Ok(mut frames) = self.preview_frames.lock() {
+            if frames.len() >= MAX_PREVIEW_SESSIONS && !frames.contains_key(session_id) {
+                if let Some(oldest_session) = frames
+                    .iter()
+                    .min_by_key(|(_, frame)| frame.captured_at_ms)
+                    .map(|(id, _)| id.clone())
+                {
+                    frames.remove(&oldest_session);
+                }
+            }
+            frames.insert(session_id.to_string(), preview_frame);
+        }
         Ok(ComputerCapture {
             target: snapshot,
             mime_type: "image/png",
-            image_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+            image_base64,
         })
     }
     pub(crate) fn click(
@@ -1164,17 +1267,23 @@ pub fn computer_use_status(
 }
 #[tauri::command]
 pub fn computer_use_arm(
+    app: tauri::AppHandle,
     state: State<'_, ComputerUseState>,
     input: ComputerUseArmInput,
 ) -> Result<ComputerGrantStatus, String> {
-    state.arm(&input.session_id, &input.allowed_bundle_ids)
+    let grant = state.arm(&input.session_id, &input.allowed_bundle_ids)?;
+    let _ = app.emit("computer-use-preview-cleared", input.session_id);
+    Ok(grant)
 }
 #[tauri::command]
 pub fn computer_use_disarm(
+    app: tauri::AppHandle,
     state: State<'_, ComputerUseState>,
     input: ComputerUseDisarmInput,
 ) -> ComputerGrantStatus {
-    state.disarm(&input.session_id)
+    let grant = state.disarm(&input.session_id);
+    let _ = app.emit("computer-use-preview-cleared", input.session_id);
+    grant
 }
 #[tauri::command]
 pub fn computer_use_request_access(
@@ -1191,12 +1300,27 @@ pub fn computer_use_list_pending_requests(
 }
 #[tauri::command]
 pub async fn computer_use_respond_control_request(
+    app: tauri::AppHandle,
     state: State<'_, ComputerUseState>,
     input: ComputerUseRespondControlRequestInput,
 ) -> Result<ComputerUseRespondControlRequestOutput, String> {
-    state
+    let output = state
         .respond_control_request(&input.request_id, input.allowed, &input.allowed_bundle_ids)
-        .await
+        .await?;
+    if input.allowed {
+        if let Some(session_id) = output.grant.session_id.as_deref() {
+            let _ = app.emit("computer-use-preview-cleared", session_id);
+        }
+    }
+    Ok(output)
+}
+
+#[tauri::command]
+pub fn computer_use_preview_frame(
+    state: State<'_, ComputerUseState>,
+    input: ComputerUsePreviewFrameInput,
+) -> Option<ComputerUsePreviewFrame> {
+    state.preview_frame(&input.session_id)
 }
 
 // Human-initiated Appshots reuse the native capture primitives without granting

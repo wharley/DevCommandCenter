@@ -1,3 +1,4 @@
+pub mod computer_use_conformance;
 pub mod credential_store;
 pub mod events;
 pub mod git;
@@ -6,6 +7,11 @@ pub mod mcp_probe;
 pub mod provider;
 pub mod repository;
 
+pub use computer_use_conformance::{
+    ComputerUseConformanceAdapter, ComputerUseConformanceAdapterError,
+    ComputerUseConformanceAdapterResult, ComputerUseConformanceObservation,
+    ComputerUseConformanceStep,
+};
 pub use credential_store::{
     CredentialStore, CredentialStoreError, CredentialStoreResult, SecretValue,
 };

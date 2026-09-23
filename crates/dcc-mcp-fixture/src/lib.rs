@@ -3,6 +3,7 @@ pub mod stdio;
 
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -18,6 +19,8 @@ pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
     &[LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26"];
 pub const MAX_ECHO_CHARS: usize = 4_096;
 pub const MAX_SLOW_DELAY_MS: u64 = 2_000;
+pub const COMPUTER_USE_IMAGE_LABELS: [&str; 4] = ["80427159", "39261508", "61743082", "95820374"];
+const COMPUTER_USE_HOLD_MAX_MS: u64 = 90_000;
 pub const MAX_CONCURRENT_REQUESTS: usize = 32;
 
 const JSON_RPC_VERSION: &str = "2.0";
@@ -38,6 +41,8 @@ struct FixtureState {
     notifications: broadcast::Sender<Value>,
     in_flight: Mutex<HashMap<RequestKey, Arc<Notify>>>,
     request_slots: Arc<Semaphore>,
+    computer_use_image_case: usize,
+    computer_use_hold_start_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -62,8 +67,22 @@ impl FixtureServer {
                 notifications,
                 in_flight: Mutex::new(HashMap::new()),
                 request_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS)),
+                computer_use_image_case: 0,
+                computer_use_hold_start_file: None,
             }),
         }
+    }
+
+    pub fn with_computer_use_image_case(case: usize) -> Self {
+        Self::with_computer_use_fixture(case, None)
+    }
+
+    pub fn with_computer_use_fixture(case: usize, hold_start_file: Option<PathBuf>) -> Self {
+        let mut fixture = Self::new();
+        let state = Arc::get_mut(&mut fixture.inner).expect("new fixture state has one owner");
+        state.computer_use_image_case = case % COMPUTER_USE_IMAGE_LABELS.len();
+        state.computer_use_hold_start_file = hold_start_file;
+        fixture
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
@@ -151,6 +170,8 @@ impl FixtureServer {
             "fixture.echo" => self.echo(id, &arguments),
             "fixture.mutate" => self.mutate(id, &arguments),
             "fixture.slow" => self.slow(id, &arguments).await,
+            "fixture.image" => self.image(id, &arguments),
+            "fixture.hold" => self.hold(id, &arguments).await,
             "fixture.fail" => {
                 if has_unknown_arguments(&arguments, &[]) {
                     tool_error(id, "fixture.fail does not accept arguments")
@@ -306,6 +327,71 @@ impl FixtureServer {
         }
     }
 
+    fn image(&self, id: Value, arguments: &Value) -> Value {
+        use base64::Engine;
+
+        if has_unknown_arguments(arguments, &[]) {
+            return tool_error(id, "fixture.image does not accept arguments");
+        }
+        let image = match self.inner.computer_use_image_case {
+            0 => include_bytes!("../assets/image-check-0.png").as_slice(),
+            1 => include_bytes!("../assets/image-check-1.png").as_slice(),
+            2 => include_bytes!("../assets/image-check-2.png").as_slice(),
+            _ => include_bytes!("../assets/image-check-3.png").as_slice(),
+        };
+        success_response(
+            id,
+            json!({
+                "content": [
+                    {"type":"text","text":"Inspect the attached image."},
+                    {"type":"image","data":base64::engine::general_purpose::STANDARD.encode(image),"mimeType":"image/png"}
+                ],
+                "isError": false
+            }),
+        )
+    }
+
+    async fn hold(&self, id: Value, arguments: &Value) -> Value {
+        if has_unknown_arguments(arguments, &[]) {
+            return tool_error(id, "fixture.hold does not accept arguments");
+        }
+        let key = request_key(&id).expect("request ID was validated");
+        let cancellation = Arc::new(Notify::new());
+        let notified = cancellation.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        self.inner
+            .in_flight
+            .lock()
+            .await
+            .insert(key.clone(), cancellation.clone());
+        if let Some(path) = &self.inner.computer_use_hold_start_file {
+            let _ = std::fs::write(path, b"started");
+        }
+        let cancelled = tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(COMPUTER_USE_HOLD_MAX_MS)) => false,
+            _ = notified => true,
+        };
+        self.inner.in_flight.lock().await.remove(&key);
+        if cancelled {
+            if let Some(path) = &self.inner.computer_use_hold_start_file {
+                let _ = std::fs::write(path, b"cancelled");
+            }
+            error_response(id, REQUEST_CANCELLED, "Request cancelled")
+        } else {
+            if let Some(path) = &self.inner.computer_use_hold_start_file {
+                let _ = std::fs::write(path, b"completed");
+            }
+            success_response(
+                id,
+                json!({
+                    "content": [{"type":"text","text":"fixture.hold reached its safety timeout"}],
+                    "isError": false
+                }),
+            )
+        }
+    }
+
     fn tools(&self) -> Vec<Value> {
         let mut tools = vec![
             tool(
@@ -370,6 +456,18 @@ impl FixtureServer {
                     },
                     "additionalProperties": false
                 }),
+                read_only_annotations(),
+            ),
+            tool(
+                "fixture.image",
+                "Return the Computer Use image inspection fixture.",
+                empty_object_schema(),
+                read_only_annotations(),
+            ),
+            tool(
+                "fixture.hold",
+                "Remain active until the provider turn is interrupted. Used only by the Computer Use conformance gate.",
+                empty_object_schema(),
                 read_only_annotations(),
             ),
         ];

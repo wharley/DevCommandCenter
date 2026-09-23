@@ -2,6 +2,7 @@ pub mod abort_run;
 pub mod agent_turn_prompt;
 pub mod approve_plan;
 pub mod close_session;
+pub mod computer_use_conformance;
 pub mod create_workspace_bundle;
 pub mod create_workspace_for_repo;
 pub mod create_workspace_from_url;
@@ -24,6 +25,9 @@ pub use agent_turn_prompt::{
 };
 pub use approve_plan::{approve_plan, ApprovePlanInput, ApprovePlanOutput};
 pub use close_session::{close_session, CloseSessionInput, CloseSessionOutput};
+pub use computer_use_conformance::{
+    run_provider_computer_use_conformance, ComputerUseConformanceFailure,
+};
 pub use create_workspace_bundle::create_workspace_bundle;
 pub use create_workspace_for_repo::{
     create_workspace_for_repo, finalize_workspace_for_repo, prepare_workspace_for_repo,

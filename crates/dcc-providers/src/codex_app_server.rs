@@ -3264,11 +3264,16 @@ impl Provider for CodexAppServerAdapter {
 
         runtime.cancel_pending_mcp_approvals().await;
         runtime.cancel_pending_native_approvals().await;
-        let mut child = runtime.child.lock().await;
-        child
-            .kill()
-            .await
-            .map_err(|e| CoreError::Provider(format!("failed to kill codex: {e}")))?;
+        let thread_id = runtime.thread_id.lock().await.clone();
+        let turn_id = runtime.active_turn_id.lock().await.clone();
+        if let (Some(thread_id), Some(turn_id)) = (thread_id, turn_id) {
+            runtime
+                .send_request(
+                    "turn/interrupt",
+                    json!({ "threadId": thread_id, "turnId": turn_id }),
+                )
+                .await?;
+        }
         Ok(())
     }
 
@@ -3333,7 +3338,10 @@ mod tests {
             "luna",
             "6-luna",
         ] {
-            assert_eq!(codex_reasoning_effort(Some(model), Some("max")), Some("max"));
+            assert_eq!(
+                codex_reasoning_effort(Some(model), Some("max")),
+                Some("max")
+            );
             assert_eq!(
                 codex_reasoning_effort(Some(model), Some("high")),
                 Some("high")

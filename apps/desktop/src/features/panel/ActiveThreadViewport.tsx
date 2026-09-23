@@ -42,6 +42,7 @@ import {
 	INITIAL_CONVERSATION_MESSAGE_LIMIT,
 } from "./conversation-window";
 import { conversationStartingPhase, shouldShowConversationStarting, shouldShowInitialConversationStarting } from "./conversation-starting.logic";
+import { ComputerUsePreview } from "@/features/computer-use/computer-use-preview";
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -65,6 +66,7 @@ type ActiveThreadViewportProps = {
 	activeMissionSpecHash: string | null;
 	autoSaveMissionValidation: boolean;
 	onSelectSession: (sessionId: string) => void;
+	onAbortSession?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
 	onReviewDelegation?: (delegationId: string) => void;
@@ -115,6 +117,7 @@ export function ActiveThreadViewport({
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
 	onSelectSession,
+	onAbortSession,
 	onReviewChanges,
 	onReviewDelegation,
 	onRerunDelegation,
@@ -627,6 +630,11 @@ export function ActiveThreadViewport({
 					</Button>
 				</div>
 			) : null}
+			<ComputerUsePreview
+				sessionId={sessionId}
+				isTurnActive={lastTurnState === "running"}
+				onStop={onAbortSession ?? (() => undefined)}
+			/>
 		</div>
 	);
 }

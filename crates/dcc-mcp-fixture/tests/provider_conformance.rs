@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use dcc_core::ports::provider::{ProviderPermissionRequest, ProviderPermissionResponse};
 use dcc_core::{
     application::{
-        resolve_session_mcp_servers, run_provider_mcp_conformance, ResolveSessionMcpInput,
+        resolve_session_mcp_servers, run_provider_computer_use_conformance,
+        run_provider_mcp_conformance, ResolveSessionMcpInput,
     },
     domain::{
         mcp::{
@@ -24,13 +25,16 @@ use dcc_core::{
         workspace::WorkspaceId,
     },
     ports::{
-        Input, McpConformanceAdapter, McpConformanceAdapterError, McpConformanceAdapterResult,
-        McpConformanceObservation, McpConformanceStep, McpConformanceUnavailableKind, McpRepo,
-        Provider, ProviderMcpServerConfig, ProviderMcpTransport, ProviderTurnInput, SessionConfig,
-        MCP_CONFORMANCE_ECHO_VALUE,
+        ComputerUseConformanceAdapter, ComputerUseConformanceAdapterError,
+        ComputerUseConformanceAdapterResult, ComputerUseConformanceObservation,
+        ComputerUseConformanceStep, Input, McpConformanceAdapter, McpConformanceAdapterError,
+        McpConformanceAdapterResult, McpConformanceObservation, McpConformanceStep,
+        McpConformanceUnavailableKind, McpRepo, Provider, ProviderMcpServerConfig,
+        ProviderMcpTransport, ProviderTurnInput, SessionConfig, MCP_CONFORMANCE_ECHO_VALUE,
     },
 };
 use dcc_infra::{credential_store::InMemoryCredentialStore, mcp_db::SqliteMcpRepo};
+use dcc_mcp_fixture::COMPUTER_USE_IMAGE_LABELS;
 use dcc_providers::{claude_code, codex, cursor};
 use futures::{stream::BoxStream, StreamExt};
 use tokio::{
@@ -84,6 +88,16 @@ impl TurnObservation {
                 .values()
                 .any(|text| text.contains(expected))
     }
+
+    fn contains_text_ascii_case_insensitive(&self, expected: &str) -> bool {
+        self.text
+            .to_ascii_uppercase()
+            .contains(&expected.to_ascii_uppercase())
+            || self.assistant_messages.values().any(|text| {
+                text.to_ascii_uppercase()
+                    .contains(&expected.to_ascii_uppercase())
+            })
+    }
 }
 
 struct ProviderMcpConformanceAdapter<P> {
@@ -106,6 +120,9 @@ struct ProviderMcpConformanceAdapter<P> {
     active_tool_calls: HashMap<String, String>,
     mutation_denied: bool,
     mutation_completed: bool,
+    computer_use_image_case: usize,
+    computer_use_hold_start_file: PathBuf,
+    computer_use_cancel_sent: bool,
 }
 
 impl<P> ProviderMcpConformanceAdapter<P>
@@ -120,6 +137,7 @@ where
         fixture_binary: PathBuf,
         workspace: PathBuf,
     ) -> Self {
+        let computer_use_hold_start_file = workspace.join("computer-use-hold-started");
         Self {
             provider,
             provider_id: ProviderId(provider_id.to_string()),
@@ -142,6 +160,14 @@ where
             active_tool_calls: HashMap::new(),
             mutation_denied: false,
             mutation_completed: false,
+            computer_use_image_case: (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default() as usize
+                + std::process::id() as usize)
+                % COMPUTER_USE_IMAGE_LABELS.len(),
+            computer_use_hold_start_file,
+            computer_use_cancel_sent: false,
         }
     }
 
@@ -183,6 +209,10 @@ where
     async fn reset(&mut self) -> McpConformanceAdapterResult<()> {
         self.cleanup_runtime().await?;
         self.stop_http_fixture().await?;
+        self.computer_use_image_case =
+            (self.computer_use_image_case + 1) % COMPUTER_USE_IMAGE_LABELS.len();
+        let _ = std::fs::remove_file(&self.computer_use_hold_start_file);
+        self.computer_use_cancel_sent = false;
         self.attached = false;
         self.server_unavailable = false;
         self.credential_unavailable = false;
@@ -195,7 +225,10 @@ where
         self.stop_http_fixture().await?;
         let mut command = Command::new(&self.fixture_binary);
         command
-            .args(["http", "--bind", "127.0.0.1:0"])
+            .args(["http", "--bind", "127.0.0.1:0", "--image-case"])
+            .arg(self.computer_use_image_case.to_string())
+            .arg("--hold-start-file")
+            .arg(&self.computer_use_hold_start_file)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -253,7 +286,15 @@ where
                 } else {
                     self.fixture_binary.to_string_lossy().to_string()
                 },
-                args: vec!["stdio".to_string()],
+                args: vec![
+                    "stdio".to_string(),
+                    "--image-case".to_string(),
+                    self.computer_use_image_case.to_string(),
+                    "--hold-start-file".to_string(),
+                    self.computer_use_hold_start_file
+                        .to_string_lossy()
+                        .to_string(),
+                ],
                 cwd: None,
                 environment: Vec::new(),
             },
@@ -394,7 +435,9 @@ where
             self.observe_event(&event, &mut observation);
             match event {
                 ProviderEvent::PermissionRequested { request, .. } => {
-                    let allow = allow_echo && tool_matches(&request.tool_name, "fixture_echo");
+                    let allow = allow_echo
+                        && (tool_matches(&request.tool_name, "fixture_echo")
+                            || tool_matches(&request.tool_name, "fixture_image"));
                     self.resolve_permission(
                         request.request_id,
                         if allow { "allow" } else { "deny" },
@@ -582,6 +625,91 @@ where
             Err(error) if error.to_string() == "provider error: MCP credential resolution failed"
         ))
     }
+
+    async fn wait_for_computer_use_tools(&mut self) -> ComputerUseConformanceAdapterResult<()> {
+        // Codex publishes an asynchronous MCP connection snapshot after
+        // thread/start; sending the image prompt before it arrives can make
+        // the model report that the fixture tool is unavailable. Claude's
+        // SDK exposes readiness through its first turn rather than this
+        // status event, so its native tool path must be exercised directly.
+        if self.provider_id.0 != "codex" {
+            return Ok(());
+        }
+        timeout(Duration::from_secs(30), async {
+            loop {
+                let event = self
+                    .next_event()
+                    .await
+                    .map_err(|_| ComputerUseConformanceAdapterError::ProviderSession)?;
+                if let ProviderEvent::McpRuntimeStatusSnapshot { statuses } = event {
+                    let Some(status) = statuses
+                        .into_iter()
+                        .find(|status| status.definition_id == self.definition_id)
+                    else {
+                        continue;
+                    };
+                    if status.state == McpRuntimeState::Failed {
+                        return Err(ComputerUseConformanceAdapterError::Attachment);
+                    }
+                    let has_image = status
+                        .tools
+                        .iter()
+                        .any(|tool| tool_matches(&tool.name, "fixture_image"));
+                    let has_hold = status
+                        .tools
+                        .iter()
+                        .any(|tool| tool_matches(&tool.name, "fixture_hold"));
+                    if status.state == McpRuntimeState::Connected && has_image && has_hold {
+                        return Ok(());
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|_| ComputerUseConformanceAdapterError::Unavailable)?
+    }
+
+    async fn begin_computer_use_hold(&mut self) -> ComputerUseConformanceAdapterResult<()> {
+        self.send_turn(
+            "Call the DCC MCP tool fixture.hold exactly once. Do not call any other tool.",
+        )
+        .await
+        .map_err(|_| ComputerUseConformanceAdapterError::ProviderSession)?;
+
+        let mut hold_call_started = false;
+        loop {
+            if hold_call_started && self.computer_use_hold_start_file.exists() {
+                return Ok(());
+            }
+            let event = tokio::select! {
+                result = self.next_event() => Some(result.map_err(|_| ComputerUseConformanceAdapterError::ProviderSession)?),
+                _ = tokio::time::sleep(Duration::from_millis(50)) => None,
+            };
+            let Some(event) = event else {
+                continue;
+            };
+            match event {
+                ProviderEvent::PermissionRequested { request, .. } => {
+                    let allow = tool_matches(&request.tool_name, "fixture_hold");
+                    self.resolve_permission(
+                        request.request_id,
+                        if allow { "allow" } else { "deny" },
+                    )
+                    .await
+                    .map_err(|_| ComputerUseConformanceAdapterError::ProviderSession)?;
+                }
+                ProviderEvent::ToolCallStarted { action, .. }
+                    if tool_matches(&action, "fixture_hold") =>
+                {
+                    hold_call_started = true;
+                }
+                ProviderEvent::Completed { .. } | ProviderEvent::Failed { .. } => {
+                    return Err(ComputerUseConformanceAdapterError::ToolNotRequested);
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -750,6 +878,176 @@ where
     }
 }
 
+#[async_trait]
+impl<P> ComputerUseConformanceAdapter for ProviderMcpConformanceAdapter<P>
+where
+    P: Provider,
+{
+    fn provider_id(&self) -> ProviderId {
+        self.provider_id.clone()
+    }
+
+    fn provider_version(&self) -> String {
+        self.provider
+            .dcc_mcp_projection_version()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    async fn execute(
+        &mut self,
+        transport: McpTransportKind,
+        step: ComputerUseConformanceStep,
+    ) -> ComputerUseConformanceAdapterResult<ComputerUseConformanceObservation> {
+        match step {
+            ComputerUseConformanceStep::Reset => {
+                self.reset()
+                    .await
+                    .map_err(|_| ComputerUseConformanceAdapterError::Lifecycle)?;
+                Ok(ComputerUseConformanceObservation::Acknowledged)
+            }
+            ComputerUseConformanceStep::AttachFixture => {
+                self.attach_fixture(&transport)
+                    .await
+                    .map_err(|_| ComputerUseConformanceAdapterError::Attachment)?;
+                Ok(ComputerUseConformanceObservation::Acknowledged)
+            }
+            ComputerUseConformanceStep::CreateSession => {
+                let server = self
+                    .server_config(&transport)
+                    .map_err(|_| ComputerUseConformanceAdapterError::Attachment)?;
+                self.prepare_session(vec![server])
+                    .await
+                    .map_err(|_| ComputerUseConformanceAdapterError::ProviderSession)?;
+                self.wait_for_computer_use_tools().await?;
+                Ok(ComputerUseConformanceObservation::SessionCreated)
+            }
+            ComputerUseConformanceStep::InspectImage => {
+                let expected = COMPUTER_USE_IMAGE_LABELS[self.computer_use_image_case];
+                let prompt = "Call the DCC MCP tool fixture.image exactly once. Inspect the attached image and reply only with the exact eight-digit code printed inside it.";
+                let observation = self
+                    .run_turn(prompt, true)
+                    .await
+                    .map_err(|_| ComputerUseConformanceAdapterError::ProviderSession)?;
+                let image_completed = observation
+                    .completed_actions
+                    .iter()
+                    .any(|action| tool_matches(action, "fixture_image"));
+                let image_allowed = observation
+                    .permission_resolutions
+                    .iter()
+                    .any(|(_, behavior)| behavior == "allow");
+                let expected_label_found =
+                    observation.contains_text_ascii_case_insensitive(expected);
+                if observation.failed || !image_completed || !image_allowed || !expected_label_found
+                {
+                    eprintln!(
+                        "Computer Use image gate: provider_failed={}, image_completed={}, image_allowed={}, expected_label_found={expected_label_found}",
+                        observation.failed, image_completed, image_allowed,
+                    );
+                    return Err(ComputerUseConformanceAdapterError::ImageResult);
+                }
+                Ok(ComputerUseConformanceObservation::ImageUnderstood)
+            }
+            ComputerUseConformanceStep::StartInterruptibleOperation => {
+                self.begin_computer_use_hold().await?;
+                Ok(ComputerUseConformanceObservation::Acknowledged)
+            }
+            ComputerUseConformanceStep::InterruptTurn => {
+                let handle = self
+                    .handle
+                    .as_ref()
+                    .ok_or(ComputerUseConformanceAdapterError::ProviderSession)?
+                    .clone();
+                self.provider
+                    .cancel(&handle)
+                    .await
+                    .map_err(|_| ComputerUseConformanceAdapterError::Interruption)?;
+                self.computer_use_cancel_sent = true;
+                Ok(ComputerUseConformanceObservation::InterruptRequested)
+            }
+            ComputerUseConformanceStep::ConfirmTurnStopped => {
+                if !self.computer_use_cancel_sent {
+                    return Err(ComputerUseConformanceAdapterError::Interruption);
+                }
+                let terminal_event = timeout(Duration::from_secs(15), async {
+                    let events = self
+                        .events
+                        .as_mut()
+                        .ok_or(ComputerUseConformanceAdapterError::ProviderSession)?;
+                    loop {
+                        match events.next().await {
+                            Some(Ok(
+                                ProviderEvent::Completed { .. } | ProviderEvent::Failed { .. },
+                            ))
+                            | Some(Err(_))
+                            | None => return Ok::<bool, ComputerUseConformanceAdapterError>(true),
+                            Some(Ok(_)) => {}
+                        }
+                    }
+                })
+                .await
+                .is_ok_and(|result| result.is_ok_and(|terminal| terminal));
+                let marker = std::fs::read(&self.computer_use_hold_start_file)
+                    .map_err(|_| ComputerUseConformanceAdapterError::Interruption)?;
+                let handle = self
+                    .handle
+                    .as_ref()
+                    .ok_or(ComputerUseConformanceAdapterError::ProviderSession)?;
+                let stopped_session_rejected_turn = if terminal_event {
+                    false
+                } else {
+                    self.provider
+                        .send_input(
+                            handle,
+                            Input::Turn(ProviderTurnInput {
+                                prompt: "Reply with DCC_STOP_CHECK".to_string(),
+                                tool_instructions: None,
+                                plan_mode: Some(false),
+                                effort: Some("low".to_string()),
+                                fast_mode: Some(true),
+                                approval_policy: None,
+                            }),
+                        )
+                        .await
+                        .is_err()
+                };
+                if (!terminal_event && !stopped_session_rejected_turn)
+                    || marker.as_slice() == b"completed"
+                {
+                    eprintln!(
+                        "Computer Use interruption gate: terminal_event={terminal_event}, stopped_session_rejected_turn={stopped_session_rejected_turn}, fixture_marker={}",
+                        String::from_utf8_lossy(&marker),
+                    );
+                    return Err(ComputerUseConformanceAdapterError::Interruption);
+                }
+                Ok(ComputerUseConformanceObservation::TurnStopped)
+            }
+            ComputerUseConformanceStep::FinalCleanup => {
+                if self.computer_use_cancel_sent {
+                    if let Some(handle) = self.handle.take() {
+                        // Some adapters already tear down the runtime on the
+                        // first cancel; others keep the session available.
+                        // A best-effort second cancel cleans up the latter.
+                        let _ = self.provider.cancel(&handle).await;
+                    }
+                    self.events = None;
+                } else {
+                    self.cleanup_runtime()
+                        .await
+                        .map_err(|_| ComputerUseConformanceAdapterError::Lifecycle)?;
+                }
+                self.stop_http_fixture()
+                    .await
+                    .map_err(|_| ComputerUseConformanceAdapterError::Lifecycle)?;
+                self.attached = false;
+                self.computer_use_cancel_sent = false;
+                Ok(ComputerUseConformanceObservation::CleanupConfirmed)
+            }
+        }
+    }
+}
+
 fn tool_matches(provider_name: &str, normalized_suffix: &str) -> bool {
     provider_name == normalized_suffix.replace('_', ".")
         || provider_name.ends_with(normalized_suffix)
@@ -827,7 +1125,7 @@ async fn run_authenticated_gate<P>(
 ) where
     P: Provider,
 {
-    let provider_id = adapter.provider_id();
+    let provider_id = adapter.provider_id.clone();
     match adapter
         .provider
         .healthcheck()
@@ -839,6 +1137,11 @@ async fn run_authenticated_gate<P>(
             panic!("provider preflight failed: {reason}");
         }
     }
+    adapter
+        .provider
+        .refresh_runtime_metadata()
+        .await
+        .expect("provider runtime metadata refresh");
     let provider_version = adapter
         .provider
         .dcc_mcp_projection_version()
@@ -850,6 +1153,49 @@ async fn run_authenticated_gate<P>(
     evidence
         .validate_for_provider(&provider_id, &provider_version)
         .expect("version-bound provider evidence");
+
+    adapter.reset().await.expect("final provider cleanup");
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+async fn run_authenticated_computer_use_gate<P>(
+    mut adapter: ProviderMcpConformanceAdapter<P>,
+    workspace: PathBuf,
+) where
+    P: Provider,
+{
+    let provider_id = adapter.provider_id.clone();
+    match adapter
+        .provider
+        .healthcheck()
+        .await
+        .expect("provider preflight healthcheck")
+    {
+        HealthStatus::Healthy => {}
+        HealthStatus::Degraded { reason } | HealthStatus::Unhealthy { reason } => {
+            panic!("provider preflight failed: {reason}");
+        }
+    }
+    adapter
+        .provider
+        .refresh_runtime_metadata()
+        .await
+        .expect("provider runtime metadata refresh");
+    let provider_version = adapter
+        .provider
+        .dcc_mcp_projection_version()
+        .expect("provider must expose an audited runtime version")
+        .to_string();
+    let evidence = run_provider_computer_use_conformance(&mut adapter)
+        .await
+        .expect("provider Computer Use conformance");
+    evidence
+        .validate_for_provider(&provider_id, &provider_version)
+        .expect("version-bound Computer Use evidence");
+    println!(
+        "COMPUTER_USE_CONFORMANCE_EVIDENCE={}",
+        serde_json::to_string(&evidence).expect("serialize non-sensitive evidence")
+    );
 
     adapter.reset().await.expect("final provider cleanup");
     let _ = std::fs::remove_dir_all(workspace);
@@ -889,6 +1235,42 @@ async fn authenticated_cursor_bridge_passes_the_shared_harness() {
     let workspace = test_workspace("cursor");
     std::fs::create_dir_all(&workspace).expect("create isolated conformance workspace");
     run_authenticated_gate(cursor_adapter(workspace.clone()), workspace).await;
+}
+
+#[tokio::test]
+#[ignore = "requires explicit opt-in and an authenticated Claude Code account"]
+async fn authenticated_claude_passes_computer_use_conformance() {
+    require_explicit_opt_in(
+        "DCC_RUN_CLAUDE_COMPUTER_USE_CONFORMANCE",
+        "set DCC_RUN_CLAUDE_COMPUTER_USE_CONFORMANCE=1 after authenticating Claude Code",
+    );
+    let workspace = test_workspace("claude-computer-use");
+    std::fs::create_dir_all(&workspace).expect("create isolated conformance workspace");
+    run_authenticated_computer_use_gate(claude_adapter(workspace.clone()), workspace).await;
+}
+
+#[tokio::test]
+#[ignore = "requires explicit opt-in and an authenticated Codex account"]
+async fn authenticated_codex_passes_computer_use_conformance() {
+    require_explicit_opt_in(
+        "DCC_RUN_CODEX_COMPUTER_USE_CONFORMANCE",
+        "set DCC_RUN_CODEX_COMPUTER_USE_CONFORMANCE=1 after authenticating codex-cli",
+    );
+    let workspace = test_workspace("codex-computer-use");
+    std::fs::create_dir_all(&workspace).expect("create isolated conformance workspace");
+    run_authenticated_computer_use_gate(codex_adapter(workspace.clone()), workspace).await;
+}
+
+#[tokio::test]
+#[ignore = "requires explicit opt-in, audited cursor-agent 2026.07.23-e383d2b, and an authenticated Cursor account"]
+async fn authenticated_cursor_passes_computer_use_conformance() {
+    require_explicit_opt_in(
+        "DCC_RUN_CURSOR_COMPUTER_USE_CONFORMANCE",
+        "set DCC_RUN_CURSOR_COMPUTER_USE_CONFORMANCE=1 after authenticating Cursor",
+    );
+    let workspace = test_workspace("cursor-computer-use");
+    std::fs::create_dir_all(&workspace).expect("create isolated conformance workspace");
+    run_authenticated_computer_use_gate(cursor_adapter(workspace.clone()), workspace).await;
 }
 
 #[test]

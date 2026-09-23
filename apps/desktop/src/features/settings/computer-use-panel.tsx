@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Clock3, Globe2, Loader2, MonitorCog, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { ProviderCatalog } from "@dcc/contracts";
 import {
 	disarmComputerUse,
 	getComputerUseStatus,
@@ -30,7 +31,29 @@ function formatRemaining(milliseconds: number): string {
 	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-export function ComputerUsePanel({ sessionId }: { sessionId: string | null }) {
+function mcpSupportLabel(
+	support: ProviderCatalog["providers"][number]["capabilities"]["mcpSupport"],
+	t: (key: string) => string,
+): string {
+	if (typeof support === "object" && support !== null && "verifiedBridge" in support) {
+		return t("settings.computerUse.matrix.mcpVerified");
+	}
+	if (typeof support === "object" && support !== null && "runtimeBridge" in support) {
+		return t("settings.computerUse.matrix.mcpRuntime");
+	}
+	if (support === "nativeConfig") return t("settings.computerUse.matrix.mcpNative");
+	return t("settings.computerUse.matrix.mcpUnsupported");
+}
+
+export function ComputerUsePanel({
+	sessionId,
+	providerId,
+	providerCatalog,
+}: {
+	sessionId: string | null;
+	providerId: string | null;
+	providerCatalog: ProviderCatalog | null;
+}) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
 	const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -97,6 +120,7 @@ export function ComputerUsePanel({ sessionId }: { sessionId: string | null }) {
 		: [];
 
 	const activeAppCount = status?.grant.allowedBundleIds.length ?? 0;
+	const activeProvider = providerCatalog?.providers.find((provider) => provider.id === providerId) ?? null;
 	const activeAppNames = useMemo(() => {
 		if (!status?.grant.armed) return [];
 		return status.targets
@@ -177,6 +201,46 @@ export function ComputerUsePanel({ sessionId }: { sessionId: string | null }) {
 							: t("settings.computerUse.unsupportedPlatformHint")}
 					</p>
 				) : null}
+			</div>
+
+			<div className="rounded-xl border border-border/60 p-4">
+				<div className="flex flex-wrap items-start justify-between gap-3">
+					<div>
+						<h3 className="text-[14px] font-medium text-foreground">{t("settings.computerUse.matrix.title")}</h3>
+						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{t("settings.computerUse.matrix.hint")}</p>
+					</div>
+					{sessionId ? (
+						<Badge variant={status.runtimeAttached ? "success" : "outline"}>
+							{status.runtimeAttached
+								? t("settings.computerUse.matrix.sessionAttached", { provider: activeProvider?.label ?? providerId ?? t("settings.computerUse.matrix.unknownProvider") })
+								: t("settings.computerUse.matrix.sessionNotAttached")}
+						</Badge>
+					) : null}
+				</div>
+				<div className="mt-4 overflow-x-auto">
+					<table className="w-full min-w-[520px] text-left text-[12px]">
+						<thead className="text-muted-foreground">
+							<tr className="border-b border-border/60">
+								<th className="px-2 py-2 font-medium">{t("settings.computerUse.matrix.provider")}</th>
+								<th className="px-2 py-2 font-medium">{t("settings.computerUse.matrix.mcp")}</th>
+								<th className="px-2 py-2 font-medium">{t("settings.computerUse.matrix.vision")}</th>
+								<th className="px-2 py-2 font-medium">{t("settings.computerUse.matrix.stop")}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{(providerCatalog?.providers ?? []).map((provider) => (
+								<tr className="border-b border-border/40 last:border-0" key={provider.id}>
+									<th className="px-2 py-2 font-medium text-foreground">
+										{provider.label}{provider.id === providerId ? <span className="ml-1 text-muted-foreground">({t("settings.computerUse.matrix.current")})</span> : null}
+									</th>
+									<td className="px-2 py-2 text-muted-foreground">{mcpSupportLabel(provider.capabilities.mcpSupport, t)}</td>
+									<td className="px-2 py-2 text-muted-foreground">{provider.capabilities.vision ? t("settings.computerUse.matrix.visionYes") : t("settings.computerUse.matrix.visionNo")}</td>
+									<td className="px-2 py-2 text-muted-foreground">{sessionId ? t("settings.computerUse.matrix.stopAvailable") : t("settings.computerUse.matrix.stopWhenActive")}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
 			</div>
 
 			<div className="rounded-xl border border-border/60 p-4">

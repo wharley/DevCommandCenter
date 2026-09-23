@@ -7042,6 +7042,7 @@ pub fn run() {
             computer_use_commands::computer_use_request_access,
             computer_use_commands::computer_use_list_pending_requests,
             computer_use_commands::computer_use_respond_control_request,
+            computer_use_commands::computer_use_preview_frame,
             browser_commands::browser_set_bounds,
             browser_commands::browser_set_occluded,
             browser_commands::browser_hide,
@@ -7307,6 +7308,7 @@ pub fn run() {
             let browser_state = BrowserState::default();
             let browser_agent_requests = BrowserAgentRequestBroker::default();
             let browser_mcp_bridge = match tauri::async_runtime::block_on(BrowserMcpBridge::start(
+                Some(app.handle().clone()),
                 browser_state.clone(),
                 browser_agent_requests.clone(),
                 session_command_state.clone(),

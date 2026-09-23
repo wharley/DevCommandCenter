@@ -1,3 +1,4 @@
+pub mod computer_use_conformance;
 pub mod decision;
 pub mod delegation;
 pub mod delegation_apply;
@@ -16,6 +17,11 @@ pub mod usage;
 pub mod workspace;
 pub mod workspace_bundle;
 
+pub use computer_use_conformance::{
+    ComputerUseConformanceCheck, ComputerUseConformanceEvidence,
+    ComputerUseConformanceEvidenceError, ComputerUseConformanceTransportEvidence,
+    COMPUTER_USE_CONFORMANCE_FIXTURE_VERSION, COMPUTER_USE_CONFORMANCE_SUITE_VERSION,
+};
 pub use delegation::{
     Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
     DelegationStatus,
