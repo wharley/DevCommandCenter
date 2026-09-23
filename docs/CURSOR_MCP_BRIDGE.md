@@ -5,14 +5,15 @@ DCC does not edit Cursor's user or project `mcp.json`, does not register an
 extension, and does not infer support merely because Cursor can use MCP from
 its own configuration.
 
-Status as of July 28, 2026: the production provider is hybrid. Sessions without
-a DCC MCP projection retain the existing Cursor `stream-json` path. Sessions
-with a projection use `cursor-agent acp` only when the installed CLI exactly
-matches the audited version. Other versions receive no DCC definitions.
+Status as of September 23, 2026: the production provider is hybrid. Sessions
+without a DCC MCP projection retain the existing Cursor `stream-json` path.
+Sessions with a projection use `cursor-agent acp` only when the installed CLI
+exactly matches the audited version. Other versions receive no DCC definitions.
 
 The catalog reports `NativeConfig`, not `VerifiedBridge`. The shared
-authenticated conformance gate is implemented but remains ignored and has not
-been run.
+authenticated conformance gate is implemented but remains ignored. The
+September 23, 2026 account-backed gate did not pass on the installed Cursor CLI,
+so no conformance evidence was issued.
 
 ## Why ACP
 
@@ -28,9 +29,12 @@ References:
 - [Cursor CLI MCP behavior](https://docs.cursor.com/en/cli/using)
 - [Cursor CLI parameters](https://docs.cursor.com/en/cli/reference/parameters)
 
-Cursor's documented CLI flow automatically reads `mcp.json`. That native path
-is intentionally independent from DCC ownership: accepting or listing a native
-Cursor server does not prove that `session/new.mcpServers` was honored.
+Cursor's official CLI documentation describes MCP servers configured in a
+project or user `.cursor/mcp.json`. The ACP specification defines
+`session/new.mcpServers`, but that protocol feature alone does not establish
+that a specific Cursor CLI version implements it. Accepting the request or
+listing a native Cursor server does not prove that DCC's session projection
+was honored.
 
 ## Current audited contract
 
@@ -139,8 +143,14 @@ The production adapter now:
 - enforces per-tool policy fail-closed; and
 - reports only observed runtime truth.
 
-The remaining release gate is the ignored, authenticated shared conformance
-test:
+On September 23, the installed `cursor-agent 2026.09.18-9a7762b` failed the
+experimental Computer Use gate: the model did not produce an observed,
+authorized fixture image call. The currently audited `2026.07.23-e383d2b`
+binary was unavailable locally, and the exact-version gate refused to use the
+newer binary. This leaves the ACP projection unsupported on the installed
+runtime until its MCP behavior is understood and the gates pass.
+
+The release gate remains the ignored, authenticated shared conformance test:
 
 ```sh
 DCC_RUN_CURSOR_MCP_CONFORMANCE=1 \
