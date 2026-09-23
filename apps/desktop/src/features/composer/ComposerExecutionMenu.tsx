@@ -6,6 +6,7 @@ import {
 	ChevronRight,
 	LoaderCircle,
 	RefreshCcw,
+	RotateCcw,
 	Settings2,
 	Star,
 } from "lucide-react";
@@ -42,7 +43,8 @@ import {
 	composerToolbarTriggerClassName,
 	getCompactComposerModelLabel,
 } from "./WorkspaceComposer.logic";
-import { DEFAULT_EFFORT_LEVEL, getEffortDisplay } from "./effort";
+import { clampEffort, DEFAULT_EFFORT_LEVEL, getEffortDisplay } from "./effort";
+import { EffortBrainIcon } from "./EffortBrainIcon";
 import { ModelFavoritesDialog } from "./ModelFavoritesDialog";
 import {
 	addModelFavorite, modelFavoriteKey, resolveModelFavorite, useModelFavorites,
@@ -143,6 +145,10 @@ export function ComposerExecutionMenu({
 	const effortLabel = t(`composer.effort.${selectedEffortId}`, {
 		defaultValue: effortDisplay.label,
 	});
+	const sliderEffortId = selectedEffortId === "ultrathink"
+		? availableEffortLevels[availableEffortLevels.length - 1]
+		: selectedEffortId;
+	const sliderEffortIndex = Math.max(0, availableEffortLevels.indexOf(sliderEffortId ?? ""));
 	const responseLabel = directResponse
 		? t("composer.execution.response.direct")
 		: t("composer.execution.response.standard");
@@ -182,7 +188,6 @@ export function ComposerExecutionMenu({
 					}
 					onSelectModel(model.id);
 					closeModelMenu();
-					onOpenChange(false);
 				}}
 				className="[&>svg:last-child]:hidden flex items-center gap-2 font-mono text-[13px] tabular-nums"
 			>
@@ -237,12 +242,83 @@ export function ComposerExecutionMenu({
 				<span className="dcc-composer-model-summary min-w-0 truncate text-[12px] font-medium leading-4 text-foreground">
 					{compactModelLabel}
 				</span>
+				{availableEffortLevels.length > 0 ? (
+					<span className="dcc-composer-effort-summary shrink-0 text-[12px] leading-4 text-muted-foreground">
+						· {effortLabel}
+					</span>
+				) : null}
 				<ChevronDown className="size-3 shrink-0 opacity-40" strokeWidth={2} />
 			</DropdownMenuTrigger>
 
 			<DropdownMenuContent side="top" align="end" sideOffset={4}
 				className="flex w-80 max-w-[calc(100vw-2rem)] flex-col"
 				onCloseAutoFocus={(event) => { if (editingFavorites) event.preventDefault(); }}>
+				{availableEffortLevels.length > 0 ? (
+					<div className="mx-1 mb-1 px-1.5 py-2" role="group" aria-label={t("composer.execution.effort")}>
+						<div className="flex items-center justify-between gap-2">
+							<div className="flex min-w-0 items-center gap-2">
+								<EffortBrainIcon level={effortDisplay.icon} />
+								<div className="min-w-0">
+									<div className="text-[12px] font-semibold leading-4">{effortLabel}</div>
+									<div className="truncate text-[10px] leading-3 text-muted-foreground">
+										{compactModelLabel}
+									</div>
+								</div>
+							</div>
+							<button
+								type="button"
+								className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+								aria-label={t("composer.execution.resetEffort")}
+								title={t("composer.execution.resetEffort")}
+								disabled={disabled}
+								onClick={() => onSelectEffort(
+									clampEffort(DEFAULT_EFFORT_LEVEL, [...availableEffortLevels]),
+								)}
+							>
+								<RotateCcw className="size-3.5" />
+							</button>
+						</div>
+						<div className="mt-1.5 px-0.5">
+							<input
+								type="range"
+								min={0}
+								max={availableEffortLevels.length - 1}
+								step={1}
+								value={sliderEffortIndex}
+								aria-label={t("composer.execution.effort")}
+								aria-valuetext={effortLabel}
+								className="h-4 w-full cursor-pointer accent-primary disabled:cursor-not-allowed"
+								disabled={disabled || availableEffortLevels.length === 1}
+								onKeyDown={(event) => event.stopPropagation()}
+								onChange={(event) => {
+									const level = availableEffortLevels[Number(event.currentTarget.value)];
+									if (level) onSelectEffort(level);
+								}}
+							/>
+							<div
+								className="grid text-center text-[9px] leading-3 text-muted-foreground"
+								style={{ gridTemplateColumns: `repeat(${availableEffortLevels.length}, minmax(0, 1fr))` }}
+							>
+								{availableEffortLevels.map((level) => (
+									<span key={level} aria-hidden="true">·</span>
+								))}
+							</div>
+						</div>
+						<button
+							type="button"
+							className={cn(
+								"mt-1 flex h-6 w-full items-center justify-between rounded px-1.5 text-left text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50",
+								selectedEffortId === "ultrathink" && "bg-accent text-foreground",
+							)}
+							aria-pressed={selectedEffortId === "ultrathink"}
+							disabled={disabled}
+							onClick={onSelectUltrathink}
+						>
+							<span>{t("composer.effort.ultrathink")}</span>
+							<span className="text-[9px]">{t("composer.execution.ultrathinkHint")}</span>
+						</button>
+					</div>
+				) : null}
 				<DropdownMenuLabel className="shrink-0">{t("composer.favorites.title")}</DropdownMenuLabel>
 				<DropdownMenuGroup
 					aria-label={t("composer.favorites.title")}

@@ -69,7 +69,6 @@ import { ExecutionContextRail } from "./ExecutionContextRail";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { ComposerApprovalPolicyMenu } from "./ComposerApprovalPolicyMenu";
 import { ComposerExecutionMenu } from "./ComposerExecutionMenu";
-import { ComposerEffortControl } from "./ComposerEffortControl";
 import { ComposerButton } from "./ComposerButton";
 import {
 	clampEffort,
@@ -1214,14 +1213,6 @@ export function WorkspaceComposer({
 								void accountUsageQuery.refetch();
 							}
 						}}
-						disabled={turnSettingsDisabled}
-					/>
-					<ComposerEffortControl
-						modelLabel={selectedModel?.label ?? selectedModelId ?? t("composer.model.select")}
-						availableEffortLevels={availableEffortLevels}
-						selectedEffortId={selectedEffortId}
-						onSelectEffort={(id) => updateEffortSelection({ effort: id, ultrathink: false })}
-						onSelectUltrathink={() => updateEffortSelection({ effort, ultrathink: true })}
 						disabled={turnSettingsDisabled}
 					/>
 					{accountUsageAlert && accountUsageWindow ? (
