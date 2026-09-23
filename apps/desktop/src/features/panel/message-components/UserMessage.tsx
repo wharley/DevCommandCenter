@@ -1,9 +1,90 @@
-import { Bug, Copy, GitFork, Pencil, RotateCcw } from "lucide-react";
+import { Suspense } from "react";
+import { Bug, Copy, File, FileImage, GitFork, Pencil, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TurnEvidenceSummary } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
+import { LazyStreamdown } from "@/components/streamdown-loader";
+import { pathBasename } from "@/lib/path-basename";
+import { isImageFilePath } from "@/lib/is-image-path";
 import { cn } from "@/lib/utils";
 import { MessageTimestamp } from "./message-metadata";
+import { ASSISTANT_STREAMDOWN_SHIKI_THEME } from "./assistant-streaming-rendering";
+
+type PromptPart = { kind: "text"; value: string } | { kind: "attachment"; path: string };
+
+/** Composer attachments are serialized as @/absolute/path; show them as chips in the timeline. */
+function promptParts(content: string): PromptPart[] {
+	const parts: PromptPart[] = [];
+	// Paths can contain spaces, so consume through the filename extension instead
+	// of stopping at the first whitespace before the rest of the prompt.
+	const attachmentPattern =
+		/@((?:\/|[A-Za-z]:[\\/]|\\\\)[^\r\n<>]*?\.[a-z\d]{1,12})(?=$|[\s),.;!?])/gi;
+	let cursor = 0;
+	for (const match of content.matchAll(attachmentPattern)) {
+		const path = match[1];
+		const start = match.index ?? 0;
+		if (start > cursor) parts.push({ kind: "text", value: content.slice(cursor, start) });
+		parts.push({ kind: "attachment", path });
+		cursor = start + 1 + path.length;
+	}
+	if (cursor < content.length) parts.push({ kind: "text", value: content.slice(cursor) });
+	return parts.length ? parts : [{ kind: "text", value: content }];
+}
+
+function UserPromptContent({ content }: { content: string }) {
+	const parts = promptParts(content);
+	const attachments = parts.filter(
+		(part): part is Extract<PromptPart, { kind: "attachment" }> =>
+			part.kind === "attachment",
+	);
+	const text = parts
+		.filter(
+			(part): part is Extract<PromptPart, { kind: "text" }> =>
+				part.kind === "text",
+		)
+		.map((part) => part.value)
+		.join("")
+		.trim();
+	return (
+		<div className="conversation-body-text w-full overflow-hidden rounded-xl border border-border/45 bg-accent/35 px-3.5 py-3 leading-7">
+			{attachments.length > 0 ? (
+				<div className="mb-2 flex flex-wrap gap-1.5" data-testid="user-message-attachments">
+					{attachments.map(({ path }, index) => {
+						const image = isImageFilePath(path);
+						const Icon = image ? FileImage : File;
+						return (
+							<span
+								key={`${path}-${index}`}
+								title={path}
+								className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/60 bg-background/70 px-2 py-1 text-[11px] leading-4 text-muted-foreground"
+							>
+								<Icon className="size-3.5 shrink-0 text-foreground/65" aria-hidden />
+								<span className="truncate">{pathBasename(path)}</span>
+							</span>
+						);
+					})}
+				</div>
+			) : null}
+			{text ? (
+				<div className="assistant-markdown-scale max-w-none break-words text-foreground [&_.conversation-streamdown]:text-[13px]">
+					<Suspense
+						fallback={
+							<p className="whitespace-pre-wrap text-[13px] leading-6">{text}</p>
+						}
+					>
+						<LazyStreamdown
+							mode="static"
+							className="conversation-streamdown"
+							shikiTheme={ASSISTANT_STREAMDOWN_SHIKI_THEME}
+						>
+							{text}
+						</LazyStreamdown>
+					</Suspense>
+				</div>
+			) : null}
+		</div>
+	);
+}
 
 /** Explains what explicit evidence travelled with this turn, from metadata only. */
 function UserMessageEvidenceChip({ evidence }: { evidence: TurnEvidenceSummary }) {
@@ -61,11 +142,7 @@ export function UserMessage({
 			className="conversation-thread-enter conversation-fade-in group/user flex min-w-0 justify-end"
 		>
 			<div className="relative flex max-w-[75%] min-w-0 flex-col items-end pb-5">
-				<div className="conversation-body-text w-full overflow-hidden rounded-md bg-accent/55 px-3 py-2 leading-7">
-					<p className="whitespace-pre-wrap break-words text-[13px] text-foreground">
-						{content}
-					</p>
-				</div>
+				<UserPromptContent content={content} />
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
 					{retryOfTurnId ? (
 						<span
