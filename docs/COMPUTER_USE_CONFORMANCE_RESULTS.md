@@ -44,3 +44,9 @@ temporary project's `.cursor/mcp.json` and an ACP session with an empty inline
 It did not emit an ACP permission request for that call, so the result only
 confirms the file-based connection path; it does not pass DCC's authorization
 contract or the Computer Use gate.
+
+The same build did not advertise ACP `additionalDirectories`. A probe that
+started Cursor from the temporary config project but set `session/new.cwd` to
+the real project did not expose the temporary MCP tool. This rules out using
+the temporary project as an isolated config root with the current advertised
+capabilities while keeping the real project as the session root.

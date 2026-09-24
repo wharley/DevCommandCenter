@@ -142,6 +142,14 @@ session projection was not observed by the authenticated gates. The probe did
 not emit `session/request_permission` for the tool call, so it does not satisfy
 DCC's approval contract and is not conformance evidence.
 
+The same build did not advertise ACP `sessionCapabilities.additionalDirectories`
+during `initialize`. A session using the temporary project root therefore
+cannot add the user's project as another supported root. Starting the process
+from a temporary directory while setting `session/new.cwd` to the user's
+project did not expose the temporary project's MCP tool either. The current
+file-based path cannot keep the project root and its MCP config separate under
+the advertised ACP capabilities.
+
 ## Remaining verification gate
 
 The production adapter now:
@@ -158,9 +166,10 @@ authorized fixture image call through DCC's inline session projection. A
 separate private-project probe confirmed that file-based MCP configuration can
 reach the model through ACP, but it did not establish DCC permission mediation.
 The currently audited `2026.07.23-e383d2b` binary was unavailable locally, and
-the exact-version gate refused to use the newer binary. DCC must test an
-isolated configuration path that keeps credential handling and approval
-enforcement intact before the current runtime can be certified.
+the exact-version gate refused to use the newer binary. A safe project-file
+fallback also needs to preserve the user's project as the primary session root
+and mediate DCC approval; the current ACP capability set does not provide the
+required additional-root path.
 
 The release gate remains the ignored, authenticated shared conformance test:
 
