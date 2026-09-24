@@ -32,8 +32,10 @@ Model selection uses a single dialog bounded by the panel, with a searchable
 list, shared favorites, effort, and response style. Lists scroll inside the dialog
 instead of opening side submenus. Returning to the request restores editor focus.
 
-DCC must remain running; quitting/closing the main window
-ends the companion panel too.
+DCC must remain running. On macOS, closing the main window hides it while the
+[menu bar companion](MENU_BAR.md) remains available. **Quit DCC** / Command + Q
+ends the companion surfaces too. If the menu bar fails to initialize, closing
+the main window keeps the previous shutdown behavior.
 
 ## Delivery and recovery
 

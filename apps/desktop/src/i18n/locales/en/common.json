@@ -4394,5 +4394,33 @@
     "open": "Open",
     "shortcutHint": "Open over any Mac app to start a task in Local or Worktree. DCC must be running.",
     "saveFailed": "Could not save your preferences."
+  },
+  "menuBar": {
+    "title": "Activity",
+    "refresh": "Refresh activity",
+    "running": "{{count}} running",
+    "waiting": "{{count}} waiting for you",
+    "loading": "Loading activity…",
+    "unavailable": "Activity unavailable",
+    "tasks": "Tasks",
+    "empty": "No tasks running",
+    "emptyHint": "Start a task and follow its progress here.",
+    "recent": "Recent activity",
+    "resources": "DCC resources",
+    "memory": "Memory",
+    "metricsScope": "App, daemon and child processes · CPU: 100% = 1 core",
+    "metricsDetail": "Sum of the app and daemon process trees. External services and WebKit processes managed by macOS may be excluded.",
+    "compose": "New task",
+    "open": "Open DCC",
+    "quit": "Quit DCC",
+    "stale": "Could not refresh. The last data may be out of date.",
+    "actionError": "Could not complete the action. Please try again.",
+    "status": {
+      "running": "Running",
+      "permission": "Needs approval",
+      "input": "Needs your reply",
+      "completed": "Completed",
+      "aborted": "Interrupted"
+    }
   }
 }

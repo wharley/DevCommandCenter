@@ -19,6 +19,7 @@ mod mcp_commands;
 mod note_commands;
 mod provider_commands;
 mod quick_composer;
+mod menu_bar;
 mod session_commands;
 mod skills_commands;
 mod workspace_commands;
@@ -7057,6 +7058,12 @@ pub fn run() {
             pair_get_endpoints,
             terminal_save_temp_image,
             attachment_commands::preview_composer_attachment,
+            menu_bar::menu_bar_snapshot,
+            menu_bar::menu_bar_visible,
+            menu_bar::menu_bar_hide,
+            menu_bar::menu_bar_compose,
+            menu_bar::menu_bar_open_main,
+            menu_bar::menu_bar_quit,
             quick_composer::quick_composer_status,
             quick_composer::quick_composer_set_shortcut,
             quick_composer::quick_composer_toggle,
@@ -7413,6 +7420,9 @@ pub fn run() {
             start_pair_audit_watcher(app.handle().clone(), audit_db_path);
             // Warm the hidden panel during normal app startup, before a global
             // shortcut can accidentally activate the main window while building it.
+            if let Err(error) = menu_bar::setup(app.handle()) {
+                eprintln!("[DCC] menu bar unavailable: {error}");
+            }
             if let Err(error) = quick_composer::setup(app.handle(), app_data_dir.clone()) {
                 eprintln!("[DCC] quick composer unavailable: {error}");
             }
@@ -7421,6 +7431,26 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            #[cfg(target_os = "macos")]
+            {
+                if let tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::CloseRequested { api, .. },
+                    ..
+                } = &event {
+                    // Hide only after the menu bar was successfully installed.
+                    // Explicit Quit/Command-Q still follows normal shutdown.
+                    if label == "main" && app_handle.try_state::<menu_bar::MenuBarState>().is_some() {
+                        api.prevent_close();
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                    }
+                }
+                if let tauri::RunEvent::Reopen { .. } = &event {
+                    let _ = menu_bar::show_main(app_handle);
+                }
+            }
             if let tauri::RunEvent::WindowEvent {
                 label,
                 event: tauri::WindowEvent::Destroyed,
@@ -7428,9 +7458,12 @@ pub fn run() {
             } = &event {
                 if label == "main" {
                     quick_composer::shutdown(app_handle);
+                    menu_bar::shutdown(app_handle);
                 }
             }
             if let tauri::RunEvent::ExitRequested { .. } = event {
+                menu_bar::shutdown(app_handle);
+                quick_composer::shutdown(app_handle);
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     kill_all_terminals(&state, app_handle);
                 }

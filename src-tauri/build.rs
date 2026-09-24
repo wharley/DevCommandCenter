@@ -117,6 +117,14 @@ fn build_macos_computer_bridge() {
         .status()
         .expect("native quick composer compiler")
         .success());
+    let menu_bar_object = out_dir.join("menu_bar_macos.o");
+    println!("cargo:rerun-if-changed=native/menu_bar_macos.m");
+    assert!(Command::new("xcrun")
+        .args(["clang", "-fobjc-arc", "-fblocks", "-c", "native/menu_bar_macos.m"])
+        .args(["-arch", architecture])
+        .arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o").arg(&menu_bar_object).status()
+        .expect("native menu bar compiler").success());
     let archived = Command::new("ar")
         .args(["crus"])
         .arg(&archive)
@@ -126,6 +134,7 @@ fn build_macos_computer_bridge() {
         .arg(&cookies_object)
         .arg(&navigation_object)
         .arg(&quick_object)
+        .arg(&menu_bar_object)
         .status()
         .expect("ar must be available to build macOS computer use")
         .success();

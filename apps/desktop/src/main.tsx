@@ -20,6 +20,13 @@ import "./styles/app.css";
 
 const isQuickComposer =
 	new URLSearchParams(window.location.search).get("quick-composer") === "1";
+const isMenuBar =
+	new URLSearchParams(window.location.search).get("menu-bar") === "1";
+const MenuBar = lazy(() =>
+	import("./features/menu-bar/MenuBar").then((module) => ({
+		default: module.MenuBar,
+	})),
+);
 const App = lazy(() => import("./App"));
 const QuickComposer = lazy(() =>
 	import("./features/quick-composer/QuickComposer").then((module) => ({
@@ -55,10 +62,10 @@ ReactDOM.createRoot(document.getElementById("root")!, reactRootOptions).render(
 	<RenderErrorBoundary scope="app">
 		<ThemeProvider>
 			<TooltipProvider delayDuration={0}>
-				{isQuickComposer ? (
+				{isQuickComposer || isMenuBar ? (
 					<QueryClientProvider client={queryClient}>
 						<Suspense fallback={null}>
-							<QuickComposer />
+							{isMenuBar ? <MenuBar /> : <QuickComposer />}
 						</Suspense>
 					</QueryClientProvider>
 				) : (

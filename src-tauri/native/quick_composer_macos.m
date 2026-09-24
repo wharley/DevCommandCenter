@@ -78,6 +78,15 @@ bool dcc_quick_composer_toggle(void) {
     return true;
 }
 
+bool dcc_quick_composer_show(void) {
+    if (!panel) return false;
+    if (!panel.visible) return dcc_quick_composer_toggle();
+    [panel makeKeyAndOrderFront:nil];
+    WKWebView *webView = findWebView(panel.contentView);
+    if (webView) [panel makeFirstResponder:webView];
+    return true;
+}
+
 void dcc_quick_composer_hide(void) {
     [panel orderOut:nil];
     // Restore DCC's previous key window only when DCC itself is active. A

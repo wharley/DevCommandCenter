@@ -303,6 +303,19 @@ pub fn toggle(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
     }
 }
+pub fn show(app: &AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let handle = app.clone();
+        return app.run_on_main_thread(move || {
+            if unsafe { native::dcc_quick_composer_show() } {
+                let _ = handle.emit_to(LABEL, "quick-composer-shown", ());
+            }
+        }).map_err(|e| e.to_string());
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = app; Err("unsupported".into()) }
+}
 #[tauri::command]
 pub fn quick_composer_hide(window: Webview, app: AppHandle) -> Result<(), String> {
     panel_only(&window)?;
@@ -404,7 +417,7 @@ pub fn setup(app: &AppHandle, app_data: PathBuf) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn local_navigation(url: &url::Url) -> bool {
+pub(crate) fn local_navigation(url: &url::Url) -> bool {
     let packaged = url.scheme() == "tauri" && url.host_str() == Some("localhost");
     let dev = cfg!(debug_assertions)
         && url.scheme() == "http"
@@ -426,6 +439,7 @@ mod native {
     extern "C" {
         pub fn dcc_quick_composer_create(window: *mut std::ffi::c_void) -> bool;
         pub fn dcc_quick_composer_toggle() -> bool;
+        pub fn dcc_quick_composer_show() -> bool;
         pub fn dcc_quick_composer_hide();
         pub fn dcc_quick_composer_destroy();
     }

@@ -4394,5 +4394,33 @@
     "open": "Abrir",
     "shortcutHint": "Abra sobre qualquer app do Mac para iniciar uma tarefa em Local ou Worktree. O DCC precisa estar aberto.",
     "saveFailed": "Não foi possível salvar suas preferências."
+  },
+  "menuBar": {
+    "title": "Atividade",
+    "refresh": "Atualizar atividade",
+    "running": "{{count}} executando",
+    "waiting": "{{count}} aguardando você",
+    "loading": "Carregando atividade…",
+    "unavailable": "Atividade indisponível",
+    "tasks": "Tarefas",
+    "empty": "Nenhuma tarefa executando",
+    "emptyHint": "Comece uma tarefa e acompanhe por aqui.",
+    "recent": "Atividade recente",
+    "resources": "Recursos do DCC",
+    "memory": "Memória",
+    "metricsScope": "App, daemon e processos filhos · CPU: 100% = 1 núcleo",
+    "metricsDetail": "Soma dos processos do app e do daemon, incluindo descendentes. Serviços externos e processos WebKit gerenciados pelo macOS podem ficar fora dessa soma.",
+    "compose": "Nova tarefa",
+    "open": "Abrir DCC",
+    "quit": "Sair do DCC",
+    "stale": "Não foi possível atualizar. Os últimos dados podem estar desatualizados.",
+    "actionError": "Não foi possível concluir a ação. Tente novamente.",
+    "status": {
+      "running": "Executando",
+      "permission": "Aguardando aprovação",
+      "input": "Aguardando resposta",
+      "completed": "Concluída",
+      "aborted": "Interrompida"
+    }
   }
 }
