@@ -117,6 +117,39 @@ pub struct ComputerUsePreviewFrame {
     pub captured_at_ms: u64,
 }
 
+#[derive(Debug, Clone)]
+struct StoredPreviewFrame {
+    frame: ComputerUsePreviewFrame,
+    pid: i32,
+    lease_id: String,
+    revision: String,
+}
+
+struct PreviewRefreshGuard {
+    sessions: Arc<Mutex<HashSet<String>>>,
+    session_id: String,
+}
+
+impl PreviewRefreshGuard {
+    fn acquire(sessions: &Arc<Mutex<HashSet<String>>>, session_id: &str) -> Option<Self> {
+        if !sessions.lock().ok()?.insert(session_id.to_string()) {
+            return None;
+        }
+        Some(Self {
+            sessions: Arc::clone(sessions),
+            session_id: session_id.to_string(),
+        })
+    }
+}
+
+impl Drop for PreviewRefreshGuard {
+    fn drop(&mut self) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.remove(&self.session_id);
+        }
+    }
+}
+
 /// A renderer-visible request created by an authenticated provider tool. This
 /// intentionally contains no window metadata; the renderer discovers targets
 /// locally only after the human decides to allow the request.
@@ -287,7 +320,8 @@ pub struct ComputerUseState {
     grants: Arc<Mutex<HashMap<String, ComputerGrant>>>,
     projected_sessions: Arc<Mutex<HashMap<String, String>>>,
     pending_control_requests: Arc<Mutex<HashMap<String, PendingControlRequest>>>,
-    preview_frames: Arc<Mutex<HashMap<String, ComputerUsePreviewFrame>>>,
+    preview_frames: Arc<Mutex<HashMap<String, StoredPreviewFrame>>>,
+    preview_refreshing: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Default for ComputerUseState {
@@ -304,6 +338,7 @@ impl ComputerUseState {
             projected_sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_control_requests: Arc::new(Mutex::new(HashMap::new())),
             preview_frames: Arc::new(Mutex::new(HashMap::new())),
+            preview_refreshing: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -378,6 +413,11 @@ impl ComputerUseState {
     }
 
     pub(crate) fn preview_frame(&self, session_id: &str) -> Option<ComputerUsePreviewFrame> {
+        self.authorized_preview_frame(session_id)
+            .map(|stored| stored.frame)
+    }
+
+    fn authorized_preview_frame(&self, session_id: &str) -> Option<StoredPreviewFrame> {
         let current_lease = self.projection_lease(session_id);
         let now = Instant::now();
         let authorized = current_lease.as_ref().is_some_and(|lease_id| {
@@ -392,19 +432,74 @@ impl ComputerUseState {
             self.clear_preview_frame(session_id);
             return None;
         }
-        let frame = self.preview_frames.lock().ok()?.get(session_id).cloned()?;
+        let stored = self.preview_frames.lock().ok()?.get(session_id).cloned()?;
         let still_allowed = self.grants.lock().is_ok_and(|mut grants| {
             prune_expired(&mut grants);
             grants.get(session_id).is_some_and(|grant| {
                 current_lease.as_ref() == Some(&grant.lease_id)
-                    && grant.allowed_bundle_ids.contains(&frame.target.bundle_id)
+                    && grant.lease_id == stored.lease_id
+                    && grant
+                        .allowed_bundle_ids
+                        .contains(&stored.frame.target.bundle_id)
             })
         });
         if !still_allowed {
             self.clear_preview_frame(session_id);
             return None;
         }
-        Some(frame)
+        Some(stored)
+    }
+
+    /// Refreshes only the window the provider already captured. This local
+    /// preview does not mint an action generation or send an image to the model.
+    pub(crate) fn refresh_preview_frame(
+        &self,
+        session_id: &str,
+    ) -> Option<ComputerUsePreviewFrame> {
+        let _in_flight = PreviewRefreshGuard::acquire(&self.preview_refreshing, session_id)?;
+        let stored = self.authorized_preview_frame(session_id)?;
+        let lease_id = self.projection_lease(session_id)?;
+        let nonce = self
+            .capture_grant(session_id, &lease_id, &stored.frame.target.bundle_id)
+            .ok()?;
+        let target = self.native.targets().ok()?.into_iter().find(|item| {
+            item.window_id == stored.frame.target.window_id
+                && item.bundle_id == stored.frame.target.bundle_id
+                && item.pid == stored.pid
+        });
+        let Some(target) = target else {
+            if let Ok(mut frames) = self.preview_frames.lock() {
+                if frames
+                    .get(session_id)
+                    .is_some_and(|current| current.revision == stored.revision)
+                {
+                    frames.remove(session_id);
+                }
+            }
+            return None;
+        };
+        let bytes = self.native.capture(&target).ok()?;
+        if bytes.len() > MAX_CAPTURE_BYTES || !self.grant_is_current(session_id, &lease_id, &nonce)
+        {
+            return None;
+        }
+        let mut frames = self.preview_frames.lock().ok()?;
+        let current = frames.get_mut(session_id)?;
+        if current.lease_id != lease_id
+            || current.pid != stored.pid
+            || current.revision != stored.revision
+        {
+            return None;
+        }
+        current.frame.image_base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+        current.frame.captured_at_ms = preview_timestamp_ms();
+        current.frame.target.name = target.name;
+        current.frame.target.title = target.title;
+        current.frame.target.width = target.width;
+        current.frame.target.height = target.height;
+        current.revision = random_token();
+        drop(frames);
+        self.preview_frame(session_id)
     }
     pub(crate) fn lease_matches(&self, session_id: &str, lease_id: &str) -> bool {
         self.projected_sessions.lock().is_ok_and(|sessions| {
@@ -953,22 +1048,27 @@ impl ComputerUseState {
             },
             mime_type: "image/png",
             image_base64: image_base64.clone(),
-            captured_at_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
-                .unwrap_or_default(),
+            captured_at_ms: preview_timestamp_ms(),
         };
         if let Ok(mut frames) = self.preview_frames.lock() {
             if frames.len() >= MAX_PREVIEW_SESSIONS && !frames.contains_key(session_id) {
                 if let Some(oldest_session) = frames
                     .iter()
-                    .min_by_key(|(_, frame)| frame.captured_at_ms)
+                    .min_by_key(|(_, stored)| stored.frame.captured_at_ms)
                     .map(|(id, _)| id.clone())
                 {
                     frames.remove(&oldest_session);
                 }
             }
-            frames.insert(session_id.to_string(), preview_frame);
+            frames.insert(
+                session_id.to_string(),
+                StoredPreviewFrame {
+                    frame: preview_frame,
+                    pid: target.pid,
+                    lease_id: expected_lease_id.to_string(),
+                    revision: random_token(),
+                },
+            );
         }
         Ok(ComputerCapture {
             target: snapshot,
@@ -1175,6 +1275,12 @@ fn random_token() -> String {
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
+fn preview_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or_default()
+}
 fn prune_expired(grants: &mut HashMap<String, ComputerGrant>) {
     let now = Instant::now();
     grants.retain(|_, grant| grant.expires_at > now);
@@ -1321,6 +1427,18 @@ pub fn computer_use_preview_frame(
     input: ComputerUsePreviewFrameInput,
 ) -> Option<ComputerUsePreviewFrame> {
     state.preview_frame(&input.session_id)
+}
+
+#[tauri::command]
+pub async fn computer_use_refresh_preview_frame(
+    state: State<'_, ComputerUseState>,
+    input: ComputerUsePreviewFrameInput,
+) -> Option<ComputerUsePreviewFrame> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || state.refresh_preview_frame(&input.session_id))
+        .await
+        .ok()
+        .flatten()
 }
 
 // Human-initiated Appshots reuse the native capture primitives without granting

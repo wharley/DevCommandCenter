@@ -7043,6 +7043,7 @@ pub fn run() {
             computer_use_commands::computer_use_list_pending_requests,
             computer_use_commands::computer_use_respond_control_request,
             computer_use_commands::computer_use_preview_frame,
+            computer_use_commands::computer_use_refresh_preview_frame,
             browser_commands::browser_set_bounds,
             browser_commands::browser_set_occluded,
             browser_commands::browser_hide,

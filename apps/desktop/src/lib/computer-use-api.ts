@@ -190,3 +190,12 @@ export async function getComputerUsePreviewFrame(
 		input: { sessionId },
 	});
 }
+
+export async function refreshComputerUsePreviewFrame(
+	sessionId: string,
+): Promise<ComputerUsePreviewFrame | null> {
+	if (!isTauriRuntime()) return null;
+	return invoke<ComputerUsePreviewFrame | null>("computer_use_refresh_preview_frame", {
+		input: { sessionId },
+	});
+}

@@ -6,6 +6,7 @@ import {
 	getComputerUsePreviewFrame,
 	getComputerUseStatus,
 	isComputerUseDesktop,
+	refreshComputerUsePreviewFrame,
 	type ComputerUseActivityEvent,
 	type ComputerUsePreviewFrame,
 } from "@/lib/computer-use-api";
@@ -39,6 +40,7 @@ export function ComputerUsePreview({
 	const [activity, setActivity] = useState<Activity | null>(null);
 	const [hidden, setHidden] = useState(false);
 	const [expanded, setExpanded] = useState(false);
+	const hasFrame = frame !== null;
 
 	useEffect(() => {
 		setFrame(null);
@@ -122,6 +124,32 @@ export function ComputerUsePreview({
 			unlistenCleared?.();
 		};
 	}, [sessionId]);
+
+	useEffect(() => {
+		if (!sessionId || !hasFrame || !isTurnActive || hidden || !isComputerUseDesktop()) return;
+		let disposed = false;
+		let inFlight = false;
+		const timer = window.setInterval(() => {
+			if (inFlight || document.visibilityState === "hidden") return;
+			inFlight = true;
+			void refreshComputerUsePreviewFrame(sessionId)
+				.then(async (next) => {
+					if (disposed) return;
+					if (next) {
+						setFrame(next);
+					} else {
+						const current = await getComputerUsePreviewFrame(sessionId);
+						if (!disposed) setFrame(current);
+					}
+				})
+				.catch(() => undefined)
+				.finally(() => { inFlight = false; });
+		}, 1_000);
+		return () => {
+			disposed = true;
+			window.clearInterval(timer);
+		};
+	}, [sessionId, hasFrame, isTurnActive, hidden]);
 
 	if (!sessionId || (!frame && !activity)) return null;
 	if (hidden) {
