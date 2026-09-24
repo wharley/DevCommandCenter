@@ -130,7 +130,7 @@ static bool request_screen_recording_access(void) {
 char *dcc_computer_status_json(void) {
   @autoreleasepool {
     NSOperatingSystemVersion version = NSProcessInfo.processInfo.operatingSystemVersion;
-    return json_string(@{@"accessibility": @(AXIsProcessTrusted()), @"screenRecording": @(screen_capture_access_is_granted()), @"majorVersion": @(version.majorVersion)});
+    return json_string(@{@"accessibility": @((bool)AXIsProcessTrusted()), @"screenRecording": @(screen_capture_access_is_granted()), @"majorVersion": @(version.majorVersion)});
   }
 }
 
