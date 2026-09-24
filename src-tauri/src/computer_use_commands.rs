@@ -1433,12 +1433,11 @@ pub fn computer_use_preview_frame(
 pub async fn computer_use_refresh_preview_frame(
     state: State<'_, ComputerUseState>,
     input: ComputerUsePreviewFrameInput,
-) -> Option<ComputerUsePreviewFrame> {
+) -> Result<Option<ComputerUsePreviewFrame>, String> {
     let state = state.inner().clone();
     tokio::task::spawn_blocking(move || state.refresh_preview_frame(&input.session_id))
         .await
-        .ok()
-        .flatten()
+        .map_err(|_| "desktop computer-use preview refresh failed".to_string())
 }
 
 // Human-initiated Appshots reuse the native capture primitives without granting
