@@ -1531,6 +1531,9 @@
       "done": "Done"
     },
     "execution": {
+      "compactTitle": "Model and execution",
+      "backToPrompt": "Back to prompt",
+      "removeFavorite": "Remove from favorites",
       "title": "Execution",
       "open": "Open execution settings",
       "openWithSelection": "Configure {{model}}, {{effort}} effort",
@@ -4364,5 +4367,32 @@
       "shortcutInvalid": "Use Command, Control or Option with a letter, number, function key or Space.",
       "shortcutUnavailable": "This shortcut could not be registered. Choose another combination."
     }
+  },
+  "quickComposer": {
+    "selectModel": "Choose an available provider and model to start.",
+    "title": "Quick composer",
+    "refresh": "Refresh projects and models",
+    "close": "Close and keep draft",
+    "project": "Project",
+    "selectProject": "Select a project",
+    "environment": "Execution environment",
+    "localDirect": "Local",
+    "protectedWorktree": "Worktree",
+    "localHint": "Edits the original folder on its current branch.",
+    "worktreeHint": "Creates a separate folder and branch for this task.",
+    "loading": "Loading projects and models…",
+    "noProjects": "Add a project in the main DCC window to get started.",
+    "starting": "Starting task…",
+    "started": "Last task created",
+    "interrupted": "The request could not be confirmed. Check the task before sending it again.",
+    "openTask": "Open in DCC",
+    "savedPrompt": "View saved request",
+    "copy": "Copy request",
+    "copied": "Request copied",
+    "stopRecovery": "I checked the task · allow a new request",
+    "footer": "Each send creates a new task · Enter sends · Esc closes",
+    "open": "Open",
+    "shortcutHint": "Open over any Mac app to start a task in Local or Worktree. DCC must be running.",
+    "saveFailed": "Could not save your preferences."
   }
 }

@@ -134,6 +134,22 @@ export function ThemeProvider({
 		applyDccDensity(next);
 	}, []);
 
+	// The quick composer and main workbench share preferences, not React state.
+	useEffect(() => {
+		const syncAppearance = (event: StorageEvent) => {
+			if (event.key === DCC_THEME_STORAGE_KEY && (event.newValue === "dark" || event.newValue === "light")) {
+				setThemeState(event.newValue);
+				applyDccThemeClass(event.newValue);
+			}
+			if (event.key === DCC_DENSITY_STORAGE_KEY && (event.newValue === "comfortable" || event.newValue === "compact")) {
+				setDensityState(event.newValue);
+				applyDccDensity(event.newValue);
+			}
+		};
+		window.addEventListener("storage", syncAppearance);
+		return () => window.removeEventListener("storage", syncAppearance);
+	}, []);
+
 	useEffect(() => {
 		if (typeof window === "undefined") {
 			return;

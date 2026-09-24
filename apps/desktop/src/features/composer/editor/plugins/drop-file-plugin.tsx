@@ -9,6 +9,7 @@ import {
 	DROP_COMMAND,
 } from "lexical";
 import { useEffect, useRef } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { pathRelativeToWorkspace } from "@/lib/path-basename";
 import { $createFileBadgeNode } from "../file-badge-node";
 import { $createImageBadgeNode } from "../image-badge-node";
@@ -52,6 +53,7 @@ export function DropFilePlugin({
 				}
 
 				listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
+					if (!editor.isEditable()) return;
 					const paths = event.payload.paths;
 					if (!paths || paths.length === 0) {
 						return;
@@ -92,7 +94,7 @@ export function DropFilePlugin({
 						paragraph.append(spacer);
 						spacer.select(1, 1);
 					});
-				}).then((fn) => {
+				}, { target: { kind: "Webview", label: getCurrentWebview().label } }).then((fn) => {
 					if (cancelledRef.current) {
 						fn();
 					} else {
@@ -110,7 +112,7 @@ export function DropFilePlugin({
 			unlistenRef.current?.();
 			unlistenRef.current = null;
 		};
-	}, [editor, workspaceRootPath]);
+	}, [editor, workspaceRootPath, imagesSupported]);
 
 	return null;
 }

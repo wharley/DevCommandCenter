@@ -140,6 +140,9 @@ import {
 } from "@/lib/session-api";
 
 type WorkspaceComposerProps = {
+	/** Quick-entry surfaces choose their project before a workspace exists. */
+	showExecutionContext?: boolean;
+	compactExecutionPicker?: boolean;
 	localBranchControl?: ReactNode;
 	draftKey: string;
 	draftSessionId: string | null;
@@ -191,6 +194,8 @@ type WorkspaceComposerProps = {
 };
 
 export function WorkspaceComposer({
+	showExecutionContext = true,
+	compactExecutionPicker = false,
 	localBranchControl,
 	draftKey,
 	draftSessionId,
@@ -1185,6 +1190,8 @@ export function WorkspaceComposer({
 
 				<div className="flex shrink-0 items-center gap-1.5">
 					<ComposerExecutionMenu
+						compact={compactExecutionPicker}
+						onReturnToComposer={() => editorRef.current?.focus()}
 						open={executionMenuOpen}
 						onOpenChange={(open) => {
 							setExecutionMenuOpen(open);
@@ -1431,7 +1438,7 @@ export function WorkspaceComposer({
 				</div>
 			</div>
 		</div>,
-		<ExecutionContextRail
+		showExecutionContext ? <ExecutionContextRail
 			key="execution-context"
 			localBranchControl={localBranchControl}
 			noteSessionId={sessionId}
@@ -1444,6 +1451,6 @@ export function WorkspaceComposer({
 			contextProjects={contextProjects}
 			setupReport={workspaceSetupReport}
 			onOpenTerminal={onOpenTerminal}
-		/>,
+		/> : null,
 	];
 }

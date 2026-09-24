@@ -16,12 +16,12 @@ let container: HTMLDivElement;
 let root: Root;
 const selected = vi.fn();
 
-function Harness({ disabled = false, managed = false }: { disabled?: boolean; managed?: boolean }) {
+function Harness({ disabled = false, managed = false, compact = false }: { disabled?: boolean; managed?: boolean; compact?: boolean }) {
 	const [open, setOpen] = useState(true);
 	const [providerId, setProviderId] = useState(managed ? "antigravity" : "cursor");
 	const [modelId, setModelId] = useState(managed ? "default" : "auto");
 	const [effort, setEffort] = useState("medium");
-	return <ComposerExecutionMenu open={open} onOpenChange={setOpen}
+	return <ComposerExecutionMenu compact={compact} open={open} onOpenChange={setOpen}
 		providers={FALLBACK_PROVIDER_CATALOG.providers}
 		selectedProviderId={providerId} selectedModelId={modelId}
 		availableEffortLevels={["low", "medium", "high", "xhigh"]} selectedEffortId={effort}
@@ -44,6 +44,7 @@ function item(text: string) {
 beforeEach(() => {
 	vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 	vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+	Element.prototype.scrollIntoView = vi.fn();
 	selected.mockClear();
 	saveModelFavorites([extraHigh, high]);
 	container = document.createElement("div");
@@ -139,5 +140,29 @@ describe("favorite picker interactions", () => {
 		expect(favorite.getAttribute("data-disabled")).not.toBeNull();
 		await act(async () => favorite.click());
 		expect(selected).not.toHaveBeenCalled();
+	});
+});
+
+describe("compact picker", () => {
+	it("selects a favorite with its effort inside one dialog and returns to the composer", async () => {
+		await act(async () => root.render(<Harness compact />));
+		expect(document.querySelector('[role="menu"]')).toBeNull();
+		const favorite = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((row) => row.textContent?.includes("composer.effort.xhigh"))!;
+		await act(async () => favorite.click());
+		expect(selected.mock.calls).toEqual([["provider", "codex"], ["model", "gpt-6-astra"], ["effort", "xhigh"]]);
+		expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+		const done = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "composer.execution.backToPrompt")!;
+		await act(async () => done.click());
+		expect(document.querySelector('[role="dialog"]')).toBeNull();
+	});
+	it("selects a model from another provider and adjusts effort without opening a submenu", async () => {
+		await act(async () => root.render(<Harness compact />));
+		const model = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((row) => row.textContent === "GPT-6 Luna")!;
+		await act(async () => model.click());
+		expect(selected.mock.calls).toEqual([["provider", "codex"], ["model", "gpt-6-luna"]]);
+		const effort = document.querySelector<HTMLSelectElement>('select[aria-label="composer.execution.effort"]')!;
+		await act(async () => { effort.value = "high"; effort.dispatchEvent(new Event("change", { bubbles: true })); });
+		expect(selected).toHaveBeenLastCalledWith("effort", "high");
+		expect(document.querySelector('[role="menu"]')).toBeNull();
 	});
 });

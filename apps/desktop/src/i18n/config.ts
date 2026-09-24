@@ -39,7 +39,20 @@ void i18n.use(initReactI18next).init({
 	defaultNS: "common",
 	ns: ["common"],
 	interpolation: { escapeValue: false },
+	react: { bindI18nStore: "added removed" },
 });
+
+// Keep already-mounted windows in sync when locale JSON changes in dev.
+// React Fast Refresh alone does not update i18next's resource store.
+if (import.meta.hot) {
+	import.meta.hot.accept(
+		["./locales/en/common.json", "./locales/pt-BR/common.json"],
+		([english, portuguese]) => {
+			if (english) i18n.addResourceBundle("en", "common", english.default, true, true);
+			if (portuguese) i18n.addResourceBundle("pt-BR", "common", portuguese.default, true, true);
+		},
+	);
+}
 
 applyDocumentLang(i18n.language);
 

@@ -10,6 +10,10 @@ interface ImportMeta {
 	readonly env: ImportMetaEnv;
 	readonly hot?: {
 		dispose(callback: () => void): void;
+		accept(
+			dependencies: string[],
+			callback: (modules: Array<{ default: Record<string, unknown> } | undefined>) => void,
+		): void;
 	};
 }
 

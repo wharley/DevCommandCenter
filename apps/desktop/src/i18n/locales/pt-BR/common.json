@@ -1531,6 +1531,9 @@
       "done": "Concluído"
     },
     "execution": {
+      "compactTitle": "Modelo e execução",
+      "backToPrompt": "Voltar ao pedido",
+      "removeFavorite": "Remover dos favoritos",
       "title": "Execução",
       "open": "Abrir configurações de execução",
       "openWithSelection": "Configurar {{model}}, esforço {{effort}}",
@@ -4364,5 +4367,32 @@
       "shortcutInvalid": "Use Command, Control ou Option com uma letra, número, tecla de função ou Espaço.",
       "shortcutUnavailable": "Não foi possível registrar este atalho. Escolha outra combinação."
     }
+  },
+  "quickComposer": {
+    "selectModel": "Selecione um provedor disponível e um modelo para iniciar.",
+    "title": "Compositor rápido",
+    "refresh": "Atualizar projetos e modelos",
+    "close": "Fechar e preservar rascunho",
+    "project": "Projeto",
+    "selectProject": "Selecione um projeto",
+    "environment": "Ambiente de execução",
+    "localDirect": "Local",
+    "protectedWorktree": "Worktree",
+    "localHint": "Altera a pasta original, na branch atual.",
+    "worktreeHint": "Cria uma pasta e branch separadas para esta tarefa.",
+    "loading": "Carregando projetos e modelos…",
+    "noProjects": "Adicione um projeto na janela principal do DCC para começar.",
+    "starting": "Iniciando tarefa…",
+    "started": "Última tarefa criada",
+    "interrupted": "Não foi possível confirmar a conclusão do pedido. Confira a tarefa antes de enviar novamente.",
+    "openTask": "Abrir no DCC",
+    "savedPrompt": "Ver pedido preservado",
+    "copy": "Copiar pedido",
+    "copied": "Pedido copiado",
+    "stopRecovery": "Já conferi a tarefa · liberar novo pedido",
+    "footer": "Cada envio cria uma nova tarefa · Enter envia · Esc fecha",
+    "open": "Abrir",
+    "shortcutHint": "Abra sobre qualquer app do Mac para iniciar uma tarefa em Local ou Worktree. O DCC precisa estar aberto.",
+    "saveFailed": "Não foi possível salvar suas preferências."
   }
 }

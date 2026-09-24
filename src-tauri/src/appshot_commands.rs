@@ -77,8 +77,8 @@ pub struct AppshotPreview {
     data_url: String,
 }
 
-fn main_only(window: &tauri::Webview) -> Result<(), String> {
-    if window.label() == "main" {
+fn composer_only(window: &tauri::Webview) -> Result<(), String> {
+    if matches!(window.label(), "main" | crate::quick_composer::LABEL) {
         Ok(())
     } else {
         Err("unavailable".into())
@@ -90,6 +90,17 @@ fn valid_key(key: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+fn composer_draft(window: &tauri::Webview, key: &str) -> Result<(), String> {
+    composer_only(window)?;
+    valid_key(key)?;
+    if window.label() == crate::quick_composer::LABEL
+        && !key.starts_with("dcc.workspace.composer.draft.quick-composer:")
+    {
+        return Err("unavailable".into());
+    }
+    Ok(())
 }
 
 impl AppshotState {
@@ -250,7 +261,7 @@ pub async fn appshots_status(
     app: tauri::AppHandle,
     include_targets: bool,
 ) -> Result<AppshotStatus, String> {
-    main_only(&window)?;
+    composer_only(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<AppshotState>().status(include_targets)
     })
@@ -260,7 +271,7 @@ pub async fn appshots_status(
 
 #[tauri::command]
 pub fn appshots_request_access(window: tauri::Webview) -> Result<(), String> {
-    main_only(&window)?;
+    composer_only(&window)?;
     if !native::appshot_status().0 {
         return Err("unsupported".into());
     }
@@ -275,8 +286,7 @@ pub async fn appshots_preview(
     draft_key: String,
     target: ComputerTarget,
 ) -> Result<AppshotPreview, String> {
-    main_only(&window)?;
-    valid_key(&draft_key)?;
+    composer_draft(&window, &draft_key)?;
     tauri::async_runtime::spawn_blocking(move || {
         let bytes = native::appshot_capture(&target)?;
         app.state::<AppshotState>()
@@ -293,10 +303,11 @@ pub async fn appshots_attach(
     draft_key: String,
     ids: Vec<String>,
 ) -> Result<(), String> {
-    main_only(&window)?;
+    composer_draft(&window, &draft_key)?;
+    let label = window.label().to_string();
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<AppshotState>().attach(&draft_key, &ids)?;
-        let _ = app.emit_to("main", "appshots-ready", &draft_key);
+        let _ = app.emit_to(&label, "appshots-ready", &draft_key);
         Ok(())
     })
     .await
@@ -310,7 +321,12 @@ pub fn appshots_activate(
     owner: String,
     draft_key: Option<String>,
 ) -> Result<(), String> {
-    main_only(&window)?;
+    composer_only(&window)?;
+    // The quick composer receives picker captures, but must not replace the
+    // main conversation targeted by the independent Appshots global shortcut.
+    if window.label() == crate::quick_composer::LABEL {
+        return Ok(());
+    }
     let mut inner = state.inner.lock().map_err(|_| "unavailable")?;
     if let Some(key) = draft_key {
         valid_key(&key)?;
@@ -331,7 +347,7 @@ pub fn appshots_pending(
     state: tauri::State<AppshotState>,
     draft_key: String,
 ) -> Result<Vec<PendingAppshot>, String> {
-    main_only(&window)?;
+    composer_draft(&window, &draft_key)?;
     Ok(state
         .inner
         .lock()
@@ -351,7 +367,7 @@ pub fn appshots_acknowledge(
     draft_key: String,
     ids: Vec<String>,
 ) -> Result<(), String> {
-    main_only(&window)?;
+    composer_draft(&window, &draft_key)?;
     let mut inner = state.inner.lock().map_err(|_| "unavailable")?;
     let previous = inner.saved.pending.clone();
     inner
@@ -371,7 +387,7 @@ pub fn appshots_set_shortcut(
     app: tauri::AppHandle,
     shortcut: Option<String>,
 ) -> Result<(), String> {
-    main_only(&window)?;
+    composer_only(&window)?;
     configure_shortcut(&app, shortcut)
 }
 
@@ -400,6 +416,9 @@ fn configure_shortcut(app: &tauri::AppHandle, shortcut: Option<String>) -> Resul
         return Ok(());
     }
     if let Some(key) = parsed {
+        if app.global_shortcut().is_registered(key) {
+            return Err("shortcutUnavailable".into());
+        }
         app.global_shortcut()
             .register(key)
             .map_err(|_| "shortcutUnavailable")?;
@@ -441,9 +460,20 @@ pub fn setup(app: &tauri::AppHandle, root: PathBuf) -> Result<(), String> {
         use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
         app.plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
-                        capture_shortcut(app);
+                        let app = app.clone();
+                        let shortcut = *shortcut;
+                        // Configuration may hold a state lock while registering
+                        // on the UI thread. Do not wait for that lock inside the
+                        // native callback; it would deadlock registration.
+                        std::thread::spawn(move || {
+                            if crate::quick_composer::handles_shortcut(&app, &shortcut) {
+                                let _ = crate::quick_composer::toggle(&app);
+                            } else {
+                                capture_shortcut(&app);
+                            }
+                        });
                     }
                 })
                 .build(),

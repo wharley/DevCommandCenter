@@ -51,12 +51,16 @@ import {
 	type ModelFavorite,
 } from "./model-favorites";
 
+import { CompactExecutionPicker } from "./CompactExecutionPicker";
+
 export const DCC_OPEN_MODEL_PICKER_EVENT = "dcc:open-model-picker";
 
 type ComposerProvider = ProviderCatalog["providers"][number];
 type ComposerModel = ComposerProvider["models"][number];
 
-type ComposerExecutionMenuProps = {
+export type ComposerExecutionMenuProps = {
+	compact?: boolean;
+	onReturnToComposer?: () => void;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	providers: ProviderCatalog["providers"];
@@ -77,7 +81,15 @@ type ComposerExecutionMenuProps = {
 	disabled?: boolean;
 };
 
-export function ComposerExecutionMenu({
+export function ComposerExecutionMenu(props: ComposerExecutionMenuProps) {
+	return props.compact ? (
+		<CompactExecutionPicker {...props} />
+	) : (
+		<FullExecutionMenu {...props} />
+	);
+}
+
+function FullExecutionMenu({
 	open,
 	onOpenChange,
 	providers,

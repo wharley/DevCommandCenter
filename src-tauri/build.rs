@@ -104,6 +104,19 @@ fn build_macos_computer_bridge() {
         .expect("native Browser navigation compiler")
         .success();
     assert!(navigation_compiled, "failed to compile Browser navigation");
+    let quick_object = out_dir.join("quick_composer_macos.o");
+    println!("cargo:rerun-if-changed=native/quick_composer_macos.m");
+    assert!(Command::new("xcrun")
+        .args([
+            "clang", "-fobjc-arc", "-c", "native/quick_composer_macos.m",
+            "-arch", architecture,
+        ])
+        .arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o")
+        .arg(&quick_object)
+        .status()
+        .expect("native quick composer compiler")
+        .success());
     let archived = Command::new("ar")
         .args(["crus"])
         .arg(&archive)
@@ -112,6 +125,7 @@ fn build_macos_computer_bridge() {
         .arg(&input_object)
         .arg(&cookies_object)
         .arg(&navigation_object)
+        .arg(&quick_object)
         .status()
         .expect("ar must be available to build macOS computer use")
         .success();

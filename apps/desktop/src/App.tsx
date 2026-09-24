@@ -1,3 +1,4 @@
+import { useQuickComposerNavigation } from "./features/quick-composer/use-quick-composer-navigation";
 import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { setFrontendErrorContext, type FrontendErrorContext } from "./lib/frontend-diagnostics";
 import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
@@ -4776,6 +4777,20 @@ export default function App() {
 		},
 		[backendCacheKey, createWorkspace, queryClient, requestNewTaskComposerFocus, t],
 	);
+
+	useQuickComposerNavigation((launch) => {
+		setGlobalSurface(null);
+		setIsSettingsOpen(false);
+		void queryClient.invalidateQueries({ queryKey: ["workspaces", backendCacheKey] });
+		if (!launch?.workspaceId) return;
+		requestWorkspaceSelection(launch.workspaceId);
+		if (launch.sessionId) {
+			setPendingSessionNavigation({ workspaceId: launch.workspaceId, sessionId: launch.sessionId });
+			void queryClient.invalidateQueries({
+				queryKey: getWorkspaceSessionsCacheKey(backendCacheKey, launch.workspaceId),
+			});
+		}
+	});
 
 	const handleWorkspaceDialogOpenChange = useCallback((open: boolean) => {
 		setIsCreateWorkspaceOpen(open);

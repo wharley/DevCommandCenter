@@ -18,6 +18,7 @@ mod git_support;
 mod mcp_commands;
 mod note_commands;
 mod provider_commands;
+mod quick_composer;
 mod session_commands;
 mod skills_commands;
 mod workspace_commands;
@@ -7056,6 +7057,13 @@ pub fn run() {
             pair_get_endpoints,
             terminal_save_temp_image,
             attachment_commands::preview_composer_attachment,
+            quick_composer::quick_composer_status,
+            quick_composer::quick_composer_set_shortcut,
+            quick_composer::quick_composer_toggle,
+            quick_composer::quick_composer_hide,
+            quick_composer::quick_composer_open_main,
+            quick_composer::quick_composer_begin,
+            quick_composer::quick_composer_checkpoint,
             appshot_commands::appshots_status,
             appshot_commands::appshots_request_access,
             appshot_commands::appshots_preview,
@@ -7403,11 +7411,25 @@ pub fn run() {
                 app.manage(browser_mcp_bridge);
             }
             start_pair_audit_watcher(app.handle().clone(), audit_db_path);
+            // Warm the hidden panel during normal app startup, before a global
+            // shortcut can accidentally activate the main window while building it.
+            if let Err(error) = quick_composer::setup(app.handle(), app_data_dir.clone()) {
+                eprintln!("[DCC] quick composer unavailable: {error}");
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } = &event {
+                if label == "main" {
+                    quick_composer::shutdown(app_handle);
+                }
+            }
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     kill_all_terminals(&state, app_handle);
