@@ -20,16 +20,20 @@ const accepted = vi.fn();
 vi.mock("@/features/composer/WorkspaceComposer", () => ({
 	WorkspaceComposer: (props: {
 		disabled: boolean;
+		fileMentionRootPath?: string | null;
+		workspacePath: string | null;
 		onSubmitPrompt: (
 			turn: ReturnType<typeof composerTurnFromRaw>,
 		) => Promise<boolean>;
 	}) => (
 		<button
 			disabled={props.disabled}
+			data-file-root={props.fileMentionRootPath}
+			data-attachment-root={props.workspacePath ?? "absolute"}
 			onClick={() =>
 				void props
 					.onSubmitPrompt(
-						composerTurnFromRaw("Fix @/tmp/capture.png", {
+						composerTurnFromRaw("Fix @src/App.tsx with @/tmp/capture.png", {
 							planMode: true,
 							effort: "high",
 						}),
@@ -128,6 +132,8 @@ it.each(["localDirect", "protectedWorktree"] as const)(
 	async (mode) => {
 		await act(async () => root.render(<QuickComposer />));
 		await act(async () => button(`quickComposer.${mode}`).click());
+		expect(button("submit-fixture").dataset.fileRoot).toBe("/fixture/repo");
+		expect(button("submit-fixture").dataset.attachmentRoot).toBe("absolute");
 		await act(async () => button("submit-fixture").click());
 		expect(ipc).toHaveBeenCalledWith("create_workspace_for_repo", {
 			input: expect.objectContaining({
@@ -145,7 +151,7 @@ it.each(["localDirect", "protectedWorktree"] as const)(
 		expect(ipc).toHaveBeenCalledWith("send_turn", {
 			input: expect.objectContaining({
 				sessionId: "session",
-				prompt: "Fix @/tmp/capture.png",
+				prompt: "Fix @src/App.tsx with @/tmp/capture.png",
 				planMode: true,
 				effort: "high",
 			}),

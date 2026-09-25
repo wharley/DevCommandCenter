@@ -161,6 +161,8 @@ type WorkspaceComposerProps = {
 	/** Evidence-first debugging tray; the person reviews what travels with the next message. */
 	debugEvidence?: DebugEvidenceController | null;
 	workspacePath: string | null;
+	/** File search can use the project before the execution workspace exists. */
+	fileMentionRootPath?: string | null;
 	workspaceSetupReport?: WorkspaceSetupReport | null;
 	workspaceBranch: string | null;
 	projectLabel: string | null;
@@ -212,6 +214,7 @@ export function WorkspaceComposer({
 	focusRequestKey = null,
 	debugEvidence = null,
 	workspacePath,
+	fileMentionRootPath,
 	workspaceSetupReport = null,
 	workspaceBranch,
 	projectLabel,
@@ -1034,7 +1037,7 @@ export function WorkspaceComposer({
 
 			<LexicalComposer initialConfig={lexicalInitialConfig}>
 				<ComposerContextReview
-					workspaceRoot={workspacePath}
+					workspaceRoot={fileMentionRootPath ?? workspacePath}
 					draftKey={composerDraftKey}
 					disabled={inputDisabled}
 				/>
@@ -1070,7 +1073,8 @@ export function WorkspaceComposer({
 					}}
 				/>
 				<FileMentionPlugin
-					workspaceRootPath={workspacePath}
+					workspaceRootPath={fileMentionRootPath ?? workspacePath}
+					floating={compactExecutionPicker}
 					popupAnchorRef={composerRootRef}
 				/>
 				<DropFilePlugin workspaceRootPath={workspacePath} imagesSupported={imagesSupported} />

@@ -47,6 +47,21 @@ Object.assign(window, {
 		invoke: async (command: string, args?: Record<string, any>) => {
 			calls.push(command);
 			switch (command) {
+				case "list_git_tracked_files":
+					return {
+						paths:
+							args?.input.workspaceRoot === "/fixture/orbit"
+								? ["orbit.config.ts", "src/orbit.ts"]
+								: [
+										"README.md",
+										"src/App.tsx",
+										"src/lib/utils.ts",
+										...Array.from(
+											{ length: 30 },
+											(_, i) => `src/components/component-${i}.tsx`,
+										),
+									],
+					};
 				case "list_repositories":
 					return { repositories: params.has("empty") ? [] : repositories };
 				case "list_workspaces":

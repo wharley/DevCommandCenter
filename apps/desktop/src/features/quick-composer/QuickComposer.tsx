@@ -550,6 +550,7 @@ export function QuickComposer() {
 						pendingPrompt={null}
 						focusRequestKey={focusKey}
 						workspacePath={null}
+						fileMentionRootPath={repository?.rootPath ?? null}
 						workspaceBranch={null}
 						projectLabel={null}
 						currentBranch={null}

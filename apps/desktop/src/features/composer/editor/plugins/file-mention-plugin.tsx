@@ -5,12 +5,20 @@ import {
 } from "@lexical/react/LexicalTypeaheadMenuPlugin";
 import { useQuery } from "@tanstack/react-query";
 import { $createTextNode, type TextNode } from "lexical";
+import { useTranslation } from "react-i18next";
 import { FileText } from "lucide-react";
-import { type RefObject, useCallback, useMemo, useState } from "react";
+import {
+	type RefObject,
+	type ReactNode,
+	type CSSProperties,
+	useLayoutEffect,
+	useCallback,
+	useMemo,
+	useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
 	Command,
-	CommandEmpty,
 	CommandGroup,
 	CommandItem,
 	CommandList,
@@ -104,14 +112,19 @@ export function matchFileMentionTrigger(text: string) {
 export function FileMentionPlugin({
 	workspaceRootPath,
 	popupAnchorRef,
+	floating = false,
 }: {
 	workspaceRootPath: string | null;
+	floating?: boolean;
 	popupAnchorRef?: RefObject<HTMLElement | null>;
 }) {
 	const [editor] = useLexicalComposerContext();
+	const { t } = useTranslation("common");
 	const [query, setQuery] = useState<string | null>(null);
 
-	const filesQuery = useQuery(workspaceTrackedFilesQueryOptions(workspaceRootPath));
+	const filesQuery = useQuery(
+		workspaceTrackedFilesQueryOptions(workspaceRootPath),
+	);
 	const files = filesQuery.data ?? [];
 
 	const options = useMemo(() => {
@@ -149,11 +162,8 @@ export function FileMentionPlugin({
 			options={options}
 			anchorClassName="file-mention-anchor"
 			menuRenderFn={(anchorElementRef, menuProps) => {
-				const {
-					selectedIndex,
-					selectOptionAndCleanUp,
-					setHighlightedIndex,
-				} = menuProps;
+				const { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex } =
+					menuProps;
 				const portalTarget =
 					popupAnchorRef?.current ?? anchorElementRef.current;
 				if (!portalTarget) {
@@ -166,19 +176,14 @@ export function FileMentionPlugin({
 				const highlightValue = options[selectedIndex ?? 0]?.file.path ?? "";
 
 				return createPortal(
-					<div
-						data-typeahead-popup="mention"
-						data-dcc-browser-occluder="true"
-						className="pointer-events-auto absolute bottom-full left-0 isolate z-[9999] mb-2 w-[min(640px,calc(100vw-2rem))]"
-					>
+					<MentionPopup anchor={portalTarget} floating={floating}>
 						<Command
 							value={highlightValue}
 							shouldFilter={false}
 							className="rounded-xl border border-border/60 bg-background text-foreground shadow-2xl ring-1 ring-black/5"
 						>
-							<CommandList className="max-h-72">
-								<CommandEmpty>No files</CommandEmpty>
-								<CommandGroup heading="Files">
+							<CommandList className="max-h-[var(--mention-list-height,18rem)]">
+								<CommandGroup heading={t("composer.fileMentions")}>
 									{options.map((opt, index) => {
 										const file = opt.file;
 										const isSelected = index === selectedIndex;
@@ -217,10 +222,68 @@ export function FileMentionPlugin({
 								</CommandGroup>
 							</CommandList>
 						</Command>
-					</div>,
-					portalTarget,
+					</MentionPopup>,
+					floating ? document.body : portalTarget,
 				);
 			}}
 		/>
+	);
+}
+
+/** Escape scroll-container clipping while fitting the small quick-entry window. */
+function MentionPopup({
+	anchor,
+	floating,
+	children,
+}: {
+	anchor: HTMLElement;
+	floating: boolean;
+	children: ReactNode;
+}) {
+	const [style, setStyle] = useState<
+		CSSProperties & { "--mention-list-height": string }
+	>();
+	useLayoutEffect(() => {
+		if (!floating) return;
+		const position = () => {
+			const rect = anchor.getBoundingClientRect();
+			const above = Math.max(0, rect.top - 16);
+			const below = Math.max(0, window.innerHeight - rect.bottom - 16);
+			const upwards = above >= below;
+			const width = Math.min(640, window.innerWidth - 32);
+			setStyle({
+				position: "fixed",
+				left: Math.max(16, Math.min(rect.left, window.innerWidth - width - 16)),
+				width,
+				...(upwards
+					? { bottom: window.innerHeight - rect.top + 8 }
+					: { top: rect.bottom + 8 }),
+				"--mention-list-height": `${Math.max(0, Math.min(288, upwards ? above : below) - 10)}px`,
+			});
+		};
+		position();
+		const observer = new ResizeObserver(position);
+		observer.observe(anchor);
+		window.addEventListener("resize", position);
+		window.addEventListener("scroll", position, true);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("resize", position);
+			window.removeEventListener("scroll", position, true);
+		};
+	}, [anchor, floating]);
+	return (
+		<div
+			data-typeahead-popup="mention"
+			data-dcc-browser-occluder="true"
+			style={floating ? style : undefined}
+			className={cn(
+				"pointer-events-auto isolate z-[9999]",
+				!floating &&
+					"absolute bottom-full left-0 mb-2 w-[min(640px,calc(100vw-2rem))]",
+			)}
+		>
+			{children}
+		</div>
 	);
 }

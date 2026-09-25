@@ -1304,6 +1304,7 @@
     }
   },
   "composer": {
+    "fileMentions": "Arquivos",
     "richText": {
       "listHint": "Enter: próximo item · ⌘/Ctrl+Enter: enviar",
       "formatting": "Formatação de texto",

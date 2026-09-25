@@ -16,7 +16,14 @@ environment separately for each project; a project without a saved choice starts
 with Worktree. Concurrent Local tasks share the same files.
 
 The existing composer supplies rich text, file/image attachments, Appshots,
-planning, effort, and approval settings. Attachments use absolute paths because
+planning, effort, and approval settings. Type `@` to search Git-tracked files in
+the selected project before creating a task. Mentions keep project-relative paths,
+so `@src/App.tsx` is resolved in the eventual Local directory or Worktree. The
+suggestions describe the current project checkout; files only present on that
+branch may not exist in a Worktree created from another base branch. File previews
+use the selected project. The suggestion list stays within the floating panel.
+
+Attachments use absolute paths because
 the execution worktree does not exist yet. Appshots picker captures go only to
 this panel's draft; the independent Appshots global shortcut continues to target
 the main conversation. Drafts are separate for each project and from the main
