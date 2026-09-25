@@ -125,6 +125,14 @@ fn build_macos_computer_bridge() {
         .arg(format!("-mmacosx-version-min={deployment_target}"))
         .arg("-o").arg(&menu_bar_object).status()
         .expect("native menu bar compiler").success());
+    let approval_object = out_dir.join("browser_approval_macos.o");
+    println!("cargo:rerun-if-changed=native/browser_approval_macos.m");
+    assert!(Command::new("xcrun")
+        .args(["clang", "-fobjc-arc", "-c", "native/browser_approval_macos.m"])
+        .args(["-arch", architecture])
+        .arg(format!("-mmacosx-version-min={deployment_target}"))
+        .arg("-o").arg(&approval_object).status()
+        .expect("native Browser approval compiler").success());
     let archived = Command::new("ar")
         .args(["crus"])
         .arg(&archive)
@@ -135,6 +143,7 @@ fn build_macos_computer_bridge() {
         .arg(&navigation_object)
         .arg(&quick_object)
         .arg(&menu_bar_object)
+        .arg(&approval_object)
         .status()
         .expect("ar must be available to build macOS computer use")
         .success();

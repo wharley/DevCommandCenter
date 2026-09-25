@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { listAllBrowserOpenRequests, resolveBrowserOpenRequest, type BrowserOpenRequest } from "./browser-api";
+import { configureBrowserApprovalPanel, dismissBrowserApprovalPanel, onBrowserPanelAllow } from "./browser-approval-panel";
 
 export type BrowserOpenApproval = BrowserOpenRequest;
 
@@ -30,9 +31,22 @@ export function BrowserApprovalHost({ workspaceSessions, onApproved }: Props) {
 	const [now, setNow] = useState(Date.now);
 	const [busy, setBusy] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const deciding = useRef<string | null>(null);
+	useEffect(() => {
+		void configureBrowserApprovalPanel({
+			title: t("browser.approval.title"), description: t("browser.approval.description"),
+			destination: t("browser.approval.destination"), conversation: t("browser.approval.conversation"),
+			provider: t("browser.approval.provider"), reason: t("browser.approval.reason"),
+			remaining: t("browser.approval.remaining", { time: "{{time}}" }),
+			allow: t("browser.approval.allow"), deny: t("browser.approval.deny"),
+		}, workspaceSessions.map(({ session, thread }) => ({
+			workspaceId: session.workspaceId, sessionId: session.id, title: thread.title,
+		}))).catch((err) => console.warn("Browser approval panel unavailable", err));
+	}, [t, workspaceSessions]);
 	const currentId = useRef<string | null>(null);
 	currentId.current = request?.requestId ?? null;
 	useEffect(() => {
+		if (deciding.current !== request?.requestId) deciding.current = null;
 		setBusy((current) => current && current !== request?.requestId ? null : current);
 		if (!request) setBusy(null);
 		setError(null);
@@ -44,23 +58,51 @@ export function BrowserApprovalHost({ workspaceSessions, onApproved }: Props) {
 	}, [request?.requestId]);
 	const liveMs = request ? Math.max(0, request.expiresAtMs - Math.max(now, Date.now())) : 0;
 	const session = useMemo(() => request && workspaceSessions.find((item) => item.session.id === request.sessionId && item.session.workspaceId === request.workspaceId), [request, workspaceSessions]);
-	const decide = async (allowed: boolean) => {
-		if (!request || busy || liveMs <= 0) return;
-		const id = request.requestId;
+	const decide = async (allowed: boolean, target = request) => {
+		if (!target || deciding.current || target.expiresAtMs <= Date.now()) return;
+		const id = target.requestId;
+		deciding.current = id;
 		setBusy(id); setError(null);
 		try {
-			if (allowed && currentId.current === id) {
-				onApproved(request);
+			void dismissBrowserApprovalPanel(id).catch((err) => console.warn("Could not hide Browser approval panel", err));
+			if (allowed) {
+				onApproved(target);
 				// Keep the request in an opening state until the native surface ACKs.
 				// The broker then removes it and the background poll closes the host.
 				return;
 			}
-			await respondBrowserOpenRequest({ requestId: id, workspaceId: request.workspaceId, sessionId: request.sessionId, decision: "deny" });
+			await respondBrowserOpenRequest({ requestId: id, workspaceId: target.workspaceId, sessionId: target.sessionId, decision: "deny" });
 			await query.refetch();
 		} catch (err) {
 			if (currentId.current === id) setError(message(err));
-		} finally { if (!allowed) setBusy((value) => value === id ? null : value); }
+			deciding.current = null;
+			setBusy((value) => value === id ? null : value);
+		} finally {
+			if (!allowed) {
+				if (deciding.current === id) deciding.current = null;
+				setBusy((value) => value === id ? null : value);
+			}
+		}
 	};
+	const decideRef = useRef(decide);
+	decideRef.current = decide;
+	useEffect(() => {
+		let disposed = false;
+		const subscription = onBrowserPanelAllow((id) => {
+			// The main WebView may have been hidden. Refresh before accepting an
+			// external click, and never apply a late click to the next queued request.
+			void query.refetch().then((result) => {
+				const fresh = result.data?.requests.find((item) => item.requestId === id);
+				if (!disposed && !result.isError && fresh) void decideRef.current(true, fresh);
+			});
+		});
+		void subscription.catch((err) => console.warn("Browser approval panel listener unavailable", err));
+		return () => { disposed = true; void subscription.then((unlisten) => unlisten(), () => {}); };
+	}, [query.refetch]);
+	// Unmount the permission portal immediately once a decision starts. Waiting
+	// for its exit animation can keep the native Browser occluded indefinitely
+	// in a minimized WebView, preventing approved background agent operations.
+	if (request && busy === request.requestId) return null;
 	return <Dialog open={Boolean(request && liveMs > 0)} onOpenChange={(open) => { if (!open) void decide(false); }}>
 		<DialogContent className="w-[min(92vw,520px)]" showCloseButton={!busy}>
 			<DialogHeader>

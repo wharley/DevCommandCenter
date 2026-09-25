@@ -48,13 +48,15 @@ function readViewportBounds(viewport: HTMLElement): BrowserBounds {
 /**
  * Watches opt-in DCC portals and reports whether any visible portal intersects
  * the browser viewport. All sources are event-driven; layout work is coalesced
- * into one animation frame and no idle polling is used.
+ * into one animation frame, with a timer fallback for hidden windows where
+ * animation frames are suspended. No idle polling is used.
  */
 export function observeBrowserOcclusion(
 	viewport: HTMLElement,
 	onChange: (occluded: boolean) => void,
 ): () => void {
 	let frame: number | null = null;
+	let fallback: number | null = null;
 	let disposed = false;
 	let lastValue: boolean | null = null;
 	const observed = new Set<HTMLElement>();
@@ -63,7 +65,10 @@ export function observeBrowserOcclusion(
 		: new ResizeObserver(schedule);
 
 	const measure = () => {
+		if (frame !== null) cancelAnimationFrame(frame);
+		if (fallback !== null) window.clearTimeout(fallback);
 		frame = null;
+		fallback = null;
 		if (disposed) return;
 		const viewportRect = viewport.getBoundingClientRect();
 		const occluders = Array.from(
@@ -93,6 +98,7 @@ export function observeBrowserOcclusion(
 	function schedule() {
 		if (disposed || frame !== null) return;
 		frame = requestAnimationFrame(measure);
+		fallback = window.setTimeout(measure, 100);
 	}
 
 	const mutationObserver = typeof MutationObserver === "undefined"
@@ -114,6 +120,7 @@ export function observeBrowserOcclusion(
 	return () => {
 		disposed = true;
 		if (frame !== null) cancelAnimationFrame(frame);
+		if (fallback !== null) window.clearTimeout(fallback);
 		mutationObserver?.disconnect();
 		resizeObserver?.disconnect();
 		window.removeEventListener("resize", schedule);

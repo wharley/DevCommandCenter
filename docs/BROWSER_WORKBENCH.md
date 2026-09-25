@@ -38,6 +38,24 @@ infer remote or LAN destinations.
 
 ### Scoped agent control
 
+When an agent requests opening the Browser, DCC asks for approval with the exact
+destination, conversation, provider, and reason. On macOS, a floating native card
+also appears over other apps when the main DCC window is not focused, including
+when it is hidden or minimized. The card does not take keyboard focus and requires
+an explicit button click; it does not depend on macOS notification permissions.
+
+**Deny** responds without opening DCC. **Open and allow** opens the integrated
+Browser in the requesting conversation in the background, preserving DCC's hidden
+or minimized state and the user's foreground app. Approval is completed only after
+the native Browser acknowledges the matching lifecycle. Requests retain their
+45-second deadline, disappear on cancellation or expiry, and are shown in queue
+order. The native process watches the queue even when the main WebView is inactive.
+Other platforms retain the in-app approval dialog.
+
+On macOS 14+, background suspension is disabled for the main renderer and Browser
+so approvals and page work can continue while DCC is hidden. Older macOS versions
+do not support this WebKit policy and may still throttle background work.
+
 The person can grant Browser control for at most 60 seconds. DCC keeps the grant bound
 to workspace, session, Browser lifecycle, and the projected provider lease.
 
@@ -143,6 +161,15 @@ application and an already-visible development error overlay. This smoke does no
 replace negative-path, budget, packaged-build, or cross-platform validation.
 
 ## Implementation references
+
+The native macOS background-input regression test loads a local HTML fixture in a
+hidden window. It checks real page keyboard/click delivery, unchanged foreground
+focus, and rejection of input after the Browser child view itself is hidden:
+
+```sh
+xcrun clang -fobjc-arc -fblocks src-tauri/native/tests/browser_background_macos.m src-tauri/native/browser_input_macos.m -framework AppKit -framework WebKit -o /tmp/dcc-browser-background-test
+/tmp/dcc-browser-background-test
+```
 
 - Browser backend and native WebView lifecycle:
   [`src-tauri/src/browser_commands.rs`](../src-tauri/src/browser_commands.rs)

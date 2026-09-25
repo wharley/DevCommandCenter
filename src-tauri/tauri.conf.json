@@ -14,6 +14,7 @@
     "windows": [
       {
         "title": "Dev Command Center",
+        "backgroundThrottling": "disabled",
         "width": 1400,
         "height": 900,
         "minWidth": 1000,

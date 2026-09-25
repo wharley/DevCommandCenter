@@ -3954,6 +3954,8 @@ fn build_browser(
     #[cfg(not(target_os = "macos"))]
     let navigation_state = state.clone();
     let builder = WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(url))
+        // Approved Browser work continues while its parent DCC window is hidden.
+        .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
         .on_navigation(move |url| {
             // Wry invokes this policy callback for every WKNavigationAction,
             // including iframe requests. It remains an allowlist gate only;

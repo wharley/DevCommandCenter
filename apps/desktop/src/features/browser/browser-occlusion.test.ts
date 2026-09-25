@@ -4,10 +4,40 @@ import {
 	createBrowserOcclusionCommandQueue,
 	isBrowserOccluded,
 	isBrowserOccluderVisible,
+	observeBrowserOcclusion,
 	rectanglesIntersect,
 } from "./browser-occlusion";
 
 describe("browser occlusion geometry", () => {
+	it("clears an approval overlay without animation frames while DCC is hidden", async () => {
+		vi.useFakeTimers();
+		const frame = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(123);
+		const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+		const viewport = document.createElement("div");
+		const overlay = document.createElement("div");
+		document.body.append(viewport, overlay);
+		viRect(viewport, 0, 0, 400, 400);
+		viRect(overlay, 0, 0, 400, 400);
+		overlay.setAttribute(BROWSER_OCCLUDER_ATTRIBUTE, "true");
+		const changed = vi.fn();
+		const dispose = observeBrowserOcclusion(viewport, changed);
+		try {
+			await vi.advanceTimersByTimeAsync(100);
+			expect(changed).toHaveBeenLastCalledWith(true);
+			overlay.remove();
+			await Promise.resolve();
+			await vi.advanceTimersByTimeAsync(100);
+			expect(changed).toHaveBeenLastCalledWith(false);
+			expect(changed).toHaveBeenCalledTimes(2);
+			dispose();
+			await vi.advanceTimersByTimeAsync(500);
+			expect(changed).toHaveBeenCalledTimes(2);
+		} finally {
+			dispose(); viewport.remove(); overlay.remove();
+			frame.mockRestore(); cancel.mockRestore(); vi.useRealTimers();
+		}
+	});
+
 	it("only treats positive-area overlap as an occlusion", () => {
 		const viewport = { left: 100, top: 100, right: 500, bottom: 500 };
 		expect(rectanglesIntersect(viewport, { left: 200, top: 200, right: 300, bottom: 300 })).toBe(true);

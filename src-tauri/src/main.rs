@@ -3,6 +3,7 @@
 mod appshot_commands;
 mod attachment_commands;
 mod browser_agent_requests;
+mod browser_approval_panel;
 mod browser_capture;
 mod browser_commands;
 mod browser_input;
@@ -7028,6 +7029,8 @@ pub fn run() {
             browser_agent_requests::browser_agent_pending_all,
             browser_agent_requests::browser_agent_resolve,
             browser_agent_requests::browser_agent_cancel,
+            browser_approval_panel::browser_approval_panel_configure,
+            browser_approval_panel::browser_approval_panel_dismiss,
             browser_commands::browser_navigate,
             browser_commands::browser_reload,
             browser_commands::browser_arm_control,
@@ -7413,6 +7416,7 @@ pub fn run() {
             app.manage(state);
             app.manage(browser_state);
             app.manage(browser_agent_requests);
+            browser_approval_panel::setup(app.handle());
             app.manage(computer_use_state);
             if let Some(browser_mcp_bridge) = browser_mcp_bridge {
                 app.manage(browser_mcp_bridge);
@@ -7457,11 +7461,13 @@ pub fn run() {
                 ..
             } = &event {
                 if label == "main" {
+                    browser_approval_panel::shutdown(app_handle);
                     quick_composer::shutdown(app_handle);
                     menu_bar::shutdown(app_handle);
                 }
             }
             if let tauri::RunEvent::ExitRequested { .. } = event {
+                browser_approval_panel::shutdown(app_handle);
                 menu_bar::shutdown(app_handle);
                 quick_composer::shutdown(app_handle);
                 if let Some(state) = app_handle.try_state::<AppState>() {

@@ -5,7 +5,9 @@
 bool dcc_browser_press_key(void *pointer, const char *rawKey) {
     if (!pointer || !rawKey || ![NSThread isMainThread]) return false;
     WKWebView *view = (__bridge WKWebView *)pointer;
-    if (![view isKindOfClass:[WKWebView class]] || !view.window || view.hidden || !view.window.visible) return false;
+    // The backend has checked the scoped Browser grant. A hidden parent window
+    // must not block approved background work; a hidden Browser view still does.
+    if (![view isKindOfClass:[WKWebView class]] || !view.window || view.hidden) return false;
     NSString *key = [NSString stringWithUTF8String:rawKey];
     NSDictionary *keys = @{
         @"Enter": @[@36, @"\r"], @"Tab": @[@48, @"\t"], @"Shift+Tab": @[@48, @"\t"],
@@ -32,7 +34,7 @@ bool dcc_browser_press_key(void *pointer, const char *rawKey) {
 bool dcc_browser_click_point(void *pointer, double x, double y) {
     if (!pointer || ![NSThread isMainThread] || !isfinite(x) || !isfinite(y)) return false;
     WKWebView *view = (__bridge WKWebView *)pointer;
-    if (![view isKindOfClass:[WKWebView class]] || !view.window || view.hidden || !view.window.visible || x < 0 || y < 0 || x >= view.bounds.size.width || y >= view.bounds.size.height) return false;
+    if (![view isKindOfClass:[WKWebView class]] || !view.window || view.hidden || x < 0 || y < 0 || x >= view.bounds.size.width || y >= view.bounds.size.height) return false;
     NSPoint local = NSMakePoint(x, view.isFlipped ? y : view.bounds.size.height - y);
     NSPoint windowPoint = [view convertPoint:local toView:nil];
     NSView *target = [view hitTest:[view convertPoint:local toView:view.superview]];
