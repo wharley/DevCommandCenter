@@ -250,6 +250,8 @@
     "settingsShort": "Settings",
     "agentState": {
       "active": "Running",
+      "waiting": "Waiting for you",
+      "waitingPermission": "Waiting for approval",
       "completed": "Completed",
       "aborted": "Aborted"
     },

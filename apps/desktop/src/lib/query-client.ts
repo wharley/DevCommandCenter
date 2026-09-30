@@ -294,6 +294,27 @@ export function coreEventRefreshPlan(event: CoreEvent): DccCoreEventRefreshPlan 
 		};
 	}
 
+	// Blocking on the user (or being unblocked) flips the rail's "needs you"
+	// state. These are rare, so a targeted metadata refresh is cheap; the open
+	// thread already renders the request from the live feed.
+	const awaitingUser =
+		("sessionTurnPermissionRequested" in event &&
+			event.sessionTurnPermissionRequested) ||
+		("sessionTurnPermissionResolved" in event &&
+			event.sessionTurnPermissionResolved) ||
+		("sessionTurnUserInputRequested" in event &&
+			event.sessionTurnUserInputRequested) ||
+		("sessionTurnUserInputResolved" in event &&
+			event.sessionTurnUserInputResolved) ||
+		null;
+	if (awaitingUser) {
+		return {
+			...EMPTY_CORE_EVENT_REFRESH_PLAN,
+			sessionId: awaitingUser.session_id,
+			refreshSessionMetadata: true,
+		};
+	}
+
 	const toolSettled =
 		("sessionTurnToolCallCompleted" in event && event.sessionTurnToolCallCompleted) ||
 		("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) ||

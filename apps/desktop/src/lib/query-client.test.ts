@@ -155,6 +155,49 @@ describe("DCC query cache persistence", () => {
 		vi.useRealTimers();
 	});
 
+	it("refreshes only the owning workspace when an agent blocks on the user", async () => {
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(
+			["workspaceSessions", "local", "workspace-a"],
+			[{ session: { id: "session-a", workspaceId: "workspace-a" } }] as WorkspaceSessionSummary[],
+		);
+		queryClient.setQueryData(
+			["workspaceSessions", "local", "workspace-b"],
+			[{ session: { id: "session-b", workspaceId: "workspace-b" } }] as WorkspaceSessionSummary[],
+		);
+		queryClient.setQueryData(["sessionThreads", "local", "session-a"], []);
+
+		applyCoreEventQueryRefresh(
+			queryClient,
+			coreEvent({
+				sessionTurnPermissionRequested: {
+					session_id: "session-a",
+					turn_id: "turn-a",
+					request_id: "permission-a",
+					tool_name: "Bash",
+					title: null,
+					description: null,
+					command: "yarn test",
+					file: null,
+				},
+			}),
+		);
+		await Promise.resolve();
+
+		expect(
+			queryClient.getQueryState(["workspaceSessions", "local", "workspace-a"])
+				?.isInvalidated,
+		).toBe(true);
+		expect(
+			queryClient.getQueryState(["workspaceSessions", "local", "workspace-b"])
+				?.isInvalidated,
+		).toBe(false);
+		expect(
+			queryClient.getQueryState(["sessionThreads", "local", "session-a"])
+				?.isInvalidated,
+		).toBe(false);
+	});
+
 	it("falls back to query families when lifecycle ownership is not cached", async () => {
 		vi.useFakeTimers();
 		const queryClient = new QueryClient();

@@ -721,6 +721,62 @@ pub struct WorkspaceSessionSummary {
     pub last_turn_state: Option<String>,
     pub last_turn_started_at: Option<String>,
     pub last_turn_completed_at: Option<String>,
+    /// `"permission"` or `"input"` while the latest turn is blocked on the
+    /// user; a pending permission wins over a pending question.
+    pub last_turn_awaiting_user: Option<String>,
+}
+
+/// What the latest turn is waiting on the user for, if anything. Requests are
+/// matched by id, and only requests of the turn that is still open count: a
+/// finished or aborted turn cannot be waiting, even if the provider never
+/// resolved its request.
+pub fn last_turn_awaiting_user(events: &[SessionEventRecord]) -> Option<String> {
+    let mut open_turn: Option<&TurnId> = None;
+    let mut permissions: Vec<&str> = Vec::new();
+    let mut inputs: Vec<&str> = Vec::new();
+    for event in events {
+        match &event.kind {
+            SessionEventKind::TurnStarted { turn_id, .. } => {
+                open_turn = Some(turn_id);
+                permissions.clear();
+                inputs.clear();
+            }
+            SessionEventKind::TurnCompleted { turn_id }
+            | SessionEventKind::TurnAborted { turn_id, .. }
+                if open_turn == Some(turn_id) =>
+            {
+                open_turn = None;
+            }
+            SessionEventKind::TurnPermissionRequested {
+                turn_id,
+                request_id,
+                ..
+            } if open_turn == Some(turn_id) => permissions.push(request_id),
+            SessionEventKind::TurnPermissionResolved { request_id, .. } => {
+                permissions.retain(|pending| *pending != request_id.as_str());
+            }
+            SessionEventKind::TurnUserInputRequested {
+                turn_id,
+                request_id,
+                ..
+            } if open_turn == Some(turn_id) => inputs.push(request_id),
+            SessionEventKind::TurnUserInputResolved { request_id, .. } => {
+                inputs.retain(|pending| *pending != request_id.as_str());
+            }
+            SessionEventKind::SessionCompleted | SessionEventKind::SessionAborted { .. } => {
+                open_turn = None;
+            }
+            _ => {}
+        }
+    }
+    open_turn?;
+    if !permissions.is_empty() {
+        Some("permission".to_string())
+    } else if !inputs.is_empty() {
+        Some("input".to_string())
+    } else {
+        None
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -753,6 +809,117 @@ mod tests {
             occurred_at: occurred_at.to_string(),
             kind,
         }
+    }
+
+    fn turn_started(sequence: u64, turn: &str) -> SessionEventRecord {
+        event(
+            sequence,
+            "2026-09-30T10:00:00Z",
+            SessionEventKind::TurnStarted {
+                turn_id: TurnId(turn.to_string()),
+                prompt: "Fix it".to_string(),
+                plan_mode: None,
+                model: None,
+                evidence: None,
+                retry_of_turn_id: None,
+            },
+        )
+    }
+
+    fn permission_requested(sequence: u64, turn: &str, request: &str) -> SessionEventRecord {
+        event(
+            sequence,
+            "2026-09-30T10:00:01Z",
+            SessionEventKind::TurnPermissionRequested {
+                turn_id: TurnId(turn.to_string()),
+                request_id: request.to_string(),
+                tool_name: "Bash".to_string(),
+                title: None,
+                description: None,
+                command: Some("yarn test".to_string()),
+                file: None,
+            },
+        )
+    }
+
+    fn permission_resolved(sequence: u64, turn: &str, request: &str) -> SessionEventRecord {
+        event(
+            sequence,
+            "2026-09-30T10:00:02Z",
+            SessionEventKind::TurnPermissionResolved {
+                turn_id: TurnId(turn.to_string()),
+                request_id: request.to_string(),
+                behavior: "allow".to_string(),
+            },
+        )
+    }
+
+    fn input_requested(sequence: u64, turn: &str, request: &str) -> SessionEventRecord {
+        event(
+            sequence,
+            "2026-09-30T10:00:03Z",
+            SessionEventKind::TurnUserInputRequested {
+                turn_id: TurnId(turn.to_string()),
+                request_id: request.to_string(),
+                questions: Vec::new(),
+            },
+        )
+    }
+
+    #[test]
+    fn awaiting_user_follows_open_requests_of_the_running_turn() {
+        let waiting = vec![turn_started(1, "t1"), permission_requested(2, "t1", "p1")];
+        assert_eq!(
+            last_turn_awaiting_user(&waiting).as_deref(),
+            Some("permission")
+        );
+
+        let answered = vec![
+            turn_started(1, "t1"),
+            permission_requested(2, "t1", "p1"),
+            permission_resolved(3, "t1", "p1"),
+        ];
+        assert_eq!(last_turn_awaiting_user(&answered), None);
+
+        let asking = vec![turn_started(1, "t1"), input_requested(2, "t1", "q1")];
+        assert_eq!(last_turn_awaiting_user(&asking).as_deref(), Some("input"));
+
+        let both = vec![
+            turn_started(1, "t1"),
+            input_requested(2, "t1", "q1"),
+            permission_requested(3, "t1", "p1"),
+        ];
+        assert_eq!(
+            last_turn_awaiting_user(&both).as_deref(),
+            Some("permission")
+        );
+    }
+
+    #[test]
+    fn awaiting_user_clears_when_the_turn_ends_or_a_new_one_starts() {
+        let aborted = vec![
+            turn_started(1, "t1"),
+            permission_requested(2, "t1", "p1"),
+            event(
+                3,
+                "2026-09-30T10:00:04Z",
+                SessionEventKind::TurnAborted {
+                    turn_id: TurnId("t1".to_string()),
+                    reason: None,
+                },
+            ),
+        ];
+        assert_eq!(last_turn_awaiting_user(&aborted), None);
+
+        let next_turn = vec![
+            turn_started(1, "t1"),
+            permission_requested(2, "t1", "p1"),
+            turn_started(3, "t2"),
+        ];
+        assert_eq!(last_turn_awaiting_user(&next_turn), None);
+
+        let stale_request = vec![turn_started(1, "t2"), permission_requested(2, "t1", "p1")];
+        assert_eq!(last_turn_awaiting_user(&stale_request), None);
     }
 
     #[test]

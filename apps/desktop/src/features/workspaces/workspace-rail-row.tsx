@@ -32,7 +32,10 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { WorkspaceRecapTone } from "@/features/inspector/workspace-recap";
-import type { WorkspaceAgentActivity } from "./use-workspace-agent-states";
+import {
+	isAgentTurnOpen,
+	type WorkspaceAgentActivity,
+} from "./use-workspace-agent-states";
 import { useWorkspaceRailRecap } from "./use-workspace-rail-recap";
 import {
 	formatCompactElapsedTime,
@@ -103,6 +106,7 @@ export function WorkspaceActivityTime({
 	bare?: boolean;
 }) {
 	const { t } = useTranslation("common");
+	const turnOpen = isAgentTurnOpen(activity);
 	const timestamp = workspaceActivityTimestamp(activity);
 	const timestampMs = timestamp ? Date.parse(timestamp) : Number.NaN;
 	const [now, setNow] = useState(() => Date.now());
@@ -123,17 +127,17 @@ export function WorkspaceActivityTime({
 			return;
 		}
 		setNow(Date.now());
-		const intervalMs = activity.state === "active" ? 1_000 : 60_000;
+		const intervalMs = turnOpen ? 1_000 : 60_000;
 		const interval = window.setInterval(() => setNow(Date.now()), intervalMs);
 		return () => window.clearInterval(interval);
-	}, [activity.state, timestampMs]);
+	}, [turnOpen, timestampMs]);
 
 	if (Number.isNaN(timestampMs)) {
 		return null;
 	}
 
 	const time = formatCompactElapsedTime(now - timestampMs, unitLabels);
-	return activity.state === "active" || bare ? (
+	return turnOpen || bare ? (
 		<span className="tabular-nums">{time}</span>
 	) : (
 		<span className="tabular-nums">
@@ -566,6 +570,7 @@ export const WorkspaceRailRowItem = memo(
 											"size-[6px] shrink-0 rounded-full",
 											activity.state === "active" &&
 												"bg-emerald-500 animate-pulse",
+											activity.state === "waiting" && "bg-amber-500",
 											activity.state === "completed" &&
 												"bg-muted-foreground/45",
 											activity.state === "aborted" && "bg-destructive",
@@ -576,11 +581,16 @@ export const WorkspaceRailRowItem = memo(
 											className={cn(
 												activity.state === "active" &&
 													"text-emerald-700 dark:text-emerald-300/90",
+												activity.state === "waiting" &&
+													"text-amber-700 dark:text-amber-300/90",
 												activity.state === "completed" && "text-foreground/70",
 												activity.state === "aborted" && "text-destructive/85",
 											)}
 										>
-											{t(`sidebar.agentState.${activity.state}`)}
+											{activity.state === "waiting" &&
+											activity.waitingFor === "permission"
+												? t("sidebar.agentState.waitingPermission")
+												: t(`sidebar.agentState.${activity.state}`)}
 										</span>
 										<span aria-hidden className="opacity-40">
 											·
@@ -858,6 +868,7 @@ export const WorkspaceRailRowItem = memo(
 	(previous, next) =>
 		previous.selected === next.selected &&
 		previous.activity?.state === next.activity?.state &&
+		previous.activity?.waitingFor === next.activity?.waitingFor &&
 		previous.activity?.startedAt === next.activity?.startedAt &&
 		previous.activity?.completedAt === next.activity?.completedAt &&
 		previous.metadataEnabled === next.metadataEnabled &&

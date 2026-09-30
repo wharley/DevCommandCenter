@@ -3283,6 +3283,11 @@ export type WorkspaceSessionSummary = {
 	lastTurnState: string | null,
 	lastTurnStartedAt: string | null,
 	lastTurnCompletedAt: string | null,
+	/**
+	 *  `"permission"` or `"input"` while the latest turn is blocked on the
+	 *  user; a pending permission wins over a pending question.
+	 */
+	lastTurnAwaitingUser: string | null,
 };
 
 export type WorkspaceSetupHint = {

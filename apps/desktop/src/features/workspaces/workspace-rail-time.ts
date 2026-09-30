@@ -1,4 +1,7 @@
-import type { WorkspaceAgentActivity } from "./use-workspace-agent-states";
+import {
+	isAgentTurnOpen,
+	type WorkspaceAgentActivity,
+} from "./use-workspace-agent-states";
 
 export type ElapsedUnitLabels = {
 	second: string;
@@ -66,7 +69,7 @@ export function formatCompactElapsedTime(
 export function workspaceActivityTimestamp(
 	activity: WorkspaceAgentActivity,
 ): string | null {
-	return activity.state === "active"
+	return isAgentTurnOpen(activity)
 		? activity.startedAt
 		: activity.completedAt;
 }

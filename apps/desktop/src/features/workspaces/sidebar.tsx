@@ -1481,11 +1481,25 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 														className="size-3.5 shrink-0"
 													/>
 												) : null}
-												<Loader2
-													className="size-3.5 shrink-0 animate-spin text-emerald-600 dark:text-emerald-400"
-													strokeWidth={2}
-													aria-hidden
-												/>
+												{activity.state === "waiting" ? (
+													<span
+														role="img"
+														aria-label={t(
+															activity.waitingFor === "permission"
+																? "sidebar.agentState.waitingPermission"
+																: "sidebar.agentState.waiting",
+														)}
+														className="grid size-3.5 shrink-0 place-items-center"
+													>
+														<span className="size-[7px] rounded-full bg-amber-500" />
+													</span>
+												) : (
+													<Loader2
+														className="size-3.5 shrink-0 animate-spin text-emerald-600 dark:text-emerald-400"
+														strokeWidth={2}
+														aria-hidden
+													/>
+												)}
 												<span className="flex min-w-0 flex-1 flex-col">
 													<span className="truncate text-[12px] font-medium leading-4">
 														{title}

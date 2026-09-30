@@ -102,9 +102,10 @@
 		color-mix(in oklab, var(--border) 45%, transparent);
 }
 .dcc-running-panel {
+	/* Neutral on purpose: amber is reserved for rows that need the user. */
 	border-radius: 14px;
-	background: color-mix(in oklab, var(--dcc-accent-idea) 5%, transparent);
-	border-color: color-mix(in oklab, var(--dcc-accent-idea) 15%, var(--border));
+	background: color-mix(in oklab, var(--muted) 22%, transparent);
+	border-color: var(--dcc-surface-edge);
 }
 .dcc-sidebar-tools {
 	margin: 0 10px;

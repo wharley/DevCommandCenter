@@ -11,7 +11,10 @@ import {
 	buildWorkspaceRecap,
 	type WorkspaceRecap,
 } from "@/features/inspector/workspace-recap";
-import type { WorkspaceAgentActivity } from "./use-workspace-agent-states";
+import {
+	isAgentTurnOpen,
+	type WorkspaceAgentActivity,
+} from "./use-workspace-agent-states";
 
 const RAIL_GIT_QUERY_OPTIONS = {
 	staleTime: 20_000,
@@ -75,6 +78,7 @@ export function buildWorkspaceRailRecap(input: {
 	});
 	const recap = buildWorkspaceRecap({
 		commitMode,
+		// A turn waiting on the user is not "working"; show the git state instead.
 		turnRunning: activity?.state === "active",
 		changedFilesCount,
 		additions,
@@ -151,7 +155,7 @@ export function useWorkspaceRailRecap(input: {
 		(gitStatusQuery.data?.aheadOfRemoteCount ?? 0) === 0;
 	const needsBranchDiff =
 		input.activity != null &&
-		input.activity.state !== "active" &&
+		!isAgentTurnOpen(input.activity) &&
 		gitStatusIsClean &&
 		prStatusQuery.data != null &&
 		prStatusQuery.data.number == null;
@@ -163,7 +167,7 @@ export function useWorkspaceRailRecap(input: {
 	return useMemo(
 		() => {
 			if (
-				input.activity?.state !== "active" &&
+				!isAgentTurnOpen(input.activity) &&
 				(gitStatusQuery.isPending || prStatusQuery.isPending)
 			) {
 				return { currentBranch, recap: null };

@@ -16,6 +16,7 @@ type SummaryOverrides = {
 	lastTurnState?: WorkspaceSessionSummary["lastTurnState"];
 	lastTurnStartedAt?: WorkspaceSessionSummary["lastTurnStartedAt"];
 	lastTurnCompletedAt?: WorkspaceSessionSummary["lastTurnCompletedAt"];
+	lastTurnAwaitingUser?: WorkspaceSessionSummary["lastTurnAwaitingUser"];
 };
 
 function makeSummary(
@@ -59,6 +60,7 @@ function makeSummary(
 		lastTurnState: overrides.lastTurnState ?? null,
 		lastTurnStartedAt: overrides.lastTurnStartedAt ?? null,
 		lastTurnCompletedAt: overrides.lastTurnCompletedAt ?? null,
+		lastTurnAwaitingUser: overrides.lastTurnAwaitingUser ?? null,
 	};
 }
 
@@ -78,6 +80,51 @@ describe("deriveAgentStateFromSessions", () => {
 		});
 
 		expect(deriveAgentStateFromSessions([completed, running])).toBe("active");
+	});
+
+	it("returns waiting, with the reason, while the running turn is blocked on the user", () => {
+		const running = makeSummary({
+			session: { id: "session-running" },
+			projection: { sessionId: "session-running", activeTurnId: "turn-2" },
+			lastTurnState: "running",
+			lastTurnStartedAt: "2026-09-30T10:00:00.000Z",
+		});
+		const blocked = makeSummary({
+			session: { id: "session-blocked" },
+			projection: { sessionId: "session-blocked", activeTurnId: "turn-1" },
+			lastTurnState: "running",
+			lastTurnStartedAt: "2026-09-30T09:00:00.000Z",
+			lastTurnAwaitingUser: "permission",
+		});
+
+		// Another session still working must not hide the one that needs the user.
+		expect(deriveAgentActivityFromSessions([running, blocked])).toEqual({
+			state: "waiting",
+			startedAt: "2026-09-30T09:00:00.000Z",
+			completedAt: null,
+			waitingFor: "permission",
+		});
+		expect(
+			deriveAgentActivityFromSessions([
+				makeSummary({
+					projection: { activeTurnId: "turn-1" },
+					lastTurnState: "running",
+					lastTurnAwaitingUser: "input",
+				}),
+			])?.waitingFor,
+		).toBe("input");
+	});
+
+	it("ignores a stale awaiting flag once the turn is no longer running", () => {
+		expect(
+			deriveAgentStateFromSessions([
+				makeSummary({
+					projection: { turnCount: 1 },
+					lastTurnState: "completed",
+					lastTurnAwaitingUser: "permission",
+				}),
+			]),
+		).toBe("completed");
 	});
 
 	it("returns completed after the turn finishes even if the session stays active", () => {
@@ -187,6 +234,30 @@ describe("runningWorkspaceActivities", () => {
 		expect(result.map(({ workspace: entry }) => entry.id)).toEqual([
 			"newer",
 			"older",
+		]);
+	});
+
+	it("keeps tasks waiting on the user in the list and puts them first", () => {
+		const result = runningWorkspaceActivities(
+			[workspace("working"), workspace("blocked")],
+			{
+				working: {
+					state: "active",
+					startedAt: "2026-09-30T11:00:00.000Z",
+					completedAt: null,
+				},
+				blocked: {
+					state: "waiting",
+					startedAt: "2026-09-30T10:00:00.000Z",
+					completedAt: null,
+					waitingFor: "permission",
+				},
+			},
+		);
+
+		expect(result.map(({ workspace: entry }) => entry.id)).toEqual([
+			"blocked",
+			"working",
 		]);
 	});
 

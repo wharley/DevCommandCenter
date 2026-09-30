@@ -295,6 +295,20 @@ describe("workspaceRailGroupSignal", () => {
 		);
 	});
 
+	it("treats an agent waiting on the user as needing attention", () => {
+		expect(
+			workspaceRailGroupSignal([row("a"), row("b")], {
+				a: running,
+				b: {
+					state: "waiting",
+					startedAt: null,
+					completedAt: null,
+					waitingFor: "input",
+				},
+			}),
+		).toBe("attention");
+	});
+
 	it("lets something that needs the user win over a running agent", () => {
 		expect(
 			workspaceRailGroupSignal([row("a"), row("b", "setup_pending")], {

@@ -2440,6 +2440,7 @@ export default function App() {
 						lastTurnState: result.projection.activeTurnId ? "running" : null,
 						lastTurnStartedAt: null,
 						lastTurnCompletedAt: null,
+						lastTurnAwaitingUser: null,
 					};
 					return [
 						nextSummary,
@@ -2526,6 +2527,7 @@ export default function App() {
 						lastTurnState: null,
 						lastTurnStartedAt: null,
 						lastTurnCompletedAt: null,
+						lastTurnAwaitingUser: null,
 					},
 					...current.filter(
 						(summary) => summary.session.id !== started.session.id,
@@ -2584,6 +2586,7 @@ export default function App() {
 											result.turn.state === "running"
 												? null
 												: result.turn.updatedAt,
+										lastTurnAwaitingUser: null,
 									}
 								: summary,
 						),
@@ -2817,6 +2820,7 @@ export default function App() {
 								lastTurnState: started.projection.activeTurnId ? "running" : null,
 								lastTurnStartedAt: null,
 								lastTurnCompletedAt: null,
+								lastTurnAwaitingUser: null,
 							};
 							return [
 								nextSummary,
@@ -3137,6 +3141,7 @@ export default function App() {
 							lastTurnState: started.projection.activeTurnId ? "running" : null,
 							lastTurnStartedAt: null,
 							lastTurnCompletedAt: null,
+							lastTurnAwaitingUser: null,
 						};
 						return [
 							nextSummary,
@@ -3195,6 +3200,7 @@ export default function App() {
 											result.turn.state === "running"
 												? null
 												: result.turn.updatedAt,
+										lastTurnAwaitingUser: null,
 									}
 								: summary,
 						),
@@ -3346,6 +3352,7 @@ export default function App() {
 							lastTurnState: started.projection.activeTurnId ? "running" : null,
 							lastTurnStartedAt: null,
 							lastTurnCompletedAt: null,
+							lastTurnAwaitingUser: null,
 						};
 						return [
 							nextSummary,
@@ -3570,6 +3577,7 @@ export default function App() {
 										result.turn.state === "running"
 											? null
 											: result.turn.updatedAt,
+									lastTurnAwaitingUser: null,
 								}
 							: summary,
 					),
@@ -3669,6 +3677,7 @@ export default function App() {
 													reanchorResult.turn.state === "running"
 														? null
 														: reanchorResult.turn.updatedAt,
+												lastTurnAwaitingUser: null,
 											}
 										: summary,
 								),
@@ -4106,6 +4115,7 @@ export default function App() {
 							lastTurnState: result.projection.activeTurnId ? "running" : null,
 							lastTurnStartedAt: null,
 							lastTurnCompletedAt: null,
+							lastTurnAwaitingUser: null,
 						},
 						...current.filter((summary) => summary.session.id !== forkedSessionId),
 					],

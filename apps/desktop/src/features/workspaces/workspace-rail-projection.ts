@@ -170,7 +170,13 @@ export function workspaceRailGroupSignal(
 	rows: readonly DccWorkspaceRailRow[],
 	activities: Readonly<Record<string, WorkspaceAgentActivity | null | undefined>>,
 ): DccWorkspaceRailGroupSignal {
-	if (rows.some((row) => row.status === "setup_pending")) {
+	if (
+		rows.some(
+			(row) =>
+				row.status === "setup_pending" ||
+				activities[row.id]?.state === "waiting",
+		)
+	) {
 		return "attention";
 	}
 	if (rows.some((row) => activities[row.id]?.state === "active")) {

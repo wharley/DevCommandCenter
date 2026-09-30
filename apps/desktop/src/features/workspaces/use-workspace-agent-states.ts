@@ -4,13 +4,33 @@ import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { workspaceSessionsQueryOptions } from "@/features/sessions/workspace-sessions-query";
 import type { WorkspaceSummary } from "./types";
 
-export type AgentState = "active" | "completed" | "aborted";
+/** `waiting` is a turn that is still open but blocked on the user. */
+export type AgentState = "active" | "waiting" | "completed" | "aborted";
+
+export type AgentWaitingReason = "permission" | "input";
 
 export type WorkspaceAgentActivity = {
 	state: AgentState;
 	startedAt: string | null;
 	completedAt: string | null;
+	waitingFor?: AgentWaitingReason;
 };
+
+/** The turn has not finished yet, whether the agent is working or waiting. */
+export function isAgentTurnOpen(
+	activity: WorkspaceAgentActivity | null | undefined,
+): boolean {
+	return activity?.state === "active" || activity?.state === "waiting";
+}
+
+function waitingReason(
+	summary: WorkspaceSessionSummary,
+): AgentWaitingReason | null {
+	return summary.lastTurnAwaitingUser === "permission" ||
+		summary.lastTurnAwaitingUser === "input"
+		? summary.lastTurnAwaitingUser
+		: null;
+}
 
 export type RunningWorkspaceActivity = {
 	workspace: WorkspaceSummary;
@@ -33,10 +53,15 @@ export function runningWorkspaceActivities(
 				return [];
 			}
 			const activity = activities[workspace.id];
-			return activity?.state === "active" ? [{ workspace, activity }] : [];
+			return isAgentTurnOpen(activity) && activity
+				? [{ workspace, activity }]
+				: [];
 		})
 		.sort(
 			(left, right) =>
+				// Agents blocked on the user come first; they are the ones to act on.
+				Number(right.activity.state === "waiting") -
+					Number(left.activity.state === "waiting") ||
 				activityStartedAtMs(right.activity) - activityStartedAtMs(left.activity) ||
 				left.workspace.id.localeCompare(right.workspace.id),
 		);
@@ -54,16 +79,18 @@ function isRunningSession(summary: WorkspaceSessionSummary): boolean {
 export function deriveAgentActivityFromSessions(
 	summaries: WorkspaceSessionSummary[],
 ): WorkspaceAgentActivity | null {
-	const running = summaries.find(isRunningSession);
+	const runningSessions = summaries.filter(isRunningSession);
+	const waiting = runningSessions.find((summary) => waitingReason(summary));
+	const running = waiting ?? runningSessions[0];
 	if (running) {
-		return {
-			state: "active",
-			startedAt:
-				running.lastTurnStartedAt ??
-				running.projection.updatedAt ??
-				running.session.updatedAt,
-			completedAt: null,
-		};
+		const startedAt =
+			running.lastTurnStartedAt ??
+			running.projection.updatedAt ??
+			running.session.updatedAt;
+		const reason = waitingReason(running);
+		return reason
+			? { state: "waiting", startedAt, completedAt: null, waitingFor: reason }
+			: { state: "active", startedAt, completedAt: null };
 	}
 
 	const latest = summaries[0];

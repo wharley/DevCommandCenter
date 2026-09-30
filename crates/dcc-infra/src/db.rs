@@ -5172,6 +5172,8 @@ impl SqliteSessionRepo {
             )
         });
 
+        let last_turn_awaiting_user = dcc_core::domain::session::last_turn_awaiting_user(&events);
+
         Ok(WorkspaceSessionSummary {
             session,
             thread,
@@ -5180,6 +5182,7 @@ impl SqliteSessionRepo {
             last_turn_state,
             last_turn_started_at,
             last_turn_completed_at,
+            last_turn_awaiting_user,
         })
     }
 
@@ -9435,6 +9438,49 @@ mod tests {
         assert_eq!(
             summary[0].last_turn_completed_at.as_deref(),
             Some("2026-01-01T00:00:09Z")
+        );
+        assert_eq!(summary[0].last_turn_awaiting_user, None);
+
+        for event in [
+            SessionEventRecord {
+                event_id: "event-4".to_string(),
+                session_id: SessionId("session-1".to_string()),
+                sequence: 4,
+                occurred_at: "2026-01-01T00:01:00Z".to_string(),
+                kind: SessionEventKind::TurnStarted {
+                    turn_id: TurnId("turn-2".to_string()),
+                    prompt: "Run the tests".to_string(),
+                    plan_mode: Some(false),
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                },
+            },
+            SessionEventRecord {
+                event_id: "event-5".to_string(),
+                session_id: SessionId("session-1".to_string()),
+                sequence: 5,
+                occurred_at: "2026-01-01T00:01:03Z".to_string(),
+                kind: SessionEventKind::TurnPermissionRequested {
+                    turn_id: TurnId("turn-2".to_string()),
+                    request_id: "permission-1".to_string(),
+                    tool_name: "Bash".to_string(),
+                    title: None,
+                    description: None,
+                    command: Some("yarn test".to_string()),
+                    file: None,
+                },
+            },
+        ] {
+            futures::executor::block_on(repo.append_event(&event)).expect("append event");
+        }
+        let summary = repo
+            .list_workspace_sessions(&WorkspaceId("workspace-1".to_string()))
+            .expect("list summaries");
+        assert_eq!(summary[0].last_turn_state.as_deref(), Some("running"));
+        assert_eq!(
+            summary[0].last_turn_awaiting_user.as_deref(),
+            Some("permission")
         );
     }
 
