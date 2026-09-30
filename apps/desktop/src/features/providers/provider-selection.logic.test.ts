@@ -131,8 +131,8 @@ describe("resolveSelectedModelId", () => {
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
 			},
 			{
-				id: "claude-sonnet-5",
-				label: "Claude Sonnet 5",
+				id: "claude-sonnet-5-5",
+				label: "Claude Sonnet 5.5",
 				description: "",
 				recommended: false,
 				effortLevels: ["low", "medium", "high", "xhigh", "max"],
@@ -175,8 +175,8 @@ describe("resolveSelectedModelId", () => {
 	);
 
 	it("preserves an explicit Sonnet selection when Opus becomes recommended", () => {
-		expect(resolveSelectedModelId(claudeProvider, "claude-sonnet-5")).toBe(
-			"claude-sonnet-5",
+		expect(resolveSelectedModelId(claudeProvider, "claude-sonnet-5-5")).toBe(
+			"claude-sonnet-5-5",
 		);
 	});
 
@@ -186,14 +186,12 @@ describe("resolveSelectedModelId", () => {
 		);
 	});
 
-	it("upgrades legacy Claude Sonnet selections to Claude Sonnet 5", () => {
-		expect(resolveSelectedModelId(claudeProvider, "sonnet-4.6")).toBe(
-			"claude-sonnet-5",
-		);
-		expect(resolveSelectedModelId(claudeProvider, "claude-sonnet-4-6")).toBe(
-			"claude-sonnet-5",
-		);
-	});
+	it.each(["sonnet-5", "sonnet-5.0", "claude-sonnet-5", "sonnet-4.6", "claude-sonnet-4-6"])(
+		"upgrades stored Sonnet selection %s to Sonnet 5.5",
+		(storedModelId) => {
+			expect(resolveSelectedModelId(claudeProvider, storedModelId)).toBe("claude-sonnet-5-5");
+		},
+	);
 
 	it("prefers the recommended model when the stored one is invalid", () => {
 		expect(resolveSelectedModelId(provider, "missing")).toBe("alpha-default");

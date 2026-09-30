@@ -60,18 +60,22 @@ describe("provider-model-registry", () => {
 		).toHaveLength(1);
 	});
 
-	it("upgrades Claude Sonnet aliases to Claude Sonnet 5", () => {
-		expect(resolveModelAlias("claude_code", "sonnet")).toBe("claude-sonnet-5");
-		expect(resolveModelAlias("claude_code", "sonnet-5")).toBe("claude-sonnet-5");
-		expect(resolveModelAlias("claude_code", "sonnet-4.6")).toBe("claude-sonnet-5");
-		expect(resolveModelAlias("claude_code", "claude-sonnet-4-6")).toBe(
-			"claude-sonnet-5",
-		);
+	it.each(["claude_code", "droid"] as const)("upgrades %s Sonnet aliases to Sonnet 5.5", (providerId) => {
+		for (const alias of [
+			"sonnet", "sonnet-5.5", "sonnet-5-5", "claude-sonnet-5-5",
+			"sonnet-5", "sonnet-5.0", "claude-sonnet-5",
+			"sonnet-4.6", "claude-sonnet-4-6",
+		]) {
+			expect(resolveModelAlias(providerId, alias)).toBe("claude-sonnet-5-5");
+		}
+		expect(PROVIDER_MODEL_REGISTRY[providerId].map((model) => model.id)).not.toContain("claude-sonnet-5");
+		expect(FALLBACK_PROVIDER_CATALOG.providers.find((provider) => provider.id === providerId)?.models)
+			.toEqual(PROVIDER_MODEL_REGISTRY[providerId]);
 	});
 
 	it("resolves Droid aliases to canonical IDs", () => {
 		expect(resolveModelAlias("droid", "auto")).toBe("auto");
-		expect(resolveModelAlias("droid", "sonnet")).toBe("claude-sonnet-5");
+		expect(resolveModelAlias("droid", "sonnet")).toBe("claude-sonnet-5-5");
 		expect(resolveModelAlias("droid", "5.4")).toBe("gpt-5.4");
 	});
 

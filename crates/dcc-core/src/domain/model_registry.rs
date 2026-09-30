@@ -67,11 +67,15 @@ pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
     ("opus-4.6", "claude-opus-5-5"),
     ("claude-opus-4-6", "claude-opus-5-5"),
     ("claude-opus-4-6-20251117", "claude-opus-5-5"),
-    ("sonnet", "claude-sonnet-5"),
-    ("sonnet-5", "claude-sonnet-5"),
-    ("sonnet-4.6", "claude-sonnet-5"),
-    ("claude-sonnet-4-6", "claude-sonnet-5"),
-    ("claude-sonnet-4-6-20251117", "claude-sonnet-5"),
+    ("sonnet", "claude-sonnet-5-5"),
+    ("sonnet-5.5", "claude-sonnet-5-5"),
+    ("sonnet-5-5", "claude-sonnet-5-5"),
+    ("sonnet-5", "claude-sonnet-5-5"),
+    ("sonnet-5.0", "claude-sonnet-5-5"),
+    ("claude-sonnet-5", "claude-sonnet-5-5"),
+    ("sonnet-4.6", "claude-sonnet-5-5"),
+    ("claude-sonnet-4-6", "claude-sonnet-5-5"),
+    ("claude-sonnet-4-6-20251117", "claude-sonnet-5-5"),
     ("haiku", "claude-haiku-4-5"),
     ("haiku-4.5", "claude-haiku-4-5"),
     ("claude-haiku-4-5-20251001", "claude-haiku-4-5"),
@@ -120,11 +124,14 @@ pub const GEMINI_ALIASES: &[(&str, &str)] = &[
 
 pub const DROID_ALIASES: &[(&str, &str)] = &[
     ("auto", "auto"),
-    ("sonnet", "claude-sonnet-5"),
-    ("sonnet-5", "claude-sonnet-5"),
-    ("claude-sonnet-5", "claude-sonnet-5"),
-    ("sonnet-4.6", "claude-sonnet-5"),
-    ("claude-sonnet-4-6", "claude-sonnet-5"),
+    ("sonnet", "claude-sonnet-5-5"),
+    ("sonnet-5.5", "claude-sonnet-5-5"),
+    ("sonnet-5-5", "claude-sonnet-5-5"),
+    ("sonnet-5", "claude-sonnet-5-5"),
+    ("sonnet-5.0", "claude-sonnet-5-5"),
+    ("claude-sonnet-5", "claude-sonnet-5-5"),
+    ("sonnet-4.6", "claude-sonnet-5-5"),
+    ("claude-sonnet-4-6", "claude-sonnet-5-5"),
     ("gpt-5.4", "gpt-5.4"),
     ("5.4", "gpt-5.4"),
     ("gpt-5.5", "gpt-5.5"),
@@ -182,9 +189,9 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
-        id: "claude-sonnet-5",
-        label: "Claude Sonnet 5",
-        description: "Best balance of speed and intelligence for coding and analysis.",
+        id: "claude-sonnet-5-5",
+        label: "Claude Sonnet 5.5",
+        description: "Most efficient for simpler tasks.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
@@ -282,9 +289,9 @@ pub const DROID: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high"],
     },
     ModelEntry {
-        id: "claude-sonnet-5",
-        label: "Claude Sonnet 5",
-        description: "Balanced Claude option with strong coding capability through Droid.",
+        id: "claude-sonnet-5-5",
+        label: "Claude Sonnet 5.5",
+        description: "Most efficient for simpler tasks.",
         recommended: false,
         effort_levels: &["low", "medium", "high"],
     },
@@ -321,7 +328,7 @@ pub const GROK: &[ModelEntry] = &[ModelEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_alias, CLAUDE_CODE, CODEX, GEMINI, GROK};
+    use super::{resolve_alias, CLAUDE_CODE, CODEX, DROID, GEMINI, GROK};
 
     #[test]
     fn codex_catalog_matches_the_current_picker() {
@@ -458,16 +465,27 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_aliases_upgrade_sonnet_to_sonnet_5() {
-        assert_eq!(resolve_alias("claude_code", "sonnet"), "claude-sonnet-5");
-        assert_eq!(resolve_alias("claude_code", "sonnet-5"), "claude-sonnet-5");
+    fn sonnet_aliases_upgrade_to_sonnet_55() {
+        for (provider_id, models) in [("claude_code", CLAUDE_CODE), ("droid", DROID)] {
+            for alias in [
+                "sonnet",
+                "sonnet-5.5",
+                "sonnet-5-5",
+                "claude-sonnet-5-5",
+                "sonnet-5",
+                "sonnet-5.0",
+                "claude-sonnet-5",
+                "sonnet-4.6",
+                "claude-sonnet-4-6",
+            ] {
+                assert_eq!(resolve_alias(provider_id, alias), "claude-sonnet-5-5");
+                assert_eq!(super::is_known_model(provider_id, alias), Some(true));
+            }
+            assert!(!models.iter().any(|model| model.id == "claude-sonnet-5"));
+        }
         assert_eq!(
-            resolve_alias("claude_code", "sonnet-4.6"),
-            "claude-sonnet-5"
-        );
-        assert_eq!(
-            resolve_alias("claude_code", "claude-sonnet-4-6"),
-            "claude-sonnet-5"
+            resolve_alias("claude_code", "claude-sonnet-4-6-20251117"),
+            "claude-sonnet-5-5"
         );
     }
 }
