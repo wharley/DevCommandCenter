@@ -74,6 +74,11 @@ try {
 		`${process.env.DCC_NOTES_URL || "http://127.0.0.1:1432"}/tests/notes.html?design`,
 	);
 	await page.locator(".dcc-project-shortcut").first().waitFor();
+	assert.equal(
+		await page.getByRole("checkbox", { name: /Worktree/ }).isChecked(),
+		true,
+		"new tasks start isolated in a worktree",
+	);
 	await screenshot("new-task-dark");
 	await page.getByRole("button", { name: "Trocar tema" }).click();
 	await screenshot("new-task-light");

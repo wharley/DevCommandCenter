@@ -189,24 +189,6 @@
 	cursor: progress;
 	opacity: 0.6;
 }
-.dcc-task-launch-modes {
-	position: static;
-	flex-shrink: 0;
-	padding: 0 24px 24px;
-}
-.dcc-task-launch-modes > div {
-	border-radius: var(--dcc-radius-surface);
-	box-shadow: var(--dcc-shadow-card);
-}
-.dcc-task-launch-modes button {
-	border-radius: 12px;
-}
-.dcc-task-launch-modes button[aria-pressed="true"] {
-	background: var(--popover);
-	box-shadow:
-		var(--dcc-shadow-card),
-		inset 0 0 0 1px var(--dcc-surface-edge);
-}
 .dcc-project-sidebar button:focus-visible,
 .dcc-task-launch button:focus-visible {
 	outline: 2px solid var(--ring);

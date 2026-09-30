@@ -1,11 +1,9 @@
 import {
 	ArrowUpRight,
 	Boxes,
-	Check,
 	ChevronDown,
 	FolderGit2,
 	LoaderCircle,
-	ShieldCheck,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -19,7 +17,6 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
 import { ProjectIdentityGlyph } from "@/features/workspaces/project-identity";
 import { repositoryDisplayName } from "@/features/workspaces/repository-display-name";
 
@@ -34,28 +31,6 @@ type NewTaskLaunchStateProps = {
 	onOpenProject: () => void;
 };
 
-const EXECUTION_MODES: Array<{
-	id: WorkspaceIsolationMode;
-	icon: typeof ShieldCheck;
-	titleKey: "newTask.execution.protected" | "newTask.execution.local";
-	descriptionKey:
-		| "newTask.execution.protectedDescription"
-		| "newTask.execution.localDescription";
-}> = [
-	{
-		id: "protectedWorktree",
-		icon: ShieldCheck,
-		titleKey: "newTask.execution.protected",
-		descriptionKey: "newTask.execution.protectedDescription",
-	},
-	{
-		id: "localDirect",
-		icon: FolderGit2,
-		titleKey: "newTask.execution.local",
-		descriptionKey: "newTask.execution.localDescription",
-	},
-];
-
 export function NewTaskLaunchState({
 	repositories,
 	isCreating,
@@ -64,8 +39,11 @@ export function NewTaskLaunchState({
 	onOpenProject,
 }: NewTaskLaunchStateProps) {
 	const { t } = useTranslation("common");
-	const [isolationMode, setIsolationMode] =
-		useState<WorkspaceIsolationMode>("protectedWorktree");
+	// Per-task choice: every new task starts isolated; opting out is one click.
+	const [useWorktree, setUseWorktree] = useState(true);
+	const isolationMode: WorkspaceIsolationMode = useWorktree
+		? "protectedWorktree"
+		: "localDirect";
 	const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
 	const selectingProject = useRef(false);
 	const busy = isCreating || pendingProjectId !== null;
@@ -168,6 +146,28 @@ export function NewTaskLaunchState({
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
+					<label
+						className="dcc-task-launch-worktree mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground has-[:disabled]:cursor-progress has-[:disabled]:opacity-60"
+					>
+						<input
+							type="checkbox"
+							checked={useWorktree}
+							disabled={busy}
+							onChange={(event) => setUseWorktree(event.target.checked)}
+							className="size-3.5 accent-primary"
+						/>
+						<span className="font-medium text-foreground">
+							{t("newTask.execution.worktree")}
+						</span>
+						<span aria-hidden>·</span>
+						<span>
+							{t(
+								useWorktree
+									? "newTask.execution.protectedDescription"
+									: "newTask.execution.localDescription",
+							)}
+						</span>
+					</label>
 					{repositories.length > 0 ? (
 						<div
 							className="dcc-project-shortcuts"
@@ -207,52 +207,6 @@ export function NewTaskLaunchState({
 							))}
 						</div>
 					) : null}
-				</div>
-			</div>
-
-			<div className="dcc-task-launch-modes pointer-events-none flex justify-center px-5">
-				<div className="pointer-events-auto flex w-full max-w-[42rem] items-center justify-center gap-1 rounded-xl border border-border/55 bg-sidebar/95 p-1 shadow-[var(--dcc-elevation-1)] backdrop-blur">
-					{EXECUTION_MODES.map((mode) => {
-						const Icon = mode.icon;
-						const selected = isolationMode === mode.id;
-						return (
-							<button
-								type="button"
-								key={mode.id}
-								aria-pressed={selected}
-								disabled={busy}
-								onClick={() => setIsolationMode(mode.id)}
-								className={cn(
-									"flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors",
-									selected
-										? "bg-accent text-foreground"
-										: "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
-								)}
-							>
-								<span
-									className={cn(
-										"grid size-7 shrink-0 place-items-center rounded-md",
-										selected && mode.id === "protectedWorktree"
-											? "bg-emerald-500/12 text-emerald-500"
-											: "bg-muted/55",
-									)}
-								>
-									<Icon className="size-4" strokeWidth={1.8} />
-								</span>
-								<span className="min-w-0 flex-1">
-									<strong className="flex items-center gap-1.5 truncate text-[11px] font-medium">
-										{t(mode.titleKey)}
-										{selected ? (
-											<Check className="size-3 text-emerald-500" />
-										) : null}
-									</strong>
-									<small className="block truncate text-[9.5px] text-muted-foreground">
-										{t(mode.descriptionKey)}
-									</small>
-								</span>
-							</button>
-						);
-					})}
 				</div>
 			</div>
 		</div>

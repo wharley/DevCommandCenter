@@ -1296,6 +1296,7 @@
     "multipleProjectsDescription": "Coordene dois ou mais projetos na mesma tarefa.",
     "openAnotherProject": "Abrir outro projeto…",
     "execution": {
+      "worktree": "Worktree",
       "protected": "Worktree protegido",
       "protectedDescription": "Isolado do checkout original",
       "local": "Local direto",
