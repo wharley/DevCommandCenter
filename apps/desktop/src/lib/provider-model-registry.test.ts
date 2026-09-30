@@ -75,9 +75,10 @@ describe("provider-model-registry", () => {
 		expect(resolveModelAlias("droid", "5.4")).toBe("gpt-5.4");
 	});
 
-	it("matches the current Codex picker and keeps Astra as the default", () => {
+	it("matches the current Codex picker with GPT-6.1 Sol as the default", () => {
 		const models = PROVIDER_MODEL_REGISTRY.codex;
 		expect(models.map((model) => model.id)).toEqual([
+			"gpt-6.1-sol",
 			"gpt-6-astra",
 			"gpt-6-sol",
 			"gpt-6-luna",
@@ -86,16 +87,21 @@ describe("provider-model-registry", () => {
 			"gpt-5.6-luna",
 			"gpt-5.5",
 		]);
-		expect(getDefaultModelId("codex")).toBe("gpt-6-astra");
+		expect(getDefaultModelId("codex")).toBe("gpt-6.1-sol");
+		expect(models.filter((model) => model.recommended)).toHaveLength(1);
 		expect(resolveModelAlias("codex", "astra")).toBe("gpt-6-astra");
 		expect(resolveModelAlias("codex", "6-astra")).toBe("gpt-6-astra");
-		for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
+		for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
 			expect(models.find((model) => model.id === id)?.effortLevels).toEqual(
 				["low", "medium", "high", "xhigh", "max"],
 			);
 		}
-		expect(resolveModelAlias("codex", "sol")).toBe("gpt-6-sol");
+		expect(resolveModelAlias("codex", "sol")).toBe("gpt-6.1-sol");
+		expect(resolveModelAlias("codex", "6.1-sol")).toBe("gpt-6.1-sol");
 		expect(resolveModelAlias("codex", "6-sol")).toBe("gpt-6-sol");
+		for (const model of models) {
+			expect(resolveModelAlias("codex", model.id)).toBe(model.id);
+		}
 		expect(resolveModelAlias("codex", "5.6-sol")).toBe("gpt-5.6-sol");
 		expect(resolveModelAlias("codex", "5.6-terra")).toBe("gpt-5.6-terra");
 		expect(resolveModelAlias("codex", "luna")).toBe("gpt-6-luna");

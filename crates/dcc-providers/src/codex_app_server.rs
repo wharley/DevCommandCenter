@@ -310,7 +310,7 @@ fn codex_reasoning_effort(model: Option<&str>, effort: Option<&str>) -> Option<&
         model
             .map(|model| dcc_core::domain::model_registry::resolve_alias("codex", model.trim()))
             .as_deref(),
-        Some("gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna")
+        Some("gpt-6.1-sol" | "gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna")
     );
     match effort.map(str::trim).filter(|value| !value.is_empty()) {
         Some("none") => Some("none"),
@@ -3328,6 +3328,8 @@ mod tests {
     #[test]
     fn preserves_gpt_6_max_reasoning_effort_without_changing_existing_models() {
         for model in [
+            "gpt-6.1-sol",
+            "6.1-sol",
             "gpt-6-astra",
             "astra",
             "6-astra",

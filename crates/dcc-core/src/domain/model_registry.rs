@@ -81,7 +81,8 @@ pub const CODEX_ALIASES: &[(&str, &str)] = &[
     ("gpt-5-codex", "gpt-6-sol"),
     ("astra", "gpt-6-astra"),
     ("6-astra", "gpt-6-astra"),
-    ("sol", "gpt-6-sol"),
+    ("sol", "gpt-6.1-sol"),
+    ("6.1-sol", "gpt-6.1-sol"),
     ("6-sol", "gpt-6-sol"),
     ("5.6-sol", "gpt-5.6-sol"),
     ("terra", "gpt-5.6-terra"),
@@ -198,51 +199,58 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
 
 pub const CODEX: &[ModelEntry] = &[
     ModelEntry {
+        id: "gpt-6.1-sol",
+        label: "GPT-6.1 Sol",
+        description: "Latest workhorse model for coding and everyday work.",
+        recommended: true,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
+    ModelEntry {
         id: "gpt-6-astra",
         label: "GPT-6 Astra",
-        description: "Most capable OpenAI model for complex reasoning, coding, and long-horizon agentic work.",
-        recommended: true,
+        description: "Frontier intelligence for the most demanding work.",
+        recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "gpt-6-sol",
         label: "GPT-6 Sol",
-        description: "Complex coding and agentic workflows with stronger factual reliability and clearer communication.",
+        description: "Previous generation workhorse model.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "gpt-6-luna",
         label: "GPT-6 Luna",
-        description: "Efficient model for focused coding and repeatable, high-volume tasks.",
+        description: "Fast and affordable model for easier tasks.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "gpt-5.6-sol",
         label: "GPT-5.6 Sol",
-        description: "General-purpose agentic coding and reasoning model for demanding everyday work.",
+        description: "Older generation workhorse model.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "gpt-5.6-terra",
         label: "GPT-5.6 Terra",
-        description: "Strong lower-cost GPT-5.6 option for coding and reasoning.",
+        description: "Older balanced model for straightforward work.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "gpt-5.6-luna",
         label: "GPT-5.6 Luna",
-        description: "Fastest and most cost-efficient GPT-5.6 option.",
+        description: "Older fast and efficient model.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
         id: "gpt-5.5",
         label: "GPT-5.5",
-        description: "Previous-generation model for coding and general reasoning.",
+        description: "Legacy coding model.",
         recommended: false,
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
@@ -320,6 +328,7 @@ mod tests {
         assert_eq!(
             CODEX.iter().map(|model| model.id).collect::<Vec<_>>(),
             [
+                "gpt-6.1-sol",
                 "gpt-6-astra",
                 "gpt-6-sol",
                 "gpt-6-luna",
@@ -329,13 +338,21 @@ mod tests {
                 "gpt-5.5",
             ]
         );
+        let recommended: Vec<_> = CODEX.iter().filter(|model| model.recommended).collect();
+        assert_eq!(recommended.len(), 1);
+        assert_eq!(recommended[0].id, "gpt-6.1-sol");
         assert_eq!(
-            CODEX.iter().find(|model| model.recommended).unwrap().id,
-            "gpt-6-astra"
+            recommended[0].effort_levels,
+            &["low", "medium", "high", "xhigh", "max"]
         );
+        for model in CODEX {
+            assert_eq!(resolve_alias("codex", model.id), model.id);
+            assert_eq!(super::is_known_model("codex", model.id), Some(true));
+        }
         assert_eq!(resolve_alias("codex", "astra"), "gpt-6-astra");
         assert_eq!(resolve_alias("codex", "6-astra"), "gpt-6-astra");
-        assert_eq!(resolve_alias("codex", "sol"), "gpt-6-sol");
+        assert_eq!(resolve_alias("codex", "sol"), "gpt-6.1-sol");
+        assert_eq!(resolve_alias("codex", "6.1-sol"), "gpt-6.1-sol");
         assert_eq!(resolve_alias("codex", "6-sol"), "gpt-6-sol");
         assert_eq!(resolve_alias("codex", "5.6-sol"), "gpt-5.6-sol");
         assert_eq!(resolve_alias("codex", "5.6-terra"), "gpt-5.6-terra");

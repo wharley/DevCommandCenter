@@ -47,18 +47,25 @@ export const PROVIDER_MODEL_REGISTRY = {
 
 	codex: [
 		{
+			id: "gpt-6.1-sol",
+			label: "GPT-6.1 Sol",
+			description: "Latest workhorse model for coding and everyday work.",
+			recommended: true,
+			effortLevels: ["low", "medium", "high", "xhigh", "max"],
+		},
+		{
 			id: "gpt-6-astra",
 			label: "GPT-6 Astra",
 			description:
-				"Most capable OpenAI model for complex reasoning, coding, and long-horizon agentic work.",
-			recommended: true,
+				"Frontier intelligence for the most demanding work.",
+			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
 		{
 			id: "gpt-6-sol",
 			label: "GPT-6 Sol",
 			description:
-				"Complex coding and agentic workflows with stronger factual reliability and clearer communication.",
+				"Previous generation workhorse model.",
 			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
@@ -66,7 +73,7 @@ export const PROVIDER_MODEL_REGISTRY = {
 			id: "gpt-6-luna",
 			label: "GPT-6 Luna",
 			description:
-				"Efficient model for focused coding and repeatable, high-volume tasks.",
+				"Fast and affordable model for easier tasks.",
 			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
@@ -74,7 +81,7 @@ export const PROVIDER_MODEL_REGISTRY = {
 			id: "gpt-5.6-sol",
 			label: "GPT-5.6 Sol",
 			description:
-				"General-purpose agentic coding and reasoning model for demanding everyday work.",
+				"Older generation workhorse model.",
 			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
@@ -82,7 +89,7 @@ export const PROVIDER_MODEL_REGISTRY = {
 			id: "gpt-5.6-terra",
 			label: "GPT-5.6 Terra",
 			description:
-				"Strong lower-cost GPT-5.6 option for coding and reasoning.",
+				"Older balanced model for straightforward work.",
 			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
@@ -90,14 +97,14 @@ export const PROVIDER_MODEL_REGISTRY = {
 			id: "gpt-5.6-luna",
 			label: "GPT-5.6 Luna",
 			description:
-				"Fastest and most cost-efficient GPT-5.6 option.",
+				"Older fast and efficient model.",
 			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
 		{
 			id: "gpt-5.5",
 			label: "GPT-5.5",
-			description: "Previous-generation model for coding and general reasoning.",
+			description: "Legacy coding model.",
 			recommended: false,
 			effortLevels: ["low", "medium", "high", "xhigh", "max"],
 		},
@@ -232,7 +239,8 @@ export const MODEL_ALIASES: Partial<Record<ProviderRegistryKey, Record<string, s
 		"gpt-5-codex": "gpt-6-sol",
 		astra: "gpt-6-astra",
 		"6-astra": "gpt-6-astra",
-		sol: "gpt-6-sol",
+		sol: "gpt-6.1-sol",
+		"6.1-sol": "gpt-6.1-sol",
 		"6-sol": "gpt-6-sol",
 		"5.6-sol": "gpt-5.6-sol",
 		terra: "gpt-5.6-terra",
