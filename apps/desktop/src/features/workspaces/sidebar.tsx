@@ -71,6 +71,7 @@ import {
 import {
 	projectGroupingKey,
 	projectWorkspaceRailGroups,
+	workspaceRailGroupSignal,
 } from "./workspace-rail-projection";
 import {
 	COMPLETED_SECTION_ID,
@@ -376,6 +377,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				repositories.map((repository) => [repository.rootPath.trim(), repository]),
 			),
 		[repositories],
+	);
+	const groupSignals = useMemo(
+		() =>
+			new Map(
+				activeGroups.map((group) => [
+					group.id,
+					workspaceRailGroupSignal(group.rows, workspaceAgentActivities),
+				]),
+			),
+		[activeGroups, workspaceAgentActivities],
 	);
 	const selectedProjectSourceKey = useMemo(
 		() => workspaces.find((workspace) => workspace.id === selectedWorkspaceId)?.rootPath?.trim(),
@@ -782,6 +793,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						? (sectionOpenState[item.groupId] ?? true)
 						: (sectionOpenState[item.groupId] ?? false);
 				const isEmptyGroup = item.rowCount === 0;
+				const groupSignal =
+					item.headerVariant === "project"
+						? (groupSignals.get(item.groupId) ?? null)
+						: null;
 				const repository =
 					item.headerVariant === "project" && item.sourceKey
 						? repositoriesBySourceKey.get(item.sourceKey) ?? null
@@ -885,13 +900,29 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</span>
 
 							{item.rowCount > 0 ? (
-								<span
-									className="ml-1.5 flex h-[17px] min-w-[17px] shrink-0 items-center justify-center rounded-full bg-foreground/[0.06] px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground"
-									title={t("sidebar.workspaceCount", {
-										count: item.rowCount,
-									})}
-								>
-									{item.rowCount}
+								<span className="ml-1.5 flex shrink-0 items-center gap-1.5">
+									{groupSignal ? (
+										<span
+											role="img"
+											data-group-signal={groupSignal}
+											aria-label={t(`sidebar.groupSignal.${groupSignal}`)}
+											title={t(`sidebar.groupSignal.${groupSignal}`)}
+											className={cn(
+												"size-[6px] rounded-full",
+												groupSignal === "attention"
+													? "bg-amber-500"
+													: "animate-pulse bg-emerald-500",
+											)}
+										/>
+									) : null}
+									<span
+										className="flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-foreground/[0.06] px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground"
+										title={t("sidebar.workspaceCount", {
+											count: item.rowCount,
+										})}
+									>
+										{item.rowCount}
+									</span>
 								</span>
 							) : null}
 						</button>
@@ -1038,6 +1069,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		},
 		[
 			completedDiskUsage,
+			groupSignals,
 			i18n.resolvedLanguage,
 			isCreatingWorkspace,
 			isRemovingProject,
@@ -1409,7 +1441,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							<h2 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">
 								{t("sidebar.running")}
 							</h2>
-							<span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500/10 px-1 text-[9px] font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+							<span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500/10 px-1 text-[9px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
 								{runningActivities.length}
 							</span>
 						</div>
@@ -1450,7 +1482,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 													/>
 												) : null}
 												<Loader2
-													className="size-3.5 shrink-0 animate-spin text-amber-600 dark:text-amber-300"
+													className="size-3.5 shrink-0 animate-spin text-emerald-600 dark:text-emerald-400"
 													strokeWidth={2}
 													aria-hidden
 												/>

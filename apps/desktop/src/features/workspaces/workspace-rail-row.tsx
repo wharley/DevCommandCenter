@@ -565,8 +565,9 @@ export const WorkspaceRailRowItem = memo(
 										className={cn(
 											"size-[6px] shrink-0 rounded-full",
 											activity.state === "active" &&
-												"bg-amber-400 animate-pulse",
-											activity.state === "completed" && "bg-emerald-500/80",
+												"bg-emerald-500 animate-pulse",
+											activity.state === "completed" &&
+												"bg-muted-foreground/45",
 											activity.state === "aborted" && "bg-destructive",
 										)}
 									/>
@@ -574,9 +575,8 @@ export const WorkspaceRailRowItem = memo(
 										<span
 											className={cn(
 												activity.state === "active" &&
-													"text-amber-700 dark:text-amber-300/90",
-												activity.state === "completed" &&
-													"text-emerald-600 dark:text-emerald-400/90",
+													"text-emerald-700 dark:text-emerald-300/90",
+												activity.state === "completed" && "text-foreground/70",
 												activity.state === "aborted" && "text-destructive/85",
 											)}
 										>

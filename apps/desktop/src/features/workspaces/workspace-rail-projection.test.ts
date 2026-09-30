@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	projectWorkspaceRailGroups,
 	projectWorkspaceRepositories,
+	workspaceRailGroupSignal,
 } from "./workspace-rail-projection";
 
 describe("projectWorkspaceRailGroups", () => {
@@ -264,5 +265,41 @@ describe("projectWorkspaceRailGroups", () => {
 			label: "Loose Workspace",
 			rows: [{ id: "z", name: "Loose Workspace" }],
 		});
+	});
+});
+
+describe("workspaceRailGroupSignal", () => {
+	const row = (id: string, status: "ready" | "setup_pending" = "ready") => ({
+		id,
+		name: id,
+		branch: "main",
+		status,
+	});
+	const running = {
+		state: "active" as const,
+		startedAt: "2026-09-30T10:00:00.000Z",
+		completedAt: null,
+	};
+
+	it("stays quiet when nothing in the project is running or blocked", () => {
+		expect(
+			workspaceRailGroupSignal([row("a")], {
+				a: { state: "completed", startedAt: null, completedAt: null },
+			}),
+		).toBeNull();
+	});
+
+	it("reports a running agent", () => {
+		expect(workspaceRailGroupSignal([row("a"), row("b")], { b: running })).toBe(
+			"running",
+		);
+	});
+
+	it("lets something that needs the user win over a running agent", () => {
+		expect(
+			workspaceRailGroupSignal([row("a"), row("b", "setup_pending")], {
+				a: running,
+			}),
+		).toBe("attention");
 	});
 });

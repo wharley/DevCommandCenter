@@ -146,6 +146,10 @@
     }
   },
   "sidebar": {
+    "groupSignal": {
+      "running": "An agent is running in this project",
+      "attention": "Something in this project needs you"
+    },
     "activeTerminals_one": "{{count}} active process in this task",
     "activeTerminals_other": "{{count}} active processes in this task",
     "terminalLifecycle": {

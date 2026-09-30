@@ -1,5 +1,6 @@
 import type { Repository } from "@dcc/contracts";
 import type { WorkspaceSummary } from "./types";
+import type { WorkspaceAgentActivity } from "./use-workspace-agent-states";
 import { repositoryDisplayName } from "./repository-display-name";
 
 export type DccWorkspaceRailRow = WorkspaceSummary;
@@ -157,6 +158,25 @@ export function projectWorkspaceRailGroups(
 		});
 
 	return { activeGroups, waitingRows, completedRows };
+}
+
+/**
+ * What a project header must still say when its rows are collapsed or scrolled
+ * away. Amber is reserved for "needs you"; a running agent only earns green.
+ */
+export type DccWorkspaceRailGroupSignal = "attention" | "running" | null;
+
+export function workspaceRailGroupSignal(
+	rows: readonly DccWorkspaceRailRow[],
+	activities: Readonly<Record<string, WorkspaceAgentActivity | null | undefined>>,
+): DccWorkspaceRailGroupSignal {
+	if (rows.some((row) => row.status === "setup_pending")) {
+		return "attention";
+	}
+	if (rows.some((row) => activities[row.id]?.state === "active")) {
+		return "running";
+	}
+	return null;
 }
 
 function hashId(key: string): string {
