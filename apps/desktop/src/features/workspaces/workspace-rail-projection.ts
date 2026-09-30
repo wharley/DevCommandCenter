@@ -99,6 +99,7 @@ export function projectWorkspaceRepositories(
 export function projectWorkspaceRailGroups(
 	workspaces: WorkspaceSummary[],
 	repositories: Repository[] = [],
+	lastInteractionAt: Readonly<Record<string, string | null | undefined>> = {},
 ): {
 	activeGroups: DccWorkspaceRailGroup[];
 	waitingRows: DccWorkspaceRailRow[];
@@ -134,9 +135,11 @@ export function projectWorkspaceRailGroups(
 			const sorted = [...rows].sort((a, b) => {
 				const pinnedOrder = Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt));
 				if (pinnedOrder !== 0) return pinnedOrder;
-				const ta = a.updatedAt ?? a.createdAt ?? a.name;
-				const tb = b.updatedAt ?? b.createdAt ?? b.name;
-				return tb.localeCompare(ta);
+				return (
+					workspaceRecencyMs(b, lastInteractionAt[b.id]) -
+						workspaceRecencyMs(a, lastInteractionAt[a.id]) ||
+					a.id.localeCompare(b.id)
+				);
 			});
 			const repository = repositories.find((candidate) => candidate.rootPath.trim() === key) ?? null;
 			const label = repository
@@ -158,6 +161,20 @@ export function projectWorkspaceRailGroups(
 		});
 
 	return { activeGroups, waitingRows, completedRows };
+}
+
+/**
+ * Most recent moment the task was touched: the user's last turn, or its own
+ * creation/metadata update when it has no turns yet (a fresh task goes on top).
+ */
+function workspaceRecencyMs(
+	workspace: WorkspaceSummary,
+	lastInteractionAt: string | null | undefined,
+): number {
+	const candidates = [lastInteractionAt, workspace.updatedAt, workspace.createdAt]
+		.map((value) => (value ? Date.parse(value) : Number.NaN))
+		.filter((value) => !Number.isNaN(value));
+	return candidates.length ? Math.max(...candidates) : Number.NEGATIVE_INFINITY;
 }
 
 /**

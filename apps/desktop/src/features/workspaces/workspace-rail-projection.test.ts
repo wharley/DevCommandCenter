@@ -268,6 +268,49 @@ describe("projectWorkspaceRailGroups", () => {
 	});
 });
 
+describe("task order inside a project", () => {
+	const task = (id: string, updatedAt: string, pinnedAt?: string) => ({
+		id,
+		name: id,
+		branch: "main",
+		status: "ready" as const,
+		rootPath: "/projects/alpha",
+		updatedAt,
+		pinnedAt: pinnedAt ?? null,
+	});
+
+	it("moves the task the user last worked on to the top", () => {
+		const { activeGroups } = projectWorkspaceRailGroups(
+			[
+				task("older", "2026-09-30T10:00:00.000Z"),
+				task("newer", "2026-09-30T11:00:00.000Z"),
+				task("sixth", "2026-09-30T09:00:00.000Z"),
+			],
+			[],
+			{ sixth: "2026-09-30T12:00:00.000Z" },
+		);
+
+		expect(activeGroups[0]!.rows.map((row) => row.id)).toEqual([
+			"sixth",
+			"newer",
+			"older",
+		]);
+	});
+
+	it("keeps pinned tasks above recent activity", () => {
+		const { activeGroups } = projectWorkspaceRailGroups(
+			[
+				task("pinned", "2026-09-30T08:00:00.000Z", "2026-09-01T00:00:00.000Z"),
+				task("busy", "2026-09-30T09:00:00.000Z"),
+			],
+			[],
+			{ busy: "2026-09-30T12:00:00.000Z" },
+		);
+
+		expect(activeGroups[0]!.rows.map((row) => row.id)).toEqual(["pinned", "busy"]);
+	});
+});
+
 describe("workspaceRailGroupSignal", () => {
 	const row = (id: string, status: "ready" | "setup_pending" = "ready") => ({
 		id,

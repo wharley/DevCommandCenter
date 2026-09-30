@@ -5,6 +5,7 @@ import {
 	deriveAgentActivityFromSessions,
 	deriveAgentStateFromSessions,
 	deriveProviderIdFromSessions,
+	lastInteractionAtFromSessions,
 	runningWorkspaceActivities,
 } from "./use-workspace-agent-states";
 
@@ -271,5 +272,27 @@ describe("runningWorkspaceActivities", () => {
 		);
 
 		expect(result.map(({ workspace: entry }) => entry.id)).toEqual(["a", "b"]);
+	});
+});
+
+describe("lastInteractionAtFromSessions", () => {
+	it("uses the newest turn start across sessions and ignores completion", () => {
+		expect(
+			lastInteractionAtFromSessions([
+				makeSummary({
+					lastTurnStartedAt: "2026-09-30T10:00:00.000Z",
+					lastTurnCompletedAt: "2026-09-30T18:00:00.000Z",
+				}),
+				makeSummary({
+					session: { id: "session-2" },
+					lastTurnStartedAt: "2026-09-30T12:00:00.000Z",
+				}),
+				makeSummary({ session: { id: "session-3" }, lastTurnStartedAt: null }),
+			]),
+		).toBe("2026-09-30T12:00:00.000Z");
+	});
+
+	it("returns null when no turn has started", () => {
+		expect(lastInteractionAtFromSessions([makeSummary()])).toBeNull();
 	});
 });

@@ -367,9 +367,27 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	);
 	const [showAllRunningTasks, setShowAllRunningTasks] = useState(false);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
+	// Activities are rebuilt every render; key the order on the timestamps only
+	// so the grouped rows (and the virtual list) change only when one moves.
+	const lastInteractionSignature = Object.entries(workspaceAgentActivities)
+		.map(([id, activity]) => `${id}=${activity.lastInteractionAt ?? ""}`)
+		.join("|");
+	const lastInteractionAt = useMemo(
+		() =>
+			Object.fromEntries(
+				lastInteractionSignature
+					.split("|")
+					.filter(Boolean)
+					.map((entry) => {
+						const separator = entry.indexOf("=");
+						return [entry.slice(0, separator), entry.slice(separator + 1) || null];
+					}),
+			),
+		[lastInteractionSignature],
+	);
 	const { activeGroups, waitingRows, completedRows } = useMemo(
-		() => projectWorkspaceRailGroups(workspaces, repositories),
-		[repositories, workspaces],
+		() => projectWorkspaceRailGroups(workspaces, repositories, lastInteractionAt),
+		[lastInteractionAt, repositories, workspaces],
 	);
 	const repositoriesBySourceKey = useMemo(
 		() =>
@@ -871,7 +889,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								) : (
 									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/75" />
 								)}
-								<span className="dcc-project-label truncate">{item.label}</span>
+								{/* Sized on the span: an unlayered `button { font: inherit }` reset in
+								    color-theme.css overrides text utilities on the button itself. */}
+								<span className="dcc-project-label truncate text-[13px] font-medium leading-5">
+									{item.label}
+								</span>
 								{item.headerVariant === "completed" &&
 								completedDiskUsage.status === "ready" ? (
 									<span
@@ -1385,6 +1407,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					</Tooltip>
 				</div>
 
+				{/* Labels are sized on their spans, like `.dcc-project-label`: the
+				    unlayered button font reset in color-theme.css wins over text
+				    utilities placed on the buttons. */}
 				<div className="dcc-sidebar-navigation space-y-1 px-2 pb-3 pt-1">
 					<button
 						type="button"
@@ -1399,7 +1424,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						)}
 					>
 						<Plus className="size-4" strokeWidth={1.9} />
-						<span>{t("sidebar.newWorkspace")}</span>
+						<span className="text-[13px] font-medium">{t("sidebar.newWorkspace")}</span>
 					</button>
 					<button
 						type="button"
@@ -1413,7 +1438,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						)}
 					>
 						<GitPullRequest className="size-4" strokeWidth={1.9} />
-						<span>{t("sidebar.pullRequests")}</span>
+						<span className="text-[13px] font-medium">{t("sidebar.pullRequests")}</span>
 					</button>
 					{onOpenNotes && (
 						<button
@@ -1422,7 +1447,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							className="dcc-notes-nav flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
 						>
 							<StickyNote className="size-4" strokeWidth={1.8} />
-							<span>{t("notes.headingShort")}</span>
+							<span className="text-[13px] font-medium">{t("notes.headingShort")}</span>
 							{notesCount > 0 && (
 								<span className="ml-auto rounded-full bg-foreground/5 px-1.5 text-[10px] tabular-nums">{notesCount}</span>
 							)}

@@ -14,6 +14,8 @@ export type WorkspaceAgentActivity = {
 	startedAt: string | null;
 	completedAt: string | null;
 	waitingFor?: AgentWaitingReason;
+	/** See `lastInteractionAtFromSessions`; drives the rail's task order. */
+	lastInteractionAt?: string | null;
 };
 
 /** The turn has not finished yet, whether the agent is working or waiting. */
@@ -127,6 +129,27 @@ export function deriveAgentActivityFromSessions(
 	return null;
 }
 
+/**
+ * When the user last acted on the task: the newest turn start across its
+ * sessions. Agent progress (deltas, completion) deliberately does not count, so
+ * the rail only reorders when the user does something, never under the cursor.
+ */
+export function lastInteractionAtFromSessions(
+	summaries: WorkspaceSessionSummary[],
+): string | null {
+	let latest: string | null = null;
+	let latestMs = Number.NEGATIVE_INFINITY;
+	for (const summary of summaries) {
+		const startedAt = summary.lastTurnStartedAt;
+		const ms = startedAt ? Date.parse(startedAt) : Number.NaN;
+		if (!Number.isNaN(ms) && ms > latestMs) {
+			latest = startedAt;
+			latestMs = ms;
+		}
+	}
+	return latest;
+}
+
 export function deriveAgentStateFromSessions(
 	summaries: WorkspaceSessionSummary[],
 ): AgentState | null {
@@ -167,10 +190,13 @@ export function useWorkspaceAgentActivities(
 
 	return trackedWorkspaces.reduce<Record<string, WorkspaceAgentActivity>>(
 		(activities, workspace, index) => {
-			const query = sessionQueries[index];
-			const activity = deriveAgentActivityFromSessions(query?.data ?? []);
+			const summaries = sessionQueries[index]?.data ?? [];
+			const activity = deriveAgentActivityFromSessions(summaries);
 			if (activity) {
-				activities[workspace.id] = activity;
+				activities[workspace.id] = {
+					...activity,
+					lastInteractionAt: lastInteractionAtFromSessions(summaries),
+				};
 			}
 			return activities;
 		},
