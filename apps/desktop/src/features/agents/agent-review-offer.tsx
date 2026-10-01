@@ -88,20 +88,23 @@ function prefersReducedMotion() {
  * The mascot thinking out loud: dots first, then the question written out,
  * then the answer buttons. With reduced motion everything shows at once.
  */
-function OfferThought({
+export function OfferThought({
 	agent,
+	question: customQuestion,
 	acceptLabel,
 	dismissLabel,
 	onAccept,
 	onDismiss,
 }: {
 	agent: AgentView;
+	/** Asked instead of the agent's own offer text. */
+	question?: string;
 	acceptLabel: string;
 	dismissLabel: string;
 	onAccept: () => void;
 	onDismiss: () => void;
 }) {
-	const question = agent.offerPrompt;
+	const question = customQuestion ?? agent.offerPrompt;
 	const [typed, setTyped] = useState(() => (prefersReducedMotion() ? question.length : -1));
 	useEffect(() => {
 		if (typed >= question.length) {

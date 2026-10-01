@@ -6248,6 +6248,13 @@ impl SessionCommandState {
         self.session_repo.delete_resident_agent(id)
     }
 
+    pub fn resident_agent(
+        &self,
+        id: &str,
+    ) -> Result<Option<dcc_core::domain::agent::ResidentAgent>> {
+        self.session_repo.load_resident_agent(id)
+    }
+
     pub fn bind_session_agent(&self, session_id: &SessionId, agent_id: &str) -> Result<()> {
         self.session_repo.bind_session_agent(session_id, agent_id)
     }

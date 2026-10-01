@@ -124,6 +124,7 @@ import {
 } from "./features/agents/use-agents";
 import { bindSessionAgent } from "./lib/agents-api";
 import { subscribeCallAgent } from "./features/agents/call-agent-command";
+import { subscribeOpenPullRequest } from "./features/agents/pr-review-jobs";
 import { markAgentResultSeen } from "./features/agents/agent-seen-results";
 import { subscribeOpenFinding } from "./features/agents/open-finding-command";
 import {
@@ -2681,6 +2682,7 @@ export default function App() {
 		],
 	);
 
+	useEffect(() => subscribeOpenPullRequest(() => setGlobalSurface("pullRequests")), []);
 	useEffect(
 		() =>
 			subscribeCallAgent((agentId) => {

@@ -173,6 +173,7 @@
       "reviewer": "Reviewer"
     },
     "state": {
+      "failed": "Failed",
       "finished": "Finished",
       "idle": "Idle",
       "working": "Working",
@@ -192,6 +193,7 @@
       "failed": "Could not call the agent."
     },
     "page": {
+      "pullRequests": "Pull Requests",
       "duplicate": "Duplicate",
       "copyName": "{{agent}} (copy)",
       "roleBuiltIn": "Role · maintained by DCC",
@@ -480,6 +482,7 @@
     }
   },
   "pullRequests": {
+    "reviewerOffer": "May I review this PR?",
     "title": "Pull Requests",
     "subtitle": "Every project, without creating a task",
     "refresh": "Refresh pull requests",
@@ -586,6 +589,16 @@
       "resolveThread": "Resolve thread",
       "reopenThread": "Reopen thread",
       "prepareWithAgent": "Prepare with agent",
+      "agentReviewTitleNamed": "{{agent}}'s review",
+      "agentReviewing": "{{agent}} is reading the PR…",
+      "reviewWithNamedAgent": "Review with {{agent}}",
+      "agentDrafted_one": "{{agent}} drafted {{count}} comment. Edit or remove it before submitting the review.",
+      "agentDrafted_other": "{{agent}} drafted {{count}} comments. Edit or remove them before submitting the review.",
+      "agentFoundNothing": "{{agent}} read the PR and found nothing to comment on.",
+      "dismissAgentResult": "OK",
+      "fileDrafts_one": "{{count}} draft comment",
+      "fileDrafts_other": "{{count}} draft comments",
+      "agentReviewingBackground": "You can leave this screen; it keeps going and tells you in the sidebar.",
       "reviewWithAgent": "Review with agent",
       "agentReviewTitle": "Ephemeral agent review",
       "agentReviewHint": "The agent only reads the PR and creates drafts. Nothing is published or becomes a task.",

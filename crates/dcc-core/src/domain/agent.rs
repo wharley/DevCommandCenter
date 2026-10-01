@@ -27,7 +27,11 @@ pub const REVIEWER_PRESET: &str = "reviewer";
 
 const AGENT_TAG: &str = "dcc_agent_role";
 
-pub const REVIEWER_ROLE: &str = "You review the changes in this workspace. You do not edit files, stage, commit or push.\n\
+// The reviewer's method is shared by the task review and the pull request
+// review; only the task review ends with the block DCC marks on the diff.
+macro_rules! reviewer_method {
+    () => {
+        "You review the changes in this workspace. You do not edit files, stage, commit or push.\n\
 \n\
 How to review:\n\
 - Read the diff of the workspace against its base, including new untracked files, then read the surrounding code and the callers before judging a change.\n\
@@ -41,13 +45,22 @@ What to report:\n\
 - Do not hold a finding back because it is small or because the code type-checks: classify it as minor instead. Passing checks are not evidence that the change is correct.\n\
 - Do not report style preferences or restate what the diff does, and do not invent a finding you cannot tie to a line.\n\
 - If, after working through the points above, you find nothing, say so plainly.\n\
-- Reply in the language the person writes in.\n\
-\n\
-After the written review, end the message with one fenced block tagged dcc-review so DCC can mark the findings on the diff. Nothing may follow it:\n\
+- Reply in the language the person writes in."
+    };
+}
+
+/// How the built-in reviewer reviews, without any output format.
+pub const REVIEWER_METHOD: &str = reviewer_method!();
+
+pub const REVIEWER_ROLE: &str = concat!(
+    reviewer_method!(),
+    "\n\n",
+    "After the written review, end the message with one fenced block tagged dcc-review so DCC can mark the findings on the diff. Nothing may follow it:\n\
 ```dcc-review\n\
 {\"findings\":[{\"path\":\"path relative to the repository root\",\"line\":123,\"endLine\":125,\"severity\":\"critical|major|minor\",\"title\":\"one sentence saying what is wrong\",\"detail\":\"what is wrong, the concrete failure scenario and exactly what to change, in two or three sentences\"}]}\n\
 ```\n\
-Line numbers refer to the file as it is now. Include every finding from the written review and nothing else; use an empty findings array when there are none. The detail is handed to the agent that wrote the code as the fix request, so it must stand on its own: name what to add or change, not only what is missing. Write title and detail in the language of the review.";
+Line numbers refer to the file as it is now. Include every finding from the written review and nothing else; use an empty findings array when there are none. The detail is handed to the agent that wrote the code as the fix request, so it must stand on its own: name what to add or change, not only what is missing. Write title and detail in the language of the review."
+);
 
 pub const REVIEWER_KICKOFF: &str = "Review the current changes in this workspace.";
 pub const REVIEWER_OFFER: &str = "May I review these changes?";
@@ -227,6 +240,25 @@ impl ResidentAgent {
         self
     }
 
+    /// What the agent brings to a one-shot review that has its own output
+    /// format (a pull request reviewed from its patch): its method and the
+    /// person's extra instructions, without the task review's output block.
+    pub fn review_brief(&self) -> String {
+        let method = if self.preset.as_deref() == Some(REVIEWER_PRESET) {
+            REVIEWER_METHOD
+        } else {
+            self.role.as_str()
+        };
+        if self.extra_instructions.is_empty() {
+            method.to_string()
+        } else {
+            format!(
+                "{method}\n\nAdditional instructions from the person:\n{}",
+                self.extra_instructions
+            )
+        }
+    }
+
     /// Bounded background context re-sent with every turn of a bound session.
     /// The current user message always takes precedence over the role text.
     pub fn instruction_block(&self) -> String {
@@ -368,6 +400,26 @@ mod tests {
         // An agent the person owns is never rewritten.
         stored.preset = None;
         assert_eq!(stored.clone().with_preset_text(Some(&portuguese)), stored);
+    }
+
+    #[test]
+    fn review_brief_carries_the_method_without_the_task_output_block() {
+        assert!(REVIEWER_ROLE.starts_with(REVIEWER_METHOD));
+        assert!(REVIEWER_ROLE.contains("```dcc-review"));
+        assert!(!REVIEWER_METHOD.contains("dcc-review"));
+
+        let mut reviewer = agent("ignored for a preset");
+        reviewer.extra_instructions = "Ignore vendor/.".to_string();
+        let brief = reviewer.review_brief();
+        assert!(brief.starts_with(REVIEWER_METHOD));
+        assert!(brief.ends_with("Additional instructions from the person:\nIgnore vendor/."));
+        assert!(!brief.contains("dcc-review"));
+
+        // An agent the person wrote brings its own role.
+        reviewer.preset = None;
+        reviewer.role = "Check accessibility only.".to_string();
+        reviewer.extra_instructions = String::new();
+        assert_eq!(reviewer.review_brief(), "Check accessibility only.");
     }
 
     #[test]

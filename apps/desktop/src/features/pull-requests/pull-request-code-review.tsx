@@ -23,13 +23,21 @@ import {
 	Sparkles,
 	Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ComposerProviderModelMenu } from "@/features/composer/ComposerProviderModelMenu";
 import { runPullRequestReviewAgent } from "@/lib/session-api";
+import { AgentAvatar } from "@/features/agents/agent-avatar";
+import { useAgents } from "@/features/agents/use-agents";
+import {
+	dismissPrReviewJob,
+	markPrReviewJobSeen,
+	startPrReviewJob,
+	usePrReviewJobs,
+} from "@/features/agents/pr-review-jobs";
 import {
 	pullRequestHubReplyThread,
 	pullRequestHubResolveThread,
@@ -56,6 +64,8 @@ type PullRequestCodeReviewProps = {
 	selectedProviderRuntime: ProviderRuntimeConfig | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
+	/** Changes when the person accepts the reviewer's offer on this PR. */
+	autoStartReview?: number;
 };
 
 function draftKey(path: string, line: number, side: string) {
@@ -284,6 +294,7 @@ export function PullRequestCodeReview({
 	selectedProviderRuntime,
 	onSelectProvider,
 	onSelectModel,
+	autoStartReview = 0,
 }: PullRequestCodeReviewProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -303,8 +314,17 @@ export function PullRequestCodeReview({
 	const [replyBody, setReplyBody] = useState("");
 	const files = detail?.files ?? [];
 	const reviewProviders = providers.filter((provider) => provider.capabilities.supportsReadOnlyDelegation);
-	const reviewProvider = reviewProviders.find((provider) => provider.id === selectedProviderId) ?? reviewProviders[0] ?? null;
-	const reviewModel = reviewProvider?.models.find((model) => model.id === selectedModelId) ?? reviewProvider?.models[0] ?? null;
+	// The built-in reviewer reviews here too, from the patch. When the person
+	// gave it a provider that can review read-only, that choice wins.
+	const reviewer = useAgents("local").agents.find((agent) => agent.preset === "reviewer") ?? null;
+	const reviewerProvider = reviewProviders.find((provider) => provider.id === reviewer?.providerId) ?? null;
+	const reviewProvider = reviewerProvider ?? reviewProviders.find((provider) => provider.id === selectedProviderId) ?? reviewProviders[0] ?? null;
+	const reviewModel = reviewerProvider
+		? (reviewerProvider.models.find((model) => model.id === reviewer?.model) ?? reviewerProvider.models.find((model) => model.recommended) ?? reviewerProvider.models[0] ?? null)
+		: (reviewProvider?.models.find((model) => model.id === selectedModelId) ?? reviewProvider?.models[0] ?? null);
+	const [agentResult, setAgentResult] = useState<{ drafts: number } | null>(null);
+	const reviewJob = usePrReviewJobs().find((job) => job.prId === item.id) ?? null;
+	const busyKey = reviewJob?.status === "running" ? "review" : agentPendingKey;
 
 	useEffect(() => {
 		if (files.length === 0) {
@@ -317,6 +337,12 @@ export function PullRequestCodeReview({
 	}, [files, selectedPath]);
 
 	const selectedFile = files.find((file) => file.path === selectedPath) ?? null;
+	// Pending draft comments per file, so the person sees where to look without opening each one.
+	const draftCountByPath = useMemo(() => {
+		const counts = new Map<string, number>();
+		for (const draft of drafts) counts.set(draft.path, (counts.get(draft.path) ?? 0) + 1);
+		return counts;
+	}, [drafts]);
 	const rows = useMemo(() => parseUnifiedDiff(selectedFile?.patch), [selectedFile?.patch]);
 	const submitMutation = useMutation({
 		mutationFn: () =>
@@ -333,6 +359,7 @@ export function PullRequestCodeReview({
 			if (result.bodySubmitted) setReviewBody("");
 			if (result.decisionSubmitted) setReviewEvent("comment");
 			setSubmitted(result.submitted);
+			if (result.submitted) dismissPrReviewJob(item.id);
 			setSubmitWarning(result.warning);
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["pullRequestHub", "detail", item.id] }),
@@ -372,7 +399,7 @@ export function PullRequestCodeReview({
 		},
 	});
 
-	const runAgent = async (prompt: string) => {
+	const runAgent = async (prompt: string, agentId: string | null = null) => {
 		if (!reviewProvider) throw new Error(t("pullRequests.code.noReviewProvider"));
 		const result = await runPullRequestReviewAgent({
 			workingDirectory: item.repositoryRoot,
@@ -380,30 +407,62 @@ export function PullRequestCodeReview({
 			model: reviewModel?.id ?? null,
 			providerRuntime: reviewProvider.id === selectedProviderId ? selectedProviderRuntime : null,
 			prompt,
+			agentId,
 		});
 		return result.response;
 	};
-	const prepareFullReview = async () => {
-		if (!detail || agentPendingKey) return;
-		setAgentPendingKey("review");
+	// The full review runs as a job that outlives this screen: leaving the PR
+	// neither cancels it nor loses its result.
+	const prepareFullReview = () => {
+		if (!detail || busyKey) return;
 		setAgentError(null);
+		setAgentResult(null);
+		setAgentPanelOpen(false);
+		const prompt = buildReviewAgentPrompt(item, detail, agentInstruction);
+		startPrReviewJob(
+			{ prId: item.id, label: `${item.repositoryName}#${item.number}`, title: item.title },
+			() => runAgent(prompt, reviewer?.id ?? null),
+		);
+	};
+	// Apply a finished review once per visit, so coming back to the PR brings
+	// the drafts back until the review is submitted or discarded.
+	const appliedReviewRef = useRef<number | null>(null);
+	useEffect(() => {
+		if (!reviewJob || reviewJob.status === "running" || !detail) return;
+		if (appliedReviewRef.current === reviewJob.finishedAt) return;
+		appliedReviewRef.current = reviewJob.finishedAt;
+		markPrReviewJobSeen(item.id);
+		if (reviewJob.status === "failed") {
+			setAgentError(reviewJob.error ?? t("pullRequests.code.agentError"));
+			dismissPrReviewJob(item.id);
+			return;
+		}
 		try {
-			const result = parseAgentReview(await runAgent(buildReviewAgentPrompt(item, detail, agentInstruction)), detail);
-			setReviewBody(result.summary);
+			const result = parseAgentReview(reviewJob.response ?? "", detail);
+			setAgentResult({ drafts: result.comments.length });
+			// Land on the first file the reviewer commented on, in the PR's file order.
+			const firstCommented = detail.files.find((file) => result.comments.some((comment) => comment.path === file.path));
+			if (firstCommented) setSelectedPath(firstCommented.path);
+			setReviewBody((current) => current || result.summary);
 			setDrafts((current) => {
 				const generatedKeys = new Set(result.comments.map((draft) => draftKey(draft.path, draft.line, draft.side)));
 				return [...current.filter((draft) => !generatedKeys.has(draftKey(draft.path, draft.line, draft.side))), ...result.comments];
 			});
-			setAgentPanelOpen(false);
 			setSubmitted(false);
 		} catch (error) {
 			setAgentError(error instanceof Error ? error.message : t("pullRequests.code.agentError"));
-		} finally {
-			setAgentPendingKey(null);
+			dismissPrReviewJob(item.id);
 		}
-	};
+	}, [detail, item.id, reviewJob, t]);
+	// The offer on the PR was accepted before the patches had loaded.
+	const autoStartedRef = useRef(0);
+	useEffect(() => {
+		if (!autoStartReview || autoStartReview === autoStartedRef.current || !detail) return;
+		autoStartedRef.current = autoStartReview;
+		if (!reviewJob) prepareFullReview();
+	});
 	const prepareInline = async (row: UnifiedDiffLine) => {
-		if (!selectedFile || row.reviewLine == null || row.reviewSide == null || agentPendingKey) return;
+		if (!selectedFile || row.reviewLine == null || row.reviewSide == null || busyKey) return;
 		const key = draftKey(selectedFile.path, row.reviewLine, row.reviewSide);
 		setAgentPendingKey(`inline:${key}`);
 		setAgentError(null);
@@ -417,7 +476,7 @@ export function PullRequestCodeReview({
 		}
 	};
 	const prepareReply = async (comment: PullRequestHubInlineComment) => {
-		if (!selectedFile || agentPendingKey) return;
+		if (!selectedFile || busyKey) return;
 		setAgentPendingKey(`reply:${comment.id}`);
 		setAgentError(null);
 		try {
@@ -486,19 +545,45 @@ export function PullRequestCodeReview({
 			{agentPanelOpen ? (
 				<section className="shrink-0 border-b border-violet-500/20 bg-violet-500/5 px-4 py-3">
 					<div className="flex flex-wrap items-center gap-2">
-						<Sparkles className="size-4 text-violet-500" />
+						{reviewer ? (
+							<AgentAvatar avatar={reviewer.avatar} state={busyKey === "review" ? "working" : undefined} size={28} />
+						) : (
+							<Sparkles className="size-4 text-violet-500" />
+						)}
 						<div className="min-w-0 flex-1">
-							<strong className="text-[12px] font-medium">{t("pullRequests.code.agentReviewTitle")}</strong>
-							<p className="text-[10px] text-muted-foreground">{t("pullRequests.code.agentReviewHint")}</p>
+							<strong className="text-[12px] font-medium">{reviewer ? t("pullRequests.code.agentReviewTitleNamed", { agent: reviewer.name }) : t("pullRequests.code.agentReviewTitle")}</strong>
+							<p className="text-[10px] text-muted-foreground">{busyKey === "review" && reviewer ? t("pullRequests.code.agentReviewing", { agent: reviewer.name }) : t("pullRequests.code.agentReviewHint")}</p>
 						</div>
-						<ComposerProviderModelMenu providers={reviewProviders} selectedProviderId={reviewProvider?.id ?? null} selectedModelId={reviewModel?.id ?? null} onSelectProvider={onSelectProvider} onSelectModel={onSelectModel} disabled={agentPendingKey != null} />
-						<Button size="xs" variant="ghost" onClick={() => setAgentPanelOpen(false)} disabled={agentPendingKey != null}>{t("pullRequests.code.cancel")}</Button>
-						<Button size="xs" onClick={() => void prepareFullReview()} disabled={!reviewProvider || agentPendingKey != null}>
-							{agentPendingKey === "review" ? <Loader2 className="mr-1 size-3 animate-spin" /> : <Sparkles className="mr-1 size-3" />}
+						{reviewerProvider ? (
+							<span className="rounded-md bg-background/70 px-2 py-1 text-[11px] text-muted-foreground">{[reviewerProvider.label, reviewModel?.label].filter(Boolean).join(" · ")}</span>
+						) : (
+							<ComposerProviderModelMenu providers={reviewProviders} selectedProviderId={reviewProvider?.id ?? null} selectedModelId={reviewModel?.id ?? null} onSelectProvider={onSelectProvider} onSelectModel={onSelectModel} disabled={agentPendingKey != null} />
+						)}
+						<Button size="xs" variant="ghost" onClick={() => setAgentPanelOpen(false)} disabled={busyKey != null}>{t("pullRequests.code.cancel")}</Button>
+						<Button size="xs" onClick={() => void prepareFullReview()} disabled={!reviewProvider || busyKey != null}>
+							{busyKey === "review" ? <Loader2 className="mr-1 size-3 animate-spin" /> : <Sparkles className="mr-1 size-3" />}
 							{t("pullRequests.code.generateDrafts")}
 						</Button>
 					</div>
 					<Textarea value={agentInstruction} onChange={(event) => setAgentInstruction(event.target.value)} placeholder={t("pullRequests.code.agentInstructionPlaceholder")} className="mt-2 min-h-14 resize-y bg-background/70 text-[11px]" />
+				</section>
+			) : busyKey === "review" && reviewer ? (
+				<section className="flex shrink-0 items-center gap-2.5 border-b border-violet-500/20 bg-violet-500/5 px-4 py-2.5" aria-live="polite">
+					<AgentAvatar avatar={reviewer.avatar} state="working" size={28} />
+					<p className="min-w-0 flex-1 text-[12px] text-foreground">
+						{t("pullRequests.code.agentReviewing", { agent: reviewer.name })}{" "}
+						<span className="text-muted-foreground">{t("pullRequests.code.agentReviewingBackground")}</span>
+					</p>
+				</section>
+			) : agentResult && reviewer ? (
+				<section className="flex shrink-0 items-center gap-2.5 border-b border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5" aria-live="polite">
+					<AgentAvatar avatar={reviewer.avatar} state={agentResult.drafts > 0 ? "done" : undefined} size={28} />
+					<p className="min-w-0 flex-1 text-[12px] text-foreground">
+						{agentResult.drafts > 0
+							? t("pullRequests.code.agentDrafted", { agent: reviewer.name, count: agentResult.drafts })
+							: t("pullRequests.code.agentFoundNothing", { agent: reviewer.name })}
+					</p>
+					<Button size="xs" variant="ghost" onClick={() => setAgentResult(null)}>{t("pullRequests.code.dismissAgentResult")}</Button>
 				</section>
 			) : null}
 			<div className="dcc-pr-code-body flex min-h-0 flex-1">
@@ -520,6 +605,14 @@ export function PullRequestCodeReview({
 							>
 								<FileCode2 className="size-3.5 shrink-0" />
 								<span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span>
+								{draftCountByPath.get(file.path) ? (
+									<span
+										className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-amber-700 dark:text-amber-300"
+										title={t("pullRequests.code.fileDrafts", { count: draftCountByPath.get(file.path) })}
+									>
+										{draftCountByPath.get(file.path)}
+									</span>
+								) : null}
 								<span className="shrink-0 text-[9px]"><b className="font-medium text-emerald-500">+{file.additions}</b> <b className="font-medium text-red-500">−{file.deletions}</b></span>
 								<ChevronRight className="size-3 shrink-0 opacity-50" />
 							</button>
@@ -554,7 +647,7 @@ export function PullRequestCodeReview({
 										onSaveComment={() => saveComment(row)}
 										onRemoveDraft={() => key && setDrafts((current) => current.filter((entry) => draftKey(entry.path, entry.line, entry.side) !== key))}
 										onPrepareInlineWithAgent={() => void prepareInline(row)}
-										agentPendingKey={agentPendingKey}
+										agentPendingKey={busyKey}
 										replyingToId={replyingToId}
 										replyBody={replyBody}
 										onReplyBodyChange={setReplyBody}
@@ -586,15 +679,15 @@ export function PullRequestCodeReview({
 							<Button
 								size="icon-xs"
 								variant="outline"
-								aria-label={t("pullRequests.code.reviewWithAgent")}
+								aria-label={reviewer ? t("pullRequests.code.reviewWithNamedAgent", { agent: reviewer.name }) : t("pullRequests.code.reviewWithAgent")}
 								aria-expanded={agentPanelOpen}
 								onClick={() => { setAgentPanelOpen((current) => !current); setAgentError(null); }}
-								disabled={reviewProviders.length === 0 || agentPendingKey != null}
+								disabled={reviewProviders.length === 0 || busyKey != null}
 							>
-								<Sparkles className="size-3" />
+								{reviewer ? <AgentAvatar avatar={reviewer.avatar} size={16} /> : <Sparkles className="size-3" />}
 							</Button>
 						</TooltipTrigger>
-						<TooltipContent side="top">{t("pullRequests.code.reviewWithAgent")}</TooltipContent>
+						<TooltipContent side="top">{reviewer ? t("pullRequests.code.reviewWithNamedAgent", { agent: reviewer.name }) : t("pullRequests.code.reviewWithAgent")}</TooltipContent>
 					</Tooltip>
 					<div className="ml-auto flex items-center gap-1 rounded-lg bg-muted/50 p-1">
 						{(["comment", "approve", "request_changes"] as const).map((event) => {

@@ -1973,6 +1973,11 @@ export type RunPullRequestReviewAgentInput = {
 	model: string | null,
 	providerRuntime: ProviderRuntimeConfig | null,
 	prompt: string,
+	/**
+	 *  The resident agent reviewing. Its method and the person's extra
+	 *  instructions lead the prompt; the output format stays the caller's.
+	 */
+	agentId?: string | null,
 };
 
 export type RunPullRequestReviewAgentOutput = {

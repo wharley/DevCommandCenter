@@ -173,6 +173,7 @@
       "reviewer": "Revisor"
     },
     "state": {
+      "failed": "Falhou",
       "finished": "Concluída",
       "idle": "Em espera",
       "working": "Trabalhando",
@@ -192,6 +193,7 @@
       "failed": "Não foi possível chamar o agente."
     },
     "page": {
+      "pullRequests": "Pull Requests",
       "duplicate": "Duplicar",
       "copyName": "{{agent}} (cópia)",
       "roleBuiltIn": "Papel · mantido pelo DCC",
@@ -480,6 +482,7 @@
     }
   },
   "pullRequests": {
+    "reviewerOffer": "Posso revisar este PR?",
     "title": "Pull Requests",
     "subtitle": "Todos os projetos, sem criar uma tarefa",
     "refresh": "Atualizar pull requests",
@@ -586,6 +589,16 @@
       "resolveThread": "Resolver conversa",
       "reopenThread": "Reabrir conversa",
       "prepareWithAgent": "Preparar com agente",
+      "agentReviewTitleNamed": "Revisão do {{agent}}",
+      "agentReviewing": "{{agent}} está lendo o PR…",
+      "reviewWithNamedAgent": "Revisar com o {{agent}}",
+      "agentDrafted_one": "{{agent}} preparou {{count}} comentário em rascunho. Edite ou remova antes de enviar a revisão.",
+      "agentDrafted_other": "{{agent}} preparou {{count}} comentários em rascunho. Edite ou remova antes de enviar a revisão.",
+      "agentFoundNothing": "{{agent}} leu o PR e não encontrou problemas para comentar.",
+      "dismissAgentResult": "Ok",
+      "fileDrafts_one": "{{count}} comentário em rascunho",
+      "fileDrafts_other": "{{count}} comentários em rascunho",
+      "agentReviewingBackground": "Você pode sair desta tela; ele continua e avisa na barra lateral.",
       "reviewWithAgent": "Revisar com agente",
       "agentReviewTitle": "Revisão efêmera com agente",
       "agentReviewHint": "O agente apenas lê o PR e cria rascunhos. Nada é publicado ou vira tarefa.",

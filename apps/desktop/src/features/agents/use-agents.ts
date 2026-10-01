@@ -12,8 +12,10 @@ import {
 import { agentSessionState, aggregateAgentState } from "./agent-activity";
 import { isResultUnread, useSeenAgentResults } from "./agent-seen-results";
 import type { AgentActivityState } from "./agent-avatar";
+import { type PrReviewJob, usePrReviewJobs } from "./pr-review-jobs";
 
 export const AGENTS_QUERY_KEY = dccQueryKeys.agents;
+const NO_PR_REVIEWS: PrReviewJob[] = [];
 
 export type AgentSessionView = AgentSessionBinding & {
 	state: AgentActivityState;
@@ -25,6 +27,8 @@ export type AgentSessionView = AgentSessionBinding & {
 export type AgentView = ResidentAgent & {
 	state: AgentActivityState;
 	sessions: AgentSessionView[];
+	/** Pull request reviews run from the hub; only the built-in reviewer has them. */
+	prReviews: PrReviewJob[];
 };
 
 /**
@@ -63,6 +67,7 @@ export function useAgents(scope: string): {
 	});
 
 	const seen = useSeenAgentResults();
+	const prJobs = usePrReviewJobs();
 	return useMemo(() => {
 		const summaryBySessionId = new Map<string, WorkspaceSessionSummary>();
 		for (const summaries of summariesByWorkspace) {
@@ -86,12 +91,20 @@ export function useAgents(scope: string): {
 						unread: state === "done" && isResultUnread(completedAt, seen[binding.sessionId]),
 					};
 				});
+			const prReviews = agent.preset === "reviewer" ? prJobs : NO_PR_REVIEWS;
 			return {
 				...agent,
 				sessions,
-				state: aggregateAgentState(sessions),
+				prReviews,
+				state: aggregateAgentState([
+					...sessions,
+					...prReviews.map((job) => ({
+						state: job.status === "running" ? ("working" as const) : ("done" as const),
+						unread: job.status === "done" && !job.seen,
+					})),
+				]),
 			};
 		});
 		return { agents, agentBySessionId, isLoading: overview.isLoading };
-	}, [bindings, overview.data?.agents, overview.isLoading, seen, summariesByWorkspace]);
+	}, [bindings, overview.data?.agents, overview.isLoading, prJobs, seen, summariesByWorkspace]);
 }

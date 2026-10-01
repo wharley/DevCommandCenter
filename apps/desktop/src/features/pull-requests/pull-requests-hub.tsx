@@ -54,6 +54,13 @@ import {
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
 import { PullRequestCodeReview } from "./pull-request-code-review";
+import { OfferThought } from "@/features/agents/agent-review-offer";
+import {
+	subscribeOpenPullRequest,
+	takePendingOpenPullRequest,
+	usePrReviewJobs,
+} from "@/features/agents/pr-review-jobs";
+import { useAgents } from "@/features/agents/use-agents";
 
 type PullRequestFilter = "all" | "reviewing" | "mine";
 type PullRequestTab = "summary" | "code";
@@ -140,6 +147,21 @@ export function PullRequestsHub({
 	const [search, setSearch] = useState("");
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<PullRequestTab>("summary");
+	// The built-in reviewer offers itself on a PR waiting for the person's review.
+	const reviewer = useAgents("local").agents.find((agent) => agent.preset === "reviewer") ?? null;
+	const [answeredOffers, setAnsweredOffers] = useState<ReadonlySet<string>>(() => new Set());
+	const [autoStartReview, setAutoStartReview] = useState(0);
+	// Another screen (the agent's page) may ask for a specific PR.
+	useEffect(() => {
+		const open = (prId: string | null) => {
+			if (!prId) return;
+			setFilter("all");
+			setSelectedId(prId);
+			setActiveTab("code");
+		};
+		open(takePendingOpenPullRequest());
+		return subscribeOpenPullRequest(() => open(takePendingOpenPullRequest()));
+	}, []);
 	const [comment, setComment] = useState("");
 	const [workingOnId, setWorkingOnId] = useState<string | null>(null);
 	const [pendingMergeMethod, setPendingMergeMethod] =
@@ -175,6 +197,13 @@ export function PullRequestsHub({
 	}, [filteredItems, selectedId]);
 
 	const selected = filteredItems.find((item) => item.id === selectedId) ?? null;
+	const prReviewJobs = usePrReviewJobs();
+	const showReviewOffer =
+		selected != null &&
+		selected.reviewRequestedForViewer &&
+		!answeredOffers.has(selected.id) &&
+		!prReviewJobs.some((job) => job.prId === selected.id) &&
+		providers.some((provider) => provider.capabilities.supportsReadOnlyDelegation);
 	const detailQuery = useQuery({
 		queryKey: ["pullRequestHub", "detail", selected?.id],
 		queryFn: () =>
@@ -408,7 +437,7 @@ export function PullRequestsHub({
 				) : null}
 			</section>
 
-			<section className="dcc-pr-detail flex min-w-0 flex-1 flex-col">
+			<section className="dcc-pr-detail relative flex min-w-0 flex-1 flex-col">
 				{!selected ? (
 					<div className="grid h-full place-items-center text-[13px] text-muted-foreground">
 						{t("pullRequests.selectPrompt")}
@@ -526,6 +555,26 @@ export function PullRequestsHub({
 							</div>
 						</header>
 
+						{reviewer && showReviewOffer ? (
+							<div className="pointer-events-none absolute bottom-5 right-6 z-20">
+								<div className="pointer-events-auto">
+									<OfferThought
+										agent={reviewer}
+										question={t("pullRequests.reviewerOffer")}
+										acceptLabel={t("agents.offer.accept")}
+										dismissLabel={t("agents.offer.dismiss")}
+										onAccept={() => {
+											setAnsweredOffers((current) => new Set(current).add(selected.id));
+											setActiveTab("code");
+											setAutoStartReview((current) => current + 1);
+										}}
+										onDismiss={() =>
+											setAnsweredOffers((current) => new Set(current).add(selected.id))
+										}
+									/>
+								</div>
+							</div>
+						) : null}
 						<div
 							className={cn(
 								"min-h-0 flex-1",
@@ -550,6 +599,7 @@ export function PullRequestsHub({
 									selectedProviderRuntime={selectedProviderRuntime}
 									onSelectProvider={onSelectProvider}
 									onSelectModel={onSelectModel}
+									autoStartReview={autoStartReview}
 								/>
 							) : (
 								<div className="mx-auto max-w-4xl space-y-6">

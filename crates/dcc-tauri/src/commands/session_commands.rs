@@ -67,6 +67,10 @@ pub struct RunPullRequestReviewAgentInput {
     pub model: Option<String>,
     pub provider_runtime: Option<ProviderRuntimeConfig>,
     pub prompt: String,
+    /// The resident agent reviewing. Its method and the person's extra
+    /// instructions lead the prompt; the output format stays the caller's.
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -657,7 +661,20 @@ pub async fn run_pull_request_review_agent(
         return Err("Select a provider for the review.".to_string());
     }
     let prompt = input.prompt.trim();
-    if prompt.is_empty() || prompt.len() > 120_000 {
+    let prompt = match input.agent_id.as_deref() {
+        Some(agent_id) => {
+            let agent = state
+                .resident_agent(agent_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "The reviewing agent no longer exists.".to_string())?;
+            format!(
+                "{}\n\nThis review is of a pull request, from the patches below. You cannot run, edit or publish anything; judge only what the patches show.\n\n{prompt}",
+                agent.review_brief()
+            )
+        }
+        None => prompt.to_string(),
+    };
+    if prompt.trim().is_empty() || prompt.len() > 120_000 {
         return Err("Pull request review context is empty or too large.".to_string());
     }
     let response = state
@@ -666,7 +683,7 @@ pub async fn run_pull_request_review_agent(
             provider_id.to_string(),
             input.model,
             input.provider_runtime,
-            prompt.to_string(),
+            prompt,
         )
         .await
         .map_err(|error| error.to_string())?;

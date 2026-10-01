@@ -26,6 +26,7 @@ import {
 } from "@/lib/agents-api";
 import { cn } from "@/lib/utils";
 import { AgentAvatar } from "./agent-avatar";
+import { requestOpenPullRequest } from "./pr-review-jobs";
 import { AGENTS_QUERY_KEY, type AgentSessionView, type AgentView } from "./use-agents";
 
 type Providers = ProviderCatalog["providers"];
@@ -516,6 +517,60 @@ export function AgentPage({
 						</ul>
 					)}
 				</section>
+
+				{agent.prReviews.length > 0 && (
+					<section>
+						<h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+							{t("agents.page.pullRequests")}
+						</h2>
+						<ul className="divide-y divide-border/60 overflow-hidden rounded-[18px] border border-border/70 bg-card">
+							{agent.prReviews.map((job) => {
+								const unread = job.status === "done" && !job.seen;
+								return (
+									<li key={job.prId}>
+										<button
+											type="button"
+											onClick={() => requestOpenPullRequest(job.prId)}
+											className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+										>
+											<AgentAvatar
+												avatar={agent.avatar}
+												state={job.status === "running" ? "working" : unread ? "done" : undefined}
+												size={28}
+											/>
+											<span className="min-w-0 flex-1">
+												<span className="block truncate text-[13px] font-medium text-foreground">
+													{job.title}
+												</span>
+												<span className="block truncate font-mono text-[11px] text-muted-foreground">
+													{job.label}
+												</span>
+											</span>
+											<span
+												className={cn(
+													"shrink-0 text-[11px]",
+													unread
+														? "font-medium text-emerald-700 dark:text-emerald-300"
+														: job.status === "failed"
+															? "text-destructive"
+															: "text-muted-foreground",
+												)}
+											>
+												{job.status === "running"
+													? t("agents.state.working")
+													: job.status === "failed"
+														? t("agents.state.failed")
+														: unread
+															? t("agents.state.done")
+															: t("agents.state.finished")}
+											</span>
+										</button>
+									</li>
+								);
+							})}
+						</ul>
+					</section>
+				)}
 
 				<section>
 					<h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">

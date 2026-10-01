@@ -6805,6 +6805,26 @@ impl SqliteSessionRepo {
             .collect())
     }
 
+    /// One live agent by id.
+    pub fn load_resident_agent(&self, id: &str) -> Result<Option<ResidentAgent>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let agent = conn
+            .query_row(
+                &format!(
+                    "SELECT {} FROM dcc_agents a WHERE a.id = ?1 AND a.deleted_at IS NULL",
+                    Self::RESIDENT_AGENT_COLUMNS
+                ),
+                params![id],
+                Self::resident_agent_from_row,
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(agent.map(|agent| agent.with_preset_text(None)))
+    }
+
     /// Creates the agent when `id` is `None`, otherwise updates a live one.
     /// On a preset only the name, avatar, provider, model, extra instructions
     /// and whether it offers itself are the person's to change.
@@ -13282,8 +13302,13 @@ mod tests {
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].workspace_id, "workspace-1");
 
+        assert_eq!(
+            repo.load_resident_agent(&reviewer.id).unwrap().unwrap().role,
+            REVIEWER_ROLE
+        );
         assert!(repo.delete_resident_agent(&reviewer.id).unwrap());
         assert!(!repo.delete_resident_agent(&reviewer.id).unwrap());
+        assert_eq!(repo.load_resident_agent(&reviewer.id).unwrap(), None);
         assert_eq!(repo.load_session_agent(&session.id).unwrap(), None);
         assert!(repo.list_agent_session_bindings().unwrap().is_empty());
         // The deleted preset is not created again.
