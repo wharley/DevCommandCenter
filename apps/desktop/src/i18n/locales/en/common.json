@@ -2358,7 +2358,7 @@
       "points": {
         "memory_filter": {
           "label": "Memory filter",
-          "hint": "Selects relevant memories before they reach the agent.",
+          "hint": "Ranks retrieved memories against the request and conversation; keeps up to three above the minimum.",
           "threshold": "Minimum relevance"
         },
         "skill_router": {
@@ -2368,7 +2368,7 @@
         },
         "model_router": {
           "label": "Model router",
-          "hint": "Prioritizes quality using the request and conversation. Keeps the current model when the difference is small.",
+          "hint": "Looks for the right-sized model for the request and conversation; prefers the more capable one when unsure. Keeps the current model when the difference is small.",
           "threshold": "Minimum suitability probability"
         },
         "completion_review": {

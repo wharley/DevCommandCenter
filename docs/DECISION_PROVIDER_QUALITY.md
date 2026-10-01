@@ -1,6 +1,6 @@
 # Jev decision quality
 
-The `jev-v2` policy uses `noul` questions: each value is the probability that a
+The `jev-v3` policy uses `noul` questions: each value is the probability that a
 proposition is true. It is not a percentage of work completed. The legacy
 `*ConfidenceThreshold` fields remain in the contract for compatibility, but
 filters use only `noul`, never a separate confidence field.
@@ -10,18 +10,25 @@ References: [Noul](https://docs.typesafe.ai/primitives/noul) and
 
 ## Behavior
 
-- **Models:** considers the request, the first conversation message, and recent
-  messages. Each excerpt preserves its beginning and end. Routing prioritizes
-  quality based on the provider's model catalog descriptions. A switch requires
-  meeting the suitability threshold and a margin of 0.10 over both the current
-  model and competing candidates. Ties retain the current model; without a clear
-  winner, the router abstains. Providers with dynamic catalogs remain unsupported
-  for routing. The catalog does not verify account access or provide performance
-  benchmarks.
-- **Skills and memory:** asks one usefulness question per candidate. A valid
-  rejection of all memories produces empty memory context; network or schema
-  failures preserve the original retrieval results. Observe mode does not change
-  the context.
+Memory, skills, and models all receive the request, the first conversation
+message, and recent messages, so a short follow-up is judged against what it
+continues. Each excerpt preserves its beginning and end.
+
+- **Models:** asks whether each model is the right-sized choice: capable enough
+  for the task, with no lighter catalog model that would do it as reliably.
+  Unclear difficulty favors the more capable model. A switch requires meeting
+  the threshold and a margin of 0.10 over both the current model and competing
+  candidates. Ties retain the current model; without a clear winner, the router
+  abstains. Providers with dynamic catalogs remain unsupported for routing. The
+  catalog does not verify account access or provide performance benchmarks.
+- **Memory:** asks whether each retrieved note would help carry out the task.
+  The threshold is a floor; the best three candidates above it are kept, ranked
+  by score. A valid rejection of all memories produces empty memory context;
+  network or schema failures preserve the original retrieval results.
+- **Skills:** asks whether the task matches the situation each skill's
+  description covers.
+- **Observe mode** records memory and skill decisions without changing the
+  context.
 - **Review:** after a turn finishes, evaluates request coverage, constraints,
   evidence supporting execution claims, and appropriate validation. Uses history
   preceding the turn, the response, tool records, and that turn's change
@@ -54,7 +61,9 @@ tests, or independent fact verification.
 | Review | 0.80 per criterion | Flags more responses |
 | Tool risk | 0.65 | Flags fewer actions |
 
-These are starting hypotheses, not thresholds calibrated for DCC. Previously
+These are starting hypotheses, not thresholds calibrated for DCC. The questions
+changed in `jev-v3`, so scores recorded under `jev-v2` are not comparable; filter
+decision history by `evaluation_json.version` before tuning. Previously
 saved values are preserved. Older configurations receive the tool guard control
 with an independent threshold of 0.65. API keys and conversation content are not
 stored in decision history; the `evaluation_json` column stores the policy

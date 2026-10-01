@@ -2358,7 +2358,7 @@
       "points": {
         "memory_filter": {
           "label": "Filtro de memória",
-          "hint": "Seleciona memórias relevantes antes que cheguem ao agente.",
+          "hint": "Ordena as memórias recuperadas pelo pedido e pela conversa; mantém até três acima do mínimo.",
           "threshold": "Relevância mínima"
         },
         "skill_router": {
@@ -2368,7 +2368,7 @@
         },
         "model_router": {
           "label": "Roteador de modelos",
-          "hint": "Prioriza qualidade usando o pedido e a conversa. Mantém o modelo atual quando a diferença é pequena.",
+          "hint": "Busca o modelo do tamanho certo para o pedido e a conversa; na dúvida, prefere o mais capaz. Mantém o modelo atual quando a diferença é pequena.",
           "threshold": "Probabilidade mínima de adequação"
         },
         "completion_review": {

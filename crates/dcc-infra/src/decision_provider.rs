@@ -24,8 +24,12 @@ const DEFAULT_MEMORY_RELEVANCE_THRESHOLD: f64 = 0.65;
 const DEFAULT_CONFIDENCE_THRESHOLD: f64 = 0.65;
 const DEFAULT_COMPLETENESS_THRESHOLD: f64 = 0.80;
 const DEFAULT_MODEL_THRESHOLD: f64 = 0.80;
-pub const DECISION_POLICY_VERSION: &str = "jev-v2";
+pub const DECISION_POLICY_VERSION: &str = "jev-v3";
 pub const MODEL_SWITCH_MARGIN: f64 = 0.10;
+/// Memory is ranked, not just gated: the threshold is a floor and only the
+/// best few candidates above it reach the agent.
+pub const MAX_SELECTED_MEMORIES: usize = 3;
+const MAX_CONVERSATION_CHARS: usize = 6_000;
 const MAX_TASK_CHARS: usize = 6_000;
 const MAX_MEMORY_SNIPPET_CHARS: usize = 1_500;
 
@@ -183,6 +187,8 @@ impl DecisionProviderConfig {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MemoryFilterInput<'a> {
+    pub context: &'a str,
+    pub context_truncated: bool,
     pub prompt: &'a str,
     pub hits: &'a [AiMemoryHit],
 }
@@ -209,6 +215,8 @@ pub struct SkillRouteCandidate<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkillRouteInput<'a> {
+    pub context: &'a str,
+    pub context_truncated: bool,
     pub prompt: &'a str,
     pub candidates: &'a [SkillRouteCandidate<'a>],
 }
@@ -368,16 +376,12 @@ impl TypeSafeDecisionProvider {
         hits: Vec<AiMemoryHit>,
         result: &MemoryFilterResult,
     ) -> Vec<AiMemoryHit> {
-        let selected: Vec<AiMemoryHit> = result
-            .decisions
-            .iter()
-            .filter(|decision| decision.relevance >= self.config.memory_relevance_threshold)
-            .filter_map(|decision| hits.get(decision.index).cloned())
-            .collect();
-
         // A valid all-negative decision means no relevant memories. Network or
         // schema failures are handled by the caller, which retains original hits.
-        selected
+        select_memory_indices(&result.decisions, self.config.memory_relevance_threshold)
+            .into_iter()
+            .filter_map(|index| hits.get(index).cloned())
+            .collect()
     }
 
     async fn request(
@@ -428,7 +432,11 @@ impl DecisionProvider for TypeSafeDecisionProvider {
         &self,
         input: MemoryFilterInput<'_>,
     ) -> Result<MemoryFilterResult, DecisionProviderError> {
-        let mut state = decision_state(&[("task", input.prompt, MAX_TASK_CHARS)]);
+        let mut state = decision_state(&[
+            ("task", input.prompt, MAX_TASK_CHARS),
+            ("conversation", input.context, MAX_CONVERSATION_CHARS),
+        ]);
+        state.truncated |= input.context_truncated;
         state.truncated |= input.hits.iter().any(|h| {
             h.snippet
                 .as_ref()
@@ -436,9 +444,9 @@ impl DecisionProvider for TypeSafeDecisionProvider {
         });
         let questions = input.hits.iter().enumerate().map(|(index, hit)| {
             (format!("memory_{index}"), noul_question(
-                "Is this historical candidate directly useful for the current task?",
-                "It supplies facts, constraints or prior decisions needed for the task.",
-                "It only shares keywords, is unrelated, or contradicts the current request.",
+                "Would this note from the project's history help an engineer carry out the current task?",
+                "It records a decision, constraint, convention, earlier attempt or relevant code area that bears on the task or on the conversation the task continues.",
+                "It concerns a different feature or area, only shares keywords, or is superseded by the current request.",
                 json!({"title": truncate(hit.title.as_deref().or(hit.path.as_deref()).unwrap_or("memory"), 300),
                     "content": truncate(hit.snippet.as_deref().unwrap_or(""), MAX_MEMORY_SNIPPET_CHARS)})))
         }).collect();
@@ -464,16 +472,20 @@ impl DecisionProvider for TypeSafeDecisionProvider {
         &self,
         input: SkillRouteInput<'_>,
     ) -> Result<SkillRouteResult, DecisionProviderError> {
-        let mut state = decision_state(&[("task", input.prompt, MAX_TASK_CHARS)]);
+        let mut state = decision_state(&[
+            ("task", input.prompt, MAX_TASK_CHARS),
+            ("conversation", input.context, MAX_CONVERSATION_CHARS),
+        ]);
+        state.truncated |= input.context_truncated;
         state.truncated |= input
             .candidates
             .iter()
             .any(|c| c.description.chars().count() > MAX_MEMORY_SNIPPET_CHARS);
         let questions = input.candidates.iter().enumerate().map(|(index, candidate)| {
             (format!("skill_{index}"), noul_question(
-                "Should this skill be loaded to fulfill the current task?",
-                "The user explicitly requests it or its documented workflow is directly needed.",
-                "The connection is incidental or the skill does not help fulfill the task.",
+                "Does the current task match the situation this skill's description says it is for?",
+                "The task, or the conversation it continues, is the kind of work the description covers; or the user names the skill.",
+                "The task is outside what the description covers, or the overlap is only shared keywords.",
                 json!({"name": truncate(candidate.name, 300), "description": truncate(candidate.description, MAX_MEMORY_SNIPPET_CHARS)})))
         }).collect();
         let mut response = self.request_if_any(state, questions).await?;
@@ -510,20 +522,25 @@ impl DecisionProvider for TypeSafeDecisionProvider {
     ) -> Result<ModelRouteResult, DecisionProviderError> {
         let mut state = decision_state(&[
             ("task", input.prompt, MAX_TASK_CHARS),
-            ("conversation", input.context, 6_000),
+            ("conversation", input.context, MAX_CONVERSATION_CHARS),
         ]);
         state.truncated |= input.context_truncated
             || input
                 .candidates
                 .iter()
                 .any(|c| c.description.chars().count() > MAX_MEMORY_SNIPPET_CHARS);
-        state.value["policy"] = json!("Prioritize reliable task completion and reasoning quality. Honor explicit user model preferences. Speed and cost are secondary unless the user prioritizes them. Use supplied model capabilities; do not invent prices, benchmarks or access rights. Missing context is uncertainty, not proof that a task is easy.");
+        state.value["policy"] = json!("Pick the right-sized model: the lightest model in the catalog whose described capabilities are enough to complete the task reliably. Honor explicit user model preferences. When difficulty is unclear or context is missing, prefer the more capable model; missing context is uncertainty, not proof that a task is easy. Use supplied model capabilities; do not invent prices, benchmarks or access rights.");
+        state.value["catalog"] = json!(input
+            .candidates
+            .iter()
+            .map(|c| json!({"id": c.id, "capabilities": truncate(c.description, 300)}))
+            .collect::<Vec<_>>());
         state.value["current_model"] = json!(input.current_model);
         let questions = input.candidates.iter().enumerate().map(|(index, candidate)| {
             (format!("model_{index}"), noul_question(
-                "Is this model a suitable choice to reliably complete the task under the stated policy?",
-                "Its described capabilities meet the task's reasoning and context needs and the user's explicit requirements.",
-                "Its capabilities are insufficient, it conflicts with an explicit model requirement, or there is insufficient evidence of suitability.",
+                "Is this model the right-sized choice for the task under the stated policy?",
+                "Its described capabilities cover the task's reasoning and context needs and no lighter catalog model would complete it as reliably; or the user explicitly asks for it.",
+                "Its capabilities are insufficient, the task is simple enough that a lighter catalog model would do it equally well, or it conflicts with an explicit model requirement.",
                 json!({"id": candidate.id, "label": candidate.label, "capabilities": truncate(candidate.description, MAX_MEMORY_SNIPPET_CHARS)})))
         }).collect();
         let mut response = self.request_if_any(state, questions).await?;
@@ -669,6 +686,20 @@ impl TypeSafeDecisionProvider {
         }
         self.request(state, questions).await
     }
+}
+
+/// Candidates at or above the floor, best first, capped at `MAX_SELECTED_MEMORIES`.
+pub fn select_memory_indices(decisions: &[MemoryFilterDecision], threshold: f64) -> Vec<usize> {
+    let mut ranked: Vec<&MemoryFilterDecision> = decisions
+        .iter()
+        .filter(|decision| decision.relevance >= threshold)
+        .collect();
+    ranked.sort_by(|a, b| b.relevance.total_cmp(&a.relevance));
+    ranked
+        .into_iter()
+        .take(MAX_SELECTED_MEMORIES)
+        .map(|decision| decision.index)
+        .collect()
 }
 
 /// Keep the current model on ties and small differences. Without a known current
@@ -855,6 +886,63 @@ mod tests {
             model: DEFAULT_MODEL.to_string(),
         };
         assert_eq!(provider.filter_hits(hits, &result).len(), 1);
+    }
+
+    #[test]
+    fn memory_selection_ranks_and_caps_candidates_above_the_floor() {
+        let decisions: Vec<_> = [0.7, 0.3, 0.9, 0.8, 0.75]
+            .iter()
+            .enumerate()
+            .map(|(index, &relevance)| MemoryFilterDecision {
+                index,
+                relevance,
+                confidence: None,
+            })
+            .collect();
+        assert_eq!(select_memory_indices(&decisions, 0.65), vec![2, 3, 4]);
+        assert!(select_memory_indices(&decisions, 0.95).is_empty());
+    }
+
+    #[tokio::test]
+    async fn memory_and_skill_questions_include_the_conversation() {
+        let (url, server) =
+            mock_server(json!({"answers":{"memory_0":{"type":"noul","noul":0.7}}}));
+        let hits = [hit("decision", "terminal moved to a side dock")];
+        fixture_provider(url)
+            .filter_memory(MemoryFilterInput {
+                prompt: "continue",
+                context: "We are reworking the terminal layout",
+                context_truncated: true,
+                hits: &hits,
+            })
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        assert_eq!(
+            request["state"]["conversation"]["text"],
+            "We are reworking the terminal layout"
+        );
+
+        let (url, server) = mock_server(json!({"answers":{"skill_0":{"type":"noul","noul":0.7}}}));
+        let candidates = [SkillRouteCandidate {
+            name: "release",
+            description: "Cut a release",
+        }];
+        let result = fixture_provider(url)
+            .route_skills(SkillRouteInput {
+                prompt: "continue",
+                context: "We are preparing v1.2",
+                context_truncated: true,
+                candidates: &candidates,
+            })
+            .await
+            .unwrap();
+        assert!(result.evaluation.context_truncated);
+        let request = server.join().unwrap();
+        assert_eq!(
+            request["state"]["conversation"]["text"],
+            "We are preparing v1.2"
+        );
     }
 
     #[test]
@@ -1081,6 +1169,7 @@ mod tests {
             request["questions"]["model_0"]["instructions"]["candidate"]["id"],
             "capable"
         );
+        assert_eq!(request["state"]["catalog"][0]["id"], "capable");
         assert_eq!(
             request["state"]["conversation"]["text"],
             "Previously agreed architecture"

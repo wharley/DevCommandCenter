@@ -1402,6 +1402,22 @@ fn render_selected_skill_context(
     (context.len() > 64).then_some(context)
 }
 
+/// Recent conversation shared by the per-turn decision points, so a short
+/// follow-up ("continue") is judged against what it continues.
+async fn decision_conversation_context(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+) -> dcc_infra::decision_context::DecisionContext {
+    match SessionEventRepo::list_events_by_session(state, session_id).await {
+        Ok(events) => dcc_infra::decision_context::conversation_context(&events, None),
+        Err(_) => dcc_infra::decision_context::DecisionContext {
+            text: "Conversation history unavailable; do not assume this task is simple."
+                .to_string(),
+            truncated: true,
+        },
+    }
+}
+
 async fn evaluate_decision_provider_model_route(
     state: &SessionCommandState,
     input: &DecisionProviderModelRouteInput,
@@ -1483,20 +1499,12 @@ async fn evaluate_decision_provider_model_route(
         };
     }
 
-    let context = if let Some(id) = input.session_id.as_ref() {
-        match SessionEventRepo::list_events_by_session(state, &SessionId(id.clone())).await {
-            Ok(events) => dcc_infra::decision_context::conversation_context(&events, None),
-            Err(_) => dcc_infra::decision_context::DecisionContext {
-                text: "Conversation history unavailable; do not assume this task is simple."
-                    .to_string(),
-                truncated: true,
-            },
-        }
-    } else {
-        dcc_infra::decision_context::DecisionContext {
+    let context = match input.session_id.as_ref() {
+        Some(id) => decision_conversation_context(state, &SessionId(id.clone())).await,
+        None => dcc_infra::decision_context::DecisionContext {
             text: String::new(),
             truncated: false,
-        }
+        },
     };
     let started = Instant::now();
     let result = match provider
@@ -1850,6 +1858,7 @@ async fn decision_provider_skill_context_for_turn(
             description: &record.description,
         })
         .collect::<Vec<_>>();
+    let context = decision_conversation_context(state, &session.id).await;
     let started = Instant::now();
     let mode = match provider.config().mode {
         DecisionMode::Observe => "observe",
@@ -1857,6 +1866,8 @@ async fn decision_provider_skill_context_for_turn(
     };
     let result = match provider
         .route_skills(SkillRouteInput {
+            context: &context.text,
+            context_truncated: context.truncated,
             prompt,
             candidates: &candidates,
         })
@@ -2013,6 +2024,7 @@ async fn apply_decision_provider_memory_filter(
         return hits;
     }
 
+    let context = decision_conversation_context(state, session_id).await;
     let started = Instant::now();
     let mode = match provider.config().mode {
         DecisionMode::Observe => "observe",
@@ -2021,6 +2033,8 @@ async fn apply_decision_provider_memory_filter(
 
     let result = match provider
         .filter_memory(MemoryFilterInput {
+            context: &context.text,
+            context_truncated: context.truncated,
             prompt,
             hits: &hits,
         })
@@ -2052,12 +2066,10 @@ async fn apply_decision_provider_memory_filter(
     };
 
     let selected = provider.filter_hits(hits.clone(), &result);
-    let selected_indices = result
-        .decisions
-        .iter()
-        .filter(|decision| decision.relevance >= provider.config().memory_relevance_threshold)
-        .map(|decision| decision.index)
-        .collect::<Vec<_>>();
+    let selected_indices = dcc_infra::decision_provider::select_memory_indices(
+        &result.decisions,
+        provider.config().memory_relevance_threshold,
+    );
     if let Err(error) = state.record_decision_provider_evaluation(
         session_id,
         None,
