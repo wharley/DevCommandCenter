@@ -73,6 +73,7 @@ import type {
 } from "@dcc/contracts";
 import { derivePlanFollowUpState } from "./plan-follow-up";
 import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
+import { AgentReviewOffer } from "@/features/agents/agent-review-offer";
 import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
 import { useWorkspaceGitBranchDiff } from "@/features/inspector/use-workspace-git-branch-diff";
 import { useWorkspacePrStatus } from "@/features/inspector/use-workspace-pr-status";
@@ -1650,6 +1651,20 @@ export function WorkspacePanel({
 
 				<div className="shrink-0 px-3 pb-3 pt-2 sm:px-4">
 					<div className="mx-auto w-full max-w-[52rem]">
+					<AgentReviewOffer
+						workspaceId={workspaceId}
+						sessionId={effectiveSessionId}
+						sessions={sessions}
+						changedFileCount={
+							new Set(
+								[
+									...(gitStatusQuery.data?.staged ?? []),
+									...(gitStatusQuery.data?.unstaged ?? []),
+								].map((entry) => entry.path),
+							).size
+						}
+						scope={sessionQueryScope}
+					/>
 					<WorkspaceComposer
 						localBranchControl={!isIsolatedWorkspace && sessionQueryScope === "local" ? <LocalBranchPicker
 							key={workspaceId}

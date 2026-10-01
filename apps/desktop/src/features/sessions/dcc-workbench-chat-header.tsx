@@ -1,4 +1,7 @@
 import { BrainCircuit, Check, Cloud, CloudOff, EyeOff, Globe2, History, LoaderCircle, Pin, Plus, RefreshCw, Search, SquareTerminal, TextSearch, X } from "lucide-react";
+import { hasReviewableChanges, isSessionRunning } from "@/features/agents/review-offer";
+import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
+import { CallAgentButtons, SessionAgentBadge } from "@/features/agents/session-agent-controls";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -169,12 +172,16 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 			? t("workbench.terminal.openWithActive", { count: activeTerminalCount })
 		: t("workbench.terminal.open");
 	const NewSessionIcon = startingSession ? LoaderCircle : Plus;
+	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
 
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 items-center justify-between gap-3 overflow-hidden">
-			<h2 className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground" title={projectLabel ? `${projectLabel} / ${threadTitle}` : threadTitle}>
-				{threadTitle}
-			</h2>
+			<div className="flex min-w-0 flex-1 items-center gap-2">
+				<SessionAgentBadge sessionId={selectedSessionId} />
+				<h2 className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground" title={projectLabel ? `${projectLabel} / ${threadTitle}` : threadTitle}>
+					{threadTitle}
+				</h2>
+			</div>
 			<div className="flex shrink-0 items-center justify-end gap-1">
 				<Tooltip>
 					<TooltipTrigger asChild>
@@ -271,6 +278,10 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}
+				<CallAgentButtons
+					busy={sessions.some(isSessionRunning)}
+					hasChanges={hasReviewableChanges(gitStatusQuery.data)}
+				/>
 				<Tooltip>
 					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onStartSession} disabled={startingSession} aria-label={t("workbench.newSessionAria")} className="text-muted-foreground hover:text-foreground"><NewSessionIcon className={cn("size-3.5", startingSession && "animate-spin")} /></Button></TooltipTrigger>
 					<TooltipContent side="bottom">{t("workbench.newSessionTooltip")}</TooltipContent>
@@ -293,6 +304,7 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						{visibleSessionList.length > 0 ? visibleSessionList.map((session) => (
 							<DropdownMenuItem key={session.session.id} onSelect={() => onSelectSession(session.session.id)} className="group/session gap-2">
 								<span className={cn("size-1.5 shrink-0 rounded-full", session.session.id === selectedSessionId ? "bg-emerald-500" : "bg-muted-foreground/45")} />
+								<SessionAgentBadge sessionId={session.session.id} size={16} />
 								<span className="min-w-0 flex-1 truncate">{session.thread.title}</span>
 								<span className="text-[10px] text-muted-foreground">{sessionStateLabel(session.projection.state, t)}</span>
 								<button type="button" disabled={sessionActionSessionId === session.session.id} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onCloseSession(session.session.id); }} aria-label={t("workbench.closeSessionAria", { title: session.thread.title })} title={t("workbench.closeSessionTooltip")} className="grid size-5 place-items-center rounded-sm text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:text-foreground"><X className="size-3" /></button>

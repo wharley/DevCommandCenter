@@ -6220,7 +6220,40 @@ impl SessionCommandState {
         base: Option<String>,
     ) -> Result<Option<String>> {
         let objective = self.session_repo.load_session_objective(session_id)?;
-        Ok(merge_objective_instructions(base, objective.as_ref()))
+        let agent = self.session_repo.load_session_agent(session_id)?;
+        Ok(dcc_core::domain::agent::merge_agent_instructions(
+            merge_objective_instructions(base, objective.as_ref()),
+            agent.as_ref(),
+        ))
+    }
+
+    // ---- Resident agents ----------------------------------------------------
+
+    pub fn list_resident_agents(
+        &self,
+        reviewer: &dcc_core::domain::agent::ReviewerPresetText,
+    ) -> Result<Vec<dcc_core::domain::agent::ResidentAgent>> {
+        self.session_repo.list_resident_agents(reviewer)
+    }
+
+    pub fn save_resident_agent(
+        &self,
+        id: Option<&str>,
+        draft: dcc_core::domain::agent::ResidentAgentDraft,
+    ) -> Result<dcc_core::domain::agent::ResidentAgent> {
+        self.session_repo.save_resident_agent(id, draft)
+    }
+
+    pub fn delete_resident_agent(&self, id: &str) -> Result<bool> {
+        self.session_repo.delete_resident_agent(id)
+    }
+
+    pub fn bind_session_agent(&self, session_id: &SessionId, agent_id: &str) -> Result<()> {
+        self.session_repo.bind_session_agent(session_id, agent_id)
+    }
+
+    pub fn list_agent_session_bindings(&self) -> Result<Vec<dcc_infra::db::AgentSessionBinding>> {
+        self.session_repo.list_agent_session_bindings()
     }
 
     /// Idempotent per turn. Retries once on a generation race with a
@@ -7703,6 +7736,43 @@ mod tests {
         assert!(
             message.contains("could not be verified") || message.contains("is not offered"),
             "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn bound_session_sends_the_agent_role_with_every_turn_until_the_agent_is_deleted() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("agent");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        let reviewer = state
+            .list_resident_agents(&dcc_core::domain::agent::ReviewerPresetText {
+                name: "Revisor".to_string(),
+                ..Default::default()
+            })
+            .expect("agents")
+            .remove(0);
+        state
+            .bind_session_agent(&session.id, &reviewer.id)
+            .expect("bind");
+        let instructions = state
+            .objective_tool_instructions(&session.id, Some("base".to_string()))
+            .unwrap()
+            .expect("merged instructions");
+        assert!(instructions.starts_with("<dcc_agent_role name=\"Revisor\">"));
+        assert!(instructions.ends_with("base"));
+        assert_eq!(state.list_agent_session_bindings().unwrap().len(), 1);
+
+        assert!(state.delete_resident_agent(&reviewer.id).unwrap());
+        assert_eq!(
+            state
+                .objective_tool_instructions(&session.id, Some("base".to_string()))
+                .unwrap(),
+            Some("base".to_string())
         );
     }
 

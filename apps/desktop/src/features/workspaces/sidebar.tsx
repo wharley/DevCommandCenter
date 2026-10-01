@@ -30,6 +30,8 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { AgentsSidebarSection } from "@/features/agents/agents-sidebar-section";
+import type { AgentView } from "@/features/agents/use-agents";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/button";
 import { CommandPopoverContent } from "../../components/ui/command-popover";
@@ -118,6 +120,7 @@ const HEADER_HEIGHT = 42;
 const ROW_HEIGHT = 76;
 const GROUP_GAP = 10;
 const EMPTY_GROUP_GAP = 8;
+const EMPTY_AGENTS: AgentView[] = [];
 const BOTTOM_PADDING = 8;
 const RUNNING_TASK_PREVIEW_LIMIT = 4;
 
@@ -275,6 +278,9 @@ type WorkspacesSidebarProps = {
 	onOpenHelp: () => void;
 	onOpenPullRequests: () => void;
 	pullRequestsActive?: boolean;
+	agents?: AgentView[];
+	activeAgentId?: string | null;
+	onOpenAgent?: (agentId: string) => void;
 	onToggleCollapsed: () => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
 	onRenameWorkspace?: (workspaceId: string, name: string) => void | Promise<void>;
@@ -339,6 +345,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onOpenHelp,
 	onOpenPullRequests,
 	pullRequestsActive = false,
+	agents = EMPTY_AGENTS,
+	activeAgentId = null,
+	onOpenAgent,
 	onToggleCollapsed,
 	onArchiveWorkspace,
 	onRenameWorkspace,
@@ -1187,6 +1196,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						<TooltipContent side="right">{t("notes.headingShort")}</TooltipContent>
 					</Tooltip>
 				)}
+				{onOpenAgent && (
+					<AgentsSidebarSection
+						collapsed
+						agents={agents}
+						activeAgentId={activeAgentId}
+						onOpenAgent={onOpenAgent}
+					/>
+				)}
 				{workspaces.length > 0 ? (
 					<>
 						<Tooltip>
@@ -1454,6 +1471,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						</button>
 					)}
 				</div>
+
+				{onOpenAgent && (
+					<AgentsSidebarSection
+						agents={agents}
+						activeAgentId={activeAgentId}
+						onOpenAgent={onOpenAgent}
+					/>
+				)}
 
 				{runningActivities.length > 0 ? (
 					<section

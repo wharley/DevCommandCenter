@@ -14,6 +14,10 @@ use crate::ai_memory::AiMemoryHit;
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
 
+use dcc_core::domain::agent::{
+    AgentAvatar, ResidentAgent, ResidentAgentDraft, ReviewerPresetText, REVIEWER_OFFER,
+    REVIEWER_PRESET,
+};
 use dcc_core::domain::objective::{ObjectivePauseReason, ObjectiveStatus, SessionObjective};
 use dcc_core::{
     domain::{
@@ -366,6 +370,52 @@ CREATE TABLE IF NOT EXISTS dcc_session_objectives (
 	updated_at TEXT NOT NULL
 );
 "#;
+
+/// Resident agents are global to the installation. A deleted agent keeps its
+/// row so a removed preset is not seeded again and old sessions keep a name.
+const RESIDENT_AGENT_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_agents (
+	id TEXT PRIMARY KEY NOT NULL CHECK(length(id) BETWEEN 1 AND 256),
+	name TEXT NOT NULL,
+	role TEXT NOT NULL,
+	kickoff_prompt TEXT NOT NULL DEFAULT '',
+	-- NULL: never set (the reviewer preset is backfilled); empty: the agent does not offer.
+	offer_prompt TEXT NULL,
+	extra_instructions TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NULL,
+	model TEXT NULL,
+	avatar_color TEXT NOT NULL,
+	avatar_arms INTEGER NOT NULL,
+	avatar_eyes TEXT NOT NULL,
+	preset TEXT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	deleted_at TEXT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dcc_session_agents (
+	session_id TEXT PRIMARY KEY NOT NULL,
+	agent_id TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE,
+	FOREIGN KEY (agent_id) REFERENCES dcc_agents(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dcc_session_agents_agent_id
+	ON dcc_session_agents(agent_id);
+"#;
+
+/// A session bound to a resident agent, with what the agent page lists.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionBinding {
+    pub session_id: String,
+    pub agent_id: String,
+    pub workspace_id: String,
+    pub project_id: String,
+    pub title: Option<String>,
+    pub updated_at: String,
+}
 
 /// Typed durable provider availability. The absence of a record represents
 /// the backwards-compatible enabled state at generation zero.
@@ -2007,10 +2057,17 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "offer_prompt", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_agents",
+            "extra_instructions",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_decision_provider_history",
@@ -6656,6 +6713,233 @@ impl SqliteSessionRepo {
             ));
         }
         Ok(())
+    }
+
+    // ---- Resident agents ---------------------------------------------------
+
+    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions";
+
+    fn resident_agent_from_row(row: &Row<'_>) -> rusqlite::Result<ResidentAgent> {
+        let preset: Option<String> = row.get(9)?;
+        // A preset row created before the offer existed has no value: it offers.
+        let offer_prompt = row.get::<_, Option<String>>(12)?.unwrap_or_else(|| {
+            if preset.is_some() {
+                REVIEWER_OFFER.to_string()
+            } else {
+                String::new()
+            }
+        });
+        Ok(ResidentAgent {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            role: row.get(2)?,
+            kickoff_prompt: row.get(3)?,
+            provider_id: row.get(4)?,
+            model: row.get(5)?,
+            avatar: AgentAvatar {
+                color: row.get(6)?,
+                arms: row.get(7)?,
+                eyes: row.get(8)?,
+            },
+            preset,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+            offer_prompt,
+            extra_instructions: row.get(13)?,
+        })
+    }
+
+    /// Lists the person's agents, oldest first. The reviewer preset is created
+    /// the first time and never again, even after the person deletes it. Its
+    /// role is DCC's and its visible texts follow the app language.
+    pub fn list_resident_agents(&self, reviewer: &ReviewerPresetText) -> Result<Vec<ResidentAgent>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let seeded: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM dcc_agents WHERE preset = ?1)",
+                params![REVIEWER_PRESET],
+                |row| row.get(0),
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if !seeded {
+            let draft = ResidentAgentDraft::reviewer(reviewer)
+                .normalized()
+                .or_else(|_| {
+                    ResidentAgentDraft::reviewer(&ReviewerPresetText::default()).normalized()
+                })
+                .map_err(dcc_core::CoreError::InvalidInput)?;
+            let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+            conn.execute(
+                "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt) VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    draft.name,
+                    draft.role,
+                    draft.kickoff_prompt,
+                    draft.avatar.color,
+                    draft.avatar.arms,
+                    draft.avatar.eyes,
+                    REVIEWER_PRESET,
+                    now,
+                    draft.offer_prompt,
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        let mut statement = conn
+            .prepare(&format!(
+                "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY a.created_at, a.id",
+                Self::RESIDENT_AGENT_COLUMNS
+            ))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let agents = statement
+            .query_map([], Self::resident_agent_from_row)
+            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(agents
+            .into_iter()
+            .map(|agent| agent.with_preset_text(Some(reviewer)))
+            .collect())
+    }
+
+    /// Creates the agent when `id` is `None`, otherwise updates a live one.
+    /// On a preset only the name, avatar, provider, model, extra instructions
+    /// and whether it offers itself are the person's to change.
+    pub fn save_resident_agent(
+        &self,
+        id: Option<&str>,
+        draft: ResidentAgentDraft,
+    ) -> Result<ResidentAgent> {
+        let draft = draft
+            .normalized()
+            .map_err(dcc_core::CoreError::InvalidInput)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let id = match id {
+            Some(id) => {
+                let updated = conn
+                    .execute(
+                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = ?11, extra_instructions = ?12 WHERE id = ?1 AND deleted_at IS NULL",
+                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions],
+                    )
+                    .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                if updated != 1 {
+                    return Err(dcc_core::CoreError::InvalidInput(format!("agent {id} does not exist")));
+                }
+                id.to_string()
+            }
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, ?11, ?12)",
+                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions],
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                id
+            }
+        };
+        conn.query_row(
+            &format!(
+                "SELECT {} FROM dcc_agents a WHERE a.id = ?1",
+                Self::RESIDENT_AGENT_COLUMNS
+            ),
+            params![id],
+            Self::resident_agent_from_row,
+        )
+        .map(|agent| agent.with_preset_text(None))
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Soft delete: sessions already bound stop receiving the role.
+    pub fn delete_resident_agent(&self, id: &str) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let removed = conn
+            .execute(
+                "UPDATE dcc_agents SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id, now],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(removed == 1)
+    }
+
+    /// Binds a session to a live agent. A session keeps its first agent.
+    pub fn bind_session_agent(&self, session_id: &SessionId, agent_id: &str) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let live: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM dcc_agents WHERE id = ?1 AND deleted_at IS NULL)",
+                params![agent_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if !live {
+            return Err(dcc_core::CoreError::InvalidInput(format!("agent {agent_id} does not exist")));
+        }
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        conn.execute(
+            "INSERT INTO dcc_session_agents (session_id, agent_id, created_at) VALUES (?1, ?2, ?3) ON CONFLICT(session_id) DO NOTHING",
+            params![session_id.0, agent_id, now],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    /// The live agent a session runs as, if any.
+    pub fn load_session_agent(&self, session_id: &SessionId) -> Result<Option<ResidentAgent>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let agent = conn
+            .query_row(
+                &format!(
+                    "SELECT {} FROM dcc_session_agents b JOIN dcc_agents a ON a.id = b.agent_id WHERE b.session_id = ?1 AND a.deleted_at IS NULL",
+                    Self::RESIDENT_AGENT_COLUMNS
+                ),
+                params![session_id.0],
+                Self::resident_agent_from_row,
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(agent.map(|agent| agent.with_preset_text(None)))
+    }
+
+    /// Every session bound to a live agent, most recently updated first.
+    pub fn list_agent_session_bindings(&self) -> Result<Vec<AgentSessionBinding>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare("SELECT b.session_id, b.agent_id, s.workspace_id, s.project_id, t.title, s.updated_at FROM dcc_session_agents b JOIN dcc_agents a ON a.id = b.agent_id AND a.deleted_at IS NULL JOIN dcc_sessions s ON s.id = b.session_id LEFT JOIN dcc_threads t ON t.session_id = s.id WHERE t.archived_at IS NULL ORDER BY s.updated_at DESC, b.session_id")
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let bindings = statement
+            .query_map([], |row| {
+                Ok(AgentSessionBinding {
+                    session_id: row.get(0)?,
+                    agent_id: row.get(1)?,
+                    workspace_id: row.get(2)?,
+                    project_id: row.get(3)?,
+                    title: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })
+            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(bindings)
     }
 
     /// Loads the durable objective for a session, if the person defined one.
@@ -12916,6 +13200,96 @@ mod tests {
             .recover_orphaned_running_turns("2026-09-02T12:00:00Z")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn resident_agents_seed_once_bind_sessions_and_stop_after_delete() {
+        use dcc_core::domain::agent::{ResidentAgentDraft, ReviewerPresetText, REVIEWER_ROLE};
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        let english = ReviewerPresetText {
+            name: "Reviewer".to_string(),
+            ..ReviewerPresetText::default()
+        };
+        let portuguese = ReviewerPresetText {
+            name: "Revisor".to_string(),
+            kickoff_prompt: "Revise.".to_string(),
+            offer_prompt: "Posso revisar?".to_string(),
+        };
+        // Created in English, then the app language changes: the texts the
+        // person reads follow it, the name they chose does not.
+        let seeded = repo.list_resident_agents(&english).unwrap().remove(0);
+        assert_eq!(seeded.offer_prompt, "May I review these changes?");
+        let agents = repo.list_resident_agents(&portuguese).unwrap();
+        assert_eq!(agents[0].name, "Reviewer");
+        assert_eq!(agents[0].kickoff_prompt, "Revise.");
+        assert_eq!(agents[0].offer_prompt, "Posso revisar?");
+
+        // On a preset the role and first message are DCC's; the person's
+        // name, extra instructions and offer switch are saved.
+        let mut edited = ResidentAgentDraft::reviewer(&portuguese);
+        edited.role = "do whatever".to_string();
+        edited.kickoff_prompt = "do whatever".to_string();
+        edited.extra_instructions = "Ignore vendor/.".to_string();
+        edited.offer_prompt = String::new();
+        repo.save_resident_agent(Some(&seeded.id), edited).unwrap();
+        let agents = repo.list_resident_agents(&portuguese).unwrap();
+        assert_eq!(agents.len(), 1);
+        let reviewer = agents[0].clone();
+        assert_eq!(reviewer.name, "Revisor");
+        assert_eq!(reviewer.role, REVIEWER_ROLE);
+        assert_eq!(reviewer.kickoff_prompt, "Revise.");
+        assert_eq!(reviewer.extra_instructions, "Ignore vendor/.");
+        assert_eq!(reviewer.offer_prompt, "");
+        assert_eq!(reviewer.preset.as_deref(), Some("reviewer"));
+
+        // An agent the person creates keeps exactly what they wrote.
+        let mut draft = ResidentAgentDraft::reviewer(&ReviewerPresetText::default());
+        draft.name = "Docs".to_string();
+        draft.role = "Write the docs.".to_string();
+        draft.model = Some("claude-opus-5-5".to_string());
+        let docs = repo.save_resident_agent(None, draft.clone()).unwrap();
+        assert_eq!(docs.preset, None);
+        assert_eq!(docs.role, "Write the docs.");
+        draft.name = "Documentador".to_string();
+        let docs = repo.save_resident_agent(Some(&docs.id), draft.clone()).unwrap();
+        assert_eq!(docs.name, "Documentador");
+        assert!(repo.save_resident_agent(Some("missing"), draft).is_err());
+
+        let session = Session {
+            id: SessionId("session-agent".to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            workspace_id: WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: vec![],
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_session(&session)).unwrap();
+        assert_eq!(repo.load_session_agent(&session.id).unwrap(), None);
+        assert!(repo.bind_session_agent(&session.id, "missing").is_err());
+        repo.bind_session_agent(&session.id, &reviewer.id).unwrap();
+        // A session keeps its first agent.
+        repo.bind_session_agent(&session.id, &docs.id).unwrap();
+        assert_eq!(
+            repo.load_session_agent(&session.id).unwrap().unwrap().id,
+            reviewer.id
+        );
+        let bindings = repo.list_agent_session_bindings().unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].workspace_id, "workspace-1");
+
+        assert!(repo.delete_resident_agent(&reviewer.id).unwrap());
+        assert!(!repo.delete_resident_agent(&reviewer.id).unwrap());
+        assert_eq!(repo.load_session_agent(&session.id).unwrap(), None);
+        assert!(repo.list_agent_session_bindings().unwrap().is_empty());
+        // The deleted preset is not created again.
+        let agents = repo.list_resident_agents(&portuguese).unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, docs.id);
     }
 
     #[test]

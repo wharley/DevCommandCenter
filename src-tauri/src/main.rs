@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_commands;
 mod appshot_commands;
 mod attachment_commands;
 mod browser_agent_requests;
@@ -7009,6 +7010,10 @@ pub fn run() {
             terminal_kill,
             terminal_kill_by_mission_id,
             terminal_get_or_create_for_pane,
+            agent_commands::agents_overview,
+            agent_commands::agents_save,
+            agent_commands::agents_delete,
+            agent_commands::agents_bind_session,
             skills_commands::skills_list,
             skills_commands::skills_import_preview,
             skills_commands::skills_import,

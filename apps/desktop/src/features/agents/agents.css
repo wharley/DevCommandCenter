@@ -1,0 +1,92 @@
+@keyframes dcc-agent-bob {
+	0%,
+	100% {
+		transform: translateY(6%);
+	}
+	50% {
+		transform: translateY(-8%);
+	}
+}
+
+/* The mascot bobs while its agent is running a turn. */
+.dcc-agent-working {
+	animation: dcc-agent-bob 1.1s ease-in-out infinite;
+}
+
+/* A slower drift for the mascot offering help above the composer. */
+.dcc-agent-float {
+	animation: dcc-agent-bob 2.6s ease-in-out infinite;
+}
+
+@keyframes dcc-agent-offer-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+.dcc-agent-offer {
+	animation: dcc-agent-offer-in var(--dcc-motion-enter, 240ms)
+		var(--dcc-motion-ease, ease-out);
+}
+
+@keyframes dcc-agent-thinking-dot {
+	0%,
+	60%,
+	100% {
+		opacity: 0.3;
+		transform: translateY(0);
+	}
+	30% {
+		opacity: 1;
+		transform: translateY(-3px);
+	}
+}
+
+.dcc-agent-thinking > span {
+	width: 6px;
+	height: 6px;
+	border-radius: 9999px;
+	background: var(--muted-foreground);
+	animation: dcc-agent-thinking-dot 1s ease-in-out infinite;
+}
+
+.dcc-agent-thinking > span:nth-child(2) {
+	animation-delay: 0.15s;
+}
+
+.dcc-agent-thinking > span:nth-child(3) {
+	animation-delay: 0.3s;
+}
+
+@keyframes dcc-agent-caret-blink {
+	50% {
+		opacity: 0;
+	}
+}
+
+.dcc-agent-caret {
+	display: inline-block;
+	width: 1.5px;
+	height: 1em;
+	margin-left: 1px;
+	vertical-align: text-bottom;
+	background: currentColor;
+	animation: dcc-agent-caret-blink 0.8s steps(1) infinite;
+}
+
+.dcc-agent-offer-actions {
+	animation: dcc-agent-offer-in var(--dcc-motion-enter, 240ms)
+		var(--dcc-motion-ease, ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.dcc-agent-working,
+	.dcc-agent-float,
+	.dcc-agent-offer,
+	.dcc-agent-offer-actions,
+	.dcc-agent-thinking > span,
+	.dcc-agent-caret {
+		animation: none;
+	}
+}

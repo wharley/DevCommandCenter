@@ -145,6 +145,90 @@
       "payload": "Payload bruto"
     }
   },
+  "agents": {
+    "heading": "Agentes",
+    "presets": {
+      "reviewerRole": "Você revisa as mudanças desta tarefa. Você não edita arquivos, não faz stage, commit nem push.\n\n- Leia o diff da tarefa em relação à base e depois o código ao redor antes de julgar uma mudança.\n- Relate só problemas que você verificou no código: bugs de correção, regressões, falta de tratamento de erro, falhas de segurança e testes que não cobrem a mudança.\n- Para cada achado, informe o arquivo e a linha, o que está errado e um cenário concreto de falha. Ordene do mais grave para o menos grave.\n- Não relate preferências de estilo nem repita o que o diff faz.\n- Se não encontrar nada, diga isso claramente em vez de inventar achados.\n- Responda no idioma em que a pessoa escreve.",
+      "reviewerOffer": "Posso revisar essas mudanças?",
+      "reviewerKickoff": "Revise as mudanças atuais desta tarefa.",
+      "reviewer": "Revisor"
+    },
+    "state": {
+      "idle": "Em espera",
+      "working": "Trabalhando",
+      "needsYou": "Precisa de você",
+      "done": "Resultado pronto"
+    },
+    "offer": {
+      "accept": "Sim, pode",
+      "dismiss": "Agora não"
+    },
+    "call": {
+      "nothingToReview": "Ainda não há mudanças para revisar nesta tarefa.",
+      "busy": "Aguarde o agente desta tarefa terminar.",
+      "inTask": "Chamar {{agent}} nesta tarefa",
+      "needsTask": "Abra uma tarefa para chamar o agente.",
+      "providerUnavailable": "O provider configurado para {{agent}} não está disponível.",
+      "failed": "Não foi possível chamar o agente."
+    },
+    "page": {
+      "duplicate": "Duplicar",
+      "copyName": "{{agent}} (cópia)",
+      "roleBuiltIn": "Papel · mantido pelo DCC",
+      "roleBuiltInHint": "Este agente é do DCC: o papel melhora a cada versão e não é editável. Use “Editar” para somar instruções suas, ou “Duplicar” para criar um agente seu com texto livre.",
+      "missing": "Este agente não existe mais.",
+      "newAgent": "Novo agente",
+      "edit": "Editar",
+      "runsOnCurrent": "usa o provider selecionado no composer",
+      "callTitle": "Chamar na tarefa atual",
+      "callHint": "Abre uma conversa deste agente em “{{task}}”.",
+      "callNoTask": "Abra uma tarefa para chamar este agente nela.",
+      "call": "Chamar",
+      "sessions": "Sessões",
+      "noSessions": "Nenhuma sessão ainda. As conversas deste agente em qualquer projeto aparecem aqui.",
+      "role": "Papel"
+    },
+    "editor": {
+      "builtInDescription": "Este agente é do DCC. Você escolhe o provider, o modelo e o avatar, e pode somar instruções suas ao papel.",
+      "extra": "Instruções extras",
+      "extraHint": "Somadas ao papel do DCC a cada turno. Exemplo: convenções do seu projeto ou pastas a ignorar.",
+      "offerSwitch": "Oferecer ao terminar um turno",
+      "offerSwitchHint": "Quando um turno termina com mudanças, o agente aparece acima do composer perguntando se pode agir.",
+      "offer": "Pergunta ao terminar um turno",
+      "offerHint": "Quando um turno termina com mudanças, o agente aparece acima do composer com esta pergunta. Deixe vazio para ele nunca se oferecer.",
+      "newTitle": "Novo agente",
+      "editTitle": "Editar agente",
+      "description": "O agente é seu e vale para todos os projetos. O papel é enviado a cada turno das conversas dele.",
+      "name": "Nome",
+      "avatar": "Avatar",
+      "colors": {
+        "blue": "Azul",
+        "cyan": "Ciano",
+        "violet": "Violeta",
+        "amber": "Âmbar",
+        "green": "Verde",
+        "pink": "Rosa"
+      },
+      "arms": "{{count}} braços",
+      "eyes": {
+        "round": "Olhos redondos",
+        "smile": "Olhos sorrindo",
+        "visor": "Visor"
+      },
+      "provider": "Provider",
+      "providerCurrent": "O selecionado no composer",
+      "model": "Modelo",
+      "modelDefault": "Recomendado do provider",
+      "role": "Papel",
+      "roleHint": "Instruções permanentes do agente. A mensagem atual tem precedência quando houver conflito.",
+      "kickoff": "Primeira mensagem",
+      "kickoffHint": "Enviada automaticamente ao chamar o agente. Deixe vazio para só abrir a conversa.",
+      "delete": "Excluir",
+      "confirmDelete": "Confirmar exclusão",
+      "cancel": "Cancelar",
+      "save": "Salvar"
+    }
+  },
   "sidebar": {
     "groupSignal": {
       "running": "Agente rodando neste projeto",

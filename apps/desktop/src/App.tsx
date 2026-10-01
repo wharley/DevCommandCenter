@@ -29,6 +29,7 @@ import type {
 	Repository,
 	SessionEventRecord,
 	SessionSearchResult,
+	WorkspaceGitStatusOutput,
 	WorkspaceRemoteBranchDeletionTarget,
 	WorkspaceIsolationMode,
 	WorkspaceSessionSummary,
@@ -114,6 +115,20 @@ import { resolveDelegateTaskToolInstructions } from "./features/sessions/delegat
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { NewTaskLaunchState } from "./features/panel/NewTaskLaunchState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
+import { AgentPage } from "./features/agents/agent-page";
+import {
+	AGENTS_QUERY_KEY,
+	type AgentSessionView,
+	type AgentView,
+	useAgents,
+} from "./features/agents/use-agents";
+import { bindSessionAgent } from "./lib/agents-api";
+import { subscribeCallAgent } from "./features/agents/call-agent-command";
+import {
+	callAgentBlockKey,
+	hasReviewableChanges,
+	isSessionRunning,
+} from "./features/agents/review-offer";
 import { useSessionEventFeed } from "./features/sessions/use-session-event-feed";
 import { visibleSessionPendingPrompt } from "./features/sessions/pending-prompt";
 import { useSessionLiveHydration } from "./features/sessions/use-session-live-hydration";
@@ -1037,8 +1052,10 @@ export default function App() {
 	const [isSkillsOpen, setIsSkillsOpen] = useState(false);
 	const [isUsageOpen, setIsUsageOpen] = useState(false);
 	const [globalSurface, setGlobalSurface] = useState<
-		"pullRequests" | "newTask" | null
+		"pullRequests" | "newTask" | "agent" | null
 	>(null);
+	const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+	const [callingAgentId, setCallingAgentId] = useState<string | null>(null);
 	const [isSessionSearchOpen, setIsSessionSearchOpen] = useState(false);
 	const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
 	const [isWorkspaceSearchOpen, setIsWorkspaceSearchOpen] = useState(false);
@@ -2476,6 +2493,192 @@ export default function App() {
 		startingSessionWorkspaceId,
 		queryClient,
 	]);
+
+	const { agents: loadedAgents } = useAgents(backendCacheKey);
+	// A deleted, archived or restored task changes which agent sessions exist.
+	// Hide sessions of tasks that are gone right away, then refetch the list.
+	const liveWorkspaceIds = useMemo(
+		() => workspacesFromBackend.map((workspace) => workspace.id).sort().join("\n"),
+		[workspacesFromBackend],
+	);
+	const residentAgents = useMemo(() => {
+		const live = new Set(liveWorkspaceIds.split("\n"));
+		return loadedAgents.map((agent) => ({
+			...agent,
+			sessions: agent.sessions.filter((session) => live.has(session.workspaceId)),
+		}));
+	}, [liveWorkspaceIds, loadedAgents]);
+	useEffect(() => {
+		void liveWorkspaceIds;
+		void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+	}, [liveWorkspaceIds, queryClient]);
+	const handleOpenAgent = useCallback((agentId: string) => {
+		setActiveAgentId(agentId);
+		setGlobalSurface("agent");
+	}, []);
+
+	/** The session lives in its task; the agent page only links to it. */
+	const handleOpenResidentAgentSession = useCallback(
+		(session: AgentSessionView) => {
+			setGlobalSurface(null);
+			setPendingSessionNavigation({
+				sessionId: session.sessionId,
+				workspaceId: session.workspaceId,
+			});
+			requestWorkspaceSelection(session.workspaceId);
+			if (selectedWorkspace?.id === session.workspaceId) {
+				setSelectedSessionId(session.sessionId);
+			}
+		},
+		[requestWorkspaceSelection, selectedWorkspace?.id],
+	);
+
+	/**
+	 * Starts a session of the agent in the current task, binds it so the role
+	 * rides along with every turn, and sends the agent's first message.
+	 */
+	const handleCallAgent = useCallback(
+		async (agent: AgentView) => {
+			if (callingAgentId) {
+				return;
+			}
+			if (!selectedWorkspace) {
+				toast.error(t("agents.call.needsTask"));
+				return;
+			}
+			const blockKey = callAgentBlockKey({
+				preset: agent.preset,
+				busy: workspaceSessions.some(isSessionRunning),
+				hasChanges: hasReviewableChanges(
+					queryClient.getQueryData<WorkspaceGitStatusOutput>([
+						WORKSPACE_GIT_STATUS_QUERY_KEY,
+						selectedLocalWorkspacePath?.trim() ?? "",
+					]),
+				),
+			});
+			if (blockKey) {
+				toast.info(t(blockKey));
+				return;
+			}
+			const provider = agent.providerId
+				? (providerChoices.find((candidate) => candidate.id === agent.providerId) ?? null)
+				: selectedProvider;
+			if (!provider || !isProviderEnabled(provider)) {
+				toast.error(t("agents.call.providerUnavailable", { agent: agent.name }));
+				return;
+			}
+			const usesSelection = provider.id === selectedProvider?.id && !agent.providerId;
+			if (usesSelection && selectedProviderBlockReason) {
+				toast.error(selectedProviderBlockReason);
+				return;
+			}
+			const model = usesSelection
+				? (selectedModel?.id ?? null)
+				: agent.model && provider.models.some((candidate) => candidate.id === agent.model)
+					? agent.model
+					: (provider.models.find((candidate) => candidate.recommended)?.id ??
+						provider.models[0]?.id ??
+						null);
+			const providerRuntime = usesSelection
+				? selectedProviderRuntime
+				: draftToProviderRuntimeConfig(
+						getProviderRuntimeDraft(providerRuntimeSettings, provider.id),
+						provider.capabilities,
+					);
+			const workspaceId = selectedWorkspace.id;
+			const sessionsKey = getWorkspaceSessionsCacheKey(backendCacheKey, workspaceId);
+			setCallingAgentId(agent.id);
+			try {
+				const started = await startThread({
+					workspaceId,
+					additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
+					projectId: selectedWorkspace.projectId ?? workspaceId,
+					providerId: provider.id,
+					model,
+					providerRuntime,
+					title: agent.name,
+				});
+				await bindSessionAgent(started.session.id, agent.id);
+				setSessionSnapshotsById((current) => ({
+					...current,
+					[started.session.id]: workspaceSessionSnapshotFromSummary({
+						session: started.session,
+						projection: started.projection,
+						lastTurnPrompt: null,
+						lastTurnState: null,
+					}),
+				}));
+				queryClient.setQueryData<WorkspaceSessionSummary[]>(sessionsKey, (current = []) => [
+					{
+						session: started.session,
+						thread: started.thread,
+						projection: started.projection,
+						lastTurnPrompt: null,
+						lastTurnState: null,
+						lastTurnStartedAt: null,
+						lastTurnCompletedAt: null,
+						lastTurnAwaitingUser: null,
+					},
+					...current.filter((summary) => summary.session.id !== started.session.id),
+				]);
+				setGlobalSurface(null);
+				setSelectedSessionId(started.session.id);
+				if (agent.kickoffPrompt.trim()) {
+					await sendTurn({
+						sessionId: started.session.id,
+						prompt: agent.kickoffPrompt.trim(),
+						providerId: provider.id,
+						model,
+						providerRuntime,
+						planMode: false,
+						effort: "medium",
+						fastMode: false,
+						approvalPolicy: "ask",
+					});
+				}
+			} catch (error) {
+				console.error("[dcc] call agent failed:", error);
+				toast.error(
+					error instanceof Error
+						? error.message
+						: typeof error === "string"
+							? error
+							: t("agents.call.failed"),
+				);
+			} finally {
+				setCallingAgentId(null);
+				void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+				void queryClient.invalidateQueries({ queryKey: sessionsKey });
+			}
+		},
+		[
+			backendCacheKey,
+			callingAgentId,
+			providerChoices,
+			providerRuntimeSettings,
+			queryClient,
+			selectedModel,
+			selectedProvider,
+			selectedProviderBlockReason,
+			selectedProviderRuntime,
+			selectedWorkspace,
+			selectedLocalWorkspacePath,
+			selectedWorkspaceAdditionalWorkspaceIds,
+			t,
+			workspaceSessions,
+		],
+	);
+
+	useEffect(
+		() =>
+			subscribeCallAgent((agentId) => {
+				const agent = residentAgents.find((candidate) => candidate.id === agentId);
+				if (agent) {
+					void handleCallAgent(agent);
+				}
+			}),
+		[handleCallAgent, residentAgents],
+	);
 
 	const handleResolveConflictWithAgent = useCallback(
 		async (
@@ -5214,6 +5417,9 @@ export default function App() {
 							onOpenHelp={() => openHelp()}
 							onOpenPullRequests={() => setGlobalSurface("pullRequests")}
 							pullRequestsActive={globalSurface === "pullRequests"}
+							agents={residentAgents}
+							activeAgentId={globalSurface === "agent" ? activeAgentId : null}
+							onOpenAgent={handleOpenAgent}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onArchiveWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleArchiveWorkspace
@@ -5379,6 +5585,26 @@ export default function App() {
 									selectedProviderRuntime={selectedProviderRuntime}
 									onSelectProvider={handleSelectProvider}
 									onSelectModel={handleSelectModel}
+								/>
+							) : globalSurface === "agent" ? (
+								<AgentPage
+									agent={residentAgents.find((agent) => agent.id === activeAgentId) ?? null}
+									providers={providerChoices}
+									currentWorkspaceName={selectedWorkspace?.name ?? null}
+									workspaceNames={Object.fromEntries(
+										workspacesFromBackend.map((workspace) => [workspace.id, workspace.name]),
+									)}
+									projectLabels={Object.fromEntries(
+										repositoriesFromBackend.map((repository) => [
+											repository.projectId,
+											repository.displayName ?? repository.name,
+										]),
+									)}
+									isCalling={callingAgentId !== null}
+									onCall={handleCallAgent}
+									onOpenSession={handleOpenResidentAgentSession}
+									onSelectAgent={setActiveAgentId}
+									onClose={() => setGlobalSurface(null)}
 								/>
 							) : globalSurface === "newTask" ? (
 								<NewTaskLaunchState

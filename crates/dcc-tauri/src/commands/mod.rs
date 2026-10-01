@@ -1,3 +1,4 @@
+pub mod agent_commands;
 pub mod local_branches;
 pub mod coderabbit;
 pub mod common;
