@@ -1722,6 +1722,7 @@ export function WorkspacePanel({
 			shouldRenderGitDiffSurface(inspectorCollapsed) ? (
 			<WorkspaceEditorSurface
 				workspaceRoot={workspacePath}
+				workspaceId={workspaceId}
 				selection={workspaceSurfaceSelection.file}
 				onClose={onCloseSurface}
 				onSubmitAnnotation={handleSubmitAnnotation}

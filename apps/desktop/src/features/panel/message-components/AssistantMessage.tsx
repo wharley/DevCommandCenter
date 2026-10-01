@@ -15,6 +15,7 @@ import {
 	Square,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { parseReviewFindings, stripReviewBlock } from "@/features/agents/review-findings";
 import { toast } from "sonner";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { StickyNote } from "lucide-react";
@@ -398,7 +399,7 @@ function NativeSubagentTree({
 }
 
 export function AssistantMessage({
-	content,
+	content: rawContent,
 	streaming,
 	createdAt,
 	status,
@@ -451,6 +452,13 @@ export function AssistantMessage({
 	hidePendingApprovals?: boolean;
 }) {
 	const { t } = useTranslation("common");
+	// The built-in reviewer ends its message with a machine-readable block that
+	// DCC marks on the diff; the person reads the prose and a one-line count.
+	const content = useMemo(() => stripReviewBlock(rawContent), [rawContent]);
+	const reviewFindings = useMemo(
+		() => (streaming ? null : parseReviewFindings(rawContent)),
+		[rawContent, streaming],
+	);
 	const modelLabel = resolveModelLabel(modelId, providers);
 	const provider = providers?.find((candidate) => candidate.id === providerId);
 	const nativeSubagentSupervision = useMemo<NativeSubagentSupervision>(
@@ -637,6 +645,13 @@ export function AssistantMessage({
 							</LazyStreamdown>
 						</Suspense>
 					</div>
+				) : null}
+				{reviewFindings ? (
+					<p className="mt-2 text-[12px] text-muted-foreground">
+						{reviewFindings.length > 0
+							? t("agents.review.marked", { count: reviewFindings.length })
+							: t("agents.review.clean")}
+					</p>
 				) : null}
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
 					<MessageTimestamp createdAt={createdAt} />

@@ -11,7 +11,7 @@ export type DiffAnnotationPayload = {
 };
 
 export type DiffMachineAnnotation = {
-	source: "coderabbit" | "forge-review";
+	source: "coderabbit" | "forge-review" | "agent-review";
 	id?: string;
 	severity: "critical" | "major" | "minor" | "trivial" | "info" | "unknown";
 	side: "original" | "modified";

@@ -369,10 +369,10 @@ export function AgentPage({
 			initialDraft={
 				editing === "duplicate" && agent
 					? {
-							// A copy is the person's own agent, so it starts from the
-							// role in their language and is theirs to rewrite.
+							// A copy is the person's own agent: it starts from the same
+							// role and is theirs to rewrite.
 							name: t("agents.page.copyName", { agent: agent.name }),
-							role: agent.preset ? t("agents.presets.reviewerRole") : agent.role,
+							role: agent.role,
 							kickoffPrompt: agent.kickoffPrompt,
 							offerPrompt: agent.offerPrompt,
 							extraInstructions: agent.extraInstructions,

@@ -1,4 +1,6 @@
 import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
+import { reviewAnnotationsForPath } from "@/features/agents/review-findings";
+import { useReviewerFindingsContext } from "@/features/agents/reviewer-findings-context";
 /**
  * Git changes list — staged / unstaged groups, list or tree view, per-file +/−,
  * extension icons and NumberTicker for diff stats.
@@ -574,6 +576,11 @@ function ReviewChangeCard({
 		payload: DiffAnnotationPayload,
 	) => void;
 }) {
+	const reviewerFindings = useReviewerFindingsContext();
+	const reviewerAnnotations = useMemo(
+		() => reviewAnnotationsForPath(entry.path, reviewerFindings),
+		[entry.path, reviewerFindings],
+	);
 	const { t } = useTranslation("common");
 	const cardRef = useRef<HTMLElement | null>(null);
 	const [open, setOpen] = useState(true);
@@ -655,6 +662,11 @@ function ReviewChangeCard({
 							</span>
 						) : null}
 					</span>
+					{reviewerAnnotations.length > 0 ? (
+						<span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+							{t("agents.review.fileCount", { count: reviewerAnnotations.length })}
+						</span>
+					) : null}
 				</button>
 				<div className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums">
 					{entry.insertions > 0 ? (
@@ -745,6 +757,7 @@ function ReviewChangeCard({
 							originalText={query.data.originalText}
 							modifiedText={query.data.modifiedText}
 							inline
+							machineAnnotations={reviewerAnnotations}
 							onAnnotate={
 								onAnnotate
 									? (payload) => onAnnotate(selection, payload)

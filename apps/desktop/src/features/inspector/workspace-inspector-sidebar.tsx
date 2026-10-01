@@ -58,6 +58,7 @@ import { SessionEventFeed } from "@/features/sessions/session-event-feed";
 import { isSemanticSessionEvent } from "@/features/sessions/session-event-feed.logic";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
 import { InspectorChangesSection } from "./inspector-changes-section";
+import { ReviewerFindingsProvider } from "@/features/agents/reviewer-findings-context";
 import { GitSectionHeader } from "./git-section-header";
 import { GitlabPipelineSection } from "./gitlab-pipeline-section";
 import { WorkspaceDeliveryFailureSection } from "./workspace-delivery-failure-section";
@@ -3447,6 +3448,7 @@ export function WorkspaceInspectorSidebar({
 								</div>
 							) : null}
 							<div className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-border/35">
+								<ReviewerFindingsProvider workspaceId={workspaceId}>
 								<InspectorChangesSection
 									turnReviewRequest={turnReviewRequest}
 									onCloseTurnReview={onCloseTurnReview}
@@ -3464,6 +3466,7 @@ export function WorkspaceInspectorSidebar({
 									}
 									onOpenExpandedPreview={onOpenExpandedPreview}
 								/>
+								</ReviewerFindingsProvider>
 							</div>
 						</div>
 					</section>

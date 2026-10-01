@@ -146,9 +146,15 @@
     }
   },
   "agents": {
+    "review": {
+      "fileCount_one": "{{count}} finding",
+      "fileCount_other": "{{count}} findings",
+      "marked_one": "{{count}} finding marked on the diff.",
+      "marked_other": "{{count}} findings marked on the diff.",
+      "clean": "No findings to mark on the diff."
+    },
     "heading": "Agents",
     "presets": {
-      "reviewerRole": "You review the changes in this workspace. You do not edit files, stage, commit or push.\n\n- Read the diff of the workspace against its base, then read the surrounding code before judging a change.\n- Report only problems you verified in the code: correctness bugs, regressions, missing error handling, security issues and tests that do not cover the change.\n- For each finding give the file and line, what is wrong, and a concrete failure scenario. Order findings from most to least severe.\n- Do not report style preferences or restate what the diff does.\n- If you find nothing, say so plainly instead of inventing findings.\n- Reply in the language the person writes in.",
       "reviewerOffer": "May I review these changes?",
       "reviewerKickoff": "Review the current changes in this workspace.",
       "reviewer": "Reviewer"

@@ -22,12 +22,16 @@ import {
 	type PendingAnnotation,
 } from "./diff-annotation";
 import { WorkspaceChangesDiffLoader } from "./WorkspaceChangesDiffLoader";
+import { reviewAnnotationsForPath } from "@/features/agents/review-findings";
+import { useReviewerFindings } from "@/features/agents/use-reviewer-findings";
 
 // Re-exported for backward compatibility with existing importers.
 export type { DiffAnnotationRequest, DiffAnnotationSubmit };
 
 type WorkspaceEditorSurfaceProps = {
 	workspaceRoot: string | null;
+	/** The task whose reviewer findings are marked on the diff. */
+	workspaceId?: string | null;
 	selection: WorkspaceGitPreviewSelection;
 	onClose: () => void;
 	/** Send the annotated selection + instruction to an agent. */
@@ -399,6 +403,7 @@ function ReviewThreadDrawer({
 
 export function WorkspaceEditorSurface({
 	workspaceRoot,
+	workspaceId,
 	selection,
 	onClose,
 	onSubmitAnnotation,
@@ -421,9 +426,14 @@ export function WorkspaceEditorSurface({
 		() => buildReviewCommentAnnotations(reviewThreads),
 		[reviewThreads],
 	);
+	const reviewerFindings = useReviewerFindings(workspaceId ?? null);
 	const machineAnnotations = useMemo(
-		() => [...(selection.machineAnnotations ?? []), ...reviewCommentAnnotations],
-		[reviewCommentAnnotations, selection.machineAnnotations],
+		() => [
+			...(selection.machineAnnotations ?? []),
+			...reviewCommentAnnotations,
+			...reviewAnnotationsForPath(selection.path, reviewerFindings),
+		],
+		[reviewCommentAnnotations, reviewerFindings, selection.machineAnnotations, selection.path],
 	);
 	const activeReviewThread = useMemo(
 		() =>
