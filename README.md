@@ -10,6 +10,8 @@
   Workspace-first AI coding hub for managing agents, reviews, terminals, and task flows across multiple providers.
 </p>
 
+[![125 active days, verified by Not a Cent](https://notacent.app/api/badge/devcommandcenter.svg?style=card&lang=en)](https://notacent.app/en/app/devcommandcenter)
+
 Dev Command Center (DCC) is a local-first desktop workbench for software
 engineering with AI agents. It connects isolated Git worktrees, multi-provider
 sessions, review and delivery workflows, terminals, usage insights, and local
