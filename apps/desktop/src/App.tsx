@@ -124,6 +124,7 @@ import {
 } from "./features/agents/use-agents";
 import { bindSessionAgent } from "./lib/agents-api";
 import { subscribeCallAgent } from "./features/agents/call-agent-command";
+import { subscribeOpenFinding } from "./features/agents/open-finding-command";
 import {
 	callAgentBlockKey,
 	hasReviewableChanges,
@@ -4542,6 +4543,42 @@ export default function App() {
 			});
 		},
 		[requestSurfaceSelection],
+	);
+
+	// A finding in the reviewer's list opens the file's diff at its line. A
+	// file that is no longer a local change opens as a plain file instead.
+	useEffect(
+		() =>
+			subscribeOpenFinding(({ workspaceId, path, line }) => {
+				if (workspaceId !== selectedWorkspace?.id) return;
+				const status = queryClient.getQueryData<WorkspaceGitStatusOutput>([
+					WORKSPACE_GIT_STATUS_QUERY_KEY,
+					selectedLocalWorkspacePath?.trim() ?? "",
+				]);
+				const unstaged = status?.unstaged.find((entry) => entry.path === path);
+				const entry = unstaged ?? status?.staged.find((candidate) => candidate.path === path);
+				if (!entry) {
+					handleOpenConversationFile({ path, line, column: null });
+					return;
+				}
+				requestSurfaceSelection({
+					kind: "git-diff",
+					file: {
+						group: unstaged ? "unstaged" : "staged",
+						path: entry.path,
+						name: entry.name,
+						status: entry.status,
+						focusLine: line,
+					},
+				});
+			}),
+		[
+			handleOpenConversationFile,
+			queryClient,
+			requestSurfaceSelection,
+			selectedLocalWorkspacePath,
+			selectedWorkspace?.id,
+		],
 	);
 
 	const handleOpenSearchMatch = useCallback(

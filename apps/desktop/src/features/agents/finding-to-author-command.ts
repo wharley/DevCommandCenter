@@ -1,13 +1,21 @@
 import type { DiffMachineAnnotation } from "@/features/editor/diff-types";
 
-/** A reviewer finding the person wants the task's author agent to fix. */
-export type FindingToAuthorCommand = {
-	workspaceId: string;
+/** One reviewer finding as it travels to the author agent. */
+export type FindingForAuthor = {
 	path: string;
 	startLine: number;
 	endLine: number;
 	title: string;
+	/** The reviewer's full explanation: what is wrong, why, what to change. */
+	detail: string;
+	/** The lines it points at, when the caller has the file at hand. */
 	snippet: string;
+};
+
+/** Findings the person wants the task's author agent to fix. */
+export type FindingToAuthorCommand = {
+	workspaceId: string;
+	findings: FindingForAuthor[];
 };
 
 const FINDING_TO_AUTHOR_EVENT = "dcc:agent-finding-to-author";
@@ -20,10 +28,22 @@ export function findingSnippet(text: string, startLine: number, endLine: number)
 		.join("\n");
 }
 
-/**
- * Hands a clicked reviewer marking to the task panel, which drafts a fix
- * request in the author agent's composer. Other markings are ignored.
- */
+/** Hands findings to the task panel, which drafts a fix request in the author's composer. */
+export function dispatchFindingsToAuthor(
+	workspaceId: string | null | undefined,
+	findings: FindingForAuthor[],
+): void {
+	if (!workspaceId || findings.length === 0) {
+		return;
+	}
+	window.dispatchEvent(
+		new CustomEvent<FindingToAuthorCommand>(FINDING_TO_AUTHOR_EVENT, {
+			detail: { workspaceId, findings },
+		}),
+	);
+}
+
+/** A clicked reviewer marking on a diff. Other markings are ignored. */
 export function dispatchFindingToAuthor(input: {
 	workspaceId: string | null | undefined;
 	path: string;
@@ -33,23 +53,21 @@ export function dispatchFindingToAuthor(input: {
 	snippet?: string;
 }): void {
 	const { workspaceId, path, annotation, modifiedText } = input;
-	if (!workspaceId || annotation.source !== "agent-review") {
+	if (annotation.source !== "agent-review") {
 		return;
 	}
-	window.dispatchEvent(
-		new CustomEvent<FindingToAuthorCommand>(FINDING_TO_AUTHOR_EVENT, {
-			detail: {
-				workspaceId,
-				path,
-				startLine: annotation.startLine,
-				endLine: annotation.endLine,
-				title: annotation.title,
-				snippet:
-					input.snippet ??
-					findingSnippet(modifiedText ?? "", annotation.startLine, annotation.endLine),
-			},
-		}),
-	);
+	dispatchFindingsToAuthor(workspaceId, [
+		{
+			path,
+			startLine: annotation.startLine,
+			endLine: annotation.endLine,
+			title: annotation.title,
+			detail: annotation.detail ?? "",
+			snippet:
+				input.snippet ??
+				findingSnippet(modifiedText ?? "", annotation.startLine, annotation.endLine),
+		},
+	]);
 }
 
 export function subscribeFindingToAuthor(
@@ -80,4 +98,45 @@ export function authorSessionId(
 		null,
 	);
 	return latest?.session.id ?? null;
+}
+
+export type FixRequestLabels = {
+	/** "Fix this Reviewer finding" */
+	one: string;
+	/** "Fix these N Reviewer findings", already counted. */
+	many: string;
+	/** ("line 3") or ("lines 3–13") */
+	location: (startLine: number, endLine: number) => string;
+};
+
+function findingBody(finding: FindingForAuthor, labels: FixRequestLabels, indent: string): string[] {
+	const lines = [`\`${finding.path}\` (${labels.location(finding.startLine, finding.endLine)}): ${finding.title}`];
+	if (finding.detail && finding.detail !== finding.title) {
+		lines.push(`${indent}${finding.detail}`);
+	}
+	return lines;
+}
+
+/**
+ * The draft the author agent receives. It carries the reviewer's full
+ * explanation: a one-sentence title alone reads as "already handled" when
+ * the code next to it looks reasonable.
+ */
+export function buildFixRequest(findings: FindingForAuthor[], labels: FixRequestLabels): string {
+	if (findings.length === 1) {
+		const finding = findings[0]!;
+		const parts = [`${labels.one}:`, "", ...findingBody(finding, labels, "")];
+		if (finding.snippet.trim()) {
+			parts.push("", "```", finding.snippet, "```");
+		}
+		return parts.join("\n");
+	}
+	return [
+		`${labels.many}:`,
+		"",
+		...findings.flatMap((finding, index) => {
+			const [head, ...rest] = findingBody(finding, labels, "   ");
+			return [`${index + 1}. ${head}`, ...rest];
+		}),
+	].join("\n");
 }

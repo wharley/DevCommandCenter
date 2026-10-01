@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { parseReviewFindings, stripReviewBlock } from "@/features/agents/review-findings";
+import { ReviewFindingsCard } from "@/features/agents/review-findings-card";
 import { toast } from "sonner";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { StickyNote } from "lucide-react";
@@ -646,12 +647,10 @@ export function AssistantMessage({
 						</Suspense>
 					</div>
 				) : null}
-				{reviewFindings ? (
-					<p className="mt-2 text-[12px] text-muted-foreground">
-						{reviewFindings.length > 0
-							? t("agents.review.marked", { count: reviewFindings.length })
-							: t("agents.review.clean")}
-					</p>
+				{reviewFindings && reviewFindings.length > 0 ? (
+					<ReviewFindingsCard sessionId={sessionId} findings={reviewFindings} />
+				) : reviewFindings ? (
+					<p className="mt-2 text-[12px] text-muted-foreground">{t("agents.review.clean")}</p>
 				) : null}
 				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
 					<MessageTimestamp createdAt={createdAt} />

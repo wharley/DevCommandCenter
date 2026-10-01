@@ -147,13 +147,24 @@
   },
   "agents": {
     "review": {
-      "fixRequest": "Fix this Reviewer finding: {{finding}}",
       "noAuthor": "There is no author agent conversation in this task to receive the finding.",
       "fileCount_one": "{{count}} finding",
       "fileCount_other": "{{count}} findings",
-      "marked_one": "{{count}} finding marked on the diff.",
-      "marked_other": "{{count}} findings marked on the diff.",
-      "clean": "No findings to mark on the diff."
+      "clean": "No findings to mark on the diff.",
+      "cardTitle_one": "{{count}} finding",
+      "cardTitle_other": "{{count}} findings",
+      "stale": "This review is older than the latest changes. Run the Reviewer again to act on its findings.",
+      "sendAll": "Send all to the author",
+      "sendOne": "Send to the author agent",
+      "severity": {
+        "critical": "Critical",
+        "major": "Major",
+        "minor": "Minor"
+      },
+      "fixOne": "Fix this Reviewer finding",
+      "fixMany": "Fix these {{count}} Reviewer findings",
+      "line": "line {{line}}",
+      "lines": "lines {{start}}–{{end}}"
     },
     "heading": "Agents",
     "presets": {

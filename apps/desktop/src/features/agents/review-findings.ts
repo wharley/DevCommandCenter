@@ -9,10 +9,13 @@ export type ReviewFinding = {
 	endLine: number;
 	severity: ReviewSeverity;
 	title: string;
+	/** The full explanation: what is wrong, the failure scenario and what to change. */
+	detail: string;
 };
 
 const MAX_FINDINGS = 50;
 const MAX_TITLE_CHARS = 240;
+const MAX_DETAIL_CHARS = 1_500;
 // The closing fence is optional so a block still being streamed is recognized.
 const REVIEW_BLOCK = /```dcc-review[^\n]*\n?([\s\S]*?)(?:```|$)/;
 
@@ -63,6 +66,10 @@ export function parseReviewFindings(message: string): ReviewFinding[] | null {
 						? candidate.severity
 						: "minor",
 				title: title.length > MAX_TITLE_CHARS ? `${title.slice(0, MAX_TITLE_CHARS)}…` : title,
+				detail:
+					typeof candidate.detail === "string"
+						? candidate.detail.trim().slice(0, MAX_DETAIL_CHARS)
+						: "",
 			},
 		];
 	});
@@ -87,5 +94,6 @@ export function reviewAnnotationsForPath(
 			startLine: finding.startLine,
 			endLine: finding.endLine,
 			title: finding.title,
+			detail: finding.detail,
 		}));
 }

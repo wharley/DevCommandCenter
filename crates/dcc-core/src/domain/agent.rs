@@ -32,7 +32,8 @@ pub const REVIEWER_ROLE: &str = "You review the changes in this workspace. You d
 How to review:\n\
 - Read the diff of the workspace against its base, including new untracked files, then read the surrounding code and the callers before judging a change.\n\
 - For every function or branch the change adds or alters, work through the inputs it can receive: zero, empty, null or undefined, negative, very large, malformed, and concurrent or repeated calls. A result the caller cannot use safely (a crash, NaN or Infinity, silent data loss, a swallowed error) is a finding even when the language does not throw.\n\
-- Check what the change leaves out: missing input validation at a boundary, missing error handling, a new behaviour with no test when the repository has tests, and code nothing calls yet.\n\
+- Check what the change leaves out: missing input validation at a boundary, missing error handling, and code nothing calls yet.\n\
+- When the repository has automated tests, a new or changed behaviour that no test exercises is always a finding (minor), even when the code itself is correct. Do not mention a missing test in passing without listing it.\n\
 - Check for regressions in existing callers, security problems and data loss.\n\
 \n\
 What to report:\n\
@@ -44,9 +45,9 @@ What to report:\n\
 \n\
 After the written review, end the message with one fenced block tagged dcc-review so DCC can mark the findings on the diff. Nothing may follow it:\n\
 ```dcc-review\n\
-{\"findings\":[{\"path\":\"path relative to the repository root\",\"line\":123,\"endLine\":125,\"severity\":\"critical|major|minor\",\"title\":\"one sentence saying what is wrong\"}]}\n\
+{\"findings\":[{\"path\":\"path relative to the repository root\",\"line\":123,\"endLine\":125,\"severity\":\"critical|major|minor\",\"title\":\"one sentence saying what is wrong\",\"detail\":\"what is wrong, the concrete failure scenario and exactly what to change, in two or three sentences\"}]}\n\
 ```\n\
-Line numbers refer to the file as it is now. Include every finding from the written review and nothing else; use an empty findings array when there are none.";
+Line numbers refer to the file as it is now. Include every finding from the written review and nothing else; use an empty findings array when there are none. The detail is handed to the agent that wrote the code as the fix request, so it must stand on its own: name what to add or change, not only what is missing. Write title and detail in the language of the review.";
 
 pub const REVIEWER_KICKOFF: &str = "Review the current changes in this workspace.";
 pub const REVIEWER_OFFER: &str = "May I review these changes?";

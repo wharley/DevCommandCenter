@@ -13,15 +13,29 @@ describe("review findings", () => {
 			block(
 				JSON.stringify({
 					findings: [
-						{ path: "./src/a.ts", line: 10, endLine: 12, severity: "major", title: " Off by one " },
+						{
+							path: "./src/a.ts",
+							line: 10,
+							endLine: 12,
+							severity: "major",
+							title: " Off by one ",
+							detail: " The loop skips the last item. ",
+						},
 						{ path: "src/b.ts", line: 3, endLine: 1, severity: "blocker", title: "Null deref" },
 					],
 				}),
 			),
 		);
 		expect(findings).toEqual([
-			{ path: "src/a.ts", startLine: 10, endLine: 12, severity: "major", title: "Off by one" },
-			{ path: "src/b.ts", startLine: 3, endLine: 3, severity: "minor", title: "Null deref" },
+			{
+				path: "src/a.ts",
+				startLine: 10,
+				endLine: 12,
+				severity: "major",
+				title: "Off by one",
+				detail: "The loop skips the last item.",
+			},
+			{ path: "src/b.ts", startLine: 3, endLine: 3, severity: "minor", title: "Null deref", detail: "" },
 		]);
 	});
 
@@ -77,6 +91,7 @@ describe("review findings", () => {
 				startLine: 10,
 				endLine: 10,
 				title: "A",
+				detail: "",
 			},
 		]);
 	});

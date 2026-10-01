@@ -147,13 +147,24 @@
   },
   "agents": {
     "review": {
-      "fixRequest": "Corrija este achado do Revisor: {{finding}}",
       "noAuthor": "Não há uma conversa do agente autor nesta tarefa para receber o achado.",
       "fileCount_one": "{{count}} achado",
       "fileCount_other": "{{count}} achados",
-      "marked_one": "{{count}} achado marcado no diff.",
-      "marked_other": "{{count}} achados marcados no diff.",
-      "clean": "Nenhum achado para marcar no diff."
+      "clean": "Nenhum achado para marcar no diff.",
+      "cardTitle_one": "{{count}} achado",
+      "cardTitle_other": "{{count}} achados",
+      "stale": "Revisão anterior às últimas mudanças. Rode o Revisor de novo para agir sobre os achados.",
+      "sendAll": "Enviar todos ao autor",
+      "sendOne": "Enviar ao agente autor",
+      "severity": {
+        "critical": "Crítico",
+        "major": "Importante",
+        "minor": "Menor"
+      },
+      "fixOne": "Corrija este achado do Revisor",
+      "fixMany": "Corrija estes {{count}} achados do Revisor",
+      "line": "linha {{line}}",
+      "lines": "linhas {{start}}–{{end}}"
     },
     "heading": "Agentes",
     "presets": {

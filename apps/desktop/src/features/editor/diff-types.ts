@@ -18,4 +18,6 @@ export type DiffMachineAnnotation = {
 	startLine: number;
 	endLine: number;
 	title: string;
+	/** Longer explanation, when the source provides one. */
+	detail?: string;
 };

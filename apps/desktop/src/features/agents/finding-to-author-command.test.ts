@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { authorSessionId, findingSnippet } from "./finding-to-author-command";
+import {
+	authorSessionId,
+	buildFixRequest,
+	findingSnippet,
+	type FindingForAuthor,
+} from "./finding-to-author-command";
+
+const labels = {
+	one: "Fix this Reviewer finding",
+	many: "Fix these 2 Reviewer findings",
+	location: (start: number, end: number) => (start === end ? `line ${start}` : `lines ${start}–${end}`),
+};
+
+const finding = (overrides: Partial<FindingForAuthor> = {}): FindingForAuthor => ({
+	path: "src/math.ts",
+	startLine: 3,
+	endLine: 13,
+	title: "divide has no regression tests",
+	detail: "Add tests for zero, -0 and overflow so the guards cannot be removed silently.",
+	snippet: "",
+	...overrides,
+});
 
 describe("finding to author", () => {
 	it("quotes the lines the finding points at", () => {
@@ -19,5 +40,41 @@ describe("finding to author", () => {
 		expect(authorSessionId(sessions, (id) => id === "reviewer")).toBe("author");
 		expect(authorSessionId(sessions.slice(1, 2), (id) => id === "reviewer")).toBeNull();
 		expect(authorSessionId([{ session: { id: "fresh" } }], () => false)).toBe("fresh");
+	});
+
+	it("sends the reviewer's explanation, not just the title", () => {
+		expect(buildFixRequest([finding({ snippet: "return a / b;" })], labels)).toBe(
+			[
+				"Fix this Reviewer finding:",
+				"",
+				"`src/math.ts` (lines 3–13): divide has no regression tests",
+				"Add tests for zero, -0 and overflow so the guards cannot be removed silently.",
+				"",
+				"```",
+				"return a / b;",
+				"```",
+			].join("\n"),
+		);
+		// No snippet at hand and no detail: location and title only.
+		expect(buildFixRequest([finding({ detail: "", startLine: 3, endLine: 3 })], labels)).toBe(
+			"Fix this Reviewer finding:\n\n`src/math.ts` (line 3): divide has no regression tests",
+		);
+	});
+
+	it("numbers several findings in one request", () => {
+		expect(
+			buildFixRequest(
+				[finding(), finding({ path: "src/b.ts", startLine: 7, endLine: 7, title: "Null deref", detail: "" })],
+				labels,
+			),
+		).toBe(
+			[
+				"Fix these 2 Reviewer findings:",
+				"",
+				"1. `src/math.ts` (lines 3–13): divide has no regression tests",
+				"   Add tests for zero, -0 and overflow so the guards cannot be removed silently.",
+				"2. `src/b.ts` (line 7): Null deref",
+			].join("\n"),
+		);
 	});
 });

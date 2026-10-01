@@ -76,6 +76,7 @@ import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mis
 import { AgentReviewOffer } from "@/features/agents/agent-review-offer";
 import {
 	authorSessionId,
+	buildFixRequest,
 	subscribeFindingToAuthor,
 } from "@/features/agents/finding-to-author-command";
 import { useAgents } from "@/features/agents/use-agents";
@@ -923,16 +924,14 @@ export function WorkspacePanel({
 				}
 				setFindingForAuthor({
 					sessionId,
-					text: buildAnnotationContent(
-						{
-							side: "modified",
-							path: command.path,
-							startLine: command.startLine,
-							endLine: command.endLine,
-							snippet: command.snippet,
-						},
-						t("agents.review.fixRequest", { finding: command.title }),
-					),
+					text: buildFixRequest(command.findings, {
+						one: t("agents.review.fixOne"),
+						many: t("agents.review.fixMany", { count: command.findings.length }),
+						location: (startLine, endLine) =>
+							startLine === endLine
+								? t("agents.review.line", { line: startLine })
+								: t("agents.review.lines", { start: startLine, end: endLine }),
+					}),
 				});
 				if (sessionId !== effectiveSessionId) onSelectSession(sessionId);
 			}),
