@@ -147,6 +147,8 @@
   },
   "agents": {
     "review": {
+      "fixRequest": "Corrija este achado do Revisor: {{finding}}",
+      "noAuthor": "Não há uma conversa do agente autor nesta tarefa para receber o achado.",
       "fileCount_one": "{{count}} achado",
       "fileCount_other": "{{count}} achados",
       "marked_one": "{{count}} achado marcado no diff.",

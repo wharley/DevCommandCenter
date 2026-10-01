@@ -22,6 +22,7 @@ import {
 	type PendingAnnotation,
 } from "./diff-annotation";
 import { WorkspaceChangesDiffLoader } from "./WorkspaceChangesDiffLoader";
+import { dispatchFindingToAuthor } from "@/features/agents/finding-to-author-command";
 import { reviewAnnotationsForPath } from "@/features/agents/review-findings";
 import { useReviewerFindings } from "@/features/agents/use-reviewer-findings";
 
@@ -660,6 +661,12 @@ export function WorkspaceEditorSurface({
 							if (annotation.source === "forge-review" && annotation.id) {
 								setActiveReviewThreadId(annotation.id);
 							}
+							dispatchFindingToAuthor({
+								workspaceId,
+								path: selection.path,
+								annotation,
+								modifiedText: snapshot.modifiedText,
+							});
 						}}
 						reviewCommentLabel={t("diffAnnotate.reviewComment")}
 					/>

@@ -9,6 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { dispatchFindingToAuthor } from "@/features/agents/finding-to-author-command";
 import { reviewAnnotationsForPath } from "@/features/agents/review-findings";
 import { useReviewerFindingsContext } from "@/features/agents/reviewer-findings-context";
 import { WorkspaceChangesDiffLoader } from "@/features/editor/WorkspaceChangesDiffLoader";
@@ -53,7 +54,8 @@ export function WorkspaceGitFilePreview({
 	forceUnified = false,
 }: WorkspaceGitFilePreviewProps) {
 	const { t } = useTranslation("common");
-	const reviewerFindings = useReviewerFindingsContext();
+	const { workspaceId: reviewWorkspaceId, findings: reviewerFindings } =
+		useReviewerFindingsContext();
 	const effectiveWorkspaceRoot = selection?.workspaceRootOverride ?? workspaceRoot;
 	const query = useWorkspaceGitFilePreviewContent(
 		selection && effectiveWorkspaceRoot
@@ -165,6 +167,14 @@ export function WorkspaceGitFilePreview({
 						...(selection.machineAnnotations ?? []),
 						...reviewAnnotationsForPath(selection.path, reviewerFindings),
 					]}
+					onMachineAnnotationClick={({ annotation }) =>
+						dispatchFindingToAuthor({
+							workspaceId: reviewWorkspaceId,
+							path: selection.path,
+							annotation,
+							modifiedText: snapshot.modifiedText,
+						})
+					}
 					className="min-h-0"
 				/>
 			) : (

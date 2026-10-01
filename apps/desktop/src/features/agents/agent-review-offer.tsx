@@ -117,8 +117,8 @@ function OfferThought({
 	const ready = typed >= question.length;
 
 	return (
-		<div className="dcc-agent-offer flex items-end justify-end">
-			<div className="relative mb-7 mr-1 flex min-h-10 items-center gap-2 rounded-[20px] border border-border/70 bg-card py-1.5 pl-4 pr-1.5 shadow-sm">
+		<div className="dcc-agent-offer flex flex-col items-end">
+			<div className="flex min-h-10 items-center gap-2 rounded-[20px] border border-border/70 bg-card py-1.5 pl-4 pr-1.5 shadow-sm">
 				{/* Read once, in full, instead of letter by letter. */}
 				<p className="sr-only" aria-live="polite">
 					{agent.name}: {question}
@@ -151,15 +151,12 @@ function OfferThought({
 						</Button>
 					</span>
 				)}
-				{/* The trail of a thought bubble, leading down to the mascot. */}
-				<span
-					className="absolute -bottom-3 right-3 size-2.5 rounded-full border border-border/70 bg-card"
-					aria-hidden
-				/>
-				<span
-					className="absolute -bottom-6 -right-0.5 size-1.5 rounded-full border border-border/70 bg-card"
-					aria-hidden
-				/>
+			</div>
+			{/* The thought rises from the mascot's head: small bubble near the
+			    head, larger one near the balloon, both centred over the mascot. */}
+			<div className="flex w-12 flex-col items-center gap-1 py-1" aria-hidden>
+				<span className="size-2.5 rounded-full border border-border/70 bg-card" />
+				<span className="size-1.5 rounded-full border border-border/70 bg-card" />
 			</div>
 			<AgentAvatar avatar={agent.avatar} size={48} className="dcc-agent-float shrink-0" />
 		</div>

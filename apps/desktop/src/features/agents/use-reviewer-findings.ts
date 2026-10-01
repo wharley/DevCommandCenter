@@ -63,3 +63,36 @@ export function useReviewerFindings(workspaceId: string | null, scope = "local")
 		return isReviewCurrent(completedAt, otherTurns) ? review.data : NO_FINDINGS;
 	}, [agentBySessionId, completedAt, review.data, sessions]);
 }
+
+/** Clock skew allowed between a turn's snapshot and its session summary. */
+const SAME_TURN_TOLERANCE_MS = 5_000;
+
+/** Whether an execution is the most recent one its session completed. */
+export function isLatestExecution(
+	executionCompletedAt: string | null,
+	sessionLastTurnCompletedAt: string | null | undefined,
+): boolean {
+	if (!executionCompletedAt || !sessionLastTurnCompletedAt) {
+		return false;
+	}
+	return (
+		Date.parse(sessionLastTurnCompletedAt) - Date.parse(executionCompletedAt) <=
+		SAME_TURN_TOLERANCE_MS
+	);
+}
+
+/**
+ * Findings to mark on the patch of one execution: the task's current findings
+ * when that execution is the latest of its session, nothing otherwise.
+ */
+export function useReviewerFindingsForTurn(
+	execution: { workspaceId: string; sessionId: string; completedAt: string | null },
+	scope = "local",
+): ReviewFinding[] {
+	const findings = useReviewerFindings(execution.workspaceId, scope);
+	const sessions = useQuery(workspaceSessionsQueryOptions(execution.workspaceId, { scope })).data;
+	const lastCompletedAt = sessions?.find(
+		(summary) => summary.session.id === execution.sessionId,
+	)?.lastTurnCompletedAt;
+	return isLatestExecution(execution.completedAt, lastCompletedAt) ? findings : NO_FINDINGS;
+}

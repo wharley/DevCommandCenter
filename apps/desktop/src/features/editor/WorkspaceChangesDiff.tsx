@@ -60,7 +60,7 @@ function triggerAnchor(target: HTMLElement | null): { top: number; left: number 
 	};
 }
 
-function AnnotationCallout({
+export function AnnotationCallout({
 	annotation,
 	reviewCommentLabel,
 	onClick,
@@ -79,11 +79,12 @@ function AnnotationCallout({
 	const className =
 		"my-1 inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-muted/70 px-2 py-1 text-[10px] text-foreground shadow-sm";
 
-	if (isReview && onClick) {
+	// Review threads open their drawer; a reviewer finding drafts a fix request.
+	if ((isReview || annotation.source === "agent-review") && onClick) {
 		return (
 			<button
 				type="button"
-				className={`${className} hover:bg-muted`}
+				className={`${className} cursor-pointer hover:bg-muted`}
 				title={annotation.title}
 				onClick={(event) =>
 					onClick({

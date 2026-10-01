@@ -1,4 +1,5 @@
 import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
+import { dispatchFindingToAuthor } from "@/features/agents/finding-to-author-command";
 import { reviewAnnotationsForPath } from "@/features/agents/review-findings";
 import { useReviewerFindingsContext } from "@/features/agents/reviewer-findings-context";
 /**
@@ -576,7 +577,8 @@ function ReviewChangeCard({
 		payload: DiffAnnotationPayload,
 	) => void;
 }) {
-	const reviewerFindings = useReviewerFindingsContext();
+	const { workspaceId: reviewWorkspaceId, findings: reviewerFindings } =
+		useReviewerFindingsContext();
 	const reviewerAnnotations = useMemo(
 		() => reviewAnnotationsForPath(entry.path, reviewerFindings),
 		[entry.path, reviewerFindings],
@@ -758,6 +760,14 @@ function ReviewChangeCard({
 							modifiedText={query.data.modifiedText}
 							inline
 							machineAnnotations={reviewerAnnotations}
+							onMachineAnnotationClick={({ annotation }) =>
+								dispatchFindingToAuthor({
+									workspaceId: reviewWorkspaceId,
+									path: entry.path,
+									annotation,
+									modifiedText: query.data.modifiedText,
+								})
+							}
 							onAnnotate={
 								onAnnotate
 									? (payload) => onAnnotate(selection, payload)

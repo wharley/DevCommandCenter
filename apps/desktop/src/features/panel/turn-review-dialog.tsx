@@ -12,6 +12,9 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { TurnReviewFilePreview } from "./turn-review-file-preview";
+import { dispatchFindingToAuthor } from "@/features/agents/finding-to-author-command";
+import { reviewAnnotationsForPath } from "@/features/agents/review-findings";
+import { useReviewerFindingsForTurn } from "@/features/agents/use-reviewer-findings";
 import { TurnReviewFileLabel, TurnReviewStats } from "./turn-review-file-label";
 import { hasTurnReviewLineStats } from "./turn-review.logic";
 import type { DiffAnnotationRequest } from "@/features/editor/diff-annotation";
@@ -37,6 +40,9 @@ export function TurnReviewDialog({
 }) {
 	const { t } = useTranslation("common");
 	const previewId = useId();
+	// Markings only on the task's latest execution: on an older one the lines
+	// the reviewer pointed at have moved.
+	const reviewerFindings = useReviewerFindingsForTurn(review);
 	const deliveryBusy = useWorkspaceDeliveryBusy(workspaceRoot);
 	const revealSelectedFile = useCallback((node: HTMLButtonElement | null) => {
 		node?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
@@ -146,6 +152,17 @@ export function TurnReviewDialog({
 								snapshotId={review.snapshotId}
 								file={file}
 								onAddToChat={onAddToChat}
+								machineAnnotations={reviewAnnotationsForPath(file.path, reviewerFindings)}
+								onMachineAnnotationClick={({ annotation, snippet }) => {
+									dispatchFindingToAuthor({
+										workspaceId: review.workspaceId,
+										path: file.path,
+										annotation,
+										snippet,
+									});
+									// The draft lands in the composer behind this dialog.
+									if (!deliveryBusy) onClose();
+								}}
 							/>
 						</div>
 					</div>

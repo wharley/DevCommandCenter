@@ -147,6 +147,8 @@
   },
   "agents": {
     "review": {
+      "fixRequest": "Fix this Reviewer finding: {{finding}}",
+      "noAuthor": "There is no author agent conversation in this task to receive the finding.",
       "fileCount_one": "{{count}} finding",
       "fileCount_other": "{{count}} findings",
       "marked_one": "{{count}} finding marked on the diff.",

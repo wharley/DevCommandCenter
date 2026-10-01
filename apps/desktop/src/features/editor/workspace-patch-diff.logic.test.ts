@@ -92,3 +92,28 @@ describe("captured patch selections", () => {
 		expect(patchSelectionRequests("example.ts", patch, { start: 1, end: 2 })).toEqual([]);
 	});
 });
+
+describe("patchNewSideLines", () => {
+	it("maps new-side line numbers to their text across hunks", async () => {
+		const { patchNewSideLines } = await import("./workspace-patch-diff.logic");
+		const patch = [
+			"diff --git a/a.ts b/a.ts",
+			"--- a/a.ts",
+			"+++ b/a.ts",
+			"@@ -1,2 +1,3 @@",
+			" keep",
+			"-old",
+			"+new",
+			"+added",
+			"@@ -10,1 +11,1 @@ fn",
+			"+tail",
+			"\\ No newline at end of file",
+		].join("\n");
+		expect([...patchNewSideLines(patch)]).toEqual([
+			[1, "keep"],
+			[2, "new"],
+			[3, "added"],
+			[11, "tail"],
+		]);
+	});
+});

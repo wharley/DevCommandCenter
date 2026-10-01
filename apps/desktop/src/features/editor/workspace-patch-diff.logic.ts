@@ -76,3 +76,28 @@ export function patchSelectionRequests(
 	}
 	return requests;
 }
+
+/**
+ * The new-side lines a unified patch shows, by line number. Markings can only
+ * be placed on these: a line outside every hunk is not rendered.
+ */
+export function patchNewSideLines(patch: string): Map<number, string> {
+	const lines = new Map<number, string>();
+	let next: number | null = null;
+	for (const line of patch.split(/\r?\n/)) {
+		const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+		if (hunk) {
+			next = Number(hunk[1]);
+			continue;
+		}
+		if (next === null || line.startsWith("\\")) continue;
+		if (line.startsWith("+") || line.startsWith(" ")) {
+			lines.set(next, line.slice(1));
+			next += 1;
+		} else if (!line.startsWith("-")) {
+			// Anything else ends the hunk (next file header, trailing text).
+			next = null;
+		}
+	}
+	return lines;
+}

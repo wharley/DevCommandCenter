@@ -74,6 +74,11 @@ import type {
 import { derivePlanFollowUpState } from "./plan-follow-up";
 import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
 import { AgentReviewOffer } from "@/features/agents/agent-review-offer";
+import {
+	authorSessionId,
+	subscribeFindingToAuthor,
+} from "@/features/agents/finding-to-author-command";
+import { useAgents } from "@/features/agents/use-agents";
 import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
 import { useWorkspaceGitBranchDiff } from "@/features/inspector/use-workspace-git-branch-diff";
 import { useWorkspacePrStatus } from "@/features/inspector/use-workspace-pr-status";
@@ -899,6 +904,54 @@ export function WorkspacePanel({
 			});
 		});
 	}, [workspaceId, effectiveSessionId, setComposerPrefill]);
+
+	// A clicked reviewer finding becomes a draft in the author agent's
+	// composer. The person reads it and sends it; nothing runs on the click.
+	const { agentBySessionId } = useAgents(sessionQueryScope);
+	const [findingForAuthor, setFindingForAuthor] = useState<{
+		sessionId: string;
+		text: string;
+	} | null>(null);
+	useEffect(
+		() =>
+			subscribeFindingToAuthor((command) => {
+				if (command.workspaceId !== workspaceId) return;
+				const sessionId = authorSessionId(sessions, (id) => agentBySessionId.has(id));
+				if (!sessionId) {
+					toast.info(t("agents.review.noAuthor"));
+					return;
+				}
+				setFindingForAuthor({
+					sessionId,
+					text: buildAnnotationContent(
+						{
+							side: "modified",
+							path: command.path,
+							startLine: command.startLine,
+							endLine: command.endLine,
+							snippet: command.snippet,
+						},
+						t("agents.review.fixRequest", { finding: command.title }),
+					),
+				});
+				if (sessionId !== effectiveSessionId) onSelectSession(sessionId);
+			}),
+		[agentBySessionId, effectiveSessionId, onSelectSession, sessions, t, workspaceId],
+	);
+	useEffect(() => {
+		// Wait until the author's conversation is the one on screen, so the
+		// draft lands in its composer and not in the reviewer's.
+		if (!findingForAuthor || findingForAuthor.sessionId !== effectiveSessionId) return;
+		composerPrefillRequestSequenceRef.current += 1;
+		const requestId = `local:${composerPrefillRequestSequenceRef.current}`;
+		setComposerPrefill((prev) => ({
+			requestId,
+			text: findingForAuthor.text,
+			mode: "append",
+			nonce: (prev?.nonce ?? 0) + 1,
+		}));
+		setFindingForAuthor(null);
+	}, [effectiveSessionId, findingForAuthor, setComposerPrefill]);
 	const hasHydratedHistory =
 		hydratedSessionHistory?.sessionId === effectiveSessionId &&
 		hydratedSessionHistory.active !== false;

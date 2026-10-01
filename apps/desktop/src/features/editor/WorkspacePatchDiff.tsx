@@ -1,15 +1,22 @@
 import codeReviewControlsCss from "./code-review-controls.css?inline";
 import "./code-review-controls.css";
-import type { SelectedLineRange } from "@pierre/diffs";
+import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle } from "@pierre/diffs/react";
 import { MessageSquarePlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppearance } from "@/components/theme-provider";
-import { workspaceDiffContentHash } from "./workspace-changes-diff.logic";
+import {
+	groupWorkspaceDiffAnnotations,
+	workspaceDiffAnnotationCss,
+	workspaceDiffContentHash,
+} from "./workspace-changes-diff.logic";
+import { AnnotationCallout } from "./WorkspaceChangesDiff";
+import type { DiffMachineAnnotation } from "./diff-types";
 import { workspaceDiffViewOptions } from "./workspace-diff-view-options";
 import {
 	parseWorkspacePatch,
+	patchNewSideLines,
 	patchSelectionRequests,
 } from "./workspace-patch-diff.logic";
 import type { DiffAnnotationRequest } from "./diff-annotation";
@@ -20,7 +27,17 @@ export type WorkspacePatchDiffProps = {
 	patch: string;
 	className?: string;
 	onAddToChat?: (requests: DiffAnnotationRequest[]) => void;
+	/** Markings on new-side lines; ones outside the patch's hunks are dropped. */
+	machineAnnotations?: DiffMachineAnnotation[];
+	onMachineAnnotationClick?: (input: {
+		annotation: DiffMachineAnnotation;
+		/** The marked lines as the patch shows them. */
+		snippet: string;
+	}) => void;
 };
+
+type AnnotationMetadata = { annotations: DiffMachineAnnotation[] };
+const NO_ANNOTATIONS: DiffMachineAnnotation[] = [];
 
 const ITEM_ID = "dcc-workspace-patch";
 
@@ -30,11 +47,13 @@ export default function WorkspacePatchDiff({
 	patch,
 	className,
 	onAddToChat,
+	machineAnnotations = NO_ANNOTATIONS,
+	onMachineAnnotationClick,
 }: WorkspacePatchDiffProps) {
 	const { t } = useTranslation("common");
 	const { theme } = useAppearance();
 	const containerRef = useRef<HTMLDivElement>(null);
-	const viewRef = useRef<CodeViewHandle<undefined>>(null);
+	const viewRef = useRef<CodeViewHandle<AnnotationMetadata>>(null);
 	const resetFrameRef = useRef<number | null>(null);
 	const [selectedLines, setSelectedLines] = useState<{
 		id: string;
@@ -85,16 +104,38 @@ export default function WorkspacePatchDiff({
 		[path, fileDiff, onAddToChat, clearSelection],
 	);
 	const activeRange = textSelection ?? selectedLines?.range;
+	const newSideLines = useMemo(() => patchNewSideLines(patch), [patch]);
+	const visibleAnnotations = useMemo(
+		() =>
+			machineAnnotations.filter(
+				(annotation) => annotation.side === "modified" && newSideLines.has(annotation.endLine),
+			),
+		[machineAnnotations, newSideLines],
+	);
+	const annotations = useMemo<DiffLineAnnotation<AnnotationMetadata>[]>(
+		() =>
+			groupWorkspaceDiffAnnotations(visibleAnnotations).map((group) => ({
+				side: group.side,
+				lineNumber: group.lineNumber,
+				metadata: { annotations: group.annotations },
+			})),
+		[visibleAnnotations],
+	);
+	const annotationCss = useMemo(
+		() => workspaceDiffAnnotationCss(visibleAnnotations),
+		[visibleAnnotations],
+	);
 	const items = useMemo(
 		() => [
 			{
 				id: ITEM_ID,
 				type: "diff" as const,
 				fileDiff,
+				annotations,
 				version: patchHash,
 			},
 		],
-		[fileDiff, patchHash],
+		[annotations, fileDiff, patchHash],
 	);
 
 	return (
@@ -115,7 +156,7 @@ export default function WorkspacePatchDiff({
 				}
 			}}
 		>
-			<CodeView
+			<CodeView<AnnotationMetadata>
 				ref={viewRef}
 				className="h-full min-h-0 min-w-0 overflow-x-auto overflow-y-auto"
 				items={items}
@@ -123,12 +164,38 @@ export default function WorkspacePatchDiff({
 				selectedLines={selectedLines}
 				onSelectedLinesChange={setSelectedLines}
 				options={{
-					...workspaceDiffViewOptions(theme, true),
-					unsafeCSS: codeReviewControlsCss,
+					...workspaceDiffViewOptions<AnnotationMetadata>(theme, true),
+					unsafeCSS: `${codeReviewControlsCss}\n${annotationCss}`,
 					enableLineSelection: Boolean(onAddToChat),
 					enableGutterUtility: Boolean(onAddToChat),
 					onGutterUtilityClick: onAddToChat ? addToChat : undefined,
 				}}
+				renderAnnotation={(annotation) => (
+					<div className="flex min-w-0 flex-col px-2 py-0.5">
+						{annotation.metadata?.annotations.map((entry, index) => (
+							<AnnotationCallout
+								key={`${entry.source}:${entry.title}:${index}`}
+								annotation={entry}
+								reviewCommentLabel=""
+								onClick={
+									onMachineAnnotationClick
+										? ({ annotation: clicked }) => {
+												const snippet: string[] = [];
+												for (let line = clicked.startLine; line <= clicked.endLine; line += 1) {
+													const text = newSideLines.get(line);
+													if (text !== undefined) snippet.push(text);
+												}
+												onMachineAnnotationClick({
+													annotation: clicked,
+													snippet: snippet.join("\n"),
+												});
+											}
+										: undefined
+								}
+							/>
+						))}
+					</div>
+				)}
 			/>
 			{activeRange && onAddToChat && (
 				<button

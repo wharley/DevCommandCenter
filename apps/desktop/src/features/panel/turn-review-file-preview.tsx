@@ -6,16 +6,21 @@ import { WorkspacePatchDiffLoader } from "@/features/editor/WorkspaceChangesDiff
 import { loadTurnReviewFileDiff } from "@/lib/session-api";
 import { Button } from "@/components/ui/button";
 import type { DiffAnnotationRequest } from "@/features/editor/diff-annotation";
+import type { WorkspacePatchDiffProps } from "@/features/editor/WorkspacePatchDiff";
 
 /** Fetch the immutable patch only while its preview is open. */
 export function TurnReviewFilePreview({
 	snapshotId,
 	file,
 	onAddToChat,
+	machineAnnotations,
+	onMachineAnnotationClick,
 }: {
 	snapshotId: string;
 	file: TurnReviewFile;
 	onAddToChat?: (requests: DiffAnnotationRequest[]) => void;
+	machineAnnotations?: WorkspacePatchDiffProps["machineAnnotations"];
+	onMachineAnnotationClick?: WorkspacePatchDiffProps["onMachineAnnotationClick"];
 }) {
 	const { t } = useTranslation("common");
 	const query = useQuery({
@@ -69,6 +74,8 @@ export function TurnReviewFilePreview({
 			patch={query.data.diff}
 			className="h-full"
 			onAddToChat={onAddToChat}
+			machineAnnotations={machineAnnotations}
+			onMachineAnnotationClick={onMachineAnnotationClick}
 		/>
 	);
 }
