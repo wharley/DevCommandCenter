@@ -10,11 +10,18 @@ import {
 	agentsOverview,
 } from "@/lib/agents-api";
 import { agentSessionState, aggregateAgentState } from "./agent-activity";
+import { isResultUnread, useSeenAgentResults } from "./agent-seen-results";
 import type { AgentActivityState } from "./agent-avatar";
 
 export const AGENTS_QUERY_KEY = dccQueryKeys.agents;
 
-export type AgentSessionView = AgentSessionBinding & { state: AgentActivityState };
+export type AgentSessionView = AgentSessionBinding & {
+	state: AgentActivityState;
+	/** When its last turn finished, if it did. */
+	completedAt: string | null;
+	/** It finished and the person has not opened it since. */
+	unread: boolean;
+};
 export type AgentView = ResidentAgent & {
 	state: AgentActivityState;
 	sessions: AgentSessionView[];
@@ -55,6 +62,7 @@ export function useAgents(scope: string): {
 		combine: (results) => results.map((result) => result.data),
 	});
 
+	const seen = useSeenAgentResults();
 	return useMemo(() => {
 		const summaryBySessionId = new Map<string, WorkspaceSessionSummary>();
 		for (const summaries of summariesByWorkspace) {
@@ -68,17 +76,22 @@ export function useAgents(scope: string): {
 				.filter((binding) => binding.agentId === agent.id)
 				.map((binding) => {
 					agentBySessionId.set(binding.sessionId, agent);
+					const summary = summaryBySessionId.get(binding.sessionId);
+					const state = agentSessionState(summary);
+					const completedAt = summary?.lastTurnCompletedAt ?? null;
 					return {
 						...binding,
-						state: agentSessionState(summaryBySessionId.get(binding.sessionId)),
+						state,
+						completedAt,
+						unread: state === "done" && isResultUnread(completedAt, seen[binding.sessionId]),
 					};
 				});
 			return {
 				...agent,
 				sessions,
-				state: aggregateAgentState(sessions.map((session) => session.state)),
+				state: aggregateAgentState(sessions),
 			};
 		});
 		return { agents, agentBySessionId, isLoading: overview.isLoading };
-	}, [bindings, overview.data?.agents, overview.isLoading, summariesByWorkspace]);
+	}, [bindings, overview.data?.agents, overview.isLoading, seen, summariesByWorkspace]);
 }

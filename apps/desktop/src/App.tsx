@@ -124,6 +124,7 @@ import {
 } from "./features/agents/use-agents";
 import { bindSessionAgent } from "./lib/agents-api";
 import { subscribeCallAgent } from "./features/agents/call-agent-command";
+import { markAgentResultSeen } from "./features/agents/agent-seen-results";
 import { subscribeOpenFinding } from "./features/agents/open-finding-command";
 import {
 	callAgentBlockKey,
@@ -2513,6 +2514,16 @@ export default function App() {
 		void liveWorkspaceIds;
 		void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
 	}, [liveWorkspaceIds, queryClient]);
+	// A finished agent result is read once its conversation is on screen.
+	useEffect(() => {
+		if (globalSurface !== null || !selectedSessionId) return;
+		const session = residentAgents
+			.flatMap((agent) => agent.sessions)
+			.find((candidate) => candidate.sessionId === selectedSessionId);
+		if (session?.state === "done" && session.completedAt) {
+			markAgentResultSeen(session.sessionId, session.completedAt);
+		}
+	}, [globalSurface, residentAgents, selectedSessionId]);
 	const handleOpenAgent = useCallback((agentId: string) => {
 		setActiveAgentId(agentId);
 		setGlobalSurface("agent");

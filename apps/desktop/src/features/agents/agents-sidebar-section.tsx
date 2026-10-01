@@ -79,7 +79,9 @@ export function AgentsSidebarSection({
 										"shrink-0 text-[11px]",
 										agent.state === "needsYou"
 											? "text-amber-700 dark:text-amber-300"
-											: "text-muted-foreground",
+											: agent.state === "done"
+												? "text-emerald-700 dark:text-emerald-300"
+												: "text-muted-foreground",
 									)}
 								>
 									{stateLabel(agent)}

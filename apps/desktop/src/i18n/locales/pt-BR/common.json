@@ -173,6 +173,7 @@
       "reviewer": "Revisor"
     },
     "state": {
+      "finished": "Concluída",
       "idle": "Em espera",
       "working": "Trabalhando",
       "needsYou": "Precisa de você",

@@ -173,6 +173,7 @@
       "reviewer": "Reviewer"
     },
     "state": {
+      "finished": "Finished",
       "idle": "Idle",
       "working": "Working",
       "needsYou": "Needs you",

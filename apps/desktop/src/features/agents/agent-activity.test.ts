@@ -25,10 +25,15 @@ describe("agent activity", () => {
 		expect(agentSessionState(summary("aborted"))).toBe("idle");
 	});
 
-	it("aggregates to the most urgent state and ignores finished sessions", () => {
+	it("aggregates to the most urgent state and lights up only for unread results", () => {
+		const read = { state: "done", unread: false } as const;
+		const unread = { state: "done", unread: true } as const;
+		const working = { state: "working", unread: false } as const;
+		const needsYou = { state: "needsYou", unread: false } as const;
 		expect(aggregateAgentState([])).toBe("idle");
-		expect(aggregateAgentState(["done", "idle"])).toBe("idle");
-		expect(aggregateAgentState(["done", "working"])).toBe("working");
-		expect(aggregateAgentState(["working", "needsYou"])).toBe("needsYou");
+		expect(aggregateAgentState([read])).toBe("idle");
+		expect(aggregateAgentState([read, unread])).toBe("done");
+		expect(aggregateAgentState([unread, working])).toBe("working");
+		expect(aggregateAgentState([working, needsYou])).toBe("needsYou");
 	});
 });

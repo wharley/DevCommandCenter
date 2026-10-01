@@ -480,7 +480,12 @@ export function AgentPage({
 										onClick={() => onOpenSession(session)}
 										className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
 									>
-										<AgentAvatar avatar={agent.avatar} state={session.state} size={28} />
+										<AgentAvatar
+											avatar={agent.avatar}
+											// A result already read shows the plain mascot.
+											state={session.state === "done" && !session.unread ? undefined : session.state}
+											size={28}
+										/>
 										<span className="min-w-0 flex-1">
 											<span className="block truncate text-[13px] font-medium text-foreground">
 												{workspaceNames[session.workspaceId] ?? session.title ?? session.sessionId}
@@ -496,10 +501,14 @@ export function AgentPage({
 												"shrink-0 text-[11px]",
 												session.state === "needsYou"
 													? "text-amber-700 dark:text-amber-300"
-													: "text-muted-foreground",
+													: session.unread
+														? "font-medium text-emerald-700 dark:text-emerald-300"
+														: "text-muted-foreground",
 											)}
 										>
-											{t(`agents.state.${session.state}`)}
+											{session.state === "done" && !session.unread
+												? t("agents.state.finished")
+												: t(`agents.state.${session.state}`)}
 										</span>
 									</button>
 								</li>

@@ -21,13 +21,18 @@ export function agentSessionState(
 }
 
 /**
- * One state for the agent across all its sessions. A finished review does not
- * count here: the sidebar mascot only signals work in progress or a blocked
- * session, so it never stays lit after the person has moved on.
+ * One state for the agent across all its sessions, most urgent first. A
+ * finished session only counts while its result is unread, so the sidebar
+ * mascot never stays lit after the person has looked at it.
  */
-export function aggregateAgentState(states: AgentActivityState[]): AgentActivityState {
-	if (states.includes("needsYou")) {
+export function aggregateAgentState(
+	sessions: Array<{ state: AgentActivityState; unread: boolean }>,
+): AgentActivityState {
+	if (sessions.some((session) => session.state === "needsYou")) {
 		return "needsYou";
 	}
-	return states.includes("working") ? "working" : "idle";
+	if (sessions.some((session) => session.state === "working")) {
+		return "working";
+	}
+	return sessions.some((session) => session.state === "done" && session.unread) ? "done" : "idle";
 }
