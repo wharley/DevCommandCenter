@@ -19,6 +19,7 @@ pub const MAX_AGENT_ROLE_CHARS: usize = 12_000;
 pub const MAX_AGENT_KICKOFF_CHARS: usize = 2_000;
 pub const MAX_AGENT_OFFER_CHARS: usize = 200;
 pub const MAX_AGENT_EXTRA_CHARS: usize = 2_000;
+pub const MAX_AGENT_EFFORT_CHARS: usize = 32;
 pub const AGENT_AVATAR_COLORS: &[&str] = &["blue", "cyan", "violet", "amber", "green", "pink"];
 pub const AGENT_AVATAR_EYES: &[&str] = &["round", "smile", "visor"];
 pub const AGENT_AVATAR_MIN_ARMS: u8 = 3;
@@ -122,6 +123,10 @@ pub struct ResidentAgentDraft {
     pub provider_id: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Reasoning effort for the turns DCC starts as this agent. `None`: the
+    /// default. It only applies together with the agent's own model.
+    #[serde(default)]
+    pub effort: Option<String>,
     pub avatar: AgentAvatar,
 }
 
@@ -136,6 +141,7 @@ pub struct ResidentAgent {
     pub extra_instructions: String,
     pub provider_id: Option<String>,
     pub model: Option<String>,
+    pub effort: Option<String>,
     pub avatar: AgentAvatar,
     pub preset: Option<String>,
     pub created_at: String,
@@ -192,6 +198,13 @@ impl ResidentAgentDraft {
         {
             return Err("agent avatar is not a supported variation".to_string());
         }
+        let effort = optional(self.effort);
+        if effort.as_deref().is_some_and(|effort| {
+            effort.len() > MAX_AGENT_EFFORT_CHARS
+                || !effort.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        }) {
+            return Err("agent effort is not a supported level".to_string());
+        }
         Ok(Self {
             name,
             role,
@@ -200,6 +213,7 @@ impl ResidentAgentDraft {
             extra_instructions,
             provider_id: optional(self.provider_id),
             model: optional(self.model),
+            effort,
             avatar: self.avatar,
         })
     }
@@ -214,6 +228,7 @@ impl ResidentAgentDraft {
             extra_instructions: String::new(),
             provider_id: None,
             model: None,
+            effort: None,
             avatar: AgentAvatar {
                 color: "blue".to_string(),
                 arms: 4,
@@ -317,6 +332,7 @@ mod tests {
             extra_instructions: String::new(),
             provider_id: None,
             model: None,
+            effort: None,
             avatar: draft.avatar,
             preset: Some(REVIEWER_PRESET.to_string()),
             created_at: "now".to_string(),

@@ -24,6 +24,8 @@ export type ResidentAgentDraft = {
 	extraInstructions: string;
 	providerId: string | null;
 	model: string | null;
+	/** Reasoning effort for the turns DCC starts as this agent. Null: the default. */
+	effort: string | null;
 	avatar: AgentAvatar;
 };
 

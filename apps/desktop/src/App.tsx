@@ -115,6 +115,7 @@ import { resolveDelegateTaskToolInstructions } from "./features/sessions/delegat
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { NewTaskLaunchState } from "./features/panel/NewTaskLaunchState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
+import { agentEffortForModel } from "./features/agents/agent-execution-picker";
 import { AgentPage } from "./features/agents/agent-page";
 import {
 	AGENTS_QUERY_KEY,
@@ -2659,7 +2660,14 @@ export default function App() {
 						model,
 						providerRuntime,
 						planMode: false,
-						effort: "medium",
+						// The agent's effort belongs to the agent's own model.
+						effort:
+							(usesSelection
+								? null
+								: agentEffortForModel(
+										agent.effort,
+										provider.models.find((candidate) => candidate.id === model)?.effortLevels,
+									)) ?? "medium",
 						fastMode: false,
 						approvalPolicy: "ask",
 					});

@@ -225,10 +225,11 @@
         "smile": "Smiling eyes",
         "visor": "Visor"
       },
-      "provider": "Provider",
       "providerCurrent": "The one selected in the composer",
-      "model": "Model",
       "modelDefault": "Provider's recommended",
+      "runsOn": "Runs on",
+      "runsOnHint": "Provider, model and effort used when DCC starts a turn as this agent.",
+      "runsOnWithSelection": "Runs on: {{selection}}",
       "cancel": "Cancel",
       "save": "Save",
       "title": "Edit {{agent}}",

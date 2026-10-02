@@ -1978,6 +1978,8 @@ export type RunPullRequestReviewAgentInput = {
 	 *  instructions lead the prompt; the output format stays the caller's.
 	 */
 	agentId?: string | null,
+	// Reasoning effort for this run. `None`: the provider's default.
+	effort?: string | null,
 };
 
 export type RunPullRequestReviewAgentOutput = {

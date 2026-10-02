@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ComposerProviderModelMenu } from "@/features/composer/ComposerProviderModelMenu";
 import { runPullRequestReviewAgent } from "@/lib/session-api";
 import { AgentAvatar } from "@/features/agents/agent-avatar";
+import { agentEffortForModel } from "@/features/agents/agent-execution-picker";
 import { useAgents } from "@/features/agents/use-agents";
 import {
 	dismissPrReviewJob,
@@ -410,6 +411,11 @@ export function PullRequestCodeReview({
 			providerRuntime: reviewProvider.id === selectedProviderId ? selectedProviderRuntime : null,
 			prompt,
 			agentId,
+			// The reviewer's effort applies only on the reviewer's own provider and model.
+			effort:
+				agentId && reviewerProvider
+					? agentEffortForModel(reviewer?.effort ?? null, reviewModel?.effortLevels)
+					: null,
 		});
 		return result.response;
 	};

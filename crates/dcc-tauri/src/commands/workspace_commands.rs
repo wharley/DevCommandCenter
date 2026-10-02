@@ -3829,6 +3829,7 @@ pub async fn workspace_git_commit_suggestion(
                         provider_id.to_string(),
                         input.model.clone(),
                         input.provider_runtime.clone(),
+                        None,
                         prompt,
                     )
                     .await;

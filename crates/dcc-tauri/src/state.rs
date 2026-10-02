@@ -1842,6 +1842,7 @@ impl SessionCommandState {
         provider_id: String,
         model: Option<String>,
         runtime_config: Option<ProviderRuntimeConfig>,
+        effort: Option<String>,
         prompt: String,
     ) -> Result<String> {
         let provider = require_provider_capability(
@@ -1889,7 +1890,7 @@ impl SessionCommandState {
                             .to_string(),
                     ),
                     plan_mode: Some(true),
-                    effort: None,
+                    effort,
                     fast_mode: None,
                     approval_policy: None,
                 }),

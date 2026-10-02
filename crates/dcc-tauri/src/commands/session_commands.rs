@@ -71,6 +71,9 @@ pub struct RunPullRequestReviewAgentInput {
     /// instructions lead the prompt; the output format stays the caller's.
     #[serde(default)]
     pub agent_id: Option<String>,
+    /// Reasoning effort for this run. `None`: the provider's default.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -683,6 +686,7 @@ pub async fn run_pull_request_review_agent(
             provider_id.to_string(),
             input.model,
             input.provider_runtime,
+            input.effort,
             prompt,
         )
         .await

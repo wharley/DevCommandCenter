@@ -24,7 +24,9 @@ import {
 	saveAgent,
 } from "@/lib/agents-api";
 import { cn } from "@/lib/utils";
+import { getEffortDisplay } from "@/features/composer/effort";
 import { AgentAvatar } from "./agent-avatar";
+import { AgentExecutionPicker, agentEffortForModel } from "./agent-execution-picker";
 import { requestOpenPullRequest } from "./pr-review-jobs";
 import { AGENTS_QUERY_KEY, type AgentSessionView, type AgentView } from "./use-agents";
 
@@ -101,6 +103,7 @@ function AgentEditorDialog({
 			extraInstructions: stored.extraInstructions,
 			providerId: stored.providerId,
 			model: stored.model,
+			effort: stored.effort,
 			avatar: stored.avatar,
 		});
 	}, [open]);
@@ -113,10 +116,6 @@ function AgentEditorDialog({
 		},
 		onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
 	});
-
-	const provider = providers.find((candidate) => candidate.id === draft.providerId) ?? null;
-	const selectClass =
-		"h-8 w-full rounded-lg border border-border/80 bg-background px-2 text-[13px] text-foreground";
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -174,41 +173,13 @@ function AgentEditorDialog({
 							))}
 						</div>
 					</Field>
-					<div className="grid grid-cols-2 gap-3">
-						<Field label={t("agents.editor.provider")}>
-							<select
-								className={selectClass}
-								aria-label={t("agents.editor.provider")}
-								value={draft.providerId ?? ""}
-								onChange={(event) =>
-									setDraft({ ...draft, providerId: event.target.value || null, model: null })
-								}
-							>
-								<option value="">{t("agents.editor.providerCurrent")}</option>
-								{providers.map((candidate) => (
-									<option key={candidate.id} value={candidate.id}>
-										{candidate.label}
-									</option>
-								))}
-							</select>
-						</Field>
-						<Field label={t("agents.editor.model")}>
-							<select
-								className={selectClass}
-								aria-label={t("agents.editor.model")}
-								value={draft.model ?? ""}
-								disabled={!provider}
-								onChange={(event) => setDraft({ ...draft, model: event.target.value || null })}
-							>
-								<option value="">{t("agents.editor.modelDefault")}</option>
-								{(provider?.models ?? []).map((model) => (
-									<option key={model.id} value={model.id}>
-										{model.label}
-									</option>
-								))}
-							</select>
-						</Field>
-					</div>
+					<Field label={t("agents.editor.runsOn")} hint={t("agents.editor.runsOnHint")}>
+						<AgentExecutionPicker
+							providers={providers}
+							value={draft}
+							onChange={(execution) => setDraft({ ...draft, ...execution })}
+						/>
+					</Field>
 					<Field label={t("agents.editor.extra")} hint={t("agents.editor.extraHint")}>
 						<Textarea
 							value={draft.extraInstructions}
@@ -284,8 +255,15 @@ export function AgentPage({
 
 	const provider = providers.find((candidate) => candidate.id === agent.providerId);
 	const model = provider?.models.find((candidate) => candidate.id === agent.model);
+	const effort = agentEffortForModel(agent.effort, model?.effortLevels);
 	const runsOn = provider
-		? [provider.label, model?.label].filter(Boolean).join(" · ")
+		? [
+				provider.label,
+				model?.label,
+				effort && t(`composer.effort.${effort}`, { defaultValue: getEffortDisplay(effort).label }),
+			]
+				.filter(Boolean)
+				.join(" · ")
 		: t("agents.page.runsOnCurrent");
 	const dateFormat = new Intl.DateTimeFormat(i18n.language, {
 		dateStyle: "medium",

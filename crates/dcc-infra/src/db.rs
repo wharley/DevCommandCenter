@@ -384,6 +384,7 @@ CREATE TABLE IF NOT EXISTS dcc_agents (
 	extra_instructions TEXT NOT NULL DEFAULT '',
 	provider_id TEXT NULL,
 	model TEXT NULL,
+	effort TEXT NULL,
 	avatar_color TEXT NOT NULL,
 	avatar_arms INTEGER NOT NULL,
 	avatar_eyes TEXT NOT NULL,
@@ -2062,6 +2063,7 @@ impl SqliteSessionRepo {
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "offer_prompt", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "effort", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_agents",
@@ -6717,7 +6719,7 @@ impl SqliteSessionRepo {
 
     // ---- Resident agents ---------------------------------------------------
 
-    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions";
+    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort";
 
     fn resident_agent_from_row(row: &Row<'_>) -> rusqlite::Result<ResidentAgent> {
         let preset: Option<String> = row.get(9)?;
@@ -6746,6 +6748,7 @@ impl SqliteSessionRepo {
             updated_at: row.get(11)?,
             offer_prompt,
             extra_instructions: row.get(13)?,
+            effort: row.get(14)?,
         })
     }
 
@@ -6845,8 +6848,8 @@ impl SqliteSessionRepo {
             Some(id) => {
                 let updated = conn
                     .execute(
-                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12 WHERE id = ?1 AND deleted_at IS NULL",
-                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions],
+                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13 WHERE id = ?1 AND deleted_at IS NULL",
+                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort],
                     )
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 if updated != 1 {
@@ -6857,8 +6860,8 @@ impl SqliteSessionRepo {
             None => {
                 let id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11)",
-                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions],
+                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12)",
+                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort],
                 )
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 id
@@ -13267,7 +13270,9 @@ mod tests {
         draft.name = "Docs".to_string();
         draft.role = "Write the docs.".to_string();
         draft.model = Some("claude-opus-5-5".to_string());
+        draft.effort = Some(" high ".to_string());
         let docs = repo.save_resident_agent(None, draft.clone()).unwrap();
+        assert_eq!(docs.effort.as_deref(), Some("high"));
         assert_eq!(docs.preset, None);
         assert_eq!(docs.role, "Write the docs.");
         // Only DCC's own agents offer themselves; a person's agent stores no offer.
