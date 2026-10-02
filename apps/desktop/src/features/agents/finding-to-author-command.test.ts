@@ -50,7 +50,7 @@ describe("finding to author", () => {
 				"`src/math.ts` (lines 3–13): divide has no regression tests",
 				"Add tests for zero, -0 and overflow so the guards cannot be removed silently.",
 				"",
-				"```",
+				"```ts startLine=3",
 				"return a / b;",
 				"```",
 			].join("\n"),

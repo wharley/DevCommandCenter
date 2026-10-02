@@ -1,7 +1,12 @@
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import { Bug, Copy, File, FileImage, GitFork, Pencil, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TurnEvidenceSummary } from "@dcc/contracts";
+import {
+	CodeBlockPresentationContext,
+	USER_PROMPT_CODE_PRESENTATION,
+	fenceBareJson,
+} from "@/components/ai/code-presentation";
 import { Button } from "@/components/ui/button";
 import { LazyStreamdown } from "@/components/streamdown-loader";
 import { pathBasename } from "@/lib/path-basename";
@@ -45,6 +50,7 @@ function UserPromptContent({ content }: { content: string }) {
 		.map((part) => part.value)
 		.join("")
 		.trim();
+	const markdown = useMemo(() => fenceBareJson(text), [text]);
 	return (
 		<div className="conversation-body-text w-full overflow-hidden rounded-xl border border-border/45 bg-accent/35 px-3.5 py-3 leading-7">
 			{attachments.length > 0 ? (
@@ -72,13 +78,15 @@ function UserPromptContent({ content }: { content: string }) {
 							<p className="whitespace-pre-wrap text-[13px] leading-6">{text}</p>
 						}
 					>
-						<LazyStreamdown
-							mode="static"
-							className="conversation-streamdown"
-							shikiTheme={ASSISTANT_STREAMDOWN_SHIKI_THEME}
-						>
-							{text}
-						</LazyStreamdown>
+						<CodeBlockPresentationContext.Provider value={USER_PROMPT_CODE_PRESENTATION}>
+							<LazyStreamdown
+								mode="static"
+								className="conversation-streamdown"
+								shikiTheme={ASSISTANT_STREAMDOWN_SHIKI_THEME}
+							>
+								{markdown}
+							</LazyStreamdown>
+						</CodeBlockPresentationContext.Provider>
 					</Suspense>
 				</div>
 			) : null}

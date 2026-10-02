@@ -308,6 +308,34 @@
 		font-size: 0.86em;
 	}
 
+	/* Code blocks own their type scale; the inline-code chip rules above must not reach them. */
+	.dcc-code code,
+	.assistant-markdown-scale .dcc-code code {
+		border: 0;
+		background: none;
+		padding: 0;
+		font-size: inherit;
+	}
+
+	.dcc-code-line > span {
+		color: var(--shiki-light);
+	}
+
+	.dark .dcc-code-line > span {
+		color: var(--shiki-dark);
+	}
+
+	.dcc-code[data-numbered] .dcc-code-line::before {
+		counter-increment: dcc-code-line;
+		content: counter(dcc-code-line);
+		display: inline-block;
+		width: var(--dcc-code-gutter, 2ch);
+		margin-right: 1.25em;
+		text-align: right;
+		color: color-mix(in oklch, var(--muted-foreground) 55%, transparent);
+		user-select: none;
+	}
+
 	.assistant-markdown-scale blockquote {
 		line-height: 1.45;
 		color: var(--muted-foreground);

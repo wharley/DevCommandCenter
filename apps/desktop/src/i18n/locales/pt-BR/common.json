@@ -3406,7 +3406,9 @@
       "forkFailed": "Não foi possível bifurcar esta thread",
       "editUser": "Editar no Composer",
       "copyAssistant": "Copiar mensagem do assistente",
-      "copyUser": "Copiar mensagem de {{label}}"
+      "copyUser": "Copiar mensagem de {{label}}",
+      "codeShowAll": "Mostrar todas as {{lines}} linhas",
+      "codeCollapse": "Recolher"
     },
     "userInput": {
       "label": "Resposta necessária",

@@ -2,6 +2,7 @@ import * as React from "react";
 import { ExternalLink, FileCode2, FileText } from "lucide-react";
 import type { Components, ExtraProps } from "streamdown";
 import { CodeBlock } from "@/components/ai/code-block";
+import { fenceStartLine } from "@/components/ai/code-presentation";
 import { openExternal, openPath } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
 import {
@@ -35,6 +36,16 @@ function getCodeContent(children: React.ReactNode) {
 	return String(children.props.children ?? "").replace(/\n$/, "");
 }
 
+/** The fence's info string after the language, e.g. `startLine=12`. */
+function getCodeMeta(children: React.ReactNode) {
+	if (!React.isValidElement<{ metastring?: unknown }>(children)) {
+		return undefined;
+	}
+
+	const meta = children.props.metastring;
+	return typeof meta === "string" ? meta : undefined;
+}
+
 function StreamdownPre({
 	children,
 	className,
@@ -42,7 +53,14 @@ function StreamdownPre({
 	const language = getCodeLanguage(children);
 	const code = getCodeContent(children);
 
-	return <CodeBlock code={code} language={language} className={className} />;
+	return (
+		<CodeBlock
+			code={code}
+			language={language}
+			startLine={fenceStartLine(getCodeMeta(children))}
+			className={className}
+		/>
+	);
 }
 
 async function handleLinkClick(

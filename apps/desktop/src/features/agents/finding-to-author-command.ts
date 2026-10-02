@@ -1,3 +1,4 @@
+import { fenceLanguageForPath } from "@/components/ai/code-presentation";
 import type { DiffMachineAnnotation } from "@/features/editor/diff-types";
 
 /** One reviewer finding as it travels to the author agent. */
@@ -127,7 +128,10 @@ export function buildFixRequest(findings: FindingForAuthor[], labels: FixRequest
 		const finding = findings[0]!;
 		const parts = [`${labels.one}:`, "", ...findingBody(finding, labels, "")];
 		if (finding.snippet.trim()) {
-			parts.push("", "```", finding.snippet, "```");
+			// The fence names the language and the first line, so the snippet reads
+			// as the file does: highlighted, with its real line numbers.
+			const fence = `\`\`\`${fenceLanguageForPath(finding.path)} startLine=${finding.startLine}`;
+			parts.push("", fence, finding.snippet, "```");
 		}
 		return parts.join("\n");
 	}

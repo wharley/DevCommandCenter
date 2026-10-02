@@ -3406,7 +3406,9 @@
       "forkFailed": "Unable to fork this thread",
       "editUser": "Edit in Composer",
       "copyAssistant": "Copy assistant message",
-      "copyUser": "Copy {{label}} message"
+      "copyUser": "Copy {{label}} message",
+      "codeShowAll": "Show all {{lines}} lines",
+      "codeCollapse": "Collapse"
     },
     "userInput": {
       "label": "User input",
