@@ -58,6 +58,7 @@ import { SessionEventFeed } from "@/features/sessions/session-event-feed";
 import { isSemanticSessionEvent } from "@/features/sessions/session-event-feed.logic";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/session-workbench";
 import { InspectorChangesSection } from "./inspector-changes-section";
+import { shouldAutoCompleteMergedWorkspace } from "./inspector-presentation";
 import { ReviewerFindingsProvider } from "@/features/agents/reviewer-findings-context";
 import { GitSectionHeader } from "./git-section-header";
 import { GitlabPipelineSection } from "./gitlab-pipeline-section";
@@ -190,6 +191,8 @@ type WorkspaceInspectorSidebarProps = {
 	workspacePath: string | null;
 	sessionWorkspacePath?: string | null;
 	workspaceStatus: WorkspaceStatus | null;
+	/** False for a task running directly in the project checkout (no worktree). */
+	workspaceHasOwnWorktree: boolean;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	sessionState: string;
@@ -1507,6 +1510,7 @@ export function WorkspaceInspectorSidebar({
 	workspacePath,
 	sessionWorkspacePath,
 	workspaceStatus,
+	workspaceHasOwnWorktree,
 	selectedProviderLabel,
 	selectedModelLabel,
 	sessionState,
@@ -2038,8 +2042,12 @@ export function WorkspaceInspectorSidebar({
 			return;
 		}
 		if (
-			commitMode !== "merged" ||
-			!onCompleteWorkspace
+			!onCompleteWorkspace ||
+			!shouldAutoCompleteMergedWorkspace({
+				commitMode,
+				workspaceStatus,
+				hasOwnWorktree: workspaceHasOwnWorktree,
+			})
 		) {
 			return;
 		}
@@ -2059,6 +2067,7 @@ export function WorkspaceInspectorSidebar({
 		onContextualActionComplete,
 		prStatusQuery.dataUpdatedAt,
 		t,
+		workspaceHasOwnWorktree,
 		workspaceStatus,
 	]);
 	const committedVsBaseCount = reviewBranchDiffQuery.data?.changes.length ?? 0;

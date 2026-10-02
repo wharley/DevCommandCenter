@@ -5887,6 +5887,7 @@ export default function App() {
 									workspacePath={selectedLocalWorkspacePath}
 									sessionWorkspacePath={selectedSessionWorkspacePath}
 									workspaceStatus={selectedWorkspace?.status ?? null}
+									workspaceHasOwnWorktree={Boolean(selectedWorkspace?.worktreePath)}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}
 									sessionState={selectedSessionSnapshot?.state ?? "idle"}
