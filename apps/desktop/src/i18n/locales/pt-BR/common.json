@@ -150,11 +150,14 @@
       "noAuthor": "Não há uma conversa do agente autor nesta tarefa para receber o achado.",
       "fileCount_one": "{{count}} achado",
       "fileCount_other": "{{count}} achados",
-      "clean": "Nenhum achado para marcar no diff.",
+      "clean": "Nenhum achado. Nada bloqueia o commit.",
+      "blocking_one": "{{count}} bloqueia o commit. Os menores são opcionais.",
+      "blocking_other": "{{count}} bloqueiam o commit. Os menores são opcionais.",
+      "nothingBlocks": "Nada bloqueia o commit. Os achados abaixo são opcionais.",
       "cardTitle_one": "{{count}} achado",
       "cardTitle_other": "{{count}} achados",
       "stale": "Revisão anterior às últimas mudanças. Rode o Revisor de novo para agir sobre os achados.",
-      "sendAll": "Enviar todos ao autor",
+      "sendBlocking": "Enviar os que bloqueiam",
       "sendOne": "Enviar ao agente autor",
       "severity": {
         "critical": "Crítico",
@@ -163,6 +166,9 @@
       },
       "fixOne": "Corrija este achado do Revisor",
       "fixMany": "Corrija estes {{count}} achados do Revisor",
+      "fixScope": "Faça a menor mudança que resolve o que foi apontado. Não adicione validações, camadas defensivas nem refatorações além disso.",
+      "followUp": "Revise de novo: confira o que foi feito com os achados da rodada anterior e o que mudou desde então.",
+      "previousFindings": "Achados da rodada anterior",
       "line": "linha {{line}}",
       "lines": "linhas {{start}}–{{end}}"
     },
@@ -2792,8 +2798,9 @@
         "whenToUse": "Quando um turno termina com mudanças e você quer uma segunda leitura antes de commitar, ou quando pediram a sua revisão num PR.",
         "steps": [
           "Ao fim de um turno com mudanças, o mascote aparece acima do composer perguntando se pode revisar. Clique em [Sim, pode]. Você também pode chamá-lo pelo ícone dele no cabeçalho da tarefa.",
-          "Leia os achados no cartão abaixo da resposta. Clicar num achado abre o diff na linha.",
-          "Use o botão de cada achado, ou [Enviar todos ao autor], para deixar o pedido de correção no composer do agente que escreveu o código. Você confere e envia.",
+          "Leia os achados no cartão abaixo da resposta. Ele diz quantos bloqueiam o commit: críticos e importantes bloqueiam, menores são opcionais. Clicar num achado abre o diff na linha.",
+          "Use [Enviar os que bloqueiam], ou o botão de cada achado, para deixar o pedido de correção no composer do agente que escreveu o código. Você confere e envia.",
+          "Depois da correção, chame o Revisor de novo. Ele continua na mesma conversa, confere os achados anteriores e só traz algo novo se bloquear o commit.",
           "Em [Pull Requests], na aba [Código], ele revisa o PR a partir do diff e deixa rascunhos de comentários. Você pode sair da tela: a seção [Agentes] da barra lateral avisa quando terminar.",
           "Em [Agentes], abra o [Revisor] e clique em [Editar] para escolher o provider e o modelo, somar [Instruções extras] ou desligar [Oferecer ao terminar um turno]."
         ],

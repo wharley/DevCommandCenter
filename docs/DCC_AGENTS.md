@@ -21,11 +21,14 @@ files.
    appears above the composer and asks whether it may review. Nothing runs until
    you accept. You can also call it from its icon in the task header, which is
    only active when there is something to review and no turn is running.
-2. It opens its own conversation in the same task, so it sees the same
-   checkout. Its role is sent with every turn of that conversation.
+2. It has one conversation per task, in the same checkout. The first call
+   opens it; later calls continue it. Its role is sent with every turn.
 3. Its answer ends with a list of findings, ordered by severity, each with a
-   file and line. Selecting a finding opens the file's diff at that line.
-4. Send one finding, or all of them, to the author agent. DCC switches to the
+   file and line. Selecting a finding opens the file's diff at that line. The
+   card says how many findings block the commit: critical and major findings
+   block, minor ones are optional.
+4. Send the blocking findings, or any single finding, to the author agent. The
+   request asks for the smallest change that fixes them. DCC switches to the
    task's most recently used ordinary conversation and drafts a fix request in
    its composer, carrying the Reviewer's full explanation. You read it and send.
 
@@ -35,6 +38,15 @@ surface, and in the changes of the latest execution.
 Once the author finishes another turn, the review is outdated. The list stays
 readable but stops acting, and the markings are removed, because the lines the
 Reviewer pointed at have moved. Run the Reviewer again to check the fix.
+
+### Follow-up rounds
+
+Calling the Reviewer again in a task is a follow-up, not a second full review.
+DCC lists the findings of the earlier round in the request. The Reviewer says
+what happened to each one, reads only what changed since, and raises something
+new in a fix only when it is critical or major. Minor findings you left alone
+are not reported again, so the rounds end when nothing blocks the commit. Work
+unrelated to the earlier findings is still reviewed in full.
 
 ### In Pull Requests
 

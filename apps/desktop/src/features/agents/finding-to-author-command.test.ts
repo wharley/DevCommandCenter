@@ -77,4 +77,12 @@ describe("finding to author", () => {
 			].join("\n"),
 		);
 	});
+
+	it("ends the request by keeping the fix to what was pointed out", () => {
+		const scoped = { ...labels, scope: "Make the smallest change that fixes it." };
+		expect(buildFixRequest([finding({ detail: "" })], scoped)).toBe(
+			"Fix this Reviewer finding:\n\n`src/math.ts` (lines 3–13): divide has no regression tests\n\nMake the smallest change that fixes it.",
+		);
+		expect(buildFixRequest([finding(), finding()], scoped).endsWith("\n\nMake the smallest change that fixes it.")).toBe(true);
+	});
 });

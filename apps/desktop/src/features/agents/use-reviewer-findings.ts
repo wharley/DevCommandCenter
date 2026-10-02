@@ -20,6 +20,27 @@ export function isReviewCurrent(
 }
 
 /**
+ * The findings of the latest review a reviewer session holds, or `null` when
+ * it has none yet. A later answer without the review block (the person asked
+ * the reviewer a question) does not replace the review before it.
+ */
+export async function loadLatestReview(sessionId: string): Promise<ReviewFinding[] | null> {
+	const events = await loadSessionThreadEvents(sessionId);
+	const messages = projectWorkspaceMessages(events, [], sessionId);
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index]!;
+		if (message.role !== "assistant" || message.assistantPhase === "commentary") {
+			continue;
+		}
+		const findings = parseReviewFindings(message.content);
+		if (findings) {
+			return findings;
+		}
+	}
+	return null;
+}
+
+/**
  * Findings of the latest finished review by the built-in reviewer in a task.
  * Empty once the task changed after the review, so the diff never shows
  * markers on lines that have moved.
@@ -39,18 +60,7 @@ export function useReviewerFindings(workspaceId: string | null, scope = "local")
 		queryKey: ["agentReview", sessionId, completedAt ?? null],
 		enabled: Boolean(sessionId),
 		staleTime: Number.POSITIVE_INFINITY,
-		queryFn: async () => {
-			const events = await loadSessionThreadEvents(sessionId as string);
-			const last = projectWorkspaceMessages(events, [], sessionId)
-				.filter(
-					(message) =>
-						message.role === "assistant" &&
-						message.assistantPhase !== "commentary" &&
-						message.content.trim().length > 0,
-				)
-				.at(-1);
-			return last ? (parseReviewFindings(last.content) ?? NO_FINDINGS) : NO_FINDINGS;
-		},
+		queryFn: async () => (await loadLatestReview(sessionId as string)) ?? NO_FINDINGS,
 	});
 
 	return useMemo(() => {

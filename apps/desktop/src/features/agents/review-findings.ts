@@ -99,3 +99,40 @@ export function reviewAnnotationsForPath(
 			detail: finding.detail,
 		}));
 }
+
+/** Critical and major findings block the change; a minor one never does. */
+export function isBlockingFinding(finding: ReviewFinding): boolean {
+	return finding.severity !== "minor";
+}
+
+const MAX_FOLLOW_UP_FINDINGS = 20;
+
+export type FollowUpLabels = {
+	/** "Review again: check what was done about the earlier findings…" */
+	intro: string;
+	/** "Findings of the earlier round" */
+	previous: string;
+	severity: (severity: ReviewSeverity) => string;
+};
+
+/**
+ * What the reviewer is asked from its second round on. It lists the earlier
+ * findings itself, so the round does not depend on what the provider still
+ * remembers of the conversation.
+ */
+export function buildFollowUpKickoff(previous: ReviewFinding[], labels: FollowUpLabels): string {
+	if (previous.length === 0) {
+		return labels.intro;
+	}
+	return [
+		labels.intro,
+		"",
+		`${labels.previous}:`,
+		...previous
+			.slice(0, MAX_FOLLOW_UP_FINDINGS)
+			.map(
+				(finding, index) =>
+					`${index + 1}. [${labels.severity(finding.severity)}] \`${finding.path}:${finding.startLine}\` ${finding.title}`,
+			),
+	].join("\n");
+}

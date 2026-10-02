@@ -41,11 +41,21 @@ How to review:\n\
 - When the repository has automated tests, a new or changed behaviour that no test exercises is always a finding (minor), even when the code itself is correct. Do not mention a missing test in passing without listing it.\n\
 - Check for regressions in existing callers, security problems and data loss.\n\
 \n\
+What counts as a finding:\n\
+- Review the change, not the repository. A problem in code the change did not touch, or behaviour that was already there before it, is not a finding unless the change is what makes it reachable or worse.\n\
+- A finding needs an input that can actually arrive: name the caller, request, file or stored value that produces it. The arguments of an exported function count. If you could not confirm that it can happen, leave it out instead of reporting a possibility.\n\
+\n\
+Severity decides whether the change can ship:\n\
+- critical: data loss, a security hole, or a crash or wrong result on the main path.\n\
+- major: wrong behaviour in a scenario that will realistically happen.\n\
+- minor: everything else, such as an unlikely edge, hardening or a missing test.\n\
+Critical and major findings block the change; a minor finding never does. Do not raise the severity of a finding to get it noticed.\n\
+\n\
 What to report:\n\
-- Report every problem you can point to in the code, with the file and line, what is wrong and a concrete failure scenario. Order findings from most to least severe.\n\
+- Report every finding with the file and line, what is wrong and a concrete failure scenario. Order findings from most to least severe.\n\
 - Do not hold a finding back because it is small or because the code type-checks: classify it as minor instead. Passing checks are not evidence that the change is correct.\n\
 - Do not report style preferences or restate what the diff does, and do not invent a finding you cannot tie to a line.\n\
-- If, after working through the points above, you find nothing, say so plainly.\n\
+- End the written review by saying plainly whether anything blocks the change. If you find nothing, say so.\n\
 - Reply in the language the person writes in."
     };
 }
@@ -56,7 +66,15 @@ pub const REVIEWER_METHOD: &str = reviewer_method!();
 pub const REVIEWER_ROLE: &str = concat!(
     reviewer_method!(),
     "\n\n",
-    "After the written review, end the message with one fenced block tagged dcc-review so DCC can mark the findings on the diff. Nothing may follow it:\n\
+    "Follow-up rounds:\n\
+When this conversation already holds a review of yours, or the message lists the findings of an earlier round, the person wants to know whether the response to that review is sound. It is not a second full review.\n\
+- Start with the earlier findings, one line each: fixed, still open, or left as it was. A minor finding left as it was is the person's decision; do not report it again.\n\
+- Then read only what changed since your last round. In changes made to answer an earlier finding, report a new finding only when it is critical or major: no new minor findings, no missing tests, and no request for more defensive code around a fix.\n\
+- Work that is unrelated to the earlier findings, such as a new feature, is new work: review that part as a first round.\n\
+- Code you already reviewed and that did not change is settled, unless you now see a critical or major problem in it.\n\
+- The dcc-review block of a follow-up round holds the earlier critical and major findings that are still open and the new findings these rules allow. When there are none, say the change is ready and use an empty findings array.\n\
+\n\
+After the written review, end the message with one fenced block tagged dcc-review so DCC can mark the findings on the diff. Nothing may follow it:\n\
 ```dcc-review\n\
 {\"findings\":[{\"path\":\"path relative to the repository root\",\"line\":123,\"endLine\":125,\"severity\":\"critical|major|minor\",\"title\":\"one sentence saying what is wrong\",\"detail\":\"what is wrong, the concrete failure scenario and exactly what to change, in two or three sentences\"}]}\n\
 ```\n\
@@ -437,6 +455,15 @@ mod tests {
         reviewer.role = "Check accessibility only.".to_string();
         reviewer.extra_instructions = String::new();
         assert_eq!(reviewer.review_brief(), "Check accessibility only.");
+    }
+
+    #[test]
+    fn follow_up_rounds_are_a_task_review_rule_that_fits_the_role_limit() {
+        assert!(REVIEWER_METHOD.contains("a minor finding never does"));
+        assert!(REVIEWER_ROLE.contains("Follow-up rounds:"));
+        // A pull request is reviewed once, from its patch.
+        assert!(!REVIEWER_METHOD.contains("Follow-up rounds:"));
+        assert!(REVIEWER_ROLE.chars().count() <= MAX_AGENT_ROLE_CHARS);
     }
 
     #[test]

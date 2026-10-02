@@ -931,6 +931,7 @@ export function WorkspacePanel({
 							startLine === endLine
 								? t("agents.review.line", { line: startLine })
 								: t("agents.review.lines", { start: startLine, end: endLine }),
+						scope: t("agents.review.fixScope"),
 					}),
 				});
 				if (sessionId !== effectiveSessionId) onSelectSession(sessionId);

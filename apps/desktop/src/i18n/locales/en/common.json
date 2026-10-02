@@ -150,11 +150,14 @@
       "noAuthor": "There is no author agent conversation in this task to receive the finding.",
       "fileCount_one": "{{count}} finding",
       "fileCount_other": "{{count}} findings",
-      "clean": "No findings to mark on the diff.",
+      "clean": "No findings. Nothing blocks the commit.",
+      "blocking_one": "{{count}} blocks the commit. Minor findings are optional.",
+      "blocking_other": "{{count}} block the commit. Minor findings are optional.",
+      "nothingBlocks": "Nothing blocks the commit. The findings below are optional.",
       "cardTitle_one": "{{count}} finding",
       "cardTitle_other": "{{count}} findings",
       "stale": "This review is older than the latest changes. Run the Reviewer again to act on its findings.",
-      "sendAll": "Send all to the author",
+      "sendBlocking": "Send blocking findings",
       "sendOne": "Send to the author agent",
       "severity": {
         "critical": "Critical",
@@ -163,6 +166,9 @@
       },
       "fixOne": "Fix this Reviewer finding",
       "fixMany": "Fix these {{count}} Reviewer findings",
+      "fixScope": "Make the smallest change that fixes what was pointed out. Do not add validation, defensive layers or refactoring beyond it.",
+      "followUp": "Review again: check what was done about the findings of the earlier round and what changed since then.",
+      "previousFindings": "Findings of the earlier round",
       "line": "line {{line}}",
       "lines": "lines {{start}}–{{end}}"
     },
@@ -2792,8 +2798,9 @@
         "whenToUse": "When a turn ends with changes and you want a second read before committing, or when your review was requested on a PR.",
         "steps": [
           "When a turn ends with changes, the mascot appears above the composer asking whether it may review. Select [Yes, go ahead]. You can also call it from its icon in the task header.",
-          "Read the findings in the card under its answer. Selecting a finding opens the diff at that line.",
-          "Use the button on each finding, or [Send all to the author], to draft the fix request in the composer of the agent that wrote the code. You check it and send.",
+          "Read the findings in the card under its answer. It says how many block the commit: critical and major findings block, minor ones are optional. Selecting a finding opens the diff at that line.",
+          "Use [Send blocking findings], or the button on each finding, to draft the fix request in the composer of the agent that wrote the code. You check it and send.",
+          "After the fix, call the Reviewer again. It continues in the same conversation, checks the earlier findings and only raises something new if it blocks the commit.",
           "In [Pull Requests], on the [Code] tab, it reviews the PR from the diff and leaves draft comments. You can leave the screen: the [Agents] section of the sidebar tells you when it is done.",
           "In [Agents], open the [Reviewer] and select [Edit] to choose the provider and model, add [Extra instructions], or turn off [Offer after a turn]."
         ],

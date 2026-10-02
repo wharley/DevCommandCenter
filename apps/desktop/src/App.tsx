@@ -125,6 +125,8 @@ import {
 	useAgentsQuery,
 } from "./features/agents/use-agents";
 import { bindSessionAgent } from "./lib/agents-api";
+import { buildFollowUpKickoff } from "./features/agents/review-findings";
+import { loadLatestReview } from "./features/agents/use-reviewer-findings";
 import { subscribeCallAgent } from "./features/agents/call-agent-command";
 import { subscribeOpenPullRequest } from "./features/agents/pr-review-jobs";
 import { markAgentResultSeen } from "./features/agents/agent-seen-results";
@@ -2607,8 +2609,50 @@ export default function App() {
 					);
 			const workspaceId = selectedWorkspace.id;
 			const sessionsKey = getWorkspaceSessionsCacheKey(backendCacheKey, workspaceId);
+			// The reviewer keeps one conversation per task, so a later round knows
+			// what the earlier ones found instead of reviewing from scratch.
+			const reviewSessionId =
+				agent.preset === "reviewer"
+					? (agent.sessions.find(
+							(session) =>
+								session.workspaceId === workspaceId &&
+								workspaceSessions.some((summary) => summary.session.id === session.sessionId),
+						)?.sessionId ?? null)
+					: null;
+			// The agent's effort belongs to the agent's own model.
+			const effort =
+				(usesSelection
+					? null
+					: agentEffortForModel(
+							agent.effort,
+							provider.models.find((candidate) => candidate.id === model)?.effortLevels,
+						)) ?? "medium";
 			setCallingAgentId(agent.id);
 			try {
+				if (reviewSessionId) {
+					const previous = await loadLatestReview(reviewSessionId);
+					setGlobalSurface(null);
+					setSelectedSessionId(reviewSessionId);
+					await sendTurn({
+						sessionId: reviewSessionId,
+						// No review in the conversation yet (its first run failed): start over.
+						prompt: previous
+							? buildFollowUpKickoff(previous, {
+									intro: t("agents.review.followUp"),
+									previous: t("agents.review.previousFindings"),
+									severity: (severity) => t(`agents.review.severity.${severity}`),
+								})
+							: agent.kickoffPrompt.trim() || t("agents.presets.reviewerKickoff"),
+						providerId: provider.id,
+						model,
+						providerRuntime,
+						planMode: false,
+						effort,
+						fastMode: false,
+						approvalPolicy: "ask",
+					});
+					return;
+				}
 				const started = await startThread({
 					workspaceId,
 					additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
@@ -2660,14 +2704,7 @@ export default function App() {
 						model,
 						providerRuntime,
 						planMode: false,
-						// The agent's effort belongs to the agent's own model.
-						effort:
-							(usesSelection
-								? null
-								: agentEffortForModel(
-										agent.effort,
-										provider.models.find((candidate) => candidate.id === model)?.effortLevels,
-									)) ?? "medium",
+						effort,
 						fastMode: false,
 						approvalPolicy: "ask",
 					});

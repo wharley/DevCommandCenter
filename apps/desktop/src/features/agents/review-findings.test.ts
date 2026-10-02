@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+	type ReviewFinding,
+	buildFollowUpKickoff,
+	isBlockingFinding,
 	parseReviewFindings,
 	reviewAnnotationsForPath,
 	stripReviewBlock,
@@ -106,5 +109,48 @@ describe("review findings", () => {
 				detail: "",
 			},
 		]);
+	});
+
+	const finding = (overrides: Partial<ReviewFinding> = {}): ReviewFinding => ({
+		path: "src/a.ts",
+		startLine: 10,
+		endLine: 12,
+		severity: "minor",
+		title: "Cache branch has no test",
+		detail: "",
+		...overrides,
+	});
+	const followUp = {
+		intro: "Review again.",
+		previous: "Findings of the earlier round",
+		severity: (severity: string) => severity.toUpperCase(),
+	};
+
+	it("treats only critical and major findings as blocking", () => {
+		expect(isBlockingFinding(finding({ severity: "critical" }))).toBe(true);
+		expect(isBlockingFinding(finding({ severity: "major" }))).toBe(true);
+		expect(isBlockingFinding(finding())).toBe(false);
+	});
+
+	it("lists the earlier findings in the follow-up request", () => {
+		expect(
+			buildFollowUpKickoff(
+				[finding({ severity: "major", title: "Off by one" }), finding({ path: "src/b.ts", startLine: 3 })],
+				followUp,
+			),
+		).toBe(
+			[
+				"Review again.",
+				"",
+				"Findings of the earlier round:",
+				"1. [MAJOR] `src/a.ts:10` Off by one",
+				"2. [MINOR] `src/b.ts:3` Cache branch has no test",
+			].join("\n"),
+		);
+		// An earlier round without findings still makes this a follow-up.
+		expect(buildFollowUpKickoff([], followUp)).toBe("Review again.");
+		// The list is bounded, so a noisy round cannot bloat every later one.
+		const many = Array.from({ length: 30 }, (_, index) => finding({ startLine: index + 1 }));
+		expect(buildFollowUpKickoff(many, followUp).split("\n")).toHaveLength(23);
 	});
 });

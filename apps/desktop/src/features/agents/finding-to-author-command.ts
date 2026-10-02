@@ -108,6 +108,8 @@ export type FixRequestLabels = {
 	many: string;
 	/** ("line 3") or ("lines 3–13") */
 	location: (startLine: number, endLine: number) => string;
+	/** Keeps the fix to what the findings ask, so it does not grow new code to review. */
+	scope?: string;
 };
 
 function findingBody(finding: FindingForAuthor, labels: FixRequestLabels, indent: string): string[] {
@@ -124,6 +126,7 @@ function findingBody(finding: FindingForAuthor, labels: FixRequestLabels, indent
  * the code next to it looks reasonable.
  */
 export function buildFixRequest(findings: FindingForAuthor[], labels: FixRequestLabels): string {
+	const scope = labels.scope ? ["", labels.scope] : [];
 	if (findings.length === 1) {
 		const finding = findings[0]!;
 		const parts = [`${labels.one}:`, "", ...findingBody(finding, labels, "")];
@@ -133,7 +136,7 @@ export function buildFixRequest(findings: FindingForAuthor[], labels: FixRequest
 			const fence = `\`\`\`${fenceLanguageForPath(finding.path)} startLine=${finding.startLine}`;
 			parts.push("", fence, finding.snippet, "```");
 		}
-		return parts.join("\n");
+		return [...parts, ...scope].join("\n");
 	}
 	return [
 		`${labels.many}:`,
@@ -142,5 +145,6 @@ export function buildFixRequest(findings: FindingForAuthor[], labels: FixRequest
 			const [head, ...rest] = findingBody(finding, labels, "   ");
 			return [`${index + 1}. ${head}`, ...rest];
 		}),
+		...scope,
 	].join("\n");
 }

@@ -5,7 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { dispatchFindingsToAuthor } from "./finding-to-author-command";
 import { dispatchOpenFinding } from "./open-finding-command";
-import type { ReviewFinding, ReviewSeverity } from "./review-findings";
+import { type ReviewFinding, type ReviewSeverity, isBlockingFinding } from "./review-findings";
 import { useAgents } from "./use-agents";
 import { useReviewerFindings } from "./use-reviewer-findings";
 
@@ -42,6 +42,9 @@ export function ReviewFindingsCard({
 	const ordered = [...findings].sort(
 		(left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity],
 	);
+	// Only what blocks the change is sent in bulk. Sending every minor finding
+	// makes the author add code that the next round then has to review.
+	const blocking = ordered.filter(isBlockingFinding);
 	const forAuthor = (finding: ReviewFinding) => ({
 		path: finding.path,
 		startLine: finding.startLine,
@@ -61,20 +64,25 @@ export function ReviewFindingsCard({
 					<h3 className="text-[13px] font-semibold text-foreground">
 						{t("agents.review.cardTitle", { count: findings.length })}
 					</h3>
+					<p className="mt-0.5 text-[11px] text-muted-foreground">
+						{blocking.length > 0
+							? t("agents.review.blocking", { count: blocking.length })
+							: t("agents.review.nothingBlocks")}
+					</p>
 					{!current && (
 						<p className="mt-0.5 text-[11px] text-muted-foreground">{t("agents.review.stale")}</p>
 					)}
 				</div>
-				{findings.length > 1 && (
+				{blocking.length > 0 && findings.length > 1 && (
 					<Button
 						type="button"
 						size="sm"
 						variant="outline"
 						disabled={!current}
-						onClick={() => dispatchFindingsToAuthor(workspaceId, ordered.map(forAuthor))}
+						onClick={() => dispatchFindingsToAuthor(workspaceId, blocking.map(forAuthor))}
 					>
 						<CornerDownLeft className="size-3.5" />
-						<span>{t("agents.review.sendAll")}</span>
+						<span>{t("agents.review.sendBlocking")}</span>
 					</Button>
 				)}
 			</header>
