@@ -195,8 +195,8 @@ pub(crate) async fn preflight_workspace_root(
 mod tests {
     use super::{
         broken_workspace_reason_by_root, cleanup_workspace_files, directory_logical_size,
-        ensure_pushable_branch, find_workspace_by_root, preferred_workspace_branch_name,
-        resolve_current_branch_name,
+        ensure_pushable_branch, find_workspace_by_root, is_linked_worktree,
+        preferred_workspace_branch_name, resolve_current_branch_name,
     };
     use dcc_core::domain::{
         project::ProjectId,
@@ -329,6 +329,24 @@ mod tests {
             Some("dcc/feat/add-upsell".to_string())
         );
         assert_eq!(preferred_workspace_branch_name(Some("Nova tarefa")), None);
+    }
+
+    #[test]
+    fn linked_worktree_is_told_apart_from_the_main_checkout() {
+        let root = create_test_repository("linked-worktree-root");
+        let worktree = temp_path("linked-worktree-task");
+        let worktree_path = worktree.to_str().expect("utf-8 worktree path");
+        run_test_git(
+            &root,
+            &["worktree", "add", "--detach", worktree_path, "main"],
+        );
+
+        assert!(!is_linked_worktree(
+            root.to_str().expect("utf-8 repository path")
+        ));
+        assert!(is_linked_worktree(worktree_path));
+
+        run_test_git(&root, &["worktree", "remove", "--force", worktree_path]);
     }
 
     #[test]
@@ -476,6 +494,23 @@ pub(crate) async fn resolve_workspace_target_branch(
         None
     } else {
         Some(branch.to_string())
+    }
+}
+
+/// Whether `root` is a linked Git worktree rather than the repository's main
+/// checkout. Answers `true` when Git cannot tell, so callers keep their
+/// worktree behavior on failure.
+pub(crate) fn is_linked_worktree(root: &str) -> bool {
+    let resolve = |flag: &str| {
+        run_git_output(root, &["rev-parse", "--path-format=absolute", flag])
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|path| !path.is_empty())
+    };
+    match (resolve("--git-dir"), resolve("--git-common-dir")) {
+        (Some(git_dir), Some(common_dir)) => git_dir != common_dir,
+        _ => true,
     }
 }
 

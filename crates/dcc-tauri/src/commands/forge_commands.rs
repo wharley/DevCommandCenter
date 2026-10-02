@@ -16,9 +16,10 @@ use crate::{
         WorkspaceChangeRequestCreateInput, WorkspaceGitPushInput,
     },
     commands::workspace_support::{
-        ensure_pushable_branch, find_workspace_by_root, preferred_workspace_branch_name,
-        preflight_workspace_root, resolve_branch_diff_base, resolve_current_branch_name,
-        resolve_current_commit_sha, resolve_workspace_target_branch, workspace_branch_hints,
+        ensure_pushable_branch, find_workspace_by_root, is_linked_worktree,
+        preferred_workspace_branch_name, preflight_workspace_root, resolve_branch_diff_base,
+        resolve_current_branch_name, resolve_current_commit_sha, resolve_workspace_target_branch,
+        workspace_branch_hints,
     },
     delivery_failure::{
         capture_workspace_delivery_failure, clear_workspace_delivery_failure,
@@ -2728,6 +2729,11 @@ pub async fn workspace_pr_status(
         head_sha.as_deref(),
         effective_login,
     )?;
+    // A task without a worktree runs on whatever branch the main checkout is on.
+    // On a long-lived branch such as `develop`, the latest change request is an
+    // old merged release that says nothing about the work in progress.
+    let resolved = resolved
+        .filter(|resolved| resolved.state.as_deref() != Some("merged") || is_linked_worktree(root));
     let Some(resolved) = resolved else {
         return Ok(WorkspacePrStatusOutput {
             provider: forge_context
