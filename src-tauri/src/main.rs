@@ -7012,7 +7012,6 @@ pub fn run() {
             terminal_get_or_create_for_pane,
             agent_commands::agents_overview,
             agent_commands::agents_save,
-            agent_commands::agents_delete,
             agent_commands::agents_bind_session,
             skills_commands::skills_list,
             skills_commands::skills_import_preview,

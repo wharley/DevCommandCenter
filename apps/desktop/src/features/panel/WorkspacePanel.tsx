@@ -908,7 +908,7 @@ export function WorkspacePanel({
 
 	// A clicked reviewer finding becomes a draft in the author agent's
 	// composer. The person reads it and sends it; nothing runs on the click.
-	const { agentBySessionId } = useAgents(sessionQueryScope);
+	const { agentBySessionId } = useAgents();
 	const [findingForAuthor, setFindingForAuthor] = useState<{
 		sessionId: string;
 		text: string;

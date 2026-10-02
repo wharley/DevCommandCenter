@@ -17,6 +17,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { parseReviewFindings, stripReviewBlock } from "@/features/agents/review-findings";
 import { ReviewFindingsCard } from "@/features/agents/review-findings-card";
+import { useAgents } from "@/features/agents/use-agents";
 import { toast } from "sonner";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { StickyNote } from "lucide-react";
@@ -455,10 +456,17 @@ export function AssistantMessage({
 	const { t } = useTranslation("common");
 	// The built-in reviewer ends its message with a machine-readable block that
 	// DCC marks on the diff; the person reads the prose and a one-line count.
-	const content = useMemo(() => stripReviewBlock(rawContent), [rawContent]);
+	// Only in the reviewer's own conversations: any other agent may quote the
+	// block format without having its message rewritten.
+	const { agentBySessionId } = useAgents();
+	const isReview = sessionId ? agentBySessionId.get(sessionId)?.preset === "reviewer" : false;
+	const content = useMemo(
+		() => (isReview ? stripReviewBlock(rawContent) : rawContent),
+		[isReview, rawContent],
+	);
 	const reviewFindings = useMemo(
-		() => (streaming ? null : parseReviewFindings(rawContent)),
-		[rawContent, streaming],
+		() => (isReview && !streaming ? parseReviewFindings(rawContent) : null),
+		[isReview, rawContent, streaming],
 	);
 	const modelLabel = resolveModelLabel(modelId, providers);
 	const provider = providers?.find((candidate) => candidate.id === providerId);

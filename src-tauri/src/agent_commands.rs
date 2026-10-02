@@ -25,14 +25,6 @@ pub async fn agents_save(
 }
 
 #[tauri::command]
-pub async fn agents_delete(
-    state: State<'_, SessionCommandState>,
-    agent_id: String,
-) -> Result<bool, String> {
-    agent_command_impl::agents_delete(state, agent_id).await
-}
-
-#[tauri::command]
 pub async fn agents_bind_session(
     state: State<'_, SessionCommandState>,
     input: BindSessionAgentInput,

@@ -1,5 +1,6 @@
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import type { AgentActivityState } from "./agent-avatar";
+import { isSessionRunning } from "./review-offer";
 
 /** What one agent session is doing, from the same summary the rail uses. */
 export function agentSessionState(
@@ -8,10 +9,7 @@ export function agentSessionState(
 	if (!summary) {
 		return "idle";
 	}
-	const running =
-		summary.lastTurnState === "running" ||
-		(summary.projection.state === "active" && Boolean(summary.projection.activeTurnId));
-	if (running) {
+	if (isSessionRunning(summary)) {
 		return summary.lastTurnAwaitingUser === "permission" ||
 			summary.lastTurnAwaitingUser === "input"
 			? "needsYou"

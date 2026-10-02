@@ -64,8 +64,9 @@ type PullRequestCodeReviewProps = {
 	selectedProviderRuntime: ProviderRuntimeConfig | null;
 	onSelectProvider: (providerId: string) => void;
 	onSelectModel: (modelId: string) => void;
-	/** Changes when the person accepts the reviewer's offer on this PR. */
-	autoStartReview?: number;
+	/** The person accepted the reviewer's offer on this PR. */
+	autoStartReview?: boolean;
+	onAutoStartReviewConsumed?: () => void;
 };
 
 function draftKey(path: string, line: number, side: string) {
@@ -294,7 +295,8 @@ export function PullRequestCodeReview({
 	selectedProviderRuntime,
 	onSelectProvider,
 	onSelectModel,
-	autoStartReview = 0,
+	autoStartReview = false,
+	onAutoStartReviewConsumed,
 }: PullRequestCodeReviewProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -316,7 +318,7 @@ export function PullRequestCodeReview({
 	const reviewProviders = providers.filter((provider) => provider.capabilities.supportsReadOnlyDelegation);
 	// The built-in reviewer reviews here too, from the patch. When the person
 	// gave it a provider that can review read-only, that choice wins.
-	const reviewer = useAgents("local").agents.find((agent) => agent.preset === "reviewer") ?? null;
+	const reviewer = useAgents().agents.find((agent) => agent.preset === "reviewer") ?? null;
 	const reviewerProvider = reviewProviders.find((provider) => provider.id === reviewer?.providerId) ?? null;
 	const reviewProvider = reviewerProvider ?? reviewProviders.find((provider) => provider.id === selectedProviderId) ?? reviewProviders[0] ?? null;
 	const reviewModel = reviewerProvider
@@ -454,11 +456,11 @@ export function PullRequestCodeReview({
 			dismissPrReviewJob(item.id);
 		}
 	}, [detail, item.id, reviewJob, t]);
-	// The offer on the PR was accepted before the patches had loaded.
-	const autoStartedRef = useRef(0);
+	// The person accepted the reviewer's offer on this PR; start once the
+	// patches are loaded, and tell the hub so it is not started twice.
 	useEffect(() => {
-		if (!autoStartReview || autoStartReview === autoStartedRef.current || !detail) return;
-		autoStartedRef.current = autoStartReview;
+		if (!autoStartReview || !detail) return;
+		onAutoStartReviewConsumed?.();
 		if (!reviewJob) prepareFullReview();
 	});
 	const prepareInline = async (row: UnifiedDiffLine) => {

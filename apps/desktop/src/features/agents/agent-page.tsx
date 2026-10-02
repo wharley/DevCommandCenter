@@ -1,7 +1,7 @@
 import type { ProviderCatalog } from "@dcc/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Loader2, Pencil } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -85,20 +85,25 @@ function AgentEditorDialog({
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
 	const [draft, setDraft] = useState<ResidentAgentDraft>(agent);
+	// Load the stored values when the dialog opens, and only then: the agent
+	// object is rebuilt whenever its sessions change, which must not wipe what
+	// the person is typing.
+	const latestAgent = useRef(agent);
+	latestAgent.current = agent;
 	useEffect(() => {
-		if (open) {
-			setDraft({
-				name: agent.name,
-				role: agent.role,
-				kickoffPrompt: agent.kickoffPrompt,
-				offerPrompt: agent.offerPrompt,
-				extraInstructions: agent.extraInstructions,
-				providerId: agent.providerId,
-				model: agent.model,
-				avatar: agent.avatar,
-			});
-		}
-	}, [agent, open]);
+		if (!open) return;
+		const stored = latestAgent.current;
+		setDraft({
+			name: stored.name,
+			role: stored.role,
+			kickoffPrompt: stored.kickoffPrompt,
+			offerPrompt: stored.offerPrompt,
+			extraInstructions: stored.extraInstructions,
+			providerId: stored.providerId,
+			model: stored.model,
+			avatar: stored.avatar,
+		});
+	}, [open]);
 
 	const save = useMutation({
 		mutationFn: () => saveAgent(agent.id, draft),

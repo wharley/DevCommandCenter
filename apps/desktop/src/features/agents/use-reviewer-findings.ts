@@ -25,7 +25,7 @@ export function isReviewCurrent(
  * markers on lines that have moved.
  */
 export function useReviewerFindings(workspaceId: string | null, scope = "local"): ReviewFinding[] {
-	const { agents, agentBySessionId } = useAgents(scope);
+	const { agents, agentBySessionId } = useAgents();
 	const reviewSession = agents
 		.find((agent) => agent.preset === "reviewer")
 		?.sessions.find((session) => session.workspaceId === workspaceId && session.state === "done");

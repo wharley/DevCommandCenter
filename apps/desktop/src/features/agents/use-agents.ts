@@ -1,6 +1,6 @@
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { dccQueryKeys } from "@/lib/query-client";
 import { workspaceSessionsQueryOptions } from "@/features/sessions/workspace-sessions-query";
@@ -36,11 +36,31 @@ export type AgentView = ResidentAgent & {
  * Session state comes from the per-workspace summaries the rail already
  * keeps fresh, so the mascot follows the same events as the task rows.
  */
-export function useAgents(scope: string): {
+export type AgentsState = {
 	agents: AgentView[];
 	agentBySessionId: Map<string, ResidentAgent>;
 	isLoading: boolean;
-} {
+};
+
+const AgentsContext = createContext<AgentsState>({
+	agents: [],
+	agentBySessionId: new Map(),
+	isLoading: false,
+});
+
+/** Shares the app shell's single agents query with every component below it. */
+export const AgentsProvider = AgentsContext.Provider;
+
+/** The person's agents and their live state, from the app shell's query. */
+export function useAgents(): AgentsState {
+	return useContext(AgentsContext);
+}
+
+/**
+ * Loads the agents and subscribes to the sessions of every task they ran in.
+ * Called once, by the app shell; everything else reads `useAgents()`.
+ */
+export function useAgentsQuery(scope: string): AgentsState {
 	const { t } = useTranslation("common");
 	const reviewerName = t("agents.presets.reviewer");
 	const overview = useQuery({

@@ -66,10 +66,6 @@ export function saveAgent(id: string | null, draft: ResidentAgentDraft) {
 	return invoke<ResidentAgent>("agents_save", { input: { id, draft } });
 }
 
-export function deleteAgent(agentId: string) {
-	return invoke<boolean>("agents_delete", { agentId });
-}
-
 export function bindSessionAgent(sessionId: string, agentId: string) {
 	return invoke<void>("agents_bind_session", { input: { sessionId, agentId } });
 }

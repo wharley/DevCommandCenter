@@ -10,14 +10,12 @@ import { useAgents } from "./use-agents";
 /** The mascot of the agent a session runs as, or nothing for a plain session. */
 export function SessionAgentBadge({
 	sessionId,
-	scope = "local",
 	size = 18,
 }: {
 	sessionId: string | null;
-	scope?: string;
 	size?: number;
 }) {
-	const { agentBySessionId, agents } = useAgents(scope);
+	const { agentBySessionId, agents } = useAgents();
 	const agent = sessionId ? agentBySessionId.get(sessionId) : undefined;
 	if (!agent) {
 		return null;
@@ -34,16 +32,14 @@ export function SessionAgentBadge({
 export function CallAgentButtons({
 	busy = false,
 	hasChanges,
-	scope = "local",
 }: {
 	/** A turn is running in this task; calling waits until it finishes. */
 	busy?: boolean;
 	/** Whether the task has anything to review; `undefined` while unknown. */
 	hasChanges?: boolean;
-	scope?: string;
 }) {
 	const { t } = useTranslation("common");
-	const { agents } = useAgents(scope);
+	const { agents } = useAgents();
 	return (
 		<>
 			{agents.map((agent) => {

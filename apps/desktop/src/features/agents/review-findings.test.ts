@@ -64,6 +64,18 @@ describe("review findings", () => {
 		expect(parseReviewFindings(block('{"findings":"none"}'))).toBeNull();
 	});
 
+	it("survives a code fence quoted inside a finding", () => {
+		const message = block(
+			JSON.stringify({
+				findings: [
+					{ path: "src/a.ts", line: 2, title: "Guard missing", detail: "Add ```if (!b) throw``` first." },
+				],
+			}),
+		);
+		expect(parseReviewFindings(message)?.[0]?.detail).toBe("Add ```if (!b) throw``` first.");
+		expect(stripReviewBlock(message)).toBe("Found two problems.");
+	});
+
 	it("hides the block from the message, even while it is still streaming", () => {
 		expect(stripReviewBlock(block('{"findings":[]}'))).toBe("Found two problems.");
 		expect(stripReviewBlock('Found one.\n\n```dcc-review\n{"findings":[{"pa')).toBe("Found one.");

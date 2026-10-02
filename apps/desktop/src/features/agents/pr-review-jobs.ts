@@ -89,6 +89,19 @@ export function prReviewJobsSnapshot(): PrReviewJob[] {
 	return jobs;
 }
 
+// ---- Offers the person already answered -------------------------------------
+
+const answeredPrOffers = new Set<string>();
+
+/** Kept while the app runs, so returning to the hub does not ask again. */
+export function isPrOfferAnswered(prId: string): boolean {
+	return answeredPrOffers.has(prId);
+}
+
+export function answerPrOffer(prId: string): void {
+	answeredPrOffers.add(prId);
+}
+
 // ---- Opening a PR from elsewhere (the agent's page) -------------------------
 
 const OPEN_PULL_REQUEST_EVENT = "dcc:open-pull-request";

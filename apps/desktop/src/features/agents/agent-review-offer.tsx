@@ -30,7 +30,7 @@ export function AgentReviewOffer({
 	scope?: string;
 }) {
 	const { t } = useTranslation("common");
-	const { agents, agentBySessionId } = useAgents(scope);
+	const { agents, agentBySessionId } = useAgents();
 	const [, setAnsweredCount] = useState(0);
 	const answer = (key: string) => {
 		answeredOffers.add(key);
@@ -60,13 +60,10 @@ export function AgentReviewOffer({
 					agent={agent}
 					acceptLabel={t("agents.offer.accept")}
 					dismissLabel={t("agents.offer.dismiss")}
-					onAccept={() => {
-						// One agent at a time: accepting answers every pending offer.
-						for (const offer of offers) {
-							answer(offer.key);
-						}
-						dispatchCallAgent(agent.id);
-					}}
+					// Accepting does not mark the offer as answered: the call may be
+					// refused (provider unavailable, a turn started meanwhile). Once the
+					// agent's session exists the offer goes away by itself.
+					onAccept={() => dispatchCallAgent(agent.id)}
 					onDismiss={() => answer(key)}
 				/>
 			))}

@@ -29,18 +29,16 @@ function sameFindings(left: ReviewFinding[], right: ReviewFinding[]) {
 export function ReviewFindingsCard({
 	sessionId,
 	findings,
-	scope = "local",
 }: {
 	sessionId: string | null | undefined;
 	findings: ReviewFinding[];
-	scope?: string;
 }) {
 	const { t } = useTranslation("common");
-	const { agents } = useAgents(scope);
+	const { agents } = useAgents();
 	const workspaceId =
 		agents.flatMap((agent) => agent.sessions).find((session) => session.sessionId === sessionId)
 			?.workspaceId ?? null;
-	const current = sameFindings(useReviewerFindings(workspaceId, scope), findings);
+	const current = sameFindings(useReviewerFindings(workspaceId), findings);
 	const ordered = [...findings].sort(
 		(left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity],
 	);

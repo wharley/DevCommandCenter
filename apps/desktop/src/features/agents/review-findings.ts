@@ -16,8 +16,10 @@ export type ReviewFinding = {
 const MAX_FINDINGS = 50;
 const MAX_TITLE_CHARS = 240;
 const MAX_DETAIL_CHARS = 1_500;
-// The closing fence is optional so a block still being streamed is recognized.
-const REVIEW_BLOCK = /```dcc-review[^\n]*\n?([\s\S]*?)(?:```|$)/;
+// The block ends at a fence on a line of its own, so a code fence quoted inside
+// a finding's text does not cut the JSON short. The closing fence is optional:
+// a block still being streamed is recognized and hidden.
+const REVIEW_BLOCK = /```dcc-review[^\n]*\n?([\s\S]*?)(?:\n```[ \t]*(?=\n|$)|$)/;
 
 function positiveLine(value: unknown): number | null {
 	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;

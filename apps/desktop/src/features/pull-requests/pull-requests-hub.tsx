@@ -56,6 +56,8 @@ import { cn } from "@/lib/utils";
 import { PullRequestCodeReview } from "./pull-request-code-review";
 import { OfferThought } from "@/features/agents/agent-review-offer";
 import {
+	answerPrOffer,
+	isPrOfferAnswered,
 	subscribeOpenPullRequest,
 	takePendingOpenPullRequest,
 	usePrReviewJobs,
@@ -148,20 +150,19 @@ export function PullRequestsHub({
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<PullRequestTab>("summary");
 	// The built-in reviewer offers itself on a PR waiting for the person's review.
-	const reviewer = useAgents("local").agents.find((agent) => agent.preset === "reviewer") ?? null;
-	const [answeredOffers, setAnsweredOffers] = useState<ReadonlySet<string>>(() => new Set());
-	const [autoStartReview, setAutoStartReview] = useState(0);
-	// Another screen (the agent's page) may ask for a specific PR.
-	useEffect(() => {
-		const open = (prId: string | null) => {
-			if (!prId) return;
-			setFilter("all");
-			setSelectedId(prId);
-			setActiveTab("code");
-		};
-		open(takePendingOpenPullRequest());
-		return subscribeOpenPullRequest(() => open(takePendingOpenPullRequest()));
-	}, []);
+	const reviewer = useAgents().agents.find((agent) => agent.preset === "reviewer") ?? null;
+	const [, setAnsweredOfferCount] = useState(0);
+	// Which PR the person accepted the offer on; the review starts once its
+	// patches load. Tied to that PR and cleared when consumed, so opening another
+	// PR, or this one again later, never starts a review nobody asked for.
+	const [autoStartReviewFor, setAutoStartReviewFor] = useState<string | null>(null);
+	// A PR another screen (the agent's page) asked for. It is selected once the
+	// list has it, instead of being replaced by the first PR while loading.
+	const [requestedId, setRequestedId] = useState<string | null>(() => takePendingOpenPullRequest());
+	useEffect(
+		() => subscribeOpenPullRequest(() => setRequestedId(takePendingOpenPullRequest())),
+		[],
+	);
 	const [comment, setComment] = useState("");
 	const [workingOnId, setWorkingOnId] = useState<string | null>(null);
 	const [pendingMergeMethod, setPendingMergeMethod] =
@@ -196,12 +197,28 @@ export function PullRequestsHub({
 		}
 	}, [filteredItems, selectedId]);
 
+	useEffect(() => {
+		if (!requestedId) return;
+		if (filter !== "all") {
+			setFilter("all");
+			return;
+		}
+		if (filteredItems.some((item) => item.id === requestedId)) {
+			setSelectedId(requestedId);
+			setActiveTab("code");
+			setRequestedId(null);
+		} else if (listQuery.isSuccess && !search) {
+			// The PR is gone (merged, closed); stop waiting for it.
+			setRequestedId(null);
+		}
+	}, [filter, filteredItems, listQuery.isSuccess, requestedId, search]);
+
 	const selected = filteredItems.find((item) => item.id === selectedId) ?? null;
 	const prReviewJobs = usePrReviewJobs();
 	const showReviewOffer =
 		selected != null &&
 		selected.reviewRequestedForViewer &&
-		!answeredOffers.has(selected.id) &&
+		!isPrOfferAnswered(selected.id) &&
 		!prReviewJobs.some((job) => job.prId === selected.id) &&
 		providers.some((provider) => provider.capabilities.supportsReadOnlyDelegation);
 	const detailQuery = useQuery({
@@ -564,13 +581,14 @@ export function PullRequestsHub({
 										acceptLabel={t("agents.offer.accept")}
 										dismissLabel={t("agents.offer.dismiss")}
 										onAccept={() => {
-											setAnsweredOffers((current) => new Set(current).add(selected.id));
+											answerPrOffer(selected.id);
 											setActiveTab("code");
-											setAutoStartReview((current) => current + 1);
+											setAutoStartReviewFor(selected.id);
 										}}
-										onDismiss={() =>
-											setAnsweredOffers((current) => new Set(current).add(selected.id))
-										}
+										onDismiss={() => {
+											answerPrOffer(selected.id);
+											setAnsweredOfferCount((count) => count + 1);
+										}}
 									/>
 								</div>
 							</div>
@@ -599,7 +617,8 @@ export function PullRequestsHub({
 									selectedProviderRuntime={selectedProviderRuntime}
 									onSelectProvider={onSelectProvider}
 									onSelectModel={onSelectModel}
-									autoStartReview={autoStartReview}
+									autoStartReview={autoStartReviewFor === selected.id}
+									onAutoStartReviewConsumed={() => setAutoStartReviewFor(null)}
 								/>
 							) : (
 								<div className="mx-auto max-w-4xl space-y-6">

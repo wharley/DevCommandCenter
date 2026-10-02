@@ -119,8 +119,9 @@ import { AgentPage } from "./features/agents/agent-page";
 import {
 	AGENTS_QUERY_KEY,
 	type AgentSessionView,
+	AgentsProvider,
 	type AgentView,
-	useAgents,
+	useAgentsQuery,
 } from "./features/agents/use-agents";
 import { bindSessionAgent } from "./lib/agents-api";
 import { subscribeCallAgent } from "./features/agents/call-agent-command";
@@ -2497,7 +2498,8 @@ export default function App() {
 		queryClient,
 	]);
 
-	const { agents: loadedAgents } = useAgents(backendCacheKey);
+	const { agents: loadedAgents, agentBySessionId, isLoading: agentsLoading } =
+		useAgentsQuery(backendCacheKey);
 	// A deleted, archived or restored task changes which agent sessions exist.
 	// Hide sessions of tasks that are gone right away, then refetch the list.
 	const liveWorkspaceIds = useMemo(
@@ -2511,6 +2513,10 @@ export default function App() {
 			sessions: agent.sessions.filter((session) => live.has(session.workspaceId)),
 		}));
 	}, [liveWorkspaceIds, loadedAgents]);
+	const agentsState = useMemo(
+		() => ({ agents: residentAgents, agentBySessionId, isLoading: agentsLoading }),
+		[agentBySessionId, agentsLoading, residentAgents],
+	);
 	useEffect(() => {
 		void liveWorkspaceIds;
 		void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
@@ -2611,7 +2617,16 @@ export default function App() {
 					providerRuntime,
 					title: agent.name,
 				});
-				await bindSessionAgent(started.session.id, agent.id);
+				try {
+					await bindSessionAgent(started.session.id, agent.id);
+				} catch (error) {
+					// Without the binding this is a plain session named after the
+					// agent, with no role. Remove it rather than leave it behind.
+					await closeSession({ sessionId: started.session.id, deleteHistory: true }).catch(
+						() => undefined,
+					);
+					throw error;
+				}
 				setSessionSnapshotsById((current) => ({
 					...current,
 					[started.session.id]: workspaceSessionSnapshotFromSummary({
@@ -5402,7 +5417,7 @@ export default function App() {
 		: inspectorWidth;
 
 	return (
-		<>
+		<AgentsProvider value={agentsState}>
 			<main
 				aria-label={t("app.shellAria")}
 				className="relative h-screen overflow-hidden bg-background font-sans text-foreground antialiased"
@@ -6112,6 +6127,6 @@ export default function App() {
 				onOpenHelp={() => openHelp()}
 			/>
 			<Toaster theme={theme} position="bottom-right" visibleToasts={6} />
-		</>
+		</AgentsProvider>
 	);
 }
