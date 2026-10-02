@@ -29,6 +29,7 @@ persistence in one Tauri application.
 - **Last Turn Review and Guarded Undo**: inspect the exact result of a completed agent turn and, for eligible macOS workspaces, preview and safely restore the previous file contents. See [Last Turn Review and Guarded Undo](docs/GUARDED_UNDO.md).
 - **Pull Request Center**: review GitHub pull requests and GitLab merge requests, inspect checks and discussions, publish review actions, create isolated implementation tasks, and directly merge eligible GitHub PRs with an explicitly confirmed strategy.
 - **DCC Feedback**: report bugs and suggest improvements from the sidebar, review a public issue before publishing with your connected GitHub account, and follow your reports in “My feedback”. Drafts stay on your device; version and system details are optional. See [DCC Feedback](docs/DCC_FEEDBACK.md).
+- **DCC agents**: the Reviewer offers to review a task's changes when a turn ends, lists findings by file and line, and hands them to the author agent as a fix request; it also drafts pull request review comments. See [DCC agents](docs/DCC_AGENTS.md).
 - **Delegation agents**: hand off review, explanation, or implementation tasks to child sessions, inspect their work in the Inspector, send feedback back to the child agent, and apply or discard the isolated worktree output. See [Delegation agents](docs/DELEGATION_AGENTS.md).
 - **Git and delivery workflows**: inspect live changes, commit and push, create or update change requests, recover delivery failures, and resolve merge conflicts without leaving the workbench.
 - **Managed MCP integrations**: connect trusted local or remote tools with scoped bindings, OS-backed credential storage, runtime status, and per-tool Ask/Allow/Deny policies.
@@ -233,6 +234,7 @@ Before starting your first agent session, complete [Provider setup](#provider-se
 - [Codex orchestration](docs/CODEX_ORCHESTRATION.md)
 - [Last Turn Review and Guarded Undo](docs/GUARDED_UNDO.md)
 - [Guarded Undo engineering contract](docs/GUARDED_UNDO_DESIGN.md)
+- [DCC agents](docs/DCC_AGENTS.md)
 - [Delegation agents](docs/DELEGATION_AGENTS.md)
 - [Mobile web companion](docs/MOBILE_WEB.md)
 - [Mobile pairing security model](docs/SECURITY_MOBILE_PAIRING.md)

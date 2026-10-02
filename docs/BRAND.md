@@ -25,6 +25,20 @@ remain recognizable when the prompt is too small to see.
 - **Calm depth.** Dimensional effects should stay restrained so the mark remains
   suitable for a professional developer tool.
 
+## The agent mascot
+
+DCC agents, such as the Reviewer, are shown as a small octopus with a face. It
+comes from the same idea as the mark, an octopus coordinating several agents,
+but it is a separate element with a separate job: the mark identifies the
+application and stays abstract, while the mascot identifies an agent and shows
+its state (resting, working, blocked on the person, result ready).
+
+The rules above still hold for the mark: no face, eyes or animal anatomy. Do not
+use the mascot as the application icon, and do not draw the mark with a face.
+The mascot is drawn in code
+([`agent-avatar.tsx`](../apps/desktop/src/features/agents/agent-avatar.tsx));
+colour, number of arms and eyes vary per agent.
+
 ## Asset usage
 
 | Asset | Purpose |

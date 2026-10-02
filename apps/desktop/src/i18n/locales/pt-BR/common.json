@@ -2784,6 +2784,21 @@
         "prompt": "Aqui você está engolindo a exceção. Propague o erro com contexto e cubra o caso com um teste.",
         "keywords": "diff revisar review anotar anotação comentar linha evidência mudanças code review"
       },
+      "agents": {
+        "label": "Agentes do DCC",
+        "summary": "O Revisor confere as mudanças da tarefa e entrega achados prontos para corrigir.",
+        "whatIs": "Um agente do DCC tem um papel fixo e entra num momento definido do seu fluxo. O primeiro é o [Revisor]: ele lê as mudanças da tarefa, lista os achados com arquivo e linha e deixa você mandá-los ao agente que escreveu o código. Ele não edita arquivos.",
+        "whenToUse": "Quando um turno termina com mudanças e você quer uma segunda leitura antes de commitar, ou quando pediram a sua revisão num PR.",
+        "steps": [
+          "Ao fim de um turno com mudanças, o mascote aparece acima do composer perguntando se pode revisar. Clique em [Sim, pode]. Você também pode chamá-lo pelo ícone dele no cabeçalho da tarefa.",
+          "Leia os achados no cartão abaixo da resposta. Clicar num achado abre o diff na linha.",
+          "Use o botão de cada achado, ou [Enviar todos ao autor], para deixar o pedido de correção no composer do agente que escreveu o código. Você confere e envia.",
+          "Em [Pull Requests], na aba [Código], ele revisa o PR a partir do diff e deixa rascunhos de comentários. Você pode sair da tela: a seção [Agentes] da barra lateral avisa quando terminar.",
+          "Em [Agentes], abra o [Revisor] e clique em [Editar] para escolher o provider e o modelo, somar [Instruções extras] ou desligar [Oferecer ao terminar um turno]."
+        ],
+        "prompt": "Neste projeto, trate como achado importante qualquer consulta ao banco sem índice e ignore a pasta vendor.",
+        "keywords": "agente revisor review revisão achados mascote polvo balão oferta autor corrigir pull request"
+      },
       "terminal": {
         "label": "Terminal",
         "summary": "Shells na pasta certa, com a saída a um clique do agente.",
@@ -2927,7 +2942,7 @@
         "steps": [
           "Clique em [Pull Requests] na barra lateral. Filtre por [Todos], [Revisando] ou [Criados por você].",
           "Abra o PR e vá para [Código]. Clique numa linha para comentar e use [Adicionar à revisão] para agrupar os comentários.",
-          "Use [Revisar com agente] para o agente ler o diff e sugerir rascunhos de comentários. Você decide o que publicar.",
+          "Em [Código], o [Revisor] se oferece quando pediram a sua revisão; você também pode chamá-lo pelo botão com o mascote. Ele lê o diff e sugere rascunhos de comentários. Você decide o que publicar.",
           "Precisa rodar o código? [Trabalhar neste PR] cria uma tarefa com worktree na branch do PR.",
           "Aprovado e verde? Clique em [Mesclar] e escolha o método. [Abrir no provedor Git] leva ao GitHub ou GitLab."
         ],

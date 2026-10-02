@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
 	AppWindow,
 	ArrowLeftRight,
+	BadgeCheck,
 	BarChart3,
 	Bot,
 	Cable,
@@ -49,6 +50,7 @@ export const HELP_TOPIC_IDS = [
 	"objective",
 	"inspector",
 	"review",
+	"agents",
 	"terminal",
 	"browser",
 	"delegate",
@@ -81,6 +83,7 @@ export const HELP_TOPIC_ICONS: Record<HelpTopicId, LucideIcon> = {
 	plan: ListChecks,
 	inspector: PanelRight,
 	review: FileDiff,
+	agents: BadgeCheck,
 	terminal: SquareTerminal,
 	browser: Globe,
 	delegate: Send,

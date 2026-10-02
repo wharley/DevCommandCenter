@@ -2784,6 +2784,21 @@
         "prompt": "You are swallowing the exception here. Propagate the error with context and cover the case with a test.",
         "keywords": "diff review annotate annotation comment line evidence changes code review"
       },
+      "agents": {
+        "label": "DCC agents",
+        "summary": "The Reviewer checks the task's changes and hands you findings ready to fix.",
+        "whatIs": "A DCC agent has a fixed role and steps in at a defined point of your workflow. The first one is the [Reviewer]: it reads the task's changes, lists findings by file and line, and lets you send them to the agent that wrote the code. It does not edit files.",
+        "whenToUse": "When a turn ends with changes and you want a second read before committing, or when your review was requested on a PR.",
+        "steps": [
+          "When a turn ends with changes, the mascot appears above the composer asking whether it may review. Select [Yes, go ahead]. You can also call it from its icon in the task header.",
+          "Read the findings in the card under its answer. Selecting a finding opens the diff at that line.",
+          "Use the button on each finding, or [Send all to the author], to draft the fix request in the composer of the agent that wrote the code. You check it and send.",
+          "In [Pull Requests], on the [Code] tab, it reviews the PR from the diff and leaves draft comments. You can leave the screen: the [Agents] section of the sidebar tells you when it is done.",
+          "In [Agents], open the [Reviewer] and select [Edit] to choose the provider and model, add [Extra instructions], or turn off [Offer after a turn]."
+        ],
+        "prompt": "In this project, treat any database query without an index as a major finding and ignore the vendor folder.",
+        "keywords": "agent reviewer review findings mascot octopus bubble offer author fix pull request"
+      },
       "terminal": {
         "label": "Terminal",
         "summary": "Shells in the right folder, with output one click away from the agent.",
@@ -2927,7 +2942,7 @@
         "steps": [
           "Click [Pull Requests] in the sidebar. Filter by [All], [Reviewing] or [Created by you].",
           "Open the PR and go to [Code]. Click a line to comment and use [Add to review] to batch comments.",
-          "Use [Review with agent] to have the agent read the diff and draft comments. You decide what gets published.",
+          "In [Code], the [Reviewer] offers itself when your review was requested; you can also call it from the button with its mascot. It reads the diff and suggests draft comments. You decide what to publish.",
           "Need to run the code? [Work on this PR] creates a task with a worktree on the PR branch.",
           "Approved and green? Click [Merge] and pick the method. [Open on Git provider] takes you to GitHub or GitLab."
         ],
