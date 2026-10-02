@@ -1054,28 +1054,30 @@ fn resolve_authorized_workspace_mutation(
     let workspaces = futures::executor::block_on(repo.list_workspaces())
         .map_err(|_| WorkspaceMutationAuthorizationError::RepositoryUnavailable)?;
 
-    let mut selected: Option<PathBuf> = None;
+    // A repository checkout is shared by design: every local-direct task of
+    // the project and the parent row of each worktree task store it as
+    // `root_path`, and they all authorize the same physical root. An isolated
+    // worktree, however, belongs to exactly one task row.
+    let mut registered = false;
+    let mut worktree_owner_seen = false;
     for workspace in workspaces {
-        let stored_root = if workspace.root_path == requested_root {
-            Some(workspace.root_path.as_str())
-        } else if workspace.worktree_path.as_deref() == Some(requested_root) {
-            workspace.worktree_path.as_deref()
-        } else {
-            None
-        };
-        let Some(stored_root) = stored_root else {
-            continue;
-        };
-        if selected.is_some() {
-            return Err(WorkspaceMutationAuthorizationError::AmbiguousMapping);
+        if workspace.worktree_path.as_deref() == Some(requested_root) {
+            if worktree_owner_seen {
+                return Err(WorkspaceMutationAuthorizationError::AmbiguousMapping);
+            }
+            worktree_owner_seen = true;
+            registered = true;
+        } else if workspace.root_path == requested_root {
+            registered = true;
         }
-        selected = Some(PathBuf::from(stored_root));
     }
 
-    let Some(workspace_absolute) = selected else {
+    if !registered {
         return Err(WorkspaceMutationAuthorizationError::UnknownMapping);
-    };
-    Ok(AuthorizedWorkspaceMutation { workspace_absolute })
+    }
+    Ok(AuthorizedWorkspaceMutation {
+        workspace_absolute: PathBuf::from(requested_root),
+    })
 }
 
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
@@ -9096,6 +9098,55 @@ mod tests {
         let debug = format!("{ambiguous:?}");
         assert!(!debug.contains(&durable_worktree));
         assert!(!format!("{workspace_state:?}").contains(db_path.to_string_lossy().as_ref()));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn workspace_mutation_authority_accepts_a_checkout_shared_by_several_tasks() {
+        let temporary = tempfile::tempdir().expect("mutation authority root");
+        let physical_temporary =
+            std::fs::canonicalize(temporary.path()).expect("physical mutation authority root");
+        let db_path = physical_temporary.join("sessions.sqlite");
+        let app_data = physical_temporary.join("app-data");
+        let session_state = SessionCommandState::new_headless(db_path.clone(), app_data);
+        let workspace_state = WorkspaceCommandState::from_session(&session_state);
+
+        let checkout = physical_temporary
+            .join("checkout")
+            .to_string_lossy()
+            .into_owned();
+        let worktree = physical_temporary
+            .join("worktree")
+            .to_string_lossy()
+            .into_owned();
+        let repo = SqliteWorkspaceRepo::open(&db_path).expect("workspace repo");
+        // Two local-direct tasks plus one worktree task of the same project.
+        for id in ["local-direct-a", "local-direct-b"] {
+            let mut workspace = sample_workspace(id, &checkout);
+            workspace.root_path = checkout.clone();
+            workspace.worktree_path = None;
+            WorkspaceRepo::save_workspace(&repo, &workspace)
+                .await
+                .expect("save local-direct workspace");
+        }
+        let mut isolated = sample_workspace("isolated", &worktree);
+        isolated.root_path = checkout.clone();
+        WorkspaceRepo::save_workspace(&repo, &isolated)
+            .await
+            .expect("save worktree workspace");
+
+        let shared = workspace_state
+            .authorize_workspace_mutation(&checkout)
+            .await
+            .expect("shared checkout mapping");
+        assert_eq!(shared.into_workspace_absolute(), PathBuf::from(&checkout));
+        let exclusive = workspace_state
+            .authorize_workspace_mutation(&worktree)
+            .await
+            .expect("worktree mapping");
+        assert_eq!(
+            exclusive.into_workspace_absolute(),
+            PathBuf::from(&worktree)
+        );
     }
 
     #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
