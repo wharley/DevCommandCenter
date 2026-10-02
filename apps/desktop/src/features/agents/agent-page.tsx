@@ -1,6 +1,6 @@
 import type { ProviderCatalog } from "@dcc/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Copy, Loader2, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -21,7 +21,6 @@ import {
 	AGENT_AVATAR_COLORS,
 	AGENT_AVATAR_EYES,
 	type ResidentAgentDraft,
-	deleteAgent,
 	saveAgent,
 } from "@/lib/agents-api";
 import { cn } from "@/lib/utils";
@@ -30,21 +29,6 @@ import { requestOpenPullRequest } from "./pr-review-jobs";
 import { AGENTS_QUERY_KEY, type AgentSessionView, type AgentView } from "./use-agents";
 
 type Providers = ProviderCatalog["providers"];
-
-const NEW_AGENT_DRAFT: ResidentAgentDraft = {
-	name: "",
-	role: "",
-	kickoffPrompt: "",
-	offerPrompt: "",
-	extraInstructions: "",
-	providerId: null,
-	model: null,
-	avatar: { color: "violet", arms: 4, eyes: "round" },
-};
-
-function errorMessage(error: unknown) {
-	return error instanceof Error ? error.message : String(error);
-}
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
 	return (
@@ -83,72 +67,49 @@ function Choice({
 	);
 }
 
+/**
+ * What the person can change on a DCC agent: its name, mascot, provider and
+ * model, extra instructions, and whether it offers itself. The role is DCC's.
+ */
 function AgentEditorDialog({
 	agent,
-	initialDraft,
 	open,
 	providers,
 	onOpenChange,
-	onSaved,
-	onDeleted,
 }: {
-	agent: AgentView | null;
-	/** Starting point for a new agent, used when duplicating. */
-	initialDraft?: ResidentAgentDraft;
+	agent: AgentView;
 	open: boolean;
 	providers: Providers;
 	onOpenChange: (open: boolean) => void;
-	onSaved: (agentId: string) => void;
-	onDeleted: () => void;
 }) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
-	const [draft, setDraft] = useState<ResidentAgentDraft>(NEW_AGENT_DRAFT);
-	const [confirmingDelete, setConfirmingDelete] = useState(false);
+	const [draft, setDraft] = useState<ResidentAgentDraft>(agent);
 	useEffect(() => {
-		if (!open) {
-			return;
+		if (open) {
+			setDraft({
+				name: agent.name,
+				role: agent.role,
+				kickoffPrompt: agent.kickoffPrompt,
+				offerPrompt: agent.offerPrompt,
+				extraInstructions: agent.extraInstructions,
+				providerId: agent.providerId,
+				model: agent.model,
+				avatar: agent.avatar,
+			});
 		}
-		setConfirmingDelete(false);
-		setDraft(
-			agent
-				? {
-						name: agent.name,
-						role: agent.role,
-						kickoffPrompt: agent.kickoffPrompt,
-						offerPrompt: agent.offerPrompt,
-						extraInstructions: agent.extraInstructions,
-						providerId: agent.providerId,
-						model: agent.model,
-						avatar: agent.avatar,
-					}
-				: (initialDraft ?? NEW_AGENT_DRAFT),
-		);
-	}, [agent, initialDraft, open]);
+	}, [agent, open]);
 
 	const save = useMutation({
-		mutationFn: () => saveAgent(agent?.id ?? null, draft),
-		onSuccess: async (saved) => {
-			await queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
-			onSaved(saved.id);
-			onOpenChange(false);
-		},
-		onError: (error) => toast.error(errorMessage(error)),
-	});
-	const remove = useMutation({
-		mutationFn: () => deleteAgent(agent?.id ?? ""),
+		mutationFn: () => saveAgent(agent.id, draft),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
-			onDeleted();
 			onOpenChange(false);
 		},
-		onError: (error) => toast.error(errorMessage(error)),
+		onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
 	});
 
 	const provider = providers.find((candidate) => candidate.id === draft.providerId) ?? null;
-	const canSave = draft.name.trim().length > 0 && draft.role.trim().length > 0;
-	// A built-in agent: its role and first message are DCC's, not editable.
-	const builtIn = Boolean(agent?.preset);
 	const selectClass =
 		"h-8 w-full rounded-lg border border-border/80 bg-background px-2 text-[13px] text-foreground";
 
@@ -156,10 +117,8 @@ function AgentEditorDialog({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-xl">
 				<DialogHeader>
-					<DialogTitle>{agent ? t("agents.editor.editTitle") : t("agents.editor.newTitle")}</DialogTitle>
-					<DialogDescription>
-						{builtIn ? t("agents.editor.builtInDescription") : t("agents.editor.description")}
-					</DialogDescription>
+					<DialogTitle>{t("agents.editor.title", { agent: agent.name })}</DialogTitle>
+					<DialogDescription>{t("agents.editor.description")}</DialogDescription>
 				</DialogHeader>
 				<div className="space-y-4">
 					<div className="flex items-center gap-4">
@@ -245,163 +204,75 @@ function AgentEditorDialog({
 							</select>
 						</Field>
 					</div>
-					{builtIn ? (
-						<>
-							<Field label={t("agents.editor.extra")} hint={t("agents.editor.extraHint")}>
-								<Textarea
-									value={draft.extraInstructions}
-									rows={4}
-									maxLength={2000}
-									onChange={(event) =>
-										setDraft({ ...draft, extraInstructions: event.target.value })
-									}
-								/>
-							</Field>
-							<div className="flex items-center justify-between gap-4">
-								<div className="space-y-1">
-									<div className="text-[12px] font-medium text-foreground">
-										{t("agents.editor.offerSwitch")}
-									</div>
-									<p className="text-[11px] leading-relaxed text-muted-foreground">
-										{t("agents.editor.offerSwitchHint")}
-									</p>
-								</div>
-								<Switch
-									aria-label={t("agents.editor.offerSwitch")}
-									checked={draft.offerPrompt.trim().length > 0}
-									onCheckedChange={(checked) =>
-										setDraft({
-											...draft,
-											offerPrompt: checked ? t("agents.presets.reviewerOffer") : "",
-										})
-									}
-								/>
+					<Field label={t("agents.editor.extra")} hint={t("agents.editor.extraHint")}>
+						<Textarea
+							value={draft.extraInstructions}
+							rows={4}
+							maxLength={2000}
+							onChange={(event) => setDraft({ ...draft, extraInstructions: event.target.value })}
+						/>
+					</Field>
+					<div className="flex items-center justify-between gap-4">
+						<div className="space-y-1">
+							<div className="text-[12px] font-medium text-foreground">
+								{t("agents.editor.offerSwitch")}
 							</div>
-						</>
-					) : (
-						<>
-							<Field label={t("agents.editor.role")} hint={t("agents.editor.roleHint")}>
-								<Textarea
-									value={draft.role}
-									rows={8}
-									maxLength={12000}
-									onChange={(event) => setDraft({ ...draft, role: event.target.value })}
-								/>
-							</Field>
-							<Field label={t("agents.editor.kickoff")} hint={t("agents.editor.kickoffHint")}>
-								<Textarea
-									value={draft.kickoffPrompt}
-									rows={2}
-									maxLength={2000}
-									onChange={(event) => setDraft({ ...draft, kickoffPrompt: event.target.value })}
-								/>
-							</Field>
-							<Field label={t("agents.editor.offer")} hint={t("agents.editor.offerHint")}>
-								<Input
-									value={draft.offerPrompt}
-									maxLength={200}
-									onChange={(event) => setDraft({ ...draft, offerPrompt: event.target.value })}
-								/>
-							</Field>
-						</>
-					)}
-				</div>
-				<DialogFooter className="sm:justify-between">
-					{agent && !builtIn ? (
-						<Button
-							type="button"
-							variant={confirmingDelete ? "destructive" : "ghost"}
-							disabled={remove.isPending}
-							onClick={() => (confirmingDelete ? remove.mutate() : setConfirmingDelete(true))}
-						>
-							<Trash2 className="size-4" />
-							<span>
-								{confirmingDelete ? t("agents.editor.confirmDelete") : t("agents.editor.delete")}
-							</span>
-						</Button>
-					) : (
-						<span />
-					)}
-					<div className="flex gap-2">
-						<Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-							<span>{t("agents.editor.cancel")}</span>
-						</Button>
-						<Button type="button" disabled={!canSave || save.isPending} onClick={() => save.mutate()}>
-							{save.isPending && <Loader2 className="size-4 animate-spin" />}
-							<span>{t("agents.editor.save")}</span>
-						</Button>
+							<p className="text-[11px] leading-relaxed text-muted-foreground">
+								{t("agents.editor.offerSwitchHint")}
+							</p>
+						</div>
+						<Switch
+							aria-label={t("agents.editor.offerSwitch")}
+							checked={draft.offerPrompt.trim().length > 0}
+							onCheckedChange={(checked) =>
+								setDraft({ ...draft, offerPrompt: checked ? t("agents.presets.reviewerOffer") : "" })
+							}
+						/>
 					</div>
+				</div>
+				<DialogFooter>
+					<Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+						<span>{t("agents.editor.cancel")}</span>
+					</Button>
+					<Button
+						type="button"
+						disabled={draft.name.trim().length === 0 || save.isPending}
+						onClick={() => save.mutate()}
+					>
+						{save.isPending && <Loader2 className="size-4 animate-spin" />}
+						<span>{t("agents.editor.save")}</span>
+					</Button>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
 	);
 }
 
-/** The home of one resident agent: who it is, and its sessions in every project. */
+const SECTION_TITLE =
+	"mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+
+/** The home of one DCC agent: how it is called, and its work in every project. */
 export function AgentPage({
 	agent,
 	providers,
-	currentWorkspaceName,
 	workspaceNames,
 	projectLabels,
-	isCalling,
-	onCall,
 	onOpenSession,
-	onSelectAgent,
-	onClose,
 }: {
 	agent: AgentView | null;
 	providers: Providers;
-	currentWorkspaceName: string | null;
 	workspaceNames: Record<string, string>;
 	projectLabels: Record<string, string>;
-	isCalling: boolean;
-	onCall: (agent: AgentView) => void;
 	onOpenSession: (session: AgentSessionView) => void;
-	onSelectAgent: (agentId: string) => void;
-	onClose: () => void;
 }) {
 	const { t, i18n } = useTranslation("common");
-	const [editing, setEditing] = useState<"edit" | "new" | "duplicate" | null>(null);
-
-	const editor = (
-		<AgentEditorDialog
-			agent={editing === "edit" ? agent : null}
-			initialDraft={
-				editing === "duplicate" && agent
-					? {
-							// A copy is the person's own agent: it starts from the same
-							// role and is theirs to rewrite.
-							name: t("agents.page.copyName", { agent: agent.name }),
-							role: agent.role,
-							kickoffPrompt: agent.kickoffPrompt,
-							offerPrompt: agent.offerPrompt,
-							extraInstructions: agent.extraInstructions,
-							providerId: agent.providerId,
-							model: agent.model,
-							avatar: agent.avatar,
-						}
-					: undefined
-			}
-			open={editing !== null}
-			providers={providers}
-			onOpenChange={(open) => !open && setEditing(null)}
-			onSaved={onSelectAgent}
-			onDeleted={onClose}
-		/>
-	);
+	const [editing, setEditing] = useState(false);
+	const [roleOpen, setRoleOpen] = useState(false);
 
 	if (!agent) {
 		return (
 			<div className="grid h-full place-items-center bg-background pt-9">
-				<div className="space-y-3 text-center">
-					<p className="text-[13px] text-muted-foreground">{t("agents.page.missing")}</p>
-					<Button type="button" onClick={() => setEditing("new")}>
-						<Plus className="size-4" />
-						<span>{t("agents.page.newAgent")}</span>
-					</Button>
-				</div>
-				{editor}
+				<p className="text-[13px] text-muted-foreground">{t("agents.page.missing")}</p>
 			</div>
 		);
 	}
@@ -415,6 +286,7 @@ export function AgentPage({
 		dateStyle: "medium",
 		timeStyle: "short",
 	});
+	const RoleChevron = roleOpen ? ChevronDown : ChevronRight;
 
 	return (
 		<div className="h-full min-h-0 overflow-y-auto bg-background pt-9">
@@ -427,102 +299,80 @@ export function AgentPage({
 							{t(`agents.state.${agent.state}`)} · {runsOn}
 						</p>
 					</div>
-					<div className="flex shrink-0 gap-2">
-						<Button type="button" variant="ghost" onClick={() => setEditing("new")}>
-							<Plus className="size-4" />
-							<span>{t("agents.page.newAgent")}</span>
-						</Button>
-						<Button type="button" variant="ghost" onClick={() => setEditing("duplicate")}>
-							<Copy className="size-4" />
-							<span>{t("agents.page.duplicate")}</span>
-						</Button>
-						<Button type="button" variant="outline" onClick={() => setEditing("edit")}>
-							<Pencil className="size-4" />
-							<span>{t("agents.page.edit")}</span>
-						</Button>
-					</div>
+					<Button type="button" variant="outline" onClick={() => setEditing(true)}>
+						<Pencil className="size-4" />
+						<span>{t("agents.page.edit")}</span>
+					</Button>
 				</header>
 
+				{/* The reviewer needs a diff, which only a task in progress has: it
+				    is called from the task or the pull request, never from here. */}
 				<section className="rounded-[18px] border border-border/70 bg-card p-5">
-					<div className="flex items-center gap-4">
-						<div className="min-w-0 flex-1">
-							<h2 className="text-[14px] font-semibold">{t("agents.page.callTitle")}</h2>
-							<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-								{currentWorkspaceName
-									? t("agents.page.callHint", { task: currentWorkspaceName })
-									: t("agents.page.callNoTask")}
-							</p>
-						</div>
-						<Button
-							type="button"
-							disabled={!currentWorkspaceName || isCalling}
-							onClick={() => onCall(agent)}
-						>
-							{isCalling ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-							<span>{t("agents.page.call")}</span>
-						</Button>
-					</div>
+					<h2 className="text-[14px] font-semibold">{t("agents.page.howToCall")}</h2>
+					<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+						{t("agents.page.howToCallReviewer")}
+					</p>
 				</section>
 
 				<section>
-					<h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-						{t("agents.page.sessions")}
-					</h2>
+					<h2 className={SECTION_TITLE}>{t("agents.page.sessions")}</h2>
 					{agent.sessions.length === 0 ? (
 						<p className="rounded-[18px] border border-dashed border-border/70 px-5 py-6 text-[13px] text-muted-foreground">
 							{t("agents.page.noSessions")}
 						</p>
 					) : (
 						<ul className="divide-y divide-border/60 overflow-hidden rounded-[18px] border border-border/70 bg-card">
-							{agent.sessions.map((session) => (
-								<li key={session.sessionId}>
-									<button
-										type="button"
-										onClick={() => onOpenSession(session)}
-										className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
-									>
-										<AgentAvatar
-											avatar={agent.avatar}
-											// A result already read shows the plain mascot.
-											state={session.state === "done" && !session.unread ? undefined : session.state}
-											size={28}
-										/>
-										<span className="min-w-0 flex-1">
-											<span className="block truncate text-[13px] font-medium text-foreground">
-												{workspaceNames[session.workspaceId] ?? session.title ?? session.sessionId}
-											</span>
-											<span className="block truncate text-[11px] text-muted-foreground">
-												{[projectLabels[session.projectId], dateFormat.format(new Date(session.updatedAt))]
-													.filter(Boolean)
-													.join(" · ")}
-											</span>
-										</span>
-										<span
-											className={cn(
-												"shrink-0 text-[11px]",
-												session.state === "needsYou"
-													? "text-amber-700 dark:text-amber-300"
-													: session.unread
-														? "font-medium text-emerald-700 dark:text-emerald-300"
-														: "text-muted-foreground",
-											)}
+							{agent.sessions.map((session) => {
+								const read = session.state === "done" && !session.unread;
+								return (
+									<li key={session.sessionId}>
+										<button
+											type="button"
+											onClick={() => onOpenSession(session)}
+											className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
 										>
-											{session.state === "done" && !session.unread
-												? t("agents.state.finished")
-												: t(`agents.state.${session.state}`)}
-										</span>
-									</button>
-								</li>
-							))}
+											{/* A result already read shows the plain mascot. */}
+											<AgentAvatar
+												avatar={agent.avatar}
+												state={read ? undefined : session.state}
+												size={28}
+											/>
+											<span className="min-w-0 flex-1">
+												<span className="block truncate text-[13px] font-medium text-foreground">
+													{workspaceNames[session.workspaceId] ?? session.title ?? session.sessionId}
+												</span>
+												<span className="block truncate text-[11px] text-muted-foreground">
+													{[
+														projectLabels[session.projectId],
+														dateFormat.format(new Date(session.updatedAt)),
+													]
+														.filter(Boolean)
+														.join(" · ")}
+												</span>
+											</span>
+											<span
+												className={cn(
+													"shrink-0 text-[11px]",
+													session.state === "needsYou"
+														? "text-amber-700 dark:text-amber-300"
+														: session.unread
+															? "font-medium text-emerald-700 dark:text-emerald-300"
+															: "text-muted-foreground",
+												)}
+											>
+												{read ? t("agents.state.finished") : t(`agents.state.${session.state}`)}
+											</span>
+										</button>
+									</li>
+								);
+							})}
 						</ul>
 					)}
 				</section>
 
 				{agent.prReviews.length > 0 && (
 					<section>
-						<h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-							{t("agents.page.pullRequests")}
-						</h2>
+						<h2 className={SECTION_TITLE}>{t("agents.page.pullRequests")}</h2>
 						<ul className="divide-y divide-border/60 overflow-hidden rounded-[18px] border border-border/70 bg-card">
 							{agent.prReviews.map((job) => {
 								const unread = job.status === "done" && !job.seen;
@@ -572,31 +422,40 @@ export function AgentPage({
 					</section>
 				)}
 
-				<section>
-					<h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-						{agent.preset ? t("agents.page.roleBuiltIn") : t("agents.page.role")}
-					</h2>
-					<pre className="whitespace-pre-wrap rounded-[18px] border border-border/70 bg-card px-5 py-4 font-sans text-[13px] leading-relaxed text-foreground">
-						{agent.role}
-					</pre>
-					{agent.preset && (
-						<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-							{t("agents.page.roleBuiltInHint")}
-						</p>
-					)}
-				</section>
 				{agent.extraInstructions && (
 					<section>
-						<h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-							{t("agents.editor.extra")}
-						</h2>
+						<h2 className={SECTION_TITLE}>{t("agents.editor.extra")}</h2>
 						<pre className="whitespace-pre-wrap rounded-[18px] border border-border/70 bg-card px-5 py-4 font-sans text-[13px] leading-relaxed text-foreground">
 							{agent.extraInstructions}
 						</pre>
 					</section>
 				)}
+
+				{/* The role is DCC's and public; it is shown on request, not as the
+				    page's main content. */}
+				<section>
+					<button
+						type="button"
+						aria-expanded={roleOpen}
+						onClick={() => setRoleOpen((current) => !current)}
+						className="flex cursor-pointer items-center gap-1.5 rounded-md text-muted-foreground transition-colors hover:text-foreground"
+					>
+						<RoleChevron className="size-3.5" />
+						<span className="text-[12px] font-medium">{t("agents.page.showRole")}</span>
+					</button>
+					{roleOpen && (
+						<>
+							<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+								{t("agents.page.roleHint")}
+							</p>
+							<pre className="mt-2 whitespace-pre-wrap rounded-[18px] border border-border/70 bg-card px-5 py-4 font-sans text-[12px] leading-relaxed text-foreground">
+								{agent.role}
+							</pre>
+						</>
+					)}
+				</section>
 			</div>
-			{editor}
+			<AgentEditorDialog agent={agent} open={editing} providers={providers} onOpenChange={setEditing} />
 		</div>
 	);
 }

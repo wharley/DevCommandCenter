@@ -193,34 +193,22 @@
       "failed": "Não foi possível chamar o agente."
     },
     "page": {
-      "pullRequests": "Pull Requests",
-      "duplicate": "Duplicar",
-      "copyName": "{{agent}} (cópia)",
-      "roleBuiltIn": "Papel · mantido pelo DCC",
-      "roleBuiltInHint": "Este agente é do DCC: o papel melhora a cada versão e não é editável. Use “Editar” para somar instruções suas, ou “Duplicar” para criar um agente seu com texto livre.",
       "missing": "Este agente não existe mais.",
-      "newAgent": "Novo agente",
       "edit": "Editar",
       "runsOnCurrent": "usa o provider selecionado no composer",
-      "callTitle": "Chamar na tarefa atual",
-      "callHint": "Abre uma conversa deste agente em “{{task}}”.",
-      "callNoTask": "Abra uma tarefa para chamar este agente nela.",
-      "call": "Chamar",
-      "sessions": "Sessões",
-      "noSessions": "Nenhuma sessão ainda. As conversas deste agente em qualquer projeto aparecem aqui.",
-      "role": "Papel"
+      "howToCall": "Como chamar",
+      "howToCallReviewer": "O Revisor trabalha sobre as mudanças de uma tarefa, então é chamado de dentro dela: pelo balão que aparece quando um turno termina com mudanças, ou pelo ícone dele no cabeçalho da tarefa. Em Pull Requests, pelo balão ou pelo botão dele na aba de código.",
+      "sessions": "Revisões em tarefas",
+      "noSessions": "Nenhuma revisão ainda. As revisões dele em qualquer projeto aparecem aqui.",
+      "pullRequests": "Revisões de Pull Requests",
+      "showRole": "Ver o papel deste agente",
+      "roleHint": "O papel é mantido pelo DCC e melhora a cada versão. Para ajustá-lo ao seu projeto, use as instruções extras em “Editar”."
     },
     "editor": {
-      "builtInDescription": "Este agente é do DCC. Você escolhe o provider, o modelo e o avatar, e pode somar instruções suas ao papel.",
       "extra": "Instruções extras",
       "extraHint": "Somadas ao papel do DCC a cada turno. Exemplo: convenções do seu projeto ou pastas a ignorar.",
       "offerSwitch": "Oferecer ao terminar um turno",
       "offerSwitchHint": "Quando um turno termina com mudanças, o agente aparece acima do composer perguntando se pode agir.",
-      "offer": "Pergunta ao terminar um turno",
-      "offerHint": "Quando um turno termina com mudanças, o agente aparece acima do composer com esta pergunta. Deixe vazio para ele nunca se oferecer.",
-      "newTitle": "Novo agente",
-      "editTitle": "Editar agente",
-      "description": "O agente é seu e vale para todos os projetos. O papel é enviado a cada turno das conversas dele.",
       "name": "Nome",
       "avatar": "Avatar",
       "colors": {
@@ -241,14 +229,10 @@
       "providerCurrent": "O selecionado no composer",
       "model": "Modelo",
       "modelDefault": "Recomendado do provider",
-      "role": "Papel",
-      "roleHint": "Instruções permanentes do agente. A mensagem atual tem precedência quando houver conflito.",
-      "kickoff": "Primeira mensagem",
-      "kickoffHint": "Enviada automaticamente ao chamar o agente. Deixe vazio para só abrir a conversa.",
-      "delete": "Excluir",
-      "confirmDelete": "Confirmar exclusão",
       "cancel": "Cancelar",
-      "save": "Salvar"
+      "save": "Salvar",
+      "title": "Editar {{agent}}",
+      "description": "Este agente é do DCC. Você escolhe o provider, o modelo e o avatar, e pode somar instruções suas ao papel."
     }
   },
   "sidebar": {

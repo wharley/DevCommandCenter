@@ -110,7 +110,8 @@ pub struct ResidentAgentDraft {
     pub role: String,
     #[serde(default)]
     pub kickoff_prompt: String,
-    /// What the agent asks after a turn leaves changes. Empty: it never offers.
+    /// What a built-in agent asks after a turn leaves changes; empty turns
+    /// the offer off. Ignored for agents the person wrote: they never offer.
     #[serde(default)]
     pub offer_prompt: String,
     /// Added after the role. For a preset this is the only role text the

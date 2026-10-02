@@ -193,34 +193,22 @@
       "failed": "Could not call the agent."
     },
     "page": {
-      "pullRequests": "Pull Requests",
-      "duplicate": "Duplicate",
-      "copyName": "{{agent}} (copy)",
-      "roleBuiltIn": "Role · maintained by DCC",
-      "roleBuiltInHint": "This agent is DCC's: its role improves with each version and is not editable. Use “Edit” to add your own instructions, or “Duplicate” to create an agent of your own with free text.",
       "missing": "This agent no longer exists.",
-      "newAgent": "New agent",
       "edit": "Edit",
       "runsOnCurrent": "uses the provider selected in the composer",
-      "callTitle": "Call in the current task",
-      "callHint": "Opens a conversation with this agent in “{{task}}”.",
-      "callNoTask": "Open a task to call this agent in it.",
-      "call": "Call",
-      "sessions": "Sessions",
-      "noSessions": "No sessions yet. This agent's conversations in any project appear here.",
-      "role": "Role"
+      "howToCall": "How to call it",
+      "howToCallReviewer": "The Reviewer works on a task's changes, so it is called from inside the task: from the bubble that appears when a turn ends with changes, or from its icon in the task header. In Pull Requests, from the bubble or its button on the code tab.",
+      "sessions": "Reviews in tasks",
+      "noSessions": "No reviews yet. Its reviews in any project appear here.",
+      "pullRequests": "Pull request reviews",
+      "showRole": "See this agent's role",
+      "roleHint": "The role is maintained by DCC and improves with each version. To adapt it to your project, use the extra instructions under “Edit”."
     },
     "editor": {
-      "builtInDescription": "This agent is DCC's. You choose the provider, model and avatar, and can add your own instructions to its role.",
       "extra": "Extra instructions",
       "extraHint": "Added to DCC's role on every turn. For example: your project's conventions or folders to ignore.",
       "offerSwitch": "Offer after a turn",
       "offerSwitchHint": "When a turn ends with changes, the agent appears above the composer asking whether it may act.",
-      "offer": "Question after a turn",
-      "offerHint": "When a turn ends with changes, the agent appears above the composer asking this. Leave empty so it never offers.",
-      "newTitle": "New agent",
-      "editTitle": "Edit agent",
-      "description": "The agent is yours and applies to every project. Its role is sent with every turn of its conversations.",
       "name": "Name",
       "avatar": "Avatar",
       "colors": {
@@ -241,14 +229,10 @@
       "providerCurrent": "The one selected in the composer",
       "model": "Model",
       "modelDefault": "Provider's recommended",
-      "role": "Role",
-      "roleHint": "The agent's standing instructions. The current message takes precedence when they conflict.",
-      "kickoff": "First message",
-      "kickoffHint": "Sent automatically when the agent is called. Leave empty to only open the conversation.",
-      "delete": "Delete",
-      "confirmDelete": "Confirm delete",
       "cancel": "Cancel",
-      "save": "Save"
+      "save": "Save",
+      "title": "Edit {{agent}}",
+      "description": "This agent is DCC's. You choose the provider, model and avatar, and can add your own instructions to its role."
     }
   },
   "sidebar": {

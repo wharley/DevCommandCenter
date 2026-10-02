@@ -5640,7 +5640,6 @@ export default function App() {
 								<AgentPage
 									agent={residentAgents.find((agent) => agent.id === activeAgentId) ?? null}
 									providers={providerChoices}
-									currentWorkspaceName={selectedWorkspace?.name ?? null}
 									workspaceNames={Object.fromEntries(
 										workspacesFromBackend.map((workspace) => [workspace.id, workspace.name]),
 									)}
@@ -5650,11 +5649,7 @@ export default function App() {
 											repository.displayName ?? repository.name,
 										]),
 									)}
-									isCalling={callingAgentId !== null}
-									onCall={handleCallAgent}
 									onOpenSession={handleOpenResidentAgentSession}
-									onSelectAgent={setActiveAgentId}
-									onClose={() => setGlobalSurface(null)}
 								/>
 							) : globalSurface === "newTask" ? (
 								<NewTaskLaunchState

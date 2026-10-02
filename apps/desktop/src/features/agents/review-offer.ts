@@ -43,8 +43,9 @@ export function callAgentBlockKey(input: {
 }
 
 /**
- * Whether an agent should offer itself after a turn. Only agents with an
- * offer text do. It offers once per finished turn of a plain session, only
+ * Whether an agent should offer itself after a turn. Only DCC's built-in
+ * agents do, and only while their offer is on: an agent the person wrote is
+ * called by hand, so two mascots never compete for the same moment. It offers once per finished turn of a plain session, only
  * while the task has local changes and nothing is running, and not when the
  * agent already ran in the task after that turn.
  * Returns the key that identifies this offer, so a dismissal can be remembered.
@@ -58,7 +59,13 @@ export function reviewOfferKey(input: {
 	isAgentSession: boolean;
 }): string | null {
 	const { agent, workspaceId, sessionId, sessions, changedFileCount, isAgentSession } = input;
-	if (!agent?.offerPrompt.trim() || !sessionId || isAgentSession || changedFileCount === 0) {
+	if (
+		!agent?.preset ||
+		!agent.offerPrompt.trim() ||
+		!sessionId ||
+		isAgentSession ||
+		changedFileCount === 0
+	) {
 		return null;
 	}
 	if (sessions.some(isSessionRunning)) {

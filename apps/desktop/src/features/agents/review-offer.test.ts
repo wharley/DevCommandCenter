@@ -13,7 +13,12 @@ function summary(id: string, lastTurnState: string | null, completedAt: string |
 }
 
 function reviewer(sessions: Array<{ workspaceId: string; updatedAt: string }> = []) {
-	return { id: "reviewer", offerPrompt: "Posso revisar?", sessions } as unknown as AgentView;
+	return {
+		id: "reviewer",
+		preset: "reviewer",
+		offerPrompt: "Posso revisar?",
+		sessions,
+	} as unknown as AgentView;
 }
 
 const base = {
@@ -50,7 +55,11 @@ describe("review offer", () => {
 
 	it("stays quiet without a reviewer, changes, or a finished turn", () => {
 		expect(reviewOfferKey({ ...base, agent: undefined })).toBeNull();
-		// An agent without an offer text never offers itself.
+		// An agent the person wrote never offers itself, whatever its text says.
+		expect(
+			reviewOfferKey({ ...base, agent: { ...reviewer(), preset: null } as AgentView }),
+		).toBeNull();
+		// The person turned the built-in offer off.
 		expect(
 			reviewOfferKey({ ...base, agent: { ...reviewer(), offerPrompt: " " } as AgentView }),
 		).toBeNull();
