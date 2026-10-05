@@ -88,10 +88,17 @@ import {
 	WorkspaceRailRowItem,
 } from "./workspace-rail-row";
 import {
+	attentionWorkspaceItems,
 	runningWorkspaceActivities,
 	useWorkspaceAgentActivities,
 	useWorkspaceProviderIds,
+	type AttentionReason,
 } from "./use-workspace-agent-states";
+import {
+	isWorkspaceResultUnread,
+	markWorkspaceResultSeen,
+	useSeenWorkspaceResults,
+} from "./workspace-seen-results";
 import { ProjectEditDialog } from "./project-edit-dialog";
 import { ProjectIdentityGlyph } from "./project-identity";
 import { ProviderIcon } from "@/features/providers/provider-icons";
@@ -122,7 +129,25 @@ const GROUP_GAP = 10;
 const EMPTY_GROUP_GAP = 8;
 const EMPTY_AGENTS: AgentView[] = [];
 const BOTTOM_PADDING = 8;
-const RUNNING_TASK_PREVIEW_LIMIT = 4;
+const ATTENTION_PREVIEW_LIMIT = 5;
+
+// Amber = blocked on you; red = interrupted; sky = a finished result you have
+// not opened yet (the conventional "unread" dot).
+const ATTENTION_DOT_CLASS: Record<AttentionReason, string> = {
+	permission: "bg-amber-500",
+	input: "bg-amber-500",
+	setup: "bg-amber-500/80",
+	aborted: "bg-destructive",
+	completed: "bg-sky-500",
+};
+
+const ATTENTION_TEXT_CLASS: Record<AttentionReason, string> = {
+	permission: "text-amber-700 dark:text-amber-300/90",
+	input: "text-amber-700 dark:text-amber-300/90",
+	setup: "text-amber-700 dark:text-amber-300/90",
+	aborted: "text-destructive/85",
+	completed: "text-sky-700 dark:text-sky-300/90",
+};
 
 function getGroupGapSize(previousHasRows: boolean, nextHasRows: boolean) {
 	return previousHasRows && nextHasRows ? GROUP_GAP : EMPTY_GROUP_GAP;
@@ -375,7 +400,37 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		() => runningWorkspaceActivities(workspaces, workspaceAgentActivities),
 		[workspaceAgentActivities, workspaces],
 	);
-	const [showAllRunningTasks, setShowAllRunningTasks] = useState(false);
+	const seenResults = useSeenWorkspaceResults();
+	const attentionItems = useMemo(
+		() =>
+			attentionWorkspaceItems(workspaces, workspaceAgentActivities, (workspaceId, completedAt) =>
+				isWorkspaceResultUnread(completedAt, seenResults.seen[workspaceId], seenResults.baseline),
+			),
+		[seenResults, workspaceAgentActivities, workspaces],
+	);
+	const unseenResultWorkspaceIds = useMemo(
+		() =>
+			new Set(
+				attentionItems
+					.filter((item) => item.reason === "completed" || item.reason === "aborted")
+					.map((item) => item.workspace.id),
+			),
+		[attentionItems],
+	);
+	// Opening a task is what marks its latest result as seen.
+	const selectedActivity = selectedWorkspaceId
+		? workspaceAgentActivities[selectedWorkspaceId]
+		: undefined;
+	const selectedFinishedAt =
+		selectedActivity?.state === "completed" || selectedActivity?.state === "aborted"
+			? selectedActivity.completedAt
+			: null;
+	useEffect(() => {
+		if (selectedWorkspaceId && selectedFinishedAt) {
+			markWorkspaceResultSeen(selectedWorkspaceId, selectedFinishedAt);
+		}
+	}, [selectedFinishedAt, selectedWorkspaceId]);
+	const [showAllAttentionItems, setShowAllAttentionItems] = useState(false);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	// Activities are rebuilt every render; key the order on the timestamps only
 	// so the grouped rows (and the virtual list) change only when one moves.
@@ -424,17 +479,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		() => new Map(activeGroups.map((group) => [group.sourceKey, group.label])),
 		[activeGroups],
 	);
-	const visibleRunningActivities = showAllRunningTasks
-		? runningActivities
-		: runningActivities.slice(0, RUNNING_TASK_PREVIEW_LIMIT);
-	const hiddenRunningActivityCount =
-		runningActivities.length - visibleRunningActivities.length;
+	const visibleAttentionItems = showAllAttentionItems
+		? attentionItems
+		: attentionItems.slice(0, ATTENTION_PREVIEW_LIMIT);
+	const hiddenAttentionItemCount = attentionItems.length - visibleAttentionItems.length;
 
 	useEffect(() => {
-		if (runningActivities.length <= RUNNING_TASK_PREVIEW_LIMIT) {
-			setShowAllRunningTasks(false);
+		if (attentionItems.length <= ATTENTION_PREVIEW_LIMIT) {
+			setShowAllAttentionItems(false);
 		}
-	}, [runningActivities.length]);
+	}, [attentionItems.length]);
 	const [projectRemovalTarget, setProjectRemovalTarget] = useState<ProjectRemovalTarget | null>(
 		null,
 	);
@@ -1075,6 +1129,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					workspace={item.workspace}
 					selected={selectedWorkspaceId === item.workspace.id}
 					activity={workspaceAgentActivities[item.workspace.id] ?? null}
+					unseenResult={unseenResultWorkspaceIds.has(item.workspace.id)}
 					providerId={workspaceProviderIds[item.workspace.id] ?? null}
 					metadataEnabled={showAgentStates}
 					projectLabel={
@@ -1127,6 +1182,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			selectedWorkspaceId,
 			t,
 			toggleSection,
+			unseenResultWorkspaceIds,
 			workspaceAgentActivities,
 			showAgentStates,
 		],
@@ -1484,23 +1540,21 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					/>
 				)}
 
-				{runningActivities.length > 0 ? (
+				{attentionItems.length > 0 ? (
 					<section
-						aria-label={t("sidebar.runningTasks", {
-							count: runningActivities.length,
-						})}
+						aria-label={t("sidebar.attention.label", { count: attentionItems.length })}
 						className="px-2 pb-3"
 					>
 						<div className="mb-1 flex items-center gap-1.5 px-1">
 							<h2 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">
-								{t("sidebar.running")}
+								{t("sidebar.attention.title")}
 							</h2>
-							<span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500/10 px-1 text-[9px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-								{runningActivities.length}
+							<span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500/12 px-1 text-[9px] font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+								{attentionItems.length}
 							</span>
 						</div>
-						<div className="dcc-running-panel space-y-px rounded-lg border border-border/45 bg-foreground/[0.018] p-0.5">
-							{visibleRunningActivities.map(({ workspace, activity }) => {
+						<div className="dcc-attention-panel space-y-px rounded-lg border border-border/45 bg-foreground/[0.018] p-0.5">
+							{visibleAttentionItems.map(({ workspace, activity, reason }) => {
 								const title = workspaceRailDisplayTitle(workspace);
 								const sourceKey = projectGroupingKey(workspace);
 								const memberProjects = [...new Set(workspace.memberProjectNames ?? [])];
@@ -1513,14 +1567,19 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											t("sidebar.unknownProject");
 								const repository = repositoriesBySourceKey.get(sourceKey) ?? null;
 								const selected = selectedWorkspaceId === workspace.id;
+								const reasonLabel = t(`sidebar.attention.reason.${reason}`);
 
 								return (
 									<Tooltip key={workspace.id} delayDuration={450}>
 										<TooltipTrigger asChild>
 											<button
 												type="button"
+												data-attention-reason={reason}
 												aria-current={selected ? "location" : undefined}
-												aria-label={t("sidebar.openWorkspace", { label: title })}
+												aria-label={t("sidebar.attention.openItem", {
+													label: title,
+													reason: reasonLabel,
+												})}
 												onClick={() => onSelectWorkspace(workspace.id)}
 												className={cn(
 													"flex h-11 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left transition-colors",
@@ -1529,77 +1588,80 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 														: "text-foreground/85 hover:bg-accent/60 hover:text-foreground",
 												)}
 											>
-												{workspaceProviderIds[workspace.id] ? (
+												{repository ? (
+													<ProjectIdentityGlyph
+														icon={repository.icon}
+														color={repository.color}
+														seed={repository.rootPath}
+														size="sm"
+														className="size-[18px]"
+													/>
+												) : workspaceProviderIds[workspace.id] ? (
 													<ProviderIcon
 														provider={workspaceProviderIds[workspace.id]}
 														className="size-3.5 shrink-0"
 													/>
 												) : null}
-												{activity.state === "waiting" ? (
-													<span
-														role="img"
-														aria-label={t(
-															activity.waitingFor === "permission"
-																? "sidebar.agentState.waitingPermission"
-																: "sidebar.agentState.waiting",
-														)}
-														className="grid size-3.5 shrink-0 place-items-center"
-													>
-														<span className="size-[7px] rounded-full bg-amber-500" />
-													</span>
-												) : (
-													<Loader2
-														className="size-3.5 shrink-0 animate-spin text-emerald-600 dark:text-emerald-400"
-														strokeWidth={2}
-														aria-hidden
-													/>
-												)}
 												<span className="flex min-w-0 flex-1 flex-col">
 													<span className="truncate text-[12px] font-medium leading-4">
 														{title}
 													</span>
-													<span className="flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted-foreground">
-														{repository ? (
-															<ProjectIdentityGlyph
-																icon={repository.icon}
-																color={repository.color}
-																seed={repository.rootPath}
-																size="sm"
-																className="size-3 shrink-0"
-															/>
-														) : null}
-														<span className="truncate">{projectLabel}</span>
+													<span className="flex min-w-0 items-center gap-1 text-[10px] leading-4">
+														<span
+															aria-hidden
+															className={cn(
+																"size-[6px] shrink-0 rounded-full",
+																ATTENTION_DOT_CLASS[reason],
+															)}
+														/>
+														<span
+															className={cn(
+																"shrink-0 font-medium",
+																ATTENTION_TEXT_CLASS[reason],
+															)}
+														>
+															{reasonLabel}
+														</span>
+														<span aria-hidden className="text-muted-foreground/50">
+															·
+														</span>
+														<span className="truncate text-muted-foreground">
+															{projectLabel}
+														</span>
 													</span>
 												</span>
-												<span className="mt-1.5 shrink-0 self-start whitespace-nowrap text-[10px] font-medium leading-4 text-muted-foreground">
-													<WorkspaceActivityTime activity={activity} bare />
-												</span>
+												{activity ? (
+													<span className="mt-1.5 shrink-0 self-start whitespace-nowrap text-[10px] font-medium leading-4 text-muted-foreground">
+														<WorkspaceActivityTime activity={activity} bare />
+													</span>
+												) : null}
 											</button>
 										</TooltipTrigger>
 										<TooltipContent side="right">
-											{t("sidebar.runningTaskTooltip", { title, project: projectLabel })}
+											{t("sidebar.attention.tooltip", {
+												title,
+												project: projectLabel,
+												reason: reasonLabel,
+											})}
 										</TooltipContent>
 									</Tooltip>
 								);
 							})}
-							{hiddenRunningActivityCount > 0 ? (
+							{hiddenAttentionItemCount > 0 ? (
 								<button
 									type="button"
-									onClick={() => setShowAllRunningTasks(true)}
+									onClick={() => setShowAllAttentionItems(true)}
 									className="flex h-7 w-full items-center justify-center rounded-md text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
 								>
-									{t("sidebar.showMoreRunningTasks", {
-										count: hiddenRunningActivityCount,
-									})}
+									{t("sidebar.attention.showMore", { count: hiddenAttentionItemCount })}
 								</button>
-							) : showAllRunningTasks &&
-							  runningActivities.length > RUNNING_TASK_PREVIEW_LIMIT ? (
+							) : showAllAttentionItems && attentionItems.length > ATTENTION_PREVIEW_LIMIT ? (
 								<button
 									type="button"
-									onClick={() => setShowAllRunningTasks(false)}
+									onClick={() => setShowAllAttentionItems(false)}
 									className="flex h-7 w-full items-center justify-center rounded-md text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
 								>
-									{t("sidebar.showFewerRunningTasks")}
+									{t("sidebar.attention.showFewer")}
 								</button>
 							) : null}
 						</div>
@@ -1607,9 +1669,20 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				) : null}
 
 				<div className="flex items-center justify-between px-3">
-					<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
-						{t("sidebar.title")}
-					</h2>
+					<div className="flex min-w-0 items-center gap-2">
+						<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
+							{t("sidebar.title")}
+						</h2>
+						{runningActivities.length > 0 ? (
+							<span
+								className="inline-flex items-center gap-1 text-[10.5px] font-medium tabular-nums text-emerald-700 dark:text-emerald-300/90"
+								title={t("sidebar.runningTasks", { count: runningActivities.length })}
+							>
+								<span aria-hidden className="size-[6px] animate-pulse rounded-full bg-emerald-500" />
+								{t("sidebar.runningCount", { count: runningActivities.length })}
+							</span>
+						) : null}
+					</div>
 					<div className="flex items-center gap-1 text-muted-foreground">
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>

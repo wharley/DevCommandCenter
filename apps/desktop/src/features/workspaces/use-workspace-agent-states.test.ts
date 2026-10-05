@@ -5,8 +5,10 @@ import {
 	deriveAgentActivityFromSessions,
 	deriveAgentStateFromSessions,
 	deriveProviderIdFromSessions,
+	attentionWorkspaceItems,
 	lastInteractionAtFromSessions,
 	runningWorkspaceActivities,
+	type WorkspaceAgentActivity,
 } from "./use-workspace-agent-states";
 
 type SummaryOverrides = {
@@ -294,5 +296,74 @@ describe("lastInteractionAtFromSessions", () => {
 
 	it("returns null when no turn has started", () => {
 		expect(lastInteractionAtFromSessions([makeSummary()])).toBeNull();
+	});
+});
+
+describe("attentionWorkspaceItems", () => {
+	const workspace = (
+		id: string,
+		status: WorkspaceSummary["status"] = "ready",
+	): WorkspaceSummary => ({ id, name: `Task ${id}`, branch: "main", status });
+	const finished = (
+		state: "completed" | "aborted",
+		completedAt: string,
+	): WorkspaceAgentActivity => ({ state, startedAt: null, completedAt });
+
+	it("lists what needs the person, most urgent first, and leaves running agents out", () => {
+		const result = attentionWorkspaceItems(
+			[
+				workspace("running"),
+				workspace("done-unread"),
+				workspace("done-read"),
+				workspace("question"),
+				workspace("approval"),
+				workspace("setup", "setup_pending"),
+				workspace("interrupted"),
+				workspace("archived-waiting", "archived"),
+			],
+			{
+				running: { state: "active", startedAt: "2026-10-05T10:00:00.000Z", completedAt: null },
+				"done-unread": finished("completed", "2026-10-05T11:00:00.000Z"),
+				"done-read": finished("completed", "2026-10-05T11:30:00.000Z"),
+				question: {
+					state: "waiting",
+					waitingFor: "input",
+					startedAt: "2026-10-05T09:00:00.000Z",
+					completedAt: null,
+				},
+				approval: {
+					state: "waiting",
+					waitingFor: "permission",
+					startedAt: "2026-10-05T08:00:00.000Z",
+					completedAt: null,
+				},
+				interrupted: finished("aborted", "2026-10-05T10:30:00.000Z"),
+				"archived-waiting": {
+					state: "waiting",
+					waitingFor: "input",
+					startedAt: null,
+					completedAt: null,
+				},
+			},
+			(workspaceId) => workspaceId !== "done-read",
+		);
+
+		expect(result.map((item) => [item.workspace.id, item.reason])).toEqual([
+			["approval", "permission"],
+			["question", "input"],
+			["setup", "setup"],
+			["interrupted", "aborted"],
+			["done-unread", "completed"],
+		]);
+	});
+
+	it("does not flag setup while an agent is already running there", () => {
+		expect(
+			attentionWorkspaceItems(
+				[workspace("setup", "setup_pending")],
+				{ setup: { state: "active", startedAt: null, completedAt: null } },
+				() => true,
+			),
+		).toEqual([]);
 	});
 });

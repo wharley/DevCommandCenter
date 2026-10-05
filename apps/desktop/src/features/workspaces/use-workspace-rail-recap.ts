@@ -34,10 +34,70 @@ export type WorkspaceRailRecap = {
 	prTitle: string | null;
 };
 
+export type WorkspaceRailPullRequestState = "open" | "draft" | "merged" | "closed";
+
+/** Compact, scannable facts for the row: the PR and the uncommitted diff. */
+export type WorkspaceRailMeta = {
+	prNumber: number | null;
+	prLabel: "PR" | "MR";
+	prState: WorkspaceRailPullRequestState | null;
+	additions: number;
+	deletions: number;
+};
+
 export type WorkspaceRailState = {
 	currentBranch: string;
 	recap: WorkspaceRailRecap | null;
+	meta: WorkspaceRailMeta | null;
 };
+
+/**
+ * Recap messages the row does not repeat: the state line already says the
+ * agent is working, and the meta line already shows the PR and the diff.
+ */
+const RAIL_SILENT_RECAP_KEYS = new Set(["working", "workingClean", "prOpen", "clean"]);
+
+/** The short "next action" key for the row, or null when it would only repeat. */
+export function railNextActionKey(messageKey: string): string | null {
+	return RAIL_SILENT_RECAP_KEYS.has(messageKey) ? null : `sidebar.nextAction.${messageKey}`;
+}
+
+function pullRequestState(
+	prStatus: WorkspacePrStatusOutput,
+): WorkspaceRailPullRequestState | null {
+	const state = prStatus.state?.toLowerCase();
+	if (state === "merged") return "merged";
+	if (state === "closed") return "closed";
+	if (prStatus.isDraft) return "draft";
+	return state === "open" || state === "opened" ? "open" : null;
+}
+
+export function buildWorkspaceRailMeta(input: {
+	branch: string;
+	gitStatus: WorkspaceGitStatusOutput | null;
+	prStatus: WorkspacePrStatusOutput | null;
+}): WorkspaceRailMeta | null {
+	const { gitStatus, prStatus } = input;
+	const entries = [...(gitStatus?.staged ?? []), ...(gitStatus?.unstaged ?? [])];
+	const additions = entries.reduce((sum, entry) => sum + entry.insertions, 0);
+	const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
+	// Only a PR opened from this exact branch belongs to the task; a fresh
+	// worktree can sit on a base commit that an older PR also points at.
+	const prHead = prStatus?.headBranch?.trim() ?? "";
+	const ownsPullRequest =
+		prStatus?.number != null && (prHead.length === 0 || prHead === input.branch.trim());
+	const prNumber = ownsPullRequest ? (prStatus?.number ?? null) : null;
+	if (prNumber == null && additions === 0 && deletions === 0) {
+		return null;
+	}
+	return {
+		prNumber,
+		prLabel: prStatus?.provider === "gitlab" ? "MR" : "PR",
+		prState: prNumber != null && prStatus ? pullRequestState(prStatus) : null,
+		additions,
+		deletions,
+	};
+}
 
 export function isMergedPullRequestForBranch(
 	prStatus: WorkspacePrStatusOutput | null | undefined,
@@ -166,17 +226,23 @@ export function useWorkspaceRailRecap(input: {
 
 	return useMemo(
 		() => {
+			const meta = buildWorkspaceRailMeta({
+				branch: currentBranch,
+				gitStatus: gitStatusQuery.data ?? null,
+				prStatus: prStatusQuery.data ?? null,
+			});
 			if (
 				!isAgentTurnOpen(input.activity) &&
 				(gitStatusQuery.isPending || prStatusQuery.isPending)
 			) {
-				return { currentBranch, recap: null };
+				return { currentBranch, recap: null, meta };
 			}
 			if (needsBranchDiff && branchDiffQuery.isPending) {
-				return { currentBranch, recap: null };
+				return { currentBranch, recap: null, meta };
 			}
 			return {
 				currentBranch,
+				meta,
 				recap: buildWorkspaceRailRecap({
 					branch: currentBranch,
 					activity: input.activity,

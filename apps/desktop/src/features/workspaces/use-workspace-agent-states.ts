@@ -69,6 +69,75 @@ export function runningWorkspaceActivities(
 		);
 }
 
+/** Why a task shows up under "Precisa de você", most urgent first. */
+export type AttentionReason = "permission" | "input" | "setup" | "aborted" | "completed";
+
+const ATTENTION_ORDER: Record<AttentionReason, number> = {
+	permission: 0,
+	input: 1,
+	setup: 2,
+	aborted: 3,
+	completed: 4,
+};
+
+export type AttentionWorkspaceItem = {
+	workspace: WorkspaceSummary;
+	activity: WorkspaceAgentActivity | null;
+	reason: AttentionReason;
+};
+
+function attentionAtMs(item: AttentionWorkspaceItem): number {
+	const at =
+		item.activity?.completedAt ?? item.activity?.startedAt ?? item.workspace.updatedAt ?? null;
+	const parsed = at ? Date.parse(at) : Number.NaN;
+	return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/**
+ * Tasks that need the person: an agent blocked on approval or a question, a
+ * workspace whose setup needs a hand, or a finished/interrupted turn whose
+ * result has not been opened yet. Running agents are deliberately absent —
+ * they live in their project group until they come back to the person.
+ */
+export function attentionWorkspaceItems(
+	workspaces: WorkspaceSummary[],
+	activities: Record<string, WorkspaceAgentActivity>,
+	isResultUnread: (workspaceId: string, completedAt: string | null) => boolean,
+): AttentionWorkspaceItem[] {
+	return workspaces
+		.flatMap((workspace): AttentionWorkspaceItem[] => {
+			if (workspace.status === "archived" || workspace.status === "completed") {
+				return [];
+			}
+			const activity = activities[workspace.id] ?? null;
+			if (activity?.state === "waiting") {
+				return [
+					{
+						workspace,
+						activity,
+						reason: activity.waitingFor === "permission" ? "permission" : "input",
+					},
+				];
+			}
+			if (workspace.status === "setup_pending" && !isAgentTurnOpen(activity)) {
+				return [{ workspace, activity, reason: "setup" }];
+			}
+			if (
+				(activity?.state === "aborted" || activity?.state === "completed") &&
+				isResultUnread(workspace.id, activity.completedAt)
+			) {
+				return [{ workspace, activity, reason: activity.state }];
+			}
+			return [];
+		})
+		.sort(
+			(left, right) =>
+				ATTENTION_ORDER[left.reason] - ATTENTION_ORDER[right.reason] ||
+				attentionAtMs(right) - attentionAtMs(left) ||
+				left.workspace.id.localeCompare(right.workspace.id),
+		);
+}
+
 function isRunningSession(summary: WorkspaceSessionSummary): boolean {
 	return (
 		summary.lastTurnState === "running" ||

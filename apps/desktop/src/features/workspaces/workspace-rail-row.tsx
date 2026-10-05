@@ -4,6 +4,7 @@ import {
 	CirclePause,
 	Folder,
 	GitBranch,
+	GitPullRequest,
 	Layers3,
 	Loader2,
 	MoreHorizontal,
@@ -36,7 +37,12 @@ import {
 	isAgentTurnOpen,
 	type WorkspaceAgentActivity,
 } from "./use-workspace-agent-states";
-import { useWorkspaceRailRecap } from "./use-workspace-rail-recap";
+import {
+	railNextActionKey,
+	useWorkspaceRailRecap,
+	type WorkspaceRailMeta,
+	type WorkspaceRailPullRequestState,
+} from "./use-workspace-rail-recap";
 import {
 	formatCompactElapsedTime,
 	workspaceActivityTimestamp,
@@ -70,6 +76,8 @@ export type WorkspaceRailRowProps = {
 	workspace: WorkspaceSummary;
 	selected: boolean;
 	activity?: WorkspaceAgentActivity | null;
+	/** The latest finished result has not been opened yet. */
+	unseenResult?: boolean;
 	providerId?: string | null;
 	metadataEnabled?: boolean;
 	projectLabel?: string | null;
@@ -98,6 +106,52 @@ const recapToneClass: Record<WorkspaceRecapTone, string> = {
 	ready: "text-foreground/70",
 	done: "text-muted-foreground/80",
 };
+
+function WorkspaceRailBranch({ branch }: { branch: string }) {
+	return (
+		<span className="flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted-foreground/70">
+			<GitBranch className="size-2.5 shrink-0" aria-hidden />
+			<span className="truncate">{branch}</span>
+		</span>
+	);
+}
+
+const PR_STATE_CLASS: Record<WorkspaceRailPullRequestState, string> = {
+	open: "text-emerald-700 dark:text-emerald-300/90",
+	draft: "text-muted-foreground",
+	merged: "text-violet-700 dark:text-violet-300/90",
+	closed: "text-muted-foreground/70 line-through",
+};
+
+/** PR number and uncommitted diff, right-aligned on the state line. */
+function WorkspaceRailMetaChips({ meta }: { meta: WorkspaceRailMeta }) {
+	const { t } = useTranslation("common");
+	const hasDiff = meta.additions > 0 || meta.deletions > 0;
+	return (
+		<span className="flex shrink-0 items-center gap-1.5 text-[10px] font-medium leading-4 tabular-nums">
+			{meta.prNumber != null ? (
+				<span
+					className={cn(
+						"inline-flex items-center gap-0.5",
+						meta.prState ? PR_STATE_CLASS[meta.prState] : "text-muted-foreground",
+					)}
+					title={t(`sidebar.meta.prState.${meta.prState ?? "unknown"}`, {
+						label: meta.prLabel,
+						number: meta.prNumber,
+					})}
+				>
+					<GitPullRequest className="size-2.5" aria-hidden />#{meta.prNumber}
+				</span>
+			) : null}
+			{hasDiff ? (
+				<span title={t("sidebar.meta.uncommittedDiff")}>
+					<span className="text-emerald-700 dark:text-emerald-400">+{meta.additions}</span>{" "}
+					<span className="text-red-600 dark:text-red-400">−{meta.deletions}</span>
+				</span>
+			) : null}
+		</span>
+	);
+}
 
 export function WorkspaceActivityTime({
 	activity,
@@ -284,6 +338,7 @@ export const WorkspaceRailRowItem = memo(
 		workspace,
 		selected,
 		activity,
+		unseenResult = false,
 		providerId,
 		metadataEnabled = true,
 		projectLabel,
@@ -327,6 +382,13 @@ export const WorkspaceRailRowItem = memo(
 					railRecap.recap.params,
 				)
 			: null;
+		const nextActionKey = railRecap ? railNextActionKey(railRecap.recap.messageKey) : null;
+		const nextActionMessage =
+			nextActionKey && recapMessage
+				? t(nextActionKey, { ...railRecap?.recap.params, defaultValue: recapMessage })
+				: null;
+		const railMeta = metadataEnabled ? railState.meta : null;
+		const branchLabel = railState.currentBranch || workspace.branch || null;
 		const hasPriorityWorkspaceStatus = workspaceRailStatusTakesRecapSlot(
 			workspace.status,
 			Boolean(recapMessage),
@@ -542,84 +604,93 @@ export const WorkspaceRailRowItem = memo(
 									</span>
 								) : null}
 							</div>
-							{workspaceStatusMessage ? (
-								<div className="mt-px flex min-w-0 items-center gap-1.5">
-									<span
-										aria-hidden
-										className={cn(
-											"size-[6px] shrink-0 rounded-full",
-											workspace.status === "initializing" &&
-												"animate-pulse bg-muted-foreground/45",
-											workspace.status === "setup_pending" &&
-												"bg-amber-500/80",
-											workspace.status === "ready" &&
-												"bg-muted-foreground/35",
-										)}
-									/>
-									<span
-										className={cn(
-											"truncate text-[10.5px] font-medium leading-4 text-muted-foreground",
-											workspace.status === "setup_pending" &&
-												"text-amber-700 dark:text-amber-300/90",
-										)}
-									>
-										{workspaceStatusMessage}
-									</span>
-								</div>
-							) : null}
-							{activity && !hasPriorityWorkspaceStatus && (
-								<div className="mt-px flex min-w-0 items-center gap-1.5">
-									<span
-										aria-hidden
-										className={cn(
-											"size-[6px] shrink-0 rounded-full",
-											activity.state === "active" &&
-												"bg-emerald-500 animate-pulse",
-											activity.state === "waiting" && "bg-amber-500",
-											activity.state === "completed" &&
-												"bg-muted-foreground/45",
-											activity.state === "aborted" && "bg-destructive",
-										)}
-									/>
-									<span className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[10.5px] font-medium leading-4 text-muted-foreground">
+							<div className="mt-px flex min-w-0 items-center justify-between gap-2">
+								{workspaceStatusMessage ? (
+									<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+										<span
+											aria-hidden
+											className={cn(
+												"size-[6px] shrink-0 rounded-full",
+												workspace.status === "initializing" &&
+													"animate-pulse bg-muted-foreground/45",
+												workspace.status === "setup_pending" &&
+													"bg-amber-500/80",
+												workspace.status === "ready" &&
+													"bg-muted-foreground/35",
+											)}
+										/>
 										<span
 											className={cn(
-												activity.state === "active" &&
-													"text-emerald-700 dark:text-emerald-300/90",
-												activity.state === "waiting" &&
+												"truncate text-[10.5px] font-medium leading-4 text-muted-foreground",
+												workspace.status === "setup_pending" &&
 													"text-amber-700 dark:text-amber-300/90",
-												activity.state === "completed" && "text-foreground/70",
-												activity.state === "aborted" && "text-destructive/85",
 											)}
 										>
-											{activity.state === "waiting" &&
-											activity.waitingFor === "permission"
-												? t("sidebar.agentState.waitingPermission")
-												: t(`sidebar.agentState.${activity.state}`)}
+											{workspaceStatusMessage}
 										</span>
-										<span aria-hidden className="opacity-40">
-											·
+									</div>
+								) : activity && !hasPriorityWorkspaceStatus ? (
+									<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+										<span
+											aria-hidden
+											className={cn(
+												"size-[6px] shrink-0 rounded-full",
+												activity.state === "active" &&
+													"bg-emerald-500 animate-pulse",
+												activity.state === "waiting" && "bg-amber-500",
+												activity.state === "completed" &&
+													(unseenResult ? "bg-sky-500" : "bg-muted-foreground/45"),
+												activity.state === "aborted" && "bg-destructive",
+											)}
+										/>
+										<span className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[10.5px] font-medium leading-4 text-muted-foreground">
+											<span
+												className={cn(
+													activity.state === "active" &&
+														"text-emerald-700 dark:text-emerald-300/90",
+													activity.state === "waiting" &&
+														"text-amber-700 dark:text-amber-300/90",
+													activity.state === "completed" &&
+														(unseenResult
+															? "text-sky-700 dark:text-sky-300/90"
+															: "text-foreground/70"),
+													activity.state === "aborted" && "text-destructive/85",
+												)}
+											>
+												{activity.state === "waiting" &&
+												activity.waitingFor === "permission"
+													? t("sidebar.agentState.waitingPermission")
+													: activity.state === "completed" && unseenResult
+														? t("sidebar.agentState.completedUnseen")
+														: t(`sidebar.agentState.${activity.state}`)}
+											</span>
+											<span aria-hidden className="opacity-40">
+												·
+											</span>
+											<WorkspaceActivityTime activity={activity} />
 										</span>
-										<WorkspaceActivityTime activity={activity} />
-									</span>
-								</div>
-							)}
-							{recapMessage && railRecap && !hasPriorityWorkspaceStatus ? (
-								<div className="mt-px flex min-w-0 items-center gap-1.5">
-									<p
-										className={cn(
-											"min-w-0 truncate text-[10.5px] leading-4",
-											recapToneClass[railRecap.recap.tone],
-										)}
-									>
-										{recapMessage}
-									</p>
-								</div>
-							) : null}
-							{!activity && !recapMessage && workspace.branch ? (
-								<div className="mt-1 flex min-w-0 items-center gap-1 text-[10px] leading-3 text-muted-foreground/70">
-									<GitBranch className="size-2.5 shrink-0" aria-hidden />
-									<span className="truncate">{workspace.branch}</span>
+									</div>
+								) : branchLabel ? (
+									<WorkspaceRailBranch branch={branchLabel} />
+								) : (
+									<span />
+								)}
+								{railMeta ? <WorkspaceRailMetaChips meta={railMeta} /> : null}
+							</div>
+							{nextActionMessage && railRecap && !hasPriorityWorkspaceStatus ? (
+								<p
+									className={cn(
+										"mt-px min-w-0 truncate text-[10.5px] leading-4",
+										recapToneClass[railRecap.recap.tone],
+									)}
+									title={recapMessage ?? undefined}
+								>
+									{nextActionMessage}
+								</p>
+							) : branchLabel &&
+							  (workspaceStatusMessage || (activity && !hasPriorityWorkspaceStatus)) ? (
+								<div className="mt-px">
+									<WorkspaceRailBranch branch={branchLabel} />
 								</div>
 							) : null}
 								</div>
@@ -877,6 +948,7 @@ export const WorkspaceRailRowItem = memo(
 		previous.activity?.waitingFor === next.activity?.waitingFor &&
 		previous.activity?.startedAt === next.activity?.startedAt &&
 		previous.activity?.completedAt === next.activity?.completedAt &&
+		previous.unseenResult === next.unseenResult &&
 		previous.metadataEnabled === next.metadataEnabled &&
 		previous.projectLabel === next.projectLabel &&
 		previous.projectIcon === next.projectIcon &&

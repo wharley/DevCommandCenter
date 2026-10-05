@@ -3,9 +3,13 @@ import type {
 	WorkspaceGitStatusOutput,
 	WorkspacePrStatusOutput,
 } from "@dcc/contracts";
+import en from "@/i18n/locales/en/common.json";
+import ptBR from "@/i18n/locales/pt-BR/common.json";
 import {
+	buildWorkspaceRailMeta,
 	buildWorkspaceRailRecap,
 	isMergedPullRequestForBranch,
+	railNextActionKey,
 } from "./use-workspace-rail-recap";
 
 const cleanGitStatus: WorkspaceGitStatusOutput = {
@@ -164,5 +168,106 @@ describe("isMergedPullRequestForBranch", () => {
 				"dcc/fix/task-completion",
 			),
 		).toBe(false);
+	});
+});
+
+describe("buildWorkspaceRailMeta", () => {
+	const dirty: WorkspaceGitStatusOutput = {
+		...cleanGitStatus,
+		staged: [
+			{
+				path: "a.ts",
+				name: "a.ts",
+				absolutePath: "/repo/a.ts",
+				status: "M",
+				insertions: 30,
+				deletions: 2,
+			},
+		],
+		unstaged: [
+			{
+				path: "b.ts",
+				name: "b.ts",
+				absolutePath: "/repo/b.ts",
+				status: "M",
+				insertions: 10,
+				deletions: 0,
+			},
+		],
+	};
+
+	it("sums the uncommitted diff and reports the branch's own PR", () => {
+		expect(
+			buildWorkspaceRailMeta({
+				branch: "feature/sidebar-recap",
+				gitStatus: dirty,
+				prStatus: {
+					...noPr,
+					number: 12,
+					headBranch: "feature/sidebar-recap",
+					state: "OPEN",
+				},
+			}),
+		).toEqual({ prNumber: 12, prLabel: "PR", prState: "open", additions: 40, deletions: 2 });
+	});
+
+	it("labels drafts and GitLab merge requests", () => {
+		expect(
+			buildWorkspaceRailMeta({
+				branch: "feature/x",
+				gitStatus: cleanGitStatus,
+				prStatus: {
+					...noPr,
+					provider: "gitlab",
+					number: 7,
+					headBranch: "feature/x",
+					state: "opened",
+					isDraft: true,
+				},
+			}),
+		).toMatchObject({ prNumber: 7, prLabel: "MR", prState: "draft" });
+	});
+
+	it("ignores a PR opened from another branch", () => {
+		expect(
+			buildWorkspaceRailMeta({
+				branch: "dcc/fresh-task",
+				gitStatus: cleanGitStatus,
+				prStatus: { ...noPr, number: 3, headBranch: "older/merged", state: "MERGED" },
+			}),
+		).toBeNull();
+	});
+
+	it("returns nothing when there is no PR and no diff", () => {
+		expect(
+			buildWorkspaceRailMeta({ branch: "main", gitStatus: cleanGitStatus, prStatus: noPr }),
+		).toBeNull();
+	});
+});
+
+describe("railNextActionKey", () => {
+	it("stays silent where the row already says it", () => {
+		for (const key of ["working", "workingClean", "prOpen", "clean"]) {
+			expect(railNextActionKey(key)).toBeNull();
+		}
+		expect(railNextActionKey("mergeReady")).toBe("sidebar.nextAction.mergeReady");
+		expect(railNextActionKey("deliveryFailure.push")).toBe(
+			"sidebar.nextAction.deliveryFailure.push",
+		);
+	});
+
+	it("keeps the short next actions in sync across locales", () => {
+		const flatten = (value: unknown, prefix = ""): string[] =>
+			value && typeof value === "object"
+				? Object.entries(value).flatMap(([key, child]) =>
+						flatten(child, prefix ? `${prefix}.${key}` : key),
+					)
+				: [prefix];
+		expect(flatten(en.sidebar.nextAction).sort()).toEqual(
+			flatten(ptBR.sidebar.nextAction).sort(),
+		);
+		for (const key of ["changes", "mergeReady", "checksFailing", "readyForPr", "conflicts_other"]) {
+			expect(flatten(ptBR.sidebar.nextAction)).toContain(key);
+		}
 	});
 });
