@@ -1,3 +1,4 @@
+import { projectIconValue } from "@dcc/mascots";
 import {
 	ArrowUpRight,
 	Boxes,
@@ -103,7 +104,7 @@ export function NewTaskLaunchState({
 									className="gap-2.5 py-2"
 								>
 									<ProjectIdentityGlyph
-										icon={repository.icon}
+										icon={projectIconValue(repository)}
 										color={repository.color}
 										seed={repository.rootPath}
 										size="sm"
@@ -183,7 +184,7 @@ export function NewTaskLaunchState({
 									onClick={() => void selectProject(repository)}
 								>
 									<ProjectIdentityGlyph
-										icon={repository.icon}
+										icon={projectIconValue(repository)}
 										color={repository.color}
 										seed={repository.rootPath}
 										size="sm"

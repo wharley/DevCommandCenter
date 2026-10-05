@@ -508,6 +508,12 @@
     "autoHint": "Escolhido a partir do caminho do projeto — cada projeto ganha o seu bicho.",
     "faunaLabel": "Fauna brasileira",
     "symbolsLabel": "Símbolos",
+    "logoLabel": "Logo do projeto",
+    "uploadLogo": "Enviar logo",
+    "replaceLogo": "Trocar",
+    "removeLogo": "Remover",
+    "logoHint": "PNG, JPG, WebP ou SVG — fica 64×64.",
+    "logoError": "Não foi possível usar essa imagem.",
     "icons": {
       "folder": "Pasta",
       "terminal": "Terminal",

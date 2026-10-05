@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { PROJECT_LOGO_ACCEPT, projectLogoFromFile } from "./project-logo";
 import { Folder, GitBranch, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -57,6 +58,7 @@ export function ProjectEditDialog({
 		displayName: string | null;
 		icon: string | null;
 		color: string | null;
+		logo: string | null;
 	}) => Promise<void>;
 }) {
 	const { t } = useTranslation("common");
@@ -64,13 +66,16 @@ export function ProjectEditDialog({
 	// "auto" = nothing stored: the mascot and color come from the project path.
 	const [icon, setIcon] = useState(AUTO);
 	const [color, setColor] = useState(AUTO);
+	const [logo, setLogo] = useState<string | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
+	const logoInputRef = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
 		if (open && repository) {
 			setName(repositoryDisplayName(repository));
 			setIcon(isKnownProjectIcon(repository.icon) ? repository.icon : AUTO);
 			setColor(isKnownProjectColor(repository.color) ? repository.color : AUTO);
+			setLogo(repository.logo ?? null);
 			setIsSaving(false);
 		}
 	}, [open, repository]);
@@ -83,12 +88,16 @@ export function ProjectEditDialog({
 	const nextColor = color === AUTO ? null : color;
 	const currentIcon = repository?.icon?.trim() || null;
 	const currentColor = repository?.color?.trim() || null;
+	const currentLogo = repository?.logo ?? null;
 	const isDirty = useMemo(
 		() =>
 			nextDisplayName !== currentDisplayName ||
 			nextIcon !== currentIcon ||
-			nextColor !== currentColor,
+			nextColor !== currentColor ||
+			logo !== currentLogo,
 		[
+			currentLogo,
+			logo,
 			currentColor,
 			currentDisplayName,
 			currentIcon,
@@ -108,6 +117,7 @@ export function ProjectEditDialog({
 				displayName: nextDisplayName,
 				icon: nextIcon,
 				color: nextColor,
+				logo,
 			});
 			toast.success(t("projectEditor.saved"));
 			onOpenChange(false);
@@ -139,7 +149,7 @@ export function ProjectEditDialog({
 					<form className="space-y-5" onSubmit={handleSubmit}>
 						<div className="grid grid-cols-[auto_1fr] items-center gap-3">
 							<ProjectIdentityGlyph
-								icon={glyphValue(icon)}
+								icon={icon === "logo" ? logo : glyphValue(icon)}
 								color={glyphValue(color)}
 								seed={repository.rootPath}
 								active
@@ -216,6 +226,68 @@ export function ProjectEditDialog({
 										/>
 									</button>
 								))}
+							</div>
+							<p className="pt-1 text-[10.5px] leading-4 text-muted-foreground">
+								{t("projectEditor.logoLabel")}
+							</p>
+							<div className="flex items-center gap-1.5">
+								{logo ? (
+									<button
+										type="button"
+										aria-label={t("projectEditor.logoLabel")}
+										aria-pressed={icon === "logo"}
+										disabled={isSaving}
+										className={cn(pickTileClass(icon === "logo"), "w-9")}
+										onClick={() => setIcon("logo")}
+									>
+										<ProjectIdentityGlyph icon={logo} color={glyphValue(color)} size="sm" />
+									</button>
+								) : null}
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="h-9 text-[11px]"
+									disabled={isSaving}
+									onClick={() => logoInputRef.current?.click()}
+								>
+									{logo ? t("projectEditor.replaceLogo") : t("projectEditor.uploadLogo")}
+								</Button>
+								{logo ? (
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										className="h-9 text-[11px] text-muted-foreground"
+										disabled={isSaving}
+										onClick={() => {
+											setLogo(null);
+											if (icon === "logo") setIcon(AUTO);
+										}}
+									>
+										{t("projectEditor.removeLogo")}
+									</Button>
+								) : null}
+								<span className="min-w-0 text-[10px] leading-4 text-muted-foreground">
+									{t("projectEditor.logoHint")}
+								</span>
+								<input
+									ref={logoInputRef}
+									type="file"
+									accept={PROJECT_LOGO_ACCEPT}
+									className="hidden"
+									onChange={(event) => {
+										const file = event.target.files?.[0];
+										event.target.value = "";
+										if (!file) return;
+										void projectLogoFromFile(file)
+											.then((dataUrl) => {
+												setLogo(dataUrl);
+												setIcon("logo");
+											})
+											.catch(() => toast.error(t("projectEditor.logoError")));
+									}}
+								/>
 							</div>
 							<p className="pt-1 text-[10.5px] leading-4 text-muted-foreground">
 								{t("projectEditor.symbolsLabel")}

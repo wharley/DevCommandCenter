@@ -909,6 +909,7 @@ impl SqliteWorkspaceRepo {
         Self::ensure_column(&conn, "dcc_repositories", "icon", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "color", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "pinned_at", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_repositories", "logo", "TEXT NULL")?;
         Self::drop_idea_sentence(&conn)?;
         Ok(())
     }
@@ -1067,6 +1068,7 @@ impl SqliteWorkspaceRepo {
         display_name: Option<&str>,
         icon: Option<&str>,
         color: Option<&str>,
+        logo: Option<&str>,
     ) -> Result<bool> {
         let conn = self
             .conn
@@ -1074,12 +1076,13 @@ impl SqliteWorkspaceRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let changed = conn
             .execute(
-                "UPDATE dcc_repositories SET display_name = ?1, icon = ?2, color = ?3, updated_at = datetime('now') WHERE id = ?4",
+                "UPDATE dcc_repositories SET display_name = ?1, icon = ?2, color = ?3, logo = ?5, updated_at = datetime('now') WHERE id = ?4",
                 params![
                     display_name.map(str::trim).filter(|value| !value.is_empty()),
                     icon.map(str::trim).filter(|value| !value.is_empty()),
                     color.map(str::trim).filter(|value| !value.is_empty()),
-                    repository_id.0.clone()
+                    repository_id.0.clone(),
+                    logo.map(str::trim).filter(|value| !value.is_empty()),
                 ],
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -1428,6 +1431,7 @@ impl SqliteWorkspaceRepo {
             forge_login: row.get::<_, Option<String>>(12)?,
             created_at: row.get::<_, String>(13)?,
             updated_at: row.get::<_, String>(14)?,
+            logo: row.get::<_, Option<String>>(15)?,
         })
     }
 }
@@ -6048,7 +6052,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let repository = conn
             .query_row(
                 r#"
-				SELECT id, project_id, name, display_name, icon, color, pinned_at, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+				SELECT id, project_id, name, display_name, icon, color, pinned_at, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at, logo
 				  FROM dcc_repositories
 				 WHERE id = ?1
 				"#,
@@ -6069,7 +6073,7 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
         let mut stmt = conn
             .prepare(
                 r#"
-				SELECT id, project_id, name, display_name, icon, color, pinned_at, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at
+				SELECT id, project_id, name, display_name, icon, color, pinned_at, root_path, base_branch, remote, remote_url, forge_provider, forge_login, created_at, updated_at, logo
 				  FROM dcc_repositories
 				 ORDER BY updated_at DESC, created_at DESC, name ASC
 				"#,
@@ -11483,6 +11487,7 @@ mod tests {
             display_name: None,
             icon: None,
             color: None,
+            logo: None,
             pinned_at: None,
             root_path: old_root.to_string(),
             base_branch: "main".to_string(),
@@ -11551,6 +11556,7 @@ mod tests {
             display_name: None,
             icon: None,
             color: None,
+            logo: None,
             pinned_at: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),
@@ -11598,8 +11604,9 @@ mod tests {
             .update_repository_identity(
                 &RepositoryId("/tmp/repo".to_string()),
                 Some("Customer Portal"),
-                Some("rocket"),
+                Some("logo"),
                 Some("violet"),
+                Some("data:image/png;base64,iVBORw0KGgo="),
             )
             .expect("rename project"));
         let renamed = futures::executor::block_on(
@@ -11608,8 +11615,10 @@ mod tests {
         .expect("read renamed project")
         .expect("renamed project exists");
         assert_eq!(renamed.display_name.as_deref(), Some("Customer Portal"));
-        assert_eq!(renamed.icon.as_deref(), Some("rocket"));
+        assert_eq!(renamed.icon.as_deref(), Some("logo"));
         assert_eq!(renamed.color.as_deref(), Some("violet"));
+        // The uploaded logo survives re-discovery of the repository below.
+        assert_eq!(renamed.logo.as_deref(), Some("data:image/png;base64,iVBORw0KGgo="));
         assert!(repo
             .update_repository_pinned_at(
                 &RepositoryId("/tmp/repo".to_string()),
@@ -11628,8 +11637,12 @@ mod tests {
             rediscovered.display_name.as_deref(),
             Some("Customer Portal")
         );
-        assert_eq!(rediscovered.icon.as_deref(), Some("rocket"));
+        assert_eq!(rediscovered.icon.as_deref(), Some("logo"));
         assert_eq!(rediscovered.color.as_deref(), Some("violet"));
+        assert_eq!(
+            rediscovered.logo.as_deref(),
+            Some("data:image/png;base64,iVBORw0KGgo=")
+        );
         assert_eq!(
             rediscovered.pinned_at.as_deref(),
             Some("2026-01-01T00:00:40Z")
@@ -11902,6 +11915,7 @@ mod tests {
             display_name: None,
             icon: None,
             color: None,
+            logo: None,
             pinned_at: None,
             root_path: "/tmp/repo".to_string(),
             base_branch: "main".to_string(),

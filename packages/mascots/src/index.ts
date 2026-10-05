@@ -387,7 +387,18 @@ const FALLBACK_MASCOT: ProjectMascotId = "polvo";
 
 export type ProjectIconVisual =
 	| { kind: "mascot"; id: ProjectMascotId }
-	| { kind: "icon"; id: ProjectSymbolId };
+	| { kind: "icon"; id: ProjectSymbolId }
+	| { kind: "logo"; src: string };
+
+const LOGO_PREFIX = "data:image/png;base64,";
+
+/** A project's icon value for rendering: its uploaded logo when that is the pick. */
+export function projectIconValue(project: {
+	icon?: string | null;
+	logo?: string | null;
+}): string | null {
+	return project.icon === "logo" && project.logo ? project.logo : (project.icon ?? null);
+}
 
 export function isProjectSymbolId(value: string | null | undefined): value is ProjectSymbolId {
 	return PROJECT_SYMBOL_IDS.includes(value as ProjectSymbolId);
@@ -407,6 +418,7 @@ export function resolveProjectIcon(
 ): ProjectIconVisual {
 	if (isProjectMascotId(value)) return { kind: "mascot", id: value };
 	if (isProjectSymbolId(value)) return { kind: "icon", id: value };
+	if (value?.startsWith(LOGO_PREFIX)) return { kind: "logo", src: value };
 	return { kind: "mascot", id: seed ? autoProjectMascot(seed) : FALLBACK_MASCOT };
 }
 

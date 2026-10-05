@@ -508,6 +508,12 @@
     "autoHint": "Picked from the project path — every project gets its own critter.",
     "faunaLabel": "Brazilian fauna",
     "symbolsLabel": "Symbols",
+    "logoLabel": "Project logo",
+    "uploadLogo": "Upload logo",
+    "replaceLogo": "Replace",
+    "removeLogo": "Remove",
+    "logoHint": "PNG, JPG, WebP or SVG — stored at 64×64.",
+    "logoError": "That image could not be used.",
     "icons": {
       "folder": "Folder",
       "terminal": "Terminal",

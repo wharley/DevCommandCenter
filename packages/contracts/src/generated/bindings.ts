@@ -1951,6 +1951,11 @@ export type Repository = {
 	icon: string | null,
 	// Optional visual identity selected from DCC's controlled color palette.
 	color: string | null,
+	/**
+	 *  Optional project logo the person uploaded: a small PNG data URI. Shown
+	 *  when `icon` is `"logo"`.
+	 */
+	logo?: string | null,
 	// When present, this project is promoted ahead of unpinned projects in the sidebar.
 	pinnedAt: string | null,
 	rootPath: string,
@@ -2523,6 +2528,8 @@ export type UpdateRepositoryIdentityInput = {
 	displayName: string | null,
 	icon: string | null,
 	color: string | null,
+	// Uploaded logo as a small PNG data URI; `None` removes it.
+	logo?: string | null,
 };
 
 export type UsageDashboard = {

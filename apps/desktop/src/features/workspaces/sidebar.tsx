@@ -1,3 +1,4 @@
+import { projectIconValue } from "@dcc/mascots";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	BarChart3,
@@ -219,7 +220,7 @@ function WorkspaceRepoPicker({
 								}}
 							>
 								<ProjectIdentityGlyph
-									icon={repository.icon}
+									icon={projectIconValue(repository)}
 									color={repository.color}
 									seed={repository.rootPath}
 									size="sm"
@@ -338,6 +339,7 @@ type WorkspacesSidebarProps = {
 		displayName: string | null;
 		icon: string | null;
 		color: string | null;
+		logo: string | null;
 	}) => Promise<void>;
 	onSetProjectPinned?: (repositoryId: string, pinned: boolean) => Promise<void>;
 	onSetWorkspacePinned?: (workspaceId: string, pinned: boolean) => Promise<void>;
@@ -960,7 +962,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									/>
 								) : repository ? (
 									<ProjectIdentityGlyph
-										icon={repository.icon}
+										icon={projectIconValue(repository)}
 										color={repository.color}
 										seed={repository.rootPath}
 										active={groupSignal === "running"}
@@ -1157,7 +1159,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							? repositoryDisplayName(workspaceRepository)
 							: null
 					}
-					projectIcon={workspaceRepository?.icon ?? null}
+					projectIcon={workspaceRepository ? projectIconValue(workspaceRepository) : null}
 					projectColor={workspaceRepository?.color ?? null}
 					projectSeed={workspaceRepository?.rootPath ?? null}
 					onSelect={
@@ -1614,7 +1616,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											>
 												{repository ? (
 													<ProjectIdentityGlyph
-														icon={repository.icon}
+														icon={projectIconValue(repository)}
 														color={repository.color}
 														seed={repository.rootPath}
 														size="sm"

@@ -73,6 +73,16 @@ export function ProjectGlyph({
 }) {
 	const visual = resolveProjectIcon(icon, seed);
 	const tone = COLOR_CLASS[resolveProjectColor(color, seed)];
+	if (visual.kind === "logo") {
+		return (
+			<img
+				src={visual.src}
+				alt=""
+				draggable={false}
+				className={cn("size-4 shrink-0 rounded-[3px] object-cover", className)}
+			/>
+		);
+	}
 	if (visual.kind === "icon") {
 		const Icon = SYMBOLS[visual.id];
 		return <Icon aria-hidden className={cn("size-3.5 shrink-0", tone, className)} />;

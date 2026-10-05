@@ -1,3 +1,4 @@
+import { projectIconValue } from "@dcc/mascots";
 import {
 	Box,
 	Boxes,
@@ -766,7 +767,7 @@ export function CreateWorkspaceDialog({
 												onClick={() => selectSingleRepository(repository)}
 											>
 												<ProjectIdentityGlyph
-													icon={repository.icon}
+													icon={projectIconValue(repository)}
 													color={repository.color}
 													seed={repository.rootPath}
 													size="sm"
@@ -876,7 +877,7 @@ export function CreateWorkspaceDialog({
 													<Check className="size-3" strokeWidth={2.4} />
 												</span>
 												<ProjectIdentityGlyph
-													icon={repository.icon}
+													icon={projectIconValue(repository)}
 													color={repository.color}
 													seed={repository.rootPath}
 													size="sm"

@@ -72,7 +72,7 @@ const PROJECT_COLOR_CLASSES: Record<ProjectColorId, string> = {
 };
 
 export function isKnownProjectIcon(value: string | null | undefined): value is string {
-	return isProjectMascotId(value) || isProjectSymbolId(value);
+	return value === "logo" || isProjectMascotId(value) || isProjectSymbolId(value);
 }
 
 export function isKnownProjectColor(value: string | null | undefined): value is ProjectColorId {
@@ -158,6 +158,14 @@ export function ProjectIdentityGlyph({
 		>
 			{visual.kind === "icon" ? (
 				<ProjectLucideIcon id={visual.id} />
+			) : visual.kind === "logo" ? (
+				<img
+					src={visual.src}
+					alt=""
+					draggable={false}
+					style={{ width: "80%", height: "80%" }}
+					className="rounded-[3px] object-cover"
+				/>
 			) : (
 				<ProjectMascotSprite id={visual.id} active={active} />
 			)}

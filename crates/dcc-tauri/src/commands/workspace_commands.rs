@@ -502,6 +502,9 @@ pub struct UpdateRepositoryIdentityInput {
     pub display_name: Option<String>,
     pub icon: Option<String>,
     pub color: Option<String>,
+    /// Uploaded logo as a small PNG data URI; `None` removes it.
+    #[serde(default)]
+    pub logo: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -7312,6 +7315,7 @@ async fn recover_existing_workspace_for_create(
             display_name: None,
             icon: None,
             color: None,
+            logo: None,
             pinned_at: workspace.pinned_at.clone(),
             root_path: workspace.root_path.clone(),
             base_branch: workspace.base_branch.clone(),
@@ -7728,7 +7732,8 @@ fn normalize_repository_display_name(
 
 // Empty means "auto": the desktop picks a Brazilian-fauna mascot from a hash of
 // the project path. Every listed value, `folder`/`slate` included, is an explicit pick.
-const PROJECT_ICONS: [&str; 22] = [
+const PROJECT_ICONS: [&str; 23] = [
+    "logo",
     "capivara", "tucano", "arara", "mico", "tatu", "onca", "jabuti", "boto", "sapo", "polvo",
     "folder", "terminal", "code", "layers", "package", "database", "globe", "rocket", "branch",
     "cpu", "shield", "wrench",
@@ -7737,6 +7742,30 @@ const PROJECT_COLORS: [&str; 12] = [
     "slate", "sky", "cyan", "emerald", "amber", "orange", "rose", "violet", "indigo", "fuchsia",
     "lime", "pink",
 ];
+
+/// The desktop downsizes uploads to a 64px PNG, which is a few KB; the cap
+/// keeps a hostile or broken client from bloating every project listing.
+const MAX_PROJECT_LOGO_CHARS: usize = 96 * 1024;
+
+fn normalize_repository_logo(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let Some(payload) = value.strip_prefix("data:image/png;base64,") else {
+        return Err("project logo must be a PNG data URI".to_string());
+    };
+    if value.len() > MAX_PROJECT_LOGO_CHARS {
+        return Err("project logo is too large".to_string());
+    }
+    if payload.is_empty()
+        || !payload
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
+    {
+        return Err("project logo is not valid base64".to_string());
+    }
+    Ok(Some(value.to_string()))
+}
 
 fn normalize_repository_visual(
     value: Option<&str>,
@@ -7770,12 +7799,17 @@ pub async fn update_repository_identity(
         normalize_repository_visual(input.icon.as_deref(), &PROJECT_ICONS, "icon")?;
     let color =
         normalize_repository_visual(input.color.as_deref(), &PROJECT_COLORS, "color")?;
+    let logo = normalize_repository_logo(input.logo.as_deref())?;
+    if icon.as_deref() == Some("logo") && logo.is_none() {
+        return Err("choose a logo image before selecting it as the project icon".to_string());
+    }
     let updated = repo
         .update_repository_identity(
             &repository_id,
             display_name.as_deref(),
             icon.as_deref(),
             color.as_deref(),
+            logo.as_deref(),
         )
         .map_err(|error| error.to_string())?;
     if !updated {
@@ -8415,6 +8449,7 @@ mod editor_workspace_file_tests {
             display_name: None,
             icon: None,
             color: None,
+            logo: None,
             pinned_at: None,
             root_path: root.to_string(),
             base_branch: "main".to_string(),
@@ -8463,6 +8498,18 @@ mod editor_workspace_file_tests {
             normalize_repository_visual(Some(" "), &PROJECT_ICONS, "icon"),
             Ok(None)
         );
+        assert_eq!(
+            normalize_repository_logo(Some("data:image/png;base64,iVBORw0KGgo=")),
+            Ok(Some("data:image/png;base64,iVBORw0KGgo=".to_string()))
+        );
+        assert_eq!(normalize_repository_logo(None), Ok(None));
+        assert!(normalize_repository_logo(Some("data:image/svg+xml;base64,PHN2Zz4=")).is_err());
+        assert!(normalize_repository_logo(Some("data:image/png;base64,<script>")).is_err());
+        assert!(normalize_repository_logo(Some(&format!(
+            "data:image/png;base64,{}",
+            "A".repeat(MAX_PROJECT_LOGO_CHARS)
+        )))
+        .is_err());
         assert!(
             normalize_repository_visual(Some("custom-svg"), &PROJECT_ICONS, "icon")
                 .is_err()

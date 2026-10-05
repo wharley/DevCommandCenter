@@ -1,3 +1,4 @@
+import { projectIconValue } from "@dcc/mascots";
 import { useQuickComposerNavigation } from "./features/quick-composer/use-quick-composer-navigation";
 import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { setFrontendErrorContext, type FrontendErrorContext } from "./lib/frontend-diagnostics";
@@ -4965,6 +4966,7 @@ export default function App() {
 			displayName: string | null;
 			icon: string | null;
 			color: string | null;
+			logo: string | null;
 		}) => {
 			const updated = await updateRepositoryIdentity({
 				...input,
@@ -5029,7 +5031,9 @@ export default function App() {
 	const activeProjectLabel = activeProjectRepository
 		? repositoryDisplayName(activeProjectRepository)
 		: null;
-	const activeProjectIcon = activeProjectRepository?.icon ?? null;
+	const activeProjectIcon = activeProjectRepository
+		? projectIconValue(activeProjectRepository)
+		: null;
 	const activeProjectColor = activeProjectRepository?.color ?? null;
 	const activeProjectSeed = activeProjectRepository?.rootPath ?? null;
 	const inlineGitDiffReview = isInlineGitDiffReview(
@@ -5346,7 +5350,7 @@ export default function App() {
 												? repositoryDisplayName(repository)
 												: workspace.name,
 											branch: workspace.branch,
-											icon: repository?.icon ?? null,
+											icon: repository ? projectIconValue(repository) : null,
 											color: repository?.color ?? null,
 											seed: repository?.rootPath ?? workspace.rootPath ?? null,
 											hasChanges:

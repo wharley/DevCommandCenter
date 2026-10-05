@@ -645,7 +645,7 @@ fn live_combs(conn: &rusqlite::Connection, project_id: Option<String>) -> Result
         .prepare(
             "SELECT w.id, w.project_id, w.name, w.base_branch, w.worktree_path,
                     w.root_path, w.state, w.created_at, w.updated_at,
-                    r.display_name, r.icon, r.color
+                    r.display_name, r.icon, r.color, r.logo
              FROM dcc_workspaces w
              LEFT JOIN dcc_repositories r ON r.root_path = w.root_path
              ORDER BY w.updated_at DESC, w.created_at DESC",
@@ -668,12 +668,16 @@ fn live_combs(conn: &rusqlite::Connection, project_id: Option<String>) -> Result
             .or_else(|| root_path_basename(root_path.as_deref()))
             .unwrap_or_else(|| row_project_id.clone());
         let base_branch: Option<String> = row.get(3).map_err(|e| e.to_string())?;
+        // A picked logo travels as the icon value itself (a PNG data URI).
+        let icon: Option<String> = row.get(10).map_err(|e| e.to_string())?;
+        let logo: Option<String> = row.get(12).map_err(|e| e.to_string())?;
+        let project_icon = if icon.as_deref() == Some("logo") { logo } else { icon };
         out.push(json!({
             "id": row.get::<_, String>(0).map_err(|e| e.to_string())?,
             "projectId": row_project_id,
             "projectName": project_name,
             "projectPath": root_path,
-            "projectIcon": row.get::<_, Option<String>>(10).map_err(|e| e.to_string())?,
+            "projectIcon": project_icon,
             "projectColor": row.get::<_, Option<String>>(11).map_err(|e| e.to_string())?,
             "name": row.get::<_, String>(2).map_err(|e| e.to_string())?,
             "description": Value::Null,
