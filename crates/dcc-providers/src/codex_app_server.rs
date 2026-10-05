@@ -1214,7 +1214,7 @@ const MAX_PENDING_CODEX_NATIVE_APPROVALS: usize = 64;
 // Keep the provider-side match exact so a user-configured MCP server never
 // loses its visible approval history merely because it happens to use a
 // similarly named tool.
-const DCC_BROWSER_INTERNAL_MCP_DEFINITION_ID: &str = "dcc-browser-webview-internal";
+pub(crate) const DCC_BROWSER_INTERNAL_MCP_DEFINITION_ID: &str = "dcc-browser-webview-internal";
 const MAX_ACTIVE_CODEX_MCP_TOOL_CALLS: usize = 128;
 const MAX_CODEX_RPC_STRING_ID_CHARS: usize = 256;
 const MAX_CODEX_MCP_ITEM_ID_CHARS: usize = 256;
@@ -1497,6 +1497,7 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_computer_key"
                 | "dcc_delegate_task"
                 | "dcc_task_status"
+                | "dcc_task_wait"
                 | "dcc_task_cancel"
         )
 }

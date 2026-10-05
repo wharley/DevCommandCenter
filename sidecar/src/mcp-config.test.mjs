@@ -659,3 +659,21 @@ test("keeps every projected server in a deterministic fail-closed snapshot", asy
 		["dcc-connected", "dcc-missing", "dcc-duplicate"],
 	);
 });
+
+test("only DCC's own HTTP server gets the long tool timeout", async () => {
+	const { normalizeDccMcpServers, DCC_INTERNAL_TOOL_TIMEOUT_MS } = await import("./mcp-config.mjs");
+	const projection = normalizeDccMcpServers([
+		{
+			definitionId: "dcc-browser-webview-internal",
+			name: "dcc-internal",
+			transport: { type: "http", url: "http://127.0.0.1:1234/mcp", headers: {} },
+		},
+		{
+			definitionId: "user-http",
+			name: "dcc-user",
+			transport: { type: "http", url: "https://example.test/mcp", headers: {} },
+		},
+	]);
+	assert.equal(projection.servers["dcc-internal"].timeout, DCC_INTERNAL_TOOL_TIMEOUT_MS);
+	assert.equal(projection.servers["dcc-user"].timeout, undefined);
+});

@@ -60,7 +60,7 @@ export function buildDelegateTaskToolInstructions(
 		"",
 		"Cross-provider delegation (Dev Command Center):",
 		"- To hand a bounded, self-contained task to a different provider, call the DCC tool dcc_delegate_task when it is in your tool list.",
-		"- It returns a taskId at once; DCC sends you the result later as a new message starting with [DCC]. End your turn or keep working on independent parts — do not poll.",
+		"- It returns a taskId at once; DCC delivers the result later as a message starting with [DCC] (mid-turn if you are still working). Keep working on independent parts or end your turn — do not poll. Use wait=true or dcc_task_wait only when you cannot continue without the result.",
 		"- review and explain are read-only; implement edits an isolated worktree that the human reviews before anything reaches this workspace.",
 		`Available external-provider delegation targets: ${targets
 			.map((provider) => `${provider.id} (${provider.label})`)

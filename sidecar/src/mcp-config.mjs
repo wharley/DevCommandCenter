@@ -128,6 +128,9 @@ function normalizeToolPolicies(value) {
 	return policies;
 }
 
+const DCC_INTERNAL_DEFINITION_ID = "dcc-browser-webview-internal";
+export const DCC_INTERNAL_TOOL_TIMEOUT_MS = 690_000;
+
 export function normalizeDccMcpServers(value) {
 	if (!Array.isArray(value) || value.length > MAX_SERVER_COUNT) {
 		throw invalidConfiguration();
@@ -158,7 +161,12 @@ export function normalizeDccMcpServers(value) {
 		) {
 			throw invalidConfiguration();
 		}
-		servers[entry.name] = transport;
+		// Claude Code's per-call MCP timeout would cut a blocking delegation
+		// wait (dcc_task_wait, up to 600s). Raised only for DCC's own server.
+		servers[entry.name] =
+			entry.definitionId === DCC_INTERNAL_DEFINITION_ID && transport.type === "http"
+				? { ...transport, timeout: DCC_INTERNAL_TOOL_TIMEOUT_MS }
+				: transport;
 		definitionIds[entry.name] = entry.definitionId;
 		toolPolicies[entry.name] = normalizeToolPolicies(entry.toolPolicies ?? []);
 		if (oauthState !== undefined) {

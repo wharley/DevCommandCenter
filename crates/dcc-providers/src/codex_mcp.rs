@@ -114,8 +114,15 @@ enum CodexMcpServer<'a> {
         url: &'a str,
         http_headers: BTreeMap<&'a str, &'a str>,
         default_tools_approval_mode: &'static str,
+        /// Codex's per-call MCP timeout (60s by default) would cut a blocking
+        /// `dcc_task_wait`; raised only for DCC's own server.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_timeout_sec: Option<u64>,
     },
 }
+
+/// Longest DCC tool call (a 600s delegation wait plus launch time).
+const DCC_INTERNAL_TOOL_TIMEOUT_SEC: u64 = 690;
 
 /// A one-shot JSON-RPC request that can contain MCP credentials.
 ///
@@ -272,6 +279,9 @@ pub(crate) fn prepare_thread_start_request(
                     url,
                     http_headers: collect_header_map(headers)?,
                     default_tools_approval_mode: "prompt",
+                    tool_timeout_sec: (server.definition_id.0
+                        == crate::codex_app_server::DCC_BROWSER_INTERNAL_MCP_DEFINITION_ID)
+                        .then_some(DCC_INTERNAL_TOOL_TIMEOUT_SEC),
                 }
             }
         };
@@ -858,7 +868,33 @@ mod tests {
                     .pointer("/http_headers/Authorization")
                     .and_then(serde_json::Value::as_str)
                     == Some("Bearer http-secret-canary")
+                // A user's MCP keeps Codex's own tool timeout.
+                && server.get("tool_timeout_sec").is_none()
         }));
+    }
+
+    #[test]
+    fn only_dccs_own_server_gets_the_long_tool_timeout() {
+        let mut servers = fixtures();
+        servers[1].definition_id = McpDefinitionId(
+            crate::codex_app_server::DCC_BROWSER_INTERNAL_MCP_DEFINITION_ID.to_string(),
+        );
+        let prepared =
+            prepare_thread_start_request(7, "/workspace", &[], None, &servers).expect("valid");
+        let value: serde_json::Value =
+            serde_json::from_slice(prepared.payload.as_bytes()).expect("valid JSON");
+        let servers = value
+            .pointer("/params/config/mcp_servers")
+            .and_then(serde_json::Value::as_object)
+            .expect("MCP config");
+        assert!(servers.values().any(|server| {
+            server.get("url").is_some()
+                && server.get("tool_timeout_sec") == Some(&serde_json::json!(DCC_INTERNAL_TOOL_TIMEOUT_SEC))
+        }));
+        assert!(servers
+            .values()
+            .filter(|server| server.get("command").is_some())
+            .all(|server| server.get("tool_timeout_sec").is_none()));
     }
 
     #[test]

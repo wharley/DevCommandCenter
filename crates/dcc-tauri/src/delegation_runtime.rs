@@ -7,8 +7,9 @@
 //! the person applies or discards delegated edits.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Utc};
@@ -18,8 +19,9 @@ use uuid::Uuid;
 
 use dcc_core::{
     application::{
-        queue_turn as run_queue_turn, start_thread as run_start_thread, QueueTurnInput,
-        SendTurnInput, StartThreadInput,
+        active_turn_for_steer, queue_turn as run_queue_turn, record_turn_steer,
+        start_thread as run_start_thread, QueueTurnInput, SendTurnInput, StartThreadInput,
+        SteerTurnInput,
     },
     domain::{
         delegation::{
@@ -1103,12 +1105,7 @@ async fn finish_failed(state: &SessionCommandState, delegation: Delegation, reas
         remove_delegation_worktree(state, Some(&failed.id), None).await;
     }
     if failed.origin == DelegationOrigin::Agent {
-        hand_back_to_parent(
-            state,
-            &failed.parent_session_id,
-            delegation_result_turn(&failed, Some(reason)),
-        )
-        .await;
+        deliver_result(state, &failed, delegation_result_turn(&failed, Some(reason))).await;
     }
 }
 
@@ -1229,14 +1226,170 @@ async fn finalize_running_delegation(state: &SessionCommandState, delegation: De
                 }
             };
             if completed.origin == DelegationOrigin::Agent {
-                hand_back_to_parent(
-                    state,
-                    &completed.parent_session_id,
-                    delegation_result_turn(&completed, None),
-                )
-                .await;
+                deliver_result(state, &completed, delegation_result_turn(&completed, None)).await;
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Waiting (`wait=true`, `dcc_task_wait`)
+// ---------------------------------------------------------------------------
+
+/// Longest a tool call may block on a child.
+pub const MAX_WAIT_SECONDS: u64 = 600;
+pub const DEFAULT_WAIT_SECONDS: u64 = 300;
+/// Concurrent blocking waits across the app; each holds an MCP request open.
+const MAX_CONCURRENT_WAITS: usize = 4;
+/// A finished child whose result was not handed to the waiter within this
+/// window (no finalizer ran) is returned from the record instead.
+const CLAIM_GRACE: Duration = Duration::from_secs(5);
+
+#[derive(Default)]
+struct WaitSlot {
+    /// The hand-back the finalizer gave the waiter instead of sending it.
+    claimed: Option<String>,
+    returned: bool,
+}
+
+fn waits() -> &'static Mutex<HashMap<String, WaitSlot>> {
+    static WAITS: OnceLock<Mutex<HashMap<String, WaitSlot>>> = OnceLock::new();
+    WAITS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A result goes to a waiting tool call when there is one, otherwise back
+/// to the parent as a turn. Exactly one of the two delivers it.
+async fn deliver_result(state: &SessionCommandState, delegation: &Delegation, prompt: String) {
+    let handed_to_waiter = waits()
+        .lock()
+        .map(|mut waits| match waits.get_mut(&delegation.id.0) {
+            Some(slot) => {
+                slot.claimed = Some(prompt.clone());
+                true
+            }
+            None => false,
+        })
+        .unwrap_or(false);
+    if !handed_to_waiter {
+        hand_back_to_parent(state, &delegation.parent_session_id, prompt).await;
+    }
+}
+
+/// Registered while a tool call blocks on a delegation. Dropping it (the
+/// call returned, timed out, or its HTTP request was cancelled) releases the
+/// slot; a result the waiter claimed but never returned is handed back.
+struct WaitGuard {
+    delegation_id: String,
+    state: SessionCommandState,
+    parent_session_id: SessionId,
+}
+
+impl WaitGuard {
+    fn register(
+        state: &SessionCommandState,
+        delegation: &Delegation,
+    ) -> Result<Self, String> {
+        let mut waits = waits().lock().map_err(|_| "wait registry unavailable".to_string())?;
+        if waits.contains_key(&delegation.id.0) {
+            return Err("this task is already being waited on".to_string());
+        }
+        if waits.len() >= MAX_CONCURRENT_WAITS {
+            return Err(
+                "too many tasks are being waited on; continue without waiting and DCC will deliver the result"
+                    .to_string(),
+            );
+        }
+        waits.insert(delegation.id.0.clone(), WaitSlot::default());
+        Ok(Self {
+            delegation_id: delegation.id.0.clone(),
+            state: state.clone(),
+            parent_session_id: delegation.parent_session_id.clone(),
+        })
+    }
+
+    fn claimed(&self) -> Option<String> {
+        waits()
+            .lock()
+            .ok()
+            .and_then(|waits| waits.get(&self.delegation_id).and_then(|slot| slot.claimed.clone()))
+    }
+
+    fn mark_returned(&self) {
+        if let Ok(mut waits) = waits().lock() {
+            if let Some(slot) = waits.get_mut(&self.delegation_id) {
+                slot.returned = true;
+            }
+        }
+    }
+}
+
+impl Drop for WaitGuard {
+    fn drop(&mut self) {
+        let orphaned = waits()
+            .lock()
+            .ok()
+            .and_then(|mut waits| waits.remove(&self.delegation_id))
+            .and_then(|slot| (!slot.returned).then_some(slot.claimed).flatten());
+        if let Some(prompt) = orphaned {
+            let state = self.state.clone();
+            let parent = self.parent_session_id.clone();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move { hand_back_to_parent(&state, &parent, prompt).await });
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct WaitOutcome {
+    pub delegation: Delegation,
+    /// The `[DCC] …` result, when the task finished within the wait.
+    pub result: Option<String>,
+    pub timed_out: bool,
+}
+
+/// Blocks until the parent's delegation finishes or `timeout` elapses. A
+/// result returned here is not handed back again; on timeout the child keeps
+/// running and its result arrives the usual way.
+pub async fn wait_for_delegation(
+    state: &SessionCommandState,
+    parent_session_id: &SessionId,
+    delegation_id: &str,
+    timeout: Duration,
+) -> Result<WaitOutcome, String> {
+    let delegation = delegation_for_parent(state, parent_session_id, delegation_id).await?;
+    if delegation.origin != DelegationOrigin::Agent {
+        return Err("only delegations you requested can be waited on".to_string());
+    }
+    let guard = WaitGuard::register(state, &delegation)?;
+    let deadline = Instant::now() + timeout.min(Duration::from_secs(MAX_WAIT_SECONDS));
+    let mut finished_since: Option<Instant> = None;
+    loop {
+        let current = delegation_for_parent(state, parent_session_id, delegation_id).await?;
+        if let Some(result) = guard.claimed() {
+            guard.mark_returned();
+            return Ok(WaitOutcome { delegation: current, result: Some(result), timed_out: false });
+        }
+        match current.status {
+            // Cancelled tasks are never handed back; nothing to wait for.
+            DelegationStatus::Cancelled => {
+                return Ok(WaitOutcome { delegation: current, result: None, timed_out: false });
+            }
+            DelegationStatus::Completed | DelegationStatus::ReviewPending | DelegationStatus::Failed => {
+                let since = *finished_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= CLAIM_GRACE {
+                    // Finished before this wait began (already handed back),
+                    // so report the record without delivering it twice.
+                    guard.mark_returned();
+                    return Ok(WaitOutcome { delegation: current, result: None, timed_out: false });
+                }
+            }
+            _ => {}
+        }
+        if Instant::now() >= deadline {
+            return Ok(WaitOutcome { delegation: current, result: None, timed_out: true });
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
@@ -1262,10 +1415,11 @@ fn hand_back_turn(parent_session_id: &SessionId, prompt: String) -> SendTurnInpu
     }
 }
 
-/// Wakes the parent agent. With an open turn the message is queued and the
-/// backend dispatches it right after that turn; an idle parent gets it as a
-/// new turn. If starting fails (provider gone, app closing), the message stays
-/// queued so the person can send it from the composer.
+/// Wakes the parent agent. With an open turn the result is steered into it
+/// when the provider supports steering (the agent reacts mid-turn, as in T3
+/// Code), else queued and dispatched right after that turn; an idle parent
+/// gets it as a new turn. If starting fails (provider gone, app closing), the
+/// message stays queued so the person can send it from the composer.
 pub async fn hand_back_to_parent(
     state: &SessionCommandState,
     parent_session_id: &SessionId,
@@ -1290,7 +1444,13 @@ pub async fn hand_back_to_parent(
         .map_err(|error| error.to_string())
     };
     let result = if parent_busy {
-        queue(prompt).await
+        match steer_into_open_turn(state, parent_session_id, &prompt).await {
+            Ok(()) => Ok(()),
+            Err(reason) => {
+                eprintln!("[DCC] delegation hand-back not steered ({reason}); queueing");
+                queue(prompt).await
+            }
+        }
     } else {
         match send_turn_with_state(state, hand_back_turn(parent_session_id, prompt.clone())).await
         {
@@ -1304,6 +1464,30 @@ pub async fn hand_back_to_parent(
     if let Err(error) = result {
         eprintln!("[DCC] delegation hand-back failed: {error}");
     }
+}
+
+/// Injects the hand-back into the parent's running turn and records it as
+/// steering guidance, exactly like a person steering from the composer.
+async fn steer_into_open_turn(
+    state: &SessionCommandState,
+    parent_session_id: &SessionId,
+    prompt: &str,
+) -> Result<(), String> {
+    let input = SteerTurnInput {
+        session_id: parent_session_id.clone(),
+        prompt: prompt.to_string(),
+    };
+    let (_, turn_id) = active_turn_for_steer(state, state, &input)
+        .await
+        .map_err(|error| error.to_string())?;
+    state
+        .steer_provider_turn(parent_session_id, prompt)
+        .await
+        .map_err(|error| error.to_string())?;
+    record_turn_steer(state, state, state, input, turn_id)
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 /// After the person applies (`applied`) or discards reviewed edits.
@@ -1997,6 +2181,101 @@ mod tests {
                     .status,
                 DelegationStatus::Cancelled
             );
+        }
+
+        async fn finish_child(state: &SessionCommandState) {
+            append(state, "child", started("c-1", "review")).await;
+            append(
+                state,
+                "child",
+                SessionEventKind::TurnAssistantMessageCompleted {
+                    turn_id: TurnId("c-1".to_string()),
+                    message_id: "m".to_string(),
+                    phase: AssistantMessagePhase::FinalAnswer,
+                    content: Some("Waited result.".to_string()),
+                },
+            )
+            .await;
+            append(
+                state,
+                "child",
+                SessionEventKind::TurnCompleted {
+                    turn_id: TurnId("c-1".to_string()),
+                },
+            )
+            .await;
+            on_session_turn_terminal(state.clone(), SessionId("child".to_string())).await;
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_waiting_call_receives_the_result_instead_of_a_hand_back() {
+            let fixture = fixture().await;
+            let state = fixture.state.clone();
+            let delegation = running_delegation(&state, DelegationOrigin::Agent).await;
+            append(&state, "parent", started("p-1", "work")).await;
+
+            let waiter_state = state.clone();
+            let id = delegation.id.0.clone();
+            let waiter = tokio::spawn(async move {
+                wait_for_delegation(
+                    &waiter_state,
+                    &SessionId("parent".to_string()),
+                    &id,
+                    Duration::from_secs(10),
+                )
+                .await
+            });
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            finish_child(&state).await;
+
+            let outcome = waiter.await.expect("join").expect("wait");
+            assert!(!outcome.timed_out);
+            assert!(outcome.result.as_deref().is_some_and(|text| text.contains("Waited result.")));
+            assert_eq!(outcome.delegation.status, DelegationStatus::Completed);
+            assert!(queued_prompts(&state, "parent").await.is_empty(), "delivered twice");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_timed_out_wait_leaves_the_result_to_the_hand_back() {
+            let fixture = fixture().await;
+            let state = fixture.state.clone();
+            let delegation = running_delegation(&state, DelegationOrigin::Agent).await;
+            append(&state, "parent", started("p-1", "work")).await;
+
+            let outcome = wait_for_delegation(
+                &state,
+                &SessionId("parent".to_string()),
+                &delegation.id.0,
+                Duration::from_millis(600),
+            )
+            .await
+            .expect("wait");
+            assert!(outcome.timed_out);
+            assert!(outcome.result.is_none());
+
+            finish_child(&state).await;
+            let queued = queued_prompts(&state, "parent").await;
+            assert_eq!(queued.len(), 1);
+            assert!(queued[0].contains("Waited result."));
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn only_the_requesting_session_can_wait_and_only_once() {
+            let fixture = fixture().await;
+            let state = fixture.state.clone();
+            let delegation = running_delegation(&state, DelegationOrigin::Agent).await;
+            assert!(wait_for_delegation(
+                &state,
+                &SessionId("child".to_string()),
+                &delegation.id.0,
+                Duration::from_millis(10),
+            )
+            .await
+            .is_err());
+            let guard = WaitGuard::register(&state, &delegation).expect("first wait");
+            assert!(WaitGuard::register(&state, &delegation).is_err());
+            drop(guard);
+            assert!(WaitGuard::register(&state, &delegation).is_ok());
         }
 
         #[tokio::test(flavor = "current_thread")]
