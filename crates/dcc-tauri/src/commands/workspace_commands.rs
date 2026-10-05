@@ -7712,7 +7712,10 @@ fn normalize_repository_display_name(
         .map(ToString::to_string)
 }
 
-const PROJECT_ICONS: [&str; 12] = [
+// Empty means "auto": the desktop picks a Brazilian-fauna mascot from a hash of
+// the project path. Every listed value, `folder`/`slate` included, is an explicit pick.
+const PROJECT_ICONS: [&str; 22] = [
+    "capivara", "tucano", "arara", "mico", "tatu", "onca", "jabuti", "boto", "sapo", "polvo",
     "folder", "terminal", "code", "layers", "package", "database", "globe", "rocket", "branch",
     "cpu", "shield", "wrench",
 ];
@@ -7723,16 +7726,12 @@ const PROJECT_COLORS: [&str; 12] = [
 
 fn normalize_repository_visual(
     value: Option<&str>,
-    default: &str,
     allowed: &[&str],
     field: &str,
 ) -> Result<Option<String>, String> {
     let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
-    if value == default {
-        return Ok(None);
-    }
     if allowed.contains(&value) {
         return Ok(Some(value.to_string()));
     }
@@ -7754,9 +7753,9 @@ pub async fn update_repository_identity(
     let display_name =
         normalize_repository_display_name(input.display_name.as_deref(), &existing.name);
     let icon =
-        normalize_repository_visual(input.icon.as_deref(), "folder", &PROJECT_ICONS, "icon")?;
+        normalize_repository_visual(input.icon.as_deref(), &PROJECT_ICONS, "icon")?;
     let color =
-        normalize_repository_visual(input.color.as_deref(), "slate", &PROJECT_COLORS, "color")?;
+        normalize_repository_visual(input.color.as_deref(), &PROJECT_COLORS, "color")?;
     let updated = repo
         .update_repository_identity(
             &repository_id,
@@ -8415,7 +8414,7 @@ mod editor_workspace_file_tests {
     }
 
     #[test]
-    fn project_identity_is_optional_controlled_and_does_not_duplicate_defaults() {
+    fn project_identity_is_optional_and_controlled() {
         assert_eq!(
             normalize_repository_display_name(Some(" Customer Portal "), "repo"),
             Some("Customer Portal".to_string())
@@ -8427,35 +8426,43 @@ mod editor_workspace_file_tests {
         assert_eq!(normalize_repository_display_name(Some("  "), "repo"), None);
         assert_eq!(normalize_repository_display_name(None, "repo"), None);
         assert_eq!(
-            normalize_repository_visual(Some("rocket"), "folder", &PROJECT_ICONS, "icon"),
+            normalize_repository_visual(Some("rocket"), &PROJECT_ICONS, "icon"),
             Ok(Some("rocket".to_string()))
         );
         assert_eq!(
-            normalize_repository_visual(Some("cpu"), "folder", &PROJECT_ICONS, "icon"),
+            normalize_repository_visual(Some("cpu"), &PROJECT_ICONS, "icon"),
             Ok(Some("cpu".to_string()))
         );
         assert_eq!(
-            normalize_repository_visual(Some("shield"), "folder", &PROJECT_ICONS, "icon"),
+            normalize_repository_visual(Some("shield"), &PROJECT_ICONS, "icon"),
             Ok(Some("shield".to_string()))
         );
         assert_eq!(
-            normalize_repository_visual(Some("folder"), "folder", &PROJECT_ICONS, "icon"),
+            normalize_repository_visual(Some("folder"), &PROJECT_ICONS, "icon"),
+            Ok(Some("folder".to_string()))
+        );
+        assert_eq!(
+            normalize_repository_visual(Some("capivara"), &PROJECT_ICONS, "icon"),
+            Ok(Some("capivara".to_string()))
+        );
+        assert_eq!(
+            normalize_repository_visual(Some(" "), &PROJECT_ICONS, "icon"),
             Ok(None)
         );
         assert!(
-            normalize_repository_visual(Some("custom-svg"), "folder", &PROJECT_ICONS, "icon")
+            normalize_repository_visual(Some("custom-svg"), &PROJECT_ICONS, "icon")
                 .is_err()
         );
         assert_eq!(
-            normalize_repository_visual(Some("violet"), "slate", &PROJECT_COLORS, "color"),
+            normalize_repository_visual(Some("violet"), &PROJECT_COLORS, "color"),
             Ok(Some("violet".to_string()))
         );
         assert_eq!(
-            normalize_repository_visual(Some("fuchsia"), "slate", &PROJECT_COLORS, "color"),
+            normalize_repository_visual(Some("fuchsia"), &PROJECT_COLORS, "color"),
             Ok(Some("fuchsia".to_string()))
         );
         assert_eq!(
-            normalize_repository_visual(Some("pink"), "slate", &PROJECT_COLORS, "color"),
+            normalize_repository_visual(Some("pink"), &PROJECT_COLORS, "color"),
             Ok(Some("pink".to_string()))
         );
     }

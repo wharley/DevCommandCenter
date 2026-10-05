@@ -768,6 +768,7 @@ export function CreateWorkspaceDialog({
 												<ProjectIdentityGlyph
 													icon={repository.icon}
 													color={repository.color}
+													seed={repository.rootPath}
 													size="sm"
 													className="size-6"
 												/>
@@ -877,6 +878,7 @@ export function CreateWorkspaceDialog({
 												<ProjectIdentityGlyph
 													icon={repository.icon}
 													color={repository.color}
+													seed={repository.rootPath}
 													size="sm"
 												/>
 												<span className="min-w-0">

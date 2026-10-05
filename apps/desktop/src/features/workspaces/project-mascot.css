@@ -1,0 +1,50 @@
+/* Pixel mascots for projects — see project-mascots.ts. */
+
+/* `+` pixels: a softer tone of the project color. Lighter on the light theme
+   (opacity over a pale tile), mixed toward white on the dark theme. */
+.dcc-mascot-accent {
+	opacity: 0.5;
+}
+
+.dark .dcc-mascot-accent {
+	opacity: 1;
+	fill: color-mix(in oklab, currentColor 50%, white);
+}
+
+/* While an agent runs in the project, the two frames alternate. */
+.dcc-mascot-move {
+	visibility: hidden;
+}
+
+.dcc-mascot.is-active .dcc-mascot-rest {
+	animation: dcc-mascot-rest 0.9s steps(1, end) infinite;
+}
+
+.dcc-mascot.is-active .dcc-mascot-move {
+	animation: dcc-mascot-move 0.9s steps(1, end) infinite;
+}
+
+@keyframes dcc-mascot-rest {
+	0% {
+		visibility: visible;
+	}
+	50% {
+		visibility: hidden;
+	}
+}
+
+@keyframes dcc-mascot-move {
+	0% {
+		visibility: hidden;
+	}
+	50% {
+		visibility: visible;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.dcc-mascot.is-active .dcc-mascot-rest,
+	.dcc-mascot.is-active .dcc-mascot-move {
+		animation: none;
+	}
+}

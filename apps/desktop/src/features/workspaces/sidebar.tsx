@@ -187,6 +187,7 @@ function WorkspaceRepoPicker({
 								<ProjectIdentityGlyph
 									icon={repository.icon}
 									color={repository.color}
+									seed={repository.rootPath}
 									size="sm"
 								/>
 								<span className="flex min-w-0 flex-1 flex-col">
@@ -892,6 +893,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									<ProjectIdentityGlyph
 										icon={repository.icon}
 										color={repository.color}
+										seed={repository.rootPath}
+										active={groupSignal === "running"}
 										size="sm"
 										className="size-[18px]"
 									/>
@@ -1081,6 +1084,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					}
 					projectIcon={workspaceRepository?.icon ?? null}
 					projectColor={workspaceRepository?.color ?? null}
+					projectSeed={workspaceRepository?.rootPath ?? null}
 					onSelect={
 						item.workspace.status === "archived" ||
 						item.workspace.status === "completed"
@@ -1559,6 +1563,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 															<ProjectIdentityGlyph
 																icon={repository.icon}
 																color={repository.color}
+																seed={repository.rootPath}
 																size="sm"
 																className="size-3 shrink-0"
 															/>

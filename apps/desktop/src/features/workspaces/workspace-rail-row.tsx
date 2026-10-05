@@ -75,6 +75,7 @@ export type WorkspaceRailRowProps = {
 	projectLabel?: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
+	projectSeed?: string | null;
 	onSelect?: (workspaceId: string) => void;
 	onRenameWorkspace?: (workspaceId: string, name: string) => void | Promise<void>;
 	onArchiveWorkspace?: (workspaceId: string) => void;
@@ -158,6 +159,7 @@ function WorkspaceIdentityCard({
 	projectLabel,
 	projectIcon,
 	projectColor,
+	projectSeed,
 	currentBranch,
 	activity,
 }: {
@@ -166,6 +168,7 @@ function WorkspaceIdentityCard({
 	projectLabel?: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
+	projectSeed?: string | null;
 	currentBranch: string;
 	activity?: WorkspaceAgentActivity | null;
 }) {
@@ -204,6 +207,7 @@ function WorkspaceIdentityCard({
 						<ProjectIdentityGlyph
 							icon={projectIcon}
 							color={projectColor}
+							seed={projectSeed}
 							size="sm"
 							title={projectName}
 						/>
@@ -285,6 +289,7 @@ export const WorkspaceRailRowItem = memo(
 		projectLabel,
 		projectIcon,
 		projectColor,
+		projectSeed,
 		onSelect,
 		onRenameWorkspace,
 		onArchiveWorkspace,
@@ -631,6 +636,7 @@ export const WorkspaceRailRowItem = memo(
 									projectLabel={projectLabel}
 									projectIcon={projectIcon}
 									projectColor={projectColor}
+									projectSeed={projectSeed}
 									currentBranch={railState.currentBranch}
 									activity={activity}
 								/>
@@ -875,6 +881,7 @@ export const WorkspaceRailRowItem = memo(
 		previous.projectLabel === next.projectLabel &&
 		previous.projectIcon === next.projectIcon &&
 		previous.projectColor === next.projectColor &&
+		previous.projectSeed === next.projectSeed &&
 		previous.workspace === next.workspace &&
 		previous.onSelect === next.onSelect &&
 		previous.onRenameWorkspace === next.onRenameWorkspace &&

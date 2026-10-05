@@ -428,6 +428,11 @@
     "nameHint": "Este nome será usado na sidebar, no cabeçalho, no Dock e nos seletores. O nome técnico permanece intacto.",
     "iconLabel": "Ícone",
     "colorLabel": "Cor",
+    "auto": "Automático",
+    "autoShort": "Auto",
+    "autoHint": "Escolhido a partir do caminho do projeto — cada projeto ganha o seu bicho.",
+    "faunaLabel": "Fauna brasileira",
+    "symbolsLabel": "Símbolos",
     "icons": {
       "folder": "Pasta",
       "terminal": "Terminal",
@@ -440,7 +445,17 @@
       "branch": "Branch",
       "cpu": "Processador",
       "shield": "Proteção",
-      "wrench": "Ferramenta"
+      "wrench": "Ferramenta",
+      "capivara": "Capivara",
+      "tucano": "Tucano",
+      "arara": "Arara",
+      "mico": "Mico-leão-dourado",
+      "tatu": "Tatu",
+      "onca": "Onça-pintada",
+      "jabuti": "Jabuti",
+      "boto": "Boto-cor-de-rosa",
+      "sapo": "Sapo",
+      "polvo": "Polvo"
     },
     "colors": {
       "slate": "Ardósia",

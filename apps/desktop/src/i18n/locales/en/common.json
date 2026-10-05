@@ -428,6 +428,11 @@
     "nameHint": "This name is used in the sidebar, header, Dock, and pickers. The technical name stays intact.",
     "iconLabel": "Icon",
     "colorLabel": "Color",
+    "auto": "Automatic",
+    "autoShort": "Auto",
+    "autoHint": "Picked from the project path — every project gets its own critter.",
+    "faunaLabel": "Brazilian fauna",
+    "symbolsLabel": "Symbols",
     "icons": {
       "folder": "Folder",
       "terminal": "Terminal",
@@ -440,7 +445,17 @@
       "branch": "Branch",
       "cpu": "Processor",
       "shield": "Protection",
-      "wrench": "Tool"
+      "wrench": "Tool",
+      "capivara": "Capybara",
+      "tucano": "Toucan",
+      "arara": "Macaw",
+      "mico": "Golden lion tamarin",
+      "tatu": "Armadillo",
+      "onca": "Jaguar",
+      "jabuti": "Tortoise",
+      "boto": "Pink river dolphin",
+      "sapo": "Frog",
+      "polvo": "Octopus"
     },
     "colors": {
       "slate": "Slate",

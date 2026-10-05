@@ -209,6 +209,7 @@ type WorkspacePanelProps = {
 	projectLabel?: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
+	projectSeed?: string | null;
 	isIsolatedWorkspace?: boolean;
 	workspaceContextProjects?: Array<{
 		id: string;
@@ -216,6 +217,7 @@ type WorkspacePanelProps = {
 		branch: string;
 		icon?: string | null;
 		color?: string | null;
+		seed?: string | null;
 	}>;
 	sessionQueryScope?: string;
 	selectedProviderId: string | null;
@@ -323,6 +325,7 @@ export function WorkspacePanel({
 	projectLabel = null,
 	projectIcon = null,
 	projectColor = null,
+	projectSeed = null,
 	isIsolatedWorkspace = true,
 	workspaceContextProjects = [],
 	sessionQueryScope = "local",
@@ -1749,6 +1752,7 @@ export function WorkspacePanel({
 						projectLabel={projectLabel}
 						projectIcon={projectIcon}
 						projectColor={projectColor}
+						projectSeed={projectSeed}
 						currentBranch={currentBranch}
 						isIsolatedWorkspace={isIsolatedWorkspace}
 						contextProjects={workspaceContextProjects}

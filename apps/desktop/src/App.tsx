@@ -5587,6 +5587,7 @@ export default function App() {
 		: null;
 	const activeProjectIcon = activeProjectRepository?.icon ?? null;
 	const activeProjectColor = activeProjectRepository?.color ?? null;
+	const activeProjectSeed = activeProjectRepository?.rootPath ?? null;
 	const inlineGitDiffReview = isInlineGitDiffReview(
 		surfaceSelection?.kind ?? null,
 		gitDiffExpanded,
@@ -5892,6 +5893,7 @@ export default function App() {
 									projectLabel={activeProjectLabel}
 									projectIcon={activeProjectIcon}
 									projectColor={activeProjectColor}
+									projectSeed={activeProjectSeed}
 									terminalWorktreePath={
 										isRemoteBackend ? null : (activeWorkspace?.worktreePath ?? null)
 									}
@@ -5907,6 +5909,7 @@ export default function App() {
 											branch: workspace.branch,
 											icon: repository?.icon ?? null,
 											color: repository?.color ?? null,
+											seed: repository?.rootPath ?? workspace.rootPath ?? null,
 											hasChanges:
 												bundleMemberChangeQueries[index]?.data?.hasChanges ?? null,
 											needsDelivery:

@@ -105,6 +105,7 @@ export function NewTaskLaunchState({
 									<ProjectIdentityGlyph
 										icon={repository.icon}
 										color={repository.color}
+										seed={repository.rootPath}
 										size="sm"
 										className="size-6"
 									/>
@@ -184,6 +185,7 @@ export function NewTaskLaunchState({
 									<ProjectIdentityGlyph
 										icon={repository.icon}
 										color={repository.color}
+										seed={repository.rootPath}
 										size="sm"
 										className="size-9 shrink-0 rounded-xl"
 									/>

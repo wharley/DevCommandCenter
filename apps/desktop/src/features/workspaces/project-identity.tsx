@@ -14,6 +14,15 @@ import {
 	Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+	autoProjectMascot,
+	isProjectMascotId,
+	PROJECT_MASCOT_IDS,
+	projectMascotPaths,
+	projectSeedHash,
+	type ProjectMascotId,
+} from "./project-mascots";
+import "./project-mascot.css";
 
 export const PROJECT_ICON_OPTIONS = [
 	{ id: "folder", Icon: Folder },
@@ -45,6 +54,8 @@ export const PROJECT_COLOR_OPTIONS = [
 	"pink",
 ] as const;
 
+export const PROJECT_MASCOT_OPTIONS = PROJECT_MASCOT_IDS;
+
 export type ProjectIconId = (typeof PROJECT_ICON_OPTIONS)[number]["id"];
 export type ProjectColorId = (typeof PROJECT_COLOR_OPTIONS)[number];
 
@@ -67,34 +78,110 @@ const PROJECT_COLOR_CLASSES: Record<ProjectColorId, string> = {
 	pink: "border-pink-500/25 bg-pink-500/12 text-pink-600 dark:text-pink-300",
 };
 
-export function projectIconId(value: string | null | undefined): ProjectIconId {
-	return PROJECT_ICON_OPTIONS.some((option) => option.id === value)
-		? (value as ProjectIconId)
-		: "folder";
+export function isKnownProjectIcon(value: string | null | undefined): value is string {
+	return isProjectMascotId(value) || isProjectIconId(value);
 }
 
-export function projectColorId(value: string | null | undefined): ProjectColorId {
-	return PROJECT_COLOR_OPTIONS.includes(value as ProjectColorId)
-		? (value as ProjectColorId)
-		: "slate";
+export function isKnownProjectColor(value: string | null | undefined): value is ProjectColorId {
+	return PROJECT_COLOR_OPTIONS.includes(value as ProjectColorId);
+}
+
+/** Colors the auto pick draws from: slate reads as "unset", amber is "needs you". */
+const AUTO_COLOR_OPTIONS = PROJECT_COLOR_OPTIONS.filter(
+	(option) => option !== "slate" && option !== "amber",
+);
+
+/** Fallback mascot when a caller has no seed to hash. */
+const FALLBACK_MASCOT: ProjectMascotId = "polvo";
+
+export type ProjectIconVisual =
+	| { kind: "mascot"; id: ProjectMascotId }
+	| { kind: "icon"; id: ProjectIconId };
+
+function isProjectIconId(value: string | null | undefined): value is ProjectIconId {
+	return PROJECT_ICON_OPTIONS.some((option) => option.id === value);
+}
+
+/**
+ * An explicit pick (mascot or lucide icon) wins; anything else — null, empty,
+ * unknown — falls back to the mascot hashed from the seed (the project path).
+ */
+export function resolveProjectIcon(
+	value: string | null | undefined,
+	seed?: string | null,
+): ProjectIconVisual {
+	if (isProjectMascotId(value)) return { kind: "mascot", id: value };
+	if (isProjectIconId(value)) return { kind: "icon", id: value };
+	return { kind: "mascot", id: seed ? autoProjectMascot(seed) : FALLBACK_MASCOT };
+}
+
+export function projectColorId(
+	value: string | null | undefined,
+	seed?: string | null,
+): ProjectColorId {
+	if (PROJECT_COLOR_OPTIONS.includes(value as ProjectColorId)) {
+		return value as ProjectColorId;
+	}
+	if (!seed) return "slate";
+	return AUTO_COLOR_OPTIONS[
+		projectSeedHash(`color:${seed}`) % AUTO_COLOR_OPTIONS.length
+	]!;
+}
+
+function ProjectLucideIcon({ id }: { id: ProjectIconId }) {
+	const Icon = PROJECT_ICON_OPTIONS.find((option) => option.id === id)!.Icon;
+	return <Icon strokeWidth={1.9} />;
+}
+
+function ProjectMascotSprite({ id, active }: { id: ProjectMascotId; active: boolean }) {
+	const paths = projectMascotPaths(id);
+	return (
+		<svg
+			viewBox="0 0 10 10"
+			shapeRendering="crispEdges"
+			fill="currentColor"
+			style={{ width: "80%", height: "80%" }}
+			className={cn("dcc-mascot", active && "is-active")}
+		>
+			<g className="dcc-mascot-rest">
+				<path d={paths.rest.body} />
+				{paths.rest.accent ? (
+					<path className="dcc-mascot-accent" d={paths.rest.accent} />
+				) : null}
+			</g>
+			{active ? (
+				<g className="dcc-mascot-move">
+					<path d={paths.move.body} />
+					{paths.move.accent ? (
+						<path className="dcc-mascot-accent" d={paths.move.accent} />
+					) : null}
+				</g>
+			) : null}
+		</svg>
+	);
 }
 
 export function ProjectIdentityGlyph({
 	icon,
 	color,
+	seed,
+	active = false,
 	size = "md",
 	className,
 	title,
 }: {
 	icon?: string | null;
 	color?: string | null;
+	/** Stable project key (root path) — picks the auto mascot and color. */
+	seed?: string | null;
+	/** An agent is running in the project: the mascot animates. */
+	active?: boolean;
 	size?: "sm" | "md" | "lg";
 	className?: string;
 	title?: string;
 }) {
-	const resolvedIcon = projectIconId(icon);
-	const resolvedColor = projectColorId(color);
-	const Icon = PROJECT_ICON_OPTIONS.find((option) => option.id === resolvedIcon)!.Icon;
+	const visual = resolveProjectIcon(icon, seed);
+	const resolvedColor = projectColorId(color, seed);
 
 	return (
 		<span
@@ -109,7 +196,11 @@ export function ProjectIdentityGlyph({
 				className,
 			)}
 		>
-			<Icon strokeWidth={1.9} />
+			{visual.kind === "icon" ? (
+				<ProjectLucideIcon id={visual.id} />
+			) : (
+				<ProjectMascotSprite id={visual.id} active={active} />
+			)}
 		</span>
 	);
 }

@@ -24,6 +24,7 @@ type ExecutionContextRailProps = {
 	projectLabel: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
+	projectSeed?: string | null;
 	baseBranch: string | null;
 	currentBranch: string | null;
 	isIsolatedWorkspace: boolean;
@@ -33,6 +34,7 @@ type ExecutionContextRailProps = {
 		branch: string;
 		icon?: string | null;
 		color?: string | null;
+		seed?: string | null;
 	}>;
 	setupReport?: WorkspaceSetupReport | null;
 	onOpenTerminal?: () => void;
@@ -44,6 +46,7 @@ export const ExecutionContextRail = memo(function ExecutionContextRail({
 	projectLabel,
 	projectIcon = null,
 	projectColor = null,
+	projectSeed = null,
 	baseBranch,
 	currentBranch,
 	isIsolatedWorkspace,
@@ -66,6 +69,7 @@ export const ExecutionContextRail = memo(function ExecutionContextRail({
 					branch: baseBranch ?? "",
 					icon: projectIcon,
 					color: projectColor,
+					seed: projectSeed,
 				},
 			];
 	const setupProblem = setupReport?.steps.find(
@@ -180,6 +184,7 @@ export const ExecutionContextRail = memo(function ExecutionContextRail({
 									key={project.id}
 									icon={project.icon}
 									color={project.color}
+									seed={project.seed}
 									size="sm"
 									title={project.name}
 									className={cn("size-4", index > 0 && "-ml-1")}

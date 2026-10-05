@@ -168,6 +168,7 @@ type WorkspaceComposerProps = {
 	projectLabel: string | null;
 	projectIcon?: string | null;
 	projectColor?: string | null;
+	projectSeed?: string | null;
 	currentBranch: string | null;
 	isIsolatedWorkspace: boolean;
 	contextProjects?: Array<{
@@ -176,6 +177,7 @@ type WorkspaceComposerProps = {
 		branch: string;
 		icon?: string | null;
 		color?: string | null;
+		seed?: string | null;
 	}>;
 	showPlanFollowUpPrompt: boolean;
 	planTitle: string | null;
@@ -220,6 +222,7 @@ export function WorkspaceComposer({
 	projectLabel,
 	projectIcon = null,
 	projectColor = null,
+	projectSeed = null,
 	currentBranch,
 	isIsolatedWorkspace,
 	contextProjects = [],
@@ -1449,6 +1452,7 @@ export function WorkspaceComposer({
 			projectLabel={projectLabel}
 			projectIcon={projectIcon}
 			projectColor={projectColor}
+			projectSeed={projectSeed}
 			baseBranch={workspaceBranch}
 			currentBranch={currentBranch}
 			isIsolatedWorkspace={isIsolatedWorkspace}
