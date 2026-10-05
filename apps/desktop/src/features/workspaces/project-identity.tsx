@@ -15,13 +15,19 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-	autoProjectMascot,
+	isProjectColorId,
 	isProjectMascotId,
+	isProjectSymbolId,
+	PROJECT_COLOR_IDS,
 	PROJECT_MASCOT_IDS,
 	projectMascotPaths,
-	projectSeedHash,
+	resolveProjectColor,
+	resolveProjectIcon,
+	type ProjectColorId,
+	type ProjectIconVisual,
 	type ProjectMascotId,
-} from "./project-mascots";
+	type ProjectSymbolId,
+} from "@dcc/mascots";
 import "./project-mascot.css";
 
 export const PROJECT_ICON_OPTIONS = [
@@ -37,27 +43,14 @@ export const PROJECT_ICON_OPTIONS = [
 	{ id: "cpu", Icon: Cpu },
 	{ id: "shield", Icon: ShieldCheck },
 	{ id: "wrench", Icon: Wrench },
-] as const satisfies ReadonlyArray<{ id: string; Icon: LucideIcon }>;
+] as const satisfies ReadonlyArray<{ id: ProjectSymbolId; Icon: LucideIcon }>;
 
-export const PROJECT_COLOR_OPTIONS = [
-	"slate",
-	"sky",
-	"cyan",
-	"emerald",
-	"amber",
-	"orange",
-	"rose",
-	"violet",
-	"indigo",
-	"fuchsia",
-	"lime",
-	"pink",
-] as const;
+export const PROJECT_COLOR_OPTIONS = PROJECT_COLOR_IDS;
 
 export const PROJECT_MASCOT_OPTIONS = PROJECT_MASCOT_IDS;
 
-export type ProjectIconId = (typeof PROJECT_ICON_OPTIONS)[number]["id"];
-export type ProjectColorId = (typeof PROJECT_COLOR_OPTIONS)[number];
+export type ProjectIconId = ProjectSymbolId;
+export type { ProjectColorId, ProjectIconVisual };
 
 const PROJECT_COLOR_CLASSES: Record<ProjectColorId, string> = {
 	slate: "border-slate-500/20 bg-slate-500/10 text-slate-600 dark:text-slate-300",
@@ -79,53 +72,20 @@ const PROJECT_COLOR_CLASSES: Record<ProjectColorId, string> = {
 };
 
 export function isKnownProjectIcon(value: string | null | undefined): value is string {
-	return isProjectMascotId(value) || isProjectIconId(value);
+	return isProjectMascotId(value) || isProjectSymbolId(value);
 }
 
 export function isKnownProjectColor(value: string | null | undefined): value is ProjectColorId {
-	return PROJECT_COLOR_OPTIONS.includes(value as ProjectColorId);
+	return isProjectColorId(value);
 }
 
-/** Colors the auto pick draws from: slate reads as "unset", amber is "needs you". */
-const AUTO_COLOR_OPTIONS = PROJECT_COLOR_OPTIONS.filter(
-	(option) => option !== "slate" && option !== "amber",
-);
-
-/** Fallback mascot when a caller has no seed to hash. */
-const FALLBACK_MASCOT: ProjectMascotId = "polvo";
-
-export type ProjectIconVisual =
-	| { kind: "mascot"; id: ProjectMascotId }
-	| { kind: "icon"; id: ProjectIconId };
-
-function isProjectIconId(value: string | null | undefined): value is ProjectIconId {
-	return PROJECT_ICON_OPTIONS.some((option) => option.id === value);
-}
-
-/**
- * An explicit pick (mascot or lucide icon) wins; anything else — null, empty,
- * unknown — falls back to the mascot hashed from the seed (the project path).
- */
-export function resolveProjectIcon(
-	value: string | null | undefined,
-	seed?: string | null,
-): ProjectIconVisual {
-	if (isProjectMascotId(value)) return { kind: "mascot", id: value };
-	if (isProjectIconId(value)) return { kind: "icon", id: value };
-	return { kind: "mascot", id: seed ? autoProjectMascot(seed) : FALLBACK_MASCOT };
-}
+export { resolveProjectIcon };
 
 export function projectColorId(
 	value: string | null | undefined,
 	seed?: string | null,
 ): ProjectColorId {
-	if (PROJECT_COLOR_OPTIONS.includes(value as ProjectColorId)) {
-		return value as ProjectColorId;
-	}
-	if (!seed) return "slate";
-	return AUTO_COLOR_OPTIONS[
-		projectSeedHash(`color:${seed}`) % AUTO_COLOR_OPTIONS.length
-	]!;
+	return resolveProjectColor(value, seed);
 }
 
 function ProjectLucideIcon({ id }: { id: ProjectIconId }) {

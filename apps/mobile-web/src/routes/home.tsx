@@ -1,3 +1,4 @@
+import { ProjectGlyph } from "../components/project-glyph";
 import { useRef, useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
@@ -63,6 +64,9 @@ type Comb = {
 	branch: string | null;
 	projectId: string | null;
 	projectName: string | null;
+	projectPath?: string | null;
+	projectIcon?: string | null;
+	projectColor?: string | null;
 	worktreePath: string | null;
 	status: string | null;
 	lastOpenedAt: string | null;
@@ -966,7 +970,15 @@ function WorkspacesList({
 									isCollapsed && "-rotate-90",
 								)}
 							/>
-							<FolderGit2 className="size-3.5 shrink-0 text-mute" />
+							<ProjectGlyph
+								icon={projectCombs[0]?.projectIcon}
+								color={projectCombs[0]?.projectColor}
+								seed={projectCombs[0]?.projectPath}
+								active={projectCombs.some((comb) => {
+									const sess = latestByWorkspace.get(comb.id);
+									return sess ? statuses.get(sess.sessionId) === "running" : false;
+								})}
+							/>
 							<span className="truncate text-[12px] font-semibold">
 								{projectName}
 							</span>

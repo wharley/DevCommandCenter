@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@dcc/mascots": "0.0.0",
     "@tanstack/react-router": "^1.95.0",
     "clsx": "^2.1.1",
     "highlight.js": "^11.10.0",

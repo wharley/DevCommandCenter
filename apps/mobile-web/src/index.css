@@ -105,3 +105,32 @@ html {
 /* Avoid iOS focus zoom and leave room for the software keyboard. */
 input, textarea, select { font-size: 16px; }
 button, a { touch-action: manipulation; }
+
+/* Project mascots (shared art in @dcc/mascots). Dark-only: the accent mixes
+   toward white; the two frames alternate while an agent runs. */
+.dcc-mascot-accent {
+	fill: color-mix(in oklab, currentColor 50%, white);
+}
+.dcc-mascot-move {
+	visibility: hidden;
+}
+.dcc-mascot.is-active .dcc-mascot-rest {
+	animation: dcc-mascot-rest 0.9s steps(1, end) infinite;
+}
+.dcc-mascot.is-active .dcc-mascot-move {
+	animation: dcc-mascot-move 0.9s steps(1, end) infinite;
+}
+@keyframes dcc-mascot-rest {
+	0% { visibility: visible; }
+	50% { visibility: hidden; }
+}
+@keyframes dcc-mascot-move {
+	0% { visibility: hidden; }
+	50% { visibility: visible; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.dcc-mascot.is-active .dcc-mascot-rest,
+	.dcc-mascot.is-active .dcc-mascot-move {
+		animation: none;
+	}
+}

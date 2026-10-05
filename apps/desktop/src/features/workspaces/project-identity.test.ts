@@ -5,7 +5,7 @@ import {
 	MASCOT_GRID,
 	PROJECT_MASCOT_IDS,
 	projectMascotPaths,
-} from "./project-mascots";
+} from "@dcc/mascots";
 
 describe("project visual identity", () => {
 	it("keeps explicit picks", () => {

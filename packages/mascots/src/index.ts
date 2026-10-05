@@ -338,3 +338,83 @@ export function projectSeedHash(seed: string): number {
 export function autoProjectMascot(seed: string): ProjectMascotId {
 	return PROJECT_MASCOT_IDS[projectSeedHash(seed) % PROJECT_MASCOT_IDS.length]!;
 }
+
+// ---------------------------------------------------------------------------
+// Project identity rules shared by every DCC surface (desktop, mobile web):
+// the same project must get the same mascot and color everywhere.
+// ---------------------------------------------------------------------------
+
+/** Symbol ids a person can pick instead of a mascot (rendered per app). */
+export const PROJECT_SYMBOL_IDS = [
+	"folder",
+	"terminal",
+	"code",
+	"layers",
+	"package",
+	"database",
+	"globe",
+	"rocket",
+	"branch",
+	"cpu",
+	"shield",
+	"wrench",
+] as const;
+
+export type ProjectSymbolId = (typeof PROJECT_SYMBOL_IDS)[number];
+
+export const PROJECT_COLOR_IDS = [
+	"slate",
+	"sky",
+	"cyan",
+	"emerald",
+	"amber",
+	"orange",
+	"rose",
+	"violet",
+	"indigo",
+	"fuchsia",
+	"lime",
+	"pink",
+] as const;
+
+export type ProjectColorId = (typeof PROJECT_COLOR_IDS)[number];
+
+/** Colors the auto pick draws from: slate reads as "unset", amber is "needs you". */
+const AUTO_COLOR_IDS = PROJECT_COLOR_IDS.filter((id) => id !== "slate" && id !== "amber");
+
+/** Fallback mascot when a caller has no seed to hash. */
+const FALLBACK_MASCOT: ProjectMascotId = "polvo";
+
+export type ProjectIconVisual =
+	| { kind: "mascot"; id: ProjectMascotId }
+	| { kind: "icon"; id: ProjectSymbolId };
+
+export function isProjectSymbolId(value: string | null | undefined): value is ProjectSymbolId {
+	return PROJECT_SYMBOL_IDS.includes(value as ProjectSymbolId);
+}
+
+export function isProjectColorId(value: string | null | undefined): value is ProjectColorId {
+	return PROJECT_COLOR_IDS.includes(value as ProjectColorId);
+}
+
+/**
+ * An explicit pick (mascot or symbol) wins; anything else — null, empty,
+ * unknown — falls back to the mascot hashed from the seed (the project path).
+ */
+export function resolveProjectIcon(
+	value: string | null | undefined,
+	seed?: string | null,
+): ProjectIconVisual {
+	if (isProjectMascotId(value)) return { kind: "mascot", id: value };
+	if (isProjectSymbolId(value)) return { kind: "icon", id: value };
+	return { kind: "mascot", id: seed ? autoProjectMascot(seed) : FALLBACK_MASCOT };
+}
+
+export function resolveProjectColor(
+	value: string | null | undefined,
+	seed?: string | null,
+): ProjectColorId {
+	if (isProjectColorId(value)) return value;
+	if (!seed) return "slate";
+	return AUTO_COLOR_IDS[projectSeedHash(`color:${seed}`) % AUTO_COLOR_IDS.length]!;
+}

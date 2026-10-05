@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@dcc/contracts": "0.0.0",
+    "@dcc/mascots": "0.0.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
     "@lexical/link": "0.44.0",
