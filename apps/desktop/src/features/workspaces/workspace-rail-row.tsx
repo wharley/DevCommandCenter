@@ -78,6 +78,8 @@ export type WorkspaceRailRowProps = {
 	activity?: WorkspaceAgentActivity | null;
 	/** The latest finished result has not been opened yet. */
 	unseenResult?: boolean;
+	/** Delegated edits waiting for the person to apply or discard. */
+	pendingDelegatedReviews?: number;
 	providerId?: string | null;
 	metadataEnabled?: boolean;
 	projectLabel?: string | null;
@@ -339,6 +341,7 @@ export const WorkspaceRailRowItem = memo(
 		selected,
 		activity,
 		unseenResult = false,
+		pendingDelegatedReviews = 0,
 		providerId,
 		metadataEnabled = true,
 		projectLabel,
@@ -364,6 +367,7 @@ export const WorkspaceRailRowItem = memo(
 			workspacePath,
 			branch: workspace.branch,
 			activity: activity ?? null,
+			pendingDelegationResultsCount: pendingDelegatedReviews,
 			enabled:
 				metadataEnabled &&
 				workspace.status !== "archived" &&
@@ -949,6 +953,7 @@ export const WorkspaceRailRowItem = memo(
 		previous.activity?.startedAt === next.activity?.startedAt &&
 		previous.activity?.completedAt === next.activity?.completedAt &&
 		previous.unseenResult === next.unseenResult &&
+		previous.pendingDelegatedReviews === next.pendingDelegatedReviews &&
 		previous.metadataEnabled === next.metadataEnabled &&
 		previous.projectLabel === next.projectLabel &&
 		previous.projectIcon === next.projectIcon &&

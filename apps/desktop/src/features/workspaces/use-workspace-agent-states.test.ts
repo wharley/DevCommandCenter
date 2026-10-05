@@ -367,3 +367,42 @@ describe("attentionWorkspaceItems", () => {
 		).toEqual([]);
 	});
 });
+
+describe("attentionWorkspaceItems with backend blockers", () => {
+	const workspace = (id: string): WorkspaceSummary => ({ id, name: id, branch: "main", status: "ready" });
+
+	it("surfaces git and review blockers, most urgent first, but not over a running agent", () => {
+		const result = attentionWorkspaceItems(
+			[workspace("checks"), workspace("conflict"), workspace("busy"), workspace("review")],
+			{ busy: { state: "active", startedAt: null, completedAt: null } },
+			() => false,
+			new Map([
+				["checks", [{ workspaceId: "checks", kind: "checks_failing", count: 12 }]],
+				["conflict", [{ workspaceId: "conflict", kind: "conflicts", count: null }]],
+				["busy", [{ workspaceId: "busy", kind: "conflicts", count: null }]],
+				[
+					"review",
+					[
+						{ workspaceId: "review", kind: "delegated_edits_review", count: 2 },
+						{ workspaceId: "review", kind: "pr_conflicts", count: 7 },
+					],
+				],
+			]),
+		);
+		expect(result.map((item) => [item.workspace.id, item.reason, item.count])).toEqual([
+			["conflict", "conflicts", null],
+			["review", "prConflicts", 7],
+			["checks", "checksFailing", 12],
+		]);
+	});
+
+	it("keeps an agent waiting on the person ahead of a git blocker", () => {
+		const result = attentionWorkspaceItems(
+			[workspace("w")],
+			{ w: { state: "waiting", waitingFor: "permission", startedAt: null, completedAt: null } },
+			() => false,
+			new Map([["w", [{ workspaceId: "w", kind: "conflicts", count: null }]]]),
+		);
+		expect(result.map((item) => item.reason)).toEqual(["permission"]);
+	});
+});

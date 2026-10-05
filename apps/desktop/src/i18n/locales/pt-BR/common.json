@@ -329,6 +329,11 @@
       "showMore_other": "Mostrar mais {{count}}",
       "showFewer": "Mostrar menos",
       "reason": {
+        "conflicts": "Conflitos para resolver",
+        "prConflicts": "PR #{{pr}} em conflito com a base",
+        "checksFailing": "Checks falhando no PR #{{pr}}",
+        "delegatedReview_one": "{{count}} mudança delegada para revisar",
+        "delegatedReview_other": "{{count}} mudanças delegadas para revisar",
         "permission": "Aguardando aprovação",
         "input": "Aguardando você",
         "setup": "Setup pendente",

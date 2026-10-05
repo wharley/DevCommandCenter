@@ -118,9 +118,10 @@ export function buildWorkspaceRailRecap(input: {
 	gitStatus: WorkspaceGitStatusOutput | null;
 	prStatus: WorkspacePrStatusOutput | null;
 	committedVsBaseCount?: number;
+	pendingDelegationResultsCount?: number;
 }): WorkspaceRailRecap | null {
 	const { activity, gitStatus, prStatus } = input;
-	if (!activity && !gitStatus && !prStatus) {
+	if (!activity && !gitStatus && !prStatus && !input.pendingDelegationResultsCount) {
 		return null;
 	}
 
@@ -150,7 +151,7 @@ export function buildWorkspaceRailRecap(input: {
 		prState: prStatus?.state ?? null,
 		requestLabel: prStatus?.provider === "gitlab" ? "MR" : "PR",
 		pendingReviewFindingsCount: 0,
-		pendingDelegationResultsCount: 0,
+		pendingDelegationResultsCount: input.pendingDelegationResultsCount ?? 0,
 	});
 
 	// A brand-new idle workspace does not need a redundant "all clean" row.
@@ -169,6 +170,7 @@ export function useWorkspaceRailRecap(input: {
 	branch: string;
 	activity: WorkspaceAgentActivity | null;
 	enabled: boolean;
+	pendingDelegationResultsCount?: number;
 	onPullRequestMerged?: () => void | Promise<void>;
 }): WorkspaceRailState {
 	const root = input.enabled ? input.workspacePath : null;
@@ -249,6 +251,7 @@ export function useWorkspaceRailRecap(input: {
 					gitStatus: gitStatusQuery.data ?? null,
 					prStatus: prStatusQuery.data ?? null,
 					committedVsBaseCount: branchDiffQuery.data?.changes.length ?? 0,
+					pendingDelegationResultsCount: input.pendingDelegationResultsCount ?? 0,
 				}),
 			};
 		},
@@ -259,6 +262,7 @@ export function useWorkspaceRailRecap(input: {
 			gitStatusQuery.data,
 			gitStatusQuery.isPending,
 			input.activity,
+			input.pendingDelegationResultsCount,
 			needsBranchDiff,
 			prStatusQuery.data,
 			prStatusQuery.isPending,

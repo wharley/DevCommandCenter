@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import type { WorkspaceSessionSummary } from "@dcc/contracts";
+import type { WorkspaceBlocker, WorkspaceSessionSummary } from "@dcc/contracts";
 import { workspaceSessionsQueryOptions } from "@/features/sessions/workspace-sessions-query";
 import type { WorkspaceSummary } from "./types";
 
@@ -70,20 +70,42 @@ export function runningWorkspaceActivities(
 }
 
 /** Why a task shows up under "Precisa de você", most urgent first. */
-export type AttentionReason = "permission" | "input" | "setup" | "aborted" | "completed";
+export type AttentionReason =
+	| "permission"
+	| "input"
+	| "conflicts"
+	| "prConflicts"
+	| "checksFailing"
+	| "delegatedReview"
+	| "setup"
+	| "aborted"
+	| "completed";
 
 const ATTENTION_ORDER: Record<AttentionReason, number> = {
 	permission: 0,
 	input: 1,
-	setup: 2,
-	aborted: 3,
-	completed: 4,
+	conflicts: 2,
+	prConflicts: 3,
+	checksFailing: 4,
+	delegatedReview: 5,
+	setup: 6,
+	aborted: 7,
+	completed: 8,
+};
+
+const BLOCKER_REASON: Record<WorkspaceBlocker["kind"], AttentionReason> = {
+	conflicts: "conflicts",
+	pr_conflicts: "prConflicts",
+	checks_failing: "checksFailing",
+	delegated_edits_review: "delegatedReview",
 };
 
 export type AttentionWorkspaceItem = {
 	workspace: WorkspaceSummary;
 	activity: WorkspaceAgentActivity | null;
 	reason: AttentionReason;
+	/** PR number for PR blockers, count for delegated reviews. */
+	count?: number | null;
 };
 
 function attentionAtMs(item: AttentionWorkspaceItem): number {
@@ -103,6 +125,7 @@ export function attentionWorkspaceItems(
 	workspaces: WorkspaceSummary[],
 	activities: Record<string, WorkspaceAgentActivity>,
 	isResultUnread: (workspaceId: string, completedAt: string | null) => boolean,
+	blockers: ReadonlyMap<string, readonly WorkspaceBlocker[]> = new Map(),
 ): AttentionWorkspaceItem[] {
 	return workspaces
 		.flatMap((workspace): AttentionWorkspaceItem[] => {
@@ -116,6 +139,25 @@ export function attentionWorkspaceItems(
 						workspace,
 						activity,
 						reason: activity.waitingFor === "permission" ? "permission" : "input",
+					},
+				];
+			}
+			// Git and review blockers outrank setup and unread results; a
+			// running agent is left alone until it comes back.
+			const blocker = isAgentTurnOpen(activity)
+				? undefined
+				: [...(blockers.get(workspace.id) ?? [])].sort(
+						(left, right) =>
+							ATTENTION_ORDER[BLOCKER_REASON[left.kind]] -
+							ATTENTION_ORDER[BLOCKER_REASON[right.kind]],
+					)[0];
+			if (blocker) {
+				return [
+					{
+						workspace,
+						activity,
+						reason: BLOCKER_REASON[blocker.kind],
+						count: blocker.count ?? null,
 					},
 				];
 			}

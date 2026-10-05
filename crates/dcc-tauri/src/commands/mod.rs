@@ -10,6 +10,7 @@ pub mod mcp_commands;
 pub mod provider_commands;
 pub mod research_commands;
 pub mod session_commands;
+pub mod workspace_attention;
 pub mod workspace_commands;
 pub(crate) mod workspace_support;
 

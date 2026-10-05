@@ -1,4 +1,7 @@
 use dcc_tauri::commands::local_branches::{LocalBranchesInput, LocalBranchesOutput, SwitchLocalBranchInput};
+use dcc_tauri::commands::workspace_attention::{
+    WorkspaceAttentionBlockersOutput, WorkspaceBlocker, WorkspaceBlockerKind,
+};
 use std::{env, fs, path::PathBuf, process::Command};
 
 fn build_macos_computer_bridge() {
@@ -502,6 +505,7 @@ struct WorkspaceMethods {
     workspace_delivery_failure_snapshot: String,
     workspace_delivery_recovery_execute: String,
     workspace_git_branch_diff: String,
+    workspace_attention_blockers: String,
     workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
     workspace_git_commit: String,
@@ -869,6 +873,9 @@ fn main() {
         .typ::<AiMemoryQueryHit>()
         .typ::<WorkspaceGitBranchDiffInput>()
         .typ::<WorkspaceGitBranchDiffOutput>()
+        .typ::<WorkspaceBlockerKind>()
+        .typ::<WorkspaceBlocker>()
+        .typ::<WorkspaceAttentionBlockersOutput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitPreviewScope>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitFilePreviewInput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitFilePreviewContentOutput>()
@@ -1142,6 +1149,7 @@ fn main() {
                 workspace_delivery_recovery_execute: "workspace_delivery_recovery_execute"
                     .to_string(),
                 workspace_git_branch_diff: "workspace_git_branch_diff".to_string(),
+                workspace_attention_blockers: "workspace_attention_blockers".to_string(),
                 workspace_apply_delegation_worktree: "workspace_apply_delegation_worktree"
                     .to_string(),
                 workspace_git_file_preview: "workspace_git_file_preview".to_string(),

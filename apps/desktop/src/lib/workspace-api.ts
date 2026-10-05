@@ -77,6 +77,7 @@ import type {
 	ListWorkspacesOutput,
 	MissionSpecContextStatusInput,
 	MissionSpecContextStatusOutput,
+	WorkspaceAttentionBlockersOutput,
 	WorkspaceGitBranchDiffInput,
 	WorkspaceGitBranchDiffOutput,
 	WorkspaceGitFilePreviewInput,
@@ -783,4 +784,9 @@ export function workspaceLocalBranches(input: import("@dcc/contracts").LocalBran
 
 export function workspaceSwitchLocalBranch(input: import("@dcc/contracts").SwitchLocalBranchInput) {
 	return invoke<import("@dcc/contracts").LocalBranchesOutput>(WORKSPACE_METHODS.workspaceSwitchLocalBranch, { input });
+}
+
+/** Blockers (conflicts, failing checks, delegated edits to review) for every active task. */
+export function workspaceAttentionBlockers() {
+	return invoke<WorkspaceAttentionBlockersOutput>(WORKSPACE_METHODS.workspaceAttentionBlockers);
 }

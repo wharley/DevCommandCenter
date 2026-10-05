@@ -2662,6 +2662,13 @@ pub async fn workspace_pr_status(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspacePrStatusInput,
 ) -> Result<WorkspacePrStatusOutput, String> {
+    workspace_pr_status_with_state(&state, input).await
+}
+
+pub async fn workspace_pr_status_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspacePrStatusInput,
+) -> Result<WorkspacePrStatusOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
 
     let root = input.workspace_root.trim();

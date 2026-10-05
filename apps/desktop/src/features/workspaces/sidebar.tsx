@@ -94,6 +94,7 @@ import {
 	useWorkspaceProviderIds,
 	type AttentionReason,
 } from "./use-workspace-agent-states";
+import { blockersByWorkspace, useWorkspaceBlockers } from "./use-workspace-blockers";
 import {
 	isWorkspaceResultUnread,
 	markWorkspaceResultSeen,
@@ -136,6 +137,10 @@ const ATTENTION_PREVIEW_LIMIT = 5;
 const ATTENTION_DOT_CLASS: Record<AttentionReason, string> = {
 	permission: "bg-amber-500",
 	input: "bg-amber-500",
+	conflicts: "bg-amber-500",
+	prConflicts: "bg-amber-500",
+	checksFailing: "bg-destructive",
+	delegatedReview: "bg-amber-500",
 	setup: "bg-amber-500/80",
 	aborted: "bg-destructive",
 	completed: "bg-sky-500",
@@ -144,6 +149,10 @@ const ATTENTION_DOT_CLASS: Record<AttentionReason, string> = {
 const ATTENTION_TEXT_CLASS: Record<AttentionReason, string> = {
 	permission: "text-amber-700 dark:text-amber-300/90",
 	input: "text-amber-700 dark:text-amber-300/90",
+	conflicts: "text-amber-700 dark:text-amber-300/90",
+	prConflicts: "text-amber-700 dark:text-amber-300/90",
+	checksFailing: "text-destructive/85",
+	delegatedReview: "text-amber-700 dark:text-amber-300/90",
 	setup: "text-amber-700 dark:text-amber-300/90",
 	aborted: "text-destructive/85",
 	completed: "text-sky-700 dark:text-sky-300/90",
@@ -401,12 +410,18 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		[workspaceAgentActivities, workspaces],
 	);
 	const seenResults = useSeenWorkspaceResults();
+	const blockersQuery = useWorkspaceBlockers(showAgentStates && sessionQueryScope === "local");
+	const workspaceBlockers = useMemo(
+		() => blockersByWorkspace(blockersQuery.data ?? []),
+		[blockersQuery.data],
+	);
 	const attentionItems = useMemo(
 		() =>
 			attentionWorkspaceItems(workspaces, workspaceAgentActivities, (workspaceId, completedAt) =>
 				isWorkspaceResultUnread(completedAt, seenResults.seen[workspaceId], seenResults.baseline),
+				workspaceBlockers,
 			),
-		[seenResults, workspaceAgentActivities, workspaces],
+		[seenResults, workspaceAgentActivities, workspaceBlockers, workspaces],
 	);
 	const unseenResultWorkspaceIds = useMemo(
 		() =>
@@ -1130,6 +1145,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					selected={selectedWorkspaceId === item.workspace.id}
 					activity={workspaceAgentActivities[item.workspace.id] ?? null}
 					unseenResult={unseenResultWorkspaceIds.has(item.workspace.id)}
+					pendingDelegatedReviews={
+						workspaceBlockers
+							.get(item.workspace.id)
+							?.find((blocker) => blocker.kind === "delegated_edits_review")?.count ?? 0
+					}
 					providerId={workspaceProviderIds[item.workspace.id] ?? null}
 					metadataEnabled={showAgentStates}
 					projectLabel={
@@ -1184,6 +1204,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			toggleSection,
 			unseenResultWorkspaceIds,
 			workspaceAgentActivities,
+			workspaceBlockers,
 			showAgentStates,
 		],
 	);
@@ -1554,7 +1575,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</span>
 						</div>
 						<div className="dcc-attention-panel space-y-px rounded-lg border border-border/45 bg-foreground/[0.018] p-0.5">
-							{visibleAttentionItems.map(({ workspace, activity, reason }) => {
+							{visibleAttentionItems.map(({ workspace, activity, reason, count }) => {
 								const title = workspaceRailDisplayTitle(workspace);
 								const sourceKey = projectGroupingKey(workspace);
 								const memberProjects = [...new Set(workspace.memberProjectNames ?? [])];
@@ -1567,7 +1588,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											t("sidebar.unknownProject");
 								const repository = repositoriesBySourceKey.get(sourceKey) ?? null;
 								const selected = selectedWorkspaceId === workspace.id;
-								const reasonLabel = t(`sidebar.attention.reason.${reason}`);
+								const reasonLabel = t(`sidebar.attention.reason.${reason}`, {
+									count: count ?? 0,
+									pr: count ?? "",
+								});
 
 								return (
 									<Tooltip key={workspace.id} delayDuration={450}>

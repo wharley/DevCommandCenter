@@ -571,3 +571,10 @@ pub async fn workspace_switch_local_branch(
 ) -> Result<dcc_tauri::commands::local_branches::LocalBranchesOutput, String> {
     dcc_tauri::commands::local_branches::workspace_switch_local_branch(state, input).await
 }
+
+#[tauri::command]
+pub async fn workspace_attention_blockers(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<dcc_tauri::commands::workspace_attention::WorkspaceAttentionBlockersOutput, String> {
+    dcc_tauri::commands::workspace_attention::workspace_attention_blockers(state).await
+}

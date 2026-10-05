@@ -329,6 +329,11 @@
       "showMore_other": "Show {{count}} more",
       "showFewer": "Show fewer",
       "reason": {
+        "conflicts": "Conflicts to resolve",
+        "prConflicts": "PR #{{pr}} conflicts with base",
+        "checksFailing": "Checks failing on PR #{{pr}}",
+        "delegatedReview_one": "{{count}} delegated change to review",
+        "delegatedReview_other": "{{count}} delegated changes to review",
         "permission": "Awaiting approval",
         "input": "Waiting for you",
         "setup": "Setup pending",
