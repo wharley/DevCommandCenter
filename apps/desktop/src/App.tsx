@@ -166,6 +166,7 @@ import {
 	listWorkspaces,
 	setRepositoryPinned,
 	setWorkspacePinned,
+	setWorkspaceSnooze,
 	updateRepositoryIdentity,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
@@ -5009,6 +5010,21 @@ export default function App() {
 		},
 		[backendCacheKey, queryClient],
 	);
+	const handleSnoozeWorkspace = useCallback(
+		async (workspaceId: string, until: string | null) => {
+			const updated = await setWorkspaceSnooze({ workspaceId, until });
+			queryClient.setQueryData<WorkspaceSummary[]>(
+				["workspaces", backendCacheKey],
+				(current = []) =>
+					current.map((workspace) =>
+						workspace.id === updated.id
+							? { ...workspace, snoozedUntil: updated.snoozedUntil ?? null }
+							: workspace,
+					),
+			);
+		},
+		[backendCacheKey, queryClient],
+	);
 	const handleRemoteWorkspaceMutation = useCallback(() => {
 		showRemoteUnsupported("workspaces");
 	}, [showRemoteUnsupported]);
@@ -5114,6 +5130,7 @@ export default function App() {
 							activeAgentId={globalSurface === "agent" ? activeAgentId : null}
 							onOpenAgent={handleOpenAgent}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+							onSnoozeWorkspace={isRemoteBackend ? undefined : handleSnoozeWorkspace}
 							onArchiveWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleArchiveWorkspace
 							}

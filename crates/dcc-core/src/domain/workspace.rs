@@ -95,6 +95,10 @@ pub struct Workspace {
     pub setup_report: Option<WorkspaceSetupReport>,
     /// When present, this task is promoted within its project in the sidebar.
     pub pinned_at: Option<String>,
+    /// Snoozed until this instant (RFC 3339): the sidebar keeps the task in
+    /// "On hold" and brings it back to "Needs you" once it passes.
+    #[serde(default)]
+    pub snoozed_until: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

@@ -140,6 +140,7 @@ where
         state: WorkspaceState::SetupPending,
         setup_report: None,
         pinned_at: None,
+        snoozed_until: None,
         created_at: created_at,
         updated_at: now,
     };

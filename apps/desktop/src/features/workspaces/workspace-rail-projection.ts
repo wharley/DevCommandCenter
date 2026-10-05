@@ -1,3 +1,4 @@
+import { isSnoozed } from "./workspace-snooze";
 import type { Repository } from "@dcc/contracts";
 import type { WorkspaceSummary } from "./types";
 import type { WorkspaceAgentActivity } from "./use-workspace-agent-states";
@@ -100,15 +101,24 @@ export function projectWorkspaceRailGroups(
 	workspaces: WorkspaceSummary[],
 	repositories: Repository[] = [],
 	lastInteractionAt: Readonly<Record<string, string | null | undefined>> = {},
+	now: number = Date.now(),
 ): {
 	activeGroups: DccWorkspaceRailGroup[];
 	waitingRows: DccWorkspaceRailRow[];
 	completedRows: DccWorkspaceRailRow[];
 } {
-	const waitingRows = workspaces.filter((workspace) => workspace.status === "archived");
+	// Snoozed tasks wait with the paused ones until their time comes.
+	const waitingRows = workspaces.filter(
+		(workspace) =>
+			workspace.status === "archived" ||
+			(workspace.status !== "completed" && isSnoozed(workspace, now)),
+	);
 	const completedRows = workspaces.filter((workspace) => workspace.status === "completed");
 	const active = workspaces.filter(
-		(workspace) => workspace.status !== "archived" && workspace.status !== "completed",
+		(workspace) =>
+			workspace.status !== "archived" &&
+			workspace.status !== "completed" &&
+			!isSnoozed(workspace, now),
 	);
 
 	const byKey = new Map<string, WorkspaceSummary[]>();

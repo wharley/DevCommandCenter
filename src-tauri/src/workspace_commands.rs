@@ -578,3 +578,11 @@ pub async fn workspace_attention_blockers(
 ) -> Result<dcc_tauri::commands::workspace_attention::WorkspaceAttentionBlockersOutput, String> {
     dcc_tauri::commands::workspace_attention::workspace_attention_blockers(state).await
 }
+
+#[tauri::command]
+pub async fn set_workspace_snooze(
+    state: State<'_, WorkspaceCommandState>,
+    input: dcc_tauri::commands::workspace_commands::SetWorkspaceSnoozeInput,
+) -> Result<dcc_core::domain::workspace::Workspace, String> {
+    dcc_tauri::commands::workspace_commands::set_workspace_snooze(state, input).await
+}

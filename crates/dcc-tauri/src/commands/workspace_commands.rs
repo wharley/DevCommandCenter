@@ -523,6 +523,14 @@ pub struct SetWorkspacePinnedInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct SetWorkspaceSnoozeInput {
+    pub workspace_id: String,
+    /// RFC 3339 instant in the future; `None` wakes the task now.
+    pub until: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitStatusInput {
     pub workspace_root: String,
 }
@@ -8311,6 +8319,7 @@ mod editor_workspace_file_tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
@@ -8463,6 +8472,22 @@ mod editor_workspace_file_tests {
     }
 
     #[test]
+    fn snooze_needs_a_future_instant_on_an_active_task() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-05T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            normalize_snooze_until(Some("2026-10-06T09:00:00-03:00"), now, &WorkspaceState::Ready),
+            Ok(Some("2026-10-06T12:00:00+00:00".to_string()))
+        );
+        assert_eq!(normalize_snooze_until(None, now, &WorkspaceState::Ready), Ok(None));
+        assert!(normalize_snooze_until(Some("2026-10-05T11:00:00Z"), now, &WorkspaceState::Ready).is_err());
+        assert!(normalize_snooze_until(Some("tomorrow"), now, &WorkspaceState::Ready).is_err());
+        assert!(normalize_snooze_until(Some("2027-01-01T00:00:00Z"), now, &WorkspaceState::Ready).is_err());
+        assert!(normalize_snooze_until(Some("2026-10-06T09:00:00Z"), now, &WorkspaceState::Archived).is_err());
+    }
+
+    #[test]
     fn project_identity_is_optional_and_controlled() {
         assert_eq!(
             normalize_repository_display_name(Some(" Customer Portal "), "repo"),
@@ -8540,6 +8565,7 @@ mod editor_workspace_file_tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-08-01T00:00:00Z".to_string(),
             updated_at: "2026-08-01T00:00:00Z".to_string(),
         }
@@ -8717,6 +8743,7 @@ mod editor_workspace_file_tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -8762,6 +8789,7 @@ mod editor_workspace_file_tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -9484,6 +9512,7 @@ mod editor_workspace_file_tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
@@ -10924,6 +10953,7 @@ mod editor_workspace_file_tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-08-28T00:00:00Z".to_string(),
             updated_at: "2026-08-28T00:00:00Z".to_string(),
         };
@@ -12281,6 +12311,49 @@ pub async fn set_workspace_pinned(
         .await
         .map_err(|error| error.to_string())?;
     Ok(workspace)
+}
+
+/// Snoozes an active task until `until`, or wakes it (`None`).
+#[tauri::command]
+pub async fn set_workspace_snooze(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetWorkspaceSnoozeInput,
+) -> Result<Workspace, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let id = WorkspaceId(input.workspace_id);
+    let mut workspace = repo
+        .get_workspace(&id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
+    workspace.snoozed_until = normalize_snooze_until(input.until.as_deref(), Utc::now(), &workspace.state)?;
+    repo.save_workspace(&workspace)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(workspace)
+}
+
+fn normalize_snooze_until(
+    until: Option<&str>,
+    now: chrono::DateTime<Utc>,
+    state: &WorkspaceState,
+) -> Result<Option<String>, String> {
+    let Some(until) = until.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if matches!(state, WorkspaceState::Archived | WorkspaceState::Completed) {
+        return Err("only active tasks can be snoozed".to_string());
+    }
+    let at = chrono::DateTime::parse_from_rfc3339(until)
+        .map_err(|_| "snooze time must be an RFC 3339 timestamp".to_string())?
+        .with_timezone(&Utc);
+    if at <= now {
+        return Err("snooze time must be in the future".to_string());
+    }
+    if at > now + chrono::Duration::days(60) {
+        return Err("a task can be snoozed for at most 60 days".to_string());
+    }
+    Ok(Some(at.to_rfc3339()))
 }
 
 async fn rename_workspace_in_repo(

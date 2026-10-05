@@ -877,6 +877,7 @@ impl SqliteWorkspaceRepo {
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_workspaces", "source_json", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_workspaces", "pinned_at", "TEXT NULL")?;
+        Self::ensure_column(&conn, "dcc_workspaces", "snoozed_until", "TEXT NULL")?;
         Self::ensure_column(
             &conn,
             "dcc_workspace_bundle_members",
@@ -1409,6 +1410,7 @@ impl SqliteWorkspaceRepo {
             state,
             setup_report,
             pinned_at: row.get::<_, Option<String>>(9)?,
+            snoozed_until: row.get::<_, Option<String>>(12)?,
             created_at: row.get::<_, String>(10)?,
             updated_at: row.get::<_, String>(11)?,
         })
@@ -5565,8 +5567,9 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             r#"
 			INSERT INTO dcc_workspaces (
 				id, project_id, name, root_path, base_branch, worktree_path,
-				source_json, state, setup_report_json, pinned_at, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+				source_json, state, setup_report_json, pinned_at, created_at, updated_at,
+				snoozed_until
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
 			ON CONFLICT(id) DO UPDATE SET
 				project_id = excluded.project_id,
 				name = excluded.name,
@@ -5578,7 +5581,8 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
 				setup_report_json = excluded.setup_report_json,
 				pinned_at = excluded.pinned_at,
 				created_at = excluded.created_at,
-				updated_at = excluded.updated_at
+				updated_at = excluded.updated_at,
+				snoozed_until = excluded.snoozed_until
 			"#,
             params![
                 workspace.id.0.clone(),
@@ -5603,6 +5607,7 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
                 workspace.pinned_at.clone(),
                 workspace.created_at.clone(),
                 workspace.updated_at.clone(),
+                workspace.snoozed_until.clone(),
             ],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -5619,7 +5624,8 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             .query_row(
                 r#"
 				SELECT id, project_id, name, root_path, base_branch, worktree_path,
-				       source_json, state, setup_report_json, pinned_at, created_at, updated_at
+				       source_json, state, setup_report_json, pinned_at, created_at, updated_at,
+				       snoozed_until
 				  FROM dcc_workspaces
 				 WHERE id = ?1
 				"#,
@@ -5641,7 +5647,8 @@ impl WorkspaceRepo for SqliteWorkspaceRepo {
             .prepare(
                 r#"
 				SELECT id, project_id, name, root_path, base_branch, worktree_path,
-				       source_json, state, setup_report_json, pinned_at, created_at, updated_at
+				       source_json, state, setup_report_json, pinned_at, created_at, updated_at,
+				       snoozed_until
 				  FROM dcc_workspaces
 				 ORDER BY updated_at DESC, created_at DESC
 				"#,
@@ -5912,7 +5919,7 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
                     tx.execute(
                         r#"
 						UPDATE dcc_workspaces
-						   SET state = 'archived', pinned_at = NULL, updated_at = ?1
+						   SET state = 'archived', pinned_at = NULL, snoozed_until = NULL, updated_at = ?1
 						 WHERE id IN (
 						       SELECT workspace_id
 						         FROM dcc_workspace_bundle_members
@@ -5927,7 +5934,7 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
                     tx.execute(
                         r#"
 						UPDATE dcc_workspaces
-						   SET state = 'completed', pinned_at = NULL, updated_at = ?1
+						   SET state = 'completed', pinned_at = NULL, snoozed_until = NULL, updated_at = ?1
 						 WHERE id IN (
 						       SELECT workspace_id
 						         FROM dcc_workspace_bundle_members
@@ -10223,6 +10230,7 @@ mod tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-08-27T10:00:00Z".to_string(),
             updated_at: "2026-08-27T10:00:00Z".to_string(),
         };
@@ -10416,6 +10424,7 @@ mod tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -10477,6 +10486,7 @@ mod tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -10622,6 +10632,7 @@ mod tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -11476,6 +11487,7 @@ mod tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -11578,6 +11590,7 @@ mod tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: Some("2026-01-01T00:00:30Z".to_string()),
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -11730,6 +11743,7 @@ mod tests {
             state: WorkspaceState::Ready,
             setup_report: None,
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -11834,6 +11848,7 @@ mod tests {
                 message: Some("initial setup".to_string()),
             }),
             pinned_at: Some("2026-01-01T00:00:00Z".to_string()),
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -11988,6 +12003,7 @@ mod tests {
                 message: Some("Workspace was created, but setup needs attention.".to_string()),
             }),
             pinned_at: None,
+            snoozed_until: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -12027,6 +12043,7 @@ mod tests {
                 state: WorkspaceState::SetupPending,
                 setup_report: None,
                 pinned_at: Some("2026-01-01T00:00:30Z".to_string()),
+                snoozed_until: None,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
@@ -12041,6 +12058,7 @@ mod tests {
                 state: WorkspaceState::Ready,
                 setup_report: None,
                 pinned_at: Some("2026-01-01T00:00:30Z".to_string()),
+                snoozed_until: None,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },

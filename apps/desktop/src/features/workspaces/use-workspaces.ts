@@ -198,6 +198,7 @@ export function workspaceToSummary(
 		worktreePath: workspace.worktreePath,
 		setupReport: workspace.setupReport,
 		pinnedAt: workspace.pinnedAt,
+		snoozedUntil: workspace.snoozedUntil ?? null,
 		remoteDeletionTargets: remoteDeletionTarget ? [remoteDeletionTarget] : [],
 		createdAt: workspace.createdAt,
 		updatedAt: workspace.updatedAt,

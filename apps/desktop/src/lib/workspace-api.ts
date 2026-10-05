@@ -62,6 +62,7 @@ import type {
 	RenameWorkspaceInput,
 	SetRepositoryPinnedInput,
 	SetWorkspacePinnedInput,
+	SetWorkspaceSnoozeInput,
 	UpdateRepositoryIdentityInput,
 	ResolveWorkspaceSourceUrlInput,
 	WriteWorkspaceFileInput,
@@ -224,6 +225,11 @@ export function setRepositoryPinned(input: SetRepositoryPinnedInput) {
 
 export function setWorkspacePinned(input: SetWorkspacePinnedInput) {
 	return invoke<Workspace>(WORKSPACE_METHODS.setWorkspacePinned, { input });
+}
+
+/** Snoozes a task until `until` (ISO instant), or wakes it with `null`. */
+export function setWorkspaceSnooze(input: SetWorkspaceSnoozeInput) {
+	return invoke<Workspace>(WORKSPACE_METHODS.setWorkspaceSnooze, { input });
 }
 
 export function createWorkspaceFromUrl(input: CreateWorkspaceFromUrlInput) {

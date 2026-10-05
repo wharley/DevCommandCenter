@@ -360,3 +360,29 @@ describe("workspaceRailGroupSignal", () => {
 		).toBe("attention");
 	});
 });
+
+describe("snoozed tasks in the rail", () => {
+	const now = Date.parse("2026-10-07T12:00:00Z");
+	const task = (id: string, snoozedUntil: string | null) => ({
+		id,
+		name: id,
+		branch: "main",
+		status: "ready" as const,
+		rootPath: "/repo",
+		snoozedUntil,
+	});
+
+	it("keeps a snoozed task on hold until its time, then back in its project", () => {
+		const { activeGroups, waitingRows } = projectWorkspaceRailGroups(
+			[task("later", "2026-10-07T13:00:00Z"), task("woken", "2026-10-07T11:00:00Z"), task("plain", null)],
+			[],
+			{},
+			now,
+		);
+		expect(waitingRows.map((row) => row.id)).toEqual(["later"]);
+		expect(activeGroups.flatMap((group) => group.rows.map((row) => row.id)).sort()).toEqual([
+			"plain",
+			"woken",
+		]);
+	});
+});

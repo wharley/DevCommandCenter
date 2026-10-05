@@ -1937,6 +1937,7 @@ mod tests {
                     state: WorkspaceState::Ready,
                     setup_report: None,
                     pinned_at: None,
+                    snoozed_until: None,
                     created_at: "2026-10-05T10:00:00Z".to_string(),
                     updated_at: "2026-10-05T10:00:00Z".to_string(),
                 })

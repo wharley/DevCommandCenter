@@ -319,6 +319,15 @@
     "runningTasks_one": "{{count}} running task",
     "runningTasks_other": "{{count}} running tasks",
     "runningCount": "{{count}} running",
+    "snooze": {
+      "menu": "Snooze",
+      "hour": "For 1 hour",
+      "tomorrow": "Until tomorrow, 9am",
+      "monday": "Until Monday, 9am",
+      "wake": "Wake now",
+      "until": "Snoozed until {{time}}",
+      "error": "Could not snooze the task"
+    },
     "attention": {
       "title": "Needs you",
       "label_one": "{{count}} task needs you",
@@ -329,6 +338,7 @@
       "showMore_other": "Show {{count}} more",
       "showFewer": "Show fewer",
       "reason": {
+        "woke": "Back from snooze",
         "conflicts": "Conflicts to resolve",
         "prConflicts": "PR #{{pr}} conflicts with base",
         "checksFailing": "Checks failing on PR #{{pr}}",

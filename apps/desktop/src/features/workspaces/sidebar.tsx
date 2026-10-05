@@ -142,6 +142,7 @@ const ATTENTION_DOT_CLASS: Record<AttentionReason, string> = {
 	prConflicts: "bg-amber-500",
 	checksFailing: "bg-destructive",
 	delegatedReview: "bg-amber-500",
+	woke: "bg-sky-500",
 	setup: "bg-amber-500/80",
 	aborted: "bg-destructive",
 	completed: "bg-sky-500",
@@ -154,6 +155,7 @@ const ATTENTION_TEXT_CLASS: Record<AttentionReason, string> = {
 	prConflicts: "text-amber-700 dark:text-amber-300/90",
 	checksFailing: "text-destructive/85",
 	delegatedReview: "text-amber-700 dark:text-amber-300/90",
+	woke: "text-sky-700 dark:text-sky-300/90",
 	setup: "text-amber-700 dark:text-amber-300/90",
 	aborted: "text-destructive/85",
 	completed: "text-sky-700 dark:text-sky-300/90",
@@ -319,6 +321,8 @@ type WorkspacesSidebarProps = {
 	onOpenAgent?: (agentId: string) => void;
 	onToggleCollapsed: () => void;
 	onArchiveWorkspace?: (workspaceId: string) => void;
+	/** Snoozes a task until an ISO instant, or wakes it with `null`. */
+	onSnoozeWorkspace?: (workspaceId: string, until: string | null) => Promise<void>;
 	onRenameWorkspace?: (workspaceId: string, name: string) => void | Promise<void>;
 	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	onRestoreWorkspace?: (workspaceId: string) => void;
@@ -361,7 +365,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	showAgentStates = true,
 	showCompletedDiskUsage = true,
 	sessionQueryScope = "local",
-	onSelectWorkspace,
+	onSelectWorkspace: selectWorkspace,
 	onNewTask,
 	newTaskActive = false,
 	onCreateWorkspace,
@@ -387,6 +391,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onOpenAgent,
 	onToggleCollapsed,
 	onArchiveWorkspace,
+	onSnoozeWorkspace,
 	onRenameWorkspace,
 	onCompleteWorkspace,
 	onRestoreWorkspace,
@@ -399,6 +404,23 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	workspaces,
 }: WorkspacesSidebarProps) {
 	const { t, i18n } = useTranslation("common");
+	// Snoozes end on their own: re-evaluate twice a minute.
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+		return () => window.clearInterval(timer);
+	}, []);
+	// Opening a snoozed or woken task ends its snooze.
+	const onSelectWorkspace = useCallback(
+		(workspaceId: string) => {
+			const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+			if (workspace?.snoozedUntil && onSnoozeWorkspace) {
+				void onSnoozeWorkspace(workspaceId, null).catch(() => undefined);
+			}
+			selectWorkspace(workspaceId);
+		},
+		[onSnoozeWorkspace, selectWorkspace, workspaces],
+	);
 	const workspaceAgentActivities = useWorkspaceAgentActivities(workspaces, {
 		enabled: showAgentStates,
 		scope: sessionQueryScope,
@@ -422,8 +444,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			attentionWorkspaceItems(workspaces, workspaceAgentActivities, (workspaceId, completedAt) =>
 				isWorkspaceResultUnread(completedAt, seenResults.seen[workspaceId], seenResults.baseline),
 				workspaceBlockers,
+				now,
 			),
-		[seenResults, workspaceAgentActivities, workspaceBlockers, workspaces],
+		[now, seenResults, workspaceAgentActivities, workspaceBlockers, workspaces],
 	);
 	const unseenResultWorkspaceIds = useMemo(
 		() =>
@@ -468,7 +491,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		[lastInteractionSignature],
 	);
 	const { activeGroups, waitingRows, completedRows } = useMemo(
-		() => projectWorkspaceRailGroups(workspaces, repositories, lastInteractionAt),
+		() => projectWorkspaceRailGroups(workspaces, repositories, lastInteractionAt, now),
 		[lastInteractionAt, repositories, workspaces],
 	);
 	const repositoriesBySourceKey = useMemo(
@@ -1169,6 +1192,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							: onSelectWorkspace
 					}
 					onArchiveWorkspace={onArchiveWorkspace}
+					onSnoozeWorkspace={onSnoozeWorkspace}
 					onRenameWorkspace={onRenameWorkspace}
 					onCompleteWorkspace={onCompleteWorkspace}
 					onRestoreWorkspace={onRestoreWorkspace}
@@ -1186,6 +1210,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			isCreatingWorkspace,
 			isRemovingProject,
 			onArchiveWorkspace,
+			onSnoozeWorkspace,
 			onRenameWorkspace,
 			onCompleteWorkspace,
 			onOpenBranchFromProject,

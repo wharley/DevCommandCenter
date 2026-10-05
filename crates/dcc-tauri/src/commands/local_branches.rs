@@ -485,6 +485,7 @@ mod tests {
                 state: WorkspaceState::Ready,
                 setup_report: None,
                 pinned_at: None,
+                snoozed_until: None,
                 created_at: "2026-01-01T00:00:00Z".into(),
                 updated_at: "2026-01-01T00:00:00Z".into(),
             };

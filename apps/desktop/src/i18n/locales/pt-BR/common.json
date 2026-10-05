@@ -319,6 +319,15 @@
     "runningTasks_one": "{{count}} tarefa em execução",
     "runningTasks_other": "{{count}} tarefas em execução",
     "runningCount": "{{count}} rodando",
+    "snooze": {
+      "menu": "Adiar",
+      "hour": "Por 1 hora",
+      "tomorrow": "Até amanhã, 9h",
+      "monday": "Até segunda, 9h",
+      "wake": "Acordar agora",
+      "until": "Adiada até {{time}}",
+      "error": "Não foi possível adiar a tarefa"
+    },
     "attention": {
       "title": "Precisa de você",
       "label_one": "{{count}} tarefa precisa de você",
@@ -329,6 +338,7 @@
       "showMore_other": "Mostrar mais {{count}}",
       "showFewer": "Mostrar menos",
       "reason": {
+        "woke": "Voltou da espera",
         "conflicts": "Conflitos para resolver",
         "prConflicts": "PR #{{pr}} em conflito com a base",
         "checksFailing": "Checks falhando no PR #{{pr}}",

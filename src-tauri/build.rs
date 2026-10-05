@@ -303,7 +303,7 @@ use dcc_tauri::commands::{
         RenameWorkspaceInput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
         SearchWorkspaceMatch, SearchWorkspaceOutput, SetRepositoryPinnedInput,
-        SetWorkspacePinnedInput, UpdateRepositoryIdentityInput,
+        SetWorkspacePinnedInput, SetWorkspaceSnoozeInput, UpdateRepositoryIdentityInput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
         WorkspaceContinueFromBaseBranchOutput, WorkspaceDeliveryPolicy, WorkspaceDiskUsageEntry,
@@ -506,6 +506,7 @@ struct WorkspaceMethods {
     workspace_delivery_recovery_execute: String,
     workspace_git_branch_diff: String,
     workspace_attention_blockers: String,
+    set_workspace_snooze: String,
     workspace_apply_delegation_worktree: String,
     workspace_git_commit_push: String,
     workspace_git_commit: String,
@@ -874,6 +875,7 @@ fn main() {
         .typ::<WorkspaceGitBranchDiffInput>()
         .typ::<WorkspaceGitBranchDiffOutput>()
         .typ::<WorkspaceBlockerKind>()
+        .typ::<SetWorkspaceSnoozeInput>()
         .typ::<WorkspaceBlocker>()
         .typ::<WorkspaceAttentionBlockersOutput>()
         .typ::<dcc_tauri::commands::workspace_commands::WorkspaceGitPreviewScope>()
@@ -1150,6 +1152,7 @@ fn main() {
                     .to_string(),
                 workspace_git_branch_diff: "workspace_git_branch_diff".to_string(),
                 workspace_attention_blockers: "workspace_attention_blockers".to_string(),
+                set_workspace_snooze: "set_workspace_snooze".to_string(),
                 workspace_apply_delegation_worktree: "workspace_apply_delegation_worktree"
                     .to_string(),
                 workspace_git_file_preview: "workspace_git_file_preview".to_string(),

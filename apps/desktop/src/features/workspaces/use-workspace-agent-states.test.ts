@@ -406,3 +406,27 @@ describe("attentionWorkspaceItems with backend blockers", () => {
 		expect(result.map((item) => item.reason)).toEqual(["permission"]);
 	});
 });
+
+describe("attentionWorkspaceItems with snoozes", () => {
+	const now = Date.parse("2026-10-07T12:00:00Z");
+	const task = (id: string, snoozedUntil: string | null): WorkspaceSummary => ({
+		id,
+		name: id,
+		branch: "main",
+		status: "ready",
+		snoozedUntil,
+	});
+
+	it("brings a woken task back and hides one still snoozed", () => {
+		const result = attentionWorkspaceItems(
+			[task("woken", "2026-10-07T11:00:00Z"), task("later", "2026-10-07T13:00:00Z")],
+			{
+				later: { state: "waiting", waitingFor: "input", startedAt: null, completedAt: null },
+			},
+			() => false,
+			new Map([["later", [{ workspaceId: "later", kind: "conflicts", count: null }]]]),
+			now,
+		);
+		expect(result.map((item) => [item.workspace.id, item.reason])).toEqual([["woken", "woke"]]);
+	});
+});

@@ -1,3 +1,4 @@
+import { hasWoken, isSnoozed } from "./workspace-snooze";
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { WorkspaceBlocker, WorkspaceSessionSummary } from "@dcc/contracts";
@@ -77,6 +78,7 @@ export type AttentionReason =
 	| "prConflicts"
 	| "checksFailing"
 	| "delegatedReview"
+	| "woke"
 	| "setup"
 	| "aborted"
 	| "completed";
@@ -88,9 +90,10 @@ const ATTENTION_ORDER: Record<AttentionReason, number> = {
 	prConflicts: 3,
 	checksFailing: 4,
 	delegatedReview: 5,
-	setup: 6,
-	aborted: 7,
-	completed: 8,
+	woke: 6,
+	setup: 7,
+	aborted: 8,
+	completed: 9,
 };
 
 const BLOCKER_REASON: Record<WorkspaceBlocker["kind"], AttentionReason> = {
@@ -126,10 +129,15 @@ export function attentionWorkspaceItems(
 	activities: Record<string, WorkspaceAgentActivity>,
 	isResultUnread: (workspaceId: string, completedAt: string | null) => boolean,
 	blockers: ReadonlyMap<string, readonly WorkspaceBlocker[]> = new Map(),
+	now: number = Date.now(),
 ): AttentionWorkspaceItem[] {
 	return workspaces
 		.flatMap((workspace): AttentionWorkspaceItem[] => {
-			if (workspace.status === "archived" || workspace.status === "completed") {
+			if (
+				workspace.status === "archived" ||
+				workspace.status === "completed" ||
+				isSnoozed(workspace, now)
+			) {
 				return [];
 			}
 			const activity = activities[workspace.id] ?? null;
@@ -160,6 +168,9 @@ export function attentionWorkspaceItems(
 						count: blocker.count ?? null,
 					},
 				];
+			}
+			if (hasWoken(workspace, now) && !isAgentTurnOpen(activity)) {
+				return [{ workspace, activity, reason: "woke" }];
 			}
 			if (workspace.status === "setup_pending" && !isAgentTurnOpen(activity)) {
 				return [{ workspace, activity, reason: "setup" }];

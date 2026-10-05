@@ -1,5 +1,7 @@
 import { cva } from "class-variance-authority";
 import {
+	AlarmClock,
+	AlarmClockOff,
 	CircleCheck,
 	CirclePause,
 	Folder,
@@ -24,8 +26,12 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSub,
+	DropdownMenuSubContent,
+	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { isSnoozed, snoozeUntil, type SnoozeOptionId } from "./workspace-snooze";
 import {
 	Tooltip,
 	TooltipContent,
@@ -89,6 +95,7 @@ export type WorkspaceRailRowProps = {
 	onSelect?: (workspaceId: string) => void;
 	onRenameWorkspace?: (workspaceId: string, name: string) => void | Promise<void>;
 	onArchiveWorkspace?: (workspaceId: string) => void;
+	onSnoozeWorkspace?: (workspaceId: string, until: string | null) => Promise<void>;
 	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	onRestoreWorkspace?: (workspaceId: string) => void;
 	onDeleteWorkspace?: (workspaceId: string) => void;
@@ -351,12 +358,13 @@ export const WorkspaceRailRowItem = memo(
 		onSelect,
 		onRenameWorkspace,
 		onArchiveWorkspace,
+		onSnoozeWorkspace,
 		onCompleteWorkspace,
 		onRestoreWorkspace,
 		onDeleteWorkspace,
 		onSetWorkspacePinned,
 	}: WorkspaceRailRowProps) {
-		const { t } = useTranslation("common");
+		const { t, i18n } = useTranslation("common");
 		const activeTerminalCount = useWorkspaceActiveTerminalCount([
 			workspace.id,
 			...(workspace.memberWorkspaceIds ?? []),
@@ -475,7 +483,22 @@ export const WorkspaceRailRowItem = memo(
 		const canSelect =
 			workspace.status !== "archived" && workspace.status !== "completed";
 		const canPin = canSelect && Boolean(onSetWorkspacePinned);
-		const hasWorkspaceMenu = Boolean(onRenameWorkspace) || canPin;
+		const canSnooze = canSelect && Boolean(onSnoozeWorkspace);
+		const snoozed = isSnoozed(workspace, Date.now());
+		const snoozedUntilLabel =
+			snoozed && workspace.snoozedUntil
+				? new Intl.DateTimeFormat(i18n.resolvedLanguage ?? i18n.language, {
+						weekday: "short",
+						hour: "2-digit",
+						minute: "2-digit",
+					}).format(new Date(workspace.snoozedUntil))
+				: null;
+		const snooze = (until: string | null) => {
+			void onSnoozeWorkspace?.(workspace.id, until).catch((error) =>
+				toast.error(error instanceof Error ? error.message : t("sidebar.snooze.error")),
+			);
+		};
+		const hasWorkspaceMenu = Boolean(onRenameWorkspace) || canPin || canSnooze;
 		return (
 			<div className="pl-3 pr-1">
 				<div
@@ -609,7 +632,14 @@ export const WorkspaceRailRowItem = memo(
 								) : null}
 							</div>
 							<div className="mt-px flex min-w-0 items-center justify-between gap-2">
-								{workspaceStatusMessage ? (
+								{snoozedUntilLabel ? (
+									<span className="flex min-w-0 items-center gap-1.5 text-[10.5px] font-medium leading-4 text-muted-foreground">
+										<AlarmClock className="size-3 shrink-0" aria-hidden />
+										<span className="truncate">
+											{t("sidebar.snooze.until", { time: snoozedUntilLabel })}
+										</span>
+									</span>
+								) : workspaceStatusMessage ? (
 									<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
 										<span
 											aria-hidden
@@ -765,6 +795,35 @@ export const WorkspaceRailRowItem = memo(
 													? t("sidebar.unpinWorkspace")
 													: t("sidebar.pinWorkspace")}
 											</DropdownMenuItem>
+										) : null}
+										{canSnooze && snoozed ? (
+											<DropdownMenuItem
+												className="gap-2 text-[13px]"
+												onSelect={() => snooze(null)}
+											>
+												<AlarmClockOff className="size-3.5" strokeWidth={1.9} aria-hidden />
+												{t("sidebar.snooze.wake")}
+											</DropdownMenuItem>
+										) : canSnooze ? (
+											<DropdownMenuSub>
+												<DropdownMenuSubTrigger className="gap-2 text-[13px]">
+													<AlarmClock className="size-3.5" strokeWidth={1.9} aria-hidden />
+													{t("sidebar.snooze.menu")}
+												</DropdownMenuSubTrigger>
+												<DropdownMenuSubContent>
+													{(["hour", "tomorrow", "monday"] as SnoozeOptionId[]).map((option) => (
+														<DropdownMenuItem
+															key={option}
+															className="text-[13px]"
+															onSelect={() =>
+																snooze(snoozeUntil(option, new Date()).toISOString())
+															}
+														>
+															{t(`sidebar.snooze.${option}`)}
+														</DropdownMenuItem>
+													))}
+												</DropdownMenuSubContent>
+											</DropdownMenuSub>
 										) : null}
 										{onRenameWorkspace ? (
 											<DropdownMenuItem
@@ -963,6 +1022,7 @@ export const WorkspaceRailRowItem = memo(
 		previous.onSelect === next.onSelect &&
 		previous.onRenameWorkspace === next.onRenameWorkspace &&
 		previous.onArchiveWorkspace === next.onArchiveWorkspace &&
+		previous.onSnoozeWorkspace === next.onSnoozeWorkspace &&
 		previous.onCompleteWorkspace === next.onCompleteWorkspace &&
 		previous.onRestoreWorkspace === next.onRestoreWorkspace &&
 		previous.onDeleteWorkspace === next.onDeleteWorkspace &&

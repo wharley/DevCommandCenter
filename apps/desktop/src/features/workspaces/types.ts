@@ -23,6 +23,8 @@ export interface WorkspaceSummary {
 	worktreePath?: string | null;
 	setupReport?: WorkspaceSetupReport | null;
 	pinnedAt?: string | null;
+	/** Snoozed until this instant; see `workspace-snooze.ts`. */
+	snoozedUntil?: string | null;
 	createdAt?: string;
 	updatedAt?: string;
 	bundleId?: string | null;
