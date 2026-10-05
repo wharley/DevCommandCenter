@@ -12850,7 +12850,7 @@ pub async fn delete_repository(
     Ok(())
 }
 
-async fn delete_repository_with_workspaces(
+pub(crate) async fn delete_repository_with_workspaces(
     state: &WorkspaceCommandState,
     repo: &SqliteWorkspaceRepo,
     session_repo: &SqliteSessionRepo,

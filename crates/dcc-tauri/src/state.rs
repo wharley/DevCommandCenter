@@ -6235,8 +6235,9 @@ impl SessionCommandState {
     pub fn list_resident_agents(
         &self,
         reviewer: &dcc_core::domain::agent::ReviewerPresetText,
+        researcher: &dcc_core::domain::agent::ResearcherPresetText,
     ) -> Result<Vec<dcc_core::domain::agent::ResidentAgent>> {
-        self.session_repo.list_resident_agents(reviewer)
+        self.session_repo.list_resident_agents(reviewer, researcher)
     }
 
     pub fn save_resident_agent(
@@ -7760,10 +7761,13 @@ mod tests {
             .await
             .expect("save session");
         let reviewer = state
-            .list_resident_agents(&dcc_core::domain::agent::ReviewerPresetText {
-                name: "Revisor".to_string(),
-                ..Default::default()
-            })
+            .list_resident_agents(
+                &dcc_core::domain::agent::ReviewerPresetText {
+                    name: "Revisor".to_string(),
+                    ..Default::default()
+                },
+                &Default::default(),
+            )
             .expect("agents")
             .remove(0);
         state

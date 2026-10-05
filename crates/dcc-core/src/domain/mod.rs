@@ -5,6 +5,7 @@ pub mod delegation;
 pub mod delegation_apply;
 pub mod delegation_worktree;
 pub mod guarded_undo;
+pub mod idea;
 pub mod mcp;
 pub mod mcp_conformance;
 pub mod model_registry;

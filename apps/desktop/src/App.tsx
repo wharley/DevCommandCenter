@@ -128,6 +128,11 @@ import { bindSessionAgent } from "./lib/agents-api";
 import { buildFollowUpKickoff } from "./features/agents/review-findings";
 import { loadLatestReview } from "./features/agents/use-reviewer-findings";
 import { subscribeCallAgent } from "./features/agents/call-agent-command";
+import { useIdeas } from "./features/agents/use-ideas";
+import { subscribeIdeaFinished } from "./features/agents/idea-events";
+import { createIdea } from "./lib/research-api";
+import { dccQueryKeys } from "./lib/query-client";
+import { inferProjectIdFromWorkspaceRoot } from "./features/workspaces/create-workspace-dialog.logic";
 import { subscribeOpenPullRequest } from "./features/agents/pr-review-jobs";
 import { markAgentResultSeen } from "./features/agents/agent-seen-results";
 import { subscribeOpenFinding } from "./features/agents/open-finding-command";
@@ -939,6 +944,14 @@ export default function App() {
 	});
 	const workspacesFromBackend = workspacesQuery.data ?? EMPTY_WORKSPACES;
 	const repositoriesFromBackend = repositoriesQuery.data ?? [];
+	// Ideas in progress are projects too, but they live on the researcher's
+	// page: every list of projects and tasks leaves them out.
+	const { ideaRootPaths } = useIdeas();
+	const projectRepositories = useMemo(
+		() =>
+			(repositoriesQuery.data ?? []).filter((repository) => !ideaRootPaths.has(repository.rootPath)),
+		[ideaRootPaths, repositoriesQuery.data],
+	);
 	const workspaceBundlesFromBackend = workspaceBundlesQuery.data ?? [];
 	const navigationWorkspaces = useMemo(() => {
 		const secondaryWorkspaceIds = new Set(
@@ -1018,6 +1031,23 @@ export default function App() {
 		selectedWorkspaceId,
 		setSelectedWorkspaceId,
 	} = useWorkspacesPanel(navigationWorkspaces);
+	const isIdeaWorkspace = useCallback(
+		(workspace: { rootPath?: string | null }) =>
+			Boolean(workspace.rootPath && ideaRootPaths.has(workspace.rootPath)),
+		[ideaRootPaths],
+	);
+	const projectWorkspaces = useMemo(
+		() => (ideaRootPaths.size === 0 ? filteredWorkspaces : filteredWorkspaces.filter((w) => !isIdeaWorkspace(w))),
+		[filteredWorkspaces, ideaRootPaths, isIdeaWorkspace],
+	);
+	const ideaWorkspaceIds = useMemo(
+		() => new Set(allWorkspaces.filter(isIdeaWorkspace).map((workspace) => workspace.id)),
+		[allWorkspaces, isIdeaWorkspace],
+	);
+	const paletteWorkspaces = useMemo(
+		() => (ideaRootPaths.size === 0 ? allWorkspaces : allWorkspaces.filter((w) => !isIdeaWorkspace(w))),
+		[allWorkspaces, ideaRootPaths, isIdeaWorkspace],
+	);
 	const selectedWorkspaceAdditionalWorkspaceIds = useMemo(() => {
 		if (!selectedWorkspace) {
 			return [];
@@ -2558,17 +2588,22 @@ export default function App() {
 	/**
 	 * Starts a session of the agent in the current task, binds it so the role
 	 * rides along with every turn, and sends the agent's first message.
+	 * `target` runs it in a task just created instead (a new idea); there the
+	 * person writes the first message.
 	 */
 	const handleCallAgent = useCallback(
-		async (agent: AgentView) => {
+		async (
+			agent: AgentView,
+			target?: { workspaceId: string; projectId: string },
+		) => {
 			if (callingAgentId) {
 				return;
 			}
-			if (!selectedWorkspace) {
+			if (!target && !selectedWorkspace) {
 				toast.error(t("agents.call.needsTask"));
 				return;
 			}
-			const blockKey = callAgentBlockKey({
+			const blockKey = target ? null : callAgentBlockKey({
 				preset: agent.preset,
 				busy: workspaceSessions.some(isSessionRunning),
 				hasChanges: hasReviewableChanges(
@@ -2607,12 +2642,12 @@ export default function App() {
 						getProviderRuntimeDraft(providerRuntimeSettings, provider.id),
 						provider.capabilities,
 					);
-			const workspaceId = selectedWorkspace.id;
+			const workspaceId = target?.workspaceId ?? selectedWorkspace?.id ?? "";
 			const sessionsKey = getWorkspaceSessionsCacheKey(backendCacheKey, workspaceId);
 			// The reviewer keeps one conversation per task, so a later round knows
 			// what the earlier ones found instead of reviewing from scratch.
 			const reviewSessionId =
-				agent.preset === "reviewer"
+				agent.preset === "reviewer" && !target
 					? (agent.sessions.find(
 							(session) =>
 								session.workspaceId === workspaceId &&
@@ -2655,8 +2690,8 @@ export default function App() {
 				}
 				const started = await startThread({
 					workspaceId,
-					additionalWorkspaceIds: selectedWorkspaceAdditionalWorkspaceIds,
-					projectId: selectedWorkspace.projectId ?? workspaceId,
+					additionalWorkspaceIds: target ? [] : selectedWorkspaceAdditionalWorkspaceIds,
+					projectId: target?.projectId ?? selectedWorkspace?.projectId ?? workspaceId,
 					providerId: provider.id,
 					model,
 					providerRuntime,
@@ -2696,10 +2731,15 @@ export default function App() {
 				]);
 				setGlobalSurface(null);
 				setSelectedSessionId(started.session.id);
-				if (agent.kickoffPrompt.trim()) {
+				if (target) {
+					// The new task may not be selected yet; open the session once it is.
+					setPendingSessionNavigation({ workspaceId, sessionId: started.session.id });
+				}
+				const kickoff = target ? "" : agent.kickoffPrompt.trim();
+				if (kickoff) {
 					await sendTurn({
 						sessionId: started.session.id,
-						prompt: agent.kickoffPrompt.trim(),
+						prompt: kickoff,
 						providerId: provider.id,
 						model,
 						providerRuntime,
@@ -2739,6 +2779,100 @@ export default function App() {
 			selectedWorkspaceAdditionalWorkspaceIds,
 			t,
 			workspaceSessions,
+		],
+	);
+
+	/**
+	 * A new idea: its folder in ~/dcc-ideias, a task straight on that folder
+	 * (it is isolated already) and an empty conversation with the researcher,
+	 * where the person describes the idea. The task has no name yet, so the
+	 * first message names it, like any task.
+	 */
+	const handleStartIdea = useCallback(
+		async (): Promise<boolean> => {
+			const researcher = residentAgents.find((agent) => agent.preset === "researcher");
+			if (!researcher) {
+				toast.error(t("agents.research.missing"));
+				return false;
+			}
+			try {
+				const idea = await createIdea();
+				await queryClient.invalidateQueries({ queryKey: dccQueryKeys.ideas });
+				const created = await createWorkspace({
+					// The folder name is reused once an idea leaves; the project id is not.
+					projectId: `${inferProjectIdFromWorkspaceRoot(idea.rootPath)}-${Date.now().toString(36)}`,
+					workspaceRoot: idea.rootPath,
+					baseBranch: "main",
+					name: null,
+					isolationMode: "localDirect",
+				});
+				void queryClient.invalidateQueries({ queryKey: ["repositories", backendCacheKey] });
+				await handleCallAgent(researcher, {
+					workspaceId: created.workspace.id,
+					projectId: created.workspace.projectId ?? created.workspace.id,
+				});
+				requestNewTaskComposerFocus(created.workspace.id);
+				return true;
+			} catch (error) {
+				console.error("[dcc] start idea failed:", error);
+				toast.error(error instanceof Error ? error.message : String(error));
+				return false;
+			}
+		},
+		[
+			backendCacheKey,
+			createWorkspace,
+			handleCallAgent,
+			queryClient,
+			requestNewTaskComposerFocus,
+			residentAgents,
+			t,
+		],
+	);
+
+	/**
+	 * After an idea leaves ~/dcc-ideias. Published: the project opens with a
+	 * new task, and the work goes on from docs/IDEIA.md like any project.
+	 * Discarded: back to the researcher's page.
+	 */
+	useEffect(
+		() =>
+			subscribeIdeaFinished((detail) => {
+				if (detail.kind === "discarded") {
+					const researcher = residentAgents.find((agent) => agent.preset === "researcher");
+					if (researcher) {
+						handleOpenAgent(researcher.id);
+					}
+					return;
+				}
+				const ideaTask = allWorkspaces.find((workspace) => workspace.id === detail.ideaWorkspaceId);
+				void (async () => {
+					try {
+						const created = await createWorkspace({
+							projectId:
+								ideaTask?.projectId ?? inferProjectIdFromWorkspaceRoot(detail.rootPath),
+							workspaceRoot: detail.rootPath,
+							baseBranch: "main",
+							name: null,
+							isolationMode: null,
+						});
+						void queryClient.invalidateQueries({ queryKey: ["repositories", backendCacheKey] });
+						setGlobalSurface(null);
+						requestNewTaskComposerFocus(created.workspace.id);
+					} catch (error) {
+						console.error("[dcc] open published idea failed:", error);
+						toast.error(error instanceof Error ? error.message : String(error));
+					}
+				})();
+			}),
+		[
+			allWorkspaces,
+			backendCacheKey,
+			createWorkspace,
+			handleOpenAgent,
+			queryClient,
+			requestNewTaskComposerFocus,
+			residentAgents,
 		],
 	);
 
@@ -5556,7 +5690,7 @@ export default function App() {
 							onSetWorkspacePinned={
 								isRemoteBackend ? undefined : handleSetWorkspacePinned
 							}
-							repositories={repositoriesFromBackend}
+							repositories={projectRepositories}
 							skillCount={skillContextCount}
 							appUpdate={appUpdateInfo}
 							isInstallingUpdate={isInstallingUpdate}
@@ -5564,7 +5698,7 @@ export default function App() {
 								void installUpdate();
 							}}
 							selectedWorkspaceId={globalSurface ? null : selectedWorkspaceId}
-							workspaces={filteredWorkspaces}
+							workspaces={projectWorkspaces}
 						/>
 					</aside>
 
@@ -5597,7 +5731,7 @@ export default function App() {
 							<WorkspaceCommandPalette
 								open={isCommandPaletteOpen}
 								onOpenChange={setIsCommandPaletteOpen}
-								workspaces={allWorkspaces}
+								workspaces={paletteWorkspaces}
 								selectedWorkspaceId={selectedWorkspaceId}
 								onSelectWorkspace={handleSelectWorkspaceSurface}
 								onCreateWorkspace={() => {
@@ -5682,7 +5816,7 @@ export default function App() {
 									requestNewTaskComposerFocus(result.workspace.id);
 									return result;
 								}}
-								repositories={repositoriesFromBackend}
+								repositories={projectRepositories}
 								isSubmitting={isCreatingWorkspace}
 							/>
 							{globalSurface === "pullRequests" ? (
@@ -5710,10 +5844,12 @@ export default function App() {
 										]),
 									)}
 									onOpenSession={handleOpenResidentAgentSession}
+									onStartIdea={handleStartIdea}
+									ideaWorkspaceIds={ideaWorkspaceIds}
 								/>
 							) : globalSurface === "newTask" ? (
 								<NewTaskLaunchState
-									repositories={repositoriesFromBackend}
+									repositories={projectRepositories}
 									isCreating={isCreatingWorkspace}
 									onSelectProject={async (repository, isolationMode) => {
 										await handleQuickCreateTask({
@@ -6083,7 +6219,7 @@ export default function App() {
 					sessionId: effectiveSelectedSessionId,
 					taskTitle: selectedSessionSummary?.thread.title ?? selectedWorkspace.name,
 				} : null}
-				projects={repositoriesFromBackend.map(repository => ({ id: repository.projectId, name: repositoryDisplayName(repository) }))}
+				projects={projectRepositories.map(repository => ({ id: repository.projectId, name: repositoryDisplayName(repository) }))}
 				onUse={(text) => {
 					setGlobalSurface(null);
 					requestSurfaceSelection(null);

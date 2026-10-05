@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod agent_commands;
+mod research_commands;
 mod appshot_commands;
 mod attachment_commands;
 mod browser_agent_requests;
@@ -7013,6 +7014,10 @@ pub fn run() {
             agent_commands::agents_overview,
             agent_commands::agents_save,
             agent_commands::agents_bind_session,
+            research_commands::research_create_idea,
+            research_commands::research_list_ideas,
+            research_commands::research_publish_idea,
+            research_commands::research_discard_idea,
             skills_commands::skills_list,
             skills_commands::skills_import_preview,
             skills_commands::skills_import,

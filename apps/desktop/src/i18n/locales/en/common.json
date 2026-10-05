@@ -173,10 +173,60 @@
       "lines": "lines {{start}}–{{end}}"
     },
     "heading": "Agents",
+    "research": {
+      "newIdea": "New idea",
+      "newIdeaHint": "DCC creates a folder in ~/dcc-ideias with an IDEIA.md and opens the chat with the Researcher. Describe the idea there, in your own words. It stays out of your projects until you publish it.",
+      "start": "Start",
+      "missing": "The Researcher was deleted. Restore it to start an idea.",
+      "progress": "Investigating the idea",
+      "progressCount": "{{count}} of {{total}}",
+      "milestones": {
+        "problem": "Problem",
+        "audience": "Who for",
+        "references": "References",
+        "hypotheses": "Hypotheses",
+        "name": "Name"
+      },
+      "card": "Card",
+      "cardTitle": "Card for {{idea}}",
+      "untitled": "an untitled idea",
+      "draft": "Draft",
+      "empty": "Not filled yet",
+      "verdict": "Verdict",
+      "verdicts": {
+        "seguir": "Go",
+        "pivotar": "Pivot",
+        "descartar": "Drop"
+      },
+      "name": "Repository and folder name",
+      "nameInvalid": "Use letters, numbers, '.', '_' or '-'.",
+      "repository": "Repository",
+      "visibility": {
+        "private": "Private",
+        "public": "Public"
+      },
+      "publicWarning": "IDEIA.md goes along: competitor research, hypotheses and decisions become visible to everyone.",
+      "keepLocal": "Keep docs/IDEIA.md on my computer only",
+      "folder": "Folder",
+      "chooseFolder": "Choose",
+      "warnVerdict": "The verdict is not \"Go\" yet.",
+      "warnArchitecture": "The Architecture and stack section is empty.",
+      "warnRoadmap": "The Roadmap is empty: the first task will have nowhere to start.",
+      "waitTurn": "Wait for the Researcher to finish its turn.",
+      "changeLater": "You can change it later, just say so",
+      "discard": "Discard",
+      "adjust": "Adjust",
+      "publish": "Publish",
+      "published": "{{name}} published: {{url}}",
+      "discardTitle": "Discard this idea?",
+      "discardDescription": "The conversation, the task and the folder {{folder}} will be deleted. This cannot be undone.",
+      "discardConfirm": "Discard and delete"
+    },
     "presets": {
       "reviewerOffer": "May I review these changes?",
       "reviewerKickoff": "Review the current changes in this workspace.",
-      "reviewer": "Reviewer"
+      "reviewer": "Reviewer",
+      "researcher": "Researcher"
     },
     "state": {
       "failed": "Failed",
@@ -208,7 +258,9 @@
       "noSessions": "No reviews yet. Its reviews in any project appear here.",
       "pullRequests": "Pull request reviews",
       "showRole": "See this agent's role",
-      "roleHint": "The role is maintained by DCC and improves with each version. To adapt it to your project, use the extra instructions under “Edit”."
+      "roleHint": "The role is maintained by DCC and improves with each version. To adapt it to your project, use the extra instructions under “Edit”.",
+      "researcherSessions": "In progress",
+      "researcherNoSessions": "No ideas in progress. Start one above."
     },
     "editor": {
       "extra": "Extra instructions",

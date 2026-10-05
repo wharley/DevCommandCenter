@@ -215,6 +215,7 @@ export const dccQueryKeys = {
 	workspaces: ["workspaces"] as const,
 	sessions: ["sessions"] as const,
 	agents: ["agents"] as const,
+	ideas: ["ideas"] as const,
 	sessionThreads: (sessionId: string, scope = "local") =>
 		["sessionThreads", scope, sessionId] as const,
 	sessionSearch: (query: string, scope = "local") =>
@@ -372,6 +373,7 @@ export function applyCoreEventQueryRefresh(
 	if (plan.refreshCollections) {
 		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.repositories });
 		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.workspaces });
+		void queryClient.invalidateQueries({ queryKey: dccQueryKeys.ideas });
 	}
 	if (plan.refreshCollections || plan.refreshSessionMetadata) {
 		// Agent pages list sessions across tasks; keep them in step with the rail.

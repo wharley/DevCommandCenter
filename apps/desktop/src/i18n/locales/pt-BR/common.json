@@ -173,10 +173,60 @@
       "lines": "linhas {{start}}–{{end}}"
     },
     "heading": "Agentes",
+    "research": {
+      "newIdea": "Nova ideia",
+      "newIdeaHint": "O DCC cria uma pasta em ~/dcc-ideias com um IDEIA.md e abre o chat com o Pesquisador. Você descreve a ideia ali, do seu jeito. Ela fica fora dos seus projetos até você publicar.",
+      "start": "Começar",
+      "missing": "O Pesquisador foi apagado. Recrie-o para começar uma ideia.",
+      "progress": "Investigando a ideia",
+      "progressCount": "{{count}} de {{total}}",
+      "milestones": {
+        "problem": "Problema",
+        "audience": "Para quem",
+        "references": "Referências",
+        "hypotheses": "Hipóteses",
+        "name": "Nome"
+      },
+      "card": "Ficha",
+      "cardTitle": "Ficha de {{idea}}",
+      "untitled": "uma ideia sem título",
+      "draft": "Rascunho",
+      "empty": "Ainda não preenchido",
+      "verdict": "Veredito",
+      "verdicts": {
+        "seguir": "Seguir",
+        "pivotar": "Pivotar",
+        "descartar": "Descartar"
+      },
+      "name": "Nome do repositório e da pasta",
+      "nameInvalid": "Use letras, números, '.', '_' ou '-'.",
+      "repository": "Repositório",
+      "visibility": {
+        "private": "Privado",
+        "public": "Público"
+      },
+      "publicWarning": "O IDEIA.md vai junto: pesquisa de concorrentes, hipóteses e decisões ficam visíveis para todos.",
+      "keepLocal": "Deixar o docs/IDEIA.md só no meu computador",
+      "folder": "Pasta",
+      "chooseFolder": "Escolher",
+      "warnVerdict": "O veredito ainda não é \"Seguir\".",
+      "warnArchitecture": "A seção Arquitetura e stack está vazia.",
+      "warnRoadmap": "O Roadmap está vazio: a primeira tarefa não terá por onde começar.",
+      "waitTurn": "Aguarde o Pesquisador terminar o turno.",
+      "changeLater": "Dá para mudar depois, é só falar",
+      "discard": "Descartar",
+      "adjust": "Ajustar",
+      "publish": "Publicar",
+      "published": "{{name}} publicado: {{url}}",
+      "discardTitle": "Descartar esta ideia?",
+      "discardDescription": "A conversa, a tarefa e a pasta {{folder}} serão apagadas. Não dá para desfazer.",
+      "discardConfirm": "Descartar e apagar"
+    },
     "presets": {
       "reviewerOffer": "Posso revisar essas mudanças?",
       "reviewerKickoff": "Revise as mudanças atuais desta tarefa.",
-      "reviewer": "Revisor"
+      "reviewer": "Revisor",
+      "researcher": "Pesquisador"
     },
     "state": {
       "failed": "Falhou",
@@ -208,7 +258,9 @@
       "noSessions": "Nenhuma revisão ainda. As revisões dele em qualquer projeto aparecem aqui.",
       "pullRequests": "Revisões de Pull Requests",
       "showRole": "Ver o papel deste agente",
-      "roleHint": "O papel é mantido pelo DCC e melhora a cada versão. Para ajustá-lo ao seu projeto, use as instruções extras em “Editar”."
+      "roleHint": "O papel é mantido pelo DCC e melhora a cada versão. Para ajustá-lo ao seu projeto, use as instruções extras em “Editar”.",
+      "researcherSessions": "Em andamento",
+      "researcherNoSessions": "Nenhuma ideia em andamento. Comece uma acima."
     },
     "editor": {
       "extra": "Instruções extras",

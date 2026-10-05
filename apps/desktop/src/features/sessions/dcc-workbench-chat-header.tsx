@@ -2,6 +2,7 @@ import { BrainCircuit, Check, Cloud, CloudOff, EyeOff, Globe2, History, LoaderCi
 import { hasReviewableChanges, isSessionRunning } from "@/features/agents/review-offer";
 import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
 import { CallAgentButtons, SessionAgentBadge } from "@/features/agents/session-agent-controls";
+import { useIdeas } from "@/features/agents/use-ideas";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -173,6 +174,9 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 		: t("workbench.terminal.open");
 	const NewSessionIcon = startingSession ? LoaderCircle : Plus;
 	const gitStatusQuery = useWorkspaceGitStatus(workspacePath);
+	// An idea's task belongs to the researcher alone: no agent is called there.
+	const { ideaRootPaths } = useIdeas();
+	const isIdeaTask = workspacePath !== null && ideaRootPaths.has(workspacePath);
 
 	return (
 		<div className="@container/header-actions flex min-w-0 flex-1 items-center justify-between gap-3 overflow-hidden">
@@ -278,10 +282,12 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}
-				<CallAgentButtons
-					busy={sessions.some(isSessionRunning)}
-					hasChanges={hasReviewableChanges(gitStatusQuery.data)}
-				/>
+				{!isIdeaTask && (
+					<CallAgentButtons
+						busy={sessions.some(isSessionRunning)}
+						hasChanges={hasReviewableChanges(gitStatusQuery.data)}
+					/>
+				)}
 				<Tooltip>
 					<TooltipTrigger asChild><Button type="button" variant="ghost" size="icon-sm" onClick={onStartSession} disabled={startingSession} aria-label={t("workbench.newSessionAria")} className="text-muted-foreground hover:text-foreground"><NewSessionIcon className={cn("size-3.5", startingSession && "animate-spin")} /></Button></TooltipTrigger>
 					<TooltipContent side="bottom">{t("workbench.newSessionTooltip")}</TooltipContent>

@@ -66,11 +66,14 @@ export function useAgentsQuery(scope: string): AgentsState {
 	const overview = useQuery({
 		queryKey: AGENTS_QUERY_KEY,
 		queryFn: () =>
-			agentsOverview({
-				name: reviewerName,
-				kickoffPrompt: t("agents.presets.reviewerKickoff"),
-				offerPrompt: t("agents.presets.reviewerOffer"),
-			}),
+			agentsOverview(
+				{
+					name: reviewerName,
+					kickoffPrompt: t("agents.presets.reviewerKickoff"),
+					offerPrompt: t("agents.presets.reviewerOffer"),
+				},
+				{ name: t("agents.presets.researcher") },
+			),
 		staleTime: 30_000,
 		retry: false,
 	});

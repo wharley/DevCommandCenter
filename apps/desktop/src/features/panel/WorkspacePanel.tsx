@@ -74,6 +74,7 @@ import type {
 import { derivePlanFollowUpState } from "./plan-follow-up";
 import { useWorkspaceMissionSpecs } from "@/features/inspector/use-workspace-mission-specs";
 import { AgentReviewOffer } from "@/features/agents/agent-review-offer";
+import { IdeaPanel } from "@/features/agents/idea-panel";
 import {
 	authorSessionId,
 	buildFixRequest,
@@ -1704,6 +1705,7 @@ export function WorkspacePanel({
 
 				<div className="shrink-0 px-3 pb-3 pt-2 sm:px-4">
 					<div className="mx-auto w-full max-w-[52rem]">
+					<IdeaPanel workspaceId={workspaceId} workspacePath={workspacePath} sessions={sessions} />
 					<AgentReviewOffer
 						workspaceId={workspaceId}
 						sessionId={effectiveSessionId}

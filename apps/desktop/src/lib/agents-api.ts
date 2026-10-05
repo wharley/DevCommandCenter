@@ -59,9 +59,14 @@ export type ReviewerPresetText = {
 	offerPrompt: string;
 };
 
-/** The built-in reviewer is created the first time; its visible texts follow `reviewer`. */
-export function agentsOverview(reviewer: ReviewerPresetText) {
-	return invoke<AgentsOverview>("agents_overview", { reviewer });
+/** The built-in researcher's name in the app language. It has no first message and never offers itself. */
+export type ResearcherPresetText = {
+	name: string;
+};
+
+/** The built-in agents are created the first time; their visible texts follow the app language. */
+export function agentsOverview(reviewer: ReviewerPresetText, researcher: ResearcherPresetText) {
+	return invoke<AgentsOverview>("agents_overview", { reviewer, researcher });
 }
 
 export function saveAgent(id: string | null, draft: ResidentAgentDraft) {

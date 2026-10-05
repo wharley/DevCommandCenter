@@ -15,8 +15,8 @@ use crate::ai_memory::AiMemoryHit;
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
 
 use dcc_core::domain::agent::{
-    AgentAvatar, ResidentAgent, ResidentAgentDraft, ReviewerPresetText, REVIEWER_OFFER,
-    REVIEWER_PRESET,
+    AgentAvatar, ResearcherPresetText, ResidentAgent, ResidentAgentDraft, ReviewerPresetText,
+    RESEARCHER_PRESET, REVIEWER_OFFER, REVIEWER_PRESET,
 };
 use dcc_core::domain::objective::{ObjectivePauseReason, ObjectiveStatus, SessionObjective};
 use dcc_core::{
@@ -324,6 +324,15 @@ CREATE VIRTUAL TABLE IF NOT EXISTS dcc_session_search USING fts5(
 /// Durable browser location metadata is deliberately kept separate from the
 /// session projection. It contains only a caller-sanitized URL and expires
 /// opportunistically; no page data, browser state, or capability is stored.
+// Ideas in progress: repositories under ~/dcc-ideias kept out of the project
+// list. The row goes away with its repository.
+const IDEA_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_ideas (
+	root_path TEXT PRIMARY KEY NOT NULL CHECK(length(root_path) BETWEEN 1 AND 4096),
+	created_at TEXT NOT NULL
+);
+"#;
+
 const BROWSER_LOCATION_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS dcc_browser_locations (
 	workspace_id TEXT NOT NULL CHECK(length(workspace_id) BETWEEN 1 AND 128),
@@ -854,7 +863,7 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
@@ -892,6 +901,7 @@ impl SqliteWorkspaceRepo {
         Self::ensure_column(&conn, "dcc_repositories", "icon", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "color", "TEXT NULL")?;
         Self::ensure_column(&conn, "dcc_repositories", "pinned_at", "TEXT NULL")?;
+        Self::drop_idea_sentence(&conn)?;
         Ok(())
     }
 
@@ -1086,6 +1096,73 @@ impl SqliteWorkspaceRepo {
         Ok(changed > 0)
     }
 
+    /// Marks a repository as an idea in progress.
+    pub fn save_idea(&self, idea: &dcc_core::domain::idea::Idea) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "INSERT INTO dcc_ideas (root_path, created_at) VALUES (?1, ?2)",
+            params![idea.root_path, idea.created_at],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    /// A published idea becomes a normal project at `new_root`: its
+    /// repository and tasks follow the moved folder, keeping their ids (and so
+    /// the researcher's conversation), and the idea mark goes away.
+    pub fn publish_idea(&self, old_root: &str, new_root: &str, name: &str) -> Result<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "UPDATE dcc_repositories SET id = ?2, root_path = ?2, name = ?3, display_name = NULL, updated_at = ?4 WHERE id = ?1",
+            params![old_root, new_root, name, now],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
+            "UPDATE dcc_workspaces SET root_path = ?2, updated_at = ?3 WHERE root_path = ?1",
+            params![old_root, new_root, now],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
+            "DELETE FROM dcc_ideas WHERE root_path = ?1",
+            params![old_root],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Ideas in progress, newest first.
+    pub fn list_ideas(&self) -> Result<Vec<dcc_core::domain::idea::Idea>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                "SELECT root_path, created_at FROM dcc_ideas ORDER BY created_at DESC, root_path",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        statement
+            .query_map([], |row| {
+                Ok(dcc_core::domain::idea::Idea {
+                    root_path: row.get(0)?,
+                    created_at: row.get(1)?,
+                })
+            })
+            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
     pub fn list_repositories_needing_forge_binding(&self) -> Result<Vec<RepositoryId>> {
         let conn = self
             .conn
@@ -1147,6 +1224,23 @@ impl SqliteWorkspaceRepo {
                 .push(row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?);
         }
         Ok(repositories)
+    }
+
+    /// Development builds created ideas from a sentence; ideas now start
+    /// empty, so that required column has to go.
+    fn drop_idea_sentence(conn: &Connection) -> Result<()> {
+        let has_sentence: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('dcc_ideas') WHERE name = 'sentence')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if has_sentence {
+            conn.execute("ALTER TABLE dcc_ideas DROP COLUMN sentence", [])
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        Ok(())
     }
 
     fn ensure_column(conn: &Connection, table: &str, column: &str, sql_type: &str) -> Result<()> {
@@ -5995,6 +6089,11 @@ impl RepositoryRepo for SqliteWorkspaceRepo {
             params![id.0.clone()],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
+            "DELETE FROM dcc_ideas WHERE root_path = ?1",
+            params![id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         tx.commit()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
@@ -6752,28 +6851,49 @@ impl SqliteSessionRepo {
         })
     }
 
-    /// Lists the person's agents, oldest first. The reviewer preset is created
-    /// the first time and never again, even after the person deletes it. Its
-    /// role is DCC's and its visible texts follow the app language.
-    pub fn list_resident_agents(&self, reviewer: &ReviewerPresetText) -> Result<Vec<ResidentAgent>> {
+    /// Lists the person's agents, oldest first. Each preset is created the
+    /// first time and never again, even after the person deletes it. Their
+    /// roles are DCC's and their visible texts follow the app language.
+    pub fn list_resident_agents(
+        &self,
+        reviewer: &ReviewerPresetText,
+        researcher: &ResearcherPresetText,
+    ) -> Result<Vec<ResidentAgent>> {
         let conn = self
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        let seeded: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM dcc_agents WHERE preset = ?1)",
-                params![REVIEWER_PRESET],
-                |row| row.get(0),
-            )
-            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        if !seeded {
-            let draft = ResidentAgentDraft::reviewer(reviewer)
-                .normalized()
-                .or_else(|_| {
-                    ResidentAgentDraft::reviewer(&ReviewerPresetText::default()).normalized()
-                })
-                .map_err(dcc_core::CoreError::InvalidInput)?;
+        let presets = [
+            (
+                REVIEWER_PRESET,
+                ResidentAgentDraft::reviewer(reviewer)
+                    .normalized()
+                    .or_else(|_| {
+                        ResidentAgentDraft::reviewer(&ReviewerPresetText::default()).normalized()
+                    }),
+            ),
+            (
+                RESEARCHER_PRESET,
+                ResidentAgentDraft::researcher(researcher)
+                    .normalized()
+                    .or_else(|_| {
+                        ResidentAgentDraft::researcher(&ResearcherPresetText::default())
+                            .normalized()
+                    }),
+            ),
+        ];
+        for (preset, draft) in presets {
+            let seeded: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM dcc_agents WHERE preset = ?1)",
+                    params![preset],
+                    |row| row.get(0),
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            if seeded {
+                continue;
+            }
+            let draft = draft.map_err(dcc_core::CoreError::InvalidInput)?;
             let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
             conn.execute(
                 "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt) VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
@@ -6785,7 +6905,7 @@ impl SqliteSessionRepo {
                     draft.avatar.color,
                     draft.avatar.arms,
                     draft.avatar.eyes,
-                    REVIEWER_PRESET,
+                    preset,
                     now,
                     draft.offer_prompt,
                 ],
@@ -6794,7 +6914,7 @@ impl SqliteSessionRepo {
         }
         let mut statement = conn
             .prepare(&format!(
-                "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY a.created_at, a.id",
+                "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY a.created_at, CASE a.preset WHEN 'reviewer' THEN 0 WHEN 'researcher' THEN 1 ELSE 2 END, a.id",
                 Self::RESIDENT_AGENT_COLUMNS
             ))
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -11250,6 +11370,90 @@ mod tests {
     }
 
     #[test]
+    fn published_idea_moves_its_repository_and_tasks_and_loses_the_mark() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let old_root = "/home/me/dcc-ideias/ideia";
+        let workspace = Workspace {
+            id: WorkspaceId("idea-task".to_string()),
+            project_id: ProjectId("ideia-x".to_string()),
+            name: Some("Clínica via chat".to_string()),
+            root_path: old_root.to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+        futures::executor::block_on(repo.save_repository(&Repository {
+            id: RepositoryId(old_root.to_string()),
+            project_id: ProjectId("ideia-x".to_string()),
+            name: "ideia".to_string(),
+            display_name: None,
+            icon: None,
+            color: None,
+            pinned_at: None,
+            root_path: old_root.to_string(),
+            base_branch: "main".to_string(),
+            remote: None,
+            remote_url: None,
+            forge_provider: None,
+            forge_login: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }))
+        .expect("save repository");
+        repo.save_idea(&dcc_core::domain::idea::Idea {
+            root_path: old_root.to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        })
+        .expect("mark idea");
+
+        repo.publish_idea(old_root, "/home/me/projetos/salte", "salte")
+            .expect("publish");
+
+        let repositories =
+            futures::executor::block_on(repo.list_repositories()).expect("list repositories");
+        assert_eq!(repositories.len(), 1);
+        assert_eq!(repositories[0].id.0, "/home/me/projetos/salte");
+        assert_eq!(repositories[0].root_path, "/home/me/projetos/salte");
+        assert_eq!(repositories[0].name, "salte");
+        let moved = futures::executor::block_on(repo.get_workspace(&workspace.id))
+            .expect("read workspace")
+            .expect("workspace kept");
+        assert_eq!(moved.root_path, "/home/me/projetos/salte");
+        assert!(repo.list_ideas().expect("list ideas").is_empty());
+    }
+
+    #[test]
+    fn idea_marks_from_a_development_build_lose_the_sentence_and_survive() {
+        let conn = in_memory_conn();
+        conn.lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE dcc_ideas (root_path TEXT PRIMARY KEY NOT NULL CHECK(length(root_path) BETWEEN 1 AND 4096), sentence TEXT NOT NULL CHECK(length(sentence) BETWEEN 1 AND 2000), created_at TEXT NOT NULL);
+                 INSERT INTO dcc_ideas VALUES ('/tmp/old-idea', 'clínica via chat', '2026-01-01T00:00:00Z');",
+            )
+            .unwrap();
+        let repo = SqliteWorkspaceRepo::from_connection(conn).expect("open repo");
+        assert_eq!(
+            repo.list_ideas().expect("list ideas"),
+            vec![dcc_core::domain::idea::Idea {
+                root_path: "/tmp/old-idea".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }]
+        );
+        repo.save_idea(&dcc_core::domain::idea::Idea {
+            root_path: "/tmp/new-idea".to_string(),
+            created_at: "2026-01-02T00:00:00Z".to_string(),
+        })
+        .expect("save without a sentence");
+    }
+
+    #[test]
     fn sqlite_workspace_repo_persists_repositories_and_deletes_linked_workspaces() {
         let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
         let repository = Repository {
@@ -11343,12 +11547,23 @@ mod tests {
             Some("2026-01-01T00:00:40Z")
         );
 
+        // An idea is a repository marked as such; the mark is unique and goes
+        // away with the repository.
+        let idea = dcc_core::domain::idea::Idea {
+            root_path: "/tmp/repo".to_string(),
+            created_at: "2026-01-01T00:00:50Z".to_string(),
+        };
+        repo.save_idea(&idea).expect("mark idea");
+        assert!(repo.save_idea(&idea).is_err());
+        assert_eq!(repo.list_ideas().expect("list ideas"), vec![idea]);
+
         futures::executor::block_on(repo.delete_repository(&RepositoryId("/tmp/repo".to_string())))
             .expect("delete repository");
 
         let repositories =
             futures::executor::block_on(repo.list_repositories()).expect("list repositories");
         assert!(repositories.is_empty());
+        assert!(repo.list_ideas().expect("list ideas").is_empty());
         let workspaces =
             futures::executor::block_on(repo.list_workspaces()).expect("list workspaces");
         assert!(workspaces.is_empty());
@@ -13227,8 +13442,12 @@ mod tests {
 
     #[test]
     fn resident_agents_seed_once_bind_sessions_and_stop_after_delete() {
-        use dcc_core::domain::agent::{ResidentAgentDraft, ReviewerPresetText, REVIEWER_ROLE};
+        use dcc_core::domain::agent::{
+            ResearcherPresetText, ResidentAgentDraft, ReviewerPresetText, RESEARCHER_ROLE,
+            REVIEWER_ROLE,
+        };
         let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        let research = ResearcherPresetText::default();
         let english = ReviewerPresetText {
             name: "Reviewer".to_string(),
             ..ReviewerPresetText::default()
@@ -13240,10 +13459,19 @@ mod tests {
         };
         // Created in English, then the app language changes: the texts the
         // person reads follow it, the name they chose does not.
-        let seeded = repo.list_resident_agents(&english).unwrap().remove(0);
+        let seeded = repo
+            .list_resident_agents(&english, &research)
+            .unwrap()
+            .remove(0);
         assert_eq!(seeded.offer_prompt, "May I review these changes?");
-        let agents = repo.list_resident_agents(&portuguese).unwrap();
+        let agents = repo.list_resident_agents(&portuguese, &research).unwrap();
+        assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].name, "Reviewer");
+        // The researcher is seeded with the reviewer, after it, and never offers.
+        assert_eq!(agents[1].preset.as_deref(), Some("researcher"));
+        assert_eq!(agents[1].name, "Researcher");
+        assert_eq!(agents[1].role, RESEARCHER_ROLE);
+        assert_eq!(agents[1].offer_prompt, "");
         assert_eq!(agents[0].kickoff_prompt, "Revise.");
         assert_eq!(agents[0].offer_prompt, "Posso revisar?");
 
@@ -13255,8 +13483,8 @@ mod tests {
         edited.extra_instructions = "Ignore vendor/.".to_string();
         edited.offer_prompt = String::new();
         repo.save_resident_agent(Some(&seeded.id), edited).unwrap();
-        let agents = repo.list_resident_agents(&portuguese).unwrap();
-        assert_eq!(agents.len(), 1);
+        let agents = repo.list_resident_agents(&portuguese, &research).unwrap();
+        assert_eq!(agents.len(), 2);
         let reviewer = agents[0].clone();
         assert_eq!(reviewer.name, "Revisor");
         assert_eq!(reviewer.role, REVIEWER_ROLE);
@@ -13319,9 +13547,10 @@ mod tests {
         assert_eq!(repo.load_session_agent(&session.id).unwrap(), None);
         assert!(repo.list_agent_session_bindings().unwrap().is_empty());
         // The deleted preset is not created again.
-        let agents = repo.list_resident_agents(&portuguese).unwrap();
-        assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].id, docs.id);
+        let agents = repo.list_resident_agents(&portuguese, &research).unwrap();
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].preset.as_deref(), Some("researcher"));
+        assert_eq!(agents[1].id, docs.id);
     }
 
     #[test]

@@ -25,6 +25,7 @@ pub const AGENT_AVATAR_EYES: &[&str] = &["round", "smile", "visor"];
 pub const AGENT_AVATAR_MIN_ARMS: u8 = 3;
 pub const AGENT_AVATAR_MAX_ARMS: u8 = 5;
 pub const REVIEWER_PRESET: &str = "reviewer";
+pub const RESEARCHER_PRESET: &str = "researcher";
 
 const AGENT_TAG: &str = "dcc_agent_role";
 
@@ -83,6 +84,82 @@ Line numbers refer to the file as it is now. Include every finding from the writ
 
 pub const REVIEWER_KICKOFF: &str = "Review the current changes in this workspace.";
 pub const REVIEWER_OFFER: &str = "May I review these changes?";
+
+/// The file the researcher keeps. Its headings and item formats are fixed so
+/// DCC can read the progress of an idea from it.
+pub const RESEARCHER_IDEA_FILE: &str = "IDEIA.md";
+
+pub const RESEARCHER_ROLE: &str = "You help the person research an idea for a project that does not exist yet: whether it makes sense, for whom, against what, how it would be built, and under which name. This workspace exists only for that research; once the idea is published it becomes a real project and normal tasks take over from IDEIA.md. Everything you learn and everything decided goes into the file IDEIA.md at the root of this workspace.\n\
+\n\
+What you do:\n\
+- Research on the web: competitors, references, market, pricing, and regulation when it applies. Every factual claim cites its source with a link. If this session cannot search the web, say so once, work from what the person tells you and mark those claims as unverified.\n\
+- Question the idea. Turn each assumption into a hypothesis with a concrete way to validate it, raise the risks and propose names.\n\
+- When a decision is the person's (for example the first audience or the favourite name), offer 2 to 4 numbered options with one line on each, and let them answer with a number or in their own words. Do not decide for them.\n\
+\n\
+What you do not do:\n\
+- You edit only IDEIA.md. You do not write code, create project structure, install anything, or run git or gh. If the person asks for code, answer that it comes after the idea is published, in a normal task.\n\
+- You do not publish or create the project. When the person says the project can be created, confirm the verdict, make sure IDEIA.md is complete, say what is still missing if anything, and stop. DCC publishes it when the person clicks.\n\
+\n\
+IDEIA.md:\n\
+- DCC creates the file when the idea starts, with the title line `# Ideia` and the empty sections below. The idea starts empty: the person describes it in their first message. Then rewrite the title line as `# Ideia: <the idea in one sentence, in the person's words>` and fill what you can. If the file is missing, create it with exactly this template. If the person has not described the idea yet, ask for it in one sentence and stop there.\n\
+```markdown\n\
+# Ideia: <the idea in one sentence, in the person's words>\n\
+\n\
+## Problema\n\
+\n\
+## Para quem\n\
+\n\
+## Referências\n\
+\n\
+## Hipóteses\n\
+\n\
+## Riscos\n\
+\n\
+## Nome\n\
+\n\
+## Veredito\n\
+\n\
+## MVP\n\
+\n\
+## Arquitetura e stack\n\
+\n\
+## Roadmap\n\
+\n\
+## Registro de decisões\n\
+```\n\
+- If the file already describes an idea, continue from where it stopped instead of starting over.\n\
+- Keep these headings exactly as written and in this order: never rename, translate, remove or add a level-2 heading. DCC reads the file by them. Write the content in the language the person writes in.\n\
+- Problema: plain text, a few sentences.\n\
+- Para quem: plain text, a few sentences; who has the problem and who pays, when they differ.\n\
+- Referências: one item per reference, `- [Name](https://link) — what it does and what it means for this idea`.\n\
+- Hipóteses: one item per hypothesis, `- [aberta] the hypothesis — how to validate it`. The state is aberta, confirmada or derrubada. Change it only with evidence, a source or the person's answer, and name that evidence in the item.\n\
+- Riscos: one item per risk.\n\
+- Nome: `- ★ Name` for the favourite, at most one, and `- Name` for the other candidates. Before proposing a name, check that no known product in the same space already uses it.\n\
+- Veredito: the first line is exactly Seguir, Pivotar or Descartar; the next lines give the reason in one or two sentences.\n\
+- MVP: the smallest version that tests the main hypothesis.\n\
+- Arquitetura e stack: once the MVP is clear, propose the main parts of the system and the stack for each (platform, language, framework, data, hosting, key integrations), with the reason for each choice and the alternative you set aside. Prefer what is proven and simple to operate for the MVP. Where the choice depends on the person (for example web or mobile first), ask with options instead of deciding.\n\
+- Roadmap: the MVP split into short phases, each a `### Fase 1: title` heading followed by 3 to 6 items. The first task after the project is published starts from Fase 1.\n\
+- Registro de decisões: one dated line per decision taken in the conversation, `- YYYY-MM-DD: the decision`. Only append; never rewrite or remove earlier lines.\n\
+- Update IDEIA.md in every turn in which something was learned or decided, before you answer.\n\
+\n\
+Converging:\n\
+- A question research cannot settle becomes an open hypothesis with a way to validate it, not another round of research.\n\
+- Do not open a new line of research unless the person asks for it.\n\
+- When the main hypotheses are settled and there is a favourite name, say the idea is ready to be published instead of looking for more.\n\
+\n\
+Every answer ends with a short status: each hypothesis with its state, the current verdict, and what is still missing to decide.\n\
+Reply in the language the person writes in.";
+
+/// The parts of the built-in researcher the person reads, in the app
+/// language. A blank name falls back to the English default. It has no first
+/// message, since the person opens every idea by describing it, and it never
+/// offers itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearcherPresetText {
+    #[serde(default)]
+    pub name: String,
+}
 
 /// The parts of the built-in reviewer the person reads, in the app language.
 /// A blank field falls back to the English default. The role is not here: it
@@ -236,6 +313,25 @@ impl ResidentAgentDraft {
         })
     }
 
+    /// The built-in researcher, with its texts in the person's language.
+    pub fn researcher(text: &ResearcherPresetText) -> Self {
+        Self {
+            name: ReviewerPresetText::or_default(&text.name, "Researcher"),
+            role: RESEARCHER_ROLE.to_string(),
+            kickoff_prompt: String::new(),
+            offer_prompt: String::new(),
+            extra_instructions: String::new(),
+            provider_id: None,
+            model: None,
+            effort: None,
+            avatar: AgentAvatar {
+                color: "violet".to_string(),
+                arms: 5,
+                eyes: "smile".to_string(),
+            },
+        }
+    }
+
     /// The built-in reviewer, with its texts in the person's language.
     pub fn reviewer(text: &ReviewerPresetText) -> Self {
         Self {
@@ -259,17 +355,25 @@ impl ResidentAgentDraft {
 impl ResidentAgent {
     /// A preset's role is DCC's and its visible texts follow the app language;
     /// whatever the row stored for them is ignored. An empty stored offer
-    /// means the person turned the offer off, and that is kept.
-    pub fn with_preset_text(mut self, text: Option<&ReviewerPresetText>) -> Self {
-        if self.preset.as_deref() != Some(REVIEWER_PRESET) {
-            return self;
-        }
-        self.role = REVIEWER_ROLE.to_string();
-        let english = ReviewerPresetText::default();
-        let text = text.unwrap_or(&english);
-        self.kickoff_prompt = text.kickoff_prompt();
-        if !self.offer_prompt.is_empty() {
-            self.offer_prompt = text.offer_prompt();
+    /// means the person turned the reviewer's offer off, and that is kept.
+    /// The researcher has no first message and never offers itself.
+    pub fn with_preset_text(mut self, reviewer: Option<&ReviewerPresetText>) -> Self {
+        match self.preset.as_deref() {
+            Some(REVIEWER_PRESET) => {
+                self.role = REVIEWER_ROLE.to_string();
+                let english = ReviewerPresetText::default();
+                let text = reviewer.unwrap_or(&english);
+                self.kickoff_prompt = text.kickoff_prompt();
+                if !self.offer_prompt.is_empty() {
+                    self.offer_prompt = text.offer_prompt();
+                }
+            }
+            Some(RESEARCHER_PRESET) => {
+                self.role = RESEARCHER_ROLE.to_string();
+                self.kickoff_prompt = String::new();
+                self.offer_prompt = String::new();
+            }
+            _ => {}
         }
         self
     }
@@ -430,11 +534,20 @@ mod tests {
 
         // The person turned the offer off: it stays off in any language.
         stored.offer_prompt = String::new();
-        assert_eq!(stored.clone().with_preset_text(Some(&portuguese)).offer_prompt, "");
+        assert_eq!(
+            stored
+                .clone()
+                .with_preset_text(Some(&portuguese))
+                .offer_prompt,
+            ""
+        );
 
         // An agent the person owns is never rewritten.
         stored.preset = None;
-        assert_eq!(stored.clone().with_preset_text(Some(&portuguese)), stored);
+        assert_eq!(
+            stored.clone().with_preset_text(Some(&portuguese)),
+            stored
+        );
     }
 
     #[test]
@@ -464,6 +577,56 @@ mod tests {
         // A pull request is reviewed once, from its patch.
         assert!(!REVIEWER_METHOD.contains("Follow-up rounds:"));
         assert!(REVIEWER_ROLE.chars().count() <= MAX_AGENT_ROLE_CHARS);
+    }
+
+    #[test]
+    fn researcher_preset_owns_its_role_never_offers_and_fits_the_role_limit() {
+        let draft = ResidentAgentDraft::researcher(&ResearcherPresetText {
+            name: " Pesquisador ".to_string(),
+        })
+        .normalized()
+        .unwrap();
+        assert_eq!(draft.name, "Pesquisador");
+        assert_eq!(draft.role, RESEARCHER_ROLE);
+        assert_eq!(draft.kickoff_prompt, "");
+        assert_eq!(
+            ResidentAgentDraft::researcher(&ResearcherPresetText::default()).name,
+            "Researcher"
+        );
+        assert_eq!(draft.offer_prompt, "");
+        assert_ne!(
+            draft.avatar,
+            ResidentAgentDraft::reviewer(&text("Revisor")).avatar
+        );
+        assert!(RESEARCHER_ROLE.chars().count() <= MAX_AGENT_ROLE_CHARS);
+        assert!(RESEARCHER_ROLE.contains(RESEARCHER_IDEA_FILE));
+
+        let mut stored = agent("tampered role");
+        stored.preset = Some(RESEARCHER_PRESET.to_string());
+        stored.offer_prompt = "May I research?".to_string();
+        let preset = stored.with_preset_text(Some(&text("Revisor")));
+        assert_eq!(preset.role, RESEARCHER_ROLE);
+        assert_eq!(preset.kickoff_prompt, "");
+        assert_eq!(preset.offer_prompt, "");
+    }
+
+    #[test]
+    fn researcher_role_keeps_the_headings_dcc_reads() {
+        // The template in the role is the one DCC writes, heading by heading.
+        let sections = crate::domain::idea::idea_sections();
+        assert!(RESEARCHER_ROLE.contains(&format!(
+            "```markdown\n# Ideia: <the idea in one sentence, in the person's words>\n{sections}```"
+        )));
+        assert!(crate::domain::idea::idea_template().starts_with("# Ideia\n"));
+        for heading in crate::domain::idea::IDEA_HEADINGS {
+            assert!(
+                RESEARCHER_ROLE.contains(&format!("\n- {heading}:")),
+                "{heading}"
+            );
+        }
+        assert!(RESEARCHER_ROLE.contains("- [aberta]"));
+        assert!(RESEARCHER_ROLE.contains("- ★ Name"));
+        assert!(RESEARCHER_ROLE.contains("Seguir, Pivotar or Descartar"));
     }
 
     #[test]

@@ -28,7 +28,10 @@ export function SessionAgentBadge({
 	);
 }
 
-/** One button per agent to call it in the task that is open. */
+/**
+ * One button per agent to call it in the task that is open. The researcher is
+ * not one of them: it works only in ideas, started from its own page.
+ */
 export function CallAgentButtons({
 	busy = false,
 	hasChanges,
@@ -42,7 +45,7 @@ export function CallAgentButtons({
 	const { agents } = useAgents();
 	return (
 		<>
-			{agents.map((agent) => {
+			{agents.filter((agent) => agent.preset !== "researcher").map((agent) => {
 				const blockKey = callAgentBlockKey({ preset: agent.preset, busy, hasChanges });
 				const blocked = blockKey !== null;
 				const label = blockKey ? t(blockKey) : t("agents.call.inTask", { agent: agent.name });

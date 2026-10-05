@@ -1,6 +1,8 @@
 //! Resident agents: person-owned identities a session can run as.
 
-use dcc_core::domain::agent::{ResidentAgent, ResidentAgentDraft, ReviewerPresetText};
+use dcc_core::domain::agent::{
+    ResearcherPresetText, ResidentAgent, ResidentAgentDraft, ReviewerPresetText,
+};
 use dcc_core::domain::session::SessionId;
 use dcc_infra::db::AgentSessionBinding;
 use serde::{Deserialize, Serialize};
@@ -30,15 +32,17 @@ pub struct BindSessionAgentInput {
     pub agent_id: String,
 }
 
-/// `reviewer` carries the built-in reviewer's texts in the app language.
+/// `reviewer` and `researcher` carry the built-in agents' texts in the app
+/// language. An app that does not send `researcher` gets the English one.
 #[tauri::command]
 pub async fn agents_overview(
     state: State<'_, SessionCommandState>,
     reviewer: ReviewerPresetText,
+    researcher: Option<ResearcherPresetText>,
 ) -> Result<AgentsOverview, String> {
     Ok(AgentsOverview {
         agents: state
-            .list_resident_agents(&reviewer)
+            .list_resident_agents(&reviewer, &researcher.unwrap_or_default())
             .map_err(|error| error.to_string())?,
         sessions: state
             .list_agent_session_bindings()

@@ -1,6 +1,6 @@
 use tauri::State;
 
-use dcc_core::domain::agent::{ResidentAgent, ReviewerPresetText};
+use dcc_core::domain::agent::{ResearcherPresetText, ResidentAgent, ReviewerPresetText};
 use dcc_tauri::{
     commands::agent_commands::{
         self as agent_command_impl, AgentsOverview, BindSessionAgentInput, SaveAgentInput,
@@ -12,8 +12,9 @@ use dcc_tauri::{
 pub async fn agents_overview(
     state: State<'_, SessionCommandState>,
     reviewer: ReviewerPresetText,
+    researcher: Option<ResearcherPresetText>,
 ) -> Result<AgentsOverview, String> {
-    agent_command_impl::agents_overview(state, reviewer).await
+    agent_command_impl::agents_overview(state, reviewer, researcher).await
 }
 
 #[tauri::command]

@@ -1,6 +1,6 @@
 import type { ProviderCatalog } from "@dcc/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Loader2, Pencil } from "lucide-react";
+import { ChevronDown, ChevronRight, Lightbulb, Loader2, Pencil } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -188,23 +188,26 @@ function AgentEditorDialog({
 							onChange={(event) => setDraft({ ...draft, extraInstructions: event.target.value })}
 						/>
 					</Field>
-					<div className="flex items-center justify-between gap-4">
-						<div className="space-y-1">
-							<div className="text-[12px] font-medium text-foreground">
-								{t("agents.editor.offerSwitch")}
+					{/* Only the reviewer offers itself; the researcher is always called. */}
+					{agent.preset === "reviewer" && (
+						<div className="flex items-center justify-between gap-4">
+							<div className="space-y-1">
+								<div className="text-[12px] font-medium text-foreground">
+									{t("agents.editor.offerSwitch")}
+								</div>
+								<p className="text-[11px] leading-relaxed text-muted-foreground">
+									{t("agents.editor.offerSwitchHint")}
+								</p>
 							</div>
-							<p className="text-[11px] leading-relaxed text-muted-foreground">
-								{t("agents.editor.offerSwitchHint")}
-							</p>
+							<Switch
+								aria-label={t("agents.editor.offerSwitch")}
+								checked={draft.offerPrompt.trim().length > 0}
+								onCheckedChange={(checked) =>
+									setDraft({ ...draft, offerPrompt: checked ? t("agents.presets.reviewerOffer") : "" })
+								}
+							/>
 						</div>
-						<Switch
-							aria-label={t("agents.editor.offerSwitch")}
-							checked={draft.offerPrompt.trim().length > 0}
-							onCheckedChange={(checked) =>
-								setDraft({ ...draft, offerPrompt: checked ? t("agents.presets.reviewerOffer") : "" })
-							}
-						/>
-					</div>
+					)}
 				</div>
 				<DialogFooter>
 					<Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
@@ -224,6 +227,38 @@ function AgentEditorDialog({
 	);
 }
 
+/** Where an idea starts: DCC prepares its folder and opens the chat. */
+function NewIdeaCard({ onStart }: { onStart: () => Promise<boolean> }) {
+	const { t } = useTranslation("common");
+	const [starting, setStarting] = useState(false);
+	const start = async () => {
+		if (starting) return;
+		setStarting(true);
+		try {
+			await onStart();
+		} finally {
+			setStarting(false);
+		}
+	};
+	return (
+		<section className="flex items-center gap-4 rounded-[18px] border border-border/70 bg-card p-5">
+			<div className="min-w-0 flex-1">
+				<h2 className="flex items-center gap-2 text-[14px] font-semibold">
+					<Lightbulb className="size-4 text-muted-foreground" />
+					{t("agents.research.newIdea")}
+				</h2>
+				<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+					{t("agents.research.newIdeaHint")}
+				</p>
+			</div>
+			<Button type="button" disabled={starting} onClick={() => void start()}>
+				{starting && <Loader2 className="size-4 animate-spin" />}
+				<span>{t("agents.research.start")}</span>
+			</Button>
+		</section>
+	);
+}
+
 const SECTION_TITLE =
 	"mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 
@@ -234,12 +269,18 @@ export function AgentPage({
 	workspaceNames,
 	projectLabels,
 	onOpenSession,
+	onStartIdea,
+	ideaWorkspaceIds,
 }: {
 	agent: AgentView | null;
 	providers: Providers;
 	workspaceNames: Record<string, string>;
 	projectLabels: Record<string, string>;
 	onOpenSession: (session: AgentSessionView) => void;
+	/** Starts a new idea with the researcher; resolves to whether it started. */
+	onStartIdea?: () => Promise<boolean>;
+	/** Tasks that are still ideas; a published idea is an ordinary project. */
+	ideaWorkspaceIds?: ReadonlySet<string>;
 }) {
 	const { t, i18n } = useTranslation("common");
 	const [editing, setEditing] = useState(false);
@@ -270,6 +311,11 @@ export function AgentPage({
 		timeStyle: "short",
 	});
 	const RoleChevron = roleOpen ? ChevronDown : ChevronRight;
+	const isResearcher = agent.preset === "researcher";
+	// The researcher's list is its ideas in progress, not every conversation it had.
+	const sessions = isResearcher
+		? agent.sessions.filter((session) => ideaWorkspaceIds?.has(session.workspaceId) ?? true)
+		: agent.sessions;
 
 	return (
 		<div className="h-full min-h-0 overflow-y-auto bg-background pt-9">
@@ -289,23 +335,31 @@ export function AgentPage({
 				</header>
 
 				{/* The reviewer needs a diff, which only a task in progress has: it
-				    is called from the task or the pull request, never from here. */}
-				<section className="rounded-[18px] border border-border/70 bg-card p-5">
-					<h2 className="text-[14px] font-semibold">{t("agents.page.howToCall")}</h2>
-					<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-						{t("agents.page.howToCallReviewer")}
-					</p>
-				</section>
+				    is called from the task or the pull request, never from here.
+				    The researcher is the opposite: an idea starts here, before any
+				    project exists, and is never called inside a project's task. */}
+				{isResearcher && onStartIdea ? (
+					<NewIdeaCard onStart={onStartIdea} />
+				) : (
+					<section className="rounded-[18px] border border-border/70 bg-card p-5">
+						<h2 className="text-[14px] font-semibold">{t("agents.page.howToCall")}</h2>
+						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+							{t("agents.page.howToCallReviewer")}
+						</p>
+					</section>
+				)}
 
 				<section>
-					<h2 className={SECTION_TITLE}>{t("agents.page.sessions")}</h2>
-					{agent.sessions.length === 0 ? (
+					<h2 className={SECTION_TITLE}>
+						{isResearcher ? t("agents.page.researcherSessions") : t("agents.page.sessions")}
+					</h2>
+					{sessions.length === 0 ? (
 						<p className="rounded-[18px] border border-dashed border-border/70 px-5 py-6 text-[13px] text-muted-foreground">
-							{t("agents.page.noSessions")}
+							{isResearcher ? t("agents.page.researcherNoSessions") : t("agents.page.noSessions")}
 						</p>
 					) : (
 						<ul className="divide-y divide-border/60 overflow-hidden rounded-[18px] border border-border/70 bg-card">
-							{agent.sessions.map((session) => {
+							{sessions.map((session) => {
 								const read = session.state === "done" && !session.unread;
 								return (
 									<li key={session.sessionId}>
