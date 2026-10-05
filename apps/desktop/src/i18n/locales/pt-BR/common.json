@@ -137,15 +137,6 @@
       "sendResultHint": "Coloca o resultado no composer desta conversa para você revisar e enviar",
       "sendResultUnavailable": "Esta delegação ainda não tem resultado para enviar.",
       "reviewInInspector": "Revisar no Inspector"
-    },
-    "approval": {
-      "title": "Pedido de delegação",
-      "instruction": "Instrução",
-      "mode": "Modo",
-      "target": "Provider alvo",
-      "targetAuto": "Escolhido pelo DCC",
-      "context": "Contexto",
-      "payload": "Payload bruto"
     }
   },
   "agents": {
@@ -563,7 +554,6 @@
 	"workspacesAndProjects": "Workspaces e projetos",
     "selected": "Selecionado",
     "actions": "Ações",
-    "delegate": "Delegar para outro agente",
     "openProject": "Abrir projeto",
     "cloneFromUrl": "Clone from URL",
     "openSettings": "Abrir configurações",
@@ -574,7 +564,6 @@
     "helpTopic": "Ajuda: {{topic}}",
     "keyboardShortcuts": "Atalhos de teclado",
 	"keywords": {
-		"delegate": "delegar delegação agente",
 		"openProject": "abrir projeto workspace",
 		"clone": "clonar repositório url",
 		"settings": "configurações preferências",
@@ -1934,13 +1923,7 @@
       }
     },
     "delegate": {
-      "open": "Delegar para outro agente",
       "title": "Delegar para",
-      "fanOut": "Delegar para vários…",
-      "submitFanOut": "Delegar para {{count}} agentes",
-      "allowEdits": "Pode editar arquivos",
-      "allowEditsHint": "Roda em worktree isolado; nada é aplicado sem sua revisão.",
-      "noEditTargets": "Nenhum agente disponível edita arquivos.",
       "chooseModel": "Escolher modelo do {{provider}}",
       "recommended": "Recomendado",
       "noModels": "Nenhum modelo disponível"
@@ -2979,14 +2962,15 @@
       "delegate": {
         "label": "Delegar para outro agente",
         "summary": "Envie uma tarefa delimitada para um segundo agente.",
-        "whatIs": "Delegar cria uma sessão filha com outro provider, com a instrução e o contexto que você escolher. A sessão principal continua livre e o resultado volta como um card na conversa.",
+        "whatIs": "Delegar cria uma sessão filha com outro provider (Claude, Codex, Cursor…). Você pede no chat, o agente chama a ferramenta dcc_delegate_task do DCC e continua trabalhando. Quando a filha termina, o resultado volta sozinho para o agente que pediu.",
         "whenToUse": "Para paralelizar: um agente implementa enquanto outro escreve testes ou revisa. Ou para pedir a segunda opinião de outro modelo sobre o mesmo diff.",
         "steps": [
-          "Clique em [Delegar] ao lado do botão de enviar do composer.",
-          "Escreva a instrução e escolha o provider alvo, ou deixe [Escolhido pelo DCC].",
-          "Escolha o contexto: [Diff atual], [Reancoragem completa] ou [Mínimo].",
-          "Acompanhe pelo card [Delegação] na conversa. Use [Abrir sessão filha] para ver os detalhes ou [Re-rodar em outro agente] para comparar."
+          "Peça no chat, em linguagem natural: \"delega pro Codex revisar este diff\" ou \"pede pro Claude escrever os testes\".",
+          "Acompanhe pelo card [Delegação] na conversa. Use [Abrir sessão filha] para ver o trabalho em andamento.",
+          "Quando a filha termina, o agente recebe o resultado e segue a tarefa. Delegações de implementação ficam isoladas até você usar [Revisar no Inspector] e aplicar ou descartar.",
+          "Para comparar, use [Re-rodar em outro agente]. Num resultado que você mesmo delegou, [Enviar ao agente] coloca o texto no composer."
         ],
+        "tip": "Funciona nos providers que recebem as ferramentas do DCC (Claude, Codex e Cursor). Um agente delegado não delega de novo.",
         "prompt": "Revise o diff atual como code review. Priorize bugs, regressão e testes faltando. Responda com achados por severidade e não edite arquivos.",
         "keywords": "delegar delegação agente sessão filha paralelo provider revisão segunda opinião fan-out"
       },
@@ -3670,9 +3654,7 @@
       "allowed": "Permitido",
       "denied": "Negado",
       "pending": "Pendente",
-      "submitError": "Não foi possível enviar sua decisão ao agente.",
-      "delegateMissingInstruction": "A solicitação de delegação não contém uma instrução.",
-      "delegateUnavailable": "A delegação não está disponível neste contexto."
+      "submitError": "Não foi possível enviar sua decisão ao agente."
     }
   },
   "workbench": {

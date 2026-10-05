@@ -6,7 +6,9 @@ use dcc_tauri::{
         CancelDelegationInput, CancelDelegationOutput, CompleteDelegationInput,
         CompleteDelegationOutput, CreateDelegationInput, CreateDelegationOutput,
         FailDelegationInput, FailDelegationOutput, GetDelegationInput, GetDelegationOutput,
-        ListDelegationsInput, ListDelegationsOutput, StartDelegationInput, StartDelegationOutput,
+        DelegationResultTurnInput, DelegationResultTurnOutput, ListDelegationsInput,
+        ListDelegationsOutput, RunDelegationInput, RunDelegationOutput, StartDelegationInput,
+        StartDelegationOutput,
     },
     state::SessionCommandState,
 };
@@ -79,4 +81,20 @@ pub async fn fail_delegation(
     input: FailDelegationInput,
 ) -> Result<FailDelegationOutput, String> {
     delegation_command_impl::fail_delegation(state, app, input).await
+}
+
+#[tauri::command]
+pub async fn run_delegation(
+    state: State<'_, SessionCommandState>,
+    input: RunDelegationInput,
+) -> Result<RunDelegationOutput, String> {
+    delegation_command_impl::run_delegation(state, input).await
+}
+
+#[tauri::command]
+pub async fn delegation_result_turn(
+    state: State<'_, SessionCommandState>,
+    input: DelegationResultTurnInput,
+) -> Result<DelegationResultTurnOutput, String> {
+    delegation_command_impl::delegation_result_turn(state, input).await
 }

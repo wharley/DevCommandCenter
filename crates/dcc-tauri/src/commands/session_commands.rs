@@ -2149,6 +2149,16 @@ pub async fn send_turn(
     _app: AppHandle,
     input: SendTurnInput,
 ) -> Result<SendTurnOutput, String> {
+    send_turn_with_state(&state, input).await
+}
+
+/// The full send pipeline (attach, MCP preflight, instructions, durable turn,
+/// provider input) without Tauri `State`, so backend flows such as delegation
+/// can start turns exactly like the desktop does.
+pub async fn send_turn_with_state(
+    state: &SessionCommandState,
+    input: SendTurnInput,
+) -> Result<SendTurnOutput, String> {
     let transition = state
         .acquire_provider_transition(&input.session_id)
         .await

@@ -2,7 +2,7 @@
 
 
 /* Constants */
-export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","startDelegation":"start_delegation"} as const;
+export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation"} as const;
 
 export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
@@ -625,6 +625,8 @@ export type CreateDelegationInput = {
 	prompt: string,
 	contextPolicy?: DelegationContextPolicy,
 	budget?: DelegationBudget,
+	origin?: DelegationOrigin,
+	instruction?: string | null,
 };
 
 export type CreateDelegationOutput = {
@@ -835,6 +837,14 @@ export type Delegation = {
 	validationSummary: string | null,
 	createdAt: string,
 	updatedAt: string,
+	origin?: DelegationOrigin,
+	/**
+	 *  The task as the requester wrote it, without the context DCC wraps
+	 *  around it in `prompt`.
+	 */
+	instruction?: string | null,
+	// First transition to `Running`; the timeout budget counts from here.
+	startedAt?: string | null,
 };
 
 export type DelegationBudget = {
@@ -848,6 +858,24 @@ export type DelegationContextPolicy = { type: "minimal" } | { type: "review_curr
 export type DelegationId = string;
 
 export type DelegationMode = "review" | "implement" | "explain" | "test" | "research";
+
+/**
+ *  Who asked for the delegation. An agent-initiated delegation (the
+ *  `dcc_delegate_task` tool) hands its result back to the parent agent as a
+ *  turn; a person-initiated one only reports it in the thread.
+ */
+export type DelegationOrigin = "person" | "agent";
+
+export type DelegationResultTurnInput = {
+	delegationId: DelegationId,
+	// The failure reason lives on the timeline event, not on the record.
+	failureReason?: string | null,
+};
+
+export type DelegationResultTurnOutput = {
+	// `None` while the delegation has not finished.
+	prompt: string | null,
+};
 
 export type DelegationStatus = "draft" | "queued" | "running" | "review_pending" | "completed" | "failed" | "cancelled";
 
@@ -1965,6 +1993,30 @@ export type ResumeSessionInput = {
 export type ResumeSessionOutput = {
 	session: Session,
 	projection: SessionProjection,
+};
+
+export type RunDelegationInput = {
+	parentSessionId: SessionId,
+	// Omitted: the first available provider that is not the parent's.
+	targetProviderId?: string | null,
+	targetModelId?: string | null,
+	mode: DelegationMode,
+	instruction: string,
+	contextPolicy?: DelegationContextPolicy,
+	origin?: DelegationOrigin,
+	// Replays an earlier delegation's prompt verbatim (reruns).
+	prebuiltPrompt?: string | null,
+	effort?: string | null,
+	fastMode?: boolean | null,
+	/**
+	 *  The desktop passes the person's runtime settings; backend callers
+	 *  inherit them from the newest session of the same provider.
+	 */
+	providerRuntime?: ProviderRuntimeConfig | null,
+};
+
+export type RunDelegationOutput = {
+	delegation: Delegation,
 };
 
 export type RunPullRequestReviewAgentInput = {

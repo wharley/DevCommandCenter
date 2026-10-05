@@ -8,7 +8,7 @@ use dcc_core::{
     domain::{
         delegation::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
-            DelegationStatus,
+            DelegationOrigin, DelegationStatus,
         },
         delegation_worktree::{DelegationWorktreeOperationId, DelegationWorktreeOperationState},
         provider::ProviderId,
@@ -41,6 +41,10 @@ pub struct CreateDelegationInput {
     pub context_policy: DelegationContextPolicy,
     #[serde(default)]
     pub budget: DelegationBudget,
+    #[serde(default)]
+    pub origin: DelegationOrigin,
+    #[serde(default)]
+    pub instruction: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -251,6 +255,13 @@ pub async fn create_delegation(
     _app: AppHandle,
     input: CreateDelegationInput,
 ) -> Result<CreateDelegationOutput, String> {
+    create_delegation_with_state(&state, input).await
+}
+
+pub async fn create_delegation_with_state(
+    state: &SessionCommandState,
+    input: CreateDelegationInput,
+) -> Result<CreateDelegationOutput, String> {
     if input.prompt.trim().is_empty() {
         return Err("prompt cannot be empty".to_string());
     }
@@ -309,6 +320,12 @@ pub async fn create_delegation(
         validation_summary: None,
         created_at: now.clone(),
         updated_at: now.clone(),
+        origin: input.origin,
+        instruction: input
+            .instruction
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        started_at: None,
     };
 
     let edit_capable =
@@ -448,6 +465,13 @@ pub async fn cancel_delegation(
     _app: AppHandle,
     input: CancelDelegationInput,
 ) -> Result<CancelDelegationOutput, String> {
+    cancel_delegation_with_state(&state, input).await
+}
+
+pub async fn cancel_delegation_with_state(
+    state: &SessionCommandState,
+    input: CancelDelegationInput,
+) -> Result<CancelDelegationOutput, String> {
     let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
         .await
         .map_err(|error| error.to_string())?
@@ -503,6 +527,10 @@ pub async fn cancel_delegation(
         now,
     )
     .await?;
+    if matches!(delegation.status, DelegationStatus::ReviewPending) {
+        // Discarding reviewed edits is the person's answer to the parent.
+        crate::delegation_runtime::notify_parent_of_review_outcome(state, &updated, false);
+    }
 
     Ok(CancelDelegationOutput {
         delegation: updated,
@@ -513,6 +541,13 @@ pub async fn cancel_delegation(
 pub async fn start_delegation(
     state: State<'_, SessionCommandState>,
     _app: AppHandle,
+    input: StartDelegationInput,
+) -> Result<StartDelegationOutput, String> {
+    start_delegation_with_state(&state, input).await
+}
+
+pub async fn start_delegation_with_state(
+    state: &SessionCommandState,
     input: StartDelegationInput,
 ) -> Result<StartDelegationOutput, String> {
     let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
@@ -574,6 +609,13 @@ pub async fn start_delegation(
 pub async fn complete_delegation(
     state: State<'_, SessionCommandState>,
     _app: AppHandle,
+    input: CompleteDelegationInput,
+) -> Result<CompleteDelegationOutput, String> {
+    complete_delegation_with_state(&state, input).await
+}
+
+pub async fn complete_delegation_with_state(
+    state: &SessionCommandState,
     input: CompleteDelegationInput,
 ) -> Result<CompleteDelegationOutput, String> {
     let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
@@ -683,6 +725,13 @@ pub async fn approve_delegation(
     _app: AppHandle,
     input: ApproveDelegationInput,
 ) -> Result<ApproveDelegationOutput, String> {
+    approve_delegation_with_state(&state, input).await
+}
+
+pub async fn approve_delegation_with_state(
+    state: &SessionCommandState,
+    input: ApproveDelegationInput,
+) -> Result<ApproveDelegationOutput, String> {
     let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
         .await
         .map_err(|error| error.to_string())?
@@ -740,6 +789,7 @@ pub async fn approve_delegation(
         now,
     )
     .await?;
+    crate::delegation_runtime::notify_parent_of_review_outcome(state, &updated, true);
 
     Ok(ApproveDelegationOutput {
         delegation: updated,
@@ -750,6 +800,13 @@ pub async fn approve_delegation(
 pub async fn fail_delegation(
     state: State<'_, SessionCommandState>,
     _app: AppHandle,
+    input: FailDelegationInput,
+) -> Result<FailDelegationOutput, String> {
+    fail_delegation_with_state(&state, input).await
+}
+
+pub async fn fail_delegation_with_state(
+    state: &SessionCommandState,
     input: FailDelegationInput,
 ) -> Result<FailDelegationOutput, String> {
     let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
@@ -790,6 +847,58 @@ pub async fn fail_delegation(
     Ok(FailDelegationOutput {
         delegation: updated,
     })
+}
+
+pub use crate::delegation_runtime::{RunDelegationInput, RunDelegationOutput};
+
+/// Starts a delegation end to end in the backend (worktree, child thread,
+/// record, child turn); the result is finalized when the child's turn ends.
+#[tauri::command]
+pub async fn run_delegation(
+    state: State<'_, SessionCommandState>,
+    input: RunDelegationInput,
+) -> Result<RunDelegationOutput, String> {
+    crate::delegation_runtime::run_delegation(&state, input).await
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegationResultTurnInput {
+    pub delegation_id: DelegationId,
+    /// The failure reason lives on the timeline event, not on the record.
+    #[serde(default)]
+    pub failure_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegationResultTurnOutput {
+    /// `None` while the delegation has not finished.
+    pub prompt: Option<String>,
+}
+
+/// The deterministic `[DCC] …` hand-back text, for the person to send a
+/// finished delegation's result to the parent agent from the composer.
+#[tauri::command]
+pub async fn delegation_result_turn(
+    state: State<'_, SessionCommandState>,
+    input: DelegationResultTurnInput,
+) -> Result<DelegationResultTurnOutput, String> {
+    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    let prompt = matches!(
+        delegation.status,
+        DelegationStatus::Completed | DelegationStatus::ReviewPending | DelegationStatus::Failed
+    )
+    .then(|| {
+        crate::delegation_runtime::delegation_result_turn(
+            &delegation,
+            input.failure_reason.as_deref(),
+        )
+    });
+    Ok(DelegationResultTurnOutput { prompt })
 }
 
 #[cfg(test)]
@@ -844,6 +953,9 @@ mod tests {
             validation_summary: None,
             created_at: "2026-09-01T00:00:00Z".to_string(),
             updated_at: "2026-09-01T00:00:00Z".to_string(),
+            origin: Default::default(),
+            instruction: None,
+            started_at: None,
         }
     }
 

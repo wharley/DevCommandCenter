@@ -49,7 +49,6 @@ import {
 } from "@/features/browser/browser-layout";
 import type { WorkspaceSurfaceSelection } from "@/features/panel/workspace-surface";
 import type {
-	ComposerDelegationRequest,
 	ComposerSubmittedTurn,
 } from "@/features/composer/composer-turn";
 import type {
@@ -58,7 +57,6 @@ import type {
 } from "@/features/merge/agent-conflict-resolution";
 import type { RuntimeSessionSnapshot } from "./workbench-types";
 import type { ManualDelegationRequest } from "./delegation-request";
-import type { AgentInitiatedDelegationRequest } from "./agent-delegation-request";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import {
 	ContextAttachmentLedger,
@@ -201,8 +199,6 @@ type SessionWorkbenchProps = {
 	onResumeSession: () => Promise<void>;
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
-	onDelegatePrompt: (request: ComposerDelegationRequest) => Promise<void>;
-	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	surfaceSelection: WorkspaceSurfaceSelection | null;
 	surfaceSelectionWorkspaceId: string | null;
@@ -248,7 +244,6 @@ type SessionWorkbenchProps = {
 	onOpenAgentSession: (sessionId: string) => void;
 	onMergeConflictStateChanged: (workspaceRoot: string) => Promise<void> | void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
-	delegateSignal?: number;
 	pendingBrowserOpen?: BrowserOpenRequest | null;
 	onBrowserOpened?: (request: BrowserOpenRequest, snapshot: { lifecycleToken: number }) => void;
 };
@@ -304,8 +299,6 @@ export function SessionWorkbench({
 	onResumeSession,
 	onAbortSession,
 	onDelegate,
-	onDelegatePrompt,
-	onAgentDelegate,
 	sessionActionSessionId,
 	surfaceSelection,
 	surfaceSelectionWorkspaceId,
@@ -330,7 +323,6 @@ export function SessionWorkbench({
 	onResolveConflictWithAgent,
 	onOpenAgentSession,
 	onMergeConflictStateChanged,
-	delegateSignal,
 	pendingBrowserOpen = null,
 	onBrowserOpened,
 }: SessionWorkbenchProps) {
@@ -1193,8 +1185,6 @@ export function SessionWorkbench({
 						onResumeSession={onResumeSession}
 						onAbortSession={onAbortSession}
 						onDelegate={onDelegate}
-						onDelegatePrompt={onDelegatePrompt}
-						onAgentDelegate={onAgentDelegate}
 						sessionActionSessionId={sessionActionSessionId}
 						surfaceSelection={surfaceSelection}
 						surfaceSelectionWorkspaceId={surfaceSelectionWorkspaceId}
@@ -1224,7 +1214,6 @@ export function SessionWorkbench({
 						onResolveConflictWithAgent={onResolveConflictWithAgent}
 						onOpenAgentSession={onOpenAgentSession}
 						onMergeConflictStateChanged={onMergeConflictStateChanged}
-						delegateSignal={delegateSignal}
 					/>
 				</div>
 			) : null}

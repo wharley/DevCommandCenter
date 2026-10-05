@@ -1,21 +1,16 @@
 import { ShieldAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import type { PendingPermissionRequest } from "../pending-permissions";
 import { ApprovalCard } from "./ApprovalCard";
 
 type PendingPermissionPanelProps = {
 	sessionId: string;
 	requests: PendingPermissionRequest[];
-	onDelegateTaskApprove?: (
-		request: AgentInitiatedDelegationRequest,
-	) => Promise<void>;
 };
 
 export function PendingPermissionPanel({
 	sessionId,
 	requests,
-	onDelegateTaskApprove,
 }: PendingPermissionPanelProps) {
 	const { t } = useTranslation("common");
 
@@ -58,7 +53,6 @@ export function PendingPermissionPanel({
 						file={request.file}
 						behavior={request.behavior}
 						isLive
-						onDelegateTaskApprove={onDelegateTaskApprove}
 					/>
 				))}
 			</div>

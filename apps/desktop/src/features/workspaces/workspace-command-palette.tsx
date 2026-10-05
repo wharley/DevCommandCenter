@@ -59,8 +59,6 @@ type WorkspaceCommandPaletteProps = {
 	queryScope?: string;
 	onSelectSession: (result: SessionSearchResult) => void;
 	onSelectFile: (input: { path: string; name: string }) => void;
-	/** Present only when the active workspace has a session to delegate from. */
-	onDelegate?: () => void;
 	onRunWorkbenchCommand?: (command: WorkbenchCommand) => void;
 };
 
@@ -84,7 +82,6 @@ export function WorkspaceCommandPalette({
 	queryScope = "local",
 	onSelectSession,
 	onSelectFile,
-	onDelegate,
 	onRunWorkbenchCommand,
 }: WorkspaceCommandPaletteProps) {
 	const { t } = useTranslation("common");
@@ -175,9 +172,6 @@ export function WorkspaceCommandPalette({
 				shortcut: item.shortcut,
 				onSelect: () => onRunWorkbenchCommand(item.command),
 			})) : []),
-			...(onDelegate
-				? [{ id: "delegate", label: t("commandPalette.delegate"), keywords: t("commandPalette.keywords.delegate"), onSelect: onDelegate }]
-				: []),
 			{ id: "open-project", label: t("commandPalette.openProject"), keywords: t("commandPalette.keywords.openProject"), shortcut: getOpenPreferredEditorShortcutKeys().join("+"), onSelect: onCreateWorkspace },
 			{ id: "clone", label: t("commandPalette.cloneFromUrl"), keywords: t("commandPalette.keywords.clone"), onSelect: onCloneWorkspace },
 			{ id: "settings", label: t("commandPalette.openSettings"), keywords: t("commandPalette.keywords.settings"), shortcut: `${getPrimaryShortcutModifier()}+,`, onSelect: onOpenSettings },
@@ -190,7 +184,6 @@ export function WorkspaceCommandPalette({
 		[
 			onCloneWorkspace,
 			onCreateWorkspace,
-			onDelegate,
 			onOpenHelp,
 			onOpenOnboarding,
 			onOpenSettings,

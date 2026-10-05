@@ -16,9 +16,11 @@ describe("delegate task tool instructions", () => {
 		expect(instructions).toContain("use Claude's native Agent tool");
 		expect(instructions).toContain('"Opus 5.5" means Agent.model = "opus"');
 		expect(instructions).toContain(
-			"delegate_task is exclusively for delegation to a different provider",
+			"dcc_delegate_task is exclusively for delegation to a different provider",
 		);
 		expect(instructions).toContain("Available external-provider delegation targets:");
+		expect(instructions).toContain("call the DCC tool dcc_delegate_task");
+		expect(instructions).not.toContain("dcc_permission_request");
 		expect(instructions).not.toContain("claude_code (Claude Code)");
 	});
 

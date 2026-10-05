@@ -9,12 +9,16 @@ import type {
 	CompleteDelegationOutput,
 	CreateDelegationInput,
 	CreateDelegationOutput,
+	DelegationResultTurnInput,
+	DelegationResultTurnOutput,
 	FailDelegationInput,
 	FailDelegationOutput,
 	GetDelegationInput,
 	GetDelegationOutput,
 	ListDelegationsInput,
 	ListDelegationsOutput,
+	RunDelegationInput,
+	RunDelegationOutput,
 	StartDelegationInput,
 	StartDelegationOutput,
 } from "@dcc/contracts";
@@ -64,6 +68,18 @@ export function approveDelegation(input: ApproveDelegationInput) {
 
 export function failDelegation(input: FailDelegationInput) {
 	return invoke<FailDelegationOutput>(DELEGATION_METHODS.failDelegation, {
+		input,
+	});
+}
+
+/** Starts a delegation end to end in the backend; see `delegation_runtime.rs`. */
+export function runDelegation(input: RunDelegationInput) {
+	return invoke<RunDelegationOutput>(DELEGATION_METHODS.runDelegation, { input });
+}
+
+/** The deterministic `[DCC] …` hand-back text for a finished delegation. */
+export function delegationResultTurn(input: DelegationResultTurnInput) {
+	return invoke<DelegationResultTurnOutput>(DELEGATION_METHODS.delegationResultTurn, {
 		input,
 	});
 }

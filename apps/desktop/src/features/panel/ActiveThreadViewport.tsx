@@ -30,7 +30,6 @@ import {
 	UserMessage,
 } from "./message-components";
 import { EmptyState } from "./EmptyState";
-import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import {
 	latestConversationActivitySignature,
 	precedingUserPrompt, precedingUserTurn } from "./conversation-recovery";
@@ -79,7 +78,6 @@ type ActiveThreadViewportProps = {
 		delegationId: string;
 		failureReason?: string | null;
 	}) => void | Promise<void>;
-	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	onEditPrompt?: (prompt: string) => void;
 	onForkFromMessage?: (messageId: string) => void;
 	onContinueInterrupted?: (originalPrompt: string | null) => Promise<void> | void;
@@ -127,7 +125,6 @@ export function ActiveThreadViewport({
 	onReviewDelegation,
 	onRerunDelegation,
 	onSendDelegationResult,
-	onDelegateTaskApprove,
 	onEditPrompt,
 	onForkFromMessage,
 	onContinueInterrupted,
@@ -447,7 +444,6 @@ export function ActiveThreadViewport({
 												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
 												activeMissionSpecHash={activeMissionSpecHash}
 												autoSaveMissionValidation={autoSaveMissionValidation}
-												onDelegateTaskApprove={onDelegateTaskApprove}
 												onContinue={
 													message.id === latestAssistantMessageId &&
 													message.status?.type === "incomplete" &&

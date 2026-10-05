@@ -171,7 +171,7 @@ use dcc_core::{
     domain::{
         delegation::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
-            DelegationStatus,
+            DelegationOrigin, DelegationStatus,
         },
         mcp::{
             McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
@@ -231,8 +231,9 @@ use dcc_tauri::commands::{
         ApproveDelegationInput, ApproveDelegationOutput, CancelDelegationInput,
         CancelDelegationOutput, CompleteDelegationInput, CompleteDelegationOutput,
         CreateDelegationInput, CreateDelegationOutput, FailDelegationInput, FailDelegationOutput,
-        GetDelegationInput, GetDelegationOutput, ListDelegationsInput, ListDelegationsOutput,
-        StartDelegationInput, StartDelegationOutput,
+        DelegationResultTurnInput, DelegationResultTurnOutput, GetDelegationInput,
+        GetDelegationOutput, ListDelegationsInput, ListDelegationsOutput, RunDelegationInput,
+        RunDelegationOutput, StartDelegationInput, StartDelegationOutput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -638,6 +639,8 @@ struct DelegationMethods {
     complete_delegation: String,
     approve_delegation: String,
     fail_delegation: String,
+    run_delegation: String,
+    delegation_result_turn: String,
 }
 
 fn main() {
@@ -684,6 +687,7 @@ fn main() {
         .typ::<DelegationId>()
         .typ::<DelegationMode>()
         .typ::<DelegationStatus>()
+        .typ::<DelegationOrigin>()
         .typ::<DelegationContextPolicy>()
         .typ::<DelegationBudget>()
         .typ::<Delegation>()
@@ -1047,6 +1051,10 @@ fn main() {
         .typ::<CancelDelegationOutput>()
         .typ::<StartDelegationInput>()
         .typ::<StartDelegationOutput>()
+        .typ::<RunDelegationInput>()
+        .typ::<RunDelegationOutput>()
+        .typ::<DelegationResultTurnInput>()
+        .typ::<DelegationResultTurnOutput>()
         .typ::<CompleteDelegationInput>()
         .typ::<CompleteDelegationOutput>()
         .typ::<ApproveDelegationInput>()
@@ -1282,6 +1290,8 @@ fn main() {
             complete_delegation: "complete_delegation".to_string(),
             approve_delegation: "approve_delegation".to_string(),
             fail_delegation: "fail_delegation".to_string(),
+            run_delegation: "run_delegation".to_string(),
+            delegation_result_turn: "delegation_result_turn".to_string(),
         },
     );
 

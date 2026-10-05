@@ -83,8 +83,9 @@ use coderabbit_commands::{
 use computer_use_commands::ComputerUseState;
 use dcc_infra::mcp_db::SqliteMcpRepo;
 use delegation_commands::{
-    approve_delegation, cancel_delegation, complete_delegation, create_delegation, fail_delegation,
-    get_delegation, list_delegations, start_delegation,
+    approve_delegation, cancel_delegation, complete_delegation, create_delegation,
+    delegation_result_turn, fail_delegation, get_delegation, list_delegations, run_delegation,
+    start_delegation,
 };
 use feedback_commands::{dcc_feedback_context, dcc_feedback_create, dcc_feedback_list};
 use forge_commands::{
@@ -7211,6 +7212,8 @@ pub fn run() {
             complete_delegation,
             approve_delegation,
             fail_delegation,
+            run_delegation,
+            delegation_result_turn,
             mcp_commands::list_mcp_integrations,
             mcp_commands::create_mcp_integration,
             mcp_commands::activate_mcp_integration,
@@ -7388,6 +7391,16 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 }
             });
+            // Settles delegations whose child finished while nobody was
+            // listening (reload, restart) and enforces their timeout budget.
+            let delegation_watchdog_state = app
+                .try_state::<SessionCommandState>()
+                .expect("session command state managed")
+                .inner()
+                .clone();
+            tauri::async_runtime::spawn(dcc_tauri::delegation_runtime::run_delegation_watchdog(
+                delegation_watchdog_state,
+            ));
             let state = AppState {
                 db_path: Arc::new(db_path.clone()),
                 app_data_dir: Arc::new(app_data_dir.clone()),

@@ -42,7 +42,6 @@ import type {
 import { DccWorkbenchChatHeader } from "@/features/sessions/dcc-workbench-chat-header";
 import { WorkspaceDeliveryControls } from "@/features/commit/WorkspaceDeliveryControls";
 import type { ManualDelegationRequest } from "@/features/sessions/delegation-request";
-import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { ActiveThreadViewport } from "./ActiveThreadViewport";
 import { collectPendingPermissionRequests } from "./pending-permissions";
 import { PendingPermissionPanel } from "./message-components";
@@ -53,7 +52,6 @@ import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-th
 import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
 import {
 	composerTurnFromRaw,
-	type ComposerDelegationRequest,
 	type ComposerSubmittedTurn,
 } from "@/features/composer/composer-turn";
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
@@ -257,8 +255,6 @@ type WorkspacePanelProps = {
 	onAbortSession: () => void;
 	onDelegate: (request: ManualDelegationRequest) => Promise<void>;
 	/** Composer-initiated delegation; mode and context policy are derived upstream. */
-	onDelegatePrompt: (request: ComposerDelegationRequest) => Promise<void>;
-	onAgentDelegate: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	sessionActionSessionId: string | null;
 	surfaceSelection: WorkspaceSurfaceSelection | null;
 	/** Workspace that owns `surfaceSelection`, used to avoid cross-workspace restore races. */
@@ -311,7 +307,6 @@ type WorkspacePanelProps = {
 	onOpenAgentSession: (sessionId: string) => void;
 	onMergeConflictStateChanged: (workspaceRoot: string) => Promise<void> | void;
 	/** Increment to open the Delegate dialog from outside (command palette). */
-	delegateSignal?: number;
 };
 
 export type CompletionReviewStatus = {
@@ -360,8 +355,6 @@ export function WorkspacePanel({
 	onResumeSession,
 	onAbortSession,
 	onDelegate,
-	onDelegatePrompt,
-	onAgentDelegate,
 	sessionActionSessionId,
 	surfaceSelection,
 	surfaceSelectionWorkspaceId,
@@ -391,7 +384,6 @@ export function WorkspacePanel({
 	onResolveConflictWithAgent,
 	onOpenAgentSession,
 	onMergeConflictStateChanged,
-	delegateSignal,
 }: WorkspacePanelProps) {
 	const { t } = useTranslation("common");
 	const workspaceSurfaceSelection =
@@ -1682,7 +1674,6 @@ export function WorkspacePanel({
 					onReviewDelegation={onReviewDelegation}
 					onRerunDelegation={onRerunDelegation}
 					onSendDelegationResult={onSendDelegationResult}
-					onDelegateTaskApprove={onAgentDelegate}
 					onEditPrompt={replaceComposerDraft}
 					onForkFromMessage={onForkFromMessage}
 					onContinueInterrupted={handleContinueInterrupted}
@@ -1709,7 +1700,6 @@ export function WorkspacePanel({
 					<PendingPermissionPanel
 						sessionId={effectiveSessionId}
 						requests={pendingPermissionRequests}
-						onDelegateTaskApprove={onAgentDelegate}
 					/>
 				) : null}
 
@@ -1772,8 +1762,6 @@ export function WorkspacePanel({
 						onSubmitPrompt={submitPromptWithModelRouting}
 						onSteerPrompt={onSteerPrompt}
 						onQueuePrompt={onQueuePrompt}
-						onDelegatePrompt={sessionSnapshot ? onDelegatePrompt : undefined}
-						openDelegateMenuSignal={delegateSignal ?? 0}
 						onAbortSession={onAbortSession}
 						onReviewPlan={onOpenPlanSurface}
 						onOpenTerminal={onOpenTerminal ? openPreferredTerminal : undefined}

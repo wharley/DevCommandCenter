@@ -1495,6 +1495,9 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_computer_scroll"
                 | "dcc_computer_type"
                 | "dcc_computer_key"
+                | "dcc_delegate_task"
+                | "dcc_task_status"
+                | "dcc_task_cancel"
         )
 }
 

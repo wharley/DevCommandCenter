@@ -22,7 +22,6 @@ import type {
 	CoreEvent,
 	DecisionProviderModelRouteSelection,
 	Delegation,
-	DelegationMode,
 	DelegationContextPolicy,
 	MissionSpecEntry,
 	PullRequestHubItem,
@@ -113,12 +112,6 @@ import {
 } from "./features/sessions/session-workbench";
 import { SessionSearchDialog } from "./features/sessions/session-search-dialog";
 import { resolveDelegateTaskToolInstructions } from "./features/sessions/delegate-task-tool-instructions";
-import {
-	buildDelegationResultTurn,
-	delegationResultTurnFromRecord,
-	extractDelegationInstruction,
-} from "./features/sessions/delegation-result-turn";
-import { deliverDelegationResultToParent } from "./features/sessions/deliver-delegation-result";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { NewTaskLaunchState } from "./features/panel/NewTaskLaunchState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
@@ -176,8 +169,6 @@ import {
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
 	workspacePrStatus,
-	workspacePrepareDelegationWorktree,
-	workspaceRemoveDelegationWorktree,
 } from "./lib/workspace-api";
 import { repositoryDisplayName } from "./features/workspaces/repository-display-name";
 import {
@@ -195,12 +186,10 @@ import {
 	steerTurn,
 } from "./lib/session-api";
 import {
-	completeDelegation,
-	createDelegation,
-	failDelegation,
+	delegationResultTurn,
 	getDelegation,
 	listDelegations,
-	startDelegation,
+	runDelegation,
 } from "./lib/delegation-api";
 import { useAppearance } from "./components/theme-provider";
 import {
@@ -226,10 +215,8 @@ import {
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
 import type {
-	ComposerDelegationRequest,
 	ComposerSubmittedTurn,
 } from "./features/composer/composer-turn";
-import { resolveDelegationDefaults } from "./features/sessions/delegation-defaults";
 import {
 	buildProviderHandoffContext,
 	mergeProviderHandoffToolInstructions,
@@ -246,7 +233,6 @@ import {
 	rerunMode,
 } from "./features/sessions/delegation-decisions";
 import type { ManualDelegationRequest } from "./features/sessions/delegation-request";
-import type { AgentInitiatedDelegationRequest } from "./features/sessions/agent-delegation-request";
 import { buildMissionSpecFilename } from "./features/composer/WorkspaceComposer.logic";
 import {
 	daemonCombToWorkspaceSummary,
@@ -402,305 +388,6 @@ type WorkspaceComposerPrefillRequest = {
 	mode?: "append" | "replace";
 };
 
-type DelegationChildBinding = {
-	delegationId: string;
-	childSessionId: string;
-	parentSessionId: string;
-	workspaceId: string;
-	/** Registered parent workspace root used for journaled cleanup. */
-	workspaceRoot?: string | null;
-	workspacePath: string | null;
-	cleanupWorkspacePath?: string | null;
-	reviewRequired: boolean;
-	finalized: boolean;
-	/**
-	 * Set when the parent agent asked for this delegation (`delegate_task`):
-	 * the result is handed back to it as a turn once the child finishes.
-	 */
-	resultHandback: {
-		mode: DelegationMode;
-		providerLabel: string;
-		modelLabel: string | null;
-		instruction: string;
-		parentToolInstructions: string | null;
-	} | null;
-};
-
-function truncateDelegationContext(value: string, maxLength: number) {
-	const trimmed = value.trim();
-	if (trimmed.length <= maxLength) {
-		return trimmed;
-	}
-	return `${trimmed.slice(0, maxLength).trimEnd()}\n\n[truncated]`;
-}
-
-function formatDelegationChangeList(
-	label: string,
-	changes: Array<{
-		path: string;
-		status: string;
-		insertions: number;
-		deletions: number;
-	}>,
-) {
-	if (changes.length === 0) {
-		return [`${label}: none`];
-	}
-	return [
-		`${label}:`,
-		...changes
-			.slice(0, 80)
-			.map(
-				(change) =>
-					`- ${change.status} ${change.path} (+${change.insertions}/-${change.deletions})`,
-			),
-		changes.length > 80 ? `- ... ${changes.length - 80} more file(s)` : "",
-	].filter(Boolean);
-}
-
-/**
- * Hands a finished delegation back to the parent agent that asked for it.
- * Manual delegations (started by the person) are not handed back
- * automatically; their card offers to put the result in the composer instead.
- */
-async function handBackDelegationResult(
-	binding: DelegationChildBinding,
-	outcome: {
-		status: "completed" | "review_pending" | "failed";
-		summary?: string | null;
-		touchedFiles?: string[];
-		validationSummary?: string | null;
-		failureReason?: string | null;
-	},
-) {
-	const handback = binding.resultHandback;
-	if (!handback) {
-		return;
-	}
-	try {
-		await deliverDelegationResultToParent({
-			parentSessionId: binding.parentSessionId,
-			prompt: buildDelegationResultTurn({ ...handback, ...outcome }),
-			toolInstructions: handback.parentToolInstructions,
-		});
-	} catch (error) {
-		console.error("[dcc] delegation result hand-back failed:", error);
-		toast.error("Could not hand the delegation result back to the agent.", {
-			description: error instanceof Error ? error.message : undefined,
-		});
-	}
-}
-
-async function summarizeSessionForDelegation(sessionId: string) {
-	const events = await loadSessionThreadEvents(sessionId);
-	const messages = projectWorkspaceMessages(events, [], sessionId, null);
-	const lastAssistant = [...messages]
-		.reverse()
-		.find((message) => message.role === "assistant" && message.content.trim());
-	return lastAssistant
-		? truncateDelegationContext(lastAssistant.content, 1600)
-		: "Delegated session completed without assistant text.";
-}
-
-async function summarizeDelegationValidation(sessionId: string) {
-	const events = await loadSessionThreadEvents(sessionId);
-	const commands = events
-		.filter((event) => event.kind.type === "turn_tool_call_started")
-		.map((event) => {
-			if (event.kind.type !== "turn_tool_call_started") {
-				return null;
-			}
-			return event.kind.command || event.kind.action;
-		})
-		.filter((value): value is string => Boolean(value?.trim()));
-	const uniqueCommands = Array.from(new Set(commands));
-	const validationCommands = uniqueCommands.filter((command) =>
-		/\b(test|check|lint|typecheck|vitest|jest|cargo|pnpm|npm|yarn)\b/i.test(
-			command,
-		),
-	);
-
-	if (uniqueCommands.length === 0) {
-		return "No tool commands observed in the delegated session.";
-	}
-
-	const lines = [
-		"Observed child-session commands:",
-		...uniqueCommands.slice(0, 12).map((command) => `- ${command}`),
-	];
-	if (uniqueCommands.length > 12) {
-		lines.push(`- ... ${uniqueCommands.length - 12} more command(s)`);
-	}
-	lines.push(
-		"",
-		validationCommands.length > 0
-			? `Validation-like commands: ${validationCommands.slice(0, 6).join("; ")}`
-			: "Validation-like commands: none observed",
-	);
-	return lines.join("\n");
-}
-
-async function collectDelegationDiffArtifact(workspacePath: string | null) {
-	if (!workspacePath) {
-		return {
-			touchedFiles: [] as string[],
-			diffSummary: null as string | null,
-		};
-	}
-
-	try {
-		const [status, branchDiff] = await Promise.all([
-			workspaceGitStatus({ workspaceRoot: workspacePath }),
-			workspaceGitBranchDiff({ workspaceRoot: workspacePath }),
-		]);
-		const entries = [
-			...status.staged,
-			...status.unstaged,
-			...branchDiff.changes,
-		];
-		const touchedFiles = Array.from(new Set(entries.map((entry) => entry.path))).sort();
-		const additions = entries.reduce((sum, entry) => sum + entry.insertions, 0);
-		const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
-		const diffSummary =
-			touchedFiles.length > 0
-				? `${touchedFiles.length} file(s), +${additions}/-${deletions}`
-				: "No changed files detected.";
-		return { touchedFiles, diffSummary };
-	} catch (error) {
-		return {
-			touchedFiles: [] as string[],
-			diffSummary: `Diff unavailable: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-		};
-	}
-}
-
-async function buildManualDelegationPrompt({
-	request,
-	workspaceName,
-	workspaceBranch,
-	workspacePath,
-	parentSessionId,
-	parentSessionTitle,
-	liveSessionEvents,
-}: {
-	request: ManualDelegationRequest;
-	workspaceName: string;
-	workspaceBranch: string;
-	workspacePath: string | null;
-	parentSessionId: string;
-	parentSessionTitle: string;
-	liveSessionEvents: CoreEvent[];
-}) {
-	const isImplementation = request.mode === "implement";
-	const lines = [
-		`Delegated ${request.mode} task from Dev Command Center.`,
-		"",
-		"Scope:",
-		...(isImplementation
-			? [
-					"- File edits are allowed for this delegated implementation.",
-					"- DCC only starts implementation delegations from a clean worktree. Treat the current HEAD as the checkpoint baseline.",
-					"- Inspect the current git status before editing and avoid overwriting unrelated work.",
-					"- Do not commit, push, delete branches, reset history, or run destructive commands.",
-					"- Run focused validation where practical and report the exact commands/results.",
-					"- Stop after implementation; Dev Command Center will require human review before marking this delegation complete.",
-				]
-			: [
-					"- Work read-only. Do not edit files, run destructive commands, or apply patches.",
-					"- Return concise findings, risks, and recommended next steps.",
-				]),
-		"",
-		"Workspace:",
-		`- Name: ${workspaceName}`,
-		`- Branch: ${workspaceBranch || "unknown"}`,
-		`- Path: ${workspacePath ?? "unknown"}`,
-		`- Parent session: ${parentSessionTitle} (${parentSessionId})`,
-		"",
-		"Instruction:",
-		request.instruction,
-	];
-
-	if (
-		workspacePath &&
-		(request.contextPolicy.type === "review_current_diff" ||
-			request.contextPolicy.type === "full_reanchor")
-	) {
-		try {
-			const [status, branchDiff] = await Promise.all([
-				workspaceGitStatus({ workspaceRoot: workspacePath }),
-				workspaceGitBranchDiff({ workspaceRoot: workspacePath }),
-			]);
-			lines.push(
-				"",
-				"Git context:",
-				`- Current branch: ${status.currentBranch ?? "unknown"}`,
-				`- Base branch: ${branchDiff.baseBranch ?? "unknown"}`,
-				`- Conflicts: ${status.conflictCount}`,
-				...formatDelegationChangeList("Staged changes", status.staged),
-				...formatDelegationChangeList("Unstaged changes", status.unstaged),
-				...formatDelegationChangeList("Branch diff", branchDiff.changes),
-			);
-		} catch (error) {
-			lines.push(
-				"",
-				"Git context:",
-				`- unavailable: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-	}
-
-	if (workspacePath && request.contextPolicy.type === "full_reanchor") {
-		try {
-			const specs = await listMissionSpecs({ workspaceRoot: workspacePath });
-			const spec = specs.specs[0] ?? null;
-			if (spec) {
-				lines.push(
-					"",
-					"Mission spec:",
-					truncateDelegationContext(spec.content, 2400),
-				);
-			}
-		} catch (error) {
-			lines.push(
-				"",
-				"Mission spec:",
-				`- unavailable: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-
-		try {
-			const historyEvents = await loadSessionThreadEvents(parentSessionId);
-			const messages = projectWorkspaceMessages(
-				historyEvents,
-				liveSessionEvents,
-				parentSessionId,
-				null,
-			);
-			const summary = messages
-				.slice(-8)
-				.map((message) => `${message.label}: ${message.content.trim()}`)
-				.filter((line) => line.trim().length > 0)
-				.join("\n\n");
-			if (summary.trim()) {
-				lines.push(
-					"",
-					"Recent parent session context:",
-					truncateDelegationContext(summary, 2400),
-				);
-			}
-		} catch (error) {
-			lines.push(
-				"",
-				"Recent parent session context:",
-				`- unavailable: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-	}
-
-	return lines.join("\n");
-}
 
 async function assertImplementationDelegationWorkspaceReady(workspacePath: string | null) {
 	if (!workspacePath) {
@@ -1121,7 +808,6 @@ export default function App() {
 	const [feedbackOpen, setFeedbackOpen] = useState(false);
 	const [notesCompletionTaskIds, setNotesCompletionTaskIds] = useState<string[]>([]);
 	const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-	const [delegateSignal, setDelegateSignal] = useState(0);
 	const [turnReviewRequest, setTurnReviewRequest] = useState<TurnReviewRequest | null>(null);
 	const [reviewDelegationRequest, setReviewDelegationRequest] = useState<{
 		delegationId: string;
@@ -1272,9 +958,6 @@ export default function App() {
 		string | null
 	>(null);
 	const autoCompiledWorkspaceSpecsRef = useRef<Set<string>>(new Set());
-	const delegatedChildSessionsRef = useRef<Map<string, DelegationChildBinding>>(
-		new Map(),
-	);
 	const contextAttachmentLedgerRef = useRef(new ContextAttachmentLedger());
 	// Fork-by-message snapshots wait for the first turn the person sends in
 	// the new thread; they are consumed exactly once and never persisted.
@@ -1297,75 +980,6 @@ export default function App() {
 		};
 	}, [selectedProviderId, selectedSessionId, selectedWorkspaceId]);
 
-	const finalizeDelegationFromChild = useCallback(
-		async (
-			childSessionId: string,
-			status: "completed" | "failed",
-			reason?: string | null,
-		) => {
-			const binding = delegatedChildSessionsRef.current.get(childSessionId);
-			if (!binding || binding.finalized) {
-				return;
-			}
-			binding.finalized = true;
-
-			try {
-				if (status === "completed") {
-					const summary = await summarizeSessionForDelegation(childSessionId);
-					const validationSummary =
-						await summarizeDelegationValidation(childSessionId);
-					const artifact = await collectDelegationDiffArtifact(binding.workspacePath);
-					await completeDelegation({
-						delegationId: binding.delegationId,
-						summary,
-						touchedFiles: artifact.touchedFiles,
-						diffSummary: artifact.diffSummary,
-						validationSummary,
-						reviewRequired: binding.reviewRequired,
-					});
-					await queryClient.invalidateQueries({
-						queryKey: ["delegations", binding.workspaceId],
-					});
-					await handBackDelegationResult(binding, {
-						status: binding.reviewRequired ? "review_pending" : "completed",
-						summary,
-						touchedFiles: artifact.touchedFiles,
-						validationSummary,
-					});
-				} else {
-					await failDelegation({
-						delegationId: binding.delegationId,
-						reason: reason ?? "Child session failed.",
-					}).catch((failure) => {
-						console.error("[dcc] delegation failure persistence failed:", failure);
-					});
-					if (binding.workspaceRoot?.trim()) {
-						await workspaceRemoveDelegationWorktree({
-							workspaceRoot: binding.workspaceRoot,
-							delegationId: binding.delegationId,
-							removeBranch: true,
-						}).catch((cleanupError) => {
-							console.error(
-								"[dcc] failed delegation worktree cleanup failed:",
-								cleanupError,
-							);
-						});
-					}
-					await queryClient.invalidateQueries({
-						queryKey: ["delegations", binding.workspaceId],
-					});
-					await handBackDelegationResult(binding, {
-						status: "failed",
-						failureReason: reason ?? "Child session failed.",
-					});
-				}
-			} catch (error) {
-				binding.finalized = false;
-				console.error("[dcc] delegation finalization failed:", error);
-			}
-		},
-		[queryClient],
-	);
 
 	const purgeThroughTurnEventsRef = useRef<
 		(sessionId: string, turnId: string) => void
@@ -1428,21 +1042,8 @@ export default function App() {
 					});
 			}
 
-			if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
-				void finalizeDelegationFromChild(
-					event.sessionTurnCompleted.session_id,
-					"completed",
-				);
-			}
-			if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
-				void finalizeDelegationFromChild(
-					event.sessionTurnAborted.session_id,
-					"failed",
-					event.sessionTurnAborted.reason,
-				);
-			}
 		},
-		[backendCacheKey, finalizeDelegationFromChild, queryClient],
+		[backendCacheKey, queryClient],
 	);
 	const [surfaceSelection, setSurfaceSelection] =
 		useState<WorkspaceSurfaceSelection | null>(null);
@@ -3139,13 +2740,18 @@ export default function App() {
 		],
 	);
 
+	/**
+	 * Person-started delegation (plan handoff, rerun). The backend owns the run
+	 * end to end — worktree, child thread, record, child turn and its
+	 * finalization — so nothing is lost if this view reloads. Results are not
+	 * handed back automatically; the delegation card offers "Send to agent".
+	 */
 	const handleDelegate = useCallback(
 		async (request: ManualDelegationRequest) => {
 			if (!selectedWorkspace || !selectedSessionSnapshot) {
 				toast.error("Select an active parent session before delegating.");
 				return;
 			}
-
 			const requestedTargetProviderIds = Array.from(
 				new Set(
 					(request.targetProviderIds?.length
@@ -3162,206 +2768,46 @@ export default function App() {
 				toast.error("Delegation target provider is unavailable.");
 				return;
 			}
-
-			const parentSessionId = selectedSessionSnapshot.sessionId;
-			const parentTitle = selectedSessionSummary?.thread.title ?? selectedWorkspace.name;
-			const allowFileEdits = request.mode === "implement";
-			if (allowFileEdits) {
+			if (request.mode === "implement") {
 				try {
 					await assertImplementationDelegationWorkspaceReady(selectedLocalWorkspacePath);
 				} catch (error) {
-					const message =
+					toast.error(
 						error instanceof Error
 							? error.message
-							: typeof error === "string"
-								? error
-								: "Implementation delegation preflight failed";
-					toast.error(message);
+							: "Implementation delegation preflight failed",
+					);
 					throw error;
 				}
 			}
-			const threadTitle = `Delegated ${request.mode}: ${parentTitle}`;
+
 			const failures: string[] = [];
 			let startedCount = 0;
-
 			for (const targetProviderId of targetProviderIds) {
 				const targetProvider = providerChoices.find(
 					(provider) => provider.id === targetProviderId,
 				);
-				if (!targetProvider) {
-					failures.push(`${targetProviderId}: unavailable`);
-					continue;
-				}
-				const targetProviderBlockReason = !isProviderEnabled(targetProvider)
-					? t("settings.model.disabledBlockReason", {
-							provider: targetProvider.label,
-					  })
-					: getProviderUnhealthyReason(targetProvider);
-				if (targetProviderBlockReason) {
-					failures.push(`${targetProvider.label}: ${targetProviderBlockReason}`);
-					continue;
-				}
-				if (
-					request.mode === "implement" &&
-					!targetProvider.capabilities.supportsEditDelegation
-				) {
-					failures.push(
-						`${targetProvider.label}: provider does not support edit delegations`,
-					);
-					continue;
-				}
-				const targetModelId =
-					targetProvider.id === request.targetProviderId &&
-					request.targetModelId &&
-					targetProvider.models.some((model) => model.id === request.targetModelId)
-						? request.targetModelId
-						: (targetProvider.models.find((model) => model.recommended)?.id ??
-							targetProvider.models[0]?.id ??
-							null);
-				const targetRuntime = draftToProviderRuntimeConfig(
-					getProviderRuntimeDraft(providerRuntimeSettings, targetProvider.id),
-					targetProvider.capabilities,
-				);
-				let delegationId: string | null = null;
-				let childSessionId: string | null = null;
-				let implementationWorktreePath: string | null = null;
-				let implementationWorktreeOperationId: string | null = null;
 				try {
-					if (allowFileEdits) {
-						if (!selectedLocalWorkspacePath) {
-							throw new Error("Implementation delegation requires a local worktree.");
-						}
-						const preparedWorktree = await workspacePrepareDelegationWorktree({
-							workspaceRoot: selectedLocalWorkspacePath,
-							workspaceId: selectedWorkspace.id,
-							parentSessionId,
-							delegationKey:
-								selectedSessionSnapshot.activeTurnId ?? parentSessionId,
-						});
-						implementationWorktreePath = preparedWorktree.worktreePath;
-						implementationWorktreeOperationId = preparedWorktree.operationId;
-					}
-					const delegationWorkspacePath =
-						implementationWorktreePath ?? selectedLocalWorkspacePath;
-					const prompt =
-						request.prebuiltPrompt ??
-						(await buildManualDelegationPrompt({
-							request,
-							workspaceName: selectedWorkspace.name,
-							workspaceBranch: selectedWorkspace.branch,
-							workspacePath: delegationWorkspacePath,
-							parentSessionId,
-							parentSessionTitle: parentTitle,
-									liveSessionEvents: legacySessionEvents,
-						}));
-					const started = await startThread({
-						workspaceId: selectedWorkspace.id,
-						projectId: selectedWorkspace.projectId ?? selectedWorkspace.id,
-						providerId: targetProvider.id,
-						model: targetModelId,
-						providerRuntime: targetRuntime,
-						workingDirectoryOverride: implementationWorktreePath,
-						title: threadTitle,
-					});
-					childSessionId = started.session.id;
-					const startedSnapshot: RuntimeSessionSnapshot = {
-						sessionId: started.session.id,
-						projectId: started.session.projectId,
-						workspaceId: started.session.workspaceId,
-						providerId: started.session.providerId,
-						model: started.session.model,
-						state: started.projection.state,
-						turnCount: started.projection.turnCount,
-						checkpointCount: started.projection.checkpointCount,
-						activeTurnId: started.projection.activeTurnId ?? null,
-						lastTurnPrompt: null,
-						lastTurnState: started.projection.activeTurnId ? "running" : null,
-					};
-					setSessionSnapshotsById((current) => ({
-						...current,
-						[started.session.id]: startedSnapshot,
-					}));
-					queryClient.setQueryData<WorkspaceSessionSummary[]>(
-						getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
-						(current = []) => {
-							const nextSummary: WorkspaceSessionSummary = {
-								session: started.session,
-								thread: started.thread,
-								projection: started.projection,
-								lastTurnPrompt: null,
-								lastTurnState: started.projection.activeTurnId ? "running" : null,
-								lastTurnStartedAt: null,
-								lastTurnCompletedAt: null,
-								lastTurnAwaitingUser: null,
-							};
-							return [
-								nextSummary,
-								...current.filter(
-									(summary) => summary.session.id !== started.session.id,
-								),
-							];
-						},
-					);
-
-					const created = await createDelegation({
-						parentSessionId,
-						parentTurnId: selectedSessionSnapshot.activeTurnId,
-						childSessionId,
-						delegationWorktreeOperationId: implementationWorktreeOperationId,
-						workspaceId: selectedWorkspace.id,
-						targetProviderId: targetProvider.id,
-						targetModelId,
+					await runDelegation({
+						parentSessionId: selectedSessionSnapshot.sessionId,
+						targetProviderId,
+						targetModelId:
+							targetProviderId === request.targetProviderId
+								? request.targetModelId
+								: null,
 						mode: request.mode,
-						prompt,
+						instruction: request.instruction,
 						contextPolicy: request.contextPolicy,
-						budget: {
-							turnLimit: 1,
-							timeoutSeconds: 600,
-							allowFileEdits,
-						},
-					});
-					delegationId = created.delegation.id;
-					delegatedChildSessionsRef.current.set(childSessionId, {
-						delegationId,
-						childSessionId,
-						parentSessionId,
-						workspaceId: selectedWorkspace.id,
-						workspaceRoot: selectedLocalWorkspacePath,
-						workspacePath: delegationWorkspacePath,
-						cleanupWorkspacePath: implementationWorktreePath,
-						reviewRequired: allowFileEdits,
-						finalized: false,
-						resultHandback: request.handBackToParent
-							? {
-									mode: request.mode,
-									providerLabel: targetProvider.label,
-									modelLabel:
-										targetProvider.models.find((model) => model.id === targetModelId)
-											?.label ??
-										targetModelId ??
-										null,
-									instruction: extractDelegationInstruction(request.instruction),
-									parentToolInstructions: resolveDelegateTaskToolInstructions({
-										provider: providerChoices.find(
-											(provider) => provider.id === selectedSessionSnapshot.providerId,
-										),
-										providers: providerChoices,
-									}),
-								}
+						origin: "person",
+						prebuiltPrompt: request.prebuiltPrompt ?? null,
+						effort: request.effort ?? null,
+						fastMode: request.fastMode ?? null,
+						providerRuntime: targetProvider
+							? draftToProviderRuntimeConfig(
+									getProviderRuntimeDraft(providerRuntimeSettings, targetProvider.id),
+									targetProvider.capabilities,
+								)
 							: null,
-					});
-					await startDelegation({ delegationId });
-
-					await sendTurn({
-						sessionId: childSessionId,
-						prompt,
-						providerId: targetProvider.id,
-						model: targetModelId,
-						providerRuntime: targetRuntime,
-						planMode: false,
-						effort: request.effort ?? "medium",
-						fastMode: request.fastMode ?? false,
-						approvalPolicy: "auto",
 					});
 					startedCount += 1;
 				} catch (error) {
@@ -3372,33 +2818,7 @@ export default function App() {
 								? error
 								: "Failed to start delegation";
 					console.error("[dcc] delegation failed:", error);
-					if (delegationId) {
-						await failDelegation({
-							delegationId,
-							reason: message,
-						}).catch((failure) => {
-							console.error("[dcc] delegation failure event failed:", failure);
-						});
-					}
-					if (childSessionId) {
-						const binding = delegatedChildSessionsRef.current.get(childSessionId);
-						if (binding) {
-							binding.finalized = true;
-						}
-					}
-					if (implementationWorktreeOperationId && selectedLocalWorkspacePath) {
-						await workspaceRemoveDelegationWorktree({
-							workspaceRoot: selectedLocalWorkspacePath,
-							operationId: implementationWorktreeOperationId,
-							removeBranch: true,
-						}).catch((cleanupError) => {
-							console.error(
-								"[dcc] delegation worktree cleanup failed:",
-								cleanupError,
-							);
-						});
-					}
-					failures.push(`${targetProvider.label}: ${message}`);
+					failures.push(`${targetProvider?.label ?? targetProviderId}: ${message}`);
 				}
 			}
 
@@ -3433,53 +2853,8 @@ export default function App() {
 			queryClient,
 			selectedLocalWorkspacePath,
 			selectedSessionSnapshot,
-			selectedSessionSummary,
 			selectedWorkspace,
-			legacySessionEvents,
-			t,
 		],
-	);
-
-	/**
-	 * Composer-initiated delegation. The user only picked target(s) and whether the
-	 * run may write files; mode and context policy are derived here so neither term
-	 * has to appear in the UI.
-	 */
-	const handleComposerDelegate = useCallback(
-		async (request: ComposerDelegationRequest) => {
-			if (request.targetProviderIds.length === 0) {
-				return;
-			}
-			let hasWorkingTreeChanges = false;
-			if (!request.allowFileEdits && selectedLocalWorkspacePath) {
-				try {
-					const status = await workspaceGitStatus({
-						workspaceRoot: selectedLocalWorkspacePath,
-					});
-					hasWorkingTreeChanges =
-						status.staged.length > 0 || status.unstaged.length > 0;
-				} catch (error) {
-					// Status is only used to pick review-vs-explain; a failure here should
-					// not block the delegation.
-					console.error("[dcc] delegation git status probe failed:", error);
-				}
-			}
-			const defaults = resolveDelegationDefaults({
-				allowFileEdits: request.allowFileEdits,
-				hasWorkingTreeChanges,
-			});
-			await handleDelegate({
-				targetProviderId: request.targetProviderIds[0],
-				targetProviderIds: request.targetProviderIds,
-				targetModelId: request.targetModelId,
-				mode: defaults.mode,
-				contextPolicy: defaults.contextPolicy,
-				instruction: request.rawPrompt,
-				effort: request.effort,
-				fastMode: request.fastMode,
-			});
-		},
-		[handleDelegate, selectedLocalWorkspacePath],
 	);
 
 	/**
@@ -3526,19 +2901,23 @@ export default function App() {
 				return;
 			}
 			let record: Delegation | null;
+			let text: string | null;
 			try {
-				record = (await getDelegation({ delegationId: input.delegationId })).delegation;
+				[record, text] = await Promise.all([
+					getDelegation({ delegationId: input.delegationId }).then(
+						(output) => output.delegation,
+					),
+					delegationResultTurn({
+						delegationId: input.delegationId,
+						failureReason: input.failureReason ?? null,
+					}).then((output) => output.prompt),
+				]);
 			} catch (error) {
 				toast.error(
 					error instanceof Error ? error.message : "Could not load the delegation.",
 				);
 				return;
 			}
-			const text = record && delegationResultTurnFromRecord(
-				record,
-				providerChoices,
-				input.failureReason,
-			);
 			if (!record || !text) {
 				toast.error(t("delegation.card.sendResultUnavailable"));
 				return;
@@ -3552,61 +2931,7 @@ export default function App() {
 				mode: "append",
 			});
 		},
-		[providerChoices, selectedWorkspace, t],
-	);
-
-	const handleAgentDelegate = useCallback(
-		async (request: AgentInitiatedDelegationRequest) => {
-			if (!selectedProvider?.capabilities.canRequestDelegation) {
-				throw new Error("The active provider cannot request delegation.");
-			}
-			if (!selectedSessionSnapshot || !selectedWorkspace) {
-				throw new Error("Select an active parent session before delegating.");
-			}
-
-			const needsEdit = request.mode === "implement";
-			const candidates = providerChoices.filter(
-				(provider) =>
-					isProviderEnabled(provider) &&
-					provider.capabilities.canBeDelegationTarget &&
-					provider.capabilities.supportsReadOnlyDelegation &&
-					(!needsEdit || provider.capabilities.supportsEditDelegation),
-			);
-			const targetProvider =
-				(request.targetProviderId
-					? candidates.find((provider) => provider.id === request.targetProviderId)
-					: null) ??
-				candidates.find((provider) => provider.id !== selectedProvider.id) ??
-				candidates[0] ??
-				null;
-			if (!targetProvider) {
-				throw new Error("No delegation target provider is available.");
-			}
-
-			const targetModelId =
-				request.targetModelId &&
-				targetProvider.models.some((model) => model.id === request.targetModelId)
-					? request.targetModelId
-					: (targetProvider.models.find((model) => model.recommended)?.id ??
-						targetProvider.models[0]?.id ??
-						null);
-
-			await handleDelegate({
-				targetProviderId: targetProvider.id,
-				targetModelId,
-				mode: request.mode,
-				contextPolicy: request.contextPolicy,
-				instruction: request.instruction,
-				handBackToParent: true,
-			});
-		},
-		[
-			handleDelegate,
-			providerChoices,
-			selectedProvider,
-			selectedSessionSnapshot,
-			selectedWorkspace,
-		],
+		[selectedWorkspace, t],
 	);
 
 	const handleImplementPlanInNewThread = useCallback(
@@ -5875,11 +5200,6 @@ export default function App() {
 								onSelectSession={handleSelectSessionSearchResult}
 								onSelectFile={handleOpenFileFromQuickOpen}
 								onRunWorkbenchCommand={runWorkbenchCommand}
-								onDelegate={
-									selectedSessionSnapshot
-										? () => setDelegateSignal((signal) => signal + 1)
-										: undefined
-								}
 							/>
 							<SessionSearchDialog
 								open={isSessionSearchOpen}
@@ -6080,8 +5400,6 @@ export default function App() {
 									onResumeSession={handleResumeSession}
 									onAbortSession={handleAbortSession}
 									onDelegate={handleDelegate}
-									onDelegatePrompt={handleComposerDelegate}
-									onAgentDelegate={handleAgentDelegate}
 									sessionActionSessionId={sessionActionSessionId}
 									surfaceSelection={surfaceSelection}
 									surfaceSelectionWorkspaceId={surfaceSelectionWorkspaceId}
@@ -6105,7 +5423,6 @@ export default function App() {
 									onResolveConflictWithAgent={handleResolveConflictWithAgent}
 									onOpenAgentSession={handleOpenAgentSession}
 									onMergeConflictStateChanged={handleMergeConflictStateChanged}
-									delegateSignal={delegateSignal}
 									composerPrefill={
 										workspaceComposerPrefill?.workspaceId === selectedWorkspace.id &&
 										(workspaceComposerPrefill.sessionId === undefined || workspaceComposerPrefill.sessionId === effectiveSelectedSessionId)

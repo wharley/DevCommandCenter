@@ -133,8 +133,10 @@ export function DelegationCard({
 		Boolean(onReviewDelegation || onReviewChanges) &&
 		(status === "review_pending" || touchedFiles.length > 0);
 	// Finished results can be handed to the parent agent through the composer.
+	// Agent-requested delegations already deliver their result on their own.
 	const canSendResult =
 		Boolean(onSendDelegationResult && record) &&
+		record?.origin !== "agent" &&
 		(status === "completed" || status === "review_pending" || status === "failed");
 	const handleReview = () => {
 		if (onReviewDelegation) {

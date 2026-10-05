@@ -32,7 +32,6 @@ import { ProviderErrorMessage } from "./ProviderErrorMessage";
 import { PlanSummaryCard } from "./PlanSummaryCard";
 import { MissionValidationCard } from "./MissionValidationCard";
 import { ApprovalCard } from "./ApprovalCard";
-import type { AgentInitiatedDelegationRequest } from "@/features/sessions/agent-delegation-request";
 import { UserInputCard } from "./UserInputCard";
 import {
 	planNeedsInput,
@@ -418,7 +417,6 @@ export function AssistantMessage({
 	activeMissionSpecRelativePath,
 	activeMissionSpecHash,
 	autoSaveMissionValidation,
-	onDelegateTaskApprove,
 	onContinue,
 	onRetry,
 	onFork,
@@ -443,7 +441,6 @@ export function AssistantMessage({
 	activeMissionSpecRelativePath?: string | null;
 	activeMissionSpecHash?: string | null;
 	autoSaveMissionValidation?: boolean;
-	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	onContinue?: () => void;
 	/** Re-runs the aborted turn with the same prompt, linked as an explicit retry. */
 	onRetry?: () => void;
@@ -613,7 +610,6 @@ export function AssistantMessage({
 										file={annotation.file}
 										behavior={annotation.behavior}
 										isLive={Boolean(annotation.streaming)}
-										onDelegateTaskApprove={onDelegateTaskApprove}
 									/>
 								);
 							}

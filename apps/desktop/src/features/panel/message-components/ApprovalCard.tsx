@@ -1,14 +1,9 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Ban, CheckCircle2, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { respondToPermissionRequest } from "@/lib/session-api";
 import { toast } from "sonner";
-import {
-	isDelegateTaskTool,
-	parseAgentInitiatedDelegationRequest,
-	type AgentInitiatedDelegationRequest,
-} from "@/features/sessions/agent-delegation-request";
 
 type ApprovalCardProps = {
 	sessionId: string | null;
@@ -20,7 +15,6 @@ type ApprovalCardProps = {
 	file?: string;
 	behavior?: string;
 	isLive: boolean;
-	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 };
 
 export function ApprovalCard({
@@ -33,18 +27,10 @@ export function ApprovalCard({
 	file,
 	behavior,
 	isLive,
-	onDelegateTaskApprove,
 }: ApprovalCardProps) {
 	const { t } = useTranslation("common");
 	const [submitting, setSubmitting] = useState<"allow" | "deny" | null>(null);
 	const resolved = !isLive && typeof behavior === "string" && behavior.length > 0;
-	const delegationRequest = useMemo(
-		() =>
-			isDelegateTaskTool(toolName)
-				? parseAgentInitiatedDelegationRequest({ command, description })
-				: null,
-		[command, description, toolName],
-	);
 	const behaviorLabel =
 		behavior === "allow"
 			? t("conversation.permission.allowed")
@@ -58,21 +44,6 @@ export function ApprovalCard({
 		}
 		setSubmitting(nextBehavior);
 		try {
-			if (nextBehavior === "allow" && isDelegateTaskTool(toolName)) {
-				const request = parseAgentInitiatedDelegationRequest({
-					command,
-					description,
-				});
-				if (!request) {
-					throw new Error(
-						t("conversation.permission.delegateMissingInstruction"),
-					);
-				}
-				if (!onDelegateTaskApprove) {
-					throw new Error(t("conversation.permission.delegateUnavailable"));
-				}
-				await onDelegateTaskApprove(request);
-			}
 			await respondToPermissionRequest({
 				sessionId,
 				requestId,
@@ -97,8 +68,7 @@ export function ApprovalCard({
 						{t("conversation.permission.label")}
 					</p>
 					<p className="mt-1 text-sm text-foreground">
-						{title ??
-							(delegationRequest ? t("delegation.approval.title") : toolName)}
+						{title ?? toolName}
 					</p>
 				</div>
 				{resolved ? (
@@ -113,89 +83,34 @@ export function ApprovalCard({
 				) : null}
 			</div>
 
-			{description && !delegationRequest ? (
+			{description ? (
 				<p className="mb-3 text-sm text-muted-foreground">{description}</p>
 			) : null}
 
-			{delegationRequest ? (
-				<div className="space-y-3">
+			<div className="space-y-2">
+				<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+					{t("conversation.permission.tool")}
+				</p>
+				<p className="text-sm text-foreground">{toolName}</p>
+				{command ? (
 					<div>
 						<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-							{t("delegation.approval.instruction")}
+							{t("conversation.permission.command")}
 						</p>
-						<p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground">
-							{delegationRequest.instruction}
+						<pre className="mt-1 overflow-x-auto rounded-xl bg-background/70 px-3 py-2 text-xs text-foreground">
+							<code>{command}</code>
+						</pre>
+					</div>
+				) : null}
+				{file ? (
+					<div>
+						<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+							{t("conversation.permission.file")}
 						</p>
+						<p className="mt-1 break-all font-mono text-xs text-foreground">{file}</p>
 					</div>
-					<div className="grid gap-3 sm:grid-cols-3">
-						<div>
-							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-								{t("delegation.approval.mode")}
-							</p>
-							<p className="mt-1 text-sm text-foreground">
-								{t(`inspector.delegations.mode.${delegationRequest.mode}`, {
-									defaultValue: delegationRequest.mode,
-								})}
-							</p>
-						</div>
-						<div>
-							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-								{t("delegation.approval.target")}
-							</p>
-							<p className="mt-1 text-sm text-foreground">
-								{delegationRequest.targetProviderId ??
-									t("delegation.approval.targetAuto")}
-							</p>
-						</div>
-						<div>
-							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-								{t("delegation.approval.context")}
-							</p>
-							<p className="mt-1 text-sm text-foreground">
-								{t(
-									`delegation.contextOptions.${delegationRequest.contextPolicy.type}`,
-									{ defaultValue: delegationRequest.contextPolicy.type },
-								)}
-							</p>
-						</div>
-					</div>
-					{command ? (
-						<details>
-							<summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-								{t("delegation.approval.payload")}
-							</summary>
-							<pre className="mt-1 overflow-x-auto rounded-xl bg-background/70 px-3 py-2 text-xs text-foreground">
-								<code>{command}</code>
-							</pre>
-						</details>
-					) : null}
-				</div>
-			) : (
-				<div className="space-y-2">
-					<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-						{t("conversation.permission.tool")}
-					</p>
-					<p className="text-sm text-foreground">{toolName}</p>
-					{command ? (
-						<div>
-							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-								{t("conversation.permission.command")}
-							</p>
-							<pre className="mt-1 overflow-x-auto rounded-xl bg-background/70 px-3 py-2 text-xs text-foreground">
-								<code>{command}</code>
-							</pre>
-						</div>
-					) : null}
-					{file ? (
-						<div>
-							<p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-								{t("conversation.permission.file")}
-							</p>
-							<p className="mt-1 break-all font-mono text-xs text-foreground">{file}</p>
-						</div>
-					) : null}
-				</div>
-			)}
+				) : null}
+			</div>
 
 			{isLive ? (
 				<div className="mt-4 flex items-center justify-end gap-2">

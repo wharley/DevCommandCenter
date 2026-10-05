@@ -2,6 +2,7 @@ pub(crate) mod antigravity_account_state;
 pub mod antigravity_installation;
 pub mod commands;
 pub(crate) mod delegation_apply;
+pub mod delegation_runtime;
 pub mod delivery_failure;
 pub mod events;
 pub mod git;

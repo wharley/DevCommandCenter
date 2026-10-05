@@ -6,8 +6,8 @@ function buildNativeSubagentInstructions(provider: Provider) {
 	const modelLabels = provider.models.map((model) => model.label).join(", ");
 	const shared = [
 		"Delegation routing rule:",
-		"- delegate_task is exclusively for delegation to a different provider.",
-		`- Models belonging to the active provider (${provider.label}) are native subagent requests, not delegate_task targets.`,
+		"- dcc_delegate_task is exclusively for delegation to a different provider.",
+		`- Models belonging to the active provider (${provider.label}) are native subagent requests, not dcc_delegate_task targets.`,
 		modelLabels ? `- Active-provider models: ${modelLabels}.` : null,
 	];
 
@@ -58,25 +58,10 @@ export function buildDelegateTaskToolInstructions(
 	return [
 		...lines,
 		"",
-		"Dev Command Center tool: delegate_task",
-		"You may ask the human to delegate a bounded subtask to another provider by emitting a DCC permission request.",
-		"Use it only when another provider can provide materially useful review, explanation, or implementation help.",
-		"Emit exactly this JSON event through the provider permission channel:",
-		JSON.stringify({
-			type: "dcc_permission_request",
-			request_id: "delegate-task-short-id",
-			tool_name: "delegate_task",
-			title: "Delegate task",
-			description: "One sentence explaining why delegation is useful.",
-			command: JSON.stringify({
-				instruction: "Specific task for the delegated provider.",
-				mode: "review",
-				contextPolicy: "review_current_diff",
-				targetProviderId: targets[0]?.id ?? null,
-			}),
-		}),
-		"Allowed modes: review, explain, implement. Use implement only when file edits are necessary; DCC will require human review before completion.",
-		"After the human approves, DCC runs the delegation and sends you its result as a new message starting with [DCC] when it finishes. Do not wait or poll for it: end your turn, or keep working on parts that do not depend on it, and continue when the result arrives.",
+		"Cross-provider delegation (Dev Command Center):",
+		"- To hand a bounded, self-contained task to a different provider, call the DCC tool dcc_delegate_task when it is in your tool list.",
+		"- It returns a taskId at once; DCC sends you the result later as a new message starting with [DCC]. End your turn or keep working on independent parts — do not poll.",
+		"- review and explain are read-only; implement edits an isolated worktree that the human reviews before anything reaches this workspace.",
 		`Available external-provider delegation targets: ${targets
 			.map((provider) => `${provider.id} (${provider.label})`)
 			.join(", ")}.`,

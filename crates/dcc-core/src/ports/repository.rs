@@ -241,6 +241,15 @@ pub trait DelegationRepo: Send + Sync {
         status: DelegationStatus,
         updated_at: String,
     ) -> Result<Option<Delegation>>;
+    /// The newest delegation whose child is `child_session_id`.
+    async fn get_delegation_by_child_session(
+        &self,
+        child_session_id: &SessionId,
+    ) -> Result<Option<Delegation>>;
+    async fn list_delegations_by_status(
+        &self,
+        status: DelegationStatus,
+    ) -> Result<Vec<Delegation>>;
 }
 
 /// Durable lifecycle journal for delegation worktree creation, binding,

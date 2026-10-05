@@ -9,7 +9,6 @@ import {
 	ChevronDown,
 	ClipboardList,
 	CornerUpRight,
-	GitFork,
 	ListPlus,
 	Paperclip,
 	Camera,
@@ -40,10 +39,7 @@ import { SessionObjectiveControl } from "@/features/sessions/SessionObjectiveCon
 import {
 	DropdownMenu,
 	DropdownMenuContent,
-	DropdownMenuGroup,
 	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -108,12 +104,7 @@ import { AppshotsDialog } from "./AppshotsDialog";
 import { isAppshotsDesktop } from "@/lib/appshots-api";
 import { SlashCommandPlugin } from "./editor/plugins/slash-command-plugin";
 import { SubmitPlugin } from "./editor/plugins/SubmitPlugin";
-import type {
-	ComposerDelegationRequest,
-	ComposerSubmittedTurn,
-} from "./composer-turn";
-import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
-import { DelegationTargetItems } from "@/features/sessions/DelegationTargetItems";
+import type { ComposerSubmittedTurn } from "./composer-turn";
 import {
 	clearDraft,
 	loadApprovalPolicy,
@@ -188,10 +179,6 @@ type WorkspaceComposerProps = {
 	onSubmitPrompt: (turn: ComposerSubmittedTurn) => Promise<boolean>;
 	onSteerPrompt?: (turn: ComposerSubmittedTurn) => Promise<void>;
 	onQueuePrompt?: (turn: ComposerSubmittedTurn) => Promise<void>;
-	/** Absent when the surface cannot delegate (no parent session yet). */
-	onDelegatePrompt?: (request: ComposerDelegationRequest) => Promise<void>;
-	/** Increment to open the delegate menu from outside (for example, the command palette). */
-	openDelegateMenuSignal?: number;
 	onAbortSession: () => void;
 	onReviewPlan: () => void;
 	onOpenTerminal?: () => void;
@@ -235,8 +222,6 @@ export function WorkspaceComposer({
 	onSubmitPrompt,
 	onSteerPrompt,
 	onQueuePrompt,
-	onDelegatePrompt,
-	openDelegateMenuSignal,
 	onAbortSession,
 	onReviewPlan,
 	onOpenTerminal,
@@ -250,11 +235,7 @@ export function WorkspaceComposer({
 	const [queueActionId, setQueueActionId] = useState<string | null>(null);
 	const [isFastMode, setIsFastMode] = useState(loadDirectResponse);
 	const [executionMenuOpen, setExecutionMenuOpen] = useState(false);
-	const [sendMenuOpen, setSendMenuOpen] = useState(false);
 	const [appshotsDraftKey, setAppshotsDraftKey] = useState<string | null>(null);
-	const [delegateAllowFileEdits, setDelegateAllowFileEdits] = useState(false);
-	const [fanOutSelection, setFanOutSelection] = useState<string[] | null>(null);
-	const lastDelegateMenuSignalRef = useRef(openDelegateMenuSignal ?? 0);
 	// Effort + ultrathink are persisted per workspace so the selection survives
 	// composer remounts (e.g. opening a git file then pressing Esc) instead of
 	// resetting to the default — mirrors the draft persistence below.
@@ -629,142 +610,6 @@ export function WorkspaceComposer({
 		},
 		[queueActionId, queuedTurns, sessionId, t],
 	);
-
-	// Delegation targets narrow when the run is allowed to write files, since edit
-	// delegations land in an isolated worktree and need provider edit support. The
-	// menu gate stays on the unfiltered list so toggling write access can never
-	// hide the control that toggles it back.
-	const canDelegate =
-		Boolean(onDelegatePrompt) &&
-		delegationTargetsFor(providerChoices, { allowFileEdits: false }).length > 0;
-	const delegateTargets = useMemo(
-		() =>
-			delegationTargetsFor(providerChoices, {
-				allowFileEdits: delegateAllowFileEdits,
-			}),
-		[delegateAllowFileEdits, providerChoices],
-	);
-	const fanOutTargetIds = useMemo(() => {
-		if (fanOutSelection === null) {
-			return null;
-		}
-		const availableIds = new Set(delegateTargets.map((target) => target.id));
-		return fanOutSelection.filter((id) => availableIds.has(id));
-	}, [delegateTargets, fanOutSelection]);
-
-	const submitDelegation = useCallback(
-		async (targetProviderIds: string[], targetModelId: string | null = null) => {
-			if (
-				!onDelegatePrompt ||
-				isSubmittingRef.current ||
-				targetProviderIds.length === 0
-			) {
-				return;
-			}
-			const editor = editorRef.current;
-			if (!editor) {
-				return;
-			}
-			const rawPrompt = readComposerPrompt(editor).trim();
-			// Evidence travels with a delegation the same way it travels with a
-			// turn: reviewed here, composed at the boundary, settled only once the
-			// delegation actually started.
-			const evidenceItems = debugEvidence?.items ?? [];
-			const evidenceStage = debugEvidence?.stage ?? "observe";
-			if (rawPrompt.length === 0 && evidenceItems.length === 0) {
-				return;
-			}
-			const delegatedPrompt =
-				evidenceItems.length > 0
-					? buildDebugEvidencePrompt({
-							message: rawPrompt,
-							stage: evidenceStage,
-							items: evidenceItems,
-							labels: {
-								stageGuidance: t(`composer.evidence.stageGuidance.${evidenceStage}`),
-								trustNotice: t("composer.evidence.trustNotice"),
-								defaultMessage: t("composer.evidence.defaultMessage"),
-							},
-						})
-					: rawPrompt;
-			isSubmittingRef.current = true;
-			setSendMenuOpen(false);
-			setIsSubmitting(true);
-			try {
-				await onDelegatePrompt({
-					rawPrompt: delegatedPrompt,
-					targetProviderIds,
-					targetModelId: targetProviderIds.length === 1 ? targetModelId : null,
-					// Edit delegations stay single-target, matching the backend guard.
-					allowFileEdits: delegateAllowFileEdits && targetProviderIds.length === 1,
-					effort: resolveEffectiveEffort({
-						selectedEffort: effort,
-						supportedEfforts: availableEffortLevels,
-						ultrathinkSelected,
-						rawPrompt,
-					}),
-					fastMode: isFastMode,
-				});
-				// Only reached when the delegation actually started.
-				clearDraft(composerDraftKey);
-				setEditorText(editor, "");
-				setFanOutSelection(null);
-				if (evidenceItems.length > 0) {
-					debugEvidence?.onConsumed(evidenceItems.map((item) => item.id));
-				}
-			} catch {
-				// Delegation failures are already surfaced as a toast upstream. Swallow
-				// the rejection so it does not go unhandled, and leave the draft in
-				// place — the dirty-worktree preflight rejects a perfectly good
-				// instruction that the user should be able to retry after committing.
-			} finally {
-				isSubmittingRef.current = false;
-				setIsSubmitting(false);
-			}
-		},
-		[
-			availableEffortLevels,
-			composerDraftKey,
-			debugEvidence,
-			delegateAllowFileEdits,
-			effort,
-			isFastMode,
-			onDelegatePrompt,
-			t,
-			ultrathinkSelected,
-		],
-	);
-
-	// The header button and the command palette no longer open a dialog; they point
-	// at the same menu that lives next to Send, so there is a single delegate path.
-	useEffect(() => {
-		const signal = openDelegateMenuSignal ?? 0;
-		if (signal <= lastDelegateMenuSignalRef.current) {
-			return;
-		}
-		lastDelegateMenuSignalRef.current = signal;
-		if (canDelegate) {
-			setSendMenuOpen(true);
-			editorRef.current?.focus();
-		}
-	}, [canDelegate, openDelegateMenuSignal]);
-
-	const toggleFanOutTarget = useCallback((targetId: string) => {
-		setFanOutSelection((current) => {
-			const selection = current ?? [];
-			return selection.includes(targetId)
-				? selection.filter((id) => id !== targetId)
-				: [...selection, targetId];
-		});
-	}, []);
-
-	// Fan-out is read-only by construction, so turning on write access collapses
-	// any multi-target selection instead of silently dropping targets at submit.
-	useEffect(() => {
-		if (delegateAllowFileEdits) {
-			setFanOutSelection(null);
-		}
-	}, [delegateAllowFileEdits]);
 
 	const lexicalInitialConfig = useMemo(
 		() => ({
@@ -1305,128 +1150,6 @@ export function WorkspaceComposer({
 						</div>
 					) : (
 						<div className="ml-1.5 flex items-center gap-1">
-							{canDelegate ? (
-								<DropdownMenu
-									open={sendMenuOpen}
-									onOpenChange={(open) => {
-										setSendMenuOpen(open);
-										// Always reopen in single-target mode, so the one-click
-										// path is what the user finds by default.
-										if (!open) {
-											setFanOutSelection(null);
-										}
-									}}
-								>
-									<DropdownMenuTrigger
-										type="button"
-										aria-label={t("composer.delegate.open")}
-										disabled={sendDisabled}
-										className={cn(
-											"flex h-8 w-6 items-center justify-center rounded-[9px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
-											sendDisabled &&
-												"cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground",
-										)}
-									>
-										<GitFork className="size-3.5" strokeWidth={2} />
-									</DropdownMenuTrigger>
-									<DropdownMenuContent
-										side="top"
-										align="end"
-										sideOffset={4}
-										className="w-72"
-									>
-										<DropdownMenuLabel>
-											{t("composer.delegate.title")}
-										</DropdownMenuLabel>
-										<DropdownMenuGroup>
-											{delegateTargets.length === 0 ? (
-												<p className="px-1.5 py-1.5 text-[12px] text-muted-foreground">
-													{t("composer.delegate.noEditTargets")}
-												</p>
-											) : null}
-											{fanOutTargetIds === null ? (
-												<DelegationTargetItems
-													targets={delegateTargets}
-													disabled={isSubmitting}
-													onSelect={(selection) => {
-														void submitDelegation(
-															[selection.providerId],
-															selection.modelId,
-														);
-													}}
-												/>
-											) : delegateTargets.map((target) => {
-												const isPicked =
-													fanOutTargetIds?.includes(target.id) ?? false;
-												return (
-													<DropdownMenuItem
-														key={target.id}
-														className="flex items-center justify-between gap-3"
-														onSelect={(event) => {
-															// Fan-out mode keeps the menu open so several
-															// targets can be picked before submitting.
-															if (fanOutTargetIds !== null) {
-																event.preventDefault();
-																toggleFanOutTarget(target.id);
-																return;
-															}
-														}}
-													>
-														<span className="min-w-0 truncate">{target.label}</span>
-														{fanOutTargetIds !== null ? (
-															<span className="text-[12px] text-foreground">
-																{isPicked ? "✓" : ""}
-															</span>
-														) : (
-															<CornerUpRight
-																className="size-3.5 shrink-0 opacity-40"
-																strokeWidth={2}
-															/>
-														)}
-													</DropdownMenuItem>
-												);
-											})}
-										</DropdownMenuGroup>
-										{fanOutTargetIds !== null ? (
-											<DropdownMenuItem
-												disabled={fanOutTargetIds.length === 0}
-												onSelect={() => void submitDelegation(fanOutTargetIds)}
-											>
-												{t("composer.delegate.submitFanOut", {
-													count: fanOutTargetIds.length,
-												})}
-											</DropdownMenuItem>
-										) : delegateTargets.length > 1 ? (
-											<DropdownMenuItem
-												onSelect={(event) => {
-													event.preventDefault();
-													setFanOutSelection([]);
-												}}
-											>
-												{t("composer.delegate.fanOut")}
-											</DropdownMenuItem>
-										) : null}
-										<DropdownMenuSeparator />
-										<DropdownMenuItem
-											className="flex items-center justify-between gap-3"
-											onSelect={(event) => {
-												event.preventDefault();
-												setDelegateAllowFileEdits((current) => !current);
-											}}
-										>
-											<div>
-												<div>{t("composer.delegate.allowEdits")}</div>
-												<div className="text-[12px] text-muted-foreground">
-													{t("composer.delegate.allowEditsHint")}
-												</div>
-											</div>
-											<span className="text-[12px] text-foreground">
-												{delegateAllowFileEdits ? "✓" : ""}
-											</span>
-										</DropdownMenuItem>
-									</DropdownMenuContent>
-								</DropdownMenu>
-							) : null}
 							<Button
 								type="button"
 								variant="default"

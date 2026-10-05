@@ -23,7 +23,7 @@ use dcc_core::{
     domain::{
         delegation::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
-            DelegationStatus,
+            DelegationOrigin, DelegationStatus,
         },
         delegation_apply::{
             DelegationApplyTransaction, DelegationApplyTransactionId,
@@ -657,6 +657,9 @@ CREATE TABLE IF NOT EXISTS dcc_delegations (
 	validation_summary TEXT NULL,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
+	origin TEXT NOT NULL DEFAULT 'person',
+	instruction TEXT NULL,
+	started_at TEXT NULL,
 	FOREIGN KEY (parent_session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE,
 	FOREIGN KEY (child_session_id) REFERENCES dcc_sessions(id) ON DELETE SET NULL,
 	FOREIGN KEY (workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
@@ -674,6 +677,11 @@ CREATE INDEX IF NOT EXISTS idx_dcc_delegations_child_session_id
 CREATE INDEX IF NOT EXISTS idx_dcc_delegations_status
 	ON dcc_delegations(status);
 "#;
+
+const DELEGATION_SELECT_SQL: &str = "SELECT id, parent_session_id, parent_turn_id, child_session_id, \
+     workspace_id, target_provider_id, target_model_id, mode, status, prompt, context_policy_json, \
+     budget_json, result_summary, touched_files_json, diff_summary, validation_summary, created_at, \
+     updated_at, origin, instruction, started_at FROM dcc_delegations";
 
 const DELEGATION_WORKTREE_OPERATION_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS dcc_delegation_worktree_operations (
@@ -2286,6 +2294,14 @@ impl SqliteSessionRepo {
             "validation_summary",
             "TEXT NULL",
         )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_delegations",
+            "origin",
+            "TEXT NOT NULL DEFAULT 'person'",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_delegations", "instruction", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_delegations", "started_at", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_sessions",
@@ -4445,6 +4461,12 @@ impl SqliteSessionRepo {
             validation_summary: row.get::<_, Option<String>>(15)?,
             created_at: row.get::<_, String>(16)?,
             updated_at: row.get::<_, String>(17)?,
+            origin: match row.get::<_, String>(18)?.as_str() {
+                "agent" => DelegationOrigin::Agent,
+                _ => DelegationOrigin::Person,
+            },
+            instruction: row.get::<_, Option<String>>(19)?,
+            started_at: row.get::<_, Option<String>>(20)?,
         })
     }
 
@@ -8286,8 +8308,9 @@ impl DelegationRepo for SqliteSessionRepo {
 			INSERT INTO dcc_delegations (
 				id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 				target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
-				result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+				result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at,
+				origin, instruction, started_at
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
 			ON CONFLICT(id) DO UPDATE SET
 				parent_session_id = excluded.parent_session_id,
 				parent_turn_id = excluded.parent_turn_id,
@@ -8305,7 +8328,10 @@ impl DelegationRepo for SqliteSessionRepo {
 				diff_summary = excluded.diff_summary,
 				validation_summary = excluded.validation_summary,
 				created_at = excluded.created_at,
-				updated_at = excluded.updated_at
+				updated_at = excluded.updated_at,
+				origin = excluded.origin,
+				instruction = excluded.instruction,
+				started_at = excluded.started_at
 			"#,
             params![
                 delegation.id.0.clone(),
@@ -8332,6 +8358,12 @@ impl DelegationRepo for SqliteSessionRepo {
                 delegation.validation_summary.clone(),
                 delegation.created_at.clone(),
                 delegation.updated_at.clone(),
+                match delegation.origin {
+                    DelegationOrigin::Agent => "agent",
+                    DelegationOrigin::Person => "person",
+                },
+                delegation.instruction.clone(),
+                delegation.started_at.clone(),
             ],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -8347,7 +8379,8 @@ impl DelegationRepo for SqliteSessionRepo {
             r#"
 			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 			       target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
-			       result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at
+			       result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at,
+			       origin, instruction, started_at
 			  FROM dcc_delegations
 			 WHERE id = ?1
 			"#,
@@ -8370,7 +8403,8 @@ impl DelegationRepo for SqliteSessionRepo {
         let base_sql = r#"
 			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 			       target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
-			       result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at
+			       result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at,
+			       origin, instruction, started_at
 			  FROM dcc_delegations
 		"#;
         let order_sql = " ORDER BY updated_at DESC, created_at DESC";
@@ -8443,8 +8477,12 @@ impl DelegationRepo for SqliteSessionRepo {
                 .conn
                 .lock()
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            // The first move to `running` stamps `started_at`, so the timeout
+            // budget has a durable origin that later updates do not move.
             conn.execute(
-                "UPDATE dcc_delegations SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                "UPDATE dcc_delegations SET status = ?1, updated_at = ?2, \
+                 started_at = CASE WHEN ?1 = 'running' AND started_at IS NULL THEN ?2 ELSE started_at END \
+                 WHERE id = ?3",
                 params![
                     Self::delegation_status_as_str(&status),
                     updated_at,
@@ -8454,6 +8492,49 @@ impl DelegationRepo for SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         }
         self.get_delegation(id).await
+    }
+    async fn get_delegation_by_child_session(
+        &self,
+        child_session_id: &SessionId,
+    ) -> Result<Option<Delegation>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            &format!(
+                "{DELEGATION_SELECT_SQL} WHERE child_session_id = ?1 \
+                 ORDER BY created_at DESC LIMIT 1"
+            ),
+            params![child_session_id.0.clone()],
+            Self::delegation_from_row,
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    async fn list_delegations_by_status(
+        &self,
+        status: DelegationStatus,
+    ) -> Result<Vec<Delegation>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "{DELEGATION_SELECT_SQL} WHERE status = ?1 ORDER BY created_at ASC"
+            ))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map(
+                params![Self::delegation_status_as_str(&status)],
+                Self::delegation_from_row,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(rows)
     }
 }
 
@@ -10593,6 +10674,9 @@ mod tests {
             validation_summary: Some("cargo test -p dcc-core".to_string()),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            origin: Default::default(),
+            instruction: None,
+            started_at: None,
         };
 
         futures::executor::block_on(repo.save_delegation(&delegation)).expect("save delegation");

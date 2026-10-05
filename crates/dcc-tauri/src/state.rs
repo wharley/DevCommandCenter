@@ -3745,6 +3745,9 @@ impl SessionCommandState {
             Ok(())
         };
         if payload.inserted {
+            // A delegated child's turn just ended: settle its delegation and
+            // hand the result back to the parent, off this terminal path.
+            crate::delegation_runtime::spawn_on_session_turn_terminal(self, session_id);
             let objective_outcome = match (&payload.record.kind, &request) {
                 (SessionEventKind::TurnCompleted { .. }, _) => {
                     Some(ObjectiveTurnOutcome::Completed)
@@ -6831,6 +6834,21 @@ impl DelegationRepo for SessionCommandState {
         updated_at: String,
     ) -> Result<Option<Delegation>> {
         DelegationRepo::update_delegation_status(&self.session_repo, id, status, updated_at).await
+    }
+
+    async fn get_delegation_by_child_session(
+        &self,
+        child_session_id: &SessionId,
+    ) -> Result<Option<Delegation>> {
+        DelegationRepo::get_delegation_by_child_session(&self.session_repo, child_session_id)
+            .await
+    }
+
+    async fn list_delegations_by_status(
+        &self,
+        status: DelegationStatus,
+    ) -> Result<Vec<Delegation>> {
+        DelegationRepo::list_delegations_by_status(&self.session_repo, status).await
     }
 }
 

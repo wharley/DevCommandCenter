@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use tauri::State;
 
 use dcc_core::domain::workspace::Workspace;
 use dcc_core::ports::WorkspaceRepo;
@@ -181,7 +180,7 @@ pub(crate) fn broken_workspace_message(reason: &str) -> String {
 }
 
 pub(crate) async fn preflight_workspace_root(
-    state: &State<'_, WorkspaceCommandState>,
+    state: &WorkspaceCommandState,
     workspace_root: &str,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;

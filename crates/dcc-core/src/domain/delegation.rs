@@ -32,6 +32,17 @@ pub enum DelegationStatus {
     Cancelled,
 }
 
+/// Who asked for the delegation. An agent-initiated delegation (the
+/// `dcc_delegate_task` tool) hands its result back to the parent agent as a
+/// turn; a person-initiated one only reports it in the thread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegationOrigin {
+    #[default]
+    Person,
+    Agent,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DelegationContextPolicy {
@@ -89,4 +100,13 @@ pub struct Delegation {
     pub validation_summary: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub origin: DelegationOrigin,
+    /// The task as the requester wrote it, without the context DCC wraps
+    /// around it in `prompt`.
+    #[serde(default)]
+    pub instruction: Option<String>,
+    /// First transition to `Running`; the timeout budget counts from here.
+    #[serde(default)]
+    pub started_at: Option<String>,
 }

@@ -17,6 +17,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use dcc_core::domain::delegation::{
+    Delegation, DelegationContextPolicy, DelegationMode, DelegationOrigin, DelegationStatus,
+};
 use dcc_core::domain::mcp::{McpDefinitionId, McpToolPolicyDecision};
 use dcc_core::domain::session::{Session, SessionId};
 use dcc_core::ports::{
@@ -74,9 +77,17 @@ const BROWSER_MCP_TOOL_NAMES: [&str; 13] = [
     "dcc_browser_evidence_read",
 ];
 #[cfg(test)]
-const DCC_MCP_TOOL_COUNT: usize = BROWSER_MCP_TOOL_NAMES.len() + 7;
+const DELEGATION_MCP_TOOL_NAMES: [&str; 3] =
+    ["dcc_delegate_task", "dcc_task_status", "dcc_task_cancel"];
+#[cfg(test)]
+const DCC_MCP_TOOL_COUNT: usize =
+    BROWSER_MCP_TOOL_NAMES.len() + 7 + DELEGATION_MCP_TOOL_NAMES.len();
+/// Starting a delegation prepares a worktree and a child thread before it
+/// returns the task id; the child's turn itself runs in the background.
+const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
+const MAX_DELEGATED_TASK_CHARS: usize = 32_000;
 const COMPUTER_CONTROL_REQUEST_HTTP_TIMEOUT: Duration = Duration::from_secs(50);
-const DCC_MCP_SERVER_INSTRUCTIONS: &str = "DCC exposes browser and desktop tools for this session. For a web task, call dcc_browser_status first. If the target is not open, call dcc_browser_open with an explicit HTTP(S) URL and a concise reason. It waits for the user to approve the visible DCC Browser. At sign-in, MFA, CAPTCHA, payment, or identity-sensitive steps, let the user complete the handoff; never request, copy, import, or invent cookies, passwords, or credentials. The user can use the Browser Sessions menu to import an eligible existing site session locally or sign in manually, including in an owned login popup; agents never receive or import cookies. After every navigation, click, fill, select, key press, reload, or user handoff, call dcc_browser_context again and use its fresh anchors before reporting a result, login state, or blocker; never infer one from the action alone. Do not use curl or another HTTP client to judge that Browser's authenticated access. Computer Use is separate experimental capability for an explicitly user-requested external desktop-app task; it is never an automatic Browser fallback.";
+const DCC_MCP_SERVER_INSTRUCTIONS: &str = "DCC exposes browser and desktop tools for this session. For a web task, call dcc_browser_status first. If the target is not open, call dcc_browser_open with an explicit HTTP(S) URL and a concise reason. It waits for the user to approve the visible DCC Browser. At sign-in, MFA, CAPTCHA, payment, or identity-sensitive steps, let the user complete the handoff; never request, copy, import, or invent cookies, passwords, or credentials. The user can use the Browser Sessions menu to import an eligible existing site session locally or sign in manually, including in an owned login popup; agents never receive or import cookies. After every navigation, click, fill, select, key press, reload, or user handoff, call dcc_browser_context again and use its fresh anchors before reporting a result, login state, or blocker; never infer one from the action alone. Do not use curl or another HTTP client to judge that Browser's authenticated access. Computer Use is separate experimental capability for an explicitly user-requested external desktop-app task; it is never an automatic Browser fallback. To hand a bounded task to another coding agent (another provider or model), call dcc_delegate_task: it returns a taskId at once and DCC later sends you the result as a new message starting with [DCC]. End your turn or continue independent work instead of polling.";
 
 fn browser_mcp_tool_policies() -> Vec<ProviderMcpToolPolicy> {
     // This override belongs only to DCC's ephemeral, lease-bound loopback
@@ -596,8 +607,17 @@ fn rpc_timeout(value: &Value) -> Duration {
                 "dcc_computer_request_control" | "dcc_browser_open"
             ) && tool_call_is_well_formed(&call)
         });
+    let is_delegate_request = value
+        .as_object()
+        .filter(|object| object.get("method").and_then(Value::as_str) == Some("tools/call"))
+        .and_then(|object| object.get("params"))
+        .cloned()
+        .and_then(|params| serde_json::from_value::<ToolCall>(params).ok())
+        .is_some_and(|call| call.name == "dcc_delegate_task" && tool_call_is_well_formed(&call));
     if is_control_request {
         COMPUTER_CONTROL_REQUEST_HTTP_TIMEOUT
+    } else if is_delegate_request {
+        DELEGATE_TASK_HTTP_TIMEOUT
     } else {
         Duration::from_secs(5)
     }
@@ -812,6 +832,57 @@ struct EvidenceReadArgs {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DelegateTaskArgs {
+    task: String,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskStatusArgs {
+    task_id: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskCancelArgs {
+    task_id: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+fn delegation_mode_arg(mode: Option<&str>) -> Option<DelegationMode> {
+    match mode.map(str::trim).unwrap_or("review") {
+        "review" => Some(DelegationMode::Review),
+        "explain" => Some(DelegationMode::Explain),
+        "implement" => Some(DelegationMode::Implement),
+        _ => None,
+    }
+}
+
+fn delegate_task_args_are_well_formed(args: &DelegateTaskArgs) -> bool {
+    !args.task.trim().is_empty()
+        && args.task.chars().count() <= MAX_DELEGATED_TASK_CHARS
+        && delegation_mode_arg(args.mode.as_deref()).is_some()
+        && args.provider.as_deref().is_none_or(|provider| {
+            dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS.contains(&provider.trim())
+        })
+        && args
+            .model
+            .as_deref()
+            .is_none_or(|model| model.chars().count() <= 128 && !model.chars().any(char::is_control))
+}
+
+fn valid_task_id(task_id: &str) -> bool {
+    let task_id = task_id.trim();
+    !task_id.is_empty() && task_id.len() <= 64 && !task_id.chars().any(char::is_control)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BrowserOpenArgs {
     url: String,
     reason: String,
@@ -929,6 +1000,23 @@ fn computer_scroll_args_are_well_formed(arguments: &Value) -> bool {
 
 fn tool_call_is_well_formed(call: &ToolCall) -> bool {
     match call.name.as_str() {
+        "dcc_delegate_task" => call.arguments.as_ref().is_some_and(|arguments| {
+            serde_json::from_value::<DelegateTaskArgs>(arguments.clone())
+                .is_ok_and(|args| delegate_task_args_are_well_formed(&args))
+        }),
+        "dcc_task_status" => call.arguments.as_ref().is_some_and(|arguments| {
+            serde_json::from_value::<TaskStatusArgs>(arguments.clone())
+                .is_ok_and(|args| valid_task_id(&args.task_id))
+        }),
+        "dcc_task_cancel" => call.arguments.as_ref().is_some_and(|arguments| {
+            serde_json::from_value::<TaskCancelArgs>(arguments.clone()).is_ok_and(|args| {
+                valid_task_id(&args.task_id)
+                    && args
+                        .reason
+                        .as_deref()
+                        .is_none_or(|reason| reason.chars().count() <= 2_000)
+            })
+        }),
         "dcc_browser_status" => call.arguments.as_ref().is_none_or(|arguments| {
             arguments
                 .as_object()
@@ -1162,6 +1250,14 @@ async fn dispatch_tool(
         );
     }
     match call.name.as_str() {
+        "dcc_delegate_task" | "dcc_task_status" | "dcc_task_cancel" => {
+            if !bridge.lease_is_current(binding) {
+                return ToolDispatch::computer_error(
+                    "delegation is unavailable for this provider session",
+                );
+            }
+            dispatch_delegation_tool(bridge, binding, call).await
+        }
         "dcc_browser_status" => {
             // The scoped Browser helper is intentionally read-only. It tells
             // the provider whether opening is required without leaking a
@@ -1761,6 +1857,127 @@ async fn action_result(
     }
 }
 
+fn delegation_task_view(delegation: &Delegation) -> Value {
+    let status = serde_json::to_value(&delegation.status).unwrap_or(Value::Null);
+    let mode = serde_json::to_value(&delegation.mode).unwrap_or(Value::Null);
+    let finished = matches!(
+        delegation.status,
+        DelegationStatus::Completed | DelegationStatus::ReviewPending | DelegationStatus::Failed
+    );
+    json!({
+        "taskId": delegation.id.0,
+        "status": status,
+        "mode": mode,
+        "provider": delegation.target_provider_id.0,
+        "model": delegation.target_model_id,
+        "childSessionId": delegation.child_session_id.as_ref().map(|id| id.0.clone()),
+        "summary": if finished { delegation.result_summary.clone() } else { None },
+        "touchedFiles": if finished { delegation.touched_files.clone() } else { Vec::new() },
+        "editsAwaitingHumanReview": matches!(delegation.status, DelegationStatus::ReviewPending),
+    })
+}
+
+/// `dcc_delegate_task`, `dcc_task_status`, `dcc_task_cancel`. The caller's
+/// identity comes from the lease, never from arguments: an agent can only
+/// delegate from, and inspect or cancel tasks of, its own session.
+async fn dispatch_delegation_tool(
+    bridge: &BrowserMcpBridge,
+    binding: &TokenBinding,
+    call: ToolCall,
+) -> ToolDispatch {
+    let parent = SessionId(binding.session_id.clone());
+    let reply = |notice: &str, value: Value| {
+        ToolDispatch::executed(
+            json!({"content":[{"type":"text","text":structured_text_content(notice, &value)}],"structuredContent":value}),
+            BrowserAuditGrantState::NotApplicable,
+        )
+    };
+    match call.name.as_str() {
+        "dcc_delegate_task" => {
+            let Some(args) = call
+                .arguments
+                .and_then(|arguments| serde_json::from_value::<DelegateTaskArgs>(arguments).ok())
+                .filter(delegate_task_args_are_well_formed)
+            else {
+                return ToolDispatch::computer_error("invalid dcc_delegate_task arguments");
+            };
+            let mode = delegation_mode_arg(args.mode.as_deref()).unwrap_or(DelegationMode::Review);
+            let result = dcc_tauri::delegation_runtime::run_delegation(
+                &bridge.sessions,
+                dcc_tauri::delegation_runtime::RunDelegationInput {
+                    parent_session_id: parent,
+                    target_provider_id: args.provider.map(|provider| provider.trim().to_string()),
+                    target_model_id: args
+                        .model
+                        .map(|model| model.trim().to_string())
+                        .filter(|model| !model.is_empty()),
+                    mode: mode.clone(),
+                    instruction: args.task,
+                    context_policy: if matches!(mode, DelegationMode::Implement) {
+                        DelegationContextPolicy::Minimal
+                    } else {
+                        DelegationContextPolicy::ReviewCurrentDiff
+                    },
+                    origin: DelegationOrigin::Agent,
+                    prebuilt_prompt: None,
+                    effort: None,
+                    fast_mode: None,
+                    provider_runtime: None,
+                },
+            )
+            .await;
+            match result {
+                Ok(output) => {
+                    let mut view = delegation_task_view(&output.delegation);
+                    view["delivery"] = json!(
+                        "DCC will send the result to this conversation as a new message starting with [DCC] when the task finishes. End your turn or continue independent work; do not poll."
+                    );
+                    reply("Delegated task started.", view)
+                }
+                Err(error) => ToolDispatch::computer_error(&format!("Delegation rejected: {error}")),
+            }
+        }
+        "dcc_task_status" => {
+            let Some(args) = call
+                .arguments
+                .and_then(|arguments| serde_json::from_value::<TaskStatusArgs>(arguments).ok())
+            else {
+                return ToolDispatch::computer_error("invalid dcc_task_status arguments");
+            };
+            match dcc_tauri::delegation_runtime::delegation_for_parent(
+                &bridge.sessions,
+                &parent,
+                &args.task_id,
+            )
+            .await
+            {
+                Ok(delegation) => reply("Delegated task status.", delegation_task_view(&delegation)),
+                Err(error) => ToolDispatch::computer_error(&error),
+            }
+        }
+        "dcc_task_cancel" => {
+            let Some(args) = call
+                .arguments
+                .and_then(|arguments| serde_json::from_value::<TaskCancelArgs>(arguments).ok())
+            else {
+                return ToolDispatch::computer_error("invalid dcc_task_cancel arguments");
+            };
+            match dcc_tauri::delegation_runtime::cancel_delegation_for_parent(
+                &bridge.sessions,
+                &parent,
+                &args.task_id,
+                args.reason,
+            )
+            .await
+            {
+                Ok(delegation) => reply("Delegated task cancelled.", delegation_task_view(&delegation)),
+                Err(error) => ToolDispatch::computer_error(&error),
+            }
+        }
+        _ => ToolDispatch::rejected(),
+    }
+}
+
 fn tool_error(error: &str) -> Value {
     let (code, message, next_step) = if error.contains("not armed") || error.contains("grant") {
         (
@@ -2009,6 +2226,9 @@ fn tools() -> Vec<Value> {
         json!({"name":"dcc_computer_scroll","description":"Request one bounded accessibility scroll step at a point within a just-captured allowed target window. x/y are screenshot window-local pixels with top-left origin. Deltas select direction and are not pixel-precise. A generation can be used once; capture again afterwards.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"x":{"type":"number"},"y":{"type":"number"},"deltaX":{"type":"integer","minimum":-1000,"maximum":1000,"default":0},"deltaY":{"type":"integer","minimum":-1000,"maximum":1000}},"required":["target","x","y","deltaY"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_computer_type","description":"Type bounded text into the focused just-captured allowed target window. A generation can be used once.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"text":{"type":"string","maxLength":2000}},"required":["target","text"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_computer_key","description":"Send one supported key combination to the focused just-captured allowed target window. A generation can be used once.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target,"key":{"type":"string","enum":computer_keys},"modifiers":{"type":"array","maxItems":4,"items":{"type":"string","enum":["SHIFT","CONTROL","OPTION","COMMAND"]}}},"required":["target","key"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
+        json!({"name":"dcc_delegate_task","description":"Delegate a bounded, self-contained task to another coding agent (a different provider or model) working in this same workspace. Returns a taskId immediately; DCC later sends you the result as a new message starting with [DCC]. End your turn or keep working on independent parts — do not poll. The child sees only `task` plus the workspace's git context, so include everything it needs. review and explain are read-only. implement edits an isolated git worktree; the human reviews those edits before anything reaches your workspace and DCC tells you whether they were applied. A delegated agent cannot delegate again.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"task":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS},"mode":{"type":"string","enum":["review","explain","implement"],"default":"review"},"provider":{"type":"string","enum":dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS,"description":"Target provider. Omit to let DCC pick an available provider other than yours."},"model":{"type":"string","maxLength":128,"description":"Target model id. Omit for the provider's default."}},"required":["task"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
+        json!({"name":"dcc_task_status","description":"Read the status and, once finished, the result of a task you delegated with dcc_delegate_task. Only needed if you must check before DCC delivers the result.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64}},"required":["taskId"]},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}),
+        json!({"name":"dcc_task_cancel","description":"Cancel a task you delegated that is still running. Its partial work is discarded.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64},"reason":{"type":"string","maxLength":2000}},"required":["taskId"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}}),
     ]
 }
 
@@ -2915,6 +3135,43 @@ mod tests {
     }
 
     #[test]
+    fn delegation_tool_arguments_are_bounded_and_closed() {
+        let call = |name: &str, arguments: Value| ToolCall {
+            name: name.to_string(),
+            arguments: Some(arguments),
+            _meta: None,
+        };
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"Review the diff","mode":"review","provider":"codex"})
+        )));
+        assert!(tool_call_is_well_formed(&call("dcc_delegate_task", json!({"task":"Explain"}))));
+        assert!(!tool_call_is_well_formed(&call("dcc_delegate_task", json!({"task":"  "}))));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"x","mode":"deploy"})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"x","provider":"unknown"})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"x","parentSessionId":"someone-else"})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"x".repeat(MAX_DELEGATED_TASK_CHARS + 1)})
+        )));
+        assert!(tool_call_is_well_formed(&call("dcc_task_status", json!({"taskId":"abc"}))));
+        assert!(!tool_call_is_well_formed(&call("dcc_task_status", json!({"taskId":""}))));
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_task_cancel",
+            json!({"taskId":"abc","reason":"no longer needed"})
+        )));
+    }
+
+    #[test]
     fn schemas_are_closed_and_expose_browser_and_computer_tools() {
         let schema_tools = tools();
         let names: Vec<_> = schema_tools
@@ -2944,6 +3201,9 @@ mod tests {
                 "dcc_computer_scroll",
                 "dcc_computer_type",
                 "dcc_computer_key",
+                "dcc_delegate_task",
+                "dcc_task_status",
+                "dcc_task_cancel",
             ]
         );
         for tool in &schema_tools {

@@ -137,15 +137,6 @@
       "sendResultHint": "Puts the result in this conversation's composer for you to review and send",
       "sendResultUnavailable": "This delegation has no result to send yet.",
       "reviewInInspector": "Review in Inspector"
-    },
-    "approval": {
-      "title": "Delegation request",
-      "instruction": "Instruction",
-      "mode": "Mode",
-      "target": "Target provider",
-      "targetAuto": "Chosen by DCC",
-      "context": "Context",
-      "payload": "Raw request"
     }
   },
   "agents": {
@@ -563,7 +554,6 @@
 	"workspacesAndProjects": "Workspaces & projects",
     "selected": "Selected",
     "actions": "Actions",
-    "delegate": "Delegate to another agent",
     "openProject": "Open project",
     "cloneFromUrl": "Clone from URL",
     "openSettings": "Open settings",
@@ -574,7 +564,6 @@
     "helpTopic": "Help: {{topic}}",
     "keyboardShortcuts": "Keyboard shortcuts",
 	"keywords": {
-		"delegate": "delegate delegation agent",
 		"openProject": "open project workspace",
 		"clone": "clone repository url",
 		"settings": "settings preferences",
@@ -1934,13 +1923,7 @@
       }
     },
     "delegate": {
-      "open": "Delegate to another agent",
       "title": "Delegate to",
-      "fanOut": "Delegate to several…",
-      "submitFanOut": "Delegate to {{count}} agents",
-      "allowEdits": "Can edit files",
-      "allowEditsHint": "Runs in an isolated worktree; nothing lands without your review.",
-      "noEditTargets": "No available agent can edit files.",
       "chooseModel": "Choose {{provider}} model",
       "recommended": "Recommended",
       "noModels": "No models available"
@@ -2979,14 +2962,15 @@
       "delegate": {
         "label": "Delegate to another agent",
         "summary": "Send a bounded task to a second agent.",
-        "whatIs": "Delegating creates a child session with another provider, with the instruction and context you choose. The main session stays free and the result comes back as a card in the conversation.",
+        "whatIs": "Delegating creates a child session with another provider (Claude, Codex, Cursor…). You ask in the chat, the agent calls DCC's dcc_delegate_task tool and keeps working. When the child finishes, the result goes back to the agent that asked on its own.",
         "whenToUse": "To parallelize: one agent implements while another writes tests or reviews. Or to get a second opinion from another model on the same diff.",
         "steps": [
-          "Click [Delegate] next to the composer's send button.",
-          "Write the instruction and pick the target provider, or leave [Chosen by DCC].",
-          "Pick the context: [Current diff], [Full reanchor] or [Minimal].",
-          "Follow the [Delegation] card in the conversation. Use [Open child session] for details or [Rerun on another agent] to compare."
+          "Ask in the chat, in plain language: \"delegate to Codex to review this diff\" or \"ask Claude to write the tests\".",
+          "Follow the [Delegation] card in the conversation. Use [Open child session] to see the work in progress.",
+          "When the child finishes, the agent receives the result and carries on. Implementation delegations stay isolated until you use [Review in Inspector] and apply or discard.",
+          "To compare, use [Rerun on another agent]. On a result you delegated yourself, [Send to agent] puts the text in the composer."
         ],
+        "tip": "Works on providers that receive DCC's tools (Claude, Codex and Cursor). A delegated agent cannot delegate again.",
         "prompt": "Review the current diff as a code review. Prioritize bugs, regressions and missing tests. Answer with findings by severity and do not edit files.",
         "keywords": "delegate delegation agent child session parallel provider review second opinion fan-out"
       },
@@ -3670,9 +3654,7 @@
       "allowed": "Allowed",
       "denied": "Denied",
       "pending": "Pending",
-      "submitError": "Unable to send the permission decision to the agent.",
-      "delegateMissingInstruction": "The delegation request is missing an instruction.",
-      "delegateUnavailable": "Delegation is unavailable in this context."
+      "submitError": "Unable to send the permission decision to the agent."
     }
   },
   "workbench": {

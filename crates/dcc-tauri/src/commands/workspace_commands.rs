@@ -4490,7 +4490,7 @@ fn file_name_from_path(path: &str) -> String {
 }
 
 /// `git status --porcelain` → staged / unstaged rows.
-fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatusOutput, String> {
+pub(crate) fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatusOutput, String> {
     let root = workspace_root.trim();
     if root.is_empty() {
         return Ok(WorkspaceGitStatusOutput {
@@ -4648,6 +4648,13 @@ pub async fn workspace_prepare_delegation_worktree(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspacePrepareDelegationWorktreeInput,
 ) -> Result<WorkspacePrepareDelegationWorktreeOutput, String> {
+    workspace_prepare_delegation_worktree_with_state(&state, input).await
+}
+
+pub async fn workspace_prepare_delegation_worktree_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspacePrepareDelegationWorktreeInput,
+) -> Result<WorkspacePrepareDelegationWorktreeOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let requested_root = input.workspace_root.trim().to_string();
     if requested_root.is_empty() {
@@ -4793,6 +4800,13 @@ pub async fn workspace_prepare_delegation_worktree(
 #[tauri::command]
 pub async fn workspace_remove_delegation_worktree(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRemoveDelegationWorktreeInput,
+) -> Result<(), String> {
+    workspace_remove_delegation_worktree_with_state(&state, input).await
+}
+
+pub async fn workspace_remove_delegation_worktree_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceRemoveDelegationWorktreeInput,
 ) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -8782,6 +8796,9 @@ mod editor_workspace_file_tests {
             validation_summary: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            origin: Default::default(),
+            instruction: None,
+            started_at: None,
         }))
         .expect("save delegation");
 
@@ -11971,6 +11988,13 @@ pub struct WorkspaceGitBranchDiffOutput {
 #[tauri::command]
 pub async fn workspace_git_branch_diff(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitBranchDiffInput,
+) -> Result<WorkspaceGitBranchDiffOutput, String> {
+    workspace_git_branch_diff_with_state(&state, input).await
+}
+
+pub async fn workspace_git_branch_diff_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceGitBranchDiffInput,
 ) -> Result<WorkspaceGitBranchDiffOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
