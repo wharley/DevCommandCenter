@@ -901,6 +901,41 @@ pub async fn delegation_result_turn(
     Ok(DelegationResultTurnOutput { prompt })
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelRunningDelegationInput {
+    pub delegation_id: DelegationId,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Stops a running delegation from the UI: marks it cancelled, aborts the
+/// child's turn and discards an implementation worktree. Finished
+/// delegations are returned unchanged.
+#[tauri::command]
+pub async fn cancel_running_delegation(
+    state: State<'_, SessionCommandState>,
+    input: CancelRunningDelegationInput,
+) -> Result<CancelDelegationOutput, String> {
+    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
+    let delegation = crate::delegation_runtime::cancel_delegation_for_parent(
+        &state,
+        &delegation.parent_session_id,
+        &delegation.id.0,
+        Some(
+            input
+                .reason
+                .filter(|reason| !reason.trim().is_empty())
+                .unwrap_or_else(|| "Cancelled by the person.".to_string()),
+        ),
+    )
+    .await?;
+    Ok(CancelDelegationOutput { delegation })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

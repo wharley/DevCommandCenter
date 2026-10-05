@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { LoaderCircle } from "lucide-react";
 import type { Delegation, ProviderCatalog } from "@dcc/contracts";
@@ -13,7 +12,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { listDelegations } from "@/lib/delegation-api";
+import { useWorkspaceDelegations } from "@/features/sessions/use-workspace-delegations";
 import { delegationStatusClass } from "@/features/sessions/delegation-status";
 import {
 	canRerunDelegation,
@@ -65,24 +64,8 @@ export function DelegationCard({
 }) {
 	const { t } = useTranslation("common");
 	const [isRerunning, setIsRerunning] = useState(false);
-	// Shares queryKey and options with the Inspector's Delegations section so
-	// both surfaces read the same cache entry and poll only once.
-	const delegationsQuery = useQuery({
-		queryKey: ["delegations", workspaceId],
-		queryFn: async () => {
-			if (!workspaceId) {
-				return [] as Delegation[];
-			}
-			const output = await listDelegations({
-				workspaceId,
-				parentSessionId: null,
-			});
-			return output.delegations;
-		},
-		enabled: Boolean(workspaceId),
-		staleTime: 5_000,
-		refetchInterval: 10_000,
-	});
+	// Shares the cache entry with the Inspector and the lineage menu.
+	const delegationsQuery = useWorkspaceDelegations(workspaceId);
 	const record =
 		delegationsQuery.data?.find((item) => item.id === delegation.id) ?? null;
 

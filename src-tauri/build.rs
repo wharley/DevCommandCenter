@@ -231,7 +231,8 @@ use dcc_tauri::commands::{
         ApproveDelegationInput, ApproveDelegationOutput, CancelDelegationInput,
         CancelDelegationOutput, CompleteDelegationInput, CompleteDelegationOutput,
         CreateDelegationInput, CreateDelegationOutput, FailDelegationInput, FailDelegationOutput,
-        DelegationResultTurnInput, DelegationResultTurnOutput, GetDelegationInput,
+        CancelRunningDelegationInput, DelegationResultTurnInput, DelegationResultTurnOutput,
+        GetDelegationInput,
         GetDelegationOutput, ListDelegationsInput, ListDelegationsOutput, RunDelegationInput,
         RunDelegationOutput, StartDelegationInput, StartDelegationOutput,
     },
@@ -641,6 +642,7 @@ struct DelegationMethods {
     fail_delegation: String,
     run_delegation: String,
     delegation_result_turn: String,
+    cancel_running_delegation: String,
 }
 
 fn main() {
@@ -1055,6 +1057,7 @@ fn main() {
         .typ::<RunDelegationOutput>()
         .typ::<DelegationResultTurnInput>()
         .typ::<DelegationResultTurnOutput>()
+        .typ::<CancelRunningDelegationInput>()
         .typ::<CompleteDelegationInput>()
         .typ::<CompleteDelegationOutput>()
         .typ::<ApproveDelegationInput>()
@@ -1292,6 +1295,7 @@ fn main() {
             fail_delegation: "fail_delegation".to_string(),
             run_delegation: "run_delegation".to_string(),
             delegation_result_turn: "delegation_result_turn".to_string(),
+            cancel_running_delegation: "cancel_running_delegation".to_string(),
         },
     );
 

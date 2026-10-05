@@ -126,6 +126,15 @@
       "full_reanchor": "Full reanchor",
       "minimal": "Minimal"
     },
+    "lineage": {
+      "button_one": "{{count}} delegation from this conversation",
+      "button_other": "{{count}} delegations from this conversation",
+      "title": "Delegations from this conversation",
+      "delegatedBy": "Delegated by",
+      "parentSession": "Originating conversation",
+      "cancel": "Cancel delegation",
+      "cancelFailed": "Could not cancel the delegation"
+    },
     "card": {
       "title": "Delegation",
       "openChild": "Open child session",

@@ -2,6 +2,9 @@ import { BrainCircuit, Check, Cloud, CloudOff, EyeOff, Globe2, History, LoaderCi
 import { hasReviewableChanges, isSessionRunning } from "@/features/agents/review-offer";
 import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
 import { CallAgentButtons, SessionAgentBadge } from "@/features/agents/session-agent-controls";
+import { DelegationLineageMenu } from "./delegation-lineage-menu";
+import { nestSessionsByLineage } from "./delegation-lineage";
+import { useWorkspaceDelegations } from "./use-workspace-delegations";
 import { useIdeas } from "@/features/agents/use-ideas";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -80,6 +83,13 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 	const { t, i18n } = useTranslation("common");
 	const resumeOk = canResumeSession(sessionSnapshot);
 	const visibleSessionList = visibleSessions(sessions);
+	const workspaceId =
+		sessions.find((summary) => summary.session.id === selectedSessionId)?.session.workspaceId ??
+		sessions[0]?.session.workspaceId ??
+		null;
+	const { data: workspaceDelegations = [] } = useWorkspaceDelegations(workspaceId);
+	// Delegated child sessions sit under the session that delegated them.
+	const nestedSessionRows = nestSessionsByLineage(visibleSessionList, workspaceDelegations);
 	const archivedSessionList = sessions.filter(isSessionArchived);
 	const activeTerminalCount = useActiveTerminalCount(terminalScopes);
 	const globalActiveTerminalCount = useGlobalActiveTerminalCount();
@@ -282,6 +292,12 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}
+				<DelegationLineageMenu
+					workspaceId={workspaceId}
+					sessionId={selectedSessionId}
+					sessions={sessions}
+					onSelectSession={onSelectSession}
+				/>
 				{!isIdeaTask && (
 					<CallAgentButtons
 						busy={sessions.some(isSessionRunning)}
@@ -307,8 +323,9 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 					<DropdownMenuContent align="end" className="max-h-96 w-72 overscroll-contain">
 						<DropdownMenuLabel>{t("workbench.sessionHistoryLabel")}</DropdownMenuLabel>
 						<DropdownMenuSeparator />
-						{visibleSessionList.length > 0 ? visibleSessionList.map((session) => (
-							<DropdownMenuItem key={session.session.id} onSelect={() => onSelectSession(session.session.id)} className="group/session gap-2">
+						{nestedSessionRows.length > 0 ? nestedSessionRows.map(({ summary: session, depth }) => (
+							<DropdownMenuItem key={session.session.id} onSelect={() => onSelectSession(session.session.id)} className={cn("group/session gap-2", depth > 0 && "pl-5")}>
+								{depth > 0 ? <span aria-hidden className="-ml-2 text-[10px] text-muted-foreground/60">↳</span> : null}
 								<span className={cn("size-1.5 shrink-0 rounded-full", session.session.id === selectedSessionId ? "bg-emerald-500" : "bg-muted-foreground/45")} />
 								<SessionAgentBadge sessionId={session.session.id} size={16} />
 								<span className="min-w-0 flex-1 truncate">{session.thread.title}</span>

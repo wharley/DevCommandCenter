@@ -2,7 +2,7 @@
 
 
 /* Constants */
-export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation"} as const;
+export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation"} as const;
 
 export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
@@ -197,6 +197,11 @@ export type CancelDelegationInput = {
 
 export type CancelDelegationOutput = {
 	delegation: Delegation,
+};
+
+export type CancelRunningDelegationInput = {
+	delegationId: DelegationId,
+	reason?: string | null,
 };
 
 export type Capabilities = {

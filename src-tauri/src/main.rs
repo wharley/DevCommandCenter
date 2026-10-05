@@ -83,8 +83,8 @@ use coderabbit_commands::{
 use computer_use_commands::ComputerUseState;
 use dcc_infra::mcp_db::SqliteMcpRepo;
 use delegation_commands::{
-    approve_delegation, cancel_delegation, complete_delegation, create_delegation,
-    delegation_result_turn, fail_delegation, get_delegation, list_delegations, run_delegation,
+    approve_delegation, cancel_delegation, cancel_running_delegation, complete_delegation,
+    create_delegation, delegation_result_turn, fail_delegation, get_delegation, list_delegations, run_delegation,
     start_delegation,
 };
 use feedback_commands::{dcc_feedback_context, dcc_feedback_create, dcc_feedback_list};
@@ -7214,6 +7214,7 @@ pub fn run() {
             fail_delegation,
             run_delegation,
             delegation_result_turn,
+            cancel_running_delegation,
             mcp_commands::list_mcp_integrations,
             mcp_commands::create_mcp_integration,
             mcp_commands::activate_mcp_integration,

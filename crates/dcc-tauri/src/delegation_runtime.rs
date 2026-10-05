@@ -1963,6 +1963,43 @@ mod tests {
         }
 
         #[tokio::test(flavor = "current_thread")]
+        async fn cancelling_stops_the_child_and_hands_nothing_back() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let delegation = running_delegation(state, DelegationOrigin::Agent).await;
+            append(state, "parent", started("p-1", "work")).await;
+            append(state, "child", started("c-1", "review")).await;
+
+            let cancelled = cancel_delegation_for_parent(
+                state,
+                &SessionId("parent".to_string()),
+                &delegation.id.0,
+                Some("no longer needed".to_string()),
+            )
+            .await
+            .expect("cancel");
+            assert_eq!(cancelled.status, DelegationStatus::Cancelled);
+            let child_events =
+                SessionEventRepo::list_events_by_session(state, &SessionId("child".to_string()))
+                    .await
+                    .expect("child history");
+            assert!(matches!(child_outcome(&child_events), ChildOutcome::Aborted(_)));
+
+            // The abort's terminal hook finds a cancelled delegation: no hand-back.
+            on_session_turn_terminal(state.clone(), SessionId("child".to_string())).await;
+            reconcile_running_delegations(state).await;
+            assert!(queued_prompts(state, "parent").await.is_empty());
+            // Cancelling again is a no-op that reports the current state.
+            assert_eq!(
+                cancel_delegation_for_parent(state, &SessionId("parent".to_string()), &delegation.id.0, None)
+                    .await
+                    .expect("idempotent")
+                    .status,
+                DelegationStatus::Cancelled
+            );
+        }
+
+        #[tokio::test(flavor = "current_thread")]
         async fn agent_task_tools_only_see_their_own_delegations() {
             let fixture = fixture().await;
             let state = &fixture.state;

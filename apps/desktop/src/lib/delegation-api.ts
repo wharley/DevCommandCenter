@@ -5,6 +5,7 @@ import type {
 	ApproveDelegationOutput,
 	CancelDelegationInput,
 	CancelDelegationOutput,
+	CancelRunningDelegationInput,
 	CompleteDelegationInput,
 	CompleteDelegationOutput,
 	CreateDelegationInput,
@@ -80,6 +81,13 @@ export function runDelegation(input: RunDelegationInput) {
 /** The deterministic `[DCC] …` hand-back text for a finished delegation. */
 export function delegationResultTurn(input: DelegationResultTurnInput) {
 	return invoke<DelegationResultTurnOutput>(DELEGATION_METHODS.delegationResultTurn, {
+		input,
+	});
+}
+
+/** Stops a running delegation: cancels it, aborts the child turn, drops its worktree. */
+export function cancelRunningDelegation(input: CancelRunningDelegationInput) {
+	return invoke<CancelDelegationOutput>(DELEGATION_METHODS.cancelRunningDelegation, {
 		input,
 	});
 }
