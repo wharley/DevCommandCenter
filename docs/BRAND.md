@@ -39,6 +39,34 @@ The mascot is drawn in code
 ([`agent-avatar.tsx`](../apps/desktop/src/features/agents/agent-avatar.tsx));
 colour, number of arms and eyes vary per agent.
 
+## Project mascots: Brazilian fauna
+
+DCC is built in Brazil, and its projects say so. A project that has no icon of
+its own gets a small pixel-art animal from Brazilian fauna: capivara (capybara),
+tucano (toucan), arara (macaw), mico-leão-dourado (golden lion tamarin), tatu
+(armadillo), onça-pintada (jaguar), jabuti (tortoise), boto-cor-de-rosa (pink
+river dolphin), sapo (frog) and polvo (octopus, the same animal as the agent
+mascot).
+
+- **Identity, not decoration.** The mascot tells projects apart at a glance in
+  the sidebar, the composer and the mobile companion. The animal and its colour
+  are derived from the project path, so a project looks the same on every
+  surface and across reinstalls.
+- **Pixel art on a 10×10 grid.** One colour plus a softer tone for details (the
+  toucan's beak, the tortoise's shell, the jaguar's spots), with transparent
+  eyes and gaps. Keep new animals readable at 12–18 px.
+- **Alive only when work is.** Two frames alternate while an agent is running in
+  the project; the animal rests otherwise. Respect reduced motion.
+- **Amber stays reserved.** The automatic palette never picks amber, which means
+  "needs you" across DCC.
+- **The person can choose.** The project editor offers any animal, one of the
+  neutral symbols, or an uploaded logo (stored as a 64 px PNG).
+
+The art and the identity rules live in one package,
+[`packages/mascots`](../packages/mascots/src/index.ts), shared by the desktop
+and the mobile web app. These animals identify projects; they are not the
+application icon and never replace the mark.
+
 ## Asset usage
 
 | Asset | Purpose |
