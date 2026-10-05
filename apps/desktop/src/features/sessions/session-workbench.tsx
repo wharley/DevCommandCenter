@@ -237,6 +237,11 @@ type SessionWorkbenchProps = {
 		delegationId: string;
 		targetProviderId: string;
 	}) => Promise<void>;
+	/** Puts a finished delegation's result in the parent's composer. */
+	onSendDelegationResult?: (input: {
+		delegationId: string;
+		failureReason?: string | null;
+	}) => void | Promise<void>;
 	onResolveConflictWithAgent: (
 		request: AgentResolutionRunRequest,
 	) => Promise<AgentResolutionRunResult>;
@@ -321,6 +326,7 @@ export function SessionWorkbench({
 	onCompleteWorkspace,
 	onReviewDelegation,
 	onRerunDelegation,
+	onSendDelegationResult,
 	onResolveConflictWithAgent,
 	onOpenAgentSession,
 	onMergeConflictStateChanged,
@@ -1214,6 +1220,7 @@ export function SessionWorkbench({
 						onOpenMultiProjectDelivery={handleOpenDelivery}
 						onReviewDelegation={onReviewDelegation}
 						onRerunDelegation={onRerunDelegation}
+						onSendDelegationResult={onSendDelegationResult}
 						onResolveConflictWithAgent={onResolveConflictWithAgent}
 						onOpenAgentSession={onOpenAgentSession}
 						onMergeConflictStateChanged={onMergeConflictStateChanged}

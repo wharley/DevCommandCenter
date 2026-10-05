@@ -76,6 +76,7 @@ export function buildDelegateTaskToolInstructions(
 			}),
 		}),
 		"Allowed modes: review, explain, implement. Use implement only when file edits are necessary; DCC will require human review before completion.",
+		"After the human approves, DCC runs the delegation and sends you its result as a new message starting with [DCC] when it finishes. Do not wait or poll for it: end your turn, or keep working on parts that do not depend on it, and continue when the result arrives.",
 		`Available external-provider delegation targets: ${targets
 			.map((provider) => `${provider.id} (${provider.label})`)
 			.join(", ")}.`,

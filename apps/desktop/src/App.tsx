@@ -22,6 +22,7 @@ import type {
 	CoreEvent,
 	DecisionProviderModelRouteSelection,
 	Delegation,
+	DelegationMode,
 	DelegationContextPolicy,
 	MissionSpecEntry,
 	PullRequestHubItem,
@@ -112,6 +113,12 @@ import {
 } from "./features/sessions/session-workbench";
 import { SessionSearchDialog } from "./features/sessions/session-search-dialog";
 import { resolveDelegateTaskToolInstructions } from "./features/sessions/delegate-task-tool-instructions";
+import {
+	buildDelegationResultTurn,
+	delegationResultTurnFromRecord,
+	extractDelegationInstruction,
+} from "./features/sessions/delegation-result-turn";
+import { deliverDelegationResultToParent } from "./features/sessions/deliver-delegation-result";
 import { WorkspaceBootstrapState } from "./features/panel/WorkspaceBootstrapState";
 import { NewTaskLaunchState } from "./features/panel/NewTaskLaunchState";
 import { PullRequestsHub } from "./features/pull-requests/pull-requests-hub";
@@ -406,6 +413,17 @@ type DelegationChildBinding = {
 	cleanupWorkspacePath?: string | null;
 	reviewRequired: boolean;
 	finalized: boolean;
+	/**
+	 * Set when the parent agent asked for this delegation (`delegate_task`):
+	 * the result is handed back to it as a turn once the child finishes.
+	 */
+	resultHandback: {
+		mode: DelegationMode;
+		providerLabel: string;
+		modelLabel: string | null;
+		instruction: string;
+		parentToolInstructions: string | null;
+	} | null;
 };
 
 function truncateDelegationContext(value: string, maxLength: number) {
@@ -438,6 +456,39 @@ function formatDelegationChangeList(
 			),
 		changes.length > 80 ? `- ... ${changes.length - 80} more file(s)` : "",
 	].filter(Boolean);
+}
+
+/**
+ * Hands a finished delegation back to the parent agent that asked for it.
+ * Manual delegations (started by the person) are not handed back
+ * automatically; their card offers to put the result in the composer instead.
+ */
+async function handBackDelegationResult(
+	binding: DelegationChildBinding,
+	outcome: {
+		status: "completed" | "review_pending" | "failed";
+		summary?: string | null;
+		touchedFiles?: string[];
+		validationSummary?: string | null;
+		failureReason?: string | null;
+	},
+) {
+	const handback = binding.resultHandback;
+	if (!handback) {
+		return;
+	}
+	try {
+		await deliverDelegationResultToParent({
+			parentSessionId: binding.parentSessionId,
+			prompt: buildDelegationResultTurn({ ...handback, ...outcome }),
+			toolInstructions: handback.parentToolInstructions,
+		});
+	} catch (error) {
+		console.error("[dcc] delegation result hand-back failed:", error);
+		toast.error("Could not hand the delegation result back to the agent.", {
+			description: error instanceof Error ? error.message : undefined,
+		});
+	}
 }
 
 async function summarizeSessionForDelegation(sessionId: string) {
@@ -1275,6 +1326,12 @@ export default function App() {
 					await queryClient.invalidateQueries({
 						queryKey: ["delegations", binding.workspaceId],
 					});
+					await handBackDelegationResult(binding, {
+						status: binding.reviewRequired ? "review_pending" : "completed",
+						summary,
+						touchedFiles: artifact.touchedFiles,
+						validationSummary,
+					});
 				} else {
 					await failDelegation({
 						delegationId: binding.delegationId,
@@ -1296,6 +1353,10 @@ export default function App() {
 					}
 					await queryClient.invalidateQueries({
 						queryKey: ["delegations", binding.workspaceId],
+					});
+					await handBackDelegationResult(binding, {
+						status: "failed",
+						failureReason: reason ?? "Child session failed.",
 					});
 				}
 			} catch (error) {
@@ -3270,6 +3331,24 @@ export default function App() {
 						cleanupWorkspacePath: implementationWorktreePath,
 						reviewRequired: allowFileEdits,
 						finalized: false,
+						resultHandback: request.handBackToParent
+							? {
+									mode: request.mode,
+									providerLabel: targetProvider.label,
+									modelLabel:
+										targetProvider.models.find((model) => model.id === targetModelId)
+											?.label ??
+										targetModelId ??
+										null,
+									instruction: extractDelegationInstruction(request.instruction),
+									parentToolInstructions: resolveDelegateTaskToolInstructions({
+										provider: providerChoices.find(
+											(provider) => provider.id === selectedSessionSnapshot.providerId,
+										),
+										providers: providerChoices,
+									}),
+								}
+							: null,
 					});
 					await startDelegation({ delegationId });
 
@@ -3437,6 +3516,45 @@ export default function App() {
 		[handleDelegate, t],
 	);
 
+	/**
+	 * Puts a finished delegation's result in the parent's composer, for
+	 * delegations the person started. They can edit it before sending.
+	 */
+	const handleSendDelegationResult = useCallback(
+		async (input: { delegationId: string; failureReason?: string | null }) => {
+			if (!selectedWorkspace) {
+				return;
+			}
+			let record: Delegation | null;
+			try {
+				record = (await getDelegation({ delegationId: input.delegationId })).delegation;
+			} catch (error) {
+				toast.error(
+					error instanceof Error ? error.message : "Could not load the delegation.",
+				);
+				return;
+			}
+			const text = record && delegationResultTurnFromRecord(
+				record,
+				providerChoices,
+				input.failureReason,
+			);
+			if (!record || !text) {
+				toast.error(t("delegation.card.sendResultUnavailable"));
+				return;
+			}
+			workspaceComposerPrefillSequenceRef.current += 1;
+			setWorkspaceComposerPrefill({
+				workspaceId: selectedWorkspace.id,
+				sessionId: record.parentSessionId,
+				text,
+				nonce: workspaceComposerPrefillSequenceRef.current,
+				mode: "append",
+			});
+		},
+		[providerChoices, selectedWorkspace, t],
+	);
+
 	const handleAgentDelegate = useCallback(
 		async (request: AgentInitiatedDelegationRequest) => {
 			if (!selectedProvider?.capabilities.canRequestDelegation) {
@@ -3479,6 +3597,7 @@ export default function App() {
 				mode: request.mode,
 				contextPolicy: request.contextPolicy,
 				instruction: request.instruction,
+				handBackToParent: true,
 			});
 		},
 		[
@@ -5982,6 +6101,7 @@ export default function App() {
 								}
 									onReviewDelegation={handleReviewDelegation}
 									onRerunDelegation={handleRerunDelegation}
+									onSendDelegationResult={handleSendDelegationResult}
 									onResolveConflictWithAgent={handleResolveConflictWithAgent}
 									onOpenAgentSession={handleOpenAgentSession}
 									onMergeConflictStateChanged={handleMergeConflictStateChanged}

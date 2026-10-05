@@ -133,6 +133,9 @@
       "rerun": "Re-rodar em outro agente",
       "rerunHint": "Mesma tarefa, mesmo contexto",
       "rerunUnavailable": "Esta delegação não pode ser re-rodada.",
+      "sendResult": "Enviar ao agente",
+      "sendResultHint": "Coloca o resultado no composer desta conversa para você revisar e enviar",
+      "sendResultUnavailable": "Esta delegação ainda não tem resultado para enviar.",
       "reviewInInspector": "Revisar no Inspector"
     },
     "approval": {

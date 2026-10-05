@@ -20,4 +20,9 @@ export type ManualDelegationRequest = {
 	 * replay an earlier delegation verbatim so the comparison stays honest.
 	 */
 	prebuiltPrompt?: string;
+	/**
+	 * The parent agent asked for this delegation (`delegate_task`), so its
+	 * result is handed back to the parent as a turn when the child finishes.
+	 */
+	handBackToParent?: boolean;
 };

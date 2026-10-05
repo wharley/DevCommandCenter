@@ -133,6 +133,9 @@
       "rerun": "Rerun on another agent",
       "rerunHint": "Same task, same context",
       "rerunUnavailable": "This delegation cannot be rerun.",
+      "sendResult": "Send to agent",
+      "sendResultHint": "Puts the result in this conversation's composer for you to review and send",
+      "sendResultUnavailable": "This delegation has no result to send yet.",
       "reviewInInspector": "Review in Inspector"
     },
     "approval": {

@@ -300,6 +300,11 @@ type WorkspacePanelProps = {
 		delegationId: string;
 		targetProviderId: string;
 	}) => Promise<void>;
+	/** Puts a finished delegation's result in the parent's composer. */
+	onSendDelegationResult?: (input: {
+		delegationId: string;
+		failureReason?: string | null;
+	}) => void | Promise<void>;
 	onResolveConflictWithAgent: (
 		request: AgentResolutionRunRequest,
 	) => Promise<AgentResolutionRunResult>;
@@ -382,6 +387,7 @@ export function WorkspacePanel({
 	onCompleteWorkspace,
 	onReviewDelegation,
 	onRerunDelegation,
+	onSendDelegationResult,
 	onResolveConflictWithAgent,
 	onOpenAgentSession,
 	onMergeConflictStateChanged,
@@ -1675,6 +1681,7 @@ export function WorkspacePanel({
 					onReviewChanges={onReviewChanges}
 					onReviewDelegation={onReviewDelegation}
 					onRerunDelegation={onRerunDelegation}
+					onSendDelegationResult={onSendDelegationResult}
 					onDelegateTaskApprove={onAgentDelegate}
 					onEditPrompt={replaceComposerDraft}
 					onForkFromMessage={onForkFromMessage}

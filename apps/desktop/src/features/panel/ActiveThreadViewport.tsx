@@ -74,6 +74,11 @@ type ActiveThreadViewportProps = {
 		delegationId: string;
 		targetProviderId: string;
 	}) => Promise<void>;
+	/** Puts a finished delegation's result in the parent's composer. */
+	onSendDelegationResult?: (input: {
+		delegationId: string;
+		failureReason?: string | null;
+	}) => void | Promise<void>;
 	onDelegateTaskApprove?: (request: AgentInitiatedDelegationRequest) => Promise<void>;
 	onEditPrompt?: (prompt: string) => void;
 	onForkFromMessage?: (messageId: string) => void;
@@ -121,6 +126,7 @@ export function ActiveThreadViewport({
 	onReviewChanges,
 	onReviewDelegation,
 	onRerunDelegation,
+	onSendDelegationResult,
 	onDelegateTaskApprove,
 	onEditPrompt,
 	onForkFromMessage,
@@ -570,6 +576,7 @@ export function ActiveThreadViewport({
 												onReviewChanges={onReviewChanges}
 												onReviewDelegation={onReviewDelegation}
 												onRerunDelegation={onRerunDelegation}
+												onSendDelegationResult={onSendDelegationResult}
 											/>
 										</div>
 									);

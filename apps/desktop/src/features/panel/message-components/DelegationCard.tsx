@@ -42,6 +42,7 @@ export function DelegationCard({
 	onReviewChanges,
 	onReviewDelegation,
 	onRerunDelegation,
+	onSendDelegationResult,
 }: {
 	delegation: WorkspaceMessageDelegation;
 	fallbackContent: string;
@@ -56,6 +57,11 @@ export function DelegationCard({
 		delegationId: string;
 		targetProviderId: string;
 	}) => Promise<void>;
+	/** Puts this delegation's result in the parent's composer. */
+	onSendDelegationResult?: (input: {
+		delegationId: string;
+		failureReason?: string | null;
+	}) => void | Promise<void>;
 }) {
 	const { t } = useTranslation("common");
 	const [isRerunning, setIsRerunning] = useState(false);
@@ -126,6 +132,10 @@ export function DelegationCard({
 	const showReview =
 		Boolean(onReviewDelegation || onReviewChanges) &&
 		(status === "review_pending" || touchedFiles.length > 0);
+	// Finished results can be handed to the parent agent through the composer.
+	const canSendResult =
+		Boolean(onSendDelegationResult && record) &&
+		(status === "completed" || status === "review_pending" || status === "failed");
 	const handleReview = () => {
 		if (onReviewDelegation) {
 			onReviewDelegation(delegation.id);
@@ -210,6 +220,23 @@ export function DelegationCard({
 							onClick={handleReview}
 						>
 							{t("delegation.card.reviewInInspector")}
+						</Button>
+					) : null}
+					{canSendResult ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="h-6 px-2 text-[11px]"
+							title={t("delegation.card.sendResultHint")}
+							onClick={() =>
+								void onSendDelegationResult?.({
+									delegationId: delegation.id,
+									failureReason: delegation.reason ?? null,
+								})
+							}
+						>
+							{t("delegation.card.sendResult")}
 						</Button>
 					) : null}
 					{availableRerunTargets.length > 0 ? (
