@@ -235,7 +235,10 @@ impl HeadlessCliProviderAdapter {
                     "plan"
                 } else {
                     match approval_policy {
-                        Some(ProviderApprovalPolicy::Ask) => "default",
+                        // ReadOnly is not advertised here; never widen it.
+                        Some(ProviderApprovalPolicy::ReadOnly | ProviderApprovalPolicy::Ask) => {
+                            "default"
+                        }
                         Some(ProviderApprovalPolicy::Auto) => "auto_edit",
                         Some(ProviderApprovalPolicy::FullAccess) | None => "yolo",
                     }

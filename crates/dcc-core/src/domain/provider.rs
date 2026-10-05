@@ -195,9 +195,33 @@ pub enum TurnControlSupport {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderApprovalPolicy {
+    /// Never writes: enforced by the provider's own sandbox, not by the
+    /// prompt. Only advertised by providers that can guarantee it; DCC uses
+    /// it for read-only delegated children (review, explain).
+    ReadOnly,
     Ask,
     Auto,
     FullAccess,
+}
+
+impl ProviderApprovalPolicy {
+    /// Permission rank: a delegated child never runs above its parent.
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::ReadOnly => 0,
+            Self::Ask => 1,
+            Self::Auto => 2,
+            Self::FullAccess => 3,
+        }
+    }
+
+    pub fn most_restrictive(self, other: Self) -> Self {
+        if other.rank() < self.rank() {
+            other
+        } else {
+            self
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

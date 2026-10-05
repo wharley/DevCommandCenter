@@ -1874,6 +1874,9 @@ fn delegation_task_view(delegation: &Delegation) -> Value {
         "summary": if finished { delegation.result_summary.clone() } else { None },
         "touchedFiles": if finished { delegation.touched_files.clone() } else { Vec::new() },
         "editsAwaitingHumanReview": matches!(delegation.status, DelegationStatus::ReviewPending),
+        "approvalPolicy": delegation.budget.approval_policy,
+        "writesGuarded": dcc_tauri::delegation_runtime::writes_guarded(delegation)
+            || matches!(delegation.mode, DelegationMode::Implement),
     })
 }
 

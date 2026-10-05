@@ -19,7 +19,10 @@ import {
 	waitForDccMcpReadiness,
 } from "./mcp-readiness.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
-import { resolveClaudeApprovalOptions } from "./approval-policy.mjs";
+import {
+	mergedDisallowedTools,
+	resolveClaudeApprovalOptions,
+} from "./approval-policy.mjs";
 import { createDccMcpPermissionHooks } from "./mcp-permission-hook.mjs";
 import { createNativeSubagentHooks } from "./native-subagent-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
@@ -298,6 +301,7 @@ async function runTurn(payload, state) {
 			includePartialMessages: true,
 			settingSources: ["user", "project", "local"],
 			...mcpOptions,
+			...mergedDisallowedTools(approvalOptions, mcpOptions),
 			hooks: {
 				...createNativeSubagentHooks(emit),
 				...(hasDccMcpServers

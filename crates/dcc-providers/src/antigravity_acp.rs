@@ -719,7 +719,8 @@ fn capabilities() -> Capabilities {
 
 const fn antigravity_permission_mode(policy: ProviderApprovalPolicy) -> &'static str {
     match policy {
-        ProviderApprovalPolicy::Ask => "default",
+        // Not advertised; the most restrictive mode if it ever arrives.
+        ProviderApprovalPolicy::ReadOnly | ProviderApprovalPolicy::Ask => "default",
         ProviderApprovalPolicy::Auto => "auto_edit",
         ProviderApprovalPolicy::FullAccess => "yolo",
     }

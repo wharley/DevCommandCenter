@@ -65,6 +65,11 @@ pub struct DelegationBudget {
     pub turn_limit: Option<u32>,
     pub timeout_seconds: Option<u64>,
     pub allow_file_edits: bool,
+    /// Permission level the child actually runs with, never above the
+    /// parent's. `None` when the target provider takes no policy at all (the
+    /// read-only scope is then an instruction, not a guarantee).
+    #[serde(default)]
+    pub approval_policy: Option<super::provider::ProviderApprovalPolicy>,
 }
 
 impl Default for DelegationBudget {
@@ -73,6 +78,7 @@ impl Default for DelegationBudget {
             turn_limit: Some(1),
             timeout_seconds: Some(600),
             allow_file_edits: false,
+            approval_policy: None,
         }
     }
 }

@@ -239,6 +239,10 @@ pub enum SessionEventKind {
         /// Explicit retry linkage: the aborted turn this one re-runs.
         #[serde(rename = "retryOfTurnId", default)]
         retry_of_turn_id: Option<TurnId>,
+        /// The permission level the turn ran with; a delegated child is
+        /// capped at its parent's latest one. Absent on older records.
+        #[serde(rename = "approvalPolicy", default)]
+        approval_policy: Option<ProviderApprovalPolicy>,
     },
     TurnSteered {
         #[serde(rename = "turnId")]
@@ -822,6 +826,7 @@ mod tests {
                 model: None,
                 evidence: None,
                 retry_of_turn_id: None,
+                approval_policy: None,
             },
         )
     }
@@ -946,6 +951,7 @@ mod tests {
                     model: None,
                     evidence: None,
                     retry_of_turn_id: None,
+                    approval_policy: None,
                 },
             ),
             event(
@@ -1144,6 +1150,7 @@ mod turn_evidence_tests {
                 )],
             }),
             retry_of_turn_id: None,
+            approval_policy: None,
         };
         let value = serde_json::to_value(&with_evidence).expect("serialize evidence");
         assert_eq!(value["evidence"]["stage"], "reproduce");

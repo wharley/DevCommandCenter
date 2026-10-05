@@ -104,6 +104,9 @@ export function DelegationCard({
 					defaultValue: decisions.contextPolicy,
 				}),
 				...(decisions.allowFileEdits ? [t("delegation.card.canEditFiles")] : []),
+				...(record?.budget.approvalPolicy === "read_only"
+					? [t("delegation.card.readOnly")]
+					: []),
 			]
 		: [];
 	const availableRerunTargets =

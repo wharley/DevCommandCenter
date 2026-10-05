@@ -362,6 +362,7 @@ impl CoreEvent {
                     model,
                     evidence,
                     retry_of_turn_id,
+                    ..
                 },
                 Self::SessionTurnStarted {
                     turn_id: actual_turn_id,

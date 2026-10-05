@@ -8789,6 +8789,7 @@ mod editor_workspace_file_tests {
                 turn_limit: Some(1),
                 timeout_seconds: Some(30),
                 allow_file_edits: false,
+                approval_policy: None,
             },
             result_summary: Some("done".to_string()),
             touched_files: Vec::new(),

@@ -130,6 +130,7 @@
       "title": "Delegação",
       "openChild": "Abrir sessão filha",
       "canEditFiles": "pode editar",
+      "readOnly": "somente leitura",
       "rerun": "Re-rodar em outro agente",
       "rerunHint": "Mesma tarefa, mesmo contexto",
       "rerunUnavailable": "Esta delegação não pode ser re-rodada.",

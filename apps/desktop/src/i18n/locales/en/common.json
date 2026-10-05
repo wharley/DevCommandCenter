@@ -130,6 +130,7 @@
       "title": "Delegation",
       "openChild": "Open child session",
       "canEditFiles": "can edit",
+      "readOnly": "read-only",
       "rerun": "Rerun on another agent",
       "rerunHint": "Same task, same context",
       "rerunUnavailable": "This delegation cannot be rerun.",

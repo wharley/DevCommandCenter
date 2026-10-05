@@ -357,6 +357,7 @@ mod tests {
                     model: None,
                     evidence: None,
                     retry_of_turn_id: None,
+                    approval_policy: None,
                 },
             },
         ];
@@ -503,6 +504,7 @@ mod tests {
                 model: None,
                 evidence: None,
                 retry_of_turn_id: None,
+                approval_policy: None,
             },
         }))
         .expect("new turn");

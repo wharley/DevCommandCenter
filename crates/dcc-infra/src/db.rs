@@ -9909,6 +9909,7 @@ mod tests {
                     model: None,
                     evidence: None,
                     retry_of_turn_id: None,
+                    approval_policy: None,
                 },
             },
             SessionEventRecord {
@@ -9962,6 +9963,7 @@ mod tests {
                     model: None,
                     evidence: None,
                     retry_of_turn_id: None,
+                    approval_policy: None,
                 },
             },
             SessionEventRecord {
@@ -10520,6 +10522,7 @@ mod tests {
                     model: None,
                     evidence: None,
                     retry_of_turn_id: None,
+                    approval_policy: None,
                 },
             },
             SessionEventRecord {
@@ -10667,6 +10670,7 @@ mod tests {
                 turn_limit: Some(1),
                 timeout_seconds: Some(300),
                 allow_file_edits: false,
+                approval_policy: None,
             },
             result_summary: Some("No blocking issues.".to_string()),
             touched_files: vec!["src/lib.rs".to_string()],
@@ -13450,6 +13454,7 @@ mod tests {
             model: None,
             evidence: None,
             retry_of_turn_id: None,
+            approval_policy: None,
         };
         let session = Session {
             id: session_id.clone(),

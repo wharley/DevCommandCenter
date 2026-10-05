@@ -26,6 +26,7 @@ use dcc_core::{
             Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
             DelegationOrigin, DelegationStatus,
         },
+        provider::ProviderApprovalPolicy,
         session::{AssistantMessagePhase, SessionEventKind, SessionId, SessionProjection, TurnId},
     },
     ports::{
@@ -490,6 +491,8 @@ pub struct DelegationPromptContext<'a> {
     pub parent_session_id: &'a str,
     pub parent_title: &'a str,
     pub git_context: Option<Vec<String>>,
+    /// The provider itself blocks or gates writes (see [`writes_guarded`]).
+    pub writes_guarded: bool,
 }
 
 pub fn build_delegation_prompt(context: &DelegationPromptContext<'_>) -> String {
@@ -522,6 +525,12 @@ pub fn build_delegation_prompt(context: &DelegationPromptContext<'_>) -> String 
             ]
             .map(str::to_string),
         );
+        if !context.writes_guarded {
+            lines.push(
+                "- DCC cannot sandbox this provider, so read-only is on you: do not modify anything."
+                    .to_string(),
+            );
+        }
     }
     lines.extend([
         "- Your final message is handed back to the requester as the result: make it self-contained."
@@ -594,6 +603,75 @@ async fn git_context_lines(workspace: &WorkspaceCommandState, path: &str) -> Vec
 }
 
 // ---------------------------------------------------------------------------
+// Permission ceiling
+// ---------------------------------------------------------------------------
+
+fn provider_approval_policies(provider_id: &str) -> Vec<ProviderApprovalPolicy> {
+    dcc_providers::provider_registration(provider_id)
+        .map(|registration| registration.capabilities.approval_policies)
+        .unwrap_or_default()
+}
+
+/// The permission level of the parent's newest turn that recorded one.
+pub fn latest_turn_approval_policy(
+    events: &[dcc_core::domain::session::SessionEventRecord],
+) -> Option<ProviderApprovalPolicy> {
+    events.iter().rev().find_map(|event| match &event.kind {
+        SessionEventKind::TurnStarted {
+            approval_policy: Some(policy),
+            ..
+        } => Some(*policy),
+        _ => None,
+    })
+}
+
+/// What a delegated child may do, mirroring T3 Code's rule that a child never
+/// runs with broader permissions than its parent, plus a mode ceiling:
+/// review/explain are read-only, implement is auto inside its isolated
+/// worktree. When the target cannot honour the level, the next more
+/// restrictive one it supports wins (read-only → ask, so a write needs a
+/// human). `None` means the provider takes no policy at all.
+pub fn child_approval_policy(
+    supported: &[ProviderApprovalPolicy],
+    mode: &DelegationMode,
+    parent: Option<ProviderApprovalPolicy>,
+) -> Option<ProviderApprovalPolicy> {
+    let mode_ceiling = if matches!(mode, DelegationMode::Implement) {
+        ProviderApprovalPolicy::Auto
+    } else {
+        ProviderApprovalPolicy::ReadOnly
+    };
+    let wanted = parent.map_or(mode_ceiling, |parent| parent.most_restrictive(mode_ceiling));
+    if supported.contains(&wanted) {
+        return Some(wanted);
+    }
+    // Prefer the closest more restrictive level; never widen past `wanted`
+    // unless the provider offers nothing at or below it.
+    let mut ordered = supported.to_vec();
+    ordered.sort_by_key(|policy| policy.rank());
+    ordered
+        .iter()
+        .copied()
+        .filter(|policy| policy.rank() <= wanted.rank())
+        .max_by_key(|policy| policy.rank())
+        .or_else(|| {
+            ordered
+                .iter()
+                .copied()
+                .find(|policy| *policy == ProviderApprovalPolicy::Ask)
+        })
+}
+
+/// Whether the provider (not just the prompt) keeps a read-only child from
+/// writing: it either cannot write or must ask the person first.
+pub fn writes_guarded(delegation: &Delegation) -> bool {
+    matches!(
+        delegation.budget.approval_policy,
+        Some(ProviderApprovalPolicy::ReadOnly | ProviderApprovalPolicy::Ask)
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Launch
 // ---------------------------------------------------------------------------
 
@@ -623,9 +701,21 @@ fn resolve_target_provider(
             )
             .is_ok()
     };
+    // A read-only task prefers a provider that can guarantee it.
+    let enforces_read_only = |provider: &str| {
+        budget.allow_file_edits
+            || provider_approval_policies(provider).contains(&ProviderApprovalPolicy::ReadOnly)
+    };
     dcc_providers::PROVIDER_IDS
         .iter()
-        .find(|provider| **provider != parent_provider && capable(provider))
+        .find(|provider| {
+            **provider != parent_provider && capable(provider) && enforces_read_only(provider)
+        })
+        .or_else(|| {
+            dcc_providers::PROVIDER_IDS
+                .iter()
+                .find(|provider| **provider != parent_provider && capable(provider))
+        })
         .or_else(|| {
             dcc_providers::PROVIDER_IDS
                 .iter()
@@ -738,7 +828,7 @@ pub async fn run_delegation(
         .unwrap_or_else(|| workspace.root_path.clone());
 
     let allow_file_edits = matches!(input.mode, DelegationMode::Implement);
-    let budget = DelegationBudget {
+    let mut budget = DelegationBudget {
         turn_limit: Some(1),
         timeout_seconds: Some(if allow_file_edits {
             IMPLEMENT_TIMEOUT_SECONDS
@@ -746,6 +836,7 @@ pub async fn run_delegation(
             READ_ONLY_TIMEOUT_SECONDS
         }),
         allow_file_edits,
+        approval_policy: None,
     };
     let target_provider_id = resolve_target_provider(
         state,
@@ -754,6 +845,15 @@ pub async fn run_delegation(
         &input.mode,
         &budget,
     )?;
+    let parent_policy = SessionEventRepo::list_events_by_session(state, &parent.id)
+        .await
+        .ok()
+        .and_then(|events| latest_turn_approval_policy(&events));
+    budget.approval_policy = child_approval_policy(
+        &provider_approval_policies(&target_provider_id),
+        &input.mode,
+        parent_policy,
+    );
 
     let sessions = state
         .list_workspace_sessions(&parent.workspace_id)
@@ -811,6 +911,10 @@ pub async fn run_delegation(
                     parent_session_id: &parent.id.0,
                     parent_title: &parent_title,
                     git_context,
+                    writes_guarded: matches!(
+                        budget.approval_policy,
+                        Some(ProviderApprovalPolicy::ReadOnly | ProviderApprovalPolicy::Ask)
+                    ),
                 })
             }
         };
@@ -911,6 +1015,7 @@ pub async fn run_delegation(
     let background = state.clone();
     let delegation_id = running.id.clone();
     let effort = input.effort.clone().or_else(|| Some("medium".to_string()));
+    let approval_policy = running.budget.approval_policy;
     let fast_mode = input.fast_mode.or(Some(false));
     tokio::spawn(async move {
         let turn = SendTurnInput {
@@ -923,7 +1028,7 @@ pub async fn run_delegation(
             plan_mode: Some(false),
             effort,
             fast_mode,
-            approval_policy: Some(dcc_core::domain::provider::ProviderApprovalPolicy::Auto),
+            approval_policy,
             evidence: None,
             retry_of_turn_id: None,
             decision_provider_model_route: None,
@@ -1480,6 +1585,7 @@ mod tests {
                     model: None,
                     evidence: None,
                     retry_of_turn_id: None,
+                    approval_policy: None,
                 },
             ),
             event(
@@ -1535,6 +1641,66 @@ mod tests {
             .with_timezone(&Utc);
         assert!(!timed_out(&running, started + chrono::Duration::seconds(599)));
         assert!(timed_out(&running, started + chrono::Duration::seconds(601)));
+    }
+
+    #[test]
+    fn a_child_never_runs_above_its_parent_or_its_mode() {
+        use ProviderApprovalPolicy::*;
+        let full = [ReadOnly, Ask, Auto, FullAccess];
+        // Read-only modes stay read-only even under a full-access parent.
+        assert_eq!(child_approval_policy(&full, &DelegationMode::Review, Some(FullAccess)), Some(ReadOnly));
+        assert_eq!(child_approval_policy(&full, &DelegationMode::Explain, None), Some(ReadOnly));
+        // Implement tops out at auto in its worktree, and follows a stricter parent.
+        assert_eq!(child_approval_policy(&full, &DelegationMode::Implement, Some(FullAccess)), Some(Auto));
+        assert_eq!(child_approval_policy(&full, &DelegationMode::Implement, Some(Ask)), Some(Ask));
+        assert_eq!(child_approval_policy(&full, &DelegationMode::Implement, None), Some(Auto));
+        // Without a read-only sandbox the next stricter level gates writes.
+        let no_read_only = [Ask, Auto, FullAccess];
+        assert_eq!(child_approval_policy(&no_read_only, &DelegationMode::Review, Some(Auto)), Some(Ask));
+        // A provider that takes no policy gets none; the prompt carries the rule.
+        assert_eq!(child_approval_policy(&[], &DelegationMode::Review, Some(Auto)), None);
+    }
+
+    #[test]
+    fn parent_policy_is_the_newest_recorded_one() {
+        let started = |sequence: u64, policy: Option<ProviderApprovalPolicy>| {
+            event(
+                sequence,
+                SessionEventKind::TurnStarted {
+                    turn_id: TurnId(format!("t-{sequence}")),
+                    prompt: "p".to_string(),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                    approval_policy: policy,
+                },
+            )
+        };
+        let events = vec![
+            started(1, Some(ProviderApprovalPolicy::FullAccess)),
+            started(2, Some(ProviderApprovalPolicy::Ask)),
+            started(3, None),
+        ];
+        assert_eq!(latest_turn_approval_policy(&events), Some(ProviderApprovalPolicy::Ask));
+        assert_eq!(latest_turn_approval_policy(&[]), None);
+    }
+
+    #[test]
+    fn unguarded_read_only_prompts_say_so() {
+        let context = |writes_guarded| DelegationPromptContext {
+            mode: &DelegationMode::Review,
+            instruction: "Review",
+            workspace_name: "w",
+            workspace_branch: "main",
+            workspace_path: "/w",
+            parent_session_id: "p",
+            parent_title: "t",
+            git_context: None,
+            writes_guarded,
+        };
+        assert!(build_delegation_prompt(&context(false)).contains("DCC cannot sandbox this provider"));
+        assert!(!build_delegation_prompt(&context(true)).contains("DCC cannot sandbox this provider"));
     }
 
     mod lifecycle {
@@ -1630,6 +1796,7 @@ mod tests {
                 model: None,
                 evidence: None,
                 retry_of_turn_id: None,
+                approval_policy: None,
             }
         }
 

@@ -37,6 +37,8 @@ pub fn stable_codex_capabilities() -> Capabilities {
     capabilities.can_request_delegation = true;
     capabilities.supports_multi_root = true;
     capabilities.approval_policies = vec![
+        // Enforced by the runtime sandbox; used for read-only delegated children.
+        ProviderApprovalPolicy::ReadOnly,
         ProviderApprovalPolicy::Ask,
         ProviderApprovalPolicy::Auto,
         ProviderApprovalPolicy::FullAccess,

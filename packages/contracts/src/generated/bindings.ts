@@ -851,6 +851,12 @@ export type DelegationBudget = {
 	turnLimit: number | null,
 	timeoutSeconds: number | null,
 	allowFileEdits: boolean,
+	/**
+	 *  Permission level the child actually runs with, never above the
+	 *  parent's. `None` when the target provider takes no policy at all (the
+	 *  read-only scope is then an instruction, not a guarantee).
+	 */
+	approvalPolicy?: ProviderApprovalPolicy | null,
 };
 
 export type DelegationContextPolicy = { type: "minimal" } | { type: "review_current_diff" } | { type: "spec_plan" } | { type: "selected_files"; paths: string[] } | { type: "full_reanchor" };
@@ -1523,7 +1529,13 @@ export type ProviderAccountUsageOutput = {
 
 export type ProviderAccountUsageState = "available" | "awaitingActivity";
 
-export type ProviderApprovalPolicy = "ask" | "auto" | "full_access";
+export type ProviderApprovalPolicy =
+/**
+ *  Never writes: enforced by the provider's own sandbox, not by the
+ *  prompt. Only advertised by providers that can guarantee it; DCC uses
+ *  it for read-only delegated children (review, explain).
+ */
+"read_only" | "ask" | "auto" | "full_access";
 
 export type ProviderAvailability = {
 	providerId: string,
@@ -2139,7 +2151,12 @@ forkedFrom?: ForkOrigin | null } | { type: "turn_started"; turnId: TurnId; promp
  */
 evidence?: TurnEvidenceSummary | null;
 // Explicit retry linkage: the aborted turn this one re-runs.
-retryOfTurnId?: TurnId | null } | { type: "turn_steered"; turnId: TurnId; prompt: string } | { type: "turn_queued"; queuedTurn: QueuedTurn } | { type: "queued_turn_removed"; queuedTurnId: string } | { type: "turn_queue_reordered"; queuedTurnIds: string[] } | { type: "queued_turn_dispatched"; queuedTurnId: string; turnId: TurnId } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_assistant_message_started"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase } | { type: "turn_assistant_message_delta"; turnId: TurnId; messageId: string; content: string } | { type: "turn_assistant_message_completed"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase;
+retryOfTurnId?: TurnId | null;
+/**
+ *  The permission level the turn ran with; a delegated child is
+ *  capped at its parent's latest one. Absent on older records.
+ */
+approvalPolicy?: ProviderApprovalPolicy | null } | { type: "turn_steered"; turnId: TurnId; prompt: string } | { type: "turn_queued"; queuedTurn: QueuedTurn } | { type: "queued_turn_removed"; queuedTurnId: string } | { type: "turn_queue_reordered"; queuedTurnIds: string[] } | { type: "queued_turn_dispatched"; queuedTurnId: string; turnId: TurnId } | { type: "turn_delta"; turnId: TurnId; content: string } | { type: "turn_assistant_message_started"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase } | { type: "turn_assistant_message_delta"; turnId: TurnId; messageId: string; content: string } | { type: "turn_assistant_message_completed"; turnId: TurnId; messageId: string; phase: AssistantMessagePhase;
 /**
  *  Final provider snapshot. When present this replaces accumulated
  *  deltas and is authoritative for replay.

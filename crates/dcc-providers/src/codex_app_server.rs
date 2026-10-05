@@ -1506,7 +1506,9 @@ fn codex_turn_execution_policy(
     plan_mode: Option<bool>,
     has_dcc_mcp_servers: bool,
 ) -> (Value, Value) {
-    if plan_mode == Some(true) {
+    // Plan mode and read-only delegated children share Codex's native
+    // read-only sandbox: nothing is written, nothing is asked.
+    if plan_mode == Some(true) || approval_policy == Some(ProviderApprovalPolicy::ReadOnly) {
         let approval = if has_dcc_mcp_servers {
             json!(codex_mcp_approval_policy())
         } else {
@@ -1529,13 +1531,16 @@ fn codex_turn_execution_policy(
         json!(match approval_policy {
             Some(ProviderApprovalPolicy::Ask) => "untrusted",
             Some(ProviderApprovalPolicy::Auto) => "on-request",
-            Some(ProviderApprovalPolicy::FullAccess) | None => "never",
+            Some(ProviderApprovalPolicy::FullAccess)
+            | Some(ProviderApprovalPolicy::ReadOnly)
+            | None => "never",
         })
     };
     let sandbox = match approval_policy {
         Some(ProviderApprovalPolicy::Ask | ProviderApprovalPolicy::Auto) => {
             json!({ "type": "workspaceWrite" })
         }
+        Some(ProviderApprovalPolicy::ReadOnly) => json!({ "type": "readOnly" }),
         Some(ProviderApprovalPolicy::FullAccess) | None => {
             json!({ "type": "dangerFullAccess" })
         }
@@ -3694,6 +3699,16 @@ unified_exec                         stable             true
                 false,
             ),
             (json!("never"), json!({ "type": "readOnly" }))
+        );
+        // Read-only delegated children never get a writable sandbox, even
+        // outside plan mode and with DCC's MCP server attached.
+        assert_eq!(
+            codex_turn_execution_policy(Some(ProviderApprovalPolicy::ReadOnly), Some(false), false),
+            (json!("never"), json!({ "type": "readOnly" }))
+        );
+        assert_eq!(
+            codex_turn_execution_policy(Some(ProviderApprovalPolicy::ReadOnly), Some(false), true).1,
+            json!({ "type": "readOnly" })
         );
 
         let (mcp_approval, sandbox) =

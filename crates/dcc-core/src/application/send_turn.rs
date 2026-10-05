@@ -242,6 +242,7 @@ where
             model: session.model.clone(),
             evidence: input.evidence.clone(),
             retry_of_turn_id: input.retry_of_turn_id.clone(),
+            approval_policy: input.approval_policy,
         },
     };
 
@@ -397,6 +398,7 @@ mod tests {
             model: None,
             evidence: None,
             retry_of_turn_id: None,
+            approval_policy: None,
         };
         let history = vec![
             record(1, started("t-aborted")),
