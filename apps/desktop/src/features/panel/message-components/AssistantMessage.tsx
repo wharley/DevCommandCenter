@@ -6,7 +6,6 @@ import {
 } from "react";
 import {
 	AlertCircle,
-	Bot,
 	Copy,
 	GitBranch,
 	GitFork,
@@ -26,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { LazyStreamdown } from "@/components/streamdown-loader";
 import { WorkspaceFileLinkProvider } from "@/components/workspace-file-link-context";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
+import { AgentMascot } from "@/features/providers/agent-mascot";
 import { cn } from "@/lib/utils";
 import { MessageTimestamp } from "./message-metadata";
 import { ProviderErrorMessage } from "./ProviderErrorMessage";
@@ -70,6 +70,8 @@ type NativeSubagentSupervision = {
 	parentStreaming?: boolean;
 	supportsSteering?: boolean;
 	supportsInterrupt?: boolean;
+	/** The parent's provider — native subagents run on the same one. */
+	providerId?: string | null;
 };
 
 function AssistantTextFallback({ text }: { text: string }) {
@@ -130,12 +132,8 @@ function NativeSubagentCard({
 				Boolean(value) && value !== identity && all.indexOf(value) === index,
 		)
 		.join(" · ");
-	const status = t(
-		`conversation.nativeSubagent.status.${nativeSubagentDisplayStatus(
-			annotation,
-			supervision?.parentStreaming,
-		)}`,
-	);
+	const displayStatus = nativeSubagentDisplayStatus(annotation, supervision?.parentStreaming);
+	const status = t(`conversation.nativeSubagent.status.${displayStatus}`);
 	const controls = nativeSubagentControlAvailability(annotation, supervision ?? {});
 	const canControl = controls.canSteer || controls.canInterrupt;
 
@@ -189,7 +187,11 @@ function NativeSubagentCard({
 			title={annotation.agentThreadId ?? undefined}
 		>
 			<div className="flex min-w-0 flex-wrap items-center gap-2">
-				<Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+				<AgentMascot
+					provider={supervision?.providerId}
+					model={annotation.model}
+					state={displayStatus === "running" ? "working" : "idle"}
+				/>
 				<div className="min-w-0 flex-1">
 					<div className="flex min-w-0 items-center gap-1.5">
 						<span className="shrink-0 font-medium text-foreground/85">
@@ -365,7 +367,10 @@ function NativeSubagentTree({
 							aria-level={1}
 							className="flex min-h-8 items-center gap-2 rounded-md bg-muted/20 px-2 text-[12px]"
 						>
-							<Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+							<AgentMascot
+								provider={supervision?.providerId}
+								state={supervision?.parentStreaming ? "working" : "idle"}
+							/>
 							<span className="font-medium text-foreground/85">
 								{t("conversation.nativeSubagent.principalAgent")}
 							</span>
@@ -466,6 +471,11 @@ export function AssistantMessage({
 		[isReview, rawContent, streaming],
 	);
 	const modelLabel = resolveModelLabel(modelId, providers);
+	const waitingForInput = (annotations ?? []).some(
+		(annotation) =>
+			(annotation.type === "approval" || annotation.type === "user-input") &&
+			annotation.streaming,
+	);
 	const provider = providers?.find((candidate) => candidate.id === providerId);
 	const nativeSubagentSupervision = useMemo<NativeSubagentSupervision>(
 		() => ({
@@ -475,8 +485,9 @@ export function AssistantMessage({
 				provider?.capabilities.supportsNativeSubagentSteering ?? false,
 			supportsInterrupt:
 				provider?.capabilities.supportsNativeSubagentInterrupt ?? false,
+			providerId,
 		}),
-		[provider, sessionId, streaming],
+		[provider, providerId, sessionId, streaming],
 	);
 	const showPlanCard = Boolean(isPlanContext || plan?.isPlanLike);
 	const displayedPlan = plan ?? {
@@ -558,8 +569,12 @@ export function AssistantMessage({
 				>
 				{modelLabel ? (
 					<div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-						<Bot className="size-3.5 shrink-0" aria-hidden />
-						<span>{t("conversation.modelLabel")}:</span>
+						<AgentMascot
+							provider={providerId}
+							model={modelId}
+							state={waitingForInput ? "waiting" : streaming ? "working" : "idle"}
+						/>
+						<span className="sr-only">{t("conversation.modelLabel")}:</span>
 						<span className="font-medium text-foreground/80">{modelLabel}</span>
 					</div>
 				) : null}
@@ -568,9 +583,7 @@ export function AssistantMessage({
 						annotations={activityAnnotations}
 						turnStreaming={streaming}
 						interrupted={status?.type === "incomplete"}
-						waitingForInput={(annotations ?? []).some(annotation =>
-							(annotation.type === "approval" || annotation.type === "user-input") && annotation.streaming,
-						)}
+						waitingForInput={waitingForInput}
 					/>
 				) : null}
 				{nativeSubagentAnnotations.length > 0 ? (

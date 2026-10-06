@@ -1,6 +1,6 @@
-/* Pixel mascots for projects — see project-mascots.ts. */
+/* Pixel sprites (project fauna, agent robots) — see @dcc/mascots. */
 
-/* `+` pixels: a softer tone of the project color. Lighter on the light theme
+/* `+` pixels: a softer tone of the sprite color. Lighter on the light theme
    (opacity over a pale tile), mixed toward white on the dark theme. */
 .dcc-mascot-accent {
 	opacity: 0.5;
@@ -11,7 +11,7 @@
 	fill: color-mix(in oklab, currentColor 50%, white);
 }
 
-/* While an agent runs in the project, the two frames alternate. */
+/* While the sprite is active (agent running), the two frames alternate. */
 .dcc-mascot-move {
 	visibility: hidden;
 }

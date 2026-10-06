@@ -430,3 +430,141 @@ export function resolveProjectColor(
 	if (!seed) return "slate";
 	return AUTO_COLOR_IDS[projectSeedHash(`color:${seed}`) % AUTO_COLOR_IDS.length]!;
 }
+
+// ---------------------------------------------------------------------------
+// Agent robots — the face of each provider in the conversation timeline.
+//
+// A pixel robot. It faces you while the turn is over or while it needs you;
+// once the agent works it turns sideways and walks right, toward the model
+// label it sits next to. Every provider shares the body; the antenna is what
+// tells them apart without relying on color alone. Same grammar as the fauna: `#`
+// paints the provider color, `+` a lighter tone (the near arm, antenna tips).
+// ---------------------------------------------------------------------------
+
+export const AGENT_MASCOT_KEYS = [
+	"claude",
+	"codex",
+	"gemini",
+	"cursor",
+	"droid",
+	"grok",
+	"generic",
+] as const;
+
+export type AgentMascotKey = (typeof AGENT_MASCOT_KEYS)[number];
+
+/** `idle`: faces you, still. `working`: walks right. `waiting`: faces you and waves. */
+export type AgentMascotState = "idle" | "working" | "waiting";
+
+/** Rows 0–1: the antenna, centered over the head. */
+const AGENT_ANTENNAS: Record<AgentMascotKey, readonly [string, string]> = {
+	// Claude: a three-spike crown, a nod to the burst.
+	claude: ["..+.+.+...", "...###...."],
+	// Codex: a round bulb.
+	codex: ["....++....", ".....#...."],
+	// Gemini: a four-point sparkle.
+	gemini: ["....+.....", "...+#+...."],
+	// Cursor: a T-shaped mast.
+	cursor: ["...+++....", "....#....."],
+	// Droid: two ears in a V.
+	droid: ["..+...+...", "...#.#...."],
+	// Grok: a slanted slash.
+	grok: [".....+....", "....#....."],
+	generic: ["....+.....", "....#....."],
+};
+
+/** Rows 2–4 seen from the side: one eye near the front, so it faces right. */
+const AGENT_HEAD = ["..######..", "..####.#..", "..######.."] as const;
+
+/** Rows 2–9 for each pose, before the antenna is laid on top. */
+const AGENT_POSES = {
+	front: [
+		"..######..",
+		"..#.##.#..",
+		"..######..",
+		"..+####+..",
+		"..+####+..",
+		"...####...",
+		"...#..#...",
+		"..##..##..",
+	],
+	frontHandUp: [
+		"..######..",
+		"..#.##.#.+",
+		"..######+.",
+		"..+####+..",
+		"..+####...",
+		"...####...",
+		"...#..#...",
+		"..##..##..",
+	],
+	frontHandHigh: [
+		"..######.+",
+		"..#.##.#.+",
+		"..######+.",
+		"..+####+..",
+		"..+####...",
+		"...####...",
+		"...#..#...",
+		"..##..##..",
+	],
+	stand: [
+		...AGENT_HEAD,
+		"...#+##...",
+		"...#+##...",
+		"...####...",
+		"...#..#...",
+		"...##.##..",
+	],
+	stride: [
+		...AGENT_HEAD,
+		"...##+#...",
+		"...####+..",
+		"...####...",
+		"..#....#..",
+		"..##...##.",
+	],
+} as const satisfies Record<string, readonly string[]>;
+
+function agentFrame(key: AgentMascotKey, pose: keyof typeof AGENT_POSES): MascotRows {
+	return [...AGENT_ANTENNAS[key], ...AGENT_POSES[pose]];
+}
+
+const AGENT_STATE_POSES: Record<
+	AgentMascotState,
+	{ rest: keyof typeof AGENT_POSES; move: keyof typeof AGENT_POSES }
+> = {
+	idle: { rest: "front", move: "front" },
+	working: { rest: "stand", move: "stride" },
+	waiting: { rest: "frontHandUp", move: "frontHandHigh" },
+};
+
+export function isAgentMascotKey(value: string | null | undefined): value is AgentMascotKey {
+	return typeof value === "string" && (AGENT_MASCOT_KEYS as readonly string[]).includes(value);
+}
+
+const agentPathCache = new Map<string, MascotPaths>();
+
+/** Two frames for the robot in `state`; `idle` repeats the same pose. */
+export function agentMascotPaths(key: AgentMascotKey, state: AgentMascotState): MascotPaths {
+	const cacheKey = `${key}:${state}`;
+	let paths = agentPathCache.get(cacheKey);
+	if (!paths) {
+		const poses = AGENT_STATE_POSES[state];
+		paths = {
+			rest: framePaths(agentFrame(key, poses.rest)),
+			move: framePaths(agentFrame(key, poses.move)),
+		};
+		agentPathCache.set(cacheKey, paths);
+	}
+	return paths;
+}
+
+/** Raw rows of both frames for every key in `state` — for tests on the grid. */
+export function agentMascotRows(state: AgentMascotState): MascotRows[] {
+	const poses = AGENT_STATE_POSES[state];
+	return AGENT_MASCOT_KEYS.flatMap((key) => [
+		agentFrame(key, poses.rest),
+		agentFrame(key, poses.move),
+	]);
+}
