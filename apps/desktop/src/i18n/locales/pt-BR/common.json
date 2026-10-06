@@ -2130,7 +2130,7 @@
       },
       "keywords": {
         "general": "versão atualização app shell",
-        "appearance": "tema claro escuro idioma linguagem português inglês densidade compacta confortável",
+        "appearance": "tema claro escuro sistema automático idioma linguagem português inglês densidade compacta confortável",
         "shortcuts": "teclado comandos atalhos",
         "model": "agentes modelos uso limite conta runtime codex claude cursor grok gemini",
         "decisionProvider": "decision provider Jev TypeSafe classificador filtro de memória roteamento validador",
@@ -2222,7 +2222,8 @@
     },
     "appearance": {
       "theme": "Tema",
-      "themeHint": "Escolha o tema claro ou escuro para toda a interface.",
+      "themeHint": "Escolha claro, escuro ou siga a aparência do sistema.",
+      "system": "Sistema",
       "light": "Claro",
       "dark": "Escuro",
       "density": "Densidade da interface",

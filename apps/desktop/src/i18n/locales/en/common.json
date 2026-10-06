@@ -2130,7 +2130,7 @@
       },
       "keywords": {
         "general": "version update app shell",
-        "appearance": "theme light dark language portuguese english density compact comfortable",
+        "appearance": "theme light dark system auto language portuguese english density compact comfortable",
         "shortcuts": "keyboard commands shortcuts",
         "model": "agents models usage limits account runtime codex claude cursor grok gemini",
         "decisionProvider": "decision provider Jev TypeSafe classifier memory filter routing validator",
@@ -2222,7 +2222,8 @@
     },
     "appearance": {
       "theme": "Theme",
-      "themeHint": "Choose a light or dark theme for the entire interface.",
+      "themeHint": "Choose light, dark, or follow your system appearance.",
+      "system": "System",
       "light": "Light",
       "dark": "Dark",
       "density": "Interface density",

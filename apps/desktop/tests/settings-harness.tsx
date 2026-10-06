@@ -63,7 +63,7 @@ const client = new QueryClient({
 });
 function Fixture() {
 	const [open, setOpen] = useState(false);
-	const { theme, setTheme, density, setDensity } = useAppearance();
+	const { themePreference, setTheme, density, setDensity } = useAppearance();
 	return (
 		<main className="min-h-screen bg-background p-12 text-foreground">
 			<button onClick={() => setOpen(true)}>Abrir configurações</button>
@@ -73,7 +73,7 @@ function Fixture() {
 				onOpenShortcuts={() => {
 					win.settingsShortcuts = (win.settingsShortcuts ?? 0) + 1;
 				}}
-				theme={theme}
+				theme={themePreference}
 				onThemeChange={setTheme}
 				density={density}
 				onDensityChange={setDensity}

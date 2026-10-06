@@ -12,7 +12,10 @@ import {
 export const DCC_THEME_STORAGE_KEY = "dcc-theme";
 export const DCC_DENSITY_STORAGE_KEY = "dcc-density";
 
+/** Resolved theme actually painted on screen. */
 export type DccTheme = "dark" | "light";
+/** What the user picked; "system" follows the OS appearance live. */
+export type DccThemePreference = DccTheme | "system";
 export type DccDensity = "comfortable" | "compact";
 
 /** PWA/tab chrome tint — matches approximate shell `--background`. */
@@ -24,30 +27,45 @@ export const DCC_THEME_COLOR_META: Record<DccTheme, string> = {
 type ThemeProviderProps = {
 	children: ReactNode;
 	/** Applied when nothing valid is stored yet. */
-	defaultTheme?: DccTheme;
+	defaultTheme?: DccThemePreference;
 };
 
-function readStoredTheme(fallback?: DccTheme): DccTheme | null {
+const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
+
+export function isDccThemePreference(
+	value: unknown,
+): value is DccThemePreference {
+	return value === "light" || value === "dark" || value === "system";
+}
+
+function readStoredThemePreference(
+	fallback: DccThemePreference = "system",
+): DccThemePreference {
 	if (typeof window === "undefined") {
-		return fallback ?? null;
+		return fallback;
 	}
 
-	const stored = window.localStorage.getItem(DCC_THEME_STORAGE_KEY);
-	if (stored === "light" || stored === "dark") {
-		return stored;
+	try {
+		const stored = window.localStorage.getItem(DCC_THEME_STORAGE_KEY);
+		return isDccThemePreference(stored) ? stored : fallback;
+	} catch {
+		return fallback;
 	}
-
-	return fallback ?? null;
 }
 
 function getSystemTheme(): DccTheme {
-	if (typeof window === "undefined") {
+	if (typeof window === "undefined" || !window.matchMedia) {
 		return "dark";
 	}
 
-	return window.matchMedia("(prefers-color-scheme: dark)").matches
-		? "dark"
-		: "light";
+	return window.matchMedia(SYSTEM_DARK_QUERY).matches ? "dark" : "light";
+}
+
+export function resolveDccTheme(
+	preference: DccThemePreference,
+	systemTheme: DccTheme,
+): DccTheme {
+	return preference === "system" ? systemTheme : preference;
 }
 
 function readStoredDensity(): DccDensity {
@@ -82,8 +100,11 @@ export function applyDccDensity(density: DccDensity) {
 }
 
 type AppearanceContextValue = {
+	/** Resolved theme — use for rendering (diff colors, toasts, …). */
 	theme: DccTheme;
-	setTheme: (theme: DccTheme) => void;
+	/** Stored choice, including "system". */
+	themePreference: DccThemePreference;
+	setTheme: (preference: DccThemePreference) => void;
 	density: DccDensity;
 	setDensity: (density: DccDensity) => void;
 };
@@ -102,26 +123,43 @@ export function ThemeProvider({
 	children,
 	defaultTheme,
 }: ThemeProviderProps) {
-	const [theme, setThemeState] = useState<DccTheme>(() => {
-		const initial =
-			readStoredTheme(defaultTheme) ?? getSystemTheme();
-		applyDccThemeClass(initial);
-		return initial;
-	});
+	const [themePreference, setThemePreferenceState] =
+		useState<DccThemePreference>(() => {
+			const initial = readStoredThemePreference(defaultTheme);
+			applyDccThemeClass(resolveDccTheme(initial, getSystemTheme()));
+			return initial;
+		});
+	const [systemTheme, setSystemTheme] = useState<DccTheme>(getSystemTheme);
+	const theme = resolveDccTheme(themePreference, systemTheme);
 	const [density, setDensityState] = useState<DccDensity>(() => {
 		const initial = readStoredDensity();
 		applyDccDensity(initial);
 		return initial;
 	});
 
-	const setTheme = useCallback((next: DccTheme) => {
-		setThemeState(next);
+	const setTheme = useCallback((next: DccThemePreference) => {
+		setThemePreferenceState(next);
 		try {
 			window.localStorage.setItem(DCC_THEME_STORAGE_KEY, next);
 		} catch {
 			/* localStorage unavailable */
 		}
-		applyDccThemeClass(next);
+	}, []);
+
+	useEffect(() => {
+		applyDccThemeClass(theme);
+	}, [theme]);
+
+	// Follow OS appearance changes while the app is open.
+	useEffect(() => {
+		if (typeof window === "undefined" || !window.matchMedia) {
+			return;
+		}
+		const query = window.matchMedia(SYSTEM_DARK_QUERY);
+		const sync = () => setSystemTheme(query.matches ? "dark" : "light");
+		sync();
+		query.addEventListener("change", sync);
+		return () => query.removeEventListener("change", sync);
 	}, []);
 
 	const setDensity = useCallback((next: DccDensity) => {
@@ -137,9 +175,8 @@ export function ThemeProvider({
 	// The quick composer and main workbench share preferences, not React state.
 	useEffect(() => {
 		const syncAppearance = (event: StorageEvent) => {
-			if (event.key === DCC_THEME_STORAGE_KEY && (event.newValue === "dark" || event.newValue === "light")) {
-				setThemeState(event.newValue);
-				applyDccThemeClass(event.newValue);
+			if (event.key === DCC_THEME_STORAGE_KEY && isDccThemePreference(event.newValue)) {
+				setThemePreferenceState(event.newValue);
 			}
 			if (event.key === DCC_DENSITY_STORAGE_KEY && (event.newValue === "comfortable" || event.newValue === "compact")) {
 				setDensityState(event.newValue);
@@ -158,16 +195,21 @@ export function ThemeProvider({
 			return;
 		}
 
+		// `null` hands the window back to the OS; forcing the resolved theme
+		// would pin the webview's prefers-color-scheme and stop "system" from
+		// tracking later OS changes.
 		void import("@tauri-apps/api/app")
-			.then(({ setTheme }) => setTheme(theme))
+			.then(({ setTheme }) =>
+				setTheme(themePreference === "system" ? null : themePreference),
+			)
 			.catch(() => {
 				/* native theme API unavailable */
 			});
-	}, [theme]);
+	}, [themePreference]);
 
 	const value = useMemo(
-		() => ({ theme, setTheme, density, setDensity }),
-		[density, setDensity, setTheme, theme],
+		() => ({ theme, themePreference, setTheme, density, setDensity }),
+		[density, setDensity, setTheme, theme, themePreference],
 	);
 
 	return (

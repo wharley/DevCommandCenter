@@ -42,7 +42,10 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { DccDensity, DccTheme } from "@/components/theme-provider";
+import type {
+	DccDensity,
+	DccThemePreference,
+} from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
 import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
@@ -138,8 +141,8 @@ type SettingsDialogProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onOpenShortcuts: () => void;
-	theme: DccTheme;
-	onThemeChange: (theme: DccTheme) => void;
+	theme: DccThemePreference;
+	onThemeChange: (theme: DccThemePreference) => void;
 	density: DccDensity;
 	onDensityChange: (density: DccDensity) => void;
 	providerCatalog: ProviderCatalog | null;

@@ -237,7 +237,7 @@
 }
 .dcc-settings-theme-options {
 	display: grid;
-	grid-template-columns: 1fr 1fr;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 14px;
 	margin-top: 18px;
 }
@@ -281,6 +281,7 @@
 	background: var(--dcc-accent-calm);
 }
 .dcc-settings-theme-preview {
+	position: relative;
 	display: flex;
 	height: 93px;
 	overflow: hidden;
@@ -350,6 +351,15 @@
 .dcc-settings-theme-preview[data-theme="dark"] .dcc-settings-preview-conversation > span {
 	background: #222623;
 	border-color: #363d38;
+}
+/* "System": light preview with the dark one laid over its lower-right half. */
+.dcc-settings-theme-preview-half {
+	position: absolute;
+	inset: 0;
+	height: auto;
+	border: 0;
+	border-radius: 0;
+	clip-path: polygon(100% 0, 100% 100%, 0 100%);
 }
 .dcc-settings-dialog button:focus-visible,
 .dcc-settings-mobile-nav select:focus-visible {

@@ -9,7 +9,10 @@
         try {
           var key = "dcc-theme";
           var stored = localStorage.getItem(key);
-          var dark = stored !== "light";
+          var dark =
+            stored === "dark" ||
+            (stored !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
           var root = document.documentElement;
           root.classList.toggle("dark", dark);
           root.dataset.theme = dark ? "dark" : "light";

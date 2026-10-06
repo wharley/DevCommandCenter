@@ -74,6 +74,18 @@ try {
 	);
 	assert.equal(await button("Claro").getAttribute("aria-pressed"), "true");
 	await page.screenshot({ animations: "disabled", path: `${output}/appearance-light.png` });
+	await button("Sistema").click();
+	assert.equal(
+		await page.evaluate(() => localStorage.getItem("dcc-theme")),
+		"system",
+	);
+	// "Sistema" must track OS appearance changes live, not just at startup.
+	await page.emulateMedia({ colorScheme: "dark" });
+	await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+	await page.emulateMedia({ colorScheme: "light" });
+	await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+	await page.screenshot({ animations: "disabled", path: `${output}/appearance-system.png` });
+	await button("Claro").click();
 	await page.getByRole("radio", { name: "Compacta", exact: true }).click();
 	assert.equal(
 		await page.evaluate(() => localStorage.getItem("dcc-density")),

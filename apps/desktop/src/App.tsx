@@ -1123,7 +1123,8 @@ export default function App() {
 	const [workspaceComposerPrefill, setWorkspaceComposerPrefill] =
 		useState<WorkspaceComposerPrefillRequest | null>(null);
 	const workspaceComposerPrefillSequenceRef = useRef(0);
-	const { theme, setTheme, density, setDensity } = useAppearance();
+	const { theme, themePreference, setTheme, density, setDensity } =
+		useAppearance();
 	const {
 		update: appUpdateInfo,
 		currentVersion: appCurrentVersion,
@@ -5716,7 +5717,7 @@ export default function App() {
 				open={isSettingsOpen}
 				onOpenChange={setIsSettingsOpen}
 				onOpenShortcuts={() => setIsShortcutSheetOpen(true)}
-				theme={theme}
+				theme={themePreference}
 				onThemeChange={setTheme}
 				density={density}
 				onDensityChange={setDensity}
