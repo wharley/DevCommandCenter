@@ -44,7 +44,7 @@ pub struct PrSnapshot {
     pub merge_state_status: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceBlockerKind {
     /// Local merge conflicts in the task's checkout.
@@ -64,6 +64,9 @@ pub struct WorkspaceBlocker {
     pub kind: WorkspaceBlockerKind,
     /// PR number for PR blockers; count for delegated reviews.
     pub count: Option<u64>,
+    /// When this app first saw the blocker; null when it was already there at
+    /// startup, so its real start is unknown.
+    pub since: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -106,6 +109,41 @@ pub fn classify_git_blockers(
         return Some((WorkspaceBlockerKind::ChecksFailing, number));
     }
     None
+}
+
+/// When each blocker first showed up, so "Needs you" can order tasks by when
+/// they came back to the person.
+#[derive(Default)]
+struct BlockerFirstSeen {
+    primed: bool,
+    seen: HashMap<(String, WorkspaceBlockerKind), Option<String>>,
+}
+
+impl BlockerFirstSeen {
+    /// Stamps the blockers found in this pass and forgets the ones that went
+    /// away, so a blocker that comes back is stamped again. Blockers present
+    /// on the first pass get no time: stamping them "now" would put blockers
+    /// older than the app above fresh results.
+    fn stamp(&mut self, blockers: &mut [WorkspaceBlocker], now: &str) {
+        let mut next = HashMap::new();
+        for blocker in blockers.iter_mut() {
+            let key = (blocker.workspace_id.clone(), blocker.kind);
+            let since = match self.seen.get(&key) {
+                Some(since) => since.clone(),
+                None if self.primed => Some(now.to_string()),
+                None => None,
+            };
+            blocker.since = since.clone();
+            next.insert(key, since);
+        }
+        self.seen = next;
+        self.primed = true;
+    }
+}
+
+fn blocker_first_seen() -> &'static Mutex<BlockerFirstSeen> {
+    static FIRST_SEEN: OnceLock<Mutex<BlockerFirstSeen>> = OnceLock::new();
+    FIRST_SEEN.get_or_init(|| Mutex::new(BlockerFirstSeen::default()))
 }
 
 fn pr_cache() -> &'static Mutex<HashMap<String, (Instant, PrSnapshot)>> {
@@ -178,6 +216,7 @@ pub async fn workspace_attention_blockers_with_state(
                 workspace_id: workspace.id.0.clone(),
                 kind: WorkspaceBlockerKind::DelegatedEditsReview,
                 count: Some(*count),
+                since: None,
             });
         }
         let root = workspace
@@ -209,8 +248,12 @@ pub async fn workspace_attention_blockers_with_state(
                 workspace_id: workspace.id.0.clone(),
                 kind,
                 count,
+                since: None,
             });
         }
+    }
+    if let Ok(mut first_seen) = blocker_first_seen().lock() {
+        first_seen.stamp(&mut blockers, &chrono::Utc::now().to_rfc3339());
     }
     Ok(WorkspaceAttentionBlockersOutput { blockers })
 }
@@ -234,6 +277,47 @@ mod tests {
             mergeable: mergeable.map(str::to_string),
             merge_state_status: merge_state.map(str::to_string),
         }
+    }
+
+    fn blocker(workspace: &str, kind: WorkspaceBlockerKind) -> WorkspaceBlocker {
+        WorkspaceBlocker {
+            workspace_id: workspace.to_string(),
+            kind,
+            count: None,
+            since: None,
+        }
+    }
+
+    #[test]
+    fn first_seen_leaves_startup_blockers_unstamped_and_stamps_new_ones() {
+        let mut first_seen = BlockerFirstSeen::default();
+        let mut startup = vec![blocker("a", WorkspaceBlockerKind::Conflicts)];
+        first_seen.stamp(&mut startup, "2026-10-06T09:00:00Z");
+        assert_eq!(startup[0].since, None);
+
+        let mut later = vec![
+            blocker("a", WorkspaceBlockerKind::Conflicts),
+            blocker("b", WorkspaceBlockerKind::ChecksFailing),
+        ];
+        first_seen.stamp(&mut later, "2026-10-06T09:01:00Z");
+        assert_eq!(later[0].since, None);
+        assert_eq!(later[1].since.as_deref(), Some("2026-10-06T09:01:00Z"));
+
+        let mut still = vec![blocker("b", WorkspaceBlockerKind::ChecksFailing)];
+        first_seen.stamp(&mut still, "2026-10-06T09:02:00Z");
+        assert_eq!(still[0].since.as_deref(), Some("2026-10-06T09:01:00Z"));
+    }
+
+    #[test]
+    fn first_seen_stamps_a_blocker_again_when_it_comes_back() {
+        let mut first_seen = BlockerFirstSeen::default();
+        first_seen.stamp(&mut [], "2026-10-06T09:00:00Z");
+        let mut checks = vec![blocker("a", WorkspaceBlockerKind::ChecksFailing)];
+        first_seen.stamp(&mut checks, "2026-10-06T09:01:00Z");
+        first_seen.stamp(&mut [], "2026-10-06T09:02:00Z");
+        let mut again = vec![blocker("a", WorkspaceBlockerKind::ChecksFailing)];
+        first_seen.stamp(&mut again, "2026-10-06T09:03:00Z");
+        assert_eq!(again[0].since.as_deref(), Some("2026-10-06T09:03:00Z"));
     }
 
     #[test]

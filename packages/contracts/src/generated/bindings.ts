@@ -2615,6 +2615,11 @@ export type WorkspaceBlocker = {
 	kind: WorkspaceBlockerKind,
 	// PR number for PR blockers; count for delegated reviews.
 	count: number | null,
+	/**
+	 *  When this app first saw the blocker; null when it was already there at
+	 *  startup, so its real start is unknown.
+	 */
+	since: string | null,
 };
 
 export type WorkspaceBlockerKind =
@@ -3408,6 +3413,11 @@ export type WorkspaceSessionSummary = {
 	 *  user; a pending permission wins over a pending question.
 	 */
 	lastTurnAwaitingUser: string | null,
+	/**
+	 *  When the latest turn started waiting on the user: the oldest request
+	 *  still open. Orders the sidebar's "Needs you" by when tasks came back.
+	 */
+	lastTurnAwaitingSince: string | null,
 };
 
 export type WorkspaceSetupHint = {

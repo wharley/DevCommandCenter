@@ -2161,6 +2161,7 @@ export default function App() {
 						lastTurnStartedAt: null,
 						lastTurnCompletedAt: null,
 						lastTurnAwaitingUser: null,
+						lastTurnAwaitingSince: null,
 					};
 					return [
 						nextSummary,
@@ -2392,6 +2393,7 @@ export default function App() {
 						lastTurnStartedAt: null,
 						lastTurnCompletedAt: null,
 						lastTurnAwaitingUser: null,
+						lastTurnAwaitingSince: null,
 					},
 					...current.filter((summary) => summary.session.id !== started.session.id),
 				]);
@@ -2605,6 +2607,7 @@ export default function App() {
 						lastTurnStartedAt: null,
 						lastTurnCompletedAt: null,
 						lastTurnAwaitingUser: null,
+						lastTurnAwaitingSince: null,
 					},
 					...current.filter(
 						(summary) => summary.session.id !== started.session.id,
@@ -2664,6 +2667,7 @@ export default function App() {
 												? null
 												: result.turn.updatedAt,
 										lastTurnAwaitingUser: null,
+										lastTurnAwaitingSince: null,
 									}
 								: summary,
 						),
@@ -3001,6 +3005,7 @@ export default function App() {
 							lastTurnStartedAt: null,
 							lastTurnCompletedAt: null,
 							lastTurnAwaitingUser: null,
+							lastTurnAwaitingSince: null,
 						};
 						return [
 							nextSummary,
@@ -3060,6 +3065,7 @@ export default function App() {
 												? null
 												: result.turn.updatedAt,
 										lastTurnAwaitingUser: null,
+										lastTurnAwaitingSince: null,
 									}
 								: summary,
 						),
@@ -3212,6 +3218,7 @@ export default function App() {
 							lastTurnStartedAt: null,
 							lastTurnCompletedAt: null,
 							lastTurnAwaitingUser: null,
+							lastTurnAwaitingSince: null,
 						};
 						return [
 							nextSummary,
@@ -3437,6 +3444,7 @@ export default function App() {
 											? null
 											: result.turn.updatedAt,
 									lastTurnAwaitingUser: null,
+									lastTurnAwaitingSince: null,
 								}
 							: summary,
 					),
@@ -3537,6 +3545,7 @@ export default function App() {
 														? null
 														: reanchorResult.turn.updatedAt,
 												lastTurnAwaitingUser: null,
+												lastTurnAwaitingSince: null,
 											}
 										: summary,
 								),
@@ -3975,6 +3984,7 @@ export default function App() {
 							lastTurnStartedAt: null,
 							lastTurnCompletedAt: null,
 							lastTurnAwaitingUser: null,
+							lastTurnAwaitingSince: null,
 						},
 						...current.filter((summary) => summary.session.id !== forkedSessionId),
 					],

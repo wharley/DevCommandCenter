@@ -5354,6 +5354,8 @@ impl SqliteSessionRepo {
         });
 
         let last_turn_awaiting_user = dcc_core::domain::session::last_turn_awaiting_user(&events);
+        let last_turn_awaiting_since =
+            dcc_core::domain::session::last_turn_awaiting_since(&events);
 
         Ok(WorkspaceSessionSummary {
             session,
@@ -5364,6 +5366,7 @@ impl SqliteSessionRepo {
             last_turn_started_at,
             last_turn_completed_at,
             last_turn_awaiting_user,
+            last_turn_awaiting_since,
         })
     }
 
@@ -10002,6 +10005,10 @@ mod tests {
         assert_eq!(
             summary[0].last_turn_awaiting_user.as_deref(),
             Some("permission")
+        );
+        assert_eq!(
+            summary[0].last_turn_awaiting_since.as_deref(),
+            Some("2026-01-01T00:01:03Z")
         );
     }
 

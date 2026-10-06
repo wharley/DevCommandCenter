@@ -20,6 +20,7 @@ type SummaryOverrides = {
 	lastTurnStartedAt?: WorkspaceSessionSummary["lastTurnStartedAt"];
 	lastTurnCompletedAt?: WorkspaceSessionSummary["lastTurnCompletedAt"];
 	lastTurnAwaitingUser?: WorkspaceSessionSummary["lastTurnAwaitingUser"];
+	lastTurnAwaitingSince?: WorkspaceSessionSummary["lastTurnAwaitingSince"];
 };
 
 function makeSummary(
@@ -64,6 +65,7 @@ function makeSummary(
 		lastTurnStartedAt: overrides.lastTurnStartedAt ?? null,
 		lastTurnCompletedAt: overrides.lastTurnCompletedAt ?? null,
 		lastTurnAwaitingUser: overrides.lastTurnAwaitingUser ?? null,
+		lastTurnAwaitingSince: overrides.lastTurnAwaitingSince ?? null,
 	};
 }
 
@@ -98,6 +100,7 @@ describe("deriveAgentStateFromSessions", () => {
 			lastTurnState: "running",
 			lastTurnStartedAt: "2026-09-30T09:00:00.000Z",
 			lastTurnAwaitingUser: "permission",
+			lastTurnAwaitingSince: "2026-09-30T09:40:00.000Z",
 		});
 
 		// Another session still working must not hide the one that needs the user.
@@ -106,6 +109,7 @@ describe("deriveAgentStateFromSessions", () => {
 			startedAt: "2026-09-30T09:00:00.000Z",
 			completedAt: null,
 			waitingFor: "permission",
+			waitingSince: "2026-09-30T09:40:00.000Z",
 		});
 		expect(
 			deriveAgentActivityFromSessions([
@@ -309,7 +313,7 @@ describe("attentionWorkspaceItems", () => {
 		completedAt: string,
 	): WorkspaceAgentActivity => ({ state, startedAt: null, completedAt });
 
-	it("lists what needs the person, most urgent first, and leaves running agents out", () => {
+	it("lists what needs the person, newest return first, and leaves running agents out", () => {
 		const result = attentionWorkspaceItems(
 			[
 				workspace("running"),
@@ -331,10 +335,12 @@ describe("attentionWorkspaceItems", () => {
 					startedAt: "2026-10-05T09:00:00.000Z",
 					completedAt: null,
 				},
+				// A long turn that asked for permission just now came back last.
 				approval: {
 					state: "waiting",
 					waitingFor: "permission",
 					startedAt: "2026-10-05T08:00:00.000Z",
+					waitingSince: "2026-10-05T11:45:00.000Z",
 					completedAt: null,
 				},
 				interrupted: finished("aborted", "2026-10-05T10:30:00.000Z"),
@@ -350,10 +356,10 @@ describe("attentionWorkspaceItems", () => {
 
 		expect(result.map((item) => [item.workspace.id, item.reason])).toEqual([
 			["approval", "permission"],
+			["done-unread", "completed"],
+			["interrupted", "aborted"],
 			["question", "input"],
 			["setup", "setup"],
-			["interrupted", "aborted"],
-			["done-unread", "completed"],
 		]);
 	});
 
@@ -369,30 +375,62 @@ describe("attentionWorkspaceItems", () => {
 });
 
 describe("attentionWorkspaceItems with backend blockers", () => {
-	const workspace = (id: string): WorkspaceSummary => ({ id, name: id, branch: "main", status: "ready" });
+	const workspace = (id: string, updatedAt?: string): WorkspaceSummary => ({
+		id,
+		name: id,
+		branch: "main",
+		status: "ready",
+		updatedAt,
+	});
 
-	it("surfaces git and review blockers, most urgent first, but not over a running agent", () => {
+	it("surfaces git and review blockers by when they appeared, but not over a running agent", () => {
 		const result = attentionWorkspaceItems(
-			[workspace("checks"), workspace("conflict"), workspace("busy"), workspace("review")],
+			[
+				workspace("checks"),
+				workspace("conflict", "2026-10-06T09:00:00.000Z"),
+				workspace("busy"),
+				workspace("review"),
+			],
 			{ busy: { state: "active", startedAt: null, completedAt: null } },
 			() => false,
 			new Map([
-				["checks", [{ workspaceId: "checks", kind: "checks_failing", count: 12 }]],
-				["conflict", [{ workspaceId: "conflict", kind: "conflicts", count: null }]],
-				["busy", [{ workspaceId: "busy", kind: "conflicts", count: null }]],
+				[
+					"checks",
+					[
+						{
+							workspaceId: "checks",
+							kind: "checks_failing",
+							count: 12,
+							since: "2026-10-06T10:00:00.000Z",
+						},
+					],
+				],
+				// Already there at startup: falls back to the task's last update.
+				["conflict", [{ workspaceId: "conflict", kind: "conflicts", count: null, since: null }]],
+				["busy", [{ workspaceId: "busy", kind: "conflicts", count: null, since: null }]],
 				[
 					"review",
 					[
-						{ workspaceId: "review", kind: "delegated_edits_review", count: 2 },
-						{ workspaceId: "review", kind: "pr_conflicts", count: 7 },
+						{
+							workspaceId: "review",
+							kind: "delegated_edits_review",
+							count: 2,
+							since: "2026-10-06T08:00:00.000Z",
+						},
+						{
+							workspaceId: "review",
+							kind: "pr_conflicts",
+							count: 7,
+							since: "2026-10-06T11:00:00.000Z",
+						},
 					],
 				],
 			]),
 		);
 		expect(result.map((item) => [item.workspace.id, item.reason, item.count])).toEqual([
-			["conflict", "conflicts", null],
 			["review", "prConflicts", 7],
 			["checks", "checksFailing", 12],
+			["conflict", "conflicts", null],
 		]);
 	});
 
@@ -401,7 +439,7 @@ describe("attentionWorkspaceItems with backend blockers", () => {
 			[workspace("w")],
 			{ w: { state: "waiting", waitingFor: "permission", startedAt: null, completedAt: null } },
 			() => false,
-			new Map([["w", [{ workspaceId: "w", kind: "conflicts", count: null }]]]),
+			new Map([["w", [{ workspaceId: "w", kind: "conflicts", count: null, since: null }]]]),
 		);
 		expect(result.map((item) => item.reason)).toEqual(["permission"]);
 	});
@@ -424,7 +462,7 @@ describe("attentionWorkspaceItems with snoozes", () => {
 				later: { state: "waiting", waitingFor: "input", startedAt: null, completedAt: null },
 			},
 			() => false,
-			new Map([["later", [{ workspaceId: "later", kind: "conflicts", count: null }]]]),
+			new Map([["later", [{ workspaceId: "later", kind: "conflicts", count: null, since: null }]]]),
 			now,
 		);
 		expect(result.map((item) => [item.workspace.id, item.reason])).toEqual([["woken", "woke"]]);

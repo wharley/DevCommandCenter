@@ -15,6 +15,8 @@ export type WorkspaceAgentActivity = {
 	startedAt: string | null;
 	completedAt: string | null;
 	waitingFor?: AgentWaitingReason;
+	/** When the open turn started waiting on the user (oldest open request). */
+	waitingSince?: string | null;
 	/** See `lastInteractionAtFromSessions`; drives the rail's task order. */
 	lastInteractionAt?: string | null;
 };
@@ -70,7 +72,7 @@ export function runningWorkspaceActivities(
 		);
 }
 
-/** Why a task shows up under "Precisa de você", most urgent first. */
+/** Why a task shows up under "Precisa de você". */
 export type AttentionReason =
 	| "permission"
 	| "input"
@@ -83,6 +85,7 @@ export type AttentionReason =
 	| "aborted"
 	| "completed";
 
+/** Picks the one reason a task shows, when several apply; not the list order. */
 const ATTENTION_ORDER: Record<AttentionReason, number> = {
 	permission: 0,
 	input: 1,
@@ -109,12 +112,12 @@ export type AttentionWorkspaceItem = {
 	reason: AttentionReason;
 	/** PR number for PR blockers, count for delegated reviews. */
 	count?: number | null;
+	/** When the task came back to the person for this reason; orders the list. */
+	returnedAt: string | null;
 };
 
-function attentionAtMs(item: AttentionWorkspaceItem): number {
-	const at =
-		item.activity?.completedAt ?? item.activity?.startedAt ?? item.workspace.updatedAt ?? null;
-	const parsed = at ? Date.parse(at) : Number.NaN;
+function returnedAtMs(item: AttentionWorkspaceItem): number {
+	const parsed = item.returnedAt ? Date.parse(item.returnedAt) : Number.NaN;
 	return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -123,6 +126,10 @@ function attentionAtMs(item: AttentionWorkspaceItem): number {
  * workspace whose setup needs a hand, or a finished/interrupted turn whose
  * result has not been opened yet. Running agents are deliberately absent —
  * they live in their project group until they come back to the person.
+ *
+ * Newest return first, whatever the reason: the task that just came back is
+ * the one on top. Returns are stamped by the backend (open request time,
+ * blocker first seen), so the order holds across mounts and polls.
  */
 export function attentionWorkspaceItems(
 	workspaces: WorkspaceSummary[],
@@ -147,6 +154,7 @@ export function attentionWorkspaceItems(
 						workspace,
 						activity,
 						reason: activity.waitingFor === "permission" ? "permission" : "input",
+						returnedAt: activity.waitingSince ?? activity.startedAt,
 					},
 				];
 			}
@@ -166,27 +174,39 @@ export function attentionWorkspaceItems(
 						activity,
 						reason: BLOCKER_REASON[blocker.kind],
 						count: blocker.count ?? null,
+						// Blockers already there at startup have no stamp.
+						returnedAt: blocker.since ?? workspace.updatedAt ?? null,
 					},
 				];
 			}
 			if (hasWoken(workspace, now) && !isAgentTurnOpen(activity)) {
-				return [{ workspace, activity, reason: "woke" }];
+				return [
+					{ workspace, activity, reason: "woke", returnedAt: workspace.snoozedUntil ?? null },
+				];
 			}
 			if (workspace.status === "setup_pending" && !isAgentTurnOpen(activity)) {
-				return [{ workspace, activity, reason: "setup" }];
+				return [
+					{
+						workspace,
+						activity,
+						reason: "setup",
+						returnedAt: workspace.updatedAt ?? workspace.createdAt ?? null,
+					},
+				];
 			}
 			if (
 				(activity?.state === "aborted" || activity?.state === "completed") &&
 				isResultUnread(workspace.id, activity.completedAt)
 			) {
-				return [{ workspace, activity, reason: activity.state }];
+				return [
+					{ workspace, activity, reason: activity.state, returnedAt: activity.completedAt },
+				];
 			}
 			return [];
 		})
 		.sort(
 			(left, right) =>
-				ATTENTION_ORDER[left.reason] - ATTENTION_ORDER[right.reason] ||
-				attentionAtMs(right) - attentionAtMs(left) ||
+				returnedAtMs(right) - returnedAtMs(left) ||
 				left.workspace.id.localeCompare(right.workspace.id),
 		);
 }
@@ -213,7 +233,13 @@ export function deriveAgentActivityFromSessions(
 			running.session.updatedAt;
 		const reason = waitingReason(running);
 		return reason
-			? { state: "waiting", startedAt, completedAt: null, waitingFor: reason }
+			? {
+					state: "waiting",
+					startedAt,
+					completedAt: null,
+					waitingFor: reason,
+					waitingSince: running.lastTurnAwaitingSince ?? null,
+				}
 			: { state: "active", startedAt, completedAt: null };
 	}
 

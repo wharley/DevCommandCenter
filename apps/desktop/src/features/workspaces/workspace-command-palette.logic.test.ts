@@ -61,6 +61,7 @@ const recentSession = (
 		lastTurnStartedAt: null,
 		lastTurnCompletedAt: updatedAt,
 		lastTurnAwaitingUser: null,
+		lastTurnAwaitingSince: null,
 	} as WorkspaceSessionSummary);
 
 describe("unified command palette logic", () => {

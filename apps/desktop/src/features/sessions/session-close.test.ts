@@ -48,6 +48,7 @@ function makeSession(
 		lastTurnStartedAt: null,
 		lastTurnCompletedAt: null,
 		lastTurnAwaitingUser: null,
+		lastTurnAwaitingSince: null,
 	};
 }
 
