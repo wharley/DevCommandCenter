@@ -68,6 +68,25 @@ Limits of a pull request review:
   discards them, and edits to a draft are lost if you leave before submitting.
 - Nothing is published until you submit the review.
 
+## The Chronicler
+
+The Chronicler keeps a recap of what moved in your tasks, so you can pick up
+where you left off without opening each one.
+
+- A new recap starts the first time DCC is open after 4am and covers
+  everything since the previous recap ended. Monday's recap covers the weekend;
+  opening DCC again the same day keeps the same recap. It never reaches back
+  more than seven days.
+- Its page lists what blocks you now (the same reasons as "Needs you"), then
+  the tasks with finished or interrupted turns, the tasks completed and the
+  tasks created. Each row opens its task. Turns of the agents' own
+  conversations, like the Reviewer's, are not counted.
+- The recap is built by DCC from what it recorded. It runs no model and costs
+  nothing. Pull request activity is not included yet.
+- While a recap is unopened, the Chronicler shows a result ready in the
+  sidebar. Opening its page marks it as read. The recap window and the read
+  marker are kept in the app's local storage.
+
 ## What you can change
 
 Open the Reviewer from the Agents section of the sidebar and select Edit:
@@ -103,5 +122,6 @@ access mode selected in the composer.
 ```sh
 cargo test -p dcc-core agent --lib
 cargo test -p dcc-infra resident_agents --lib
+cargo test -p dcc-infra activity_recap --lib
 yarn workspace @dcc/desktop test src/features/agents
 ```

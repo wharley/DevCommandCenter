@@ -10,6 +10,7 @@ import {
 	agentsOverview,
 } from "@/lib/agents-api";
 import { agentSessionState, aggregateAgentState } from "./agent-activity";
+import { isRecapUnread, useDailyRecap } from "./daily-recap";
 import { isResultUnread, useSeenAgentResults } from "./agent-seen-results";
 import type { AgentActivityState } from "./agent-avatar";
 import { type PrReviewJob, usePrReviewJobs } from "./pr-review-jobs";
@@ -73,6 +74,7 @@ export function useAgentsQuery(scope: string): AgentsState {
 					offerPrompt: t("agents.presets.reviewerOffer"),
 				},
 				{ name: t("agents.presets.researcher") },
+				{ name: t("agents.presets.chronicler") },
 			),
 		staleTime: 30_000,
 		retry: false,
@@ -91,6 +93,7 @@ export function useAgentsQuery(scope: string): AgentsState {
 
 	const seen = useSeenAgentResults();
 	const prJobs = usePrReviewJobs();
+	const recapUnread = isRecapUnread(useDailyRecap());
 	return useMemo(() => {
 		const summaryBySessionId = new Map<string, WorkspaceSessionSummary>();
 		for (const summaries of summariesByWorkspace) {
@@ -115,6 +118,11 @@ export function useAgentsQuery(scope: string): AgentsState {
 					};
 				});
 			const prReviews = agent.preset === "reviewer" ? prJobs : NO_PR_REVIEWS;
+			// The chronicler has no sessions: its result is the recap.
+			const recap =
+				agent.preset === "chronicler" && recapUnread
+					? [{ state: "done" as const, unread: true }]
+					: [];
 			return {
 				...agent,
 				sessions,
@@ -125,9 +133,18 @@ export function useAgentsQuery(scope: string): AgentsState {
 						state: job.status === "running" ? ("working" as const) : ("done" as const),
 						unread: job.status === "done" && !job.seen,
 					})),
+					...recap,
 				]),
 			};
 		});
 		return { agents, agentBySessionId, isLoading: overview.isLoading };
-	}, [bindings, overview.data?.agents, overview.isLoading, prJobs, seen, summariesByWorkspace]);
+	}, [
+		bindings,
+		overview.data?.agents,
+		overview.isLoading,
+		prJobs,
+		recapUnread,
+		seen,
+		summariesByWorkspace,
+	]);
 }

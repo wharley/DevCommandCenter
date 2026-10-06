@@ -26,6 +26,7 @@ pub const AGENT_AVATAR_MIN_ARMS: u8 = 3;
 pub const AGENT_AVATAR_MAX_ARMS: u8 = 5;
 pub const REVIEWER_PRESET: &str = "reviewer";
 pub const RESEARCHER_PRESET: &str = "researcher";
+pub const CHRONICLER_PRESET: &str = "chronicler";
 
 const AGENT_TAG: &str = "dcc_agent_role";
 
@@ -149,6 +150,21 @@ Converging:\n\
 \n\
 Every answer ends with a short status: each hypothesis with its state, the current verdict, and what is still missing to decide.\n\
 Reply in the language the person writes in.";
+
+/// The chronicler's recap is built by DCC from what it recorded, without a
+/// model. The role is kept for when it writes a paragraph of its own.
+pub const CHRONICLER_ROLE: &str = "You write the person's recap of what moved in their tasks since the last one: what finished, what was interrupted, what is waiting for them, and where you would start today. You read only the facts DCC gives you; you do not open files, run commands or change anything. Keep it short, name each task, and put what blocks the person first.\n\
+Reply in the language the person writes in.";
+
+/// The parts of the built-in chronicler the person reads, in the app
+/// language. A blank name falls back to the English default. It has no first
+/// message and never offers itself: its recap appears on its own page.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ChroniclerPresetText {
+    #[serde(default)]
+    pub name: String,
+}
 
 /// The parts of the built-in researcher the person reads, in the app
 /// language. A blank name falls back to the English default. It has no first
@@ -332,6 +348,25 @@ impl ResidentAgentDraft {
         }
     }
 
+    /// The built-in chronicler, with its name in the person's language.
+    pub fn chronicler(text: &ChroniclerPresetText) -> Self {
+        Self {
+            name: ReviewerPresetText::or_default(&text.name, "Chronicler"),
+            role: CHRONICLER_ROLE.to_string(),
+            kickoff_prompt: String::new(),
+            offer_prompt: String::new(),
+            extra_instructions: String::new(),
+            provider_id: None,
+            model: None,
+            effort: None,
+            avatar: AgentAvatar {
+                color: "amber".to_string(),
+                arms: 3,
+                eyes: "round".to_string(),
+            },
+        }
+    }
+
     /// The built-in reviewer, with its texts in the person's language.
     pub fn reviewer(text: &ReviewerPresetText) -> Self {
         Self {
@@ -370,6 +405,11 @@ impl ResidentAgent {
             }
             Some(RESEARCHER_PRESET) => {
                 self.role = RESEARCHER_ROLE.to_string();
+                self.kickoff_prompt = String::new();
+                self.offer_prompt = String::new();
+            }
+            Some(CHRONICLER_PRESET) => {
+                self.role = CHRONICLER_ROLE.to_string();
                 self.kickoff_prompt = String::new();
                 self.offer_prompt = String::new();
             }
@@ -607,6 +647,38 @@ mod tests {
         let preset = stored.with_preset_text(Some(&text("Revisor")));
         assert_eq!(preset.role, RESEARCHER_ROLE);
         assert_eq!(preset.kickoff_prompt, "");
+        assert_eq!(preset.offer_prompt, "");
+    }
+
+    #[test]
+    fn chronicler_preset_owns_its_role_and_never_offers() {
+        let draft = ResidentAgentDraft::chronicler(&ChroniclerPresetText {
+            name: " Cronista ".to_string(),
+        })
+        .normalized()
+        .unwrap();
+        assert_eq!(draft.name, "Cronista");
+        assert_eq!(draft.role, CHRONICLER_ROLE);
+        assert_eq!(draft.kickoff_prompt, "");
+        assert_eq!(draft.offer_prompt, "");
+        assert_eq!(
+            ResidentAgentDraft::chronicler(&ChroniclerPresetText::default()).name,
+            "Chronicler"
+        );
+        assert_ne!(
+            draft.avatar,
+            ResidentAgentDraft::reviewer(&text("Revisor")).avatar
+        );
+        assert_ne!(
+            draft.avatar,
+            ResidentAgentDraft::researcher(&ResearcherPresetText::default()).avatar
+        );
+
+        let mut stored = agent("tampered role");
+        stored.preset = Some(CHRONICLER_PRESET.to_string());
+        stored.offer_prompt = "May I recap?".to_string();
+        let preset = stored.with_preset_text(Some(&text("Revisor")));
+        assert_eq!(preset.role, CHRONICLER_ROLE);
         assert_eq!(preset.offer_prompt, "");
     }
 

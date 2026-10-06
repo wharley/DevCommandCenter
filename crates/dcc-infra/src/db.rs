@@ -15,8 +15,8 @@ use crate::ai_memory::AiMemoryHit;
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
 
 use dcc_core::domain::agent::{
-    AgentAvatar, ResearcherPresetText, ResidentAgent, ResidentAgentDraft, ReviewerPresetText,
-    RESEARCHER_PRESET, REVIEWER_OFFER, REVIEWER_PRESET,
+    AgentAvatar, ChroniclerPresetText, ResearcherPresetText, ResidentAgent, ResidentAgentDraft,
+    ReviewerPresetText, CHRONICLER_PRESET, RESEARCHER_PRESET, REVIEWER_OFFER, REVIEWER_PRESET,
 };
 use dcc_core::domain::objective::{ObjectivePauseReason, ObjectiveStatus, SessionObjective};
 use dcc_core::{
@@ -427,6 +427,26 @@ pub struct AgentSessionBinding {
     pub updated_at: String,
 }
 
+/// What moved in the person's tasks during a window, for the chronicler's
+/// recap. Turns of resident agents' own sessions are left out: the recap is
+/// about the work, not about the reviews of it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityRecap {
+    pub tasks: Vec<RecapTaskActivity>,
+    pub created_workspace_ids: Vec<String>,
+    pub completed_workspace_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecapTaskActivity {
+    pub workspace_id: String,
+    pub completed_turns: u32,
+    pub aborted_turns: u32,
+    pub last_activity_at: String,
+}
+
 /// Typed durable provider availability. The absence of a record represents
 /// the backwards-compatible enabled state at generation zero.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -470,6 +490,10 @@ CREATE INDEX IF NOT EXISTS idx_dcc_sessions_created_at
 CREATE INDEX IF NOT EXISTS idx_dcc_session_events_completed_occurred_at
 	ON dcc_session_events(occurred_at, session_id)
 	WHERE json_extract(kind_json, '$.type') = 'turn_completed';
+
+CREATE INDEX IF NOT EXISTS idx_dcc_session_events_aborted_occurred_at
+	ON dcc_session_events(occurred_at, session_id)
+	WHERE json_extract(kind_json, '$.type') = 'turn_aborted';
 "#;
 
 const TURN_CHANGE_SET_TABLE_SQL: &str = r#"
@@ -6894,6 +6918,7 @@ impl SqliteSessionRepo {
         &self,
         reviewer: &ReviewerPresetText,
         researcher: &ResearcherPresetText,
+        chronicler: &ChroniclerPresetText,
     ) -> Result<Vec<ResidentAgent>> {
         let conn = self
             .conn
@@ -6914,6 +6939,15 @@ impl SqliteSessionRepo {
                     .normalized()
                     .or_else(|_| {
                         ResidentAgentDraft::researcher(&ResearcherPresetText::default())
+                            .normalized()
+                    }),
+            ),
+            (
+                CHRONICLER_PRESET,
+                ResidentAgentDraft::chronicler(chronicler)
+                    .normalized()
+                    .or_else(|_| {
+                        ResidentAgentDraft::chronicler(&ChroniclerPresetText::default())
                             .normalized()
                     }),
             ),
@@ -6950,7 +6984,7 @@ impl SqliteSessionRepo {
         }
         let mut statement = conn
             .prepare(&format!(
-                "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY a.created_at, CASE a.preset WHEN 'reviewer' THEN 0 WHEN 'researcher' THEN 1 ELSE 2 END, a.id",
+                "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY a.created_at, CASE a.preset WHEN 'reviewer' THEN 0 WHEN 'researcher' THEN 1 WHEN 'chronicler' THEN 2 ELSE 3 END, a.id",
                 Self::RESIDENT_AGENT_COLUMNS
             ))
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -7119,6 +7153,97 @@ impl SqliteSessionRepo {
             .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(bindings)
+    }
+
+    /// What moved in the tasks between `from` (inclusive) and `to`
+    /// (exclusive), both RFC 3339 instants: finished and interrupted turns per
+    /// task, newest first, and the tasks created and completed.
+    pub fn activity_recap(&self, from: &str, to: &str) -> Result<ActivityRecap> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let repository =
+            |error: rusqlite::Error| dcc_core::CoreError::Repository(error.to_string());
+        // One branch per turn end, so each uses its partial index on occurred_at.
+        let mut statement = conn
+            .prepare(
+                "SELECT s.workspace_id, e.kind, COUNT(*), MAX(e.occurred_at)
+                 FROM (
+                     SELECT session_id, occurred_at, 'completed' AS kind FROM dcc_session_events
+                     WHERE json_extract(kind_json, '$.type') = 'turn_completed'
+                       AND occurred_at >= ?1 AND occurred_at < ?2
+                     UNION ALL
+                     SELECT session_id, occurred_at, 'aborted' AS kind FROM dcc_session_events
+                     WHERE json_extract(kind_json, '$.type') = 'turn_aborted'
+                       AND occurred_at >= ?1 AND occurred_at < ?2
+                 ) e
+                 JOIN dcc_sessions s ON s.id = e.session_id
+                 WHERE NOT EXISTS (SELECT 1 FROM dcc_session_agents b WHERE b.session_id = s.id)
+                 GROUP BY s.workspace_id, e.kind",
+            )
+            .map_err(repository)?;
+        let rows = statement
+            .query_map(params![from, to], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+            .map_err(repository)?;
+        let mut by_workspace: HashMap<String, RecapTaskActivity> = HashMap::new();
+        for (workspace_id, kind, count, last_at) in rows {
+            let task =
+                by_workspace
+                    .entry(workspace_id.clone())
+                    .or_insert_with(|| RecapTaskActivity {
+                        workspace_id,
+                        completed_turns: 0,
+                        aborted_turns: 0,
+                        last_activity_at: String::new(),
+                    });
+            if kind == "completed" {
+                task.completed_turns = count;
+            } else {
+                task.aborted_turns = count;
+            }
+            if last_at > task.last_activity_at {
+                task.last_activity_at = last_at;
+            }
+        }
+        let mut tasks: Vec<RecapTaskActivity> = by_workspace.into_values().collect();
+        tasks.sort_by(|left, right| {
+            right
+                .last_activity_at
+                .cmp(&left.last_activity_at)
+                .then_with(|| left.workspace_id.cmp(&right.workspace_id))
+        });
+
+        let workspace_ids = |sql: &str| -> Result<Vec<String>> {
+            let mut statement = conn.prepare(sql).map_err(repository)?;
+            statement
+                .query_map(params![from, to], |row| row.get::<_, String>(0))
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                .map_err(repository)
+        };
+        Ok(ActivityRecap {
+            tasks,
+            created_workspace_ids: workspace_ids(
+                "SELECT id FROM dcc_workspaces
+                 WHERE created_at >= ?1 AND created_at < ?2 AND state != 'archived'
+                 ORDER BY created_at DESC, id",
+            )?,
+            // The workspace has no completion time; its last update is when
+            // it was marked done unless it was edited after.
+            completed_workspace_ids: workspace_ids(
+                "SELECT id FROM dcc_workspaces
+                 WHERE state = 'completed' AND updated_at >= ?1 AND updated_at < ?2
+                 ORDER BY updated_at DESC, id",
+            )?,
+        })
     }
 
     /// Loads the durable objective for a session, if the person defined one.
@@ -13571,11 +13696,12 @@ mod tests {
     #[test]
     fn resident_agents_seed_once_bind_sessions_and_stop_after_delete() {
         use dcc_core::domain::agent::{
-            ResearcherPresetText, ResidentAgentDraft, ReviewerPresetText, RESEARCHER_ROLE,
-            REVIEWER_ROLE,
+            ChroniclerPresetText, ResearcherPresetText, ResidentAgentDraft, ReviewerPresetText,
+            CHRONICLER_ROLE, RESEARCHER_ROLE, REVIEWER_ROLE,
         };
         let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
         let research = ResearcherPresetText::default();
+        let chronicle = ChroniclerPresetText::default();
         let english = ReviewerPresetText {
             name: "Reviewer".to_string(),
             ..ReviewerPresetText::default()
@@ -13588,18 +13714,25 @@ mod tests {
         // Created in English, then the app language changes: the texts the
         // person reads follow it, the name they chose does not.
         let seeded = repo
-            .list_resident_agents(&english, &research)
+            .list_resident_agents(&english, &research, &chronicle)
             .unwrap()
             .remove(0);
         assert_eq!(seeded.offer_prompt, "May I review these changes?");
-        let agents = repo.list_resident_agents(&portuguese, &research).unwrap();
-        assert_eq!(agents.len(), 2);
+        let agents = repo
+            .list_resident_agents(&portuguese, &research, &chronicle)
+            .unwrap();
+        assert_eq!(agents.len(), 3);
         assert_eq!(agents[0].name, "Reviewer");
         // The researcher is seeded with the reviewer, after it, and never offers.
         assert_eq!(agents[1].preset.as_deref(), Some("researcher"));
         assert_eq!(agents[1].name, "Researcher");
         assert_eq!(agents[1].role, RESEARCHER_ROLE);
         assert_eq!(agents[1].offer_prompt, "");
+        // The chronicler comes third and never offers either.
+        assert_eq!(agents[2].preset.as_deref(), Some("chronicler"));
+        assert_eq!(agents[2].name, "Chronicler");
+        assert_eq!(agents[2].role, CHRONICLER_ROLE);
+        assert_eq!(agents[2].offer_prompt, "");
         assert_eq!(agents[0].kickoff_prompt, "Revise.");
         assert_eq!(agents[0].offer_prompt, "Posso revisar?");
 
@@ -13611,8 +13744,10 @@ mod tests {
         edited.extra_instructions = "Ignore vendor/.".to_string();
         edited.offer_prompt = String::new();
         repo.save_resident_agent(Some(&seeded.id), edited).unwrap();
-        let agents = repo.list_resident_agents(&portuguese, &research).unwrap();
-        assert_eq!(agents.len(), 2);
+        let agents = repo
+            .list_resident_agents(&portuguese, &research, &chronicle)
+            .unwrap();
+        assert_eq!(agents.len(), 3);
         let reviewer = agents[0].clone();
         assert_eq!(reviewer.name, "Revisor");
         assert_eq!(reviewer.role, REVIEWER_ROLE);
@@ -13634,7 +13769,9 @@ mod tests {
         // Only DCC's own agents offer themselves; a person's agent stores no offer.
         assert_eq!(docs.offer_prompt, "");
         draft.name = "Documentador".to_string();
-        let docs = repo.save_resident_agent(Some(&docs.id), draft.clone()).unwrap();
+        let docs = repo
+            .save_resident_agent(Some(&docs.id), draft.clone())
+            .unwrap();
         assert_eq!(docs.name, "Documentador");
         assert!(repo.save_resident_agent(Some("missing"), draft).is_err());
 
@@ -13666,7 +13803,10 @@ mod tests {
         assert_eq!(bindings[0].workspace_id, "workspace-1");
 
         assert_eq!(
-            repo.load_resident_agent(&reviewer.id).unwrap().unwrap().role,
+            repo.load_resident_agent(&reviewer.id)
+                .unwrap()
+                .unwrap()
+                .role,
             REVIEWER_ROLE
         );
         assert!(repo.delete_resident_agent(&reviewer.id).unwrap());
@@ -13675,10 +13815,130 @@ mod tests {
         assert_eq!(repo.load_session_agent(&session.id).unwrap(), None);
         assert!(repo.list_agent_session_bindings().unwrap().is_empty());
         // The deleted preset is not created again.
-        let agents = repo.list_resident_agents(&portuguese, &research).unwrap();
-        assert_eq!(agents.len(), 2);
+        let agents = repo
+            .list_resident_agents(&portuguese, &research, &chronicle)
+            .unwrap();
+        assert_eq!(agents.len(), 3);
         assert_eq!(agents[0].preset.as_deref(), Some("researcher"));
-        assert_eq!(agents[1].id, docs.id);
+        assert_eq!(agents[1].preset.as_deref(), Some("chronicler"));
+        assert_eq!(agents[2].id, docs.id);
+    }
+
+    #[test]
+    fn activity_recap_counts_task_turns_in_the_window_without_agent_sessions() {
+        use dcc_core::domain::agent::{
+            ChroniclerPresetText, ResearcherPresetText, ReviewerPresetText,
+        };
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        let session = |id: &str, workspace: &str| Session {
+            id: SessionId(id.to_string()),
+            project_id: ProjectId("project-1".to_string()),
+            workspace_id: WorkspaceId(workspace.to_string()),
+            additional_workspace_ids: vec![],
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-10-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-10-01T00:00:00.000Z".to_string(),
+        };
+        for (id, workspace) in [("s-a", "task-a"), ("s-b", "task-b"), ("s-review", "task-a")] {
+            futures::executor::block_on(repo.save_session(&session(id, workspace))).unwrap();
+        }
+        let reviewer = repo
+            .list_resident_agents(
+                &ReviewerPresetText::default(),
+                &ResearcherPresetText::default(),
+                &ChroniclerPresetText::default(),
+            )
+            .unwrap()
+            .remove(0);
+        repo.bind_session_agent(&SessionId("s-review".to_string()), &reviewer.id)
+            .unwrap();
+        {
+            let conn = repo.conn.lock().unwrap();
+            let events = [
+                ("s-a", 1, "2026-10-05T09:00:00.000Z", "turn_completed"),
+                ("s-a", 2, "2026-10-05T11:00:00.000Z", "turn_aborted"),
+                ("s-a", 3, "2026-10-05T12:00:00.000Z", "turn_completed"),
+                // Outside the window on both sides.
+                ("s-a", 4, "2026-10-04T23:59:59.000Z", "turn_completed"),
+                ("s-b", 1, "2026-10-06T04:00:00.000Z", "turn_completed"),
+                ("s-b", 2, "2026-10-05T10:00:00.000Z", "turn_completed"),
+                ("s-b", 3, "2026-10-05T10:30:00.000Z", "turn_started"),
+                // The reviewer's own turns are not task work.
+                ("s-review", 1, "2026-10-05T13:00:00.000Z", "turn_completed"),
+            ];
+            for (session_id, sequence, at, kind) in events {
+                conn.execute(
+                    "INSERT INTO dcc_session_events (event_id, session_id, sequence, occurred_at, kind_json) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        format!("{session_id}-{sequence}"),
+                        session_id,
+                        sequence,
+                        at,
+                        format!(r#"{{"type":"{kind}","turnId":"t{sequence}"}}"#),
+                    ],
+                )
+                .unwrap();
+            }
+            for (id, state, created_at, updated_at) in [
+                (
+                    "task-new",
+                    "ready",
+                    "2026-10-05T08:00:00.000Z",
+                    "2026-10-05T08:00:00.000Z",
+                ),
+                (
+                    "task-done",
+                    "completed",
+                    "2026-09-01T00:00:00.000Z",
+                    "2026-10-05T15:00:00.000Z",
+                ),
+                (
+                    "task-old-done",
+                    "completed",
+                    "2026-09-01T00:00:00.000Z",
+                    "2026-09-02T00:00:00.000Z",
+                ),
+                (
+                    "task-gone",
+                    "archived",
+                    "2026-10-05T08:30:00.000Z",
+                    "2026-10-05T08:30:00.000Z",
+                ),
+            ] {
+                conn.execute(
+                    "INSERT INTO dcc_workspaces (id, project_id, root_path, base_branch, state, created_at, updated_at) VALUES (?1, 'project-1', '/tmp/p', 'main', ?2, ?3, ?4)",
+                    params![id, state, created_at, updated_at],
+                )
+                .unwrap();
+            }
+        }
+
+        let recap = repo
+            .activity_recap("2026-10-05T00:00:00.000Z", "2026-10-06T04:00:00.000Z")
+            .unwrap();
+        assert_eq!(
+            recap.tasks,
+            vec![
+                RecapTaskActivity {
+                    workspace_id: "task-a".to_string(),
+                    completed_turns: 2,
+                    aborted_turns: 1,
+                    last_activity_at: "2026-10-05T12:00:00.000Z".to_string(),
+                },
+                RecapTaskActivity {
+                    workspace_id: "task-b".to_string(),
+                    completed_turns: 1,
+                    aborted_turns: 0,
+                    last_activity_at: "2026-10-05T10:00:00.000Z".to_string(),
+                },
+            ]
+        );
+        assert_eq!(recap.created_workspace_ids, vec!["task-new".to_string()]);
+        assert_eq!(recap.completed_workspace_ids, vec!["task-done".to_string()]);
     }
 
     #[test]

@@ -5399,6 +5399,9 @@ export default function App() {
 									onOpenSession={handleOpenResidentAgentSession}
 									onStartIdea={handleStartIdea}
 									ideaWorkspaceIds={ideaWorkspaceIds}
+									workspaces={workspacesFromBackend}
+									sessionScope={backendCacheKey}
+									onOpenWorkspace={handleSelectWorkspaceSurface}
 								/>
 							) : globalSurface === "newTask" ? (
 								<NewTaskLaunchState

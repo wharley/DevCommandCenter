@@ -231,7 +231,8 @@
       "reviewerOffer": "Posso revisar essas mudanças?",
       "reviewerKickoff": "Revise as mudanças atuais desta tarefa.",
       "reviewer": "Revisor",
-      "researcher": "Pesquisador"
+      "researcher": "Pesquisador",
+      "chronicler": "Cronista"
     },
     "state": {
       "failed": "Falhou",
@@ -266,6 +267,22 @@
       "roleHint": "O papel é mantido pelo DCC e melhora a cada versão. Para ajustá-lo ao seu projeto, use as instruções extras em “Editar”.",
       "researcherSessions": "Em andamento",
       "researcherNoSessions": "Nenhuma ideia em andamento. Comece uma acima."
+    },
+    "recap": {
+      "title": "Resumo desde {{from}}",
+      "howItWorks": "Montado pelo DCC a partir do que ficou registrado, sem modelo. Um resumo novo começa na primeira abertura depois das 4h e cobre tudo desde o anterior.",
+      "loading": "Lendo o que aconteceu…",
+      "failed": "Não consegui montar o resumo.",
+      "empty": "Nada andou nas tarefas desde {{from}}.",
+      "blocked": "Travado agora",
+      "moved": "Andou",
+      "completed": "Concluídas",
+      "created": "Novas",
+      "turns_one": "{{count}} turno concluído",
+      "turns_other": "{{count}} turnos concluídos",
+      "aborted_one": "{{count}} interrompido",
+      "aborted_other": "{{count}} interrompidos",
+      "removedTask": "Tarefa removida"
     },
     "editor": {
       "extra": "Instruções extras",

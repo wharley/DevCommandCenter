@@ -7,6 +7,9 @@ import { dispatchCallAgent } from "./call-agent-command";
 import { callAgentBlockKey } from "./review-offer";
 import { useAgents } from "./use-agents";
 
+/** Built-in agents with a surface of their own: an idea, the daily recap. */
+const NOT_CALLED_IN_A_TASK = new Set(["researcher", "chronicler"]);
+
 /** The mascot of the agent a session runs as, or nothing for a plain session. */
 export function SessionAgentBadge({
 	sessionId,
@@ -45,7 +48,7 @@ export function CallAgentButtons({
 	const { agents } = useAgents();
 	return (
 		<>
-			{agents.filter((agent) => agent.preset !== "researcher").map((agent) => {
+			{agents.filter((agent) => !NOT_CALLED_IN_A_TASK.has(agent.preset ?? "")).map((agent) => {
 				const blockKey = callAgentBlockKey({ preset: agent.preset, busy, hasChanges });
 				const blocked = blockKey !== null;
 				const label = blockKey ? t(blockKey) : t("agents.call.inTask", { agent: agent.name });

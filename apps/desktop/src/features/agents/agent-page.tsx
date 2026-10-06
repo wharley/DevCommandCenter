@@ -26,7 +26,9 @@ import {
 import { cn } from "@/lib/utils";
 import { getEffortDisplay } from "@/features/composer/effort";
 import { AgentAvatar } from "./agent-avatar";
+import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { AgentExecutionPicker, agentEffortForModel } from "./agent-execution-picker";
+import { DailyRecapCard } from "./daily-recap-card";
 import { requestOpenPullRequest } from "./pr-review-jobs";
 import { AGENTS_QUERY_KEY, type AgentSessionView, type AgentView } from "./use-agents";
 
@@ -271,6 +273,9 @@ export function AgentPage({
 	onOpenSession,
 	onStartIdea,
 	ideaWorkspaceIds,
+	workspaces,
+	sessionScope = "local",
+	onOpenWorkspace,
 }: {
 	agent: AgentView | null;
 	providers: Providers;
@@ -281,6 +286,10 @@ export function AgentPage({
 	onStartIdea?: () => Promise<boolean>;
 	/** Tasks that are still ideas; a published idea is an ordinary project. */
 	ideaWorkspaceIds?: ReadonlySet<string>;
+	/** Every task, for the chronicler's recap. */
+	workspaces?: WorkspaceSummary[];
+	sessionScope?: string;
+	onOpenWorkspace?: (workspaceId: string) => void;
 }) {
 	const { t, i18n } = useTranslation("common");
 	const [editing, setEditing] = useState(false);
@@ -312,6 +321,11 @@ export function AgentPage({
 	});
 	const RoleChevron = roleOpen ? ChevronDown : ChevronRight;
 	const isResearcher = agent.preset === "researcher";
+	// The chronicler has no conversations: its page is the recap.
+	const recap =
+		agent.preset === "chronicler" && workspaces && onOpenWorkspace
+			? { workspaces, onOpenWorkspace }
+			: null;
 	// The researcher's list is its ideas in progress, not every conversation it had.
 	const sessions = isResearcher
 		? agent.sessions.filter((session) => ideaWorkspaceIds?.has(session.workspaceId) ?? true)
@@ -334,78 +348,89 @@ export function AgentPage({
 					</Button>
 				</header>
 
-				{/* The reviewer needs a diff, which only a task in progress has: it
-				    is called from the task or the pull request, never from here.
-				    The researcher is the opposite: an idea starts here, before any
-				    project exists, and is never called inside a project's task. */}
-				{isResearcher && onStartIdea ? (
-					<NewIdeaCard onStart={onStartIdea} />
+				{recap ? (
+					<DailyRecapCard
+						workspaces={recap.workspaces}
+						projectLabels={projectLabels}
+						scope={sessionScope}
+						onOpenWorkspace={recap.onOpenWorkspace}
+					/>
 				) : (
-					<section className="rounded-[18px] border border-border/70 bg-card p-5">
-						<h2 className="text-[14px] font-semibold">{t("agents.page.howToCall")}</h2>
-						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-							{t("agents.page.howToCallReviewer")}
-						</p>
-					</section>
-				)}
+					<>
+						{/* The reviewer needs a diff, which only a task in progress has: it
+						    is called from the task or the pull request, never from here.
+						    The researcher is the opposite: an idea starts here, before any
+						    project exists, and is never called inside a project's task. */}
+						{isResearcher && onStartIdea ? (
+							<NewIdeaCard onStart={onStartIdea} />
+						) : (
+							<section className="rounded-[18px] border border-border/70 bg-card p-5">
+								<h2 className="text-[14px] font-semibold">{t("agents.page.howToCall")}</h2>
+								<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+									{t("agents.page.howToCallReviewer")}
+								</p>
+							</section>
+						)}
 
-				<section>
-					<h2 className={SECTION_TITLE}>
-						{isResearcher ? t("agents.page.researcherSessions") : t("agents.page.sessions")}
-					</h2>
-					{sessions.length === 0 ? (
-						<p className="rounded-[18px] border border-dashed border-border/70 px-5 py-6 text-[13px] text-muted-foreground">
-							{isResearcher ? t("agents.page.researcherNoSessions") : t("agents.page.noSessions")}
-						</p>
-					) : (
-						<ul className="divide-y divide-border/60 overflow-hidden rounded-[18px] border border-border/70 bg-card">
-							{sessions.map((session) => {
-								const read = session.state === "done" && !session.unread;
-								return (
-									<li key={session.sessionId}>
-										<button
-											type="button"
-											onClick={() => onOpenSession(session)}
-											className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
-										>
-											{/* A result already read shows the plain mascot. */}
-											<AgentAvatar
-												avatar={agent.avatar}
-												state={read ? undefined : session.state}
-												size={28}
-											/>
-											<span className="min-w-0 flex-1">
-												<span className="block truncate text-[13px] font-medium text-foreground">
-													{workspaceNames[session.workspaceId] ?? session.title ?? session.sessionId}
-												</span>
-												<span className="block truncate text-[11px] text-muted-foreground">
-													{[
-														projectLabels[session.projectId],
-														dateFormat.format(new Date(session.updatedAt)),
-													]
-														.filter(Boolean)
-														.join(" · ")}
-												</span>
-											</span>
-											<span
-												className={cn(
-													"shrink-0 text-[11px]",
-													session.state === "needsYou"
-														? "text-amber-700 dark:text-amber-300"
-														: session.unread
-															? "font-medium text-emerald-700 dark:text-emerald-300"
-															: "text-muted-foreground",
-												)}
-											>
-												{read ? t("agents.state.finished") : t(`agents.state.${session.state}`)}
-											</span>
-										</button>
-									</li>
-								);
-							})}
-						</ul>
-					)}
-				</section>
+						<section>
+							<h2 className={SECTION_TITLE}>
+								{isResearcher ? t("agents.page.researcherSessions") : t("agents.page.sessions")}
+							</h2>
+							{sessions.length === 0 ? (
+								<p className="rounded-[18px] border border-dashed border-border/70 px-5 py-6 text-[13px] text-muted-foreground">
+									{isResearcher ? t("agents.page.researcherNoSessions") : t("agents.page.noSessions")}
+								</p>
+							) : (
+								<ul className="divide-y divide-border/60 overflow-hidden rounded-[18px] border border-border/70 bg-card">
+									{sessions.map((session) => {
+										const read = session.state === "done" && !session.unread;
+										return (
+											<li key={session.sessionId}>
+												<button
+													type="button"
+													onClick={() => onOpenSession(session)}
+													className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+												>
+													{/* A result already read shows the plain mascot. */}
+													<AgentAvatar
+														avatar={agent.avatar}
+														state={read ? undefined : session.state}
+														size={28}
+													/>
+													<span className="min-w-0 flex-1">
+														<span className="block truncate text-[13px] font-medium text-foreground">
+															{workspaceNames[session.workspaceId] ?? session.title ?? session.sessionId}
+														</span>
+														<span className="block truncate text-[11px] text-muted-foreground">
+															{[
+																projectLabels[session.projectId],
+																dateFormat.format(new Date(session.updatedAt)),
+															]
+																.filter(Boolean)
+																.join(" · ")}
+														</span>
+													</span>
+													<span
+														className={cn(
+															"shrink-0 text-[11px]",
+															session.state === "needsYou"
+																? "text-amber-700 dark:text-amber-300"
+																: session.unread
+																	? "font-medium text-emerald-700 dark:text-emerald-300"
+																	: "text-muted-foreground",
+														)}
+													>
+														{read ? t("agents.state.finished") : t(`agents.state.${session.state}`)}
+													</span>
+												</button>
+											</li>
+										);
+									})}
+								</ul>
+							)}
+						</section>
+					</>
+				)}
 
 				{agent.prReviews.length > 0 && (
 					<section>

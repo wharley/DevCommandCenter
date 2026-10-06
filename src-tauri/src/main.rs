@@ -7015,6 +7015,7 @@ pub fn run() {
             terminal_kill_by_mission_id,
             terminal_get_or_create_for_pane,
             agent_commands::agents_overview,
+            agent_commands::agents_activity_recap,
             agent_commands::agents_save,
             agent_commands::agents_bind_session,
             research_commands::research_create_idea,

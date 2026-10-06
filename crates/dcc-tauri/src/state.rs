@@ -6239,8 +6239,10 @@ impl SessionCommandState {
         &self,
         reviewer: &dcc_core::domain::agent::ReviewerPresetText,
         researcher: &dcc_core::domain::agent::ResearcherPresetText,
+        chronicler: &dcc_core::domain::agent::ChroniclerPresetText,
     ) -> Result<Vec<dcc_core::domain::agent::ResidentAgent>> {
-        self.session_repo.list_resident_agents(reviewer, researcher)
+        self.session_repo
+            .list_resident_agents(reviewer, researcher, chronicler)
     }
 
     pub fn save_resident_agent(
@@ -6268,6 +6270,10 @@ impl SessionCommandState {
 
     pub fn list_agent_session_bindings(&self) -> Result<Vec<dcc_infra::db::AgentSessionBinding>> {
         self.session_repo.list_agent_session_bindings()
+    }
+
+    pub fn activity_recap(&self, from: &str, to: &str) -> Result<dcc_infra::db::ActivityRecap> {
+        self.session_repo.activity_recap(from, to)
     }
 
     /// Idempotent per turn. Retries once on a generation race with a
@@ -7784,6 +7790,7 @@ mod tests {
                     name: "Revisor".to_string(),
                     ..Default::default()
                 },
+                &Default::default(),
                 &Default::default(),
             )
             .expect("agents")

@@ -64,9 +64,38 @@ export type ResearcherPresetText = {
 	name: string;
 };
 
+/** The built-in chronicler's name in the app language. Its recap is built by DCC, without a model. */
+export type ChroniclerPresetText = {
+	name: string;
+};
+
 /** The built-in agents are created the first time; their visible texts follow the app language. */
-export function agentsOverview(reviewer: ReviewerPresetText, researcher: ResearcherPresetText) {
-	return invoke<AgentsOverview>("agents_overview", { reviewer, researcher });
+export function agentsOverview(
+	reviewer: ReviewerPresetText,
+	researcher: ResearcherPresetText,
+	chronicler: ChroniclerPresetText,
+) {
+	return invoke<AgentsOverview>("agents_overview", { reviewer, researcher, chronicler });
+}
+
+/** Turns of one task that ended during the recap window. Resident agents' own sessions are left out. */
+export type RecapTaskActivity = {
+	workspaceId: string;
+	completedTurns: number;
+	abortedTurns: number;
+	lastActivityAt: string;
+};
+
+export type ActivityRecap = {
+	/** Newest activity first. */
+	tasks: RecapTaskActivity[];
+	createdWorkspaceIds: string[];
+	completedWorkspaceIds: string[];
+};
+
+/** What moved in the tasks between `from` (inclusive) and `to` (exclusive). */
+export function agentsActivityRecap(from: string, to: string) {
+	return invoke<ActivityRecap>("agents_activity_recap", { input: { from, to } });
 }
 
 export function saveAgent(id: string | null, draft: ResidentAgentDraft) {

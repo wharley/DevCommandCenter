@@ -231,7 +231,8 @@
       "reviewerOffer": "May I review these changes?",
       "reviewerKickoff": "Review the current changes in this workspace.",
       "reviewer": "Reviewer",
-      "researcher": "Researcher"
+      "researcher": "Researcher",
+      "chronicler": "Chronicler"
     },
     "state": {
       "failed": "Failed",
@@ -266,6 +267,22 @@
       "roleHint": "The role is maintained by DCC and improves with each version. To adapt it to your project, use the extra instructions under “Edit”.",
       "researcherSessions": "In progress",
       "researcherNoSessions": "No ideas in progress. Start one above."
+    },
+    "recap": {
+      "title": "Recap since {{from}}",
+      "howItWorks": "Built by DCC from what it recorded, without a model. A new recap starts at the first opening after 4am and covers everything since the previous one.",
+      "loading": "Reading what happened…",
+      "failed": "Couldn't build the recap.",
+      "empty": "Nothing moved in your tasks since {{from}}.",
+      "blocked": "Blocked now",
+      "moved": "Moved",
+      "completed": "Completed",
+      "created": "New",
+      "turns_one": "{{count}} turn finished",
+      "turns_other": "{{count}} turns finished",
+      "aborted_one": "{{count}} interrupted",
+      "aborted_other": "{{count}} interrupted",
+      "removedTask": "Removed task"
     },
     "editor": {
       "extra": "Extra instructions",
