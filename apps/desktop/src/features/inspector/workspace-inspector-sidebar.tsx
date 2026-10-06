@@ -2979,10 +2979,19 @@ export function WorkspaceInspectorSidebar({
 		selectedForgeLogin,
 		forgeConnected && Boolean(prStatus?.number),
 	);
+	// GitHub has no pipeline: the refresh reads the PR's failing checks into
+	// the delivery failure. Only while GitHub reports a failing commit status,
+	// or a captured failure still needs clearing once checks pass.
+	const githubChecksNeedRefresh =
+		workspaceForgeContext?.provider === "github" &&
+		Boolean(prStatus?.number) &&
+		(prStatus?.mergeStateStatus?.toUpperCase() === "UNSTABLE" ||
+			deliveryFailureQuery.data?.snapshot?.operation === "pipeline");
 	const deliveryPipelineQuery = useWorkspacePipeline(
 		workspacePath,
 		selectedForgeLogin,
-		workspaceForgeContext?.provider === "gitlab" && forgeConnected,
+		forgeConnected &&
+			(workspaceForgeContext?.provider === "gitlab" || githubChecksNeedRefresh),
 	);
 	const workingTreeSummary = useMemo(() => {
 		const entries = [

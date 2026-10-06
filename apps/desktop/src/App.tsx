@@ -171,8 +171,11 @@ import {
 	updateRepositoryIdentity,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
+	workspaceDeliveryFailureSnapshot,
+	workspacePipelineStatus,
 	workspacePrStatus,
 } from "./lib/workspace-api";
+import { buildDeliveryFailureComposerPrompt } from "./features/inspector/delivery-failure-format";
 import { repositoryDisplayName } from "./features/workspaces/repository-display-name";
 import {
 	abortRun,
@@ -5058,6 +5061,57 @@ export default function App() {
 		},
 		[backendCacheKey, queryClient],
 	);
+	const handleSendChecksToAgent = useCallback(
+		async (workspaceId: string) => {
+			const workspace = projectWorkspaces.find((candidate) => candidate.id === workspaceId);
+			const root = (workspace?.worktreePath ?? workspace?.rootPath)?.trim();
+			if (!root) return;
+			try {
+				// The pipeline refresh is what reads the failing checks and their logs.
+				await workspacePipelineStatus({ workspaceRoot: root, forgeLogin: null });
+				const { snapshot } = await workspaceDeliveryFailureSnapshot({ workspaceRoot: root });
+				if (!snapshot || snapshot.operation !== "pipeline") {
+					toast.info(t("sidebar.attention.checksUnavailable"));
+					return;
+				}
+				const sessions = await queryClient.fetchQuery(
+					workspaceSessionsQueryOptions(workspaceId, { scope: backendCacheKey }),
+				);
+				// The fix changes code, so it never lands in the Reviewer's conversation.
+				const sessionId = codeChangeSessionId(null, sessions, (id) => agentBySessionId.has(id));
+				if (!sessionId && sessions.length > 0) {
+					toast.info(t("agents.review.noAuthorForChange"));
+					return;
+				}
+				setGlobalSurface(null);
+				if (sessionId) {
+					setPendingSessionNavigation({ sessionId, workspaceId });
+					if (selectedWorkspace?.id === workspaceId) setSelectedSessionId(sessionId);
+				}
+				requestWorkspaceSelection(workspaceId);
+				workspaceComposerPrefillSequenceRef.current += 1;
+				setWorkspaceComposerPrefill({
+					workspaceId,
+					sessionId: sessionId ?? undefined,
+					text: buildDeliveryFailureComposerPrompt(snapshot),
+					nonce: workspaceComposerPrefillSequenceRef.current,
+				});
+			} catch (error) {
+				toast.error(t("sidebar.attention.checksUnavailable"), {
+					description: error instanceof Error ? error.message : String(error),
+				});
+			}
+		},
+		[
+			agentBySessionId,
+			backendCacheKey,
+			projectWorkspaces,
+			queryClient,
+			requestWorkspaceSelection,
+			selectedWorkspace?.id,
+			t,
+		],
+	);
 	const handleRemoteWorkspaceMutation = useCallback(() => {
 		showRemoteUnsupported("workspaces");
 	}, [showRemoteUnsupported]);
@@ -5164,6 +5218,11 @@ export default function App() {
 							onOpenAgent={handleOpenAgent}
 							onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
 							onSnoozeWorkspace={isRemoteBackend ? undefined : handleSnoozeWorkspace}
+							onSendChecksToAgent={
+								isRemoteBackend
+									? undefined
+									: (workspaceId) => void handleSendChecksToAgent(workspaceId)
+							}
 							onArchiveWorkspace={
 								isRemoteBackend ? handleRemoteWorkspaceMutation : handleArchiveWorkspace
 							}

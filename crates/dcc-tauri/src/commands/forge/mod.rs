@@ -2,6 +2,7 @@ pub(crate) mod accounts;
 pub(crate) mod context;
 pub(crate) mod detect;
 pub(crate) mod github;
+pub(crate) mod github_checks;
 pub(crate) mod gitlab;
 pub(crate) mod provider;
 pub(crate) mod remote;

@@ -338,6 +338,9 @@
       "showMore_one": "Show {{count}} more",
       "showMore_other": "Show {{count}} more",
       "showFewer": "Show fewer",
+      "sendChecks": "Send to agent",
+      "sendChecksLabel": "Send the failing checks of {{label}} to the agent",
+      "checksUnavailable": "Couldn't read the failing checks of this PR.",
       "reason": {
         "woke": "Back from snooze",
         "conflicts": "Conflicts to resolve",

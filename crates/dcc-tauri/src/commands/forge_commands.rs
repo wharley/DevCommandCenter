@@ -10,6 +10,7 @@ use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use crate::{
     commands::forge::context as forge_context,
     commands::forge::provider as forge_provider,
+    commands::forge::{github, github_checks},
     commands::workspace_commands::{
         complete_repository_forge_binding_retry, push_current_branch, RepositoryIdInput,
         WorkspaceChangeRequestContextInput, WorkspaceChangeRequestContextOutput,
@@ -3378,6 +3379,138 @@ pub async fn workspace_pr_review_comments(
     })
 }
 
+/// What the GitHub side of a pipeline refresh found for the task's PR.
+struct GithubChecksLookup {
+    number: u32,
+    url: Option<String>,
+    /// Captured text when checks fail; None when nothing fails.
+    failure: Option<String>,
+}
+
+/// GitHub has no pipeline object, so the failing checks of the task's open PR
+/// feed the same delivery failure GitLab pipelines do: the Inspector shows
+/// them and can send them, with the end of each failed log, to the agent.
+/// Logs are fetched once per commit and set of failed jobs. A lookup error
+/// keeps what was captured instead of flapping.
+async fn sync_github_failed_checks(
+    state: &WorkspaceCommandState,
+    root: &str,
+    host: &str,
+    remote: &str,
+    login: Option<String>,
+    head_sha: Option<String>,
+) -> Option<u32> {
+    let lookup_root = root.to_string();
+    let lookup_host = host.to_string();
+    let lookup_sha = head_sha.clone();
+    let lookup = tokio::task::spawn_blocking(move || {
+        lookup_github_failed_checks(
+            &lookup_root,
+            &lookup_host,
+            login.as_deref(),
+            lookup_sha.as_deref(),
+        )
+    })
+    .await;
+    let lookup = match lookup {
+        Ok(Ok(lookup)) => lookup,
+        Ok(Err(error)) => {
+            eprintln!("[DCC] GitHub checks lookup failed for {root}: {error}");
+            return None;
+        }
+        Err(_) => return None,
+    };
+    let Some(lookup) = lookup else {
+        github_checks::forget_detail(root);
+        clear_workspace_delivery_failure(state, root, WorkspaceDeliveryFailureOperation::Pipeline);
+        return None;
+    };
+    match lookup.failure {
+        Some(detail) => {
+            capture_workspace_delivery_failure(
+                state,
+                root,
+                WorkspaceDeliveryFailureOperation::Pipeline,
+                &detail,
+                CaptureDeliveryFailureOptions {
+                    remote: Some(remote.to_string()),
+                    external_url: lookup
+                        .url
+                        .map(|url| format!("{}/checks", url.trim_end_matches('/'))),
+                    ..CaptureDeliveryFailureOptions::default()
+                },
+            )
+            .await;
+        }
+        None => {
+            github_checks::forget_detail(root);
+            clear_workspace_delivery_failure(
+                state,
+                root,
+                WorkspaceDeliveryFailureOperation::Pipeline,
+            );
+        }
+    }
+    Some(lookup.number)
+}
+
+fn lookup_github_failed_checks(
+    root: &str,
+    host: &str,
+    login: Option<&str>,
+    head_sha: Option<&str>,
+) -> Result<Option<GithubChecksLookup>, String> {
+    let Ok(branch) = resolve_current_branch_name(root) else {
+        return Ok(None);
+    };
+    let hints = workspace_branch_hints(root, Some(&branch));
+    let Some(status) = forge_provider::resolve_workspace_change_request_status(
+        root, &branch, &hints, head_sha, login,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(number) = status.number else {
+        return Ok(None);
+    };
+    let mut lookup = GithubChecksLookup {
+        number,
+        url: status.url.clone(),
+        failure: None,
+    };
+    if !status
+        .state
+        .as_deref()
+        .is_some_and(|state| state.eq_ignore_ascii_case("open"))
+    {
+        return Ok(Some(lookup));
+    }
+    let checks = github::pull_request_checks_json(root, host, number, login)?;
+    let failed = github_checks::failed_checks(&checks);
+    if failed.is_empty() {
+        return Ok(Some(lookup));
+    }
+    let key = github_checks::detail_cache_key(head_sha, &failed);
+    if let Some(detail) = github_checks::cached_detail(root, &key) {
+        lookup.failure = Some(detail);
+        return Ok(Some(lookup));
+    }
+    let mut logs = std::collections::HashMap::new();
+    for job_id in github_checks::jobs_to_fetch(&failed) {
+        match github::failed_job_log(root, host, job_id, login) {
+            Ok(log) => {
+                logs.insert(job_id, log);
+            }
+            Err(error) => eprintln!("[DCC] GitHub job {job_id} log unavailable: {error}"),
+        }
+    }
+    let detail =
+        github_checks::failed_checks_detail(Some(u64::from(number)), head_sha, &failed, &logs);
+    github_checks::remember_detail(root, key, detail.clone());
+    lookup.failure = Some(detail);
+    Ok(Some(lookup))
+}
+
 #[tauri::command]
 pub async fn workspace_pipeline_status(
     state: State<'_, WorkspaceCommandState>,
@@ -3411,11 +3544,21 @@ pub async fn workspace_pipeline_status(
     };
     let provider_key = forge_context::forge_provider_key(forge_context.provider).to_string();
     if forge_context.provider != ForgeCliProvider::Gitlab {
+        let head_sha = resolve_current_commit_sha(root).ok().flatten();
+        let change_request_number = sync_github_failed_checks(
+            &state,
+            root,
+            &forge_context.host,
+            &forge_context.remote_name,
+            forge_context.effective_login.clone(),
+            head_sha.clone(),
+        )
+        .await;
         return Ok(WorkspacePipelineStatusOutput {
             provider: Some(provider_key),
             host: Some(forge_context.host),
-            change_request_number: None,
-            head_sha: resolve_current_commit_sha(root).ok().flatten(),
+            change_request_number,
+            head_sha,
             pipeline: None,
         });
     }

@@ -2,6 +2,7 @@ import { projectIconValue } from "@dcc/mascots";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	BarChart3,
+	Bot,
 	CircleCheckBig,
 	CircleQuestionMark,
 	ChevronRight,
@@ -323,6 +324,8 @@ type WorkspacesSidebarProps = {
 	onArchiveWorkspace?: (workspaceId: string) => void;
 	/** Snoozes a task until an ISO instant, or wakes it with `null`. */
 	onSnoozeWorkspace?: (workspaceId: string, until: string | null) => Promise<void>;
+	/** Puts the task's failing PR checks, with their logs, in its agent's composer. */
+	onSendChecksToAgent?: (workspaceId: string) => void;
 	onRenameWorkspace?: (workspaceId: string, name: string) => void | Promise<void>;
 	onCompleteWorkspace?: (workspaceId: string) => void | Promise<void>;
 	onRestoreWorkspace?: (workspaceId: string) => void;
@@ -392,6 +395,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onToggleCollapsed,
 	onArchiveWorkspace,
 	onSnoozeWorkspace,
+	onSendChecksToAgent,
 	onRenameWorkspace,
 	onCompleteWorkspace,
 	onRestoreWorkspace,
@@ -1620,8 +1624,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									pr: count ?? "",
 								});
 
+								const canSendChecks = reason === "checksFailing" && Boolean(onSendChecksToAgent);
+
 								return (
-									<Tooltip key={workspace.id} delayDuration={450}>
+									<div key={workspace.id} className="group/attention relative">
+									<Tooltip delayDuration={450}>
 										<TooltipTrigger asChild>
 											<button
 												type="button"
@@ -1696,6 +1703,18 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											})}
 										</TooltipContent>
 									</Tooltip>
+									{canSendChecks ? (
+										<button
+											type="button"
+											aria-label={t("sidebar.attention.sendChecksLabel", { label: title })}
+											title={t("sidebar.attention.sendChecks")}
+											onClick={() => onSendChecksToAgent?.(workspace.id)}
+											className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md bg-background text-muted-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/attention:opacity-100"
+										>
+											<Bot className="size-3.5" aria-hidden />
+										</button>
+									) : null}
+									</div>
 								);
 							})}
 							{hiddenAttentionItemCount > 0 ? (

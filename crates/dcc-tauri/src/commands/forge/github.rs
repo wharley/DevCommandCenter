@@ -1104,6 +1104,56 @@ pub(crate) fn pull_request_detail_json(
     )
 }
 
+/// Checks of a PR, with the bucket (`pass`/`fail`/`pending`/…) used to find
+/// failures. `--json` exits 0 even when checks fail.
+pub(crate) fn pull_request_checks_json(
+    root: &str,
+    host: &str,
+    number: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    run_hub_gh_json(
+        root,
+        host,
+        login,
+        &[
+            "pr",
+            "checks",
+            &number.to_string(),
+            "--json",
+            "name,bucket,link,workflow",
+        ],
+    )
+}
+
+/// Output of the failed steps of one Actions job.
+pub(crate) fn failed_job_log(
+    root: &str,
+    host: &str,
+    job_id: u64,
+    login: Option<&str>,
+) -> Result<String, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let gh = resolve_cli_binary("gh")?;
+    let output = dcc_infra::process::run_command_with_timeout(
+        &gh,
+        |command| {
+            command
+                .current_dir(root)
+                .args(["run", "view", "--job", &job_id.to_string(), "--log-failed"])
+                .env("GH_HOST", host);
+            if let Some(auth) = auth.as_ref() {
+                command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+            }
+        },
+        std::time::Duration::from_secs(20),
+    )?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 pub(crate) fn repository_merge_capabilities_json(
     root: &str,
     host: &str,
