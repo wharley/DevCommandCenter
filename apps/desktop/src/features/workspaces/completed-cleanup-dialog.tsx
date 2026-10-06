@@ -17,6 +17,7 @@ import { workspaceCleanupScan } from "@/lib/workspace-api";
 import {
 	type CompletedCleanupRow,
 	completedCleanupRows,
+	deleteCompletedTasks,
 	isPreselectedForCleanup,
 	selectedCleanupBytes,
 } from "./completed-cleanup";
@@ -27,7 +28,7 @@ import { workspaceRailDisplayTitle } from "./workspace-rail-shared";
 type ScanState =
 	| { status: "loading" }
 	| { status: "error" }
-	| { status: "ready"; entries: WorkspaceCleanupEntry[] };
+	| { status: "ready"; entries: WorkspaceCleanupEntry[]; totalBytes: number };
 
 /**
  * Deletes completed tasks in one go. Each worktree is inspected first; only
@@ -40,6 +41,7 @@ export function CompletedCleanupDialog({
 	workspaces,
 	projectLabelOf,
 	onDeleteWorkspace,
+	onCleaned,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -50,6 +52,8 @@ export function CompletedCleanupDialog({
 		workspaceId: string,
 		options?: { deleteRemoteBranch?: boolean },
 	) => void | Promise<void>;
+	/** After a deletion, with what the completed tasks still take. */
+	onCleaned?: (remainingBytes: number) => void;
 }) {
 	const { t, i18n } = useTranslation("common");
 	const [scan, setScan] = useState<ScanState>({ status: "loading" });
@@ -68,7 +72,11 @@ export function CompletedCleanupDialog({
 		void workspaceCleanupScan({ workspaceIds: workspaceDiskUsageIds(workspaces) })
 			.then((result) => {
 				if (cancelled) return;
-				setScan({ status: "ready", entries: result.workspaces });
+				setScan({
+					status: "ready",
+					entries: result.workspaces,
+					totalBytes: result.totalBytes,
+				});
 				setSelected(
 					new Set(
 						completedCleanupRows(workspaces, result.workspaces)
@@ -104,31 +112,30 @@ export function CompletedCleanupDialog({
 	};
 
 	const handleDelete = async () => {
-		const targets = selectedRows;
-		let freed = 0;
-		let failed = 0;
-		setProgress({ done: 0, total: targets.length });
-		for (const [index, row] of targets.entries()) {
-			try {
-				await onDeleteWorkspace(row.workspace.id, { deleteRemoteBranch: false });
-				freed += row.bytes;
-				setSelected((current) => {
-					const next = new Set(current);
-					next.delete(row.workspace.id);
-					return next;
-				});
-			} catch (error) {
-				failed += 1;
-				console.warn("[dcc] failed to delete completed task", error);
-			}
-			setProgress({ done: index + 1, total: targets.length });
-		}
+		setProgress({ done: 0, total: selectedRows.length });
+		const { freedBytes, failed } = await deleteCompletedTasks(
+			selectedRows,
+			(workspaceId) => onDeleteWorkspace(workspaceId, { deleteRemoteBranch: false }),
+			({ done, total, deletedId }) => {
+				setProgress({ done, total });
+				if (deletedId) {
+					setSelected((current) => {
+						const next = new Set(current);
+						next.delete(deletedId);
+						return next;
+					});
+				}
+			},
+		);
 		setProgress(null);
+		if (scan.status === "ready") {
+			onCleaned?.(Math.max(0, scan.totalBytes - freedBytes));
+		}
 		if (failed > 0) {
 			toast.error(t("sidebar.cleanup.partial", { count: failed }));
 			return;
 		}
-		toast.success(t("sidebar.cleanup.freed", { size: formatBytes(freed) }));
+		toast.success(t("sidebar.cleanup.freed", { size: formatBytes(freedBytes) }));
 		onOpenChange(false);
 	};
 

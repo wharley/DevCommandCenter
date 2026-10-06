@@ -67,7 +67,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import type { Repository, WorkspaceRemoteBranchDeletionTarget } from "@dcc/contracts";
 import { AppUpdateButton, type AppUpdateInfo } from "@/features/updater";
 import { cn } from "@/lib/utils";
-import { workspaceDiskUsage } from "@/lib/workspace-api";
+import { workspaceCleanupScan } from "@/lib/workspace-api";
+import {
+	dismissCleanupAlert,
+	isCleanupAlertDue,
+	syncCleanupAlert,
+	useCleanupAlert,
+} from "@/features/agents/cleanup-alert";
 import type { WorkspaceSummary } from "./types";
 import {
 	createInitialRailSectionState,
@@ -104,7 +110,14 @@ import {
 	markWorkspaceResultSeen,
 	useSeenWorkspaceResults,
 } from "./workspace-seen-results";
+import {
+	completedCleanupRows,
+	completedCleanupSummary,
+	deleteCompletedTasks,
+	isPreselectedForCleanup,
+} from "./completed-cleanup";
 import { CompletedCleanupDialog } from "./completed-cleanup-dialog";
+import { useCompletedCleanupScan } from "./use-completed-cleanup-scan";
 import { ProjectEditDialog } from "./project-edit-dialog";
 import { ProjectIdentityGlyph } from "./project-identity";
 import { ProviderIcon } from "@/features/providers/provider-icons";
@@ -546,61 +559,125 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const [deleteRemoteBranch, setDeleteRemoteBranch] = useState(false);
 	const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
 	const [isCleanupOpen, setIsCleanupOpen] = useState(false);
-	const [completedDiskUsage, setCompletedDiskUsage] = useState<{
+	const completedScan = useCompletedCleanupScan(completedRows, showCompletedDiskUsage);
+	const hasCompletedRows = showCompletedDiskUsage && completedRows.length > 0;
+	const completedScanData = hasCompletedRows ? completedScan.data : undefined;
+	const completedDiskUsage = useMemo((): {
 		status: "idle" | "loading" | "ready" | "error";
 		totalBytes: number;
 		bytesByWorkspaceId: Record<string, number>;
-	}>({ status: "idle", totalBytes: 0, bytesByWorkspaceId: {} });
-	const completedDiskUsageIds = useMemo(
-		() => workspaceDiskUsageIds(completedRows),
-		[completedRows],
-	);
-	useEffect(() => {
-		if (!showCompletedDiskUsage || completedDiskUsageIds.length === 0) {
-			setCompletedDiskUsage({
-				status: "idle",
+	} => {
+		if (!hasCompletedRows) {
+			return { status: "idle", totalBytes: 0, bytesByWorkspaceId: {} };
+		}
+		if (!completedScanData) {
+			return {
+				status: completedScan.isError ? "error" : "loading",
 				totalBytes: 0,
 				bytesByWorkspaceId: {},
-			});
+			};
+		}
+		return {
+			status: "ready",
+			totalBytes: completedScanData.totalBytes,
+			bytesByWorkspaceId: Object.fromEntries(
+				completedScanData.workspaces.map((entry) => [entry.workspaceId, entry.bytes]),
+			),
+		};
+	}, [completedScan.isError, completedScanData, hasCompletedRows]);
+
+	// The reporter points at completed tasks once they pass the person's limit.
+	const cleanupAlertState = useCleanupAlert();
+	const completedTotalBytes = !showCompletedDiskUsage
+		? null
+		: completedRows.length === 0
+			? 0
+			: (completedScanData?.totalBytes ?? null);
+	useEffect(() => {
+		if (completedTotalBytes !== null) {
+			syncCleanupAlert(completedTotalBytes);
+		}
+	}, [completedTotalBytes]);
+	const completedCleanupSummaryValue = useMemo(
+		() =>
+			completedCleanupSummary(
+				completedScanData ? completedCleanupRows(completedRows, completedScanData.workspaces) : [],
+			),
+		[completedRows, completedScanData],
+	);
+	const [cleanupProgress, setCleanupProgress] = useState<{
+		done: number;
+		total: number;
+	} | null>(null);
+	const cleanupAlertDue =
+		completedTotalBytes !== null && isCleanupAlertDue(cleanupAlertState, completedTotalBytes);
+	const handleCleanSafeCompleted = useCallback(async () => {
+		if (!onDeleteWorkspace || cleanupProgress) {
 			return;
 		}
-
-		let cancelled = false;
-		setCompletedDiskUsage((current) => ({ ...current, status: "loading" }));
-		void workspaceDiskUsage({ workspaceIds: completedDiskUsageIds })
-			.then((result) => {
-				if (cancelled) return;
-				setCompletedDiskUsage({
-					status: "ready",
-					totalBytes: result.totalBytes,
-					bytesByWorkspaceId: Object.fromEntries(
-						result.workspaces.map((workspace) => [
-							workspace.workspaceId,
-							workspace.bytes,
-						]),
-					),
-				});
-			})
-			.catch((error) => {
-				if (cancelled) return;
-				console.warn("[dcc] failed to measure completed worktrees", error);
-				setCompletedDiskUsage({
-					status: "error",
-					totalBytes: 0,
-					bytesByWorkspaceId: {},
-				});
+		setCleanupProgress({ done: 0, total: 0 });
+		try {
+			// Checked again right before deleting: the cached verdict can be minutes old.
+			const fresh = await workspaceCleanupScan({
+				workspaceIds: workspaceDiskUsageIds(completedRows),
 			});
-
-		return () => {
-			cancelled = true;
-		};
-	}, [completedDiskUsageIds, showCompletedDiskUsage]);
+			const targets = completedCleanupRows(completedRows, fresh.workspaces).filter(
+				isPreselectedForCleanup,
+			);
+			if (targets.length === 0) {
+				toast.info(t("agents.cleanup.bubble.nothingSafe"));
+				return;
+			}
+			setCleanupProgress({ done: 0, total: targets.length });
+			const { freedBytes, failed } = await deleteCompletedTasks(
+				targets,
+				(workspaceId) => onDeleteWorkspace(workspaceId, { deleteRemoteBranch: false }),
+				({ done, total }) => setCleanupProgress({ done, total }),
+			);
+			// What is left was judged unsafe; do not point at it again right away.
+			dismissCleanupAlert(Math.max(0, fresh.totalBytes - freedBytes));
+			if (failed > 0) {
+				toast.error(t("sidebar.cleanup.partial", { count: failed }));
+			} else {
+				toast.success(
+					t("sidebar.cleanup.freed", {
+						size: formatDiskBytes(freedBytes, i18n.resolvedLanguage),
+					}),
+				);
+			}
+		} catch (error) {
+			console.warn("[dcc] failed to clean up completed tasks", error);
+			toast.error(t("sidebar.cleanup.scanFailed"));
+		} finally {
+			setCleanupProgress(null);
+		}
+	}, [cleanupProgress, completedRows, i18n.resolvedLanguage, onDeleteWorkspace, t]);
+	const reporterCleanup =
+		onDeleteWorkspace && completedTotalBytes !== null && (cleanupAlertDue || cleanupProgress)
+			? {
+					alert: {
+						totalBytes: completedTotalBytes,
+						safeCount: completedCleanupSummaryValue.safeCount,
+						safeBytes: completedCleanupSummaryValue.safeBytes,
+						progress: cleanupProgress,
+					},
+					onReview: () => setIsCleanupOpen(true),
+					onCleanSafe: () => {
+						void handleCleanSafeCompleted();
+					},
+					onDismiss: () => dismissCleanupAlert(completedTotalBytes),
+				}
+			: null;
 
 	const workspaceDeletionBytes = useMemo(() => {
 		if (!workspaceDeletionTarget || completedDiskUsage.status !== "ready") {
 			return null;
 		}
-		return workspaceDiskUsageIds([workspaceDeletionTarget]).reduce(
+		const memberIds = workspaceDiskUsageIds([workspaceDeletionTarget]);
+		if (!memberIds.some((workspaceId) => workspaceId in completedDiskUsage.bytesByWorkspaceId)) {
+			return null;
+		}
+		return memberIds.reduce(
 			(total, workspaceId) =>
 				total + (completedDiskUsage.bytesByWorkspaceId[workspaceId] ?? 0),
 			0,
@@ -1623,6 +1700,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						recapBlockedCount={
 							attentionItems.filter((item) => RECAP_BLOCKING_REASONS.has(item.reason)).length
 						}
+						cleanup={reporterCleanup}
 					/>
 				)}
 
@@ -2076,6 +2154,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						return repository ? repositoryDisplayName(repository) : undefined;
 					}}
 					onDeleteWorkspace={onDeleteWorkspace}
+					onCleaned={dismissCleanupAlert}
 				/>
 			) : null}
 

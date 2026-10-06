@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { agentsActivityRecap } from "@/lib/agents-api";
@@ -66,28 +67,37 @@ export function ChroniclerRecapBubble({
 	return (
 		// A count that arrives late (blockers load after the recap) extends
 		// the text, and the typing carries on from where it was.
-		<RecapThought
+		<ReporterThought
 			name={name}
 			text={text}
-			openLabel={t("agents.recap.bubble.open")}
 			dismissLabel={t("agents.offer.dismiss")}
-			onOpen={onOpen}
-		/>
+			onDismiss={dismissDailyRecapBubble}
+		>
+			<Button type="button" size="sm" onClick={onOpen}>
+				<span>{t("agents.recap.bubble.open")}</span>
+			</Button>
+		</ReporterThought>
 	);
 }
 
-function RecapThought({
+/**
+ * A thought rising to the reporter's mascot in the row above: dots, the text
+ * written out, then a close button and the given actions.
+ */
+export function ReporterThought({
 	name,
 	text,
-	openLabel,
 	dismissLabel,
-	onOpen,
+	dismissDisabled = false,
+	onDismiss,
+	children,
 }: {
 	name: string;
 	text: string;
-	openLabel: string;
 	dismissLabel: string;
-	onOpen: () => void;
+	dismissDisabled?: boolean;
+	onDismiss: () => void;
+	children: ReactNode;
 }) {
 	const { typed, thinking, ready } = useThoughtTyping(text);
 	return (
@@ -114,19 +124,18 @@ function RecapThought({
 					</p>
 				)}
 				{ready && (
-					<span className="dcc-agent-offer-actions mt-1.5 flex items-center justify-end gap-1">
+					<span className="dcc-agent-offer-actions mt-1.5 flex flex-wrap items-center justify-end gap-1">
 						<Button
 							type="button"
 							variant="ghost"
 							size="icon-sm"
 							aria-label={dismissLabel}
-							onClick={dismissDailyRecapBubble}
+							disabled={dismissDisabled}
+							onClick={onDismiss}
 						>
 							<X className="size-3.5" />
 						</Button>
-						<Button type="button" size="sm" onClick={onOpen}>
-							<span>{openLabel}</span>
-						</Button>
+						{children}
 					</span>
 				)}
 			</div>

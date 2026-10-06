@@ -6,6 +6,7 @@ import { Fragment } from "react";
 import { AgentAvatar } from "./agent-avatar";
 import { ChroniclerRecapBubble, useRecapBubbleText } from "./chronicler-recap-bubble";
 import { isRecapBubbleVisible, useDailyRecap } from "./daily-recap";
+import { type ReporterCleanupAlert, ReporterCleanupBubble } from "./reporter-cleanup-bubble";
 import type { AgentView } from "./use-agents";
 
 /** Resident agents in the sidebar: one compact row each, above the projects. */
@@ -15,6 +16,7 @@ export function AgentsSidebarSection({
 	collapsed = false,
 	onOpenAgent,
 	recapBlockedCount = 0,
+	cleanup,
 }: {
 	agents: AgentView[];
 	activeAgentId: string | null;
@@ -22,6 +24,13 @@ export function AgentsSidebarSection({
 	onOpenAgent: (agentId: string) => void;
 	/** Tasks blocked on the person now, for the chronicler's bubble. */
 	recapBlockedCount?: number;
+	/** Completed tasks over the person's limit, for the reporter to point at. */
+	cleanup?: {
+		alert: ReporterCleanupAlert;
+		onReview: () => void;
+		onCleanSafe: () => void;
+		onDismiss: () => void;
+	} | null;
 }) {
 	const { t } = useTranslation("common");
 	const recap = useDailyRecap();
@@ -67,7 +76,14 @@ export function AgentsSidebarSection({
 			<div className="space-y-px">
 				{agents.map((agent) => {
 					const active = activeAgentId === agent.id;
-					const speaking = agent.preset === "chronicler" && recapText !== null;
+					const isReporter = agent.preset === "chronicler";
+					// One thought at a time: the recap first, unless a cleanup is under way.
+					const cleanupBubble =
+						isReporter && cleanup && (recapText === null || cleanup.alert.progress)
+							? cleanup
+							: null;
+					const recapBubble = isReporter && !cleanupBubble ? recapText : null;
+					const speaking = Boolean(cleanupBubble || recapBubble);
 					return (
 						<Fragment key={agent.id}>
 							<button
@@ -105,11 +121,20 @@ export function AgentsSidebarSection({
 									</span>
 								)}
 							</button>
-							{speaking && recapText && (
+							{recapBubble && (
 								<ChroniclerRecapBubble
 									name={agent.name}
-									text={recapText}
+									text={recapBubble}
 									onOpen={() => onOpenAgent(agent.id)}
+								/>
+							)}
+							{cleanupBubble && (
+								<ReporterCleanupBubble
+									name={agent.name}
+									alert={cleanupBubble.alert}
+									onReview={cleanupBubble.onReview}
+									onCleanSafe={cleanupBubble.onCleanSafe}
+									onDismiss={cleanupBubble.onDismiss}
 								/>
 							)}
 						</Fragment>

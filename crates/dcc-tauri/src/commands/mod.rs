@@ -64,7 +64,7 @@ pub use workspace_commands::{
     list_workspaces, mission_spec_context_status, rename_workspace, resolve_workspace_source_url,
     restore_workspace, restore_workspace_bundle, save_mission_validation, set_repository_pinned,
     set_workspace_pinned, update_repository_identity, workspace_continue_from_base_branch,
-    workspace_delivery_recovery_execute, workspace_disk_usage, workspace_git_abort_merge,
+    workspace_delivery_recovery_execute, workspace_git_abort_merge,
     workspace_git_accept_conflict, workspace_git_commit, workspace_git_commit_push,
     workspace_git_commit_suggestion, workspace_git_complete_merge, workspace_git_conflict_state,
     workspace_git_discard_file, workspace_git_file_preview, workspace_git_file_preview_content,

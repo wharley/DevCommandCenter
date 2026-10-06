@@ -19,7 +19,7 @@ use dcc_tauri::{
         UpdateRepositoryIdentityInput, WorkspaceApplyDelegationWorktreeInput,
         WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
-        WorkspaceDiskUsageInput, WorkspaceDiskUsageOutput, WorkspaceGitAcceptConflictInput,
+        WorkspaceGitAcceptConflictInput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitCommitPushInput,
         WorkspaceGitCompleteMergeInput, WorkspaceGitCompleteMergeOutput,
         WorkspaceGitConflictStateInput, WorkspaceGitConflictStateOutput,
@@ -522,14 +522,6 @@ pub async fn restore_workspace(
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
     dcc_tauri::commands::workspace_commands::restore_workspace(state, input).await
-}
-
-#[tauri::command]
-pub async fn workspace_disk_usage(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceDiskUsageInput,
-) -> Result<WorkspaceDiskUsageOutput, String> {
-    dcc_tauri::commands::workspace_commands::workspace_disk_usage(state, input).await
 }
 
 #[tauri::command]

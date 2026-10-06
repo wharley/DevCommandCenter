@@ -66,3 +66,45 @@ export function selectedCleanupBytes(
 		0,
 	);
 }
+
+export type CompletedCleanupSummary = {
+	/** Tasks safe to delete that free space. */
+	safeCount: number;
+	safeBytes: number;
+};
+
+export function completedCleanupSummary(
+	rows: readonly CompletedCleanupRow[],
+): CompletedCleanupSummary {
+	const safe = rows.filter(isPreselectedForCleanup);
+	return {
+		safeCount: safe.length,
+		safeBytes: safe.reduce((total, row) => total + row.bytes, 0),
+	};
+}
+
+/**
+ * Deletes tasks one at a time, the way a single delete does, and carries on
+ * past a failure so one stuck task does not hold back the rest.
+ */
+export async function deleteCompletedTasks(
+	rows: readonly CompletedCleanupRow[],
+	deleteOne: (workspaceId: string) => void | Promise<void>,
+	onProgress?: (progress: { done: number; total: number; deletedId?: string }) => void,
+): Promise<{ freedBytes: number; failed: number }> {
+	let freedBytes = 0;
+	let failed = 0;
+	for (const [index, row] of rows.entries()) {
+		let deletedId: string | undefined;
+		try {
+			await deleteOne(row.workspace.id);
+			freedBytes += row.bytes;
+			deletedId = row.workspace.id;
+		} catch (error) {
+			failed += 1;
+			console.warn("[dcc] failed to delete completed task", error);
+		}
+		onProgress?.({ done: index + 1, total: rows.length, deletedId });
+	}
+	return { freedBytes, failed };
+}

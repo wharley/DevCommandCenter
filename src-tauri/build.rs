@@ -310,8 +310,7 @@ use dcc_tauri::commands::{
         SetWorkspacePinnedInput, SetWorkspaceSnoozeInput, UpdateRepositoryIdentityInput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
-        WorkspaceContinueFromBaseBranchOutput, WorkspaceDeliveryPolicy, WorkspaceDiskUsageEntry,
-        WorkspaceDiskUsageInput, WorkspaceDiskUsageOutput, WorkspaceGitAcceptConflictInput,
+        WorkspaceContinueFromBaseBranchOutput, WorkspaceDeliveryPolicy, WorkspaceGitAcceptConflictInput,
         WorkspaceGitBranchDiffInput, WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry,
         WorkspaceGitCommitPushInput, WorkspaceGitCommitSuggestionInput,
         WorkspaceGitCommitSuggestionOutput, WorkspaceGitCompleteMergeInput,
@@ -457,7 +456,6 @@ struct WorkspaceMethods {
     restore_workspace_bundle: String,
     delete_workspace_bundle: String,
     delete_workspace: String,
-    workspace_disk_usage: String,
     workspace_cleanup_scan: String,
     delete_repository: String,
     update_repository_identity: String,
@@ -915,9 +913,6 @@ fn main() {
         .typ::<WorkspacePrepareDelegationWorktreeInput>()
         .typ::<WorkspacePrepareDelegationWorktreeOutput>()
         .typ::<WorkspaceRemoveDelegationWorktreeInput>()
-        .typ::<WorkspaceDiskUsageInput>()
-        .typ::<WorkspaceDiskUsageEntry>()
-        .typ::<WorkspaceDiskUsageOutput>()
         .typ::<WorkspaceCleanupSafety>()
         .typ::<WorkspaceCleanupScanInput>()
         .typ::<WorkspaceCleanupEntry>()
@@ -1103,7 +1098,6 @@ fn main() {
                 restore_workspace_bundle: "restore_workspace_bundle".to_string(),
                 delete_workspace_bundle: "delete_workspace_bundle".to_string(),
                 delete_workspace: "delete_workspace".to_string(),
-                workspace_disk_usage: "workspace_disk_usage".to_string(),
                 workspace_cleanup_scan: "workspace_cleanup_scan".to_string(),
                 delete_repository: "delete_repository".to_string(),
                 update_repository_identity: "update_repository_identity".to_string(),

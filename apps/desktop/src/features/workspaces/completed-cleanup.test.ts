@@ -2,6 +2,8 @@ import type { WorkspaceCleanupEntry, WorkspaceCleanupSafety } from "@dcc/contrac
 import { describe, expect, it } from "vitest";
 import {
 	completedCleanupRows,
+	completedCleanupSummary,
+	deleteCompletedTasks,
 	isPreselectedForCleanup,
 	selectedCleanupBytes,
 } from "./completed-cleanup";
@@ -76,5 +78,34 @@ describe("cleanup selection", () => {
 			[entry("a", 100, "safe"), entry("b", 40, "safe"), entry("c", 7, "safe")],
 		);
 		expect(selectedCleanupBytes(rows, new Set(["a", "c"]))).toBe(107);
+	});
+});
+
+describe("completedCleanupSummary", () => {
+	it("counts only safe tasks that free space", () => {
+		const rows = completedCleanupRows(
+			[workspace("a"), workspace("b"), workspace("c")],
+			[entry("a", 100, "safe"), entry("b", 0, "safe"), entry("c", 70, "unpushed")],
+		);
+		expect(completedCleanupSummary(rows)).toEqual({ safeCount: 1, safeBytes: 100 });
+	});
+});
+
+describe("deleteCompletedTasks", () => {
+	it("carries on past a failure and reports what it freed", async () => {
+		const rows = completedCleanupRows(
+			[workspace("a"), workspace("b"), workspace("c")],
+			[entry("a", 300, "safe"), entry("b", 200, "safe"), entry("c", 100, "safe")],
+		);
+		const progress: Array<string | undefined> = [];
+		const result = await deleteCompletedTasks(
+			rows,
+			async (id) => {
+				if (id === "b") throw new Error("busy");
+			},
+			({ deletedId }) => progress.push(deletedId),
+		);
+		expect(result).toEqual({ freedBytes: 400, failed: 1 });
+		expect(progress).toEqual(["a", undefined, "c"]);
 	});
 });

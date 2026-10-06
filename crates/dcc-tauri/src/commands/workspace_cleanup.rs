@@ -61,6 +61,8 @@ pub struct WorkspaceCleanupEntry {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCleanupScanOutput {
     pub workspaces: Vec<WorkspaceCleanupEntry>,
+    /// Every distinct worktree counted once, even when tasks share one.
+    pub total_bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -198,7 +200,14 @@ pub async fn workspace_cleanup_scan(
                 unpushed_commits: verdict.unpushed_commits,
             });
         }
-        Ok(WorkspaceCleanupScanOutput { workspaces })
+        let total_bytes = measured
+            .values()
+            .map(|(bytes, _)| *bytes)
+            .fold(0_u64, u64::saturating_add);
+        Ok(WorkspaceCleanupScanOutput {
+            workspaces,
+            total_bytes,
+        })
     })
     .await
     .map_err(|error| format!("failed to inspect completed worktrees: {error}"))?

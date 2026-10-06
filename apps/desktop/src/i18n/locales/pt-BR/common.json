@@ -297,11 +297,26 @@
         "open": "Ver resumo"
       }
     },
+    "cleanup": {
+      "bubble": {
+        "safe_one": "Suas concluídas ocupam {{total}}. {{count}} dá para apagar com segurança ({{safe}}).",
+        "safe_other": "Suas concluídas ocupam {{total}}. {{count}} dá para apagar com segurança ({{safe}}).",
+        "noneSafe": "Suas concluídas ocupam {{total}}, mas nenhuma está pronta para apagar com segurança.",
+        "review": "Revisar",
+        "cleanSafe": "Limpar as seguras",
+        "checking": "Verificando…",
+        "cleaning": "Limpando {{done}} de {{total}}…",
+        "nothingSafe": "Nada está pronto para apagar com segurança agora."
+      }
+    },
     "editor": {
       "extra": "Instruções extras",
       "extraHint": "Somadas ao papel do DCC a cada turno. Exemplo: convenções do seu projeto ou pastas a ignorar.",
       "offerSwitch": "Oferecer ao terminar um turno",
       "offerSwitchHint": "Quando um turno termina com mudanças, o agente aparece acima do composer perguntando se pode agir.",
+      "cleanupSwitch": "Avisar quando as concluídas ocuparem muito espaço",
+      "cleanupSwitchHint": "O Repórter mostra quanto dá para liberar. Ele só apaga quando você pede, e só o que já está commitado e publicado.",
+      "cleanupThreshold": "Avisar a partir de",
       "name": "Nome",
       "avatar": "Avatar",
       "colors": {
@@ -3042,10 +3057,11 @@
           "Quando há um resumo novo, o Repórter avisa num balão abaixo dele na seção [Agentes] da barra lateral. Clique em [Ver resumo].",
           "Ou abra o [Repórter] em [Agentes] a qualquer momento para ver o resumo atual.",
           "Comece por [Travado agora]: são as tarefas que esperam por você, com o tempo desde quando estão paradas. Depois veja [Andou], [Concluídas] e [Novas].",
-          "Clique numa tarefa do resumo para abri-la e retomar dali."
+          "Clique numa tarefa do resumo para abri-la e retomar dali.",
+          "Se as concluídas passarem do limite que você escolhe em [Editar], o Repórter avisa quanto elas ocupam. [Revisar] abre a lista e [Limpar as seguras] apaga só as que estão commitadas e publicadas."
         ],
         "tip": "Um resumo novo começa na primeira abertura depois das 4h e cobre tudo desde o anterior.",
-        "keywords": "agentes do dcc agente repórter resumo diário recap o que andou travado concluídas novas manhã retomar"
+        "keywords": "agentes do dcc agente repórter resumo diário recap o que andou travado concluídas novas manhã retomar espaço disco limpar faxina worktrees liberar"
       },
       "terminal": {
         "label": "Terminal",

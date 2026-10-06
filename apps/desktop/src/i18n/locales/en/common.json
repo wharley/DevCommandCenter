@@ -297,11 +297,26 @@
         "open": "See recap"
       }
     },
+    "cleanup": {
+      "bubble": {
+        "safe_one": "Your completed tasks take {{total}}. {{count}} can be deleted safely ({{safe}}).",
+        "safe_other": "Your completed tasks take {{total}}. {{count}} can be deleted safely ({{safe}}).",
+        "noneSafe": "Your completed tasks take {{total}}, but none is ready to delete safely.",
+        "review": "Review",
+        "cleanSafe": "Clean up the safe ones",
+        "checking": "Checking…",
+        "cleaning": "Cleaning {{done}} of {{total}}…",
+        "nothingSafe": "Nothing is ready to delete safely right now."
+      }
+    },
     "editor": {
       "extra": "Extra instructions",
       "extraHint": "Added to DCC's role on every turn. For example: your project's conventions or folders to ignore.",
       "offerSwitch": "Offer after a turn",
       "offerSwitchHint": "When a turn ends with changes, the agent appears above the composer asking whether it may act.",
+      "cleanupSwitch": "Warn when completed tasks take a lot of space",
+      "cleanupSwitchHint": "The Reporter shows how much can be freed. It only deletes when you ask, and only what is already committed and pushed.",
+      "cleanupThreshold": "Warn from",
       "name": "Name",
       "avatar": "Avatar",
       "colors": {
@@ -3042,10 +3057,11 @@
           "When there is a new recap, the Reporter tells you in a bubble under it in the [Agents] section of the sidebar. Select [See recap].",
           "Or open the [Reporter] in [Agents] at any time to see the current recap.",
           "Start with [Blocked now]: these are the tasks waiting on you, with how long they have been stuck. Then look at [Moved], [Completed] and [New].",
-          "Select a task in the recap to open it and pick up from there."
+          "Select a task in the recap to open it and pick up from there.",
+          "If completed tasks pass the limit you choose in [Edit], the Reporter tells you how much they take. [Review] opens the list and [Clean up the safe ones] deletes only those already committed and pushed."
         ],
         "tip": "A new recap starts at the first opening after 4am and covers everything since the previous one.",
-        "keywords": "dcc agents agent reporter daily recap summary what moved blocked completed new morning pick up"
+        "keywords": "dcc agents agent reporter daily recap summary what moved blocked completed new morning pick up space disk clean up worktrees free"
       },
       "terminal": {
         "label": "Terminal",

@@ -137,8 +137,6 @@ import type {
 	WorkspaceBundleStateOutput,
 	WorkspaceCleanupScanInput,
 	WorkspaceCleanupScanOutput,
-	WorkspaceDiskUsageInput,
-	WorkspaceDiskUsageOutput,
 	WorkspaceSourceUrlResolution,
 	Repository,
 	Workspace,
@@ -185,12 +183,6 @@ export function completeWorkspace(workspaceId: string) {
 
 export function restoreWorkspace(workspaceId: string) {
 	return invoke<void>(WORKSPACE_METHODS.restoreWorkspace, { input: { workspaceId } });
-}
-
-export function workspaceDiskUsage(input: WorkspaceDiskUsageInput) {
-	return invoke<WorkspaceDiskUsageOutput>(WORKSPACE_METHODS.workspaceDiskUsage, {
-		input,
-	});
 }
 
 /** Size and delete-safety of each completed task's worktree. */

@@ -28,6 +28,13 @@ import { getEffortDisplay } from "@/features/composer/effort";
 import { AgentAvatar } from "./agent-avatar";
 import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { AgentExecutionPicker, agentEffortForModel } from "./agent-execution-picker";
+import {
+	MAX_CLEANUP_THRESHOLD_GB,
+	MIN_CLEANUP_THRESHOLD_GB,
+	clampCleanupThresholdGb,
+	readCleanupAlert,
+	setCleanupAlertSettings,
+} from "./cleanup-alert";
 import { DailyRecapCard } from "./daily-recap-card";
 import { requestOpenPullRequest } from "./pr-review-jobs";
 import { AGENTS_QUERY_KEY, type AgentSessionView, type AgentView } from "./use-agents";
@@ -89,6 +96,11 @@ function AgentEditorDialog({
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
 	const [draft, setDraft] = useState<ResidentAgentDraft>(agent);
+	// The reporter's cleanup alert lives in this browser profile, beside the recap.
+	const [cleanupAlert, setCleanupAlert] = useState(() => {
+		const stored = readCleanupAlert();
+		return { enabled: stored.enabled, thresholdGb: String(stored.thresholdGb) };
+	});
 	// Load the stored values when the dialog opens, and only then: the agent
 	// object is rebuilt whenever its sessions change, which must not wipe what
 	// the person is typing.
@@ -108,11 +120,22 @@ function AgentEditorDialog({
 			effort: stored.effort,
 			avatar: stored.avatar,
 		});
+		const storedAlert = readCleanupAlert();
+		setCleanupAlert({
+			enabled: storedAlert.enabled,
+			thresholdGb: String(storedAlert.thresholdGb),
+		});
 	}, [open]);
 
 	const save = useMutation({
 		mutationFn: () => saveAgent(agent.id, draft),
 		onSuccess: async () => {
+			if (agent.preset === "chronicler") {
+				setCleanupAlertSettings({
+					enabled: cleanupAlert.enabled,
+					thresholdGb: clampCleanupThresholdGb(Number(cleanupAlert.thresholdGb)),
+				});
+			}
 			await queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
 			onOpenChange(false);
 		},
@@ -208,6 +231,43 @@ function AgentEditorDialog({
 									setDraft({ ...draft, offerPrompt: checked ? t("agents.presets.reviewerOffer") : "" })
 								}
 							/>
+						</div>
+					)}
+					{agent.preset === "chronicler" && (
+						<div className="space-y-2">
+							<div className="flex items-center justify-between gap-4">
+								<div className="space-y-1">
+									<div className="text-[12px] font-medium text-foreground">
+										{t("agents.editor.cleanupSwitch")}
+									</div>
+									<p className="text-[11px] leading-relaxed text-muted-foreground">
+										{t("agents.editor.cleanupSwitchHint")}
+									</p>
+								</div>
+								<Switch
+									aria-label={t("agents.editor.cleanupSwitch")}
+									checked={cleanupAlert.enabled}
+									onCheckedChange={(enabled) => setCleanupAlert({ ...cleanupAlert, enabled })}
+								/>
+							</div>
+							{cleanupAlert.enabled && (
+								<label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+									<span>{t("agents.editor.cleanupThreshold")}</span>
+									<Input
+										type="number"
+										inputMode="numeric"
+										min={MIN_CLEANUP_THRESHOLD_GB}
+										max={MAX_CLEANUP_THRESHOLD_GB}
+										step={1}
+										value={cleanupAlert.thresholdGb}
+										onChange={(event) =>
+											setCleanupAlert({ ...cleanupAlert, thresholdGb: event.target.value })
+										}
+										className="h-8 w-20 tabular-nums"
+									/>
+									<span>GB</span>
+								</label>
+							)}
 						</div>
 					)}
 				</div>
