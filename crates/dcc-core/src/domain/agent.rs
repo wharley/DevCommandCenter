@@ -26,7 +26,11 @@ pub const AGENT_AVATAR_MIN_ARMS: u8 = 3;
 pub const AGENT_AVATAR_MAX_ARMS: u8 = 5;
 pub const REVIEWER_PRESET: &str = "reviewer";
 pub const RESEARCHER_PRESET: &str = "researcher";
+/// Shown as the Reporter; the preset keeps the id it was first stored with.
 pub const CHRONICLER_PRESET: &str = "chronicler";
+/// Names the reporter was seeded with before it was renamed; still the
+/// factory name, so the person never chose them.
+pub const CHRONICLER_FORMER_NAMES: &[&str] = &["Cronista", "Chronicler"];
 
 const AGENT_TAG: &str = "dcc_agent_role";
 
@@ -348,10 +352,10 @@ impl ResidentAgentDraft {
         }
     }
 
-    /// The built-in chronicler, with its name in the person's language.
+    /// The built-in reporter (`chronicler` preset), with its name in the person's language.
     pub fn chronicler(text: &ChroniclerPresetText) -> Self {
         Self {
-            name: ReviewerPresetText::or_default(&text.name, "Chronicler"),
+            name: ReviewerPresetText::or_default(&text.name, "Reporter"),
             role: CHRONICLER_ROLE.to_string(),
             kickoff_prompt: String::new(),
             offer_prompt: String::new(),
@@ -653,17 +657,17 @@ mod tests {
     #[test]
     fn chronicler_preset_owns_its_role_and_never_offers() {
         let draft = ResidentAgentDraft::chronicler(&ChroniclerPresetText {
-            name: " Cronista ".to_string(),
+            name: " Repórter ".to_string(),
         })
         .normalized()
         .unwrap();
-        assert_eq!(draft.name, "Cronista");
+        assert_eq!(draft.name, "Repórter");
         assert_eq!(draft.role, CHRONICLER_ROLE);
         assert_eq!(draft.kickoff_prompt, "");
         assert_eq!(draft.offer_prompt, "");
         assert_eq!(
             ResidentAgentDraft::chronicler(&ChroniclerPresetText::default()).name,
-            "Chronicler"
+            "Reporter"
         );
         assert_ne!(
             draft.avatar,

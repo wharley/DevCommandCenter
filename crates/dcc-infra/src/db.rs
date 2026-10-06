@@ -16,7 +16,8 @@ use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
 
 use dcc_core::domain::agent::{
     AgentAvatar, ChroniclerPresetText, ResearcherPresetText, ResidentAgent, ResidentAgentDraft,
-    ReviewerPresetText, CHRONICLER_PRESET, RESEARCHER_PRESET, REVIEWER_OFFER, REVIEWER_PRESET,
+    ReviewerPresetText, CHRONICLER_FORMER_NAMES, CHRONICLER_PRESET, RESEARCHER_PRESET,
+    REVIEWER_OFFER, REVIEWER_PRESET,
 };
 use dcc_core::domain::objective::{ObjectivePauseReason, ObjectiveStatus, SessionObjective};
 use dcc_core::{
@@ -6982,6 +6983,22 @@ impl SqliteSessionRepo {
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         }
+        // The reporter was seeded as "Cronista"/"Chronicler" first. A name
+        // still equal to a former factory name was never chosen by the
+        // person, so it takes the current one; an edited name stays.
+        let reporter_name = ResidentAgentDraft::chronicler(chronicler).name;
+        for former in CHRONICLER_FORMER_NAMES {
+            conn.execute(
+                "UPDATE dcc_agents SET name = ?1, updated_at = ?2 WHERE preset = ?3 AND name = ?4 AND deleted_at IS NULL",
+                params![
+                    reporter_name,
+                    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+                    CHRONICLER_PRESET,
+                    former
+                ],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
         let mut statement = conn
             .prepare(&format!(
                 "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY a.created_at, CASE a.preset WHEN 'reviewer' THEN 0 WHEN 'researcher' THEN 1 WHEN 'chronicler' THEN 2 ELSE 3 END, a.id",
@@ -13730,7 +13747,7 @@ mod tests {
         assert_eq!(agents[1].offer_prompt, "");
         // The chronicler comes third and never offers either.
         assert_eq!(agents[2].preset.as_deref(), Some("chronicler"));
-        assert_eq!(agents[2].name, "Chronicler");
+        assert_eq!(agents[2].name, "Reporter");
         assert_eq!(agents[2].role, CHRONICLER_ROLE);
         assert_eq!(agents[2].offer_prompt, "");
         assert_eq!(agents[0].kickoff_prompt, "Revise.");
@@ -13822,6 +13839,46 @@ mod tests {
         assert_eq!(agents[0].preset.as_deref(), Some("researcher"));
         assert_eq!(agents[1].preset.as_deref(), Some("chronicler"));
         assert_eq!(agents[2].id, docs.id);
+    }
+
+    #[test]
+    fn reporter_takes_its_new_name_unless_the_person_renamed_it() {
+        use dcc_core::domain::agent::{
+            ChroniclerPresetText, ResearcherPresetText, ReviewerPresetText,
+        };
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        let list = |name: &str| {
+            repo.list_resident_agents(
+                &ReviewerPresetText::default(),
+                &ResearcherPresetText::default(),
+                &ChroniclerPresetText {
+                    name: name.to_string(),
+                },
+            )
+            .unwrap()
+            .into_iter()
+            .find(|agent| agent.preset.as_deref() == Some("chronicler"))
+            .unwrap()
+        };
+        let reporter = list("Repórter");
+        let set_name = |name: &str| {
+            repo.conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE dcc_agents SET name = ?1 WHERE id = ?2",
+                    params![name, reporter.id],
+                )
+                .unwrap();
+        };
+        // Seeded under the former factory name.
+        set_name("Cronista");
+        assert_eq!(list("Repórter").name, "Repórter");
+        set_name("Chronicler");
+        assert_eq!(list("Reporter").name, "Reporter");
+        // A name the person chose is theirs.
+        set_name("Diário");
+        assert_eq!(list("Repórter").name, "Diário");
     }
 
     #[test]

@@ -232,7 +232,7 @@
       "reviewerKickoff": "Revise as mudanças atuais desta tarefa.",
       "reviewer": "Revisor",
       "researcher": "Pesquisador",
-      "chronicler": "Cronista"
+      "chronicler": "Repórter"
     },
     "state": {
       "failed": "Falhou",
@@ -2988,10 +2988,10 @@
           "Depois da correção, chame o Revisor de novo. Ele continua na mesma conversa, confere os achados anteriores e só traz algo novo se bloquear o commit.",
           "Em [Pull Requests], na aba [Código], ele revisa o PR a partir do diff e deixa rascunhos de comentários. Você pode sair da tela: a seção [Agentes] da barra lateral avisa quando terminar.",
           "Em [Agentes], abra o [Revisor] e clique em [Editar] para escolher o provider e o modelo, somar [Instruções extras] ou desligar [Oferecer ao terminar um turno].",
-          "Em [Agentes], abra o [Cronista] para ver o que andou desde o último resumo: o que está travado agora, as tarefas que andaram, as concluídas e as novas. Um resumo novo começa na primeira abertura depois das 4h e não usa modelo."
+          "Em [Agentes], abra o [Repórter] para ver o que andou desde o último resumo: o que está travado agora, as tarefas que andaram, as concluídas e as novas. Um resumo novo começa na primeira abertura depois das 4h e não usa modelo."
         ],
         "prompt": "Neste projeto, trate como achado importante qualquer consulta ao banco sem índice e ignore a pasta vendor.",
-        "keywords": "agente revisor review revisão achados mascote polvo balão oferta autor corrigir pull request cronista resumo diário"
+        "keywords": "agente revisor review revisão achados mascote polvo balão oferta autor corrigir pull request repórter resumo diário"
       },
       "terminal": {
         "label": "Terminal",
