@@ -152,6 +152,7 @@
   "agents": {
     "review": {
       "noAuthor": "There is no author agent conversation in this task to receive the finding.",
+      "noAuthorForChange": "This conversation belongs to the Reviewer, which does not change code. Open a conversation in this task to ask for the change.",
       "fileCount_one": "{{count}} finding",
       "fileCount_other": "{{count}} findings",
       "clean": "No findings. Nothing blocks the commit.",

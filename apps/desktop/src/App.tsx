@@ -127,6 +127,7 @@ import {
 } from "./features/agents/use-agents";
 import { bindSessionAgent } from "./lib/agents-api";
 import { buildFollowUpKickoff } from "./features/agents/review-findings";
+import { codeChangeSessionId } from "./features/agents/finding-to-author-command";
 import { loadLatestReview } from "./features/agents/use-reviewer-findings";
 import { subscribeCallAgent } from "./features/agents/call-agent-command";
 import { useIdeas } from "./features/agents/use-ideas";
@@ -4250,19 +4251,40 @@ export default function App() {
 	);
 
 	const handlePrefillComposer = useCallback(
-		(text: string, sessionId?: string | null) => {
+		(text: string, sessionId?: string | null): boolean => {
 			if (!selectedWorkspace || text.trim().length === 0) {
-				return;
+				return false;
+			}
+			// Without a target (the inspector: conflicts, failures, findings) the
+			// request changes code, so it never lands in the Reviewer's conversation.
+			let targetSessionId = sessionId;
+			if (
+				targetSessionId === undefined &&
+				effectiveSelectedSessionId &&
+				agentBySessionId.has(effectiveSelectedSessionId)
+			) {
+				const authorId = codeChangeSessionId(
+					effectiveSelectedSessionId,
+					visibleWorkspaceSessions,
+					(id) => agentBySessionId.has(id),
+				);
+				if (!authorId) {
+					toast.info(t("agents.review.noAuthorForChange"));
+					return false;
+				}
+				targetSessionId = authorId;
+				setSelectedSessionId(authorId);
 			}
 			workspaceComposerPrefillSequenceRef.current += 1;
 			setWorkspaceComposerPrefill({
 				workspaceId: selectedWorkspace.id,
-				sessionId,
+				sessionId: targetSessionId,
 				text,
 				nonce: workspaceComposerPrefillSequenceRef.current,
 			});
+			return true;
 		},
-		[selectedWorkspace],
+		[agentBySessionId, effectiveSelectedSessionId, selectedWorkspace, t, visibleWorkspaceSessions],
 	);
 
 	const handleComposerPrefillConsumed = useCallback(

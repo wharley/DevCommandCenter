@@ -101,6 +101,20 @@ export function authorSessionId(
 	return latest?.session.id ?? null;
 }
 
+/**
+ * Where a request to change code goes: the open conversation, unless it
+ * belongs to a resident agent (the Reviewer only reviews), in which case
+ * the author's conversation.
+ */
+export function codeChangeSessionId(
+	selectedSessionId: string | null,
+	sessions: SessionLike[],
+	isAgentSession: (sessionId: string) => boolean,
+): string | null {
+	if (selectedSessionId && !isAgentSession(selectedSessionId)) return selectedSessionId;
+	return authorSessionId(sessions, isAgentSession);
+}
+
 export type FixRequestLabels = {
 	/** "Fix this Reviewer finding" */
 	one: string;

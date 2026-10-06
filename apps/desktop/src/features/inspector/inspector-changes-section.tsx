@@ -1032,7 +1032,7 @@ type InspectorChangesSectionProps = {
 	sessionId: string | null;
 	selectedPreview: WorkspaceGitPreviewSelection | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
-	onPrefillComposer?: (text: string) => void;
+	onPrefillComposer?: (text: string) => boolean;
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
 	targetSessionId?: string | null;
 	onOpenExpandedPreview?: (selection?: WorkspaceGitPreviewSelection) => void;

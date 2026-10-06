@@ -152,6 +152,7 @@
   "agents": {
     "review": {
       "noAuthor": "Não há uma conversa do agente autor nesta tarefa para receber o achado.",
+      "noAuthorForChange": "Esta conversa é do Revisor, que não altera código. Abra uma conversa nesta tarefa para pedir a mudança.",
       "fileCount_one": "{{count}} achado",
       "fileCount_other": "{{count}} achados",
       "clean": "Nenhum achado. Nada bloqueia o commit.",

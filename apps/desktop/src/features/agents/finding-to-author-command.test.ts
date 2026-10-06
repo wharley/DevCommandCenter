@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	authorSessionId,
 	buildFixRequest,
+	codeChangeSessionId,
 	findingSnippet,
 	type FindingForAuthor,
 } from "./finding-to-author-command";
@@ -40,6 +41,19 @@ describe("finding to author", () => {
 		expect(authorSessionId(sessions, (id) => id === "reviewer")).toBe("author");
 		expect(authorSessionId(sessions.slice(1, 2), (id) => id === "reviewer")).toBeNull();
 		expect(authorSessionId([{ session: { id: "fresh" } }], () => false)).toBe("fresh");
+	});
+
+	it("keeps code changes away from the Reviewer's conversation", () => {
+		const sessions = [
+			{ session: { id: "reviewer" }, lastTurnStartedAt: "2026-10-01T12:00:00Z" },
+			{ session: { id: "author" }, lastTurnStartedAt: "2026-10-01T11:00:00Z" },
+			{ session: { id: "other" }, lastTurnStartedAt: "2026-10-01T10:00:00Z" },
+		];
+		const isAgent = (id: string) => id === "reviewer";
+		expect(codeChangeSessionId("other", sessions, isAgent)).toBe("other");
+		expect(codeChangeSessionId("reviewer", sessions, isAgent)).toBe("author");
+		expect(codeChangeSessionId(null, sessions, isAgent)).toBe("author");
+		expect(codeChangeSessionId("reviewer", sessions.slice(0, 1), isAgent)).toBeNull();
 	});
 
 	it("sends the reviewer's explanation, not just the title", () => {

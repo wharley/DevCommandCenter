@@ -54,7 +54,7 @@ type CodeRabbitReviewSectionProps = {
 	unstaged: WorkspaceGitChangeEntry[];
 	baseBranch?: string | null;
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection) => void;
-	onPrefillComposer?: (text: string) => void;
+	onPrefillComposer?: (text: string) => boolean;
 };
 
 const REVIEW_TYPES: CodeRabbitReviewType[] = ["all", "uncommitted", "committed"];
@@ -482,7 +482,7 @@ export function CodeRabbitReviewSection({
 		if (!onPrefillComposer || selectedFindings.length === 0 || !review) {
 			return;
 		}
-		onPrefillComposer(
+		const delivered = onPrefillComposer(
 			buildCodeRabbitComposerPrompt({
 				findings: selectedFindings,
 				reviewType: review.reviewType,
@@ -490,6 +490,7 @@ export function CodeRabbitReviewSection({
 				isStale,
 			}),
 		);
+		if (!delivered) return;
 		toast.success(
 			t("inspector.codeRabbit.sentToComposer", {
 				count: selectedFindings.length,

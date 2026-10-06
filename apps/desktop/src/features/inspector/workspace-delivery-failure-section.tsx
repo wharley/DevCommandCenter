@@ -44,7 +44,7 @@ export function WorkspaceDeliveryFailureSection({
 	branch: string | null;
 	forgeLogin: string | null;
 	enabled: boolean;
-	onPrefillComposer?: (text: string) => void;
+	onPrefillComposer?: (text: string) => boolean;
 }) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -116,10 +116,12 @@ export function WorkspaceDeliveryFailureSection({
 			});
 
 			if (action === "send-to-agent") {
-				onPrefillComposer?.(
+				const delivered = onPrefillComposer?.(
 					buildDeliveryFailureComposerPrompt(result.snapshot),
 				);
-				toast.success(t("inspector.deliveryFailure.sentToAgent"));
+				if (delivered) {
+					toast.success(t("inspector.deliveryFailure.sentToAgent"));
+				}
 			} else if (action === "open-external") {
 				if (!result.snapshot.externalUrl) {
 					throw new Error(t("inspector.deliveryFailure.externalUnavailable"));

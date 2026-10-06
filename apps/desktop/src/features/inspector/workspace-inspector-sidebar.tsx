@@ -205,7 +205,7 @@ type WorkspaceInspectorSidebarProps = {
 	onCloseTurnReview?: () => void;
 	reviewDelegationRequest?: { delegationId: string; nonce: number } | null;
 	onSelectSession: (sessionId: string) => void;
-	onPrefillComposer?: (text: string) => void;
+	onPrefillComposer?: (text: string) => boolean;
 	onOpenMergeConflictResolver: (input: {
 		workspaceRoot: string;
 		baseBranch: string | null;
