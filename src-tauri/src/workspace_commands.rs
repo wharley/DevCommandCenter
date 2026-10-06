@@ -533,6 +533,14 @@ pub async fn workspace_disk_usage(
 }
 
 #[tauri::command]
+pub async fn workspace_cleanup_scan(
+    state: State<'_, WorkspaceCommandState>,
+    input: dcc_tauri::commands::workspace_cleanup::WorkspaceCleanupScanInput,
+) -> Result<dcc_tauri::commands::workspace_cleanup::WorkspaceCleanupScanOutput, String> {
+    dcc_tauri::commands::workspace_cleanup::workspace_cleanup_scan(state, input).await
+}
+
+#[tauri::command]
 pub async fn rename_workspace(
     state: State<'_, WorkspaceCommandState>,
     input: RenameWorkspaceInput,

@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	BarChart3,
 	Bot,
+	BrushCleaning,
 	CircleCheckBig,
 	CircleQuestionMark,
 	ChevronRight,
@@ -103,6 +104,7 @@ import {
 	markWorkspaceResultSeen,
 	useSeenWorkspaceResults,
 } from "./workspace-seen-results";
+import { CompletedCleanupDialog } from "./completed-cleanup-dialog";
 import { ProjectEditDialog } from "./project-edit-dialog";
 import { ProjectIdentityGlyph } from "./project-identity";
 import { ProviderIcon } from "@/features/providers/provider-icons";
@@ -543,6 +545,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		useState<WorkspaceSummary | null>(null);
 	const [deleteRemoteBranch, setDeleteRemoteBranch] = useState(false);
 	const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
+	const [isCleanupOpen, setIsCleanupOpen] = useState(false);
 	const [completedDiskUsage, setCompletedDiskUsage] = useState<{
 		status: "idle" | "loading" | "ready" | "error";
 		totalBytes: number;
@@ -950,6 +953,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					canEditProject ||
 					canPinProject ||
 					canRemoveProject;
+				const canCleanUpCompleted =
+					item.headerVariant === "completed" &&
+					item.rowCount > 0 &&
+					showCompletedDiskUsage &&
+					Boolean(onDeleteWorkspace);
 
 				return (
 					<div
@@ -1059,6 +1067,27 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								</span>
 							) : null}
 						</button>
+
+						{canCleanUpCompleted ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("sidebar.cleanup.action")}
+										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
+										onClick={(event) => {
+											event.stopPropagation();
+											setIsCleanupOpen(true);
+										}}
+									>
+										<BrushCleaning className="size-3.5" strokeWidth={2} aria-hidden />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="top">{t("sidebar.cleanup.action")}</TooltipContent>
+							</Tooltip>
+						) : null}
 
 						{canOpenProjectBranch ? (
 							<Tooltip>
@@ -1231,6 +1260,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			repositoriesBySourceKey,
 			sectionOpenState,
 			selectedProjectSourceKey,
+			showCompletedDiskUsage,
 			selectedWorkspaceId,
 			t,
 			toggleSection,
@@ -2033,6 +2063,21 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+
+			{onDeleteWorkspace ? (
+				<CompletedCleanupDialog
+					open={isCleanupOpen}
+					onOpenChange={setIsCleanupOpen}
+					workspaces={completedRows}
+					projectLabelOf={(workspace) => {
+						const repository = workspace.rootPath
+							? repositoriesBySourceKey.get(workspace.rootPath.trim())
+							: undefined;
+						return repository ? repositoryDisplayName(repository) : undefined;
+					}}
+					onDeleteWorkspace={onDeleteWorkspace}
+				/>
+			) : null}
 
 			<Dialog
 				open={workspaceDeletionTarget !== null}
