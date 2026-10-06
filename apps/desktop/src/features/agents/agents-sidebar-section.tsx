@@ -2,7 +2,10 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Fragment } from "react";
 import { AgentAvatar } from "./agent-avatar";
+import { ChroniclerRecapBubble, useRecapBubbleText } from "./chronicler-recap-bubble";
+import { isRecapBubbleVisible, useDailyRecap } from "./daily-recap";
 import type { AgentView } from "./use-agents";
 
 /** Resident agents in the sidebar: one compact row each, above the projects. */
@@ -11,13 +14,21 @@ export function AgentsSidebarSection({
 	activeAgentId,
 	collapsed = false,
 	onOpenAgent,
+	recapBlockedCount = 0,
 }: {
 	agents: AgentView[];
 	activeAgentId: string | null;
 	collapsed?: boolean;
 	onOpenAgent: (agentId: string) => void;
+	/** Tasks blocked on the person now, for the chronicler's bubble. */
+	recapBlockedCount?: number;
 }) {
 	const { t } = useTranslation("common");
+	const recap = useDailyRecap();
+	const recapText = useRecapBubbleText(
+		isRecapBubbleVisible(recap) ? recap.current : null,
+		recapBlockedCount,
+	);
 	if (agents.length === 0) {
 		return null;
 	}
@@ -56,38 +67,52 @@ export function AgentsSidebarSection({
 			<div className="space-y-px">
 				{agents.map((agent) => {
 					const active = activeAgentId === agent.id;
+					const speaking = agent.preset === "chronicler" && recapText !== null;
 					return (
-						<button
-							key={agent.id}
-							type="button"
-							onClick={() => onOpenAgent(agent.id)}
-							aria-current={active ? "page" : undefined}
-							className={cn(
-								"flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left transition-colors",
-								active
-									? "bg-accent text-foreground shadow-sm"
-									: "text-foreground hover:bg-accent/50",
-							)}
-						>
-							<AgentAvatar avatar={agent.avatar} state={agent.state} size={22} />
-							<span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-								{agent.name}
-							</span>
-							{agent.state !== "idle" && (
-								<span
-									className={cn(
-										"shrink-0 text-[11px]",
-										agent.state === "needsYou"
-											? "text-amber-700 dark:text-amber-300"
-											: agent.state === "done"
-												? "text-emerald-700 dark:text-emerald-300"
-												: "text-muted-foreground",
-									)}
-								>
-									{stateLabel(agent)}
+						<Fragment key={agent.id}>
+							<button
+								type="button"
+								onClick={() => onOpenAgent(agent.id)}
+								aria-current={active ? "page" : undefined}
+								className={cn(
+									"flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left transition-colors",
+									active
+										? "bg-accent text-foreground shadow-sm"
+										: "text-foreground hover:bg-accent/50",
+								)}
+							>
+								<AgentAvatar
+									avatar={agent.avatar}
+									state={agent.state}
+									size={22}
+									className={speaking ? "dcc-agent-float" : undefined}
+								/>
+								<span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+									{agent.name}
 								</span>
+								{agent.state !== "idle" && (
+									<span
+										className={cn(
+											"shrink-0 text-[11px]",
+											agent.state === "needsYou"
+												? "text-amber-700 dark:text-amber-300"
+												: agent.state === "done"
+													? "text-emerald-700 dark:text-emerald-300"
+													: "text-muted-foreground",
+										)}
+									>
+										{stateLabel(agent)}
+									</span>
+								)}
+							</button>
+							{speaking && recapText && (
+								<ChroniclerRecapBubble
+									name={agent.name}
+									text={recapText}
+									onOpen={() => onOpenAgent(agent.id)}
+								/>
 							)}
-						</button>
+						</Fragment>
 					);
 				})}
 			</div>

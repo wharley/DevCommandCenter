@@ -8,7 +8,6 @@ import type { WorkspaceSummary } from "@/features/workspaces/types";
 import {
 	attentionWorkspaceItems,
 	useWorkspaceAgentActivities,
-	type AttentionReason,
 } from "@/features/workspaces/use-workspace-agent-states";
 import { blockersByWorkspace, useWorkspaceBlockers } from "@/features/workspaces/use-workspace-blockers";
 import {
@@ -16,21 +15,11 @@ import {
 	useSeenWorkspaceResults,
 } from "@/features/workspaces/workspace-seen-results";
 import { workspaceRailDisplayTitle } from "@/features/workspaces/workspace-rail-shared";
-import { markDailyRecapSeen, useDailyRecap } from "./daily-recap";
+import { markDailyRecapSeen, RECAP_BLOCKING_REASONS, useDailyRecap } from "./daily-recap";
 
 const SECTION_TITLE =
 	"mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 
-/** What blocks the person. Unread results are left out: "Moved" lists them. */
-const BLOCKING: ReadonlySet<AttentionReason> = new Set([
-	"permission",
-	"input",
-	"conflicts",
-	"prConflicts",
-	"checksFailing",
-	"delegatedReview",
-	"setup",
-]);
 
 type RecapRow = {
 	workspaceId: string;
@@ -79,7 +68,7 @@ export function DailyRecapCard({
 				(workspaceId, completedAt) =>
 					isWorkspaceResultUnread(completedAt, seenResults.seen[workspaceId], seenResults.baseline),
 				blockersByWorkspace(blockersQuery.data ?? []),
-			).filter((item) => BLOCKING.has(item.reason)),
+			).filter((item) => RECAP_BLOCKING_REASONS.has(item.reason)),
 		[activities, blockersQuery.data, seenResults, workspaces],
 	);
 

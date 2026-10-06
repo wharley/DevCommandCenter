@@ -283,7 +283,19 @@
       "aborted_one": "{{count}} interrupted",
       "aborted_other": "{{count}} interrupted",
       "removedTask": "Removed task",
-      "since": "since {{time}}"
+      "since": "since {{time}}",
+      "bubble": {
+        "lead": "Since {{from}}: {{facts}}.",
+        "moved_one": "{{count}} task moved",
+        "moved_other": "{{count}} tasks moved",
+        "completed_one": "{{count}} completed",
+        "completed_other": "{{count}} completed",
+        "created_one": "{{count}} new",
+        "created_other": "{{count}} new",
+        "blocked_one": "{{count}} blocked now",
+        "blocked_other": "{{count}} blocked now",
+        "open": "See recap"
+      }
     },
     "editor": {
       "extra": "Extra instructions",

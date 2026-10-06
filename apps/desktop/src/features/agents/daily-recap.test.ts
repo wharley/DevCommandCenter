@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRecapUnread, nextRecapState, recapBoundary } from "./daily-recap";
+import { isRecapBubbleVisible, isRecapUnread, nextRecapState, recapBoundary } from "./daily-recap";
 
 // Local times, so the 4am boundary is the person's own.
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute);
@@ -57,5 +57,18 @@ describe("isRecapUnread", () => {
 		expect(isRecapUnread({ current: window, seenTo: window.to })).toBe(false);
 		expect(isRecapUnread({ current: window, seenTo: at(5, 9).toISOString() })).toBe(true);
 		expect(isRecapUnread({ current: null, seenTo: null })).toBe(false);
+	});
+});
+
+describe("isRecapBubbleVisible", () => {
+	it("shows once per recap, until it is read or closed", () => {
+		const window = { from: at(5, 4).toISOString(), to: at(6, 9).toISOString() };
+		expect(isRecapBubbleVisible({ current: window, seenTo: null })).toBe(true);
+		expect(isRecapBubbleVisible({ current: window, seenTo: null, bubbleDismissedTo: window.to })).toBe(false);
+		expect(isRecapBubbleVisible({ current: window, seenTo: window.to })).toBe(false);
+		// Closing yesterday's bubble does not silence today's.
+		expect(
+			isRecapBubbleVisible({ current: window, seenTo: null, bubbleDismissedTo: at(5, 9).toISOString() }),
+		).toBe(true);
 	});
 });

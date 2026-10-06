@@ -83,6 +83,10 @@ where you left off without opening each one.
   conversations, like the Reviewer's, are not counted.
 - The recap is built by DCC from what it recorded. It runs no model and costs
   nothing. Pull request activity is not included yet.
+- When a new recap has something to report, the Chronicler's mascot floats in
+  the sidebar and a bubble under it gives the numbers ("Since Fri 18:30: 4
+  tasks moved, 2 blocked now"), once per recap. **See recap** opens its page;
+  closing the bubble only hides it.
 - While a recap is unopened, the Chronicler shows a result ready in the
   sidebar. Opening its page marks it as read. The recap window and the read
   marker are kept in the app's local storage.

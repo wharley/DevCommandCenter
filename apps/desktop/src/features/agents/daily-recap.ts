@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import type { AttentionReason } from "@/features/workspaces/use-workspace-agent-states";
 
 /**
  * The chronicler's recap window. A new recap starts at the first look after
@@ -18,9 +19,22 @@ export type DailyRecapState = {
 	current: RecapWindow | null;
 	/** `to` of the window the person last looked at. */
 	seenTo: string | null;
+	/** `to` of the window whose sidebar bubble the person closed. */
+	bubbleDismissedTo?: string | null;
 };
 
 const EMPTY_STATE: DailyRecapState = { current: null, seenTo: null };
+
+/** What the recap counts as blocking the person. Unread results are "moved" instead. */
+export const RECAP_BLOCKING_REASONS: ReadonlySet<AttentionReason> = new Set([
+	"permission",
+	"input",
+	"conflicts",
+	"prConflicts",
+	"checksFailing",
+	"delegatedReview",
+	"setup",
+]);
 
 /** The latest 4am local time at or before `now`. */
 export function recapBoundary(now: Date): Date {
@@ -55,6 +69,11 @@ export function isRecapUnread(state: DailyRecapState): boolean {
 	return Boolean(state.current) && state.seenTo !== state.current?.to;
 }
 
+/** The chronicler speaks up once per recap: until it is read or its bubble closed. */
+export function isRecapBubbleVisible(state: DailyRecapState): boolean {
+	return isRecapUnread(state) && state.bubbleDismissedTo !== state.current?.to;
+}
+
 const listeners = new Set<() => void>();
 let cache: DailyRecapState | null = null;
 
@@ -77,6 +96,8 @@ function read(): DailyRecapState {
 		cache = {
 			current: isWindow(parsed?.current) ? parsed.current : null,
 			seenTo: typeof parsed?.seenTo === "string" ? parsed.seenTo : null,
+			bubbleDismissedTo:
+				typeof parsed?.bubbleDismissedTo === "string" ? parsed.bubbleDismissedTo : null,
 		};
 	} catch {
 		cache = EMPTY_STATE;
@@ -102,6 +123,13 @@ export function refreshDailyRecap(now: Date = new Date()): void {
 	const next = nextRecapState(state, now);
 	if (next !== state) {
 		write(next);
+	}
+}
+
+export function dismissDailyRecapBubble(): void {
+	const state = read();
+	if (state.current && state.bubbleDismissedTo !== state.current.to) {
+		write({ ...state, bubbleDismissedTo: state.current.to });
 	}
 }
 

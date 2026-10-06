@@ -283,7 +283,19 @@
       "aborted_one": "{{count}} interrompido",
       "aborted_other": "{{count}} interrompidos",
       "removedTask": "Tarefa removida",
-      "since": "desde {{time}}"
+      "since": "desde {{time}}",
+      "bubble": {
+        "lead": "Desde {{from}}: {{facts}}.",
+        "moved_one": "{{count}} tarefa andou",
+        "moved_other": "{{count}} tarefas andaram",
+        "completed_one": "{{count}} concluída",
+        "completed_other": "{{count}} concluídas",
+        "created_one": "{{count}} nova",
+        "created_other": "{{count}} novas",
+        "blocked_one": "{{count}} travada agora",
+        "blocked_other": "{{count}} travadas agora",
+        "open": "Ver resumo"
+      }
     },
     "editor": {
       "extra": "Instruções extras",

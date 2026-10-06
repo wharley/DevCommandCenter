@@ -33,6 +33,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentsSidebarSection } from "@/features/agents/agents-sidebar-section";
+import { RECAP_BLOCKING_REASONS } from "@/features/agents/daily-recap";
 import type { AgentView } from "@/features/agents/use-agents";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/button";
@@ -1589,6 +1590,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						agents={agents}
 						activeAgentId={activeAgentId}
 						onOpenAgent={onOpenAgent}
+						recapBlockedCount={
+							attentionItems.filter((item) => RECAP_BLOCKING_REASONS.has(item.reason)).length
+						}
 					/>
 				)}
 

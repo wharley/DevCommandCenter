@@ -82,6 +82,26 @@ function prefersReducedMotion() {
 }
 
 /**
+ * How much of a mascot's thought is written: dots first (`thinking`), then
+ * the text letter by letter, until `ready`. With reduced motion the whole
+ * text shows at once.
+ */
+export function useThoughtTyping(text: string) {
+	const [typed, setTyped] = useState(() => (prefersReducedMotion() ? text.length : -1));
+	useEffect(() => {
+		if (typed >= text.length) {
+			return;
+		}
+		const timer = window.setTimeout(
+			() => setTyped((current) => current + 1),
+			typed < 0 ? THINKING_MS : TYPING_MS_PER_CHAR,
+		);
+		return () => window.clearTimeout(timer);
+	}, [text.length, typed]);
+	return { typed, thinking: typed < 0, ready: typed >= text.length };
+}
+
+/**
  * The mascot thinking out loud: dots first, then the question written out,
  * then the answer buttons. With reduced motion everything shows at once.
  */
@@ -102,19 +122,7 @@ export function OfferThought({
 	onDismiss: () => void;
 }) {
 	const question = customQuestion ?? agent.offerPrompt;
-	const [typed, setTyped] = useState(() => (prefersReducedMotion() ? question.length : -1));
-	useEffect(() => {
-		if (typed >= question.length) {
-			return;
-		}
-		const timer = window.setTimeout(
-			() => setTyped((current) => current + 1),
-			typed < 0 ? THINKING_MS : TYPING_MS_PER_CHAR,
-		);
-		return () => window.clearTimeout(timer);
-	}, [question.length, typed]);
-	const thinking = typed < 0;
-	const ready = typed >= question.length;
+	const { typed, thinking, ready } = useThoughtTyping(question);
 
 	return (
 		<div className="dcc-agent-offer flex flex-col items-end">
