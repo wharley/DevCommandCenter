@@ -61,6 +61,36 @@ function getSystemTheme(): DccTheme {
 	return window.matchMedia(SYSTEM_DARK_QUERY).matches ? "dark" : "light";
 }
 
+function isLinuxWebview(): boolean {
+	return (
+		typeof navigator !== "undefined" &&
+		/Linux/.test(navigator.userAgent) &&
+		!/Android/.test(navigator.userAgent)
+	);
+}
+
+/**
+ * Theme to hand to Tauri's app-level `setTheme`. On macOS/Windows, `null`
+ * gives the window back to the OS; forcing the resolved theme would pin the
+ * webview's prefers-color-scheme and stop "system" from tracking the OS.
+ * On Linux, tao turns `null` into "prefer light" in GTK (which WebKitGTK
+ * reads), so we push the portal's color-scheme instead — window `theme()`
+ * reports it while no per-window theme is set, and tao keeps GTK in sync
+ * with later portal changes on its own.
+ */
+async function resolveNativeTheme(
+	preference: DccThemePreference,
+): Promise<DccTheme | null> {
+	if (preference !== "system") {
+		return preference;
+	}
+	if (!isLinuxWebview()) {
+		return null;
+	}
+	const { getCurrentWindow } = await import("@tauri-apps/api/window");
+	return getCurrentWindow().theme();
+}
+
 export function resolveDccTheme(
 	preference: DccThemePreference,
 	systemTheme: DccTheme,
@@ -195,13 +225,11 @@ export function ThemeProvider({
 			return;
 		}
 
-		// `null` hands the window back to the OS; forcing the resolved theme
-		// would pin the webview's prefers-color-scheme and stop "system" from
-		// tracking later OS changes.
-		void import("@tauri-apps/api/app")
-			.then(({ setTheme }) =>
-				setTheme(themePreference === "system" ? null : themePreference),
-			)
+		void resolveNativeTheme(themePreference)
+			.then(async (native) => {
+				const { setTheme } = await import("@tauri-apps/api/app");
+				await setTheme(native);
+			})
 			.catch(() => {
 				/* native theme API unavailable */
 			});
