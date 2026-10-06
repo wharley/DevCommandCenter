@@ -62,6 +62,15 @@ describe("help topics", () => {
 		);
 	});
 
+	it("keeps the DCC agents next to each other", () => {
+		const reviewer = HELP_TOPIC_IDS.indexOf("agents");
+		expect(HELP_TOPIC_IDS.slice(reviewer, reviewer + 3)).toEqual([
+			"agents",
+			"researcher",
+			"reporter",
+		]);
+	});
+
 	it("recognises topic ids and rejects strangers", () => {
 		expect(isHelpTopicId("delegate")).toBe(true);
 		expect(isHelpTopicId("settings")).toBe(false);

@@ -2977,9 +2977,9 @@
         "keywords": "diff review annotate annotation comment line evidence changes code review"
       },
       "agents": {
-        "label": "DCC agents",
-        "summary": "The Reviewer checks the task's changes and hands you findings ready to fix.",
-        "whatIs": "A DCC agent has a fixed role and steps in at a defined point of your workflow. The first one is the [Reviewer]: it reads the task's changes, lists findings by file and line, and lets you send them to the agent that wrote the code. It does not edit files.",
+        "label": "Reviewer agent",
+        "summary": "Checks the task's changes and hands you findings ready to fix.",
+        "whatIs": "A DCC agent has a fixed role and steps in at a defined point of your workflow. There are three, in the [Agents] section of the sidebar: the [Reviewer], the [Researcher] and the [Reporter]. The Reviewer reads the task's changes, lists findings by file and line, and lets you send them to the agent that wrote the code. It does not edit files.",
         "whenToUse": "When a turn ends with changes and you want a second read before committing, or when your review was requested on a PR.",
         "steps": [
           "When a turn ends with changes, the mascot appears above the composer asking whether it may review. Select [Yes, go ahead]. You can also call it from its icon in the task header.",
@@ -2987,11 +2987,40 @@
           "Use [Send blocking findings], or the button on each finding, to draft the fix request in the composer of the agent that wrote the code. You check it and send.",
           "After the fix, call the Reviewer again. It continues in the same conversation, checks the earlier findings and only raises something new if it blocks the commit.",
           "In [Pull Requests], on the [Code] tab, it reviews the PR from the diff and leaves draft comments. You can leave the screen: the [Agents] section of the sidebar tells you when it is done.",
-          "In [Agents], open the [Reviewer] and select [Edit] to choose the provider and model, add [Extra instructions], or turn off [Offer after a turn].",
-          "In [Agents], open the [Reporter] to see what moved since the last recap: what is blocked now, the tasks that moved, the completed ones and the new ones. A new recap starts at the first opening after 4am and runs no model."
+          "In [Agents], open the [Reviewer] and select [Edit] to choose the provider and model, add [Extra instructions], or turn off [Offer after a turn]."
         ],
         "prompt": "In this project, treat any database query without an index as a major finding and ignore the vendor folder.",
-        "keywords": "agent reviewer review findings mascot octopus bubble offer author fix pull request reporter daily recap"
+        "keywords": "dcc agents agent reviewer review findings mascot octopus bubble offer author fix pull request"
+      },
+      "researcher": {
+        "label": "Researcher agent",
+        "summary": "Investigates a project idea before any code exists.",
+        "whatIs": "The [Researcher] helps you decide whether an idea is worth becoming a project: the problem, who it is for, references and competitors, hypotheses and the name. Everything it learns and everything you decide goes into an IDEIA.md, in a folder under ~/dcc-ideias, away from your projects.",
+        "whenToUse": "When you have a loose idea and want to research it before opening a repository, without mixing it with the work of your existing projects.",
+        "steps": [
+          "In [Agents], open the [Researcher] and, under [New idea], select [Start]. DCC creates the folder with the IDEIA.md and opens the chat with it.",
+          "Describe the idea in your own words and answer its questions. Above the composer, the [Investigating the idea] bar marks what is already filled in: [Problem], [Who for], [References], [Hypotheses] and [Name].",
+          "Select [Card] to see the idea's summary and the [Verdict]. When every milestone is filled in and the verdict is [Go], the card opens on its own.",
+          "To publish, check the repository name, pick [Private] or [Public] and the folder, and select [Publish]. The idea becomes an ordinary project, with IDEIA.md as the starting point for its tasks.",
+          "If the idea did not pan out, use [Discard]: the conversation, the task and the folder are deleted. To keep talking instead, use [Adjust]."
+        ],
+        "tip": "The Researcher only works on ideas. It is never called inside a project's tasks.",
+        "prompt": "I want an app for small restaurants to track their stock from the phone. Find who already does this, what people complain about in those tools, and whether there is still room.",
+        "keywords": "dcc agents agent researcher research idea new idea ideia.md card verdict competitors hypotheses name publish repository github discard"
+      },
+      "reporter": {
+        "label": "Reporter agent",
+        "summary": "Recaps what moved in your tasks since last time.",
+        "whatIs": "The [Reporter] builds a recap of what happened in your tasks since the previous one: what is blocked now, what moved, what was completed and what is new. It reads what DCC recorded and runs no model, so it spends no tokens.",
+        "whenToUse": "When you start the day or come back after some time away, to know where to pick up without opening task after task.",
+        "steps": [
+          "When there is a new recap, the Reporter tells you in a bubble under it in the [Agents] section of the sidebar. Select [See recap].",
+          "Or open the [Reporter] in [Agents] at any time to see the current recap.",
+          "Start with [Blocked now]: these are the tasks waiting on you, with how long they have been stuck. Then look at [Moved], [Completed] and [New].",
+          "Select a task in the recap to open it and pick up from there."
+        ],
+        "tip": "A new recap starts at the first opening after 4am and covers everything since the previous one.",
+        "keywords": "dcc agents agent reporter daily recap summary what moved blocked completed new morning pick up"
       },
       "terminal": {
         "label": "Terminal",
@@ -3028,18 +3057,18 @@
       },
       "delegate": {
         "label": "Delegate to another agent",
-        "summary": "Send a bounded task to a second agent.",
-        "whatIs": "Delegating creates a child session with another provider (Claude, Codex, Cursor…). You ask in the chat, the agent calls DCC's dcc_delegate_task tool and keeps working. When the child finishes, the result goes back to the agent that asked on its own.",
+        "summary": "Ask in the chat and the agent hands part of the work to another provider.",
+        "whatIs": "There is no button: you ask for the delegation in the chat, saying which provider and what it should do. The agent calls DCC's dcc_delegate_task tool, which creates a child session with another provider (Claude, Codex, Cursor…), and keeps working. When the child finishes, the result goes back to the agent that asked on its own.",
         "whenToUse": "To parallelize: one agent implements while another writes tests or reviews. Or to get a second opinion from another model on the same diff.",
         "steps": [
-          "Ask in the chat, in plain language: \"delegate to Codex to review this diff\" or \"ask Claude to write the tests\".",
+          "Ask in the chat, in plain language, naming the provider and the task: \"delegate to Codex to review this diff\" or \"ask Claude to write the tests\". Also say whether it should review, explain or implement: review and explain only read the code.",
           "Follow the [Delegation] card in the conversation. Use [Open child session] to see the work in progress.",
           "When the child finishes, the agent receives the result and carries on. Implementation delegations stay isolated until you use [Review in Inspector] and apply or discard.",
           "To compare, use [Rerun on another agent]. On a result you delegated yourself, [Send to agent] puts the text in the composer."
         ],
-        "tip": "Works on providers that receive DCC's tools (Claude, Codex and Cursor). A delegated agent cannot delegate again.",
-        "prompt": "Review the current diff as a code review. Prioritize bugs, regressions and missing tests. Answer with findings by severity and do not edit files.",
-        "keywords": "delegate delegation agent child session parallel provider review second opinion fan-out"
+        "tip": "Delegating is for another provider. If you ask for another model of the same provider (for example, Opus while on Claude), the agent uses its own subagents, with no child session. Works on providers that receive DCC's tools (Claude, Codex and Cursor), and a delegated agent cannot delegate again.",
+        "prompt": "Delegate to Codex a code review of the current diff: prioritize bugs, regressions and missing tests, answer with findings by severity and do not edit files. While it reviews, keep implementing the pagination.",
+        "keywords": "delegate delegation agent child session parallel provider codex claude cursor dcc_delegate_task review second opinion fan-out"
       },
       "handoff": {
         "label": "Switch provider",

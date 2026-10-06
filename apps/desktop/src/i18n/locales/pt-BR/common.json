@@ -2977,9 +2977,9 @@
         "keywords": "diff revisar review anotar anotação comentar linha evidência mudanças code review"
       },
       "agents": {
-        "label": "Agentes do DCC",
-        "summary": "O Revisor confere as mudanças da tarefa e entrega achados prontos para corrigir.",
-        "whatIs": "Um agente do DCC tem um papel fixo e entra num momento definido do seu fluxo. O primeiro é o [Revisor]: ele lê as mudanças da tarefa, lista os achados com arquivo e linha e deixa você mandá-los ao agente que escreveu o código. Ele não edita arquivos.",
+        "label": "Agente Revisor",
+        "summary": "Confere as mudanças da tarefa e entrega achados prontos para corrigir.",
+        "whatIs": "Um agente do DCC tem um papel fixo e entra num momento definido do seu fluxo. São três, na seção [Agentes] da barra lateral: o [Revisor], o [Pesquisador] e o [Repórter]. O Revisor lê as mudanças da tarefa, lista os achados com arquivo e linha e deixa você mandá-los ao agente que escreveu o código. Ele não edita arquivos.",
         "whenToUse": "Quando um turno termina com mudanças e você quer uma segunda leitura antes de commitar, ou quando pediram a sua revisão num PR.",
         "steps": [
           "Ao fim de um turno com mudanças, o mascote aparece acima do composer perguntando se pode revisar. Clique em [Sim, pode]. Você também pode chamá-lo pelo ícone dele no cabeçalho da tarefa.",
@@ -2987,11 +2987,40 @@
           "Use [Enviar os que bloqueiam], ou o botão de cada achado, para deixar o pedido de correção no composer do agente que escreveu o código. Você confere e envia.",
           "Depois da correção, chame o Revisor de novo. Ele continua na mesma conversa, confere os achados anteriores e só traz algo novo se bloquear o commit.",
           "Em [Pull Requests], na aba [Código], ele revisa o PR a partir do diff e deixa rascunhos de comentários. Você pode sair da tela: a seção [Agentes] da barra lateral avisa quando terminar.",
-          "Em [Agentes], abra o [Revisor] e clique em [Editar] para escolher o provider e o modelo, somar [Instruções extras] ou desligar [Oferecer ao terminar um turno].",
-          "Em [Agentes], abra o [Repórter] para ver o que andou desde o último resumo: o que está travado agora, as tarefas que andaram, as concluídas e as novas. Um resumo novo começa na primeira abertura depois das 4h e não usa modelo."
+          "Em [Agentes], abra o [Revisor] e clique em [Editar] para escolher o provider e o modelo, somar [Instruções extras] ou desligar [Oferecer ao terminar um turno]."
         ],
         "prompt": "Neste projeto, trate como achado importante qualquer consulta ao banco sem índice e ignore a pasta vendor.",
-        "keywords": "agente revisor review revisão achados mascote polvo balão oferta autor corrigir pull request repórter resumo diário"
+        "keywords": "agentes do dcc agente revisor review revisão achados mascote polvo balão oferta autor corrigir pull request"
+      },
+      "researcher": {
+        "label": "Agente Pesquisador",
+        "summary": "Investiga uma ideia de projeto antes de existir código.",
+        "whatIs": "O [Pesquisador] ajuda a decidir se uma ideia vale virar projeto: o problema, para quem, as referências e concorrentes, as hipóteses e o nome. Tudo que ele descobre e tudo que vocês decidem fica num IDEIA.md, numa pasta em ~/dcc-ideias, fora dos seus projetos.",
+        "whenToUse": "Quando você tem uma ideia solta e quer pesquisar antes de abrir um repositório, sem misturar com o trabalho dos projetos que já existem.",
+        "steps": [
+          "Em [Agentes], abra o [Pesquisador] e, em [Nova ideia], clique em [Começar]. O DCC cria a pasta com o IDEIA.md e abre o chat com ele.",
+          "Descreva a ideia do seu jeito e responda às perguntas. Acima do composer, a barra [Investigando a ideia] marca o que já está preenchido: [Problema], [Para quem], [Referências], [Hipóteses] e [Nome].",
+          "Clique em [Ficha] para ver o resumo da ideia e o [Veredito]. Quando todos os marcos estão preenchidos e o veredito é [Seguir], a ficha abre sozinha.",
+          "Para publicar, confira o nome do repositório, escolha [Privado] ou [Público] e a pasta, e clique em [Publicar]. A ideia vira um projeto normal, com o IDEIA.md como ponto de partida das tarefas.",
+          "Se a ideia não vingou, use [Descartar]: a conversa, a tarefa e a pasta são apagadas. Para continuar conversando, use [Ajustar]."
+        ],
+        "tip": "O Pesquisador só trabalha em ideias. Ele não é chamado dentro das tarefas de um projeto.",
+        "prompt": "Quero um app para pequenos restaurantes controlarem o estoque pelo celular. Veja quem já faz isso, o que reclamam dessas ferramentas e se ainda tem espaço.",
+        "keywords": "agentes do dcc agente pesquisador pesquisa ideia nova ideia ideia.md ficha veredito concorrentes hipóteses nome publicar repositório github descartar"
+      },
+      "reporter": {
+        "label": "Agente Repórter",
+        "summary": "Resume o que andou nas suas tarefas desde a última vez.",
+        "whatIs": "O [Repórter] monta um resumo do que aconteceu nas suas tarefas desde o resumo anterior: o que está travado agora, o que andou, o que foi concluído e o que é novo. Ele lê o que o DCC registrou e não usa modelo, então não gasta tokens.",
+        "whenToUse": "Ao começar o dia ou ao voltar depois de um tempo longe, para saber onde retomar sem abrir tarefa por tarefa.",
+        "steps": [
+          "Quando há um resumo novo, o Repórter avisa num balão abaixo dele na seção [Agentes] da barra lateral. Clique em [Ver resumo].",
+          "Ou abra o [Repórter] em [Agentes] a qualquer momento para ver o resumo atual.",
+          "Comece por [Travado agora]: são as tarefas que esperam por você, com o tempo desde quando estão paradas. Depois veja [Andou], [Concluídas] e [Novas].",
+          "Clique numa tarefa do resumo para abri-la e retomar dali."
+        ],
+        "tip": "Um resumo novo começa na primeira abertura depois das 4h e cobre tudo desde o anterior.",
+        "keywords": "agentes do dcc agente repórter resumo diário recap o que andou travado concluídas novas manhã retomar"
       },
       "terminal": {
         "label": "Terminal",
@@ -3028,18 +3057,18 @@
       },
       "delegate": {
         "label": "Delegar para outro agente",
-        "summary": "Envie uma tarefa delimitada para um segundo agente.",
-        "whatIs": "Delegar cria uma sessão filha com outro provider (Claude, Codex, Cursor…). Você pede no chat, o agente chama a ferramenta dcc_delegate_task do DCC e continua trabalhando. Quando a filha termina, o resultado volta sozinho para o agente que pediu.",
+        "summary": "Peça no chat e o agente passa uma parte do trabalho para outro provider.",
+        "whatIs": "Não tem botão: você pede a delegação no chat, dizendo para qual provider e o que ele deve fazer. O agente chama a ferramenta dcc_delegate_task do DCC, que cria uma sessão filha com outro provider (Claude, Codex, Cursor…), e continua trabalhando. Quando a filha termina, o resultado volta sozinho para o agente que pediu.",
         "whenToUse": "Para paralelizar: um agente implementa enquanto outro escreve testes ou revisa. Ou para pedir a segunda opinião de outro modelo sobre o mesmo diff.",
         "steps": [
-          "Peça no chat, em linguagem natural: \"delega pro Codex revisar este diff\" ou \"pede pro Claude escrever os testes\".",
+          "Peça no chat, em linguagem natural, dizendo o provider e a tarefa: \"delega pro Codex revisar este diff\" ou \"pede pro Claude escrever os testes\". Diga também se é para revisar, explicar ou implementar: revisar e explicar só leem o código.",
           "Acompanhe pelo card [Delegação] na conversa. Use [Abrir sessão filha] para ver o trabalho em andamento.",
           "Quando a filha termina, o agente recebe o resultado e segue a tarefa. Delegações de implementação ficam isoladas até você usar [Revisar no Inspector] e aplicar ou descartar.",
           "Para comparar, use [Re-rodar em outro agente]. Num resultado que você mesmo delegou, [Enviar ao agente] coloca o texto no composer."
         ],
-        "tip": "Funciona nos providers que recebem as ferramentas do DCC (Claude, Codex e Cursor). Um agente delegado não delega de novo.",
-        "prompt": "Revise o diff atual como code review. Priorize bugs, regressão e testes faltando. Responda com achados por severidade e não edite arquivos.",
-        "keywords": "delegar delegação agente sessão filha paralelo provider revisão segunda opinião fan-out"
+        "tip": "Delegar é para outro provider. Se você pedir outro modelo do mesmo provider (por exemplo, Opus estando no Claude), o agente usa os subagentes dele, sem sessão filha. Funciona nos providers que recebem as ferramentas do DCC (Claude, Codex e Cursor), e um agente delegado não delega de novo.",
+        "prompt": "Delega pro Codex revisar o diff atual como code review: priorizar bugs, regressão e testes faltando, responder com achados por severidade e não editar arquivos. Enquanto ele revisa, continue implementando a paginação.",
+        "keywords": "delegar delegação agente sessão filha paralelo provider codex claude cursor dcc_delegate_task revisão segunda opinião fan-out"
       },
       "handoff": {
         "label": "Trocar de provider",
