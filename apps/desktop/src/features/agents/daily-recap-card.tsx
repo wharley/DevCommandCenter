@@ -102,11 +102,12 @@ export function DailyRecapCard({
 		return projectId ? projectLabels[projectId] : undefined;
 	};
 
-	const blockedRows: RecapRow[] = blocked.map(({ workspace, reason, count }) => ({
+	const blockedRows: RecapRow[] = blocked.map(({ workspace, reason, count, returnedAt }) => ({
 		workspaceId: workspace.id,
 		title: workspaceRailDisplayTitle(workspace),
 		detail: [
 			t(`sidebar.attention.reason.${reason}`, { count: count ?? 0, pr: count ?? "" }),
+			returnedAt ? t("agents.recap.since", { time: timeFormat.format(new Date(returnedAt)) }) : null,
 			projectOf(workspace.id),
 		]
 			.filter(Boolean)

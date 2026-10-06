@@ -282,7 +282,8 @@
       "turns_other": "{{count}} turns finished",
       "aborted_one": "{{count}} interrupted",
       "aborted_other": "{{count}} interrupted",
-      "removedTask": "Removed task"
+      "removedTask": "Removed task",
+      "since": "since {{time}}"
     },
     "editor": {
       "extra": "Extra instructions",
@@ -2974,10 +2975,11 @@
           "Use [Send blocking findings], or the button on each finding, to draft the fix request in the composer of the agent that wrote the code. You check it and send.",
           "After the fix, call the Reviewer again. It continues in the same conversation, checks the earlier findings and only raises something new if it blocks the commit.",
           "In [Pull Requests], on the [Code] tab, it reviews the PR from the diff and leaves draft comments. You can leave the screen: the [Agents] section of the sidebar tells you when it is done.",
-          "In [Agents], open the [Reviewer] and select [Edit] to choose the provider and model, add [Extra instructions], or turn off [Offer after a turn]."
+          "In [Agents], open the [Reviewer] and select [Edit] to choose the provider and model, add [Extra instructions], or turn off [Offer after a turn].",
+          "In [Agents], open the [Chronicler] to see what moved since the last recap: what is blocked now, the tasks that moved, the completed ones and the new ones. A new recap starts at the first opening after 4am and runs no model."
         ],
         "prompt": "In this project, treat any database query without an index as a major finding and ignore the vendor folder.",
-        "keywords": "agent reviewer review findings mascot octopus bubble offer author fix pull request"
+        "keywords": "agent reviewer review findings mascot octopus bubble offer author fix pull request chronicler daily recap"
       },
       "terminal": {
         "label": "Terminal",
