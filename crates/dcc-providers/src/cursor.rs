@@ -15,15 +15,16 @@ use dcc_core::{
     domain::{
         provider::{
             Capabilities, HealthStatus, McpSupportLevel, ProviderDescriptor, ProviderEvent,
-            ProviderId, ProviderModelDescriptor, SessionHandle,
+            ProviderId, ProviderModelDescriptor, SessionHandle, ToolCallDetail,
         },
         session::{AssistantMessagePhase, SessionId},
+        usage::ModelTokenUsage,
     },
     ports::{Input, Provider, SessionConfig},
     CoreError, Result,
 };
 
-use crate::common::{append_tool_instructions, experimental_cli_capabilities};
+use crate::common::{append_tool_instructions, experimental_cli_capabilities, replacement_diff};
 use crate::cursor_acp::CursorBridgeProvider;
 
 const PROVIDER_LABEL: &str = "Cursor";
@@ -70,6 +71,8 @@ struct CursorCommandResult {
 struct CursorStreamState {
     assistant_message_id: Option<String>,
     assistant_message_started: bool,
+    /// Display name from `system/init`, attached to the turn usage.
+    model: Option<String>,
 }
 
 pub fn adapter() -> CursorBridgeProvider {
@@ -462,7 +465,18 @@ fn parse_cursor_stream_value(value: &Value, state: &mut CursorStreamState) -> Ve
         "assistant" => parse_cursor_assistant_message(value, state, at),
         "tool_call" => parse_cursor_tool_call(value, at).into_iter().collect(),
         "result" => parse_cursor_result(value, state, at),
-        "system" | "user" => Vec::new(),
+        "system" => {
+            if value.get("subtype").and_then(Value::as_str) == Some("init") {
+                state.model = value
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|model| !model.is_empty())
+                    .map(str::to_string);
+            }
+            Vec::new()
+        }
+        "user" => Vec::new(),
         _ => Vec::new(),
     }
 }
@@ -521,7 +535,7 @@ fn parse_cursor_tool_call(value: &Value, at: String) -> Option<ProviderEvent> {
         .unwrap_or("tool-call")
         .to_string();
     let tool_call = value.get("tool_call")?.as_object()?;
-    let (tool_name, tool_value) = tool_call.iter().next()?;
+    let (tool_name, tool_value) = cursor_tool_entry(tool_call)?;
 
     match subtype {
         "started" => {
@@ -534,15 +548,145 @@ fn parse_cursor_tool_call(value: &Value, at: String) -> Option<ProviderEvent> {
                 at,
             })
         }
-        "completed" => Some(ProviderEvent::ToolCallCompleted { id: call_id, detail: None, at }),
-        "failed" => Some(ProviderEvent::ToolCallFailed {
-            detail: None,
-            id: call_id,
-            reason: extract_cursor_tool_call_failure(tool_value),
-            at,
-        }),
+        "completed" | "failed" => {
+            let detail = cursor_tool_call_detail(tool_value);
+            let outcome = cursor_tool_result_outcome(tool_value);
+            if subtype == "failed" || outcome.is_some_and(|(variant, _)| variant != "success") {
+                Some(ProviderEvent::ToolCallFailed {
+                    reason: extract_cursor_tool_call_failure(tool_value),
+                    detail,
+                    id: call_id,
+                    at,
+                })
+            } else {
+                Some(ProviderEvent::ToolCallCompleted {
+                    id: call_id,
+                    detail,
+                    at,
+                })
+            }
+        }
         _ => None,
     }
+}
+
+/// The tool entry of a serialized Cursor `ToolCall` message. The tool is a
+/// oneof (`shellToolCall`, `editToolCall`, …) serialized next to metadata
+/// such as `toolCallId`, so the entry is picked by shape, not position.
+fn cursor_tool_entry(tool_call: &serde_json::Map<String, Value>) -> Option<(&String, &Value)> {
+    tool_call
+        .iter()
+        .find(|(name, value)| value.is_object() && name.ends_with("ToolCall"))
+        .or_else(|| tool_call.iter().find(|(_, value)| value.is_object()))
+}
+
+/// The populated variant of a Cursor tool `result` oneof: `success`,
+/// `failure` (non-zero shell exit), `error`, `rejected`, …
+fn cursor_tool_result_outcome(
+    tool_value: &Value,
+) -> Option<(&str, &serde_json::Map<String, Value>)> {
+    tool_value
+        .get("result")?
+        .as_object()?
+        .iter()
+        .find_map(|(variant, value)| value.as_object().map(|value| (variant.as_str(), value)))
+}
+
+fn cursor_str<'a>(object: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a str> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+}
+
+/// What a completed Cursor stream-json tool call did. Cursor serializes its
+/// protobuf results with default values, so a shell `exitCode` of 0 is
+/// present rather than omitted.
+fn cursor_tool_call_detail(tool_value: &Value) -> Option<ToolCallDetail> {
+    let args = tool_value.get("args").and_then(Value::as_object);
+    let file = args
+        .and_then(|args| cursor_str(args, "path").or_else(|| cursor_str(args, "filePath")))
+        .map(str::to_string);
+    let mut detail = ToolCallDetail {
+        command: args
+            .and_then(|args| cursor_str(args, "command"))
+            .map(str::to_string),
+        file: file.clone(),
+        ..ToolCallDetail::default()
+    };
+    if let Some((variant, result)) = cursor_tool_result_outcome(tool_value) {
+        detail.command = detail
+            .command
+            .or_else(|| cursor_str(result, "command").map(str::to_string));
+        detail.output = cursor_tool_output(result);
+        if matches!(variant, "success" | "failure") {
+            detail.exit_code = result
+                .get("exitCode")
+                .and_then(Value::as_i64)
+                .and_then(|code| i32::try_from(code).ok());
+        }
+        if let Some(diff) = cursor_str(result, "diffString") {
+            let mut text = String::new();
+            if !diff.starts_with("---") {
+                if let Some(file) = file.as_deref() {
+                    text.push_str(&format!("--- a/{file}\n+++ b/{file}\n"));
+                }
+            }
+            text.push_str(diff);
+            detail.diff = Some(text);
+        } else if variant == "success" {
+            if let Some(written) = args.and_then(|args| cursor_str(args, "fileText")) {
+                detail.diff = Some(replacement_diff(file.as_deref(), "", written));
+            } else if let Some(previous) = cursor_str(result, "prevContent") {
+                detail.diff = Some(replacement_diff(file.as_deref(), previous, ""));
+            }
+        }
+        if detail.diff.is_some() {
+            // The diff says everything; edit results only add a confirmation.
+            detail.output = None;
+        }
+    } else if args.is_some() && detail.command.is_none() {
+        detail.input = tool_value
+            .get("args")
+            .and_then(|args| serde_json::to_string_pretty(args).ok());
+    }
+    let detail = detail.bounded();
+    (!detail.is_empty()).then_some(detail)
+}
+
+fn cursor_tool_output(result: &serde_json::Map<String, Value>) -> Option<String> {
+    if let Some(output) = cursor_str(result, "interleavedOutput") {
+        return Some(output.to_string());
+    }
+    let stdout = cursor_str(result, "stdout");
+    let stderr = cursor_str(result, "stderr");
+    if stdout.is_some() || stderr.is_some() {
+        return Some(
+            [stdout, stderr]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    if let Some(content) = cursor_str(result, "content") {
+        return Some(content.to_string());
+    }
+    // MCP results: `content: [{ "text": { "text": "…" } }]`.
+    if let Some(items) = result.get("content").and_then(Value::as_array) {
+        let text = items
+            .iter()
+            .filter_map(|item| item.pointer("/text/text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+    ["error", "errorMessage", "reason", "message"]
+        .into_iter()
+        .find_map(|key| cursor_str(result, key))
+        .map(str::to_string)
 }
 
 fn parse_cursor_tool_call_metadata(
@@ -583,14 +727,28 @@ fn parse_cursor_tool_call_metadata(
 fn extract_cursor_tool_call_failure(tool_value: &Value) -> Option<String> {
     let result = tool_value.get("result")?.as_object()?;
     if let Some(error) = result.get("error").and_then(Value::as_object) {
-        if let Some(message) = error.get("message").and_then(Value::as_str) {
-            return Some(message.to_string());
+        for key in ["message", "error", "errorMessage"] {
+            if let Some(message) = cursor_str(error, key) {
+                return Some(message.to_string());
+            }
         }
     }
-    result
-        .get("message")
-        .and_then(Value::as_str)
+    if let Some(message) = result.get("message").and_then(Value::as_str) {
+        return Some(message.to_string());
+    }
+    let (variant, outcome) = cursor_tool_result_outcome(tool_value)?;
+    ["reason", "error", "errorMessage"]
+        .into_iter()
+        .find_map(|key| cursor_str(outcome, key))
         .map(str::to_string)
+        .or_else(|| {
+            outcome
+                .get("exitCode")
+                .and_then(Value::as_i64)
+                .filter(|code| *code != 0)
+                .map(|code| format!("exit code {code}"))
+        })
+        .or_else(|| (variant != "success").then(|| variant.to_string()))
 }
 
 fn humanize_cursor_tool_name(tool_name: &str) -> String {
@@ -653,6 +811,12 @@ fn parse_cursor_result(
         return vec![ProviderEvent::Failed { message, at }];
     }
     let mut events = Vec::new();
+    if let Some(usage) = cursor_result_usage(value, state.model.clone()) {
+        events.push(ProviderEvent::TurnUsage {
+            models: vec![usage],
+            at: at.clone(),
+        });
+    }
     if let Some(content) = value
         .get("result")
         .and_then(Value::as_str)
@@ -673,6 +837,32 @@ fn parse_cursor_result(
     }
     events.push(ProviderEvent::Completed { at });
     events
+}
+
+/// `result.usage` of Cursor's stream-json: totals over every model call of
+/// the turn. Cursor already subtracts cache reads and writes from
+/// `inputTokens`.
+fn cursor_result_usage(value: &Value, model: Option<String>) -> Option<ModelTokenUsage> {
+    let usage = value.get("usage")?.as_object()?;
+    let tokens = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let input_tokens = tokens("inputTokens");
+    let output_tokens = tokens("outputTokens");
+    let cached_input_tokens = tokens("cacheReadTokens");
+    let cache_write_input_tokens = tokens("cacheWriteTokens");
+    let total_tokens = input_tokens
+        .saturating_add(output_tokens)
+        .saturating_add(cached_input_tokens)
+        .saturating_add(cache_write_input_tokens);
+    (total_tokens > 0).then_some(ModelTokenUsage {
+        model,
+        input_tokens,
+        output_tokens,
+        cached_input_tokens,
+        cache_write_input_tokens,
+        reasoning_output_tokens: 0,
+        total_tokens,
+        cost_usd: None,
+    })
 }
 
 async fn collect_stream_to_string<R>(reader: R) -> String
@@ -1264,6 +1454,128 @@ mod tests {
                 ProviderEvent::Completed { .. }
             ] if id == "cursor:assistant:0" && content == "done"
         ));
+    }
+
+    /// Result shapes follow cursor-agent 2026.10.01: protobuf messages
+    /// serialized with default values, the tool oneof next to metadata.
+    #[test]
+    fn cursor_shell_results_carry_command_output_and_exit_code() {
+        let mut state = CursorStreamState::default();
+        let completed = parse_cursor_stream_line(
+            r#"{"type":"tool_call","subtype":"completed","call_id":"call_sh","tool_call":{"hookAdditionalContexts":[],"shellToolCall":{"args":{"command":"ls","workingDirectory":"","timeout":30000},"result":{"success":{"command":"ls","workingDirectory":"/repo","exitCode":0,"signal":"","stdout":"Cargo.toml\nsrc\n","stderr":"","executionTime":12}}},"toolCallId":"call_sh"},"session_id":"sess"}"#,
+            &mut state,
+        );
+        match completed.as_slice() {
+            [ProviderEvent::ToolCallCompleted {
+                id,
+                detail: Some(detail),
+                ..
+            }] => {
+                assert_eq!(id, "call_sh");
+                assert_eq!(detail.command.as_deref(), Some("ls"));
+                assert_eq!(detail.output.as_deref(), Some("Cargo.toml\nsrc\n"));
+                assert_eq!(detail.exit_code, Some(0));
+            }
+            other => panic!("expected shell completion, got {other:?}"),
+        }
+
+        let failed = parse_cursor_stream_line(
+            r#"{"type":"tool_call","subtype":"completed","call_id":"call_fail","tool_call":{"shellToolCall":{"args":{"command":"cargo test"},"result":{"failure":{"command":"cargo test","workingDirectory":"/repo","exitCode":101,"signal":"","stdout":"","stderr":"test failed","executionTime":900,"aborted":false}}}},"session_id":"sess"}"#,
+            &mut state,
+        );
+        match failed.as_slice() {
+            [ProviderEvent::ToolCallFailed {
+                reason,
+                detail: Some(detail),
+                ..
+            }] => {
+                assert_eq!(reason.as_deref(), Some("exit code 101"));
+                assert_eq!(detail.exit_code, Some(101));
+                assert_eq!(detail.output.as_deref(), Some("test failed"));
+            }
+            other => panic!("expected shell failure, got {other:?}"),
+        }
+
+        let rejected = parse_cursor_stream_line(
+            r#"{"type":"tool_call","subtype":"completed","call_id":"call_rej","tool_call":{"shellToolCall":{"args":{"command":"rm -rf /"},"result":{"rejected":{"command":"rm -rf /","workingDirectory":"/repo","reason":"blocked by policy","isReadonly":false}}}},"session_id":"sess"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            rejected.as_slice(),
+            [ProviderEvent::ToolCallFailed { reason: Some(reason), detail: Some(detail), .. }]
+                if reason == "blocked by policy" && detail.exit_code.is_none()
+        ));
+    }
+
+    #[test]
+    fn cursor_edit_and_write_results_carry_diffs() {
+        let mut state = CursorStreamState::default();
+        let edit = parse_cursor_stream_line(
+            r#"{"type":"tool_call","subtype":"completed","call_id":"call_edit","tool_call":{"editToolCall":{"args":{"path":"src/lib.rs"},"result":{"success":{"path":"src/lib.rs","linesAdded":1,"linesRemoved":1,"diffString":"@@ -1 +1 @@\n-fn a() {}\n+fn b() {}\n","afterFullFileContent":"fn b() {}\n","message":"Edited"}}}},"session_id":"sess"}"#,
+            &mut state,
+        );
+        match edit.as_slice() {
+            [ProviderEvent::ToolCallCompleted {
+                detail: Some(detail),
+                ..
+            }] => {
+                assert_eq!(detail.file.as_deref(), Some("src/lib.rs"));
+                assert_eq!(
+                    detail.diff.as_deref(),
+                    Some(
+                        "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-fn a() {}\n+fn b() {}\n"
+                    )
+                );
+                assert_eq!(detail.output, None);
+            }
+            other => panic!("expected edit completion, got {other:?}"),
+        }
+
+        let write = parse_cursor_stream_line(
+            r#"{"type":"tool_call","subtype":"completed","call_id":"call_write","tool_call":{"writeToolCall":{"args":{"path":"NOTES.md","fileText":"hello\n","toolCallId":"call_write"},"result":{"success":{"path":"/repo/NOTES.md","linesCreated":1,"fileSize":6}}}},"session_id":"sess"}"#,
+            &mut state,
+        );
+        assert!(matches!(
+            write.as_slice(),
+            [ProviderEvent::ToolCallCompleted { detail: Some(detail), .. }]
+                if detail.diff.as_deref() == Some("--- a/NOTES.md\n+++ b/NOTES.md\n@@\n+hello\n")
+        ));
+    }
+
+    #[test]
+    fn cursor_result_usage_is_reported_with_the_init_model() {
+        let mut state = CursorStreamState::default();
+        parse_cursor_stream_line(
+            r#"{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/repo","session_id":"sess","model":"Claude 4.5 Sonnet","permissionMode":"default"}"#,
+            &mut state,
+        );
+        parse_cursor_stream_line(
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]},"session_id":"sess"}"#,
+            &mut state,
+        );
+        let result = parse_cursor_stream_line(
+            r#"{"type":"result","subtype":"success","duration_ms":1234,"duration_api_ms":1234,"is_error":false,"result":"done","session_id":"sess","request_id":"req","usage":{"inputTokens":120,"outputTokens":40,"cacheReadTokens":900,"cacheWriteTokens":15}}"#,
+            &mut state,
+        );
+        match result.as_slice() {
+            [ProviderEvent::TurnUsage { models, .. }, ProviderEvent::AssistantMessageCompleted { .. }, ProviderEvent::Completed { .. }] =>
+            {
+                assert_eq!(
+                    models,
+                    &vec![ModelTokenUsage {
+                        model: Some("Claude 4.5 Sonnet".to_string()),
+                        input_tokens: 120,
+                        output_tokens: 40,
+                        cached_input_tokens: 900,
+                        cache_write_input_tokens: 15,
+                        reasoning_output_tokens: 0,
+                        total_tokens: 1_075,
+                        cost_usd: None,
+                    }]
+                );
+            }
+            other => panic!("expected usage before completion, got {other:?}"),
+        }
     }
 
     #[test]

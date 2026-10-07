@@ -16,9 +16,10 @@ use dcc_core::{
         model_registry,
         provider::{
             Capabilities, HealthStatus, ProviderDescriptor, ProviderEvent, ProviderId,
-            SessionHandle,
+            SessionHandle, ToolCallDetail,
         },
         session::{AssistantMessagePhase, SessionId},
+        usage::ModelTokenUsage,
     },
     ports::{Input, Provider, SessionConfig},
     CoreError, Result,
@@ -26,7 +27,7 @@ use dcc_core::{
 
 use crate::common::{
     append_tool_instructions, apply_cli_spawn_environment, augmented_path, now_iso,
-    stable_cli_capabilities,
+    replacement_diff, stable_cli_capabilities,
 };
 
 const PROVIDER_ID: &str = "droid";
@@ -67,6 +68,10 @@ struct DroidStreamState {
     active_assistant_text: String,
     legacy_assistant_text: String,
     reasoning_started: HashMap<String, bool>,
+    /// Tool name and parameters by call id: `tool_result` repeats neither.
+    tool_calls: HashMap<String, (String, Value)>,
+    /// Model from `system/init`, attached to the turn usage.
+    model: Option<String>,
 }
 
 /// Droid honors plan mode as a native exec flag; fast mode is prompt text.
@@ -379,7 +384,17 @@ fn parse_droid_stream_value(value: &Value, state: &mut DroidStreamState) -> Vec<
     let at = now_iso();
 
     match kind {
-        "system" => Vec::new(),
+        "system" => {
+            if value.get("subtype").and_then(Value::as_str) == Some("init") {
+                state.model = value
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|model| !model.is_empty())
+                    .map(str::to_string);
+            }
+            Vec::new()
+        }
         "message" => parse_droid_message(value, state),
         "reasoning" => {
             let mut events = complete_droid_active_message(state, None, at.clone());
@@ -390,13 +405,19 @@ fn parse_droid_stream_value(value: &Value, state: &mut DroidStreamState) -> Vec<
         "tool_call" => {
             let mut events = complete_droid_active_message(state, None, at.clone());
             state.legacy_assistant_text.clear();
-            events.extend(parse_droid_tool_call(value, at));
+            events.extend(parse_droid_tool_call(value, state, at));
             events
         }
-        "tool_result" => parse_droid_tool_result(value, at),
+        "tool_result" => parse_droid_tool_result(value, state, at),
         "completion" => {
             let final_text = droid_final_text(value);
-            let mut events = complete_droid_turn_text(value, state, final_text, at.clone());
+            let mut events = droid_turn_usage(value, state, at.clone());
+            events.extend(complete_droid_turn_text(
+                value,
+                state,
+                final_text,
+                at.clone(),
+            ));
             events.push(ProviderEvent::Completed { at });
             events
         }
@@ -412,7 +433,13 @@ fn parse_droid_stream_value(value: &Value, state: &mut DroidStreamState) -> Vec<
                 != Some(true);
             if success {
                 let final_text = droid_final_text(value);
-                let mut events = complete_droid_turn_text(value, state, final_text, at.clone());
+                let mut events = droid_turn_usage(value, state, at.clone());
+                events.extend(complete_droid_turn_text(
+                    value,
+                    state,
+                    final_text,
+                    at.clone(),
+                ));
                 events.push(ProviderEvent::Completed { at });
                 events
             } else {
@@ -601,7 +628,11 @@ fn parse_droid_reasoning(
     events
 }
 
-fn parse_droid_tool_call(value: &Value, at: String) -> Option<ProviderEvent> {
+fn parse_droid_tool_call(
+    value: &Value,
+    state: &mut DroidStreamState,
+    at: String,
+) -> Option<ProviderEvent> {
     let id = value
         .get("id")
         .and_then(Value::as_str)
@@ -618,6 +649,13 @@ fn parse_droid_tool_call(value: &Value, at: String) -> Option<ProviderEvent> {
     let parameters = value.get("parameters").and_then(Value::as_object);
     let command = parameters.and_then(droid_tool_command);
     let file = parameters.and_then(droid_tool_file);
+    state.tool_calls.insert(
+        id.clone(),
+        (
+            action.clone(),
+            value.get("parameters").cloned().unwrap_or(Value::Null),
+        ),
+    );
 
     Some(ProviderEvent::ToolCallStarted {
         id,
@@ -628,26 +666,26 @@ fn parse_droid_tool_call(value: &Value, at: String) -> Option<ProviderEvent> {
     })
 }
 
-fn parse_droid_tool_result(value: &Value, at: String) -> Vec<ProviderEvent> {
+fn parse_droid_tool_result(
+    value: &Value,
+    state: &mut DroidStreamState,
+    at: String,
+) -> Vec<ProviderEvent> {
     let id = value
         .get("id")
         .and_then(Value::as_str)
         .unwrap_or("tool-call")
         .to_string();
-    let mut events = Vec::new();
-    if let Some(output) = value
+    let call = state.tool_calls.remove(&id);
+    let output = value
         .get("value")
         .or_else(|| value.get("result"))
         .or_else(|| value.get("output"))
         .and_then(droid_value_to_text)
         .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
-    {
-        events.push(ProviderEvent::ToolCallDelta {
-            id: id.clone(),
-            content: output,
-        });
-    }
+        .filter(|text| !text.is_empty());
+    let detail = droid_tool_detail(call.as_ref(), output);
+    let mut events = Vec::new();
 
     if value
         .get("isError")
@@ -656,7 +694,7 @@ fn parse_droid_tool_result(value: &Value, at: String) -> Vec<ProviderEvent> {
         == Some(true)
     {
         events.push(ProviderEvent::ToolCallFailed {
-            detail: None,
+            detail,
             id,
             reason: value
                 .get("error")
@@ -665,10 +703,131 @@ fn parse_droid_tool_result(value: &Value, at: String) -> Vec<ProviderEvent> {
             at,
         });
     } else {
-        events.push(ProviderEvent::ToolCallCompleted { id, detail: None, at });
+        events.push(ProviderEvent::ToolCallCompleted { id, detail, at });
     }
 
     events
+}
+
+/// Droid's `tool_result` carries only the result text. The command and the
+/// edit diff come from the matching `tool_call` parameters; `Execute`
+/// results do not report an exit code.
+fn droid_tool_detail(
+    call: Option<&(String, Value)>,
+    output: Option<String>,
+) -> Option<ToolCallDetail> {
+    let mut detail = ToolCallDetail {
+        output,
+        ..ToolCallDetail::default()
+    };
+    if let Some((action, parameters)) = call {
+        if let Some(parameters) = parameters.as_object() {
+            detail.command = droid_tool_command(parameters);
+            detail.file = droid_tool_file(parameters);
+            let text = |keys: &[&str]| {
+                keys.iter()
+                    .find_map(|key| parameters.get(*key).and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let file = detail.file.clone();
+            match action.as_str() {
+                "Edit" => {
+                    detail.diff = Some(replacement_diff(
+                        file.as_deref(),
+                        &text(&["old_str", "old_string"]),
+                        &text(&["new_str", "new_string"]),
+                    ));
+                }
+                "MultiEdit" => {
+                    let diff = parameters
+                        .get("edits")
+                        .or_else(|| parameters.get("changes"))
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_object)
+                        .enumerate()
+                        .map(|(index, edit)| {
+                            let side = |keys: [&str; 2]| {
+                                keys.iter()
+                                    .find_map(|key| edit.get(*key).and_then(Value::as_str))
+                                    .unwrap_or("")
+                            };
+                            replacement_diff(
+                                (index == 0).then_some(file.as_deref()).flatten(),
+                                side(["old_str", "old_string"]),
+                                side(["new_str", "new_string"]),
+                            )
+                        })
+                        .collect::<String>();
+                    detail.diff = (!diff.is_empty()).then_some(diff);
+                }
+                "Create" => {
+                    detail.diff = Some(replacement_diff(file.as_deref(), "", &text(&["content"])));
+                }
+                "ApplyPatch" => {
+                    // The patch envelope (`*** Update File: …`) is the
+                    // closest thing to a diff Droid exposes for this tool.
+                    let patch = text(&["input", "patch"]);
+                    detail.file = detail.file.or_else(|| {
+                        patch.lines().find_map(|line| {
+                            ["*** Update File:", "*** Add File:", "*** Delete File:"]
+                                .iter()
+                                .find_map(|prefix| line.strip_prefix(prefix))
+                                .map(|path| path.trim().to_string())
+                        })
+                    });
+                    detail.diff = (!patch.is_empty()).then_some(patch);
+                }
+                "Execute" => {}
+                _ => {
+                    if detail.command.is_none() {
+                        detail.input = serde_json::to_string_pretty(parameters).ok();
+                    }
+                }
+            }
+            if detail.diff.is_some() {
+                // Edit results are a boilerplate confirmation.
+                detail.output = None;
+            }
+        }
+    }
+    let detail = detail.bounded();
+    (!detail.is_empty()).then_some(detail)
+}
+
+/// `completion.usage` (and `result.usage`). Droid uses Anthropic field
+/// names but, as with OpenAI, `input_tokens` already includes cache reads
+/// and writes, so they are subtracted to match the other adapters.
+fn droid_turn_usage(value: &Value, state: &DroidStreamState, at: String) -> Vec<ProviderEvent> {
+    let Some(usage) = value.get("usage").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let tokens = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let input_tokens = tokens("input_tokens");
+    let output_tokens = tokens("output_tokens");
+    let cached_input_tokens = tokens("cache_read_input_tokens");
+    let cache_write_input_tokens = tokens("cache_creation_input_tokens");
+    let total_tokens = input_tokens.saturating_add(output_tokens);
+    if total_tokens == 0 {
+        return Vec::new();
+    }
+    vec![ProviderEvent::TurnUsage {
+        models: vec![ModelTokenUsage {
+            model: state.model.clone(),
+            input_tokens: input_tokens
+                .saturating_sub(cached_input_tokens)
+                .saturating_sub(cache_write_input_tokens),
+            output_tokens,
+            cached_input_tokens,
+            cache_write_input_tokens,
+            reasoning_output_tokens: 0,
+            total_tokens,
+            cost_usd: None,
+        }],
+        at,
+    }]
 }
 
 fn droid_error_message(value: &Value) -> String {
@@ -958,13 +1117,21 @@ mod tests {
             r#"{"type":"tool_result","id":"call-1","toolName":"Execute","isError":false,"value":"total 16","session_id":"sess"}"#,
             &mut state,
         );
-        assert!(matches!(
-            tool_result.as_slice(),
-            [
-                ProviderEvent::ToolCallDelta { id: first_id, content },
-                ProviderEvent::ToolCallCompleted { id: second_id, .. }
-            ] if first_id == "call-1" && second_id == "call-1" && content == "total 16"
-        ));
+        // The output travels bounded in the completion detail, with the
+        // command recovered from the matching tool_call.
+        match tool_result.as_slice() {
+            [ProviderEvent::ToolCallCompleted {
+                id,
+                detail: Some(detail),
+                ..
+            }] => {
+                assert_eq!(id, "call-1");
+                assert_eq!(detail.command.as_deref(), Some("ls -la"));
+                assert_eq!(detail.output.as_deref(), Some("total 16"));
+                assert_eq!(detail.exit_code, None);
+            }
+            other => panic!("unexpected tool result events: {other:?}"),
+        }
 
         let completion = parse_droid_stream_line(
             r#"{"type":"completion","finalText":"Done.","numTurns":1,"durationMs":3000,"session_id":"sess"}"#,
@@ -1014,5 +1181,107 @@ mod tests {
                 ProviderEvent::Completed { .. }
             ] if id == "droid:final" && content == "Final answer"
         ));
+    }
+
+    #[test]
+    fn droid_edit_create_and_patch_results_carry_diffs() {
+        let mut state = DroidStreamState::default();
+        let lines = [
+            r#"{"type":"tool_call","id":"edit-1","toolName":"Edit","parameters":{"file_path":"/repo/src/lib.rs","old_str":"fn a() {}","new_str":"fn b() {}"}}"#,
+            r#"{"type":"tool_result","id":"edit-1","toolId":"Edit","isError":false,"value":"File edited successfully"}"#,
+            r#"{"type":"tool_call","id":"create-1","toolName":"Create","parameters":{"file_path":"/repo/NOTES.md","content":"hello"}}"#,
+            r#"{"type":"tool_result","id":"create-1","toolId":"Create","isError":false,"value":"Created"}"#,
+            r#"{"type":"tool_call","id":"patch-1","toolName":"ApplyPatch","parameters":{"input":"*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch"}}"#,
+            r#"{"type":"tool_result","id":"patch-1","toolId":"ApplyPatch","isError":false,"value":"ok"}"#,
+        ];
+        let details = lines
+            .iter()
+            .flat_map(|line| parse_droid_stream_line(line, &mut state))
+            .filter_map(|event| match event {
+                ProviderEvent::ToolCallCompleted { detail, .. } => detail,
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(details.len(), 3);
+        assert_eq!(details[0].file.as_deref(), Some("/repo/src/lib.rs"));
+        assert_eq!(
+            details[0].diff.as_deref(),
+            Some("--- a//repo/src/lib.rs\n+++ b//repo/src/lib.rs\n@@\n-fn a() {}\n+fn b() {}\n")
+        );
+        // Edit confirmations are dropped in favor of the diff.
+        assert_eq!(details[0].output, None);
+        assert!(details[1]
+            .diff
+            .as_deref()
+            .unwrap()
+            .ends_with("@@\n+hello\n"));
+        assert_eq!(details[2].file.as_deref(), Some("src/main.rs"));
+        assert!(details[2].diff.as_deref().unwrap().contains("+new"));
+        assert!(state.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn failed_droid_tool_keeps_its_output_as_detail() {
+        let mut state = DroidStreamState::default();
+        parse_droid_stream_line(
+            r#"{"type":"tool_call","id":"run-1","toolName":"Execute","parameters":{"command":"cargo test"}}"#,
+            &mut state,
+        );
+        let events = parse_droid_stream_line(
+            r#"{"type":"tool_result","id":"run-1","toolId":"Execute","isError":true,"value":"error: 2 tests failed"}"#,
+            &mut state,
+        );
+        match events.as_slice() {
+            [ProviderEvent::ToolCallFailed {
+                reason,
+                detail: Some(detail),
+                ..
+            }] => {
+                assert_eq!(reason.as_deref(), Some("error: 2 tests failed"));
+                assert_eq!(detail.command.as_deref(), Some("cargo test"));
+                assert_eq!(detail.output.as_deref(), Some("error: 2 tests failed"));
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    /// Lines from a real `droid exec --output-format stream-json` capture
+    /// (2026-09), trimmed.
+    #[test]
+    fn reports_droid_completion_usage_before_the_turn_ends() {
+        let mut state = DroidStreamState::default();
+        parse_droid_stream_line(
+            r#"{"type":"system","subtype":"init","cwd":"/tmp/droid","session_id":"6d37fb97-a480-47b4-a514-94b49828503e","tools":["Read","Execute"],"model":"gpt-5.6-sol","reasoning_effort":"medium"}"#,
+            &mut state,
+        );
+        let events = parse_droid_stream_line(
+            r#"{"type":"completion","finalText":"Done","numTurns":2,"durationMs":28182,"session_id":"6d37fb97-a480-47b4-a514-94b49828503e","timestamp":1790491755310,"usage":{"input_tokens":21960,"output_tokens":186,"cache_read_input_tokens":21693,"cache_creation_input_tokens":0,"factory_credits":40096,"ttft_ms":3645.5}}"#,
+            &mut state,
+        );
+        match events.as_slice() {
+            [ProviderEvent::TurnUsage { models, .. }, ProviderEvent::AssistantMessageCompleted { .. }, ProviderEvent::Completed { .. }] =>
+            {
+                assert_eq!(
+                    models,
+                    &vec![ModelTokenUsage {
+                        model: Some("gpt-5.6-sol".to_string()),
+                        input_tokens: 267,
+                        output_tokens: 186,
+                        cached_input_tokens: 21_693,
+                        cache_write_input_tokens: 0,
+                        reasoning_output_tokens: 0,
+                        total_tokens: 22_146,
+                        cost_usd: None,
+                    }]
+                );
+            }
+            other => panic!("unexpected completion events: {other:?}"),
+        }
+        // A completion without usage reports none.
+        let events =
+            parse_droid_stream_line(r#"{"type":"completion","finalText":"Again"}"#, &mut state);
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, ProviderEvent::TurnUsage { .. })));
     }
 }

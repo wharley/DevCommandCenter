@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 async-trait = "0.1"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dcc-core = { path = "../dcc-core" }
 futures = "0.3"

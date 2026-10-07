@@ -56,8 +56,8 @@ use dcc_core::{
 use crate::codex_mcp::{
     codex_mcp_approval_policy, codex_mcp_approval_policy_with_native, codex_mcp_runtime_version,
     failed_codex_mcp_status_snapshot, initial_codex_mcp_status_snapshot, merge_codex_mcp_status,
-    parse_codex_mcp_startup_status, parse_codex_mcp_status_snapshot, prepare_thread_start_request,
-    CodexMcpDefinitionMap, CodexMcpToolPolicyMap,
+    parse_codex_mcp_startup_status, parse_codex_mcp_status_snapshot, prepare_thread_resume_request,
+    prepare_thread_start_request, CodexMcpDefinitionMap, CodexMcpToolPolicyMap,
 };
 use crate::common::{append_tool_instructions, augmented_path, codex_item_detail};
 
@@ -77,6 +77,13 @@ fn rpc_request(id: u64, method: &str, params: Value) -> String {
 
 fn rpc_notification(method: &str) -> String {
     json!({ "jsonrpc": "2.0", "method": method }).to_string()
+}
+
+fn codex_thread_id(result: &Value) -> Option<&str> {
+    result
+        .get("thread")
+        .and_then(|thread| thread.get("id"))
+        .and_then(Value::as_str)
 }
 
 fn rpc_response(id: &Value, result: Value) -> String {
@@ -124,6 +131,62 @@ fn thread_start_params(
         params["runtimeWorkspaceRoots"] = json!(runtime_workspace_roots);
     }
     params
+}
+
+/// `thread/resume` of the thread a previous runtime of this DCC session
+/// created, with the same overrides as `thread/start`. Codex does not accept
+/// `experimentalRawEvents` on resume.
+fn thread_resume_params(
+    thread_id: &str,
+    cwd: &str,
+    additional_working_directories: &[String],
+    model: Option<&str>,
+) -> Value {
+    let mut params = json!({
+        "threadId": thread_id,
+        "cwd": cwd,
+        "model": model,
+        "approvalPolicy": "never",
+        "sandbox": "workspace-write",
+        "excludeTurns": true,
+    });
+    if !additional_working_directories.is_empty() {
+        let mut runtime_workspace_roots = vec![cwd.to_string()];
+        runtime_workspace_roots.extend(additional_working_directories.iter().cloned());
+        params["runtimeWorkspaceRoots"] = json!(runtime_workspace_roots);
+    }
+    params
+}
+
+/// Longest native thread id DCC persists or hands back to Codex.
+const CODEX_NATIVE_THREAD_ID_MAX_CHARS: usize = 256;
+
+fn valid_codex_thread_id(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.chars().count() <= CODEX_NATIVE_THREAD_ID_MAX_CHARS
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_')))
+    .then_some(value)
+}
+
+/// The history snapshot DCC holds back while a native resume is armed. It
+/// travels only when Codex refused the persisted thread, so context is never
+/// sent twice.
+fn apply_codex_resume_fallback(turn: &mut ProviderTurnInput, native_resumed: bool) {
+    let Some(fallback) = turn.resume_fallback_context.take() else {
+        return;
+    };
+    if native_resumed {
+        return;
+    }
+    turn.tool_instructions = Some(match turn.tool_instructions.take() {
+        Some(existing) if !existing.trim().is_empty() => {
+            format!("{}\n\n{fallback}", existing.trim_end())
+        }
+        _ => fallback,
+    });
 }
 
 fn turn_start_params(
@@ -1886,6 +1949,11 @@ struct SessionRuntime {
     next_id: AtomicU64,
     events_tx: broadcast::Sender<ProviderEvent>,
     last_retry_at: Mutex<Option<Instant>>,
+    /// The thread continues one a previous runtime persisted.
+    native_resumed: std::sync::atomic::AtomicBool,
+    /// Thread id DCC has not been told about yet. Reported on the first
+    /// input, once the event stream is subscribed.
+    unreported_native_thread: Mutex<Option<String>>,
 }
 
 impl SessionRuntime {
@@ -1898,6 +1966,51 @@ impl SessionRuntime {
             return;
         };
         let _ = self.send_request("thread/inject_items", params).await;
+    }
+
+    /// `thread/start`, or `thread/resume` of `resume_thread_id`.
+    async fn open_thread(
+        &self,
+        cfg: &SessionConfig,
+        cwd: &str,
+        resume_thread_id: Option<&str>,
+    ) -> Result<Value> {
+        if !cfg.mcp_servers.is_empty() {
+            return self
+                .send_mcp_thread_start_request(
+                    resume_thread_id,
+                    cwd,
+                    &cfg.additional_working_directories,
+                    cfg.model.as_deref(),
+                    &cfg.mcp_servers,
+                )
+                .await;
+        }
+        match resume_thread_id {
+            Some(thread_id) => {
+                self.send_request(
+                    "thread/resume",
+                    thread_resume_params(
+                        thread_id,
+                        cwd,
+                        &cfg.additional_working_directories,
+                        cfg.model.as_deref(),
+                    ),
+                )
+                .await
+            }
+            None => {
+                self.send_request(
+                    "thread/start",
+                    thread_start_params(
+                        cwd,
+                        &cfg.additional_working_directories,
+                        cfg.model.as_deref(),
+                    ),
+                )
+                .await
+            }
+        }
     }
 
     fn mcp_provider_version(&self) -> Result<&str> {
@@ -1941,15 +2054,36 @@ impl SessionRuntime {
 
     async fn send_mcp_thread_start_request(
         &self,
+        resume_thread_id: Option<&str>,
         cwd: &str,
         additional_working_directories: &[String],
         model: Option<&str>,
         servers: &[dcc_core::ports::ProviderMcpServerConfig],
     ) -> Result<Value> {
-        let method = "thread/start";
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let prepared =
-            prepare_thread_start_request(id, cwd, additional_working_directories, model, servers)?;
+        let (method, prepared) = match resume_thread_id {
+            Some(thread_id) => (
+                "thread/resume",
+                prepare_thread_resume_request(
+                    id,
+                    thread_id,
+                    cwd,
+                    additional_working_directories,
+                    model,
+                    servers,
+                )?,
+            ),
+            None => (
+                "thread/start",
+                prepare_thread_start_request(
+                    id,
+                    cwd,
+                    additional_working_directories,
+                    model,
+                    servers,
+                )?,
+            ),
+        };
         let definitions = prepared.definitions_by_wire_name().clone();
         let tool_policies = prepared.tool_policies_by_definition().clone();
         *self.mcp_definitions_by_wire_name.lock().await = definitions.clone();
@@ -2654,6 +2788,8 @@ impl CodexAppServerAdapter {
             next_id: AtomicU64::new(1),
             events_tx: events_tx.clone(),
             last_retry_at: Mutex::new(None),
+            native_resumed: std::sync::atomic::AtomicBool::new(false),
+            unreported_native_thread: Mutex::new(None),
         });
 
         let session_key = cfg.session_id.0.clone();
@@ -2714,35 +2850,36 @@ impl CodexAppServerAdapter {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(".");
-        let result = if cfg.mcp_servers.is_empty() {
-            runtime
-                .send_request(
-                    "thread/start",
-                    thread_start_params(
-                        cwd,
-                        &cfg.additional_working_directories,
-                        cfg.model.as_deref(),
-                    ),
-                )
-                .await?
-        } else {
-            runtime
-                .send_mcp_thread_start_request(
-                    cwd,
-                    &cfg.additional_working_directories,
-                    cfg.model.as_deref(),
-                    &cfg.mcp_servers,
-                )
-                .await?
+        // A thread persisted by an earlier runtime is resumed natively. A
+        // refusal (thread gone, older app-server) falls back to a fresh
+        // thread, and the held-back history snapshot then rides the first
+        // turn.
+        let resumed = match cfg
+            .native_resume_id
+            .as_deref()
+            .and_then(valid_codex_thread_id)
+        {
+            Some(native_id) => runtime
+                .open_thread(cfg, cwd, Some(native_id))
+                .await
+                .ok()
+                .filter(|result| codex_thread_id(result).is_some()),
+            None => None,
+        };
+        runtime
+            .native_resumed
+            .store(resumed.is_some(), Ordering::SeqCst);
+        let result = match resumed {
+            Some(result) => result,
+            None => runtime.open_thread(cfg, cwd, None).await?,
         };
 
-        let thread_id = result
-            .get("thread")
-            .and_then(|t| t.get("id"))
-            .and_then(Value::as_str)
+        let thread_id = codex_thread_id(&result)
             .ok_or_else(|| CoreError::Provider("codex thread/start missing thread.id".to_string()))?
             .to_string();
 
+        *runtime.unreported_native_thread.lock().await =
+            valid_codex_thread_id(&thread_id).map(str::to_string);
         *runtime.thread_id.lock().await = Some(thread_id);
         if !cfg.mcp_servers.is_empty() {
             refresh_codex_mcp_statuses(runtime).await;
@@ -3197,6 +3334,10 @@ impl Provider for CodexAppServerAdapter {
             .and_then(|runtime| runtime.mcp_provider_version.clone())
     }
 
+    fn supports_native_resume(&self) -> bool {
+        true
+    }
+
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
         self.start_runtime(cfg).await
     }
@@ -3214,6 +3355,12 @@ impl Provider for CodexAppServerAdapter {
 
         if let Input::PermissionResponse(response) = input {
             return runtime.resolve_permission(response).await;
+        }
+
+        if let Some(native_thread) = runtime.unreported_native_thread.lock().await.take() {
+            let _ = runtime.events_tx.send(ProviderEvent::NativeSessionChanged {
+                native_session_id: Some(native_thread),
+            });
         }
 
         let thread_id = runtime
@@ -3235,7 +3382,11 @@ impl Provider for CodexAppServerAdapter {
                 json!("never"),
                 json!({ "type": "dangerFullAccess" }),
             ),
-            Input::Turn(turn) => {
+            Input::Turn(mut turn) => {
+                apply_codex_resume_fallback(
+                    &mut turn,
+                    runtime.native_resumed.load(Ordering::SeqCst),
+                );
                 let (approval_policy, sandbox_policy) = codex_turn_execution_policy(
                     turn.approval_policy,
                     turn.plan_mode,

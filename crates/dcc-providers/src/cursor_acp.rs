@@ -96,6 +96,8 @@ struct CursorAcpSessionRuntime {
     owned_tool_calls: Mutex<HashMap<String, OwnedMcpToolCall>>,
     mcp_status_snapshot: RwLock<Option<Vec<McpRuntimeStatus>>>,
     current_mode: Mutex<String>,
+    /// `promptCapabilities.image` from `initialize`.
+    image_prompts: std::sync::atomic::AtomicBool,
 }
 
 impl CursorAcpSessionRuntime {
@@ -227,6 +229,8 @@ impl CursorAcpSessionRuntime {
             ),
             turn.tool_instructions.as_deref(),
         );
+        let content =
+            crate::common::acp_prompt_content(&prompt, self.image_prompts.load(Ordering::SeqCst));
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
@@ -237,7 +241,7 @@ impl CursorAcpSessionRuntime {
                 "method": "session/prompt",
                 "params": {
                     "sessionId": session_id,
-                    "prompt": [{ "type": "text", "text": prompt }],
+                    "prompt": content,
                 },
             }))
             .await
@@ -249,7 +253,13 @@ impl CursorAcpSessionRuntime {
         tokio::spawn(async move {
             let at = now_iso();
             match timeout(PROMPT_TIMEOUT, rx).await {
-                Ok(Ok(Ok(_))) => {
+                Ok(Ok(Ok(result))) => {
+                    if let Some(usage) = crate::common::acp_prompt_usage(&result) {
+                        let _ = events_tx.send(ProviderEvent::TurnUsage {
+                            models: vec![usage],
+                            at: at.clone(),
+                        });
+                    }
                     let _ = events_tx.send(ProviderEvent::Completed { at });
                 }
                 Ok(Ok(Err(()))) => {
@@ -522,6 +532,7 @@ impl CursorAcpAdapter {
             owned_tool_calls: Mutex::new(HashMap::new()),
             mcp_status_snapshot: RwLock::new(None),
             current_mode: Mutex::new("agent".to_string()),
+            image_prompts: std::sync::atomic::AtomicBool::new(false),
         });
         let session_key = cfg.session_id.0.clone();
         self.state
@@ -555,6 +566,10 @@ impl CursorAcpAdapter {
                 }),
             )
             .await?;
+        runtime.image_prompts.store(
+            crate::common::acp_supports_image_prompts(&initialized),
+            Ordering::SeqCst,
+        );
         let cursor_login = initialized
             .get("authMethods")
             .and_then(Value::as_array)
@@ -1564,6 +1579,131 @@ mod tests {
             Some("provider-message")
         );
         assert!(update_message_id(&json!({ "messageId": "bad\nmessage" })).is_none());
+    }
+
+    /// A scripted ACP agent: advertises image prompts unless `<bin>.no-image`
+    /// exists, logs every request and answers `session/prompt` with usage.
+    #[cfg(unix)]
+    const FAKE_ACP_AGENT: &str = r#"#!/bin/sh
+[ "$1" = "acp" ] || exit 1
+image=true
+[ -f "$0.no-image" ] && image=false
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$0.log"
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  [ -n "$id" ] || continue
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"promptCapabilities":{"image":%s},"mcpCapabilities":{"http":true}},"authMethods":[{"id":"cursor_login"}]}}\n' "$id" "$image" ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"acp-session"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":30,"outputTokens":12,"cachedReadTokens":200,"totalTokens":242}}}\n' "$id" ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn acp_prompts_carry_native_images_and_report_prompt_usage() {
+        use base64::Engine as _;
+        use futures::StreamExt;
+        use std::os::unix::fs::PermissionsExt;
+
+        for image_supported in [true, false] {
+            let root = std::env::temp_dir().join(format!("dcc-fake-acp-{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&root).expect("fixture root");
+            let agent = root.join("agent");
+            std::fs::write(&agent, FAKE_ACP_AGENT).expect("agent");
+            std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+            if !image_supported {
+                std::fs::write(root.join("agent.no-image"), "").expect("flag");
+            }
+            let image = root.join("shot.png");
+            std::fs::write(&image, b"png bytes").expect("image");
+
+            let adapter = CursorAcpAdapter::new(
+                agent.to_string_lossy().to_string(),
+                crate::common::stable_cli_capabilities(),
+            );
+            let handle = adapter
+                .prepare_session(SessionConfig {
+                    workspace_id: dcc_core::domain::workspace::WorkspaceId("fixture".to_string()),
+                    session_id: SessionId(format!("acp-{image_supported}")),
+                    model: None,
+                    working_directory: Some(root.to_string_lossy().to_string()),
+                    additional_working_directories: Vec::new(),
+                    provider_runtime: None,
+                    mcp_servers: vec![dcc_core::ports::ProviderMcpServerConfig {
+                        definition_id: McpDefinitionId("fixture".to_string()),
+                        server_name: "dcc-fixture".to_string(),
+                        transport: dcc_core::ports::ProviderMcpTransport::Stdio {
+                            executable: "/fixtures/dcc-mcp-fixture".to_string(),
+                            args: Vec::new(),
+                            cwd: None,
+                            environment: Vec::new(),
+                        },
+                        oauth_state: None,
+                        tool_policies: Vec::new(),
+                    }],
+                    native_resume_id: None,
+                })
+                .await
+                .expect("fake ACP session");
+            let mut events = adapter.stream_events(&handle);
+            adapter
+                .send_input(
+                    &handle,
+                    Input::Text(format!("describe @{} please", image.to_string_lossy())),
+                )
+                .await
+                .expect("prompt");
+
+            let mut usage = None;
+            while let Ok(Some(Ok(event))) =
+                tokio::time::timeout(Duration::from_secs(5), events.next()).await
+            {
+                match event {
+                    ProviderEvent::TurnUsage { models, .. } => usage = Some(models),
+                    ProviderEvent::Completed { .. } => break,
+                    _ => {}
+                }
+            }
+            let usage = usage.expect("usage reported before completion");
+            assert_eq!(usage[0].input_tokens, 30);
+            assert_eq!(usage[0].cached_input_tokens, 200);
+            assert_eq!(usage[0].total_tokens, 242);
+
+            let log = std::fs::read_to_string(root.join("agent.log")).expect("agent log");
+            let prompt_line = log
+                .lines()
+                .find(|line| line.contains("\"method\":\"session/prompt\""))
+                .expect("session/prompt");
+            let prompt: Value = serde_json::from_str(prompt_line).expect("prompt json");
+            let blocks = prompt["params"]["prompt"].as_array().expect("blocks");
+            if image_supported {
+                assert_eq!(blocks.len(), 2);
+                assert_eq!(blocks[1]["type"], "image");
+                assert_eq!(blocks[1]["mimeType"], "image/png");
+                assert_eq!(
+                    blocks[1]["data"],
+                    base64::engine::general_purpose::STANDARD
+                        .encode(b"png bytes")
+                        .as_str()
+                );
+            } else {
+                assert_eq!(blocks.len(), 1);
+                assert_eq!(blocks[0]["type"], "text");
+            }
+            let _ = adapter.cancel(&handle).await;
+            if let Some(runtime) = adapter.session_runtime(&handle.session_id).await {
+                let _ = runtime.child.lock().await.start_kill();
+            }
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     #[test]

@@ -181,3 +181,95 @@ async fn metadata_refresh_recovers_after_cli_becomes_available() {
     );
     stop(&adapter).await;
 }
+
+#[tokio::test]
+async fn native_thread_resumes_and_falls_back_to_a_fresh_thread_with_the_snapshot() {
+    for (native_id, expected_thread, resumed) in [
+        (None, "thread-fixture", false),
+        (Some("thread-kept"), "thread-kept", true),
+        (Some("thread-gone"), "thread-fixture", false),
+    ] {
+        let cli = TestCli::new("codex-cli 0.153.4");
+        let adapter = adapter(&cli);
+        assert!(adapter.supports_native_resume());
+        let mut cfg = config("native");
+        cfg.native_resume_id = native_id.map(str::to_string);
+        let handle = adapter.prepare_session(cfg).await.unwrap();
+        let mut events = adapter.stream_events(&handle);
+        adapter
+            .send_input(
+                &handle,
+                Input::Turn(ProviderTurnInput {
+                    prompt: "next".to_string(),
+                    tool_instructions: None,
+                    plan_mode: None,
+                    effort: None,
+                    fast_mode: None,
+                    approval_policy: None,
+                    resume_fallback_context: native_id
+                        .map(|_| "<dcc_reanchor>snapshot</dcc_reanchor>".to_string()),
+                }),
+            )
+            .await
+            .unwrap();
+
+        // DCC learns the thread to persist on the first input.
+        let reported = loop {
+            match tokio::time::timeout(Duration::from_secs(5), events.next())
+                .await
+                .expect("native session event")
+            {
+                Some(Ok(ProviderEvent::NativeSessionChanged { native_session_id })) => {
+                    break native_session_id
+                }
+                Some(_) => continue,
+                None => panic!("stream ended"),
+            }
+        };
+        assert_eq!(reported.as_deref(), Some(expected_thread));
+
+        let log = cli.log();
+        let resume_attempts = log.matches("\"method\":\"thread/resume\"").count();
+        assert_eq!(resume_attempts, usize::from(native_id.is_some()));
+        assert_eq!(
+            log.matches("\"method\":\"thread/start\"").count(),
+            usize::from(!resumed)
+        );
+        let turn = log
+            .lines()
+            .find(|line| line.contains("\"method\":\"turn/start\""))
+            .expect("turn/start");
+        assert!(turn.contains(&format!("\"threadId\":\"{expected_thread}\"")));
+        // The held-back snapshot travels only when the resume was refused.
+        assert_eq!(
+            turn.contains("<dcc_reanchor>snapshot"),
+            native_id.is_some() && !resumed
+        );
+        if resumed {
+            let resume = log
+                .lines()
+                .find(|line| line.contains("\"method\":\"thread/resume\""))
+                .unwrap();
+            assert!(resume.contains("\"excludeTurns\":true"));
+            assert!(resume.contains("\"mcp_servers\""));
+        }
+        stop(&adapter).await;
+    }
+}
+
+#[test]
+fn native_thread_ids_are_bounded_opaque_tokens() {
+    assert_eq!(
+        valid_codex_thread_id(" 019a5f3e-7b1c-7d40-a2b9-3c1d2e4f5a6b "),
+        Some("019a5f3e-7b1c-7d40-a2b9-3c1d2e4f5a6b")
+    );
+    assert_eq!(valid_codex_thread_id("../../etc/passwd"), None);
+    assert_eq!(valid_codex_thread_id(""), None);
+    assert_eq!(valid_codex_thread_id(&"a".repeat(257)), None);
+
+    let params = thread_resume_params("thread-1", "/repo", &["/extra".to_string()], Some("gpt-5"));
+    assert_eq!(params["threadId"], "thread-1");
+    assert_eq!(params["excludeTurns"], true);
+    assert_eq!(params["runtimeWorkspaceRoots"], json!(["/repo", "/extra"]));
+    assert!(params.get("experimentalRawEvents").is_none());
+}

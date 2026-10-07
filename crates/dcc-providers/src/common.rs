@@ -77,11 +77,46 @@ enum ProviderEnvelope {
     },
     ToolCallCompleted {
         id: String,
+        #[serde(flatten)]
+        detail: EnvelopeToolDetail,
     },
     ToolCallFailed {
         id: String,
         reason: Option<String>,
+        #[serde(flatten)]
+        detail: EnvelopeToolDetail,
     },
+}
+
+/// Optional result fields a generic CLI may attach to its own
+/// `tool_call_completed` / `tool_call_failed` envelope.
+#[derive(Debug, Default, Deserialize)]
+struct EnvelopeToolDetail {
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    file: Option<String>,
+    #[serde(default)]
+    output: Option<String>,
+    #[serde(default)]
+    exit_code: Option<i32>,
+    #[serde(default)]
+    diff: Option<String>,
+}
+
+impl EnvelopeToolDetail {
+    fn into_detail(self) -> Option<ToolCallDetail> {
+        let detail = ToolCallDetail {
+            command: self.command,
+            file: self.file,
+            output: self.output,
+            exit_code: self.exit_code,
+            diff: self.diff,
+            ..ToolCallDetail::default()
+        }
+        .bounded();
+        (!detail.is_empty()).then_some(detail)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -104,6 +139,11 @@ pub(crate) struct ProviderStreamState {
     claude_pending_events: Vec<ProviderEvent>,
     pub(crate) gemini_streamed_text_emitted: bool,
     pub(crate) gemini_active_message_id: Option<String>,
+    /// Gemini `tool_use` name and parameters by tool id: `tool_result`
+    /// repeats neither.
+    pub(crate) gemini_tool_calls: HashMap<String, (String, Value)>,
+    /// Model from Gemini's `init`, attached to the turn usage.
+    pub(crate) gemini_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -542,10 +582,17 @@ fn parse_custom_envelope(value: &Value) -> Option<ProviderEvent> {
         ProviderEnvelope::ToolCallDelta { id, content } => {
             ProviderEvent::ToolCallDelta { id, content }
         }
-        ProviderEnvelope::ToolCallCompleted { id } => ProviderEvent::ToolCallCompleted { id, detail: None, at },
-        ProviderEnvelope::ToolCallFailed { id, reason } => {
-            ProviderEvent::ToolCallFailed { id, reason, detail: None, at }
-        }
+        ProviderEnvelope::ToolCallCompleted { id, detail } => ProviderEvent::ToolCallCompleted {
+            id,
+            detail: detail.into_detail(),
+            at,
+        },
+        ProviderEnvelope::ToolCallFailed { id, reason, detail } => ProviderEvent::ToolCallFailed {
+            id,
+            reason,
+            detail: detail.into_detail(),
+            at,
+        },
     })
 }
 
@@ -908,7 +955,8 @@ fn parse_claude_terminal_value(
                     .remove(id)
                     .map(|input| input.action)
                     .unwrap_or_default();
-                let detail = claude_tool_result_detail(&action, block, value.get("tool_use_result"));
+                let detail =
+                    claude_tool_result_detail(&action, block, value.get("tool_use_result"));
                 let detail = (!detail.is_empty()).then_some(detail);
                 return if block
                     .get("is_error")
@@ -1080,9 +1128,23 @@ fn parse_claude_result_usage(value: &Value) -> Vec<ModelTokenUsage> {
         return models;
     }
 
-    let Some(usage) = value.get("usage").and_then(Value::as_object) else {
-        return models;
-    };
+    if let Some(mut usage) = value
+        .get("usage")
+        .and_then(Value::as_object)
+        .and_then(|usage| anthropic_usage(usage, None))
+    {
+        usage.cost_usd = value.get("total_cost_usd").and_then(Value::as_f64);
+        models.push(usage);
+    }
+    models
+}
+
+/// Anthropic-shaped `usage` (`input_tokens` excludes cache reads and writes),
+/// as reported by Claude and by Droid's `completion` event.
+pub(crate) fn anthropic_usage(
+    usage: &serde_json::Map<String, Value>,
+    model: Option<String>,
+) -> Option<ModelTokenUsage> {
     let input_tokens = json_u64(usage, "input_tokens");
     let output_tokens = json_u64(usage, "output_tokens");
     let cached_input_tokens = json_u64(usage, "cache_read_input_tokens");
@@ -1091,19 +1153,47 @@ fn parse_claude_result_usage(value: &Value) -> Vec<ModelTokenUsage> {
         .saturating_add(output_tokens)
         .saturating_add(cached_input_tokens)
         .saturating_add(cache_write_input_tokens);
-    if total_tokens > 0 {
-        models.push(ModelTokenUsage {
-            model: None,
-            input_tokens,
-            output_tokens,
-            cached_input_tokens,
-            cache_write_input_tokens,
-            reasoning_output_tokens: 0,
-            total_tokens,
-            cost_usd: value.get("total_cost_usd").and_then(Value::as_f64),
+    (total_tokens > 0).then_some(ModelTokenUsage {
+        model,
+        input_tokens,
+        output_tokens,
+        cached_input_tokens,
+        cache_write_input_tokens,
+        reasoning_output_tokens: 0,
+        total_tokens,
+        cost_usd: None,
+    })
+}
+
+/// `usage` of an ACP `session/prompt` response (`PromptResponse.usage`).
+/// Agents that predate the field, or do not fill it, report nothing.
+pub(crate) fn acp_prompt_usage(result: &Value) -> Option<ModelTokenUsage> {
+    let usage = result.get("usage")?.as_object()?;
+    let input_tokens = json_u64(usage, "inputTokens");
+    let output_tokens = json_u64(usage, "outputTokens");
+    let cached_input_tokens = json_u64(usage, "cachedReadTokens");
+    let cache_write_input_tokens = json_u64(usage, "cachedWriteTokens");
+    let reasoning_output_tokens = json_u64(usage, "thoughtTokens");
+    let total_tokens = usage
+        .get("totalTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            input_tokens
+                .saturating_add(output_tokens)
+                .saturating_add(cached_input_tokens)
+                .saturating_add(cache_write_input_tokens)
+                .saturating_add(reasoning_output_tokens)
         });
-    }
-    models
+    (total_tokens > 0).then_some(ModelTokenUsage {
+        model: None,
+        input_tokens,
+        output_tokens,
+        cached_input_tokens,
+        cache_write_input_tokens,
+        reasoning_output_tokens,
+        total_tokens,
+        cost_usd: None,
+    })
 }
 
 fn codex_agent_message_phase(item: &serde_json::Map<String, Value>) -> AssistantMessagePhase {
@@ -1414,6 +1504,51 @@ pub(crate) fn referenced_image_paths(prompt: &str) -> Vec<String> {
     paths
 }
 
+fn image_mime_type(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    }
+}
+
+/// ACP `session/prompt` content: the text, plus the images it references as
+/// native `image` blocks when the agent advertised
+/// `promptCapabilities.image`. The textual `@/path` reference stays.
+pub(crate) fn acp_prompt_content(prompt: &str, image_supported: bool) -> Vec<Value> {
+    use base64::Engine as _;
+    let mut content = vec![serde_json::json!({ "type": "text", "text": prompt })];
+    if !image_supported {
+        return content;
+    }
+    for path in referenced_image_paths(prompt) {
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        content.push(serde_json::json!({
+            "type": "image",
+            "mimeType": image_mime_type(&path),
+            "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+            "uri": format!("file://{path}"),
+        }));
+    }
+    content
+}
+
+/// `agentCapabilities.promptCapabilities.image` from an ACP `initialize`
+/// result. Absent means unsupported, per the protocol baseline.
+pub(crate) fn acp_supports_image_prompts(initialize_result: &Value) -> bool {
+    initialize_result
+        .pointer("/agentCapabilities/promptCapabilities/image")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 /// Upper bound for buffered streamed tool input. Larger inputs (a huge Write)
 /// still produce metadata from the start block; the JSON simply stops
 /// parsing and no input-derived update is emitted.
@@ -1645,7 +1780,11 @@ pub(crate) fn acp_tool_call_detail(update: &Value) -> Option<ToolCallDetail> {
     {
         match json_str(entry, "type") {
             Some("content") => {
-                if let Some(text) = entry.get("content").and_then(|c| c.get("text")).and_then(Value::as_str) {
+                if let Some(text) = entry
+                    .get("content")
+                    .and_then(|c| c.get("text"))
+                    .and_then(Value::as_str)
+                {
                     output.push(text.to_string());
                 }
             }
@@ -3023,7 +3162,9 @@ mod tests {
             &mut state,
         );
         match denied {
-            ParsedProviderLine::Event(ProviderEvent::ToolCallFailed { id, reason, detail, .. }) => {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallFailed {
+                id, reason, detail, ..
+            }) => {
                 assert_eq!(id, "tool-denied");
                 assert_eq!(reason.as_deref(), Some("User denied tool execution."));
                 assert_eq!(
@@ -3106,6 +3247,116 @@ mod tests {
             }
             other => panic!("expected edit completion, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn generic_cli_envelopes_may_attach_tool_results() {
+        let mut state = ProviderStreamState::default();
+        match parse_provider_stream_line(
+            r#"{"type":"tool_call_completed","id":"run-1","command":"make test","output":"ok","exit_code":0}"#,
+            &mut state,
+        ) {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted {
+                id,
+                detail: Some(detail),
+                ..
+            }) => {
+                assert_eq!(id, "run-1");
+                assert_eq!(detail.command.as_deref(), Some("make test"));
+                assert_eq!(detail.output.as_deref(), Some("ok"));
+                assert_eq!(detail.exit_code, Some(0));
+            }
+            other => panic!("expected detailed completion, got {other:?}"),
+        }
+        match parse_provider_stream_line(
+            r#"{"type":"tool_call_failed","id":"edit-1","reason":"conflict","file":"a.txt","diff":"@@\n-a\n+b\n"}"#,
+            &mut state,
+        ) {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallFailed {
+                reason,
+                detail: Some(detail),
+                ..
+            }) => {
+                assert_eq!(reason.as_deref(), Some("conflict"));
+                assert_eq!(detail.file.as_deref(), Some("a.txt"));
+                assert_eq!(detail.diff.as_deref(), Some("@@\n-a\n+b\n"));
+            }
+            other => panic!("expected detailed failure, got {other:?}"),
+        }
+        // The original envelope, without result fields, still parses.
+        assert!(matches!(
+            parse_provider_stream_line(r#"{"type":"tool_call_completed","id":"bare"}"#, &mut state,),
+            ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted { detail: None, .. })
+        ));
+    }
+
+    #[test]
+    fn reads_acp_prompt_response_usage_when_present() {
+        let usage = acp_prompt_usage(&serde_json::json!({
+            "stopReason": "end_turn",
+            "usage": {
+                "inputTokens": 100,
+                "outputTokens": 20,
+                "cachedReadTokens": 400,
+                "cachedWriteTokens": 5,
+                "thoughtTokens": 7,
+                "totalTokens": 532
+            }
+        }))
+        .expect("usage");
+        assert_eq!(
+            usage,
+            ModelTokenUsage {
+                model: None,
+                input_tokens: 100,
+                output_tokens: 20,
+                cached_input_tokens: 400,
+                cache_write_input_tokens: 5,
+                reasoning_output_tokens: 7,
+                total_tokens: 532,
+                cost_usd: None,
+            }
+        );
+        // Cursor, Grok and older agents answer with the stop reason only.
+        assert!(acp_prompt_usage(&serde_json::json!({ "stopReason": "end_turn" })).is_none());
+        assert!(acp_prompt_usage(&serde_json::json!({ "usage": null })).is_none());
+    }
+
+    #[test]
+    fn acp_prompts_attach_images_only_when_the_agent_accepts_them() {
+        use base64::Engine as _;
+        let dir = std::env::temp_dir().join(format!("dcc-acp-image-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let image = dir.join("shot.png");
+        std::fs::write(&image, b"\x89PNG fixture").expect("image");
+        let image = image.to_string_lossy().to_string();
+        let prompt = format!("describe @{image} please");
+
+        assert_eq!(
+            acp_prompt_content(&prompt, false),
+            vec![serde_json::json!({ "type": "text", "text": prompt })]
+        );
+        let content = acp_prompt_content(&prompt, true);
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["text"], prompt.as_str());
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["mimeType"], "image/png");
+        assert_eq!(content[1]["uri"], format!("file://{image}").as_str());
+        assert_eq!(
+            content[1]["data"],
+            base64::engine::general_purpose::STANDARD
+                .encode(b"\x89PNG fixture")
+                .as_str()
+        );
+
+        assert!(acp_supports_image_prompts(&serde_json::json!({
+            "agentCapabilities": { "promptCapabilities": { "image": true } }
+        })));
+        assert!(!acp_supports_image_prompts(&serde_json::json!({
+            "agentCapabilities": { "promptCapabilities": { "image": false } }
+        })));
+        assert!(!acp_supports_image_prompts(&serde_json::json!({})));
+        std::fs::remove_dir_all(dir).expect("cleanup");
     }
 
     #[test]

@@ -51,6 +51,12 @@ struct RpcRequest<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexThreadStartParams<'a> {
+    /// Set for `thread/resume`; absent for `thread/start`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_id: Option<&'a str>,
+    /// `thread/resume` only: skip returning the stored turns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exclude_turns: Option<bool>,
     cwd: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<&'a str>,
@@ -197,6 +203,44 @@ pub(crate) fn prepare_thread_start_request(
     model: Option<&str>,
     servers: &[ProviderMcpServerConfig],
 ) -> Result<PreparedCodexMcpThreadStartRequest> {
+    prepare_thread_request(
+        request_id,
+        None,
+        cwd,
+        additional_working_directories,
+        model,
+        servers,
+    )
+}
+
+/// `thread/resume` of a persisted thread with the same MCP projection a
+/// fresh `thread/start` would carry.
+pub(crate) fn prepare_thread_resume_request(
+    request_id: u64,
+    thread_id: &str,
+    cwd: &str,
+    additional_working_directories: &[String],
+    model: Option<&str>,
+    servers: &[ProviderMcpServerConfig],
+) -> Result<PreparedCodexMcpThreadStartRequest> {
+    prepare_thread_request(
+        request_id,
+        Some(thread_id),
+        cwd,
+        additional_working_directories,
+        model,
+        servers,
+    )
+}
+
+fn prepare_thread_request(
+    request_id: u64,
+    resume_thread_id: Option<&str>,
+    cwd: &str,
+    additional_working_directories: &[String],
+    model: Option<&str>,
+    servers: &[ProviderMcpServerConfig],
+) -> Result<PreparedCodexMcpThreadStartRequest> {
     if cwd.trim().is_empty()
         || cwd.contains('\0')
         || model.is_some_and(|model| model.trim().is_empty() || model.contains('\0'))
@@ -302,8 +346,14 @@ pub(crate) fn prepare_thread_start_request(
     let payload = serde_json::to_vec(&RpcRequest {
         jsonrpc: "2.0",
         id: request_id,
-        method: "thread/start",
+        method: if resume_thread_id.is_some() {
+            "thread/resume"
+        } else {
+            "thread/start"
+        },
         params: CodexThreadStartParams {
+            thread_id: resume_thread_id,
+            exclude_turns: resume_thread_id.map(|_| true),
             cwd,
             model,
             approval_policy: codex_mcp_approval_policy(),
@@ -889,7 +939,8 @@ mod tests {
             .expect("MCP config");
         assert!(servers.values().any(|server| {
             server.get("url").is_some()
-                && server.get("tool_timeout_sec") == Some(&serde_json::json!(DCC_INTERNAL_TOOL_TIMEOUT_SEC))
+                && server.get("tool_timeout_sec")
+                    == Some(&serde_json::json!(DCC_INTERNAL_TOOL_TIMEOUT_SEC))
         }));
         assert!(servers
             .values()

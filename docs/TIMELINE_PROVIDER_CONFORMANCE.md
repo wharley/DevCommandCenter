@@ -42,6 +42,92 @@ output 8K head + 16K tail, diff 64K. Sources:
 | Claude Agent SDK | Buffered tool input at block stop | `tool_result` content; Bash `stdout`/`stderr` | — | Edit/MultiEdit/Write input, then SDK `structuredPatch` |
 | Codex app-server | `item/started` | `item/commandExecution/outputDelta`, then `aggregatedOutput` | `exitCode` | `fileChange.changes[].diff` |
 | ACP (Cursor, Grok, Antigravity) | `rawInput` | `content` text blocks or `rawOutput` | `rawOutput.exitCode` | `content` diff blocks |
+| Cursor stream-json | `tool_call.<x>ToolCall.args` (`command`, `path`) | Result `interleavedOutput`, else `stdout` + `stderr`; Read `content`; MCP `content[].text.text`; error/reason text | Shell `success`/`failure.exitCode` | Edit `diffString`; Write `args.fileText`; Delete `prevContent` |
+| Droid stream-json | Matching `tool_call.parameters` (kept by id) | `tool_result.value` | Not exposed | Edit/MultiEdit `old_str`/`new_str`, Create `content`, ApplyPatch `input` envelope |
+| Gemini stream-json | Matching `tool_use.parameters` (kept by `tool_id`) | `tool_result.output` (string displays only) | Not exposed | `replace` `old_string`/`new_string`, `write_file` `content`, on success only |
+| Generic CLI envelope | `tool_call_started` | Optional `output` on `tool_call_completed`/`tool_call_failed` | Optional `exit_code` | Optional `diff` |
+
+Provider-specific notes:
+
+- **Cursor stream-json** (`parse_cursor_tool_call` in `cursor.rs`). Shapes
+  come from cursor-agent 2026.10.01: `tool_call` is a serialized protobuf
+  message, so the tool is a oneof key (`shellToolCall`, `editToolCall`, …)
+  next to metadata like `toolCallId` and `hookAdditionalContexts`. The adapter
+  picks the `…ToolCall` object, not the first key. Results are serialized with
+  default values, so a shell `exitCode` of 0 is present. Any result variant
+  other than `success` (`failure` with a non-zero exit, `rejected`, `error`,
+  `permissionDenied`, …) becomes `ToolCallFailed`, the same rule as Codex.
+- **Droid stream-json** (`droid_tool_detail` in `droid.rs`). `tool_result`
+  carries only `id`, `toolId`, `isError` and `value`, so the command and edit
+  diff come from the `tool_call` parameters. `Execute` results are plain text
+  with no exit code. The output used to be streamed as an unbounded
+  `ToolCallDelta`; it now travels once, bounded, in the completion detail.
+- **Gemini stream-json** (`gemini_tool_detail` in `headless_cli.rs`, gemini-cli
+  0.32.1). `tool_result.output` is the tool's `resultDisplay` only when it is a
+  string. Edits display a diff object the stream drops, so the diff is rebuilt
+  from the `tool_use` parameters (no line numbers). Shell exit codes are not
+  in the stream.
+- **Generic CLI envelope** (`ProviderEnvelope` in `common.rs`): DCC's own
+  `tool_call_completed` / `tool_call_failed` lines accept optional `command`,
+  `file`, `output`, `exit_code` and `diff`. Lines without them still parse.
+
+## Turn usage
+
+`ProviderEvent::TurnUsage` feeds the per-turn footer (`session_turn_usage`).
+DCC stores one row per turn and model and replaces it on every report, so a
+provider that reports cumulative per-turn totals once at the end and one that
+reports several snapshots behave the same. `input_tokens` excludes cache reads
+and writes in every adapter except Codex, whose `inputTokens` include cached
+input (OpenAI convention); `total_tokens` is the provider's own total when it
+publishes one. Cost is never estimated.
+
+| Provider path | Source | Model | Notes |
+| --- | --- | --- | --- |
+| Claude Agent SDK | `result.modelUsage` (per model), else `result.usage` | Per model | Includes `costUSD` when present |
+| Codex app-server | `thread/tokenUsage/updated.tokenUsage.last` | — | Includes reasoning output tokens |
+| Cursor stream-json | `result.usage` (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`) | `system/init.model` (display name) | cursor-agent already subtracts cache tokens from `inputTokens` |
+| Droid stream-json | `completion.usage` (also `result.usage`) | `system/init.model` | Anthropic field names, but `input_tokens` includes cache reads (a real capture shows 21,960 input with 21,693 cache reads); DCC subtracts them. `factory_credits` is ignored |
+| Gemini stream-json | `result.stats` (`input`, `cached`, `output_tokens`, `total_tokens`) | `init.model` | Process-wide metrics, which cover exactly one turn because DCC runs one `gemini` process per turn. Thought and tool-prompt tokens are only inside `total_tokens` |
+| ACP (Cursor, Grok, Antigravity) | `session/prompt` response `usage` (`inputTokens`, `outputTokens`, `cachedReadTokens`, `cachedWriteTokens`, `thoughtTokens`, `totalTokens`) | — | Read when present. cursor-agent 2026.10.01 and Grok 0.2.101 answer with `stopReason` only, so they report nothing today. ACP `usage_update` is context-window occupancy (`used`/`size`), not per-turn tokens, and is not used |
+
+## Native image input
+
+The composer serializes pasted and attached images as `@/absolute/path.png`
+tokens. `referenced_image_paths` (`common.rs`) picks existing files (png, jpg,
+jpeg, gif, webp; at most 8, 20 MB each). The textual reference always stays
+in the prompt, so a provider without image input can still open the file
+with a tool.
+
+| Provider path | Native image input |
+| --- | --- |
+| Claude Agent SDK | Image content blocks |
+| Codex app-server | `localImage` input items |
+| ACP (Cursor, Grok, Antigravity) | `image` content blocks (`mimeType`, base64 `data`, `file://` `uri`) in `session/prompt`, only when `initialize` advertised `agentCapabilities.promptCapabilities.image` (cursor-agent 2026.10.01 does) |
+| Cursor / Droid / Gemini stream-json | None: the prompt is a single CLI argument with no attachment channel |
+
+## Native resume
+
+A runtime that restarts (Stop, app restart) reattaches to the provider's own
+conversation when the adapter reports `supports_native_resume`. The bridge
+persists the id from `NativeSessionChanged` per DCC session and provider, and
+holds the cold-attach history snapshot back as `resume_fallback_context`; the
+adapter sends it only if the provider refused the id.
+
+| Provider path | Resume channel | On refusal |
+| --- | --- | --- |
+| Claude Agent SDK | `DCC_RESUME_SESSION_ID` → SDK `resume` | Sidecar forgets the id and retries the turn fresh with the snapshot |
+| Codex app-server | `thread/resume { threadId, excludeTurns: true }` with the same cwd, sandbox, workspace roots and MCP `config` as `thread/start` | `thread/start`, and the snapshot joins the first turn's DCC context |
+| Cursor / Droid / Gemini CLIs | CLI-native continuation (`--resume`, `--session-id`) within one runtime only | — |
+| ACP (Cursor, Grok, Antigravity) | Not implemented | — |
+
+Codex details (`open_thread` in `codex_app_server.rs`): `thread/resume` is
+stable in the v2 app-server; DCC still tries it on every version and falls
+back on any error, so an app-server without it behaves like a fresh start.
+The thread id is reported on the first input of the runtime, once the event
+stream is subscribed. `thread/resume` does not accept `experimentalRawEvents`,
+so on a resumed thread the model a native subagent was asked to spawn with is
+not shown until Codex confirms it. Codex's `additionalContext` memory is per
+process, so the first turn after a resume re-sends every context entry.
 
 ## User words vs. DCC context
 

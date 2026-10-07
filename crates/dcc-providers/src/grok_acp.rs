@@ -64,6 +64,8 @@ struct SessionRuntime {
     next_id: AtomicU64,
     events_tx: broadcast::Sender<ProviderEvent>,
     reasoning_active: Mutex<bool>,
+    /// `promptCapabilities.image` from `initialize`.
+    image_prompts: std::sync::atomic::AtomicBool,
 }
 
 impl SessionRuntime {
@@ -93,6 +95,8 @@ impl SessionRuntime {
             .await
             .clone()
             .ok_or_else(|| CoreError::Provider("grok session has no session ID".to_string()))?;
+        let content =
+            crate::common::acp_prompt_content(&prompt, self.image_prompts.load(Ordering::SeqCst));
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
@@ -102,7 +106,7 @@ impl SessionRuntime {
             "method": "session/prompt",
             "params": {
                 "sessionId": session_id,
-                "prompt": [{ "type": "text", "text": prompt }],
+                "prompt": content,
             },
         }))
         .await?;
@@ -111,7 +115,13 @@ impl SessionRuntime {
         tokio::spawn(async move {
             let at = now_iso();
             match timeout(Duration::from_secs(30 * 60), rx).await {
-                Ok(Ok(Ok(_))) => {
+                Ok(Ok(Ok(result))) => {
+                    if let Some(usage) = crate::common::acp_prompt_usage(&result) {
+                        let _ = events_tx.send(ProviderEvent::TurnUsage {
+                            models: vec![usage],
+                            at: at.clone(),
+                        });
+                    }
                     let _ = events_tx.send(ProviderEvent::Completed { at });
                 }
                 Ok(Ok(Err(message))) => {
@@ -233,6 +243,7 @@ impl GrokAcpAdapter {
             next_id: AtomicU64::new(1),
             events_tx,
             reasoning_active: Mutex::new(false),
+            image_prompts: std::sync::atomic::AtomicBool::new(false),
         });
         let session_key = cfg.session_id.0.clone();
         self.state
@@ -266,6 +277,10 @@ impl GrokAcpAdapter {
                 }),
             )
             .await?;
+        runtime.image_prompts.store(
+            crate::common::acp_supports_image_prompts(&initialized),
+            Ordering::SeqCst,
+        );
         let auth_method = select_auth_method(&initialized).ok_or_else(|| {
             CoreError::Provider(
                 "Grok Build is not authenticated. Run `grok login` or set XAI_API_KEY.".to_string(),

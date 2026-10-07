@@ -18,9 +18,10 @@ use dcc_core::{
     domain::{
         provider::{
             Capabilities, HealthStatus, ProviderApprovalPolicy, ProviderEvent, ProviderId,
-            SessionHandle,
+            SessionHandle, ToolCallDetail,
         },
         session::SessionId,
+        usage::ModelTokenUsage,
     },
     ports::{Input, Provider, SessionConfig},
     CoreError, Result,
@@ -28,7 +29,7 @@ use dcc_core::{
 
 use crate::common::{
     append_tool_instructions, apply_cli_spawn_environment, augmented_path, now_iso,
-    parse_provider_stream_line, ParsedProviderLine, ProviderStreamState,
+    parse_provider_stream_line, replacement_diff, ParsedProviderLine, ProviderStreamState,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -539,43 +540,64 @@ fn parse_gemini_stream_line(line: &str, state: &mut ProviderStreamState) -> Pars
         Err(_) => return ParsedProviderLine::Text(trimmed.to_string()),
     };
 
-    match parse_gemini_stream_value(&value, state) {
-        Some(ProviderEvent::TextDelta { content }) => ParsedProviderLine::Text(content),
-        Some(event) => ParsedProviderLine::Event(event),
-        None => ParsedProviderLine::Ignored,
+    let mut events = parse_gemini_stream_value(&value, state);
+    match events.len() {
+        0 => ParsedProviderLine::Ignored,
+        1 => match events.pop().expect("one event") {
+            ProviderEvent::TextDelta { content } => ParsedProviderLine::Text(content),
+            event => ParsedProviderLine::Event(event),
+        },
+        _ => ParsedProviderLine::Events(events),
     }
 }
 
-fn parse_gemini_stream_value(
-    value: &Value,
-    state: &mut ProviderStreamState,
-) -> Option<ProviderEvent> {
-    let kind = value.get("type").and_then(Value::as_str)?;
+fn parse_gemini_stream_value(value: &Value, state: &mut ProviderStreamState) -> Vec<ProviderEvent> {
+    let Some(kind) = value.get("type").and_then(Value::as_str) else {
+        return Vec::new();
+    };
     let at = now_iso();
 
     match kind {
         "init" => {
             state.gemini_streamed_text_emitted = false;
             state.gemini_active_message_id = Some("gemini:assistant:0".to_string());
-            None
+            state.gemini_model = value
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(str::to_string);
+            Vec::new()
         }
+        _ => parse_gemini_event(kind, value, state, at)
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn parse_gemini_event(
+    kind: &str,
+    value: &Value,
+    state: &mut ProviderStreamState,
+    at: String,
+) -> Vec<ProviderEvent> {
+    match kind {
         "message" => {
-            let role = value.get("role").and_then(Value::as_str)?;
-            if role != "assistant" {
-                return None;
+            if value.get("role").and_then(Value::as_str) != Some("assistant") {
+                return Vec::new();
             }
             let content = value.get("content").and_then(Value::as_str).unwrap_or("");
             if content.is_empty() {
-                None
+                Vec::new()
             } else {
                 state.gemini_streamed_text_emitted = true;
-                Some(ProviderEvent::AssistantMessageDelta {
+                vec![ProviderEvent::AssistantMessageDelta {
                     id: state
                         .gemini_active_message_id
                         .get_or_insert_with(|| "gemini:assistant:0".to_string())
                         .clone(),
                     content: content.to_string(),
-                })
+                }]
             }
         }
         "tool_use" => {
@@ -590,13 +612,21 @@ fn parse_gemini_stream_value(
                 .unwrap_or("tool")
                 .to_string();
             let parameters = value.get("parameters").and_then(Value::as_object);
-            Some(ProviderEvent::ToolCallStarted {
-                id,
-                action: tool_name,
+            let event = ProviderEvent::ToolCallStarted {
+                id: id.clone(),
+                action: tool_name.clone(),
                 command: parameters.and_then(gemini_tool_command),
                 file: parameters.and_then(gemini_tool_file),
                 at,
-            })
+            };
+            state.gemini_tool_calls.insert(
+                id,
+                (
+                    tool_name,
+                    value.get("parameters").cloned().unwrap_or(Value::Null),
+                ),
+            );
+            vec![event]
         }
         "tool_result" => {
             let id = value
@@ -608,9 +638,14 @@ fn parse_gemini_stream_value(
                 .get("status")
                 .and_then(Value::as_str)
                 .unwrap_or("success");
+            let detail = gemini_tool_detail(
+                state.gemini_tool_calls.remove(&id).as_ref(),
+                value.get("output").and_then(Value::as_str),
+                status == "error",
+            );
             if status == "error" {
-                Some(ProviderEvent::ToolCallFailed {
-                    detail: None,
+                vec![ProviderEvent::ToolCallFailed {
+                    detail,
                     id,
                     reason: value
                         .get("error")
@@ -624,9 +659,9 @@ fn parse_gemini_stream_value(
                                 .map(str::to_string)
                         }),
                     at,
-                })
+                }]
             } else {
-                Some(ProviderEvent::ToolCallCompleted { id, detail: None, at })
+                vec![ProviderEvent::ToolCallCompleted { id, detail, at }]
             }
         }
         "error" => {
@@ -635,18 +670,18 @@ fn parse_gemini_stream_value(
                 .and_then(Value::as_str)
                 .unwrap_or("error");
             if severity == "warning" {
-                None
+                Vec::new()
             } else {
                 let raw_message = value
                     .get("message")
                     .and_then(Value::as_str)
                     .unwrap_or("gemini runtime error");
-                Some(ProviderEvent::Failed {
+                vec![ProviderEvent::Failed {
                     message: normalized_gemini_auth_failure(raw_message)
                         .unwrap_or(raw_message)
                         .to_string(),
                     at,
-                })
+                }]
             }
         }
         "result" => {
@@ -655,10 +690,17 @@ fn parse_gemini_stream_value(
                 .and_then(Value::as_str)
                 .unwrap_or("success");
             if status == "success" {
+                let mut events = gemini_turn_usage(value, state.gemini_model.clone())
+                    .map(|usage| ProviderEvent::TurnUsage {
+                        models: vec![usage],
+                        at: at.clone(),
+                    })
+                    .into_iter()
+                    .collect::<Vec<_>>();
                 let content = gemini_result_text(value);
                 if state.gemini_streamed_text_emitted || content.is_some() {
                     state.gemini_streamed_text_emitted = false;
-                    return Some(ProviderEvent::AssistantMessageCompleted {
+                    events.push(ProviderEvent::AssistantMessageCompleted {
                         id: state
                             .gemini_active_message_id
                             .take()
@@ -668,24 +710,102 @@ fn parse_gemini_stream_value(
                         model: None,
                         at,
                     });
+                    return events;
                 }
-                Some(ProviderEvent::Completed { at })
+                events.push(ProviderEvent::Completed { at });
+                events
             } else {
                 let raw_message = value
                     .get("error")
                     .and_then(|error| error.get("message"))
                     .and_then(Value::as_str)
                     .unwrap_or("gemini turn failed");
-                Some(ProviderEvent::Failed {
+                vec![ProviderEvent::Failed {
                     message: normalized_gemini_auth_failure(raw_message)
                         .unwrap_or(raw_message)
                         .to_string(),
                     at,
-                })
+                }]
             }
         }
-        _ => None,
+        _ => Vec::new(),
     }
+}
+
+/// Gemini's `tool_result.output` is the tool's display text when it is a
+/// string (shell output, read excerpts). Edits display a diff object that
+/// the stream drops, so their diff is rebuilt from the `tool_use`
+/// parameters. Shell exit codes are not exposed.
+fn gemini_tool_detail(
+    call: Option<&(String, Value)>,
+    output: Option<&str>,
+    failed: bool,
+) -> Option<ToolCallDetail> {
+    let mut detail = ToolCallDetail {
+        output: output.map(str::to_string),
+        ..ToolCallDetail::default()
+    };
+    if let Some((tool_name, parameters)) = call {
+        if let Some(parameters) = parameters.as_object() {
+            detail.command = gemini_tool_command(parameters);
+            detail.file = gemini_tool_file(parameters);
+            let text = |key: &str| parameters.get(key).and_then(Value::as_str).unwrap_or("");
+            let file = detail.file.clone();
+            match tool_name.as_str() {
+                "replace" | "edit" if !failed => {
+                    detail.diff = Some(replacement_diff(
+                        file.as_deref(),
+                        text("old_string"),
+                        text("new_string"),
+                    ));
+                }
+                "write_file" if !failed => {
+                    detail.diff = Some(replacement_diff(file.as_deref(), "", text("content")));
+                }
+                "run_shell_command" => {}
+                _ => {
+                    if detail.command.is_none() {
+                        detail.input = serde_json::to_string_pretty(parameters).ok();
+                    }
+                }
+            }
+        }
+    }
+    let detail = detail.bounded();
+    (!detail.is_empty()).then_some(detail)
+}
+
+/// `result.stats` of Gemini's stream-json: the CLI's process-wide metrics,
+/// which cover exactly one turn because DCC runs one process per turn.
+/// `input` is the prompt minus cached tokens; `total_tokens` also counts
+/// thoughts and tool-use prompts, which are not reported separately.
+fn gemini_turn_usage(value: &Value, model: Option<String>) -> Option<ModelTokenUsage> {
+    let stats = value.get("stats")?.as_object()?;
+    let tokens = |key: &str| stats.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let cached_input_tokens = tokens("cached");
+    let input_tokens = stats
+        .get("input")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| tokens("input_tokens").saturating_sub(cached_input_tokens));
+    let output_tokens = tokens("output_tokens");
+    let total_tokens = stats
+        .get("total_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            input_tokens
+                .saturating_add(cached_input_tokens)
+                .saturating_add(output_tokens)
+        });
+    (total_tokens > 0).then_some(ModelTokenUsage {
+        model,
+        input_tokens,
+        output_tokens,
+        cached_input_tokens,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens,
+        cost_usd: None,
+    })
 }
 
 fn gemini_result_text(value: &Value) -> Option<String> {
@@ -953,6 +1073,96 @@ mod tests {
             completed,
             ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted { .. })
         ));
+    }
+
+    /// Event shapes follow gemini-cli 0.32.1 (`output/types.d.ts`).
+    #[test]
+    fn gemini_tool_results_carry_output_and_rebuilt_edit_diffs() {
+        let mut state = ProviderStreamState::default();
+        let lines = [
+            r#"{"type":"tool_use","timestamp":"2026-10-07T00:00:00Z","tool_name":"run_shell_command","tool_id":"shell-1","parameters":{"command":"git status --short","description":"status"}}"#,
+            r#"{"type":"tool_result","timestamp":"2026-10-07T00:00:01Z","tool_id":"shell-1","status":"success","output":" M src/lib.rs"}"#,
+            r#"{"type":"tool_use","timestamp":"2026-10-07T00:00:02Z","tool_name":"replace","tool_id":"edit-1","parameters":{"file_path":"/repo/src/lib.rs","old_string":"fn a() {}","new_string":"fn b() {}","instruction":"rename"}}"#,
+            r#"{"type":"tool_result","timestamp":"2026-10-07T00:00:03Z","tool_id":"edit-1","status":"success"}"#,
+            r#"{"type":"tool_use","timestamp":"2026-10-07T00:00:04Z","tool_name":"write_file","tool_id":"write-1","parameters":{"file_path":"/repo/NOTES.md","content":"hello"}}"#,
+            r#"{"type":"tool_result","timestamp":"2026-10-07T00:00:05Z","tool_id":"write-1","status":"error","error":{"type":"FILE_WRITE_FAILURE","message":"permission denied"}}"#,
+        ];
+        let mut terminal = Vec::new();
+        for line in lines {
+            match parse_gemini_stream_line(line, &mut state) {
+                ParsedProviderLine::Event(event @ ProviderEvent::ToolCallCompleted { .. })
+                | ParsedProviderLine::Event(event @ ProviderEvent::ToolCallFailed { .. }) => {
+                    terminal.push(event)
+                }
+                _ => {}
+            }
+        }
+        match terminal.as_slice() {
+            [ProviderEvent::ToolCallCompleted {
+                detail: Some(shell),
+                ..
+            }, ProviderEvent::ToolCallCompleted {
+                detail: Some(edit), ..
+            }, ProviderEvent::ToolCallFailed {
+                reason,
+                detail: Some(write),
+                ..
+            }] => {
+                assert_eq!(shell.command.as_deref(), Some("git status --short"));
+                assert_eq!(shell.output.as_deref(), Some(" M src/lib.rs"));
+                assert_eq!(shell.exit_code, None);
+                assert_eq!(edit.file.as_deref(), Some("/repo/src/lib.rs"));
+                assert!(edit
+                    .diff
+                    .as_deref()
+                    .is_some_and(|diff| diff.ends_with("@@\n-fn a() {}\n+fn b() {}\n")));
+                assert_eq!(reason.as_deref(), Some("permission denied"));
+                // A failed write did not change the file: no diff.
+                assert_eq!(write.diff, None);
+                assert_eq!(write.file.as_deref(), Some("/repo/NOTES.md"));
+            }
+            other => panic!("unexpected tool events: {other:?}"),
+        }
+        assert!(state.gemini_tool_calls.is_empty());
+    }
+
+    #[test]
+    fn gemini_result_stats_become_turn_usage_with_the_init_model() {
+        let mut state = ProviderStreamState::default();
+        let _ = parse_gemini_stream_line(
+            r#"{"type":"init","timestamp":"2026-10-07T00:00:00Z","session_id":"gemini-session-1","model":"gemini-2.5-pro"}"#,
+            &mut state,
+        );
+        let _ = parse_gemini_stream_line(
+            r#"{"type":"message","timestamp":"2026-10-07T00:00:01Z","role":"assistant","content":"Done","delta":true}"#,
+            &mut state,
+        );
+        let result = parse_gemini_stream_line(
+            r#"{"type":"result","timestamp":"2026-10-07T00:00:02Z","status":"success","stats":{"total_tokens":1450,"input_tokens":1200,"output_tokens":150,"cached":800,"input":400,"duration_ms":2100,"tool_calls":1}}"#,
+            &mut state,
+        );
+        match result {
+            ParsedProviderLine::Events(events) => match events.as_slice() {
+                [ProviderEvent::TurnUsage { models, .. }, ProviderEvent::AssistantMessageCompleted { .. }] =>
+                {
+                    assert_eq!(
+                        models,
+                        &vec![ModelTokenUsage {
+                            model: Some("gemini-2.5-pro".to_string()),
+                            input_tokens: 400,
+                            output_tokens: 150,
+                            cached_input_tokens: 800,
+                            cache_write_input_tokens: 0,
+                            reasoning_output_tokens: 0,
+                            total_tokens: 1450,
+                            cost_usd: None,
+                        }]
+                    );
+                }
+                other => panic!("unexpected result events: {other:?}"),
+            },
+            _ => panic!("expected usage and completion"),
+        }
     }
 
     #[test]

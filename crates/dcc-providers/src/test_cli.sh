@@ -27,6 +27,13 @@ while IFS= read -r line; do
       else
         printf '{"id":%s,"result":{"thread":{"id":"thread-fixture"}}}\n' "$id"
       fi ;;
+    *'"method":"thread/resume"'*)
+      thread=$(printf '%s\n' "$line" | sed -n 's/.*"threadId":"\([^"]*\)".*/\1/p')
+      if [ "$thread" = "thread-gone" ]; then
+        printf '{"id":%s,"error":{"message":"no rollout found for thread id %s"}}\n' "$id" "$thread"
+      else
+        printf '{"id":%s,"result":{"thread":{"id":"%s"}}}\n' "$id" "$thread"
+      fi ;;
     *'"method":"mcpServerStatus/list"'*)
       printf '{"id":%s,"result":{"data":[],"nextCursor":null}}\n' "$id" ;;
     *'"method":"turn/start"'*)
