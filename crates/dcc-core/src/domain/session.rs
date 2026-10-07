@@ -500,6 +500,115 @@ pub enum SessionEventKind {
         #[serde(rename = "turnsUsed")]
         turns_used: u32,
     },
+    /// "Edit from here": the conversation went back to just before
+    /// `anchor_turn_id`. The anchor and every later turn leave the
+    /// conversation. Their events stay durable for audit, but every
+    /// projection that feeds a person or a provider skips them.
+    ConversationRewound {
+        #[serde(rename = "anchorTurnId")]
+        anchor_turn_id: TurnId,
+        #[serde(rename = "removedTurnIds")]
+        removed_turn_ids: Vec<TurnId>,
+        #[serde(rename = "providerContext")]
+        provider_context: RewindProviderContext,
+        /// Turns whose file changes Guarded Undo restored, newest first.
+        #[serde(rename = "restoredTurnIds", default)]
+        restored_turn_ids: Vec<TurnId>,
+    },
+}
+
+/// How the provider's own memory followed a conversation rewind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RewindProviderContext {
+    /// The provider's native conversation is cut at the same point.
+    Native,
+    /// No turn is kept, so the provider starts a new conversation.
+    Fresh,
+}
+
+impl SessionEventKind {
+    /// The turn an event belongs to, when it belongs to one.
+    pub fn turn_id(&self) -> Option<&TurnId> {
+        match self {
+            Self::TurnStarted { turn_id, .. }
+            | Self::TurnSteered { turn_id, .. }
+            | Self::QueuedTurnDispatched { turn_id, .. }
+            | Self::TurnDelta { turn_id, .. }
+            | Self::TurnAssistantMessageStarted { turn_id, .. }
+            | Self::TurnAssistantMessageDelta { turn_id, .. }
+            | Self::TurnAssistantMessageCompleted { turn_id, .. }
+            | Self::TurnReasoningStarted { turn_id, .. }
+            | Self::TurnReasoningDelta { turn_id, .. }
+            | Self::TurnReasoningCompleted { turn_id, .. }
+            | Self::TurnToolCallStarted { turn_id, .. }
+            | Self::TurnToolCallDelta { turn_id, .. }
+            | Self::TurnToolCallUpdated { turn_id, .. }
+            | Self::TurnToolCallCompleted { turn_id, .. }
+            | Self::TurnToolCallFailed { turn_id, .. }
+            | Self::TurnUserInputRequested { turn_id, .. }
+            | Self::TurnUserInputResolved { turn_id, .. }
+            | Self::TurnPermissionRequested { turn_id, .. }
+            | Self::TurnPermissionResolved { turn_id, .. }
+            | Self::TurnNativeSubagentActivity { turn_id, .. }
+            | Self::TurnNativeSubagentModelConfirmed { turn_id, .. }
+            | Self::TurnNativeSubagentModelRequested { turn_id, .. }
+            | Self::TurnModelEffective { turn_id, .. }
+            | Self::TurnCompleted { turn_id }
+            | Self::TurnAborted { turn_id, .. } => Some(turn_id),
+            Self::SessionStarted { .. }
+            | Self::TurnQueued { .. }
+            | Self::QueuedTurnRemoved { .. }
+            | Self::TurnQueueReordered { .. }
+            | Self::CheckpointCreated { .. }
+            | Self::PlanApproved { .. }
+            | Self::PlanHandedOff { .. }
+            | Self::DelegationRequested { .. }
+            | Self::DelegationStarted { .. }
+            | Self::DelegationDelta { .. }
+            | Self::DelegationCompleted { .. }
+            | Self::DelegationFailed { .. }
+            | Self::DelegationCancelled { .. }
+            | Self::SessionCompleted
+            | Self::SessionAborted { .. }
+            | Self::SessionResumed
+            | Self::ObjectivePaused { .. }
+            | Self::ConversationRewound { .. } => None,
+        }
+    }
+}
+
+/// Turns that a conversation rewind took out of the conversation.
+pub fn rewound_turn_ids(events: &[SessionEventRecord]) -> std::collections::HashSet<TurnId> {
+    events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            SessionEventKind::ConversationRewound {
+                removed_turn_ids, ..
+            } => Some(removed_turn_ids.iter().cloned()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// The conversation as it stands: events of rewound turns are dropped.
+/// Session-level events stay, including the rewind markers themselves.
+pub fn visible_session_events(events: &[SessionEventRecord]) -> Vec<SessionEventRecord> {
+    let rewound = rewound_turn_ids(events);
+    if rewound.is_empty() {
+        return events.to_vec();
+    }
+    events
+        .iter()
+        .filter(|event| {
+            event
+                .kind
+                .turn_id()
+                .is_none_or(|turn_id| !rewound.contains(turn_id))
+        })
+        .cloned()
+        .collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -689,6 +798,9 @@ impl SessionProjection {
                 self.state = SessionState::Active;
             }
             SessionEventKind::ObjectivePaused { .. } => {}
+            SessionEventKind::ConversationRewound { .. } => {
+                self.active_turn_id = None;
+            }
         }
     }
 

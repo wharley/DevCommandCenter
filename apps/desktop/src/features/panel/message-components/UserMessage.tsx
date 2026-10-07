@@ -11,30 +11,10 @@ import { Button } from "@/components/ui/button";
 import { LazyStreamdown } from "@/components/streamdown-loader";
 import { pathBasename } from "@/lib/path-basename";
 import { isImageFilePath } from "@/lib/is-image-path";
+import { promptParts, type PromptPart } from "@/lib/prompt-attachments";
 import { cn } from "@/lib/utils";
 import { MessageTimestamp } from "./message-metadata";
 import { ASSISTANT_STREAMDOWN_SHIKI_THEME } from "./assistant-streaming-rendering";
-
-type PromptPart = { kind: "text"; value: string } | { kind: "attachment"; path: string };
-
-/** Composer attachments are serialized as @/absolute/path; show them as chips in the timeline. */
-function promptParts(content: string): PromptPart[] {
-	const parts: PromptPart[] = [];
-	// Paths can contain spaces, so consume through the filename extension instead
-	// of stopping at the first whitespace before the rest of the prompt.
-	const attachmentPattern =
-		/@((?:\/|[A-Za-z]:[\\/]|\\\\)[^\r\n<>]*?\.[a-z\d]{1,12})(?=$|[\s),.;!?])/gi;
-	let cursor = 0;
-	for (const match of content.matchAll(attachmentPattern)) {
-		const path = match[1];
-		const start = match.index ?? 0;
-		if (start > cursor) parts.push({ kind: "text", value: content.slice(cursor, start) });
-		parts.push({ kind: "attachment", path });
-		cursor = start + 1 + path.length;
-	}
-	if (cursor < content.length) parts.push({ kind: "text", value: content.slice(cursor) });
-	return parts.length ? parts : [{ kind: "text", value: content }];
-}
 
 function UserPromptContent({ content }: { content: string }) {
 	const parts = promptParts(content);

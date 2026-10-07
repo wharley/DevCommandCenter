@@ -49,6 +49,8 @@ import { WorkspaceComposer } from "@/features/composer";
 import type { DebugEvidenceController } from "@/features/composer/DebugEvidenceTray";
 import { diffEvidenceInput } from "@/features/sessions/debug-evidence";
 import { sessionThreadHistoryQueryOptions } from "@/features/sessions/session-thread-history";
+import { EditFromHereDialog } from "@/features/sessions/EditFromHereDialog";
+import { useEditFromHere } from "@/features/sessions/use-edit-from-here";
 import { delegationTargetsFor } from "@/features/sessions/delegation-targets";
 import {
 	composerTurnFromRaw,
@@ -1211,6 +1213,11 @@ export function WorkspacePanel({
 			mode: "replace",
 		}));
 	}, []);
+	const editFromHere = useEditFromHere({
+		sessionId: effectiveSessionId,
+		putPromptInComposer: replaceComposerDraft,
+		forkFromMessage: onForkFromMessage,
+	});
 	const handleContinueInterrupted = useCallback(
 		async (originalPrompt: string | null) => {
 			try {
@@ -1675,7 +1682,7 @@ export function WorkspacePanel({
 					onReviewDelegation={onReviewDelegation}
 					onRerunDelegation={onRerunDelegation}
 					onSendDelegationResult={onSendDelegationResult}
-					onEditPrompt={replaceComposerDraft}
+					onEditFromMessage={editFromHere.begin}
 					onForkFromMessage={onForkFromMessage}
 					onContinueInterrupted={handleContinueInterrupted}
 					onRetryInterrupted={handleRetryInterrupted}
@@ -1946,6 +1953,7 @@ export function WorkspacePanel({
 	return (
 		<>
 			{surfaceContent}
+			<EditFromHereDialog {...editFromHere.dialog} />
 			<Dialog
 				open={commitPreview !== null}
 				onOpenChange={(open) => {

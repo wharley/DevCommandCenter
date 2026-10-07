@@ -28,8 +28,11 @@ import { createTurnInput, SESSION_STATE_ENV } from "./turn-input.mjs";
 import { waitForPendingResponse } from "./pending-response.mjs";
 import { claudeCommand, resolveClaudeExecutable } from "./claude-executable.mjs";
 import {
+	adoptNativeSession,
 	createTurnTrace,
+	initialNativeResumeAt,
 	initialNativeResumeId,
+	nativeResumeQueryOptions,
 	recordTurnStderr,
 	runTurnWithNativeResume,
 } from "./native-resume.mjs";
@@ -97,7 +100,7 @@ function updateResumeSessionId(message, state, trace) {
 		typeof message.session_id === "string" &&
 		message.session_id.length > 0
 	) {
-		state.resumeSessionId = message.session_id;
+		adoptNativeSession(state, message.session_id);
 		trace.sawInit = true;
 	}
 }
@@ -308,7 +311,7 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 			pathToClaudeCodeExecutable: claudeBinPath,
 			executable: "node",
 			model: process.env.DCC_MODEL || undefined,
-			...(state.resumeSessionId ? { resume: state.resumeSessionId } : {}),
+			...nativeResumeQueryOptions(state),
 			...approvalOptions,
 			includePartialMessages: true,
 			settingSources: ["user", "project", "local"],
@@ -479,6 +482,7 @@ async function main() {
 	const nativeResumeId = initialNativeResumeId(process.env);
 	const state = {
 		resumeSessionId: nativeResumeId,
+		resumeSessionAt: nativeResumeId ? initialNativeResumeAt(process.env) : null,
 		nativeResumePending: nativeResumeId !== null,
 		running: false,
 		activeTurnPromise: null,

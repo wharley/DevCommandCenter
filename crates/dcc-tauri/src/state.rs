@@ -167,6 +167,8 @@ fn truncate_chars_for_reanchor(value: &str, max_chars: usize) -> String {
 /// prompts and final assistant answers travel; reasoning, tool calls and
 /// streaming fragments never do. `None` when no turn ever completed.
 pub(crate) fn build_cold_attach_reanchor(history: &[SessionEventRecord]) -> Option<String> {
+    // Rewound turns left the conversation; they never travel back.
+    let history = &dcc_core::domain::session::visible_session_events(history)[..];
     let completed_turns = history
         .iter()
         .filter(|event| matches!(event.kind, SessionEventKind::TurnCompleted { .. }))
@@ -1907,6 +1909,7 @@ impl SessionCommandState {
                 provider_runtime: Some(runtime),
                 mcp_servers: Vec::new(),
                 native_resume_id: None,
+                native_rewind_checkpoint: None,
             })
             .await?;
         let mut events = provider.stream_events(&handle);
@@ -4120,8 +4123,11 @@ impl SessionCommandState {
             }
         }
 
-        let native_resume_id =
-            self.native_resume_id_for_attach(session, provider.supports_native_resume());
+        let (native_resume_id, native_rewind_checkpoint) = self.native_resume_for_attach(
+            session,
+            provider.supports_native_resume(),
+            provider.native_rewind_cut().is_some(),
+        );
         let native_resume_armed = native_resume_id.is_some();
         let handle = match provider
             .prepare_session(SessionConfig {
@@ -4133,6 +4139,7 @@ impl SessionCommandState {
                 provider_runtime: Some(provider_runtime),
                 mcp_servers,
                 native_resume_id,
+                native_rewind_checkpoint,
             })
             .await
         {
@@ -5077,8 +5084,52 @@ impl SessionCommandState {
     }
 
     /// Persisted native conversation id to resume when attaching `session`'s
-    /// provider. Ids left by another provider are dropped first: they never
-    /// saw the turns made since. Lookup failures attach fresh.
+    /// provider, with the pending "edit from here" cut for it, if any. Ids
+    /// left by another provider are dropped first: they never saw the turns
+    /// made since. Lookup failures attach fresh.
+    fn native_resume_for_attach(
+        &self,
+        session: &Session,
+        supports_native_resume: bool,
+        supports_native_rewind: bool,
+    ) -> (Option<String>, Option<String>) {
+        let Some(native_id) = self.native_resume_id_for_attach(session, supports_native_resume)
+        else {
+            return (None, None);
+        };
+        let pending = match self
+            .session_repo
+            .load_provider_native_rewind(&session.id, &session.provider_id)
+        {
+            Ok(pending) => pending,
+            Err(error) => {
+                // Resuming the whole conversation would bring rewound turns
+                // back; start fresh and let the bounded snapshot re-anchor.
+                eprintln!("[DCC] provider native rewind lookup failed: {error}");
+                return (None, None);
+            }
+        };
+        match pending {
+            None => (Some(native_id), None),
+            Some((rewind_native_id, checkpoint))
+                if supports_native_rewind && rewind_native_id == native_id =>
+            {
+                (Some(native_id), Some(checkpoint))
+            }
+            Some(_) => {
+                // The cut belongs to another conversation or this runtime
+                // cannot apply it: never resume past it.
+                if let Err(error) = self
+                    .session_repo
+                    .delete_provider_native_sessions(&session.id, Some(&session.provider_id))
+                {
+                    eprintln!("[DCC] provider native session cleanup failed: {error}");
+                }
+                (None, None)
+            }
+        }
+    }
+
     fn native_resume_id_for_attach(
         &self,
         session: &Session,
@@ -5128,16 +5179,142 @@ impl SessionCommandState {
             return Ok(());
         }
         match native_session_id {
-            Some(native_id) => self.session_repo.save_provider_native_session(
-                session_id,
-                &binding.provider_id,
-                native_id,
-            ),
+            Some(native_id) => {
+                self.session_repo.save_provider_native_session(
+                    session_id,
+                    &binding.provider_id,
+                    native_id,
+                )?;
+                // The adapter reports the conversation it continues with only
+                // after any pending cut is in place.
+                self.session_repo
+                    .delete_provider_native_rewind(session_id, &binding.provider_id)
+                    .map(|_| ())
+            }
             None => self
                 .session_repo
                 .delete_provider_native_sessions(session_id, Some(&binding.provider_id))
                 .map(|_| ()),
         }
+    }
+
+    /// How `session`'s provider can follow an "edit from here" to `plan`.
+    pub(crate) fn plan_rewind_provider_context(
+        &self,
+        session: &Session,
+        plan: &dcc_core::application::ConversationRewindPlan,
+    ) -> (
+        crate::conversation_rewind::RewindProviderPlan,
+        Option<crate::conversation_rewind::NativeRewindTarget>,
+    ) {
+        let cut = registered_provider(&session.provider_id)
+            .ok()
+            .and_then(|registration| registration.runtime.native_rewind_cut());
+        let stored_native_id = self
+            .session_repo
+            .load_provider_native_session(&session.id, &session.provider_id)
+            .unwrap_or_else(|error| {
+                eprintln!("[DCC] provider native session lookup failed: {error}");
+                None
+            });
+        crate::conversation_rewind::plan_provider_context(
+            cut,
+            plan,
+            stored_native_id.as_deref(),
+            |turn_id| {
+                self.session_repo
+                    .load_provider_native_turn_checkpoint(
+                        &session.id,
+                        turn_id,
+                        &session.provider_id,
+                    )
+                    .ok()
+                    .flatten()
+            },
+        )
+    }
+
+    /// Cuts the conversation in this thread once files are settled: the live
+    /// runtime is dropped, the provider is told where to continue, and only
+    /// then the rewind becomes durable. The caller holds `transition`, so no
+    /// turn can start in between.
+    pub(crate) async fn commit_conversation_rewind(
+        &self,
+        transition: &ProviderTransitionGuard,
+        session: &Session,
+        plan: &dcc_core::application::ConversationRewindPlan,
+        provider: &crate::conversation_rewind::RewindProviderPlan,
+        target: Option<crate::conversation_rewind::NativeRewindTarget>,
+        restored_turn_ids: Vec<TurnId>,
+    ) -> Result<()> {
+        use crate::conversation_rewind::RewindProviderPlan;
+        use dcc_core::domain::session::RewindProviderContext;
+
+        let provider_context = match (provider, &target) {
+            (RewindProviderPlan::Native, Some(_)) => RewindProviderContext::Native,
+            (RewindProviderPlan::Fresh, None) => RewindProviderContext::Fresh,
+            _ => {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "this provider cannot follow the rewind in this thread".to_string(),
+                ))
+            }
+        };
+        self.cancel_provider_session_if_attached_under_transition(transition, &session.id)
+            .await?;
+        self.clear_cold_attach_reanchor(&session.id);
+        match &target {
+            Some(target) => self.session_repo.save_provider_native_rewind(
+                &session.id,
+                &session.provider_id,
+                &target.native_id,
+                &target.checkpoint,
+            )?,
+            None => {
+                self.session_repo
+                    .delete_provider_native_sessions(&session.id, None)?;
+            }
+        }
+        let recorded = dcc_core::application::record_conversation_rewound(
+            self,
+            self,
+            &session.id,
+            plan,
+            provider_context,
+            restored_turn_ids,
+        )
+        .await;
+        if recorded.is_err() && target.is_some() {
+            // The conversation did not move, so the native one must not either.
+            let _ = self
+                .session_repo
+                .delete_provider_native_rewind(&session.id, &session.provider_id);
+        }
+        recorded.map(|_| ())
+    }
+
+    /// Stores where the current turn left the native conversation, so a later
+    /// "edit from here" can cut it there. Stale bindings are ignored.
+    fn record_provider_native_turn_checkpoint(
+        &self,
+        session_id: &SessionId,
+        binding: &ProviderSessionBinding,
+        turn_id: &TurnId,
+        native_session_id: &str,
+        checkpoint: &str,
+    ) -> Result<()> {
+        let current = self
+            .provider_binding(session_id)?
+            .is_some_and(|current| current.handle.handle_id == binding.handle.handle_id);
+        if !current {
+            return Ok(());
+        }
+        self.session_repo.save_provider_native_turn_checkpoint(
+            session_id,
+            turn_id,
+            &binding.provider_id,
+            native_session_id,
+            checkpoint,
+        )
     }
 
     /// Model authority for every provider. Static catalogs are checked in the
@@ -5405,6 +5582,25 @@ impl SessionCommandState {
                             native_session_id.as_deref(),
                         ) {
                             eprintln!("[DCC] provider native session persistence failed: {error}");
+                        }
+                    }
+                    Ok(ProviderEvent::NativeTurnCheckpoint {
+                        native_session_id,
+                        checkpoint,
+                    }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            if let Err(error) = state.record_provider_native_turn_checkpoint(
+                                &session_id,
+                                &binding,
+                                &TurnId(turn_id),
+                                &native_session_id,
+                                &checkpoint,
+                            ) {
+                                eprintln!(
+                                    "[DCC] provider native checkpoint persistence failed: {error}"
+                                );
+                            }
                         }
                     }
                     Ok(ProviderEvent::McpOauthStateChanged { definition_id }) => {
@@ -6586,12 +6782,10 @@ impl SessionCommandState {
 
     pub async fn steer_provider_turn(&self, session_id: &SessionId, prompt: &str) -> Result<()> {
         // All steering entry points must validate the checkout before provider input.
-        let _branch_guards = crate::commands::local_branches::guard_conversation_event(
-            self.db_path(),
-            session_id,
-        )
-        .await
-        .map_err(dcc_core::CoreError::InvalidInput)?;
+        let _branch_guards =
+            crate::commands::local_branches::guard_conversation_event(self.db_path(), session_id)
+                .await
+                .map_err(dcc_core::CoreError::InvalidInput)?;
         let binding = self.provider_binding(session_id)?.ok_or_else(|| {
             dcc_core::CoreError::Provider(format!(
                 "no provider binding for session {}",
@@ -6929,9 +7123,12 @@ impl SessionEventRepo for SessionCommandState {
                 | SessionEventKind::TurnQueued { .. }
                 | SessionEventKind::TurnSteered { .. }
         ) {
-            crate::commands::local_branches::guard_conversation_event(self.db_path(), &event.session_id)
-                .await
-                .map_err(dcc_core::CoreError::InvalidInput)?
+            crate::commands::local_branches::guard_conversation_event(
+                self.db_path(),
+                &event.session_id,
+            )
+            .await
+            .map_err(dcc_core::CoreError::InvalidInput)?
         } else {
             Vec::new()
         };

@@ -158,6 +158,29 @@ fn thread_resume_params(
     params
 }
 
+/// How many turns `thread/rollback` must drop so the thread ends just before
+/// `checkpoint`, the Codex turn an "edit from here" anchored on. `None` when
+/// that turn is not in the thread: cutting by count alone could keep a
+/// rewound turn or drop a kept one.
+fn codex_rollback_turn_count(turn_ids: &[&str], checkpoint: &str) -> Option<u32> {
+    let index = turn_ids.iter().position(|turn_id| *turn_id == checkpoint)?;
+    u32::try_from(turn_ids.len() - index).ok()
+}
+
+fn codex_thread_turn_ids(result: &Value) -> Vec<&str> {
+    result
+        .get("thread")
+        .and_then(|thread| thread.get("turns"))
+        .and_then(Value::as_array)
+        .map(|turns| {
+            turns
+                .iter()
+                .filter_map(|turn| turn.get("id").and_then(Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Longest native thread id DCC persists or hands back to Codex.
 const CODEX_NATIVE_THREAD_ID_MAX_CHARS: usize = 256;
 
@@ -1968,6 +1991,34 @@ impl SessionRuntime {
         let _ = self.send_request("thread/inject_items", params).await;
     }
 
+    /// Cuts a resumed thread just before the Codex turn `checkpoint`. Any
+    /// doubt is an error: the caller then starts a fresh thread rather than
+    /// continuing one that still holds rewound turns.
+    async fn rewind_thread(&self, thread_id: &str, checkpoint: &str) -> Result<()> {
+        let read = self
+            .send_request(
+                "thread/read",
+                json!({ "threadId": thread_id, "includeTurns": true }),
+            )
+            .await?;
+        let num_turns = codex_rollback_turn_count(&codex_thread_turn_ids(&read), checkpoint)
+            .ok_or_else(|| {
+                CoreError::Provider("codex thread does not hold the rewind turn".to_string())
+            })?;
+        let rolled_back = self
+            .send_request(
+                "thread/rollback",
+                json!({ "threadId": thread_id, "numTurns": num_turns }),
+            )
+            .await?;
+        if codex_thread_turn_ids(&rolled_back).contains(&checkpoint) {
+            return Err(CoreError::Provider(
+                "codex thread/rollback kept the rewound turn".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// `thread/start`, or `thread/resume` of `resume_thread_id`.
     async fn open_thread(
         &self,
@@ -2859,11 +2910,26 @@ impl CodexAppServerAdapter {
             .as_deref()
             .and_then(valid_codex_thread_id)
         {
-            Some(native_id) => runtime
-                .open_thread(cfg, cwd, Some(native_id))
-                .await
-                .ok()
-                .filter(|result| codex_thread_id(result).is_some()),
+            Some(native_id) => {
+                let resumed = runtime
+                    .open_thread(cfg, cwd, Some(native_id))
+                    .await
+                    .ok()
+                    .filter(|result| codex_thread_id(result).is_some());
+                // Edit from here: the resumed thread must first lose the
+                // rewound turns. If it cannot, it is not resumed at all.
+                match (resumed, cfg.native_rewind_checkpoint.as_deref()) {
+                    (Some(result), Some(checkpoint)) => {
+                        let thread_id = codex_thread_id(&result).unwrap_or(native_id).to_string();
+                        runtime
+                            .rewind_thread(&thread_id, checkpoint)
+                            .await
+                            .ok()
+                            .map(|()| result)
+                    }
+                    (resumed, _) => resumed,
+                }
+            }
             None => None,
         };
         runtime
@@ -3338,6 +3404,10 @@ impl Provider for CodexAppServerAdapter {
         true
     }
 
+    fn native_rewind_cut(&self) -> Option<dcc_core::ports::NativeRewindCut> {
+        Some(dcc_core::ports::NativeRewindCut::FromAnchorTurn)
+    }
+
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
         self.start_runtime(cfg).await
     }
@@ -3429,11 +3499,21 @@ impl Provider for CodexAppServerAdapter {
             )
             .await?;
 
-        result
+        let turn_id = result
             .get("turn")
             .and_then(|turn| turn.get("id"))
             .and_then(Value::as_str)
             .ok_or_else(|| CoreError::Provider("codex turn/start missing turn.id".to_string()))?;
+        // The Codex turn is where "edit from here" cuts this thread later.
+        if let (Some(thread_id), Some(turn_id)) = (
+            valid_codex_thread_id(&thread_id),
+            valid_codex_thread_id(turn_id),
+        ) {
+            let _ = runtime.events_tx.send(ProviderEvent::NativeTurnCheckpoint {
+                native_session_id: thread_id.to_string(),
+                checkpoint: turn_id.to_string(),
+            });
+        }
 
         Ok(())
     }
@@ -3723,6 +3803,31 @@ impl Provider for CodexAppServerAdapter {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn rollback_drops_the_anchor_turn_and_everything_after_it_or_nothing() {
+        let read = json!({ "thread": { "id": "th", "turns": [
+            { "id": "t1" }, { "id": "t2" }, { "id": "t3" }
+        ] } });
+        let turns = codex_thread_turn_ids(&read);
+        assert_eq!(
+            codex_rollback_turn_count(&turns, "t3"),
+            Some(1),
+            "last turn"
+        );
+        assert_eq!(
+            codex_rollback_turn_count(&turns, "t2"),
+            Some(2),
+            "middle turn"
+        );
+        assert_eq!(codex_rollback_turn_count(&turns, "t1"), Some(3));
+        // A thread that does not hold the turn (fresh thread after a refused
+        // resume, another thread) is never cut by count.
+        assert_eq!(codex_rollback_turn_count(&turns, "t9"), None);
+        assert_eq!(codex_rollback_turn_count(&[], "t1"), None);
+        assert!(codex_thread_turn_ids(&json!({ "thread": { "id": "th" } })).is_empty());
+    }
+
     use super::*;
 
     #[test]

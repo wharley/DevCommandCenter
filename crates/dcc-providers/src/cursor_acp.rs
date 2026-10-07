@@ -1650,6 +1650,7 @@ done
                         tool_policies: Vec::new(),
                     }],
                     native_resume_id: None,
+                    native_rewind_checkpoint: None,
                 })
                 .await
                 .expect("fake ACP session");

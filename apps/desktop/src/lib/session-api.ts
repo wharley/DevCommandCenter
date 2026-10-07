@@ -19,6 +19,10 @@ import type {
 	TurnReviewFileDiffOutput,
 	ExecuteGuardedUndoInput,
 	ExecuteGuardedUndoOutput,
+	ExecuteConversationRewindInput,
+	ExecuteConversationRewindOutput,
+	PrepareConversationRewindInput,
+	PrepareConversationRewindOutput,
 	InheritSessionObjectiveInput,
 	SessionObjectiveOutput,
 	SetSessionObjectiveInput,
@@ -325,6 +329,20 @@ export function prepareGuardedUndo(snapshotId: string) {
 export function executeGuardedUndo(previewToken: string) {
 	const input = { previewToken, confirmed: true } satisfies ExecuteGuardedUndoInput;
 	return invoke<ExecuteGuardedUndoOutput>(SESSION_METHODS.executeGuardedUndo, {
+		input,
+	});
+}
+
+/** Read-only: what "edit from here" on this turn would do. */
+export function prepareConversationRewind(input: PrepareConversationRewindInput) {
+	return invoke<PrepareConversationRewindOutput>(SESSION_METHODS.prepareConversationRewind, {
+		input,
+	});
+}
+
+/** Carries out a prepared "edit from here" the person confirmed. */
+export function executeConversationRewind(input: ExecuteConversationRewindInput) {
+	return invoke<ExecuteConversationRewindOutput>(SESSION_METHODS.executeConversationRewind, {
 		input,
 	});
 }

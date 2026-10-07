@@ -495,6 +495,14 @@ pub enum ProviderEvent {
     NativeSessionChanged {
         native_session_id: Option<String>,
     },
+    /// Backend-only, per turn: where the native conversation stood for the
+    /// current turn. The meaning of `checkpoint` is the adapter's own (the
+    /// Claude message to resume at, the Codex turn id); DCC only stores it and
+    /// hands it back through `SessionConfig::native_rewind_checkpoint`.
+    NativeTurnCheckpoint {
+        native_session_id: String,
+        checkpoint: String,
+    },
     NativeSubagentActivity {
         id: String,
         agent_id: Option<String>,

@@ -13,6 +13,7 @@ pub mod record_plan_handoff;
 pub mod resolve_session_mcp;
 pub mod restore_session;
 pub mod resume_session;
+pub mod rewind_conversation;
 pub mod send_turn;
 pub mod start_thread;
 pub mod steer_turn;
@@ -47,6 +48,10 @@ pub use record_plan_handoff::{
 pub use resolve_session_mcp::{resolve_session_mcp_servers, ResolveSessionMcpInput};
 pub use restore_session::{restore_session, RestoreSessionInput, RestoreSessionOutput};
 pub use resume_session::{resume_session, ResumeSessionInput, ResumeSessionOutput};
+pub use rewind_conversation::{
+    plan_conversation_rewind, record_conversation_rewound, ConversationRewindBlock,
+    ConversationRewindPlan,
+};
 pub use send_turn::{
     merge_send_turn_session_selection, prepare_session_for_turn, send_turn,
     send_turn_selection_differs_from_session, SendTurnInput, SendTurnOutput,

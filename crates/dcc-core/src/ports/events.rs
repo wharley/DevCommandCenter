@@ -48,6 +48,13 @@ pub enum CoreEvent {
         consecutive_failures: u32,
         turns_used: u32,
     },
+    SessionConversationRewound {
+        session_id: String,
+        anchor_turn_id: String,
+        removed_turn_ids: Vec<String>,
+        provider_context: crate::domain::session::RewindProviderContext,
+        restored_turn_ids: Vec<String>,
+    },
     /// Ephemeral runtime truth. This event is not appended to the durable
     /// session transcript.
     SessionMcpRuntimeStatusChanged {
@@ -289,6 +296,7 @@ impl CoreEvent {
             | Self::SessionAborted { session_id, .. }
             | Self::SessionResumed { session_id }
             | Self::SessionObjectivePaused { session_id, .. }
+            | Self::SessionConversationRewound { session_id, .. }
             | Self::SessionMcpRuntimeStatusChanged { session_id, .. }
             | Self::SessionTurnStarted { session_id, .. }
             | Self::SessionTurnSteered { session_id, .. }
@@ -946,6 +954,32 @@ impl CoreEvent {
                 reason == actual_reason
                     && consecutive_failures == actual_failures
                     && turns_used == actual_turns
+            }
+            (
+                SessionEventKind::ConversationRewound {
+                    anchor_turn_id,
+                    removed_turn_ids,
+                    provider_context,
+                    restored_turn_ids,
+                },
+                Self::SessionConversationRewound {
+                    anchor_turn_id: actual_anchor_turn_id,
+                    removed_turn_ids: actual_removed_turn_ids,
+                    provider_context: actual_provider_context,
+                    restored_turn_ids: actual_restored_turn_ids,
+                    ..
+                },
+            ) => {
+                anchor_turn_id.0 == *actual_anchor_turn_id
+                    && provider_context == actual_provider_context
+                    && removed_turn_ids
+                        .iter()
+                        .map(|turn_id| turn_id.0.as_str())
+                        .eq(actual_removed_turn_ids.iter().map(String::as_str))
+                    && restored_turn_ids
+                        .iter()
+                        .map(|turn_id| turn_id.0.as_str())
+                        .eq(actual_restored_turn_ids.iter().map(String::as_str))
             }
             _ => false,
         }

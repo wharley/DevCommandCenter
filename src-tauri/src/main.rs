@@ -7282,6 +7282,8 @@ pub fn run() {
             session_commands::turn_review_file_diff,
             session_commands::prepare_guarded_undo,
             session_commands::execute_guarded_undo,
+            session_commands::prepare_conversation_rewind,
+            session_commands::execute_conversation_rewind,
             session_commands::list_mcp_runtime_statuses,
             session_commands::start_mcp_oauth,
             session_commands::wait_mcp_oauth,

@@ -94,6 +94,10 @@ Review continue to work normally.
 5. Select **Restore _n_ files** / **Restaurar _n_ arquivos**.
 6. Wait for preparation, restoration, and final verification to finish.
 
+[Edit from here](EDIT_FROM_HERE.md) uses the same restoration to take files
+back together with the conversation, newest turn first, only when you choose
+it.
+
 Later changes to unrelated files are not Undo targets. A later change to a
 target file, `HEAD`, branch, index, repository identity, or relevant metadata
 blocks automatic Undo before DCC overwrites the workspace.

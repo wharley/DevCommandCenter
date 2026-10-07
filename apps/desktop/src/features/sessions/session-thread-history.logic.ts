@@ -450,6 +450,16 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					turns_used: record.kind.turnsUsed,
 				},
 			};
+		case "conversation_rewound":
+			return {
+				sessionConversationRewound: {
+					session_id: record.sessionId,
+					anchor_turn_id: record.kind.anchorTurnId,
+					removed_turn_ids: record.kind.removedTurnIds,
+					provider_context: record.kind.providerContext,
+					restored_turn_ids: record.kind.restoredTurnIds ?? [],
+				},
+			};
 		default:
 			return null;
 	}
@@ -470,6 +480,9 @@ function getEventSessionId(event: CoreEvent): string | null {
 	}
 	if ("sessionObjectivePaused" in event && event.sessionObjectivePaused) {
 		return event.sessionObjectivePaused.session_id;
+	}
+	if ("sessionConversationRewound" in event && event.sessionConversationRewound) {
+		return event.sessionConversationRewound.session_id;
 	}
 	if (
 		"sessionMcpRuntimeStatusChanged" in event &&
@@ -603,6 +616,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionAborted" in event) return "session.aborted";
 	if ("sessionResumed" in event) return "session.resumed";
 	if ("sessionObjectivePaused" in event) return "session.objective.paused";
+	if ("sessionConversationRewound" in event) return "session.conversation.rewound";
 	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnSteered" in event) return "session.turn.steered";
@@ -789,7 +803,55 @@ function eventSummary(event: CoreEvent): string {
 					: "paused";
 		return `Objective paused automatically: ${why}. Queued follow-ups stop until you resume it.`;
 	}
+	if ("sessionConversationRewound" in event && event.sessionConversationRewound) {
+		const rewound = event.sessionConversationRewound;
+		const turns = rewound.removed_turn_ids.length;
+		const context =
+			rewound.provider_context === "fresh"
+				? "the agent starts a new conversation"
+				: "the agent's own conversation was cut at the same point";
+		const files =
+			rewound.restored_turn_ids.length > 0
+				? `files restored for ${rewound.restored_turn_ids.length} turn${rewound.restored_turn_ids.length === 1 ? "" : "s"}`
+				: "files kept as they were";
+		return `Edited from an earlier message: ${turns} turn${turns === 1 ? "" : "s"} left the conversation; ${context}; ${files}.`;
+	}
 	return "No payload summary";
+}
+
+/** The turn a live event belongs to, when it belongs to one. */
+function coreEventTurnId(event: CoreEvent): string | null {
+	for (const payload of Object.values(event)) {
+		if (
+			payload &&
+			typeof payload === "object" &&
+			"turn_id" in payload &&
+			typeof payload.turn_id === "string"
+		) {
+			return payload.turn_id;
+		}
+	}
+	return null;
+}
+
+/**
+ * "Edit from here" keeps rewound turns durable for audit; the conversation,
+ * and everything projected from it, drops them.
+ */
+export function withoutRewoundTurns<T extends { event: CoreEvent }>(events: readonly T[]): T[] {
+	const rewound = new Set<string>();
+	for (const { event } of events) {
+		if ("sessionConversationRewound" in event && event.sessionConversationRewound) {
+			for (const turnId of event.sessionConversationRewound.removed_turn_ids) {
+				rewound.add(turnId);
+			}
+		}
+	}
+	if (rewound.size === 0) return events.slice();
+	return events.filter(({ event }) => {
+		const turnId = coreEventTurnId(event);
+		return turnId === null || !rewound.has(turnId);
+	});
 }
 
 function eventSignature(event: CoreEvent): string {
@@ -1189,7 +1251,9 @@ export function projectWorkspaceMessages(
 	const turnModelByTurnId = new Map<string, string | null>();
 	const requestedSubagentModels = new Map<string, string>();
 	const confirmedSubagentModels = new Map<string, string>();
-	const filteredEvents = mergeSessionThreadEvents(historyEvents, liveEvents, sessionId);
+	const filteredEvents = withoutRewoundTurns(
+		mergeSessionThreadEvents(historyEvents, liveEvents, sessionId),
+	);
 
 	for (const timelineEvent of filteredEvents) {
 		const event = timelineEvent.event;
@@ -1823,7 +1887,7 @@ export function projectWorkspaceMessages(
 			continue;
 		}
 
-		if ("sessionCompleted" in event || "sessionAborted" in event || "sessionResumed" in event || "sessionObjectivePaused" in event || "sessionCheckpointCreated" in event || "workspacePrepared" in event || "workspaceReady" in event) {
+		if ("sessionCompleted" in event || "sessionAborted" in event || "sessionResumed" in event || "sessionObjectivePaused" in event || "sessionConversationRewound" in event || "sessionCheckpointCreated" in event || "workspacePrepared" in event || "workspaceReady" in event) {
 			messages.push({
 				id: `${eventLabel(event)}-${messages.length}`,
 				role: "system",

@@ -4,6 +4,12 @@
 // another machine, another worktree path) the turn retries fresh with the
 // bounded history snapshot DCC sent as `resumeFallbackContext`, and DCC is
 // told to forget the id.
+//
+// After "edit from here" DCC also hands back DCC_RESUME_SESSION_AT: the
+// assistant message the conversation must continue from. That turn forks the
+// native conversation at that message, so the rewound turns never come back.
+// If the cut cannot be made, the turn starts fresh with the snapshot instead
+// of resuming the whole conversation.
 
 const NATIVE_SESSION_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const RESUME_REJECTED = /No conversation found with session ID/i;
@@ -15,6 +21,34 @@ export function initialNativeResumeId(env) {
 			? env.DCC_RESUME_SESSION_ID.trim()
 			: "";
 	return NATIVE_SESSION_ID.test(value) ? value : null;
+}
+
+export function initialNativeResumeAt(env) {
+	const value =
+		typeof env?.DCC_RESUME_SESSION_AT === "string"
+			? env.DCC_RESUME_SESSION_AT.trim()
+			: "";
+	return NATIVE_SESSION_ID.test(value) ? value : null;
+}
+
+export function nativeResumeQueryOptions(state) {
+	if (!state.resumeSessionId) {
+		return {};
+	}
+	if (!state.resumeSessionAt) {
+		return { resume: state.resumeSessionId };
+	}
+	return {
+		resume: state.resumeSessionId,
+		resumeSessionAt: state.resumeSessionAt,
+		forkSession: true,
+	};
+}
+
+// The fork reported its own id in `system/init`: the cut is in place.
+export function adoptNativeSession(state, sessionId) {
+	state.resumeSessionId = sessionId;
+	state.resumeSessionAt = null;
 }
 
 export function createTurnTrace() {
@@ -69,6 +103,7 @@ export function withResumeFallback(payload, fallbackContext) {
 
 function forgetNativeResume(state, emit, sessionId) {
 	state.resumeSessionId = null;
+	state.resumeSessionAt = null;
 	emit({ type: "dcc_native_resume_rejected", session_id: sessionId });
 }
 
@@ -100,9 +135,13 @@ export async function runTurnWithNativeResume(
 	// The native conversation already holds the history; the fallback
 	// snapshot would only duplicate it.
 	const resumedId = state.resumeSessionId;
+	const cutting = Boolean(state.resumeSessionAt);
 	const trace = createTurnTrace();
 	const terminalResult = await runTurn(turnPayload, state, trace);
-	if (!isResumeRejection(trace, terminalResult)) {
+	// A cut that never got to `system/init` is not retried: resuming without
+	// it would bring the rewound turns back.
+	const cutFailed = cutting && !trace.sawInit;
+	if (!cutFailed && !isResumeRejection(trace, terminalResult)) {
 		return terminalResult;
 	}
 	forgetNativeResume(state, emit, resumedId);

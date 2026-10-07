@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+	adoptNativeSession,
 	createTurnTrace,
+	initialNativeResumeAt,
 	initialNativeResumeId,
+	nativeResumeQueryOptions,
 	isResumeRejection,
 	recordTurnStderr,
 	runTurnWithNativeResume,
@@ -185,4 +188,59 @@ test("stderr capture stays bounded", () => {
 test("fallback merges into tool instructions only when present", () => {
 	assert.deepEqual(withResumeFallback({ prompt: "p" }, null), { prompt: "p" });
 	assert.equal(withResumeFallback({ prompt: "p" }, FALLBACK).toolInstructions, FALLBACK);
+});
+
+const CUT_AT = "a5b6c7d8-2222-4000-8000-000000000000";
+
+test("an edit-from-here cut forks the native conversation at the kept message", () => {
+	assert.equal(initialNativeResumeAt({ DCC_RESUME_SESSION_AT: ` ${CUT_AT} ` }), CUT_AT);
+	assert.equal(initialNativeResumeAt({ DCC_RESUME_SESSION_AT: "../x" }), null);
+	assert.deepEqual(nativeResumeQueryOptions({ resumeSessionId: null, resumeSessionAt: CUT_AT }), {});
+	assert.deepEqual(nativeResumeQueryOptions({ resumeSessionId: NATIVE_ID, resumeSessionAt: null }), {
+		resume: NATIVE_ID,
+	});
+	assert.deepEqual(nativeResumeQueryOptions({ resumeSessionId: NATIVE_ID, resumeSessionAt: CUT_AT }), {
+		resume: NATIVE_ID,
+		resumeSessionAt: CUT_AT,
+		forkSession: true,
+	});
+});
+
+test("the cut applies once: the fork's own id is resumed afterwards", async () => {
+	const { state, emitted, deps } = harness({ sessionInfo: { sessionId: NATIVE_ID } });
+	state.resumeSessionAt = CUT_AT;
+	const options = [];
+	const runTurn = async (_payload, turnState, trace) => {
+		options.push(nativeResumeQueryOptions(turnState));
+		adoptNativeSession(turnState, `fork-${options.length}`);
+		trace.sawInit = true;
+		return { type: "result", is_error: false, result: "done" };
+	};
+	await runTurnWithNativeResume(payload, state, runTurn, deps);
+	await runTurnWithNativeResume(payload, state, runTurn, deps);
+	assert.deepEqual(options, [
+		{ resume: NATIVE_ID, resumeSessionAt: CUT_AT, forkSession: true },
+		{ resume: "fork-1" },
+	]);
+	assert.deepEqual(emitted, []);
+});
+
+test("a cut that cannot be made starts fresh instead of resuming the whole conversation", async () => {
+	const { state, emitted, calls, runTurn, deps } = harness({
+		sessionInfo: { sessionId: NATIVE_ID },
+		attempts: [
+			{ stderr: "Error: message not found", result: { type: "result", is_error: true } },
+			{ initId: "fresh-id" },
+		],
+	});
+	state.resumeSessionAt = CUT_AT;
+	await runTurnWithNativeResume(payload, state, runTurn, deps);
+	assert.deepEqual(
+		calls.map((call) => call.resume),
+		[NATIVE_ID, null],
+		"the retry never resumes the uncut conversation",
+	);
+	assert.equal(calls[1].payload.toolInstructions, `scope\n\n${FALLBACK}`);
+	assert.equal(state.resumeSessionAt, null);
+	assert.deepEqual(emitted, [{ type: "dcc_native_resume_rejected", session_id: NATIVE_ID }]);
 });

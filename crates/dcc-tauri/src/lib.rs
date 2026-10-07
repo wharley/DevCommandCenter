@@ -1,6 +1,7 @@
 pub(crate) mod antigravity_account_state;
 pub mod antigravity_installation;
 pub mod commands;
+pub mod conversation_rewind;
 pub(crate) mod delegation_apply;
 pub mod delegation_runtime;
 pub mod delivery_failure;

@@ -336,6 +336,7 @@ where
                 provider_runtime: None,
                 mcp_servers: servers,
                 native_resume_id: None,
+                native_rewind_checkpoint: None,
             })
             .await
             .map_err(|_| McpConformanceAdapterError::ProviderSession)?;

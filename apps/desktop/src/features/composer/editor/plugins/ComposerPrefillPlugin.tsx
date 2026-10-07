@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { appendComposerText, setEditorText } from "../../editorOps";
+import { appendComposerText, setEditorPrompt } from "../../editorOps";
 import { shouldApplyComposerPrefill } from "../../WorkspaceComposer.logic";
 
 import type {
@@ -32,7 +32,7 @@ export function ComposerPrefillPlugin({
 		if (!prefill) return;
 
 		if (prefill.mode === "replace") {
-			setEditorText(editor, prefill.text);
+			setEditorPrompt(editor, prefill.text);
 		} else {
 			appendComposerText(editor, prefill.text);
 		}

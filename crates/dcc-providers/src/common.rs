@@ -2526,6 +2526,7 @@ mod tests {
             }),
             mcp_servers: Vec::new(),
             native_resume_id: None,
+            native_rewind_checkpoint: None,
         };
 
         let layout = resolve_codex_home_layout(&cfg);

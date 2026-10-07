@@ -281,16 +281,18 @@ use dcc_tauri::commands::{
         AiMemoryExportHistoryOutput, AiMemoryOutboxStatusOutput, AiMemoryQueryHit,
         AiMemoryQueryInput, AiMemorySyncInput, AiMemorySyncOutput, ApplyTaskTitleInput,
         ApplyTaskTitleOutput, DecisionProviderCompletionActionInput, DecisionProviderHistoryOutput,
-        DecisionProviderModelRouteInput, DecisionProviderModelRouteOutput, ExecuteGuardedUndoInput,
+        DecisionProviderModelRouteInput, DecisionProviderModelRouteOutput,
+        ExecuteConversationRewindInput, ExecuteConversationRewindOutput, ExecuteGuardedUndoInput,
         ExecuteGuardedUndoOutput, GuardedUndoOperationSummary, GuardedUndoPreviewFile,
         InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
         ListMcpRuntimeStatusesOutput, McpTurnPreflightState, NativeSubagentControlOutput,
-        PrepareGuardedUndoInput, PrepareGuardedUndoOutput, PrepareTurnOutput,
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput, RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput,
-        SearchSessionsInput, SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput,
-        SteerNativeSubagentInput, TurnReviewFileDiffInput, TurnReviewFileDiffOutput,
-        TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
+        PrepareConversationRewindInput, PrepareConversationRewindOutput, PrepareGuardedUndoInput,
+        PrepareGuardedUndoOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
+        RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
+        RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
+        SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
+        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
+        WaitMcpOauthOutput,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -602,6 +604,8 @@ struct SessionMethods {
     turn_review_file_diff: String,
     prepare_guarded_undo: String,
     execute_guarded_undo: String,
+    prepare_conversation_rewind: String,
+    execute_conversation_rewind: String,
     list_mcp_runtime_statuses: String,
     start_mcp_oauth: String,
     wait_mcp_oauth: String,
@@ -1039,6 +1043,10 @@ fn main() {
         .typ::<PrepareGuardedUndoOutput>()
         .typ::<ExecuteGuardedUndoInput>()
         .typ::<ExecuteGuardedUndoOutput>()
+        .typ::<PrepareConversationRewindInput>()
+        .typ::<PrepareConversationRewindOutput>()
+        .typ::<ExecuteConversationRewindInput>()
+        .typ::<ExecuteConversationRewindOutput>()
         .typ::<ListMcpRuntimeStatusesInput>()
         .typ::<ListMcpRuntimeStatusesOutput>()
         .typ::<StartMcpOauthInput>()
@@ -1261,6 +1269,8 @@ fn main() {
             turn_review_file_diff: "turn_review_file_diff".to_string(),
             prepare_guarded_undo: "prepare_guarded_undo".to_string(),
             execute_guarded_undo: "execute_guarded_undo".to_string(),
+            prepare_conversation_rewind: "prepare_conversation_rewind".to_string(),
+            execute_conversation_rewind: "execute_conversation_rewind".to_string(),
             list_mcp_runtime_statuses: "list_mcp_runtime_statuses".to_string(),
             start_mcp_oauth: "start_mcp_oauth".to_string(),
             wait_mcp_oauth: "wait_mcp_oauth".to_string(),

@@ -395,6 +395,32 @@ CREATE TABLE IF NOT EXISTS dcc_provider_native_sessions (
 );
 "#;
 
+/// "Edit from here" for provider-native conversations. Each turn stores the
+/// checkpoint its adapter reported (what it means is the adapter's own); a
+/// rewind stores the checkpoint the next runtime must continue from, until
+/// the adapter reports the conversation it continues with.
+const PROVIDER_NATIVE_REWIND_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_provider_native_turn_checkpoints (
+	session_id TEXT NOT NULL CHECK(length(session_id) BETWEEN 1 AND 256),
+	turn_id TEXT NOT NULL CHECK(length(turn_id) BETWEEN 1 AND 256),
+	provider_id TEXT NOT NULL CHECK(length(provider_id) BETWEEN 1 AND 128),
+	native_id TEXT NOT NULL CHECK(length(native_id) BETWEEN 1 AND 256),
+	checkpoint TEXT NOT NULL CHECK(length(checkpoint) BETWEEN 1 AND 256),
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY (session_id, turn_id, provider_id),
+	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS dcc_provider_native_rewinds (
+	session_id TEXT NOT NULL CHECK(length(session_id) BETWEEN 1 AND 256),
+	provider_id TEXT NOT NULL CHECK(length(provider_id) BETWEEN 1 AND 128),
+	native_id TEXT NOT NULL CHECK(length(native_id) BETWEEN 1 AND 256),
+	checkpoint TEXT NOT NULL CHECK(length(checkpoint) BETWEEN 1 AND 256),
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (session_id, provider_id),
+	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+);
+"#;
+
 /// Resident agents are global to the installation. A deleted agent keeps its
 /// row so a removed preset is not seeded again and old sessions keep a name.
 const RESIDENT_AGENT_TABLE_SQL: &str = r#"
@@ -2205,7 +2231,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{PROVIDER_NATIVE_REWIND_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
@@ -4760,6 +4786,8 @@ impl SqliteSessionRepo {
     }
 
     fn build_search_text(events: &[SessionEventRecord]) -> String {
+        // Rewound turns left the conversation; search must not find them.
+        let events = &dcc_core::domain::session::visible_session_events(events)[..];
         #[derive(Default)]
         struct ToolCallBuffer {
             label: String,
@@ -5117,6 +5145,7 @@ impl SqliteSessionRepo {
                 | SessionEventKind::PlanApproved { .. }
                 | SessionEventKind::PlanHandedOff { .. }
                 | SessionEventKind::ObjectivePaused { .. }
+                | SessionEventKind::ConversationRewound { .. }
                 | SessionEventKind::SessionResumed => {}
             }
         }
@@ -5368,7 +5397,8 @@ impl SqliteSessionRepo {
         let mut last_turn_id = None;
         let mut last_turn_started_at = None;
         let mut last_turn_completed_at = None;
-        for event in &events {
+        // The sidebar summarizes the conversation as it stands after rewinds.
+        for event in &dcc_core::domain::session::visible_session_events(&events) {
             match &event.kind {
                 SessionEventKind::TurnStarted {
                     turn_id, prompt, ..
@@ -7525,6 +7555,18 @@ impl SqliteSessionRepo {
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        // A forgotten conversation has nothing left to cut.
+        match provider_id {
+            Some(provider_id) => conn.execute(
+                "DELETE FROM dcc_provider_native_rewinds WHERE session_id = ?1 AND provider_id = ?2",
+                params![session_id.0, provider_id],
+            ),
+            None => conn.execute(
+                "DELETE FROM dcc_provider_native_rewinds WHERE session_id = ?1",
+                params![session_id.0],
+            ),
+        }
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let removed = match provider_id {
             Some(provider_id) => conn.execute(
                 "DELETE FROM dcc_provider_native_sessions WHERE session_id = ?1 AND provider_id = ?2",
@@ -7539,6 +7581,144 @@ impl SqliteSessionRepo {
         Ok(removed)
     }
 
+    /// Remembers where `turn_id` left the provider's native conversation.
+    /// A later report for the same turn wins: it is the turn's latest point.
+    pub fn save_provider_native_turn_checkpoint(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        provider_id: &str,
+        native_id: &str,
+        checkpoint: &str,
+    ) -> Result<()> {
+        let (native_id, checkpoint) = (native_id.trim(), checkpoint.trim());
+        if [native_id, checkpoint]
+            .iter()
+            .any(|value| value.is_empty() || value.chars().count() > 256)
+        {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "provider native checkpoint is invalid".to_string(),
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_provider_native_turn_checkpoints
+                (session_id, turn_id, provider_id, native_id, checkpoint, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(session_id, turn_id, provider_id) DO UPDATE SET
+                native_id = excluded.native_id,
+                checkpoint = excluded.checkpoint,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                session_id.0,
+                turn_id.0,
+                provider_id,
+                native_id,
+                checkpoint,
+                Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    /// The (native conversation id, checkpoint) recorded for `turn_id`.
+    pub fn load_provider_native_turn_checkpoint(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        provider_id: &str,
+    ) -> Result<Option<(String, String)>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            "SELECT native_id, checkpoint FROM dcc_provider_native_turn_checkpoints WHERE session_id = ?1 AND turn_id = ?2 AND provider_id = ?3",
+            params![session_id.0, turn_id.0, provider_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Records that `native_id` must continue from `checkpoint` next time it
+    /// is resumed. Replaces any earlier pending rewind of the same session.
+    pub fn save_provider_native_rewind(
+        &self,
+        session_id: &SessionId,
+        provider_id: &str,
+        native_id: &str,
+        checkpoint: &str,
+    ) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_provider_native_rewinds
+                (session_id, provider_id, native_id, checkpoint, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(session_id, provider_id) DO UPDATE SET
+                native_id = excluded.native_id,
+                checkpoint = excluded.checkpoint,
+                created_at = excluded.created_at
+            "#,
+            params![
+                session_id.0,
+                provider_id,
+                native_id,
+                checkpoint,
+                Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    /// The pending rewind as (native conversation id, checkpoint).
+    pub fn load_provider_native_rewind(
+        &self,
+        session_id: &SessionId,
+        provider_id: &str,
+    ) -> Result<Option<(String, String)>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            "SELECT native_id, checkpoint FROM dcc_provider_native_rewinds WHERE session_id = ?1 AND provider_id = ?2",
+            params![session_id.0, provider_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Clears a pending rewind once the adapter reports where it continues.
+    pub fn delete_provider_native_rewind(
+        &self,
+        session_id: &SessionId,
+        provider_id: &str,
+    ) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_provider_native_rewinds WHERE session_id = ?1 AND provider_id = ?2",
+            params![session_id.0, provider_id],
+        )
+        .map(|removed| removed == 1)
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
     /// Keeps only `provider_id`'s native id for a session. Another provider's
     /// conversation never saw the turns made since, so it cannot be resumed.
     pub fn retain_provider_native_session(
@@ -7550,6 +7730,11 @@ impl SqliteSessionRepo {
             .conn
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_provider_native_rewinds WHERE session_id = ?1 AND provider_id <> ?2",
+            params![session_id.0, provider_id],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute(
             "DELETE FROM dcc_provider_native_sessions WHERE session_id = ?1 AND provider_id <> ?2",
             params![session_id.0, provider_id],
@@ -14186,6 +14371,117 @@ mod tests {
         );
         assert_eq!(recap.created_workspace_ids, vec!["task-new".to_string()]);
         assert_eq!(recap.completed_workspace_ids, vec!["task-done".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn provider_native_checkpoints_and_pending_rewind_follow_the_native_session() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        repo.ensure_schema().unwrap();
+        let session_id = SessionId("session-rewind".to_string());
+        SessionRepo::save_session(
+            &repo,
+            &dcc_core::domain::session::Session {
+                id: session_id.clone(),
+                project_id: ProjectId("project".to_string()),
+                workspace_id: WorkspaceId("workspace".to_string()),
+                provider_id: "claude_code".to_string(),
+                model: None,
+                provider_runtime: None,
+                working_directory_override: None,
+                additional_workspace_ids: Vec::new(),
+                state: SessionState::Active,
+                created_at: "t0".to_string(),
+                updated_at: "t0".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let turn = TurnId("turn-1".to_string());
+        repo.save_provider_native_turn_checkpoint(
+            &session_id,
+            &turn,
+            "claude_code",
+            "native-1",
+            "uuid-a",
+        )
+        .unwrap();
+        repo.save_provider_native_turn_checkpoint(
+            &session_id,
+            &turn,
+            "claude_code",
+            "native-1",
+            "uuid-b",
+        )
+        .unwrap();
+        assert_eq!(
+            repo.load_provider_native_turn_checkpoint(&session_id, &turn, "claude_code")
+                .unwrap(),
+            Some(("native-1".to_string(), "uuid-b".to_string())),
+            "the turn's latest point wins"
+        );
+        assert_eq!(
+            repo.load_provider_native_turn_checkpoint(&session_id, &turn, "codex")
+                .unwrap(),
+            None
+        );
+        assert!(repo
+            .save_provider_native_turn_checkpoint(
+                &session_id,
+                &turn,
+                "claude_code",
+                "native-1",
+                " "
+            )
+            .is_err());
+
+        repo.save_provider_native_session(&session_id, "claude_code", "native-1")
+            .unwrap();
+        repo.save_provider_native_rewind(&session_id, "claude_code", "native-1", "uuid-a")
+            .unwrap();
+        repo.save_provider_native_rewind(&session_id, "claude_code", "native-1", "uuid-0")
+            .unwrap();
+        assert_eq!(
+            repo.load_provider_native_rewind(&session_id, "claude_code")
+                .unwrap(),
+            Some(("native-1".to_string(), "uuid-0".to_string())),
+            "a second rewind before the next turn replaces the first"
+        );
+        assert!(repo
+            .delete_provider_native_rewind(&session_id, "claude_code")
+            .unwrap());
+        assert!(!repo
+            .delete_provider_native_rewind(&session_id, "claude_code")
+            .unwrap());
+
+        repo.save_provider_native_rewind(&session_id, "claude_code", "native-1", "uuid-0")
+            .unwrap();
+        repo.delete_provider_native_sessions(&session_id, Some("claude_code"))
+            .unwrap();
+        assert_eq!(
+            repo.load_provider_native_rewind(&session_id, "claude_code")
+                .unwrap(),
+            None,
+            "forgetting the conversation forgets its pending cut"
+        );
+
+        repo.save_provider_native_rewind(&session_id, "codex", "thread-1", "turn-x")
+            .unwrap();
+        repo.retain_provider_native_session(&session_id, "claude_code")
+            .unwrap();
+        assert_eq!(
+            repo.load_provider_native_rewind(&session_id, "codex")
+                .unwrap(),
+            None
+        );
+
+        SessionRepo::delete_session(&repo, &session_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.load_provider_native_turn_checkpoint(&session_id, &turn, "claude_code")
+                .unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

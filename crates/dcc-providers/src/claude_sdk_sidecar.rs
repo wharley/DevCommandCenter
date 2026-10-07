@@ -258,6 +258,31 @@ fn parse_claude_native_session_change(value: &Value) -> Option<ProviderEvent> {
     }
 }
 
+/// Each top-level assistant message names the point "edit from here" can
+/// cut the native conversation at (`resumeSessionAt`). DCC keeps the latest
+/// one per turn; subagent messages are not resumable points.
+fn parse_claude_native_turn_checkpoint(value: &Value) -> Option<ProviderEvent> {
+    if value.get("type").and_then(Value::as_str)? != "assistant"
+        || value
+            .get("parent_tool_use_id")
+            .is_some_and(|parent| !parent.is_null())
+    {
+        return None;
+    }
+    let native_session_id = value
+        .get("session_id")
+        .and_then(Value::as_str)
+        .and_then(valid_native_session_id)?;
+    let checkpoint = value
+        .get("uuid")
+        .and_then(Value::as_str)
+        .and_then(valid_native_session_id)?;
+    Some(ProviderEvent::NativeTurnCheckpoint {
+        native_session_id: native_session_id.to_string(),
+        checkpoint: checkpoint.to_string(),
+    })
+}
+
 fn claude_reset_time(value: &Value) -> Option<String> {
     match value {
         Value::Number(number) => {
@@ -659,12 +684,20 @@ impl ClaudeSdkSidecarAdapter {
             .map_err(|error| CoreError::Provider(error.to_string()))?;
         command.env("DCC_ADDITIONAL_DIRECTORIES", additional_directories);
         command.env_remove("DCC_RESUME_SESSION_ID");
+        command.env_remove("DCC_RESUME_SESSION_AT");
         if let Some(native_id) = cfg
             .native_resume_id
             .as_deref()
             .and_then(valid_native_session_id)
         {
             command.env("DCC_RESUME_SESSION_ID", native_id);
+            if let Some(checkpoint) = cfg
+                .native_rewind_checkpoint
+                .as_deref()
+                .and_then(valid_native_session_id)
+            {
+                command.env("DCC_RESUME_SESSION_AT", checkpoint);
+            }
         }
         if let Some(ref working_directory) = cfg.working_directory {
             let cwd = PathBuf::from(working_directory);
@@ -784,6 +817,9 @@ impl ClaudeSdkSidecarAdapter {
                             continue;
                         }
                     }
+                    if let Some(event) = parse_claude_native_turn_checkpoint(&value) {
+                        let _ = runtime_for_task.events_tx.send(event);
+                    }
                     cache_claude_account_usage(&runtime_state, &account_usage_key, &value).await;
                     if let Some(snapshot) = parse_claude_mcp_status_snapshot(
                         &value,
@@ -901,6 +937,10 @@ impl Provider for ClaudeSdkSidecarAdapter {
 
     fn supports_native_resume(&self) -> bool {
         true
+    }
+
+    fn native_rewind_cut(&self) -> Option<dcc_core::ports::NativeRewindCut> {
+        Some(dcc_core::ports::NativeRewindCut::AfterLastKeptTurn)
     }
 
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
@@ -1388,6 +1428,7 @@ mod account_usage_tests {
                         provider_runtime: None,
                         mcp_servers: vec![],
                         native_resume_id: None,
+                        native_rewind_checkpoint: None,
                     })
                     .await
                     .expect_err("missing CLI must not start a session");
@@ -1460,10 +1501,12 @@ exit 43
                     provider_runtime: None,
                     mcp_servers: vec![],
                     native_resume_id: match mode.as_str() {
-                        "resumed" => Some("live-native-id".to_string()),
+                        "resumed" | "rewound" => Some("live-native-id".to_string()),
                         "refused" => Some("gone-native-id".to_string()),
                         _ => None,
                     },
+                    native_rewind_checkpoint: (mode == "rewound")
+                        .then(|| "kept-message-uuid".to_string()),
                 })
                 .await
                 .expect("fake sidecar session");
@@ -1486,11 +1529,19 @@ exit 43
                 .await
                 .expect("turn input");
             let mut changes = Vec::new();
+            let mut checkpoints = Vec::new();
             while let Ok(Some(event)) =
                 tokio::time::timeout(Duration::from_secs(10), events.next()).await
             {
-                if let Ok(ProviderEvent::NativeSessionChanged { native_session_id }) = event {
-                    changes.push(native_session_id);
+                match event {
+                    Ok(ProviderEvent::NativeSessionChanged { native_session_id }) => {
+                        changes.push(native_session_id)
+                    }
+                    Ok(ProviderEvent::NativeTurnCheckpoint {
+                        native_session_id,
+                        checkpoint,
+                    }) => checkpoints.push((native_session_id, checkpoint)),
+                    _ => {}
                 }
             }
             let expected: Vec<Option<String>> = match mode.as_str() {
@@ -1499,9 +1550,18 @@ exit 43
                 // Refused: forget the old id, then store the fresh one; the
                 // fake proves the fallback snapshot reached the sidecar.
                 "refused" => vec![None, Some("fresh-with-fallback".to_string())],
+                // Edit from here: the sidecar forked at the kept message and
+                // reported the fork, never the uncut conversation.
+                "rewound" => vec![Some("fork-at-kept-message-uuid".to_string())],
                 _ => vec![Some("first-native-id".to_string())],
             };
             assert_eq!(changes, expected);
+            let native_id = expected.last().cloned().flatten().expect("native id");
+            assert_eq!(
+                checkpoints,
+                vec![(native_id, "assistant-uuid-1".to_string())],
+                "top-level assistant messages are checkpoints; subagent ones are not"
+            );
             return;
         }
 
@@ -1527,7 +1587,10 @@ while IFS= read -r line; do
         "") id=first-native-id ;;
         *) id="$DCC_RESUME_SESSION_ID" ;;
       esac
+      if [ -n "$DCC_RESUME_SESSION_AT" ]; then id="fork-at-$DCC_RESUME_SESSION_AT"; fi
       echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$id\"}"
+      echo "{\"type\":\"assistant\",\"uuid\":\"subagent-uuid\",\"parent_tool_use_id\":\"toolu_1\",\"session_id\":\"$id\",\"message\":{\"content\":[]}}"
+      echo "{\"type\":\"assistant\",\"uuid\":\"assistant-uuid-1\",\"parent_tool_use_id\":null,\"session_id\":\"$id\",\"message\":{\"content\":[]}}"
       exit 0 ;;
   esac
 done
@@ -1536,13 +1599,14 @@ done
         .expect("helper fixture");
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o755))
             .expect("executable fixture");
-        for mode in ["first", "resumed", "refused"] {
+        for mode in ["first", "resumed", "refused", "rewound"] {
             let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
                 .args(["--exact", "claude_sdk_sidecar::account_usage_tests::native_resume_id_reaches_the_sidecar_and_its_answers_reach_dcc", "--nocapture"])
                 .env("DCC_CLAUDE_SIDECAR_PATH", &helper)
                 .env("DCC_CLAUDE_NATIVE_RESUME_TEST_CHILD", mode)
                 // A value inherited from the developer shell must not leak in.
                 .env("DCC_RESUME_SESSION_ID", "inherited-id")
+                .env("DCC_RESUME_SESSION_AT", "inherited-cut")
                 .output()
                 .expect("isolated native resume test");
             assert!(
@@ -1575,6 +1639,7 @@ done
                     provider_runtime: None,
                     mcp_servers: vec![],
                     native_resume_id: None,
+                    native_rewind_checkpoint: None,
                 })
                 .await
                 .expect("fake sidecar session");

@@ -1,7 +1,11 @@
 import { $createParagraphNode, $createTextNode, $getRoot } from "lexical";
 import type { EditorState, LexicalEditor } from "lexical";
 
+import { isImageFilePath } from "@/lib/is-image-path";
+import { promptParts } from "@/lib/prompt-attachments";
 import { $extractComposerPrompt } from "./editor/extract-composer-prompt";
+import { $createFileBadgeNode } from "./editor/file-badge-node";
+import { $createImageBadgeNode } from "./editor/image-badge-node";
 
 export function readEditorText(editorState: EditorState) {
 	let text = "";
@@ -31,6 +35,34 @@ export function setEditorText(editor: LexicalEditor, text: string) {
 
 		const paragraph = $createParagraphNode();
 		paragraph.append($createTextNode(text));
+		root.append(paragraph);
+		paragraph.selectEnd();
+	});
+}
+
+/**
+ * Replaces the draft with a prompt that was sent before, turning its
+ * `@/path` attachments back into badges so they travel again as attachments.
+ */
+export function setEditorPrompt(editor: LexicalEditor, prompt: string) {
+	editor.update(() => {
+		const root = $getRoot();
+		root.clear();
+		if (prompt.length === 0) {
+			return;
+		}
+		const paragraph = $createParagraphNode();
+		for (const part of promptParts(prompt)) {
+			if (part.kind === "attachment") {
+				paragraph.append(
+					isImageFilePath(part.path)
+						? $createImageBadgeNode(part.path)
+						: $createFileBadgeNode(part.path),
+				);
+			} else if (part.value.length > 0) {
+				paragraph.append($createTextNode(part.value));
+			}
+		}
 		root.append(paragraph);
 		paragraph.selectEnd();
 	});

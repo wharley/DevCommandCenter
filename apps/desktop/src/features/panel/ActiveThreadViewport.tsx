@@ -1,4 +1,5 @@
 import { DecisionEvaluationDetails } from "./DecisionEvaluationDetails";
+import type { EditFromHereRequest } from "@/features/sessions/use-edit-from-here";
 import { TurnReviewTimelineCard } from "./turn-review-timeline-card";
 import {
 	memo,
@@ -178,7 +179,8 @@ type ActiveThreadViewportProps = {
 		delegationId: string;
 		failureReason?: string | null;
 	}) => void | Promise<void>;
-	onEditPrompt?: (prompt: string) => void;
+	/** "Edit from here": rewind to just before this user message. */
+	onEditFromMessage?: (request: EditFromHereRequest) => void;
 	onForkFromMessage?: (messageId: string) => void;
 	onContinueInterrupted?: (originalPrompt: string | null) => Promise<void> | void;
 	onRetryInterrupted?: (input: { prompt: string; turnId: string }) => Promise<void> | void;
@@ -225,7 +227,7 @@ export function ActiveThreadViewport({
 	onReviewDelegation,
 	onRerunDelegation,
 	onSendDelegationResult,
-	onEditPrompt,
+	onEditFromMessage,
 	onForkFromMessage,
 	onContinueInterrupted,
 	onRetryInterrupted,
@@ -571,8 +573,13 @@ export function ActiveThreadViewport({
 														: undefined
 												}
 												onEdit={
-													onEditPrompt
-														? () => onEditPrompt(message.content)
+													onEditFromMessage
+														? () =>
+																onEditFromMessage({
+																	messageId: message.id,
+																	turnId: message.turnId ?? null,
+																	prompt: message.content,
+																})
 														: undefined
 												}
 											/>

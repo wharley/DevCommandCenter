@@ -16,23 +16,23 @@ use dcc_core::{
     application::{
         abort_run as run_abort_run, active_turn_for_steer, approve_plan as run_approve_plan,
         close_session as run_close_session, list_turn_queue as run_list_turn_queue,
-        queue_turn as run_queue_turn, record_plan_handoff as run_record_plan_handoff,
-        record_turn_steer, remove_queued_turn as run_remove_queued_turn,
-        reorder_turn_queue as run_reorder_turn_queue, restore_session as run_restore_session,
-        resume_session as run_resume_session, send_turn as run_send_turn,
-        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ApprovePlanInput,
-        ApprovePlanOutput, CloseSessionInput, CloseSessionOutput, QueueTurnInput,
-        RecordPlanHandoffInput, RecordPlanHandoffOutput, RemoveQueuedTurnInput,
-        ReorderTurnQueueInput, RestoreSessionInput, RestoreSessionOutput, ResumeSessionInput,
-        ResumeSessionOutput, SendTurnInput, SendTurnOutput, StartThreadInput, StartThreadOutput,
-        SteerTurnInput, SteerTurnOutput,
+        plan_conversation_rewind, queue_turn as run_queue_turn,
+        record_plan_handoff as run_record_plan_handoff, record_turn_steer,
+        remove_queued_turn as run_remove_queued_turn, reorder_turn_queue as run_reorder_turn_queue,
+        restore_session as run_restore_session, resume_session as run_resume_session,
+        send_turn as run_send_turn, start_thread as run_start_thread, AbortRunInput,
+        AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput, CloseSessionOutput,
+        ConversationRewindBlock, ConversationRewindPlan, QueueTurnInput, RecordPlanHandoffInput,
+        RecordPlanHandoffOutput, RemoveQueuedTurnInput, ReorderTurnQueueInput, RestoreSessionInput,
+        RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
+        SendTurnOutput, StartThreadInput, StartThreadOutput, SteerTurnInput, SteerTurnOutput,
     },
     domain::{
         mcp::{McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
         provider::McpOauthSupport,
         session::{
             QueuedTurn, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
-            SessionSearchResult, TurnReviewFile, WorkspaceSessionSummary,
+            SessionSearchResult, TurnId, TurnReviewFile, WorkspaceSessionSummary,
         },
         thread::Thread,
         usage::{SessionTurnUsage, UsageDashboard, UsageDashboardInput},
@@ -56,6 +56,10 @@ use dcc_infra::decision_provider::{
     SkillRouteCandidate, SkillRouteInput, ToolGuardInput, TypeSafeDecisionProvider,
 };
 
+use crate::conversation_rewind::{
+    plan_files, restore_files, RewindFileRestorer, RewindFilesPlan, RewindFilesStopped,
+    RewindProviderPlan, TurnFileFacts,
+};
 use crate::guarded_undo_runtime::{GuardedUndoExecuteResult, GuardedUndoPrepareResult};
 use crate::state::SessionCommandState;
 
@@ -999,6 +1003,241 @@ pub async fn execute_guarded_undo(
             },
         },
     )
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareConversationRewindInput {
+    pub session_id: String,
+    pub anchor_turn_id: String,
+}
+
+/// What "edit from here" would do, decided before anything changes.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum PrepareConversationRewindOutput {
+    Ready {
+        anchor_turn_id: String,
+        /// The anchor and every later turn, oldest first.
+        removed_turn_ids: Vec<String>,
+        kept_turn_count: u32,
+        /// The anchor's prompt, attachments included, for the composer.
+        anchor_prompt: String,
+        provider: RewindProviderPlan,
+        files: RewindFilesPlan,
+    },
+    Blocked {
+        reason: ConversationRewindBlock,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecuteConversationRewindInput {
+    pub session_id: String,
+    pub anchor_turn_id: String,
+    /// The prepared plan; a different one now refuses the rewind.
+    pub removed_turn_ids: Vec<String>,
+    /// The person chose to restore the removed turns' files.
+    pub restore_files: bool,
+    /// The prepared plan continues in a new thread (provider without rewind).
+    pub continue_in_new_thread: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ExecuteConversationRewindOutput {
+    /// This thread now ends before the anchor.
+    Rewound {
+        provider: RewindProviderPlan,
+        restored_turn_ids: Vec<String>,
+        anchor_prompt: String,
+    },
+    /// Files are settled; the caller forks the new thread. This thread is
+    /// unchanged.
+    ContinueInNewThread {
+        restored_turn_ids: Vec<String>,
+        anchor_prompt: String,
+    },
+    /// Restoring stopped. The conversation was not rewound.
+    FilesStopped { stopped: RewindFilesStopped },
+    /// The conversation or provider changed since the plan was prepared.
+    Refused { reason: String },
+}
+
+fn rewind_file_facts(
+    state: &SessionCommandState,
+    session: &dcc_core::domain::session::Session,
+    turn_ids: &[TurnId],
+) -> Result<Vec<TurnFileFacts>, String> {
+    let change_sets = state
+        .list_turn_change_sets(&session.id)
+        .map_err(|error| error.to_string())?;
+    let guarded_repo =
+        SqliteSessionRepo::open_read_only(state.db_path()).map_err(|error| error.to_string())?;
+    turn_ids
+        .iter()
+        .map(|turn_id| {
+            let change_set = change_sets.iter().find(|change_set| {
+                change_set.turn_id == *turn_id && change_set.workspace_id == session.workspace_id
+            });
+            let capture = match change_set {
+                Some(change_set) => guarded_repo
+                    .get_guarded_undo_capture_summary(&change_set.snapshot_id)
+                    .map_err(|error| error.to_string())?,
+                None => None,
+            };
+            Ok(TurnFileFacts {
+                turn_id: turn_id.clone(),
+                snapshot_id: change_set.map(|change_set| change_set.snapshot_id.clone()),
+                changed_file_count: change_set.map(|change_set| change_set.files.len()),
+                capture_state: capture.as_ref().map(|capture| capture.state.clone()),
+                capture_reason: capture.and_then(|capture| capture.reason_code),
+            })
+        })
+        .collect()
+}
+
+struct GuardedUndoRewindRestorer<'a>(&'a SessionCommandState);
+
+#[async_trait::async_trait]
+impl RewindFileRestorer for GuardedUndoRewindRestorer<'_> {
+    async fn prepare(&self, snapshot_id: String) -> GuardedUndoPrepareResult {
+        self.0.prepare_guarded_undo(snapshot_id).await
+    }
+
+    async fn execute(&self, preview_token: String) -> GuardedUndoExecuteResult {
+        // The person confirmed restoring these files in the rewind dialog.
+        self.0.execute_guarded_undo(preview_token, true).await
+    }
+}
+
+async fn load_rewind_scope(
+    state: &SessionCommandState,
+    session_id: &str,
+    anchor_turn_id: &str,
+) -> Result<
+    (
+        dcc_core::domain::session::Session,
+        Result<ConversationRewindPlan, ConversationRewindBlock>,
+    ),
+    String,
+> {
+    let session_id = SessionId(session_id.trim().to_string());
+    let anchor_turn_id = TurnId(anchor_turn_id.trim().to_string());
+    if session_id.0.is_empty() || anchor_turn_id.0.is_empty() {
+        return Err("sessionId and anchorTurnId are required".to_string());
+    }
+    let session = SessionRepo::get_session(state, &session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "session not found".to_string())?;
+    let history = SessionEventRepo::list_events_by_session(state, &session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok((session, plan_conversation_rewind(&history, &anchor_turn_id)))
+}
+
+/// Read-only: what "edit from here" on `anchor_turn_id` would remove, how
+/// the provider follows, and whether the removed turns' files can be
+/// restored. Nothing on disk or in the provider changes.
+#[tauri::command]
+pub async fn prepare_conversation_rewind(
+    state: State<'_, SessionCommandState>,
+    input: PrepareConversationRewindInput,
+) -> Result<PrepareConversationRewindOutput, String> {
+    let (session, plan) =
+        load_rewind_scope(&state, &input.session_id, &input.anchor_turn_id).await?;
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(reason) => return Ok(PrepareConversationRewindOutput::Blocked { reason }),
+    };
+    let (provider, _) = state.plan_rewind_provider_context(&session, &plan);
+    let facts = rewind_file_facts(&state, &session, &plan.removed_turn_ids)?;
+    let files = plan_files(&GuardedUndoRewindRestorer(&state), &facts).await;
+    Ok(PrepareConversationRewindOutput::Ready {
+        anchor_turn_id: plan.anchor_turn_id.0,
+        removed_turn_ids: plan.removed_turn_ids.into_iter().map(|id| id.0).collect(),
+        kept_turn_count: plan.kept_turn_count,
+        anchor_prompt: plan.anchor_prompt,
+        provider,
+        files,
+    })
+}
+
+/// Carries out a prepared "edit from here". Files are restored first, only
+/// when the person chose it; the conversation is cut only after they are.
+#[tauri::command]
+pub async fn execute_conversation_rewind(
+    state: State<'_, SessionCommandState>,
+    input: ExecuteConversationRewindInput,
+) -> Result<ExecuteConversationRewindOutput, String> {
+    let refused = |reason: &str| {
+        Ok(ExecuteConversationRewindOutput::Refused {
+            reason: reason.to_string(),
+        })
+    };
+    let session_id = SessionId(input.session_id.trim().to_string());
+    // Holding the provider transition keeps a new turn from starting while
+    // files are restored and the conversation is cut.
+    let transition = state
+        .acquire_provider_transition(&session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let (session, plan) =
+        load_rewind_scope(&state, &input.session_id, &input.anchor_turn_id).await?;
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(_) => return refused("plan_changed"),
+    };
+    if plan
+        .removed_turn_ids
+        .iter()
+        .map(|turn_id| turn_id.0.as_str())
+        .ne(input.removed_turn_ids.iter().map(String::as_str))
+    {
+        return refused("plan_changed");
+    }
+    let (provider, target) = state.plan_rewind_provider_context(&session, &plan);
+    let new_thread = matches!(provider, RewindProviderPlan::NewThread { .. });
+    if new_thread != input.continue_in_new_thread {
+        return refused("provider_changed");
+    }
+
+    let restored = if input.restore_files {
+        let facts = rewind_file_facts(&state, &session, &plan.removed_turn_ids)?;
+        match restore_files(&GuardedUndoRewindRestorer(&state), &facts).await {
+            Ok(restored) => restored,
+            Err(stopped) => return Ok(ExecuteConversationRewindOutput::FilesStopped { stopped }),
+        }
+    } else {
+        Vec::new()
+    };
+    let restored_turn_ids: Vec<String> = restored.iter().map(|id| id.0.clone()).collect();
+
+    if new_thread {
+        return Ok(ExecuteConversationRewindOutput::ContinueInNewThread {
+            restored_turn_ids,
+            anchor_prompt: plan.anchor_prompt,
+        });
+    }
+    state
+        .commit_conversation_rewind(&transition, &session, &plan, &provider, target, restored)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ExecuteConversationRewindOutput::Rewound {
+        provider,
+        restored_turn_ids,
+        anchor_prompt: plan.anchor_prompt,
+    })
 }
 
 impl From<InfraGuardedUndoCaptureSummary> for GuardedUndoCaptureSummary {

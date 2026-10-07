@@ -36,6 +36,7 @@ fn config(session: &str) -> SessionConfig {
             tool_policies: Vec::new(),
         }],
         native_resume_id: None,
+        native_rewind_checkpoint: None,
     }
 }
 

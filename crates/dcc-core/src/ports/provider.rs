@@ -45,6 +45,24 @@ pub struct SessionConfig {
     /// receive one; they must fall back to a fresh conversation on refusal.
     #[serde(default)]
     pub native_resume_id: Option<String>,
+    /// Pending "edit from here" for `native_resume_id`: a checkpoint the
+    /// adapter itself reported with `ProviderEvent::NativeTurnCheckpoint`.
+    /// The native conversation must continue from that point, not from its
+    /// end. Only adapters that report `supports_native_rewind` receive one,
+    /// and they must report the conversation they continue with
+    /// (`NativeSessionChanged`) once the cut is in place.
+    #[serde(default)]
+    pub native_rewind_checkpoint: Option<String>,
+}
+
+/// Which turn's checkpoint cuts a native conversation for "edit from here".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeRewindCut {
+    /// Continue from the last kept turn's checkpoint (Claude `resumeSessionAt`).
+    AfterLastKeptTurn,
+    /// Drop the anchor turn's checkpoint and everything after it (Codex
+    /// `thread/rollback`).
+    FromAnchorTurn,
 }
 
 #[derive(Clone, Debug)]
@@ -295,6 +313,12 @@ pub trait Provider: Send + Sync {
     fn supports_native_resume(&self) -> bool {
         false
     }
+    /// Whether `ProviderEvent::NativeTurnCheckpoint` is reported per turn and
+    /// `SessionConfig::native_rewind_checkpoint` is honored, and which turn's
+    /// checkpoint a cut needs. `None`: the native conversation cannot be cut.
+    fn native_rewind_cut(&self) -> Option<NativeRewindCut> {
+        None
+    }
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
     async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;
     /// Adds guidance to the active turn. A provider that can tell the turn is
@@ -399,6 +423,7 @@ mod tests {
                 tool_policies: Vec::new(),
             }],
             native_resume_id: None,
+            native_rewind_checkpoint: None,
         };
 
         let serialized = serde_json::to_string(&config).expect("serialize session config");

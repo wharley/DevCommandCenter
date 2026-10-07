@@ -26,6 +26,9 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionObjectivePaused { .. } => {
             format!("{SESSION_EVENT_PREFIX}/objective/paused")
         }
+        CoreEvent::SessionConversationRewound { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/conversation/rewound")
+        }
         CoreEvent::SessionMcpRuntimeStatusChanged { .. } => {
             format!("{SESSION_EVENT_PREFIX}/mcp/runtime-status")
         }

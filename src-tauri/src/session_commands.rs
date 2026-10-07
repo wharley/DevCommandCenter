@@ -17,10 +17,12 @@ use dcc_tauri::{
         AiMemoryQueryHit, AiMemoryQueryInput, AiMemorySourceActionInput,
         AiMemorySourceActionOutput, AiMemorySyncInput, AiMemorySyncOutput, ApplyTaskTitleInput,
         ApplyTaskTitleOutput, DecisionProviderCompletionActionInput,
-        DecisionProviderModelRouteInput, DecisionProviderModelRouteOutput, ExecuteGuardedUndoInput,
+        DecisionProviderModelRouteInput, DecisionProviderModelRouteOutput,
+        ExecuteConversationRewindInput, ExecuteConversationRewindOutput, ExecuteGuardedUndoInput,
         ExecuteGuardedUndoOutput, InheritSessionObjectiveInput, InterruptNativeSubagentInput,
         LastTurnReviewInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
-        NativeSubagentControlOutput, PrepareGuardedUndoInput, PrepareGuardedUndoOutput,
+        NativeSubagentControlOutput, PrepareConversationRewindInput,
+        PrepareConversationRewindOutput, PrepareGuardedUndoInput, PrepareGuardedUndoOutput,
         PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
         RespondToUserInputInput, RespondToUserInputOutput, RunPullRequestReviewAgentInput,
         RunPullRequestReviewAgentOutput, SearchSessionsInput, SessionLiveSnapshot,
@@ -51,6 +53,22 @@ pub async fn execute_guarded_undo(
     input: ExecuteGuardedUndoInput,
 ) -> Result<ExecuteGuardedUndoOutput, String> {
     session_command_impl::execute_guarded_undo(state, input).await
+}
+
+#[tauri::command]
+pub async fn prepare_conversation_rewind(
+    state: State<'_, SessionCommandState>,
+    input: PrepareConversationRewindInput,
+) -> Result<PrepareConversationRewindOutput, String> {
+    session_command_impl::prepare_conversation_rewind(state, input).await
+}
+
+#[tauri::command]
+pub async fn execute_conversation_rewind(
+    state: State<'_, SessionCommandState>,
+    input: ExecuteConversationRewindInput,
+) -> Result<ExecuteConversationRewindOutput, String> {
+    session_command_impl::execute_conversation_rewind(state, input).await
 }
 
 #[tauri::command]

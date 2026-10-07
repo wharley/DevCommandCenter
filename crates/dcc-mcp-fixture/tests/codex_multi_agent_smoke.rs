@@ -407,6 +407,7 @@ async fn authenticated_codex_sol_delegates_to_terra_and_integrates_result() {
             provider_runtime: None,
             mcp_servers: Vec::new(),
             native_resume_id: None,
+            native_rewind_checkpoint: None,
         })
         .await;
 
@@ -490,6 +491,7 @@ async fn authenticated_codex_can_steer_a_running_terra_child_directly() {
             provider_runtime: None,
             mcp_servers: Vec::new(),
             native_resume_id: None,
+            native_rewind_checkpoint: None,
         })
         .await
         .expect("prepare authenticated Codex steering session");
@@ -619,6 +621,7 @@ async fn authenticated_codex_can_interrupt_terra_without_stopping_sol() {
             provider_runtime: None,
             mcp_servers: Vec::new(),
             native_resume_id: None,
+            native_rewind_checkpoint: None,
         })
         .await
         .expect("prepare authenticated Codex interruption session");
