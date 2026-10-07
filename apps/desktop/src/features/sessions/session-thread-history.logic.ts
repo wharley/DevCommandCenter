@@ -7,6 +7,7 @@ import type {
 	ToolCallDetail,
 	TurnEvidenceSummary,
 } from "@dcc/contracts";
+import { type DelegationHandBack, parseDelegationHandBack } from "./delegation-hand-back";
 import { parsePlanContent, type ParsedPlanContent } from "@/features/panel/plan-content";
 
 export type SessionMessageStatus = {
@@ -120,6 +121,10 @@ export type WorkspaceMessage = {
 		label: string;
 	};
 	delegation?: WorkspaceMessageDelegation;
+	/** The turn a delegation card belongs after: the one that requested it. */
+	delegationTurnId?: string;
+	/** A `[DCC]` turn the backend wrote for the agent, not the person. */
+	delegationHandBack?: DelegationHandBack;
 };
 
 type TimelineEvent = {
@@ -1273,12 +1278,14 @@ export function projectWorkspaceMessages(
 	const filteredEvents = withoutRewoundTurns(
 		mergeSessionThreadEvents(historyEvents, liveEvents, sessionId),
 	);
+	let latestTurnId: string | null = null;
 
 	for (const timelineEvent of filteredEvents) {
 		const event = timelineEvent.event;
 		const occurredAt = timelineEvent.occurredAt;
 
 		if ("sessionTurnStarted" in event && event.sessionTurnStarted) {
+			latestTurnId = event.sessionTurnStarted.turn_id;
 			turnModelByTurnId.set(
 				event.sessionTurnStarted.turn_id,
 				event.sessionTurnStarted.model ?? null,
@@ -1860,6 +1867,7 @@ export function projectWorkspaceMessages(
 						id: delegationId,
 						phase: "requested",
 					},
+					...(latestTurnId ? { delegationTurnId: latestTurnId } : {}),
 				};
 				delegationBuckets.set(delegationId, message);
 				messages.push(message);
@@ -1947,6 +1955,8 @@ export function projectWorkspaceMessages(
 	for (const message of messages) {
 		if (message.role === "user") {
 			lastUserPlanMode = message.planMode === true;
+			const handBack = parseDelegationHandBack(message.content);
+			if (handBack) message.delegationHandBack = handBack;
 			continue;
 		}
 		if (message.role !== "assistant") {
@@ -1971,10 +1981,43 @@ export function projectWorkspaceMessages(
 		}
 	}
 
-	return foldAssistantTurnMessages(
-		messages,
-		assistantMessagesByTurn,
-		new Set([...completedTurns, ...abortedTurns.keys()]),
-		sessionId ?? "unknown-session",
+	return placeDelegationsAfterTheirTurn(
+		foldAssistantTurnMessages(
+			messages,
+			assistantMessagesByTurn,
+			new Set([...completedTurns, ...abortedTurns.keys()]),
+			sessionId ?? "unknown-session",
+		),
 	);
+}
+
+/**
+ * A delegation is requested in the middle of the agent's turn, but the turn's
+ * reply renders after its folded activity. Left at the request point, the
+ * card (often already finished) would sit above the reply that announces it;
+ * it belongs right after that turn's last row.
+ */
+export function placeDelegationsAfterTheirTurn(messages: WorkspaceMessage[]): WorkspaceMessage[] {
+	if (!messages.some((message) => message.delegation && message.delegationTurnId)) {
+		return messages;
+	}
+	const lastRowIndexByTurn = new Map<string, number>();
+	messages.forEach((message, index) => {
+		if (message.role === "assistant" && message.turnId) {
+			lastRowIndexByTurn.set(message.turnId, index);
+		}
+	});
+	const anchored = new Map<number, WorkspaceMessage[]>();
+	const kept: Array<{ message: WorkspaceMessage; index: number }> = [];
+	messages.forEach((message, index) => {
+		const anchorIndex = message.delegationTurnId
+			? lastRowIndexByTurn.get(message.delegationTurnId)
+			: undefined;
+		if (message.delegation && anchorIndex !== undefined && anchorIndex > index) {
+			anchored.set(anchorIndex, [...(anchored.get(anchorIndex) ?? []), message]);
+			return;
+		}
+		kept.push({ message, index });
+	});
+	return kept.flatMap(({ message, index }) => [message, ...(anchored.get(index) ?? [])]);
 }

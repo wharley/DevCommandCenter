@@ -203,7 +203,7 @@ type WorkspaceInspectorSidebarProps = {
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	turnReviewRequest?: TurnReviewRequest | null;
 	onCloseTurnReview?: () => void;
-	reviewDelegationRequest?: { delegationId: string; nonce: number } | null;
+	reviewDelegationRequest?: { delegationId: string; nonce: number; path?: string } | null;
 	onSelectSession: (sessionId: string) => void;
 	onPrefillComposer?: (text: string) => boolean;
 	onOpenMergeConflictResolver: (input: {
@@ -1766,6 +1766,39 @@ export function WorkspaceInspectorSidebar({
 		],
 	);
 
+	/** Points the Changes list at a delegation's worktree, optionally on one file. */
+	const openDelegationReview = useCallback(
+		async (delegation: Delegation, path?: string) => {
+			try {
+				const workspaceRoot = await resolveDelegationWorktreePath(delegation);
+				setDelegationReviewRoot({
+					delegationId: delegation.id,
+					workspaceRoot,
+					label: providerLabelForDelegation(providerCatalog, delegation.targetProviderId),
+					delegation,
+				});
+				// A file chip in the conversation opens that file's diff directly.
+				const filePath = path?.trim();
+				onSelectPreview(
+					filePath
+						? {
+								group: "unstaged",
+								path: filePath,
+								name: filePath.split("/").pop() ?? filePath,
+								status: "M",
+								workspaceRootOverride: workspaceRoot,
+								targetSessionId: delegation.childSessionId ?? null,
+								baseBranch: null,
+							}
+						: null,
+				);
+			} catch (error) {
+				toast.error(error instanceof Error ? error.message : String(error));
+			}
+		},
+		[onSelectPreview, providerCatalog, resolveDelegationWorktreePath],
+	);
+
 	const handledReviewDelegationNonceRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (!reviewDelegationRequest) {
@@ -1786,28 +1819,22 @@ export function WorkspaceInspectorSidebar({
 			setDelegationReviewRoot(null);
 			return;
 		}
+		void openDelegationReview(delegation, reviewDelegationRequest.path);
+	}, [delegationsQuery.data, openDelegationReview, reviewDelegationRequest]);
 
-		void (async () => {
-			try {
-				const workspaceRoot = await resolveDelegationWorktreePath(delegation);
-				setDelegationReviewRoot({
-					delegationId: delegation.id,
-					workspaceRoot,
-					label: providerLabelForDelegation(providerCatalog, delegation.targetProviderId),
-					delegation,
-				});
-				onSelectPreview(null);
-			} catch (error) {
-				toast.error(error instanceof Error ? error.message : String(error));
-			}
-		})();
-	}, [
-		delegationsQuery.data,
-		onSelectPreview,
-		providerCatalog,
-		resolveDelegationWorktreePath,
-		reviewDelegationRequest,
-	]);
+	// Edits a child agent left for this conversation, offered in its own
+	// Changes view: the person should not have to open the child to see them.
+	const pendingDelegationsOfSession = useMemo(
+		() =>
+			(delegationsQuery.data ?? []).filter(
+				(delegation) =>
+					Boolean(sessionId) &&
+					delegation.parentSessionId === sessionId &&
+					delegation.mode === "implement" &&
+					delegation.status === "review_pending",
+			),
+		[delegationsQuery.data, sessionId],
+	);
 
 	useEffect(() => {
 		setDelegationReviewRoot(null);
@@ -3374,6 +3401,37 @@ export function WorkspaceInspectorSidebar({
 									</Button>
 								</div>
 							) : null}
+							{!activeDelegationReview
+								? pendingDelegationsOfSession.map((delegation) => (
+										<div
+											key={delegation.id}
+											className="flex shrink-0 items-center gap-1.5 overflow-hidden rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5"
+										>
+											<GitFork
+												className="size-3.5 shrink-0 text-amber-800 dark:text-amber-200"
+												strokeWidth={2}
+											/>
+											<p className="min-w-0 flex-1 truncate text-[11px] font-medium text-amber-800 dark:text-amber-200">
+												{t("inspector.delegations.pendingFromSession", {
+													agent: providerLabelForDelegation(
+														providerCatalog,
+														delegation.targetProviderId,
+													),
+													count: delegation.touchedFiles?.length ?? 0,
+												})}
+											</p>
+											<Button
+												type="button"
+												variant="default"
+												size="xs"
+												className="ml-auto h-6 shrink-0 px-2 text-[11px]"
+												onClick={() => void openDelegationReview(delegation)}
+											>
+												{t("inspector.delegations.showPendingChanges")}
+											</Button>
+										</div>
+									))
+								: null}
 							{activeDelegationReview ? (
 								<div className="flex shrink-0 items-center gap-1.5 overflow-hidden rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5">
 									<GitFork

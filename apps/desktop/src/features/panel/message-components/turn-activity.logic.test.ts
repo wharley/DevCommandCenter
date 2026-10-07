@@ -34,6 +34,8 @@ describe("turn activity", () => {
 		expect(classifyToolAction("MultiEdit")).toBe("edit");
 		expect(classifyToolAction("Grep")).toBe("search");
 		expect(classifyToolAction("mcp__github__create_issue")).toBe("mcp");
+		expect(classifyToolAction("dcc_delegate_task")).toBe("agent");
+		expect(classifyToolAction("mcp__dcc__dcc_delegate_task")).toBe("agent");
 		expect(classifyToolAction("SomethingNew")).toBe("other");
 		expect(mcpToolLabel("mcp__github__create_issue")).toBe("github · create_issue");
 	});

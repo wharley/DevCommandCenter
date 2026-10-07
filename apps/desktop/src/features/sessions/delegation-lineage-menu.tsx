@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { CornerLeftUp, GitFork, LoaderCircle, Square } from "lucide-react";
+import { CircleStop, CornerLeftUp, GitFork, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 import type { Delegation, WorkspaceSessionSummary } from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
@@ -72,6 +72,12 @@ export function DelegationLineageMenu({
 	const titleOf = (id: string | null) =>
 		sessions.find((summary) => summary.session.id === id)?.thread.title ?? null;
 	const label = t("delegation.lineage.button", { count: children.length });
+	// The child's title is the agent's short name for the task; the
+	// instruction is a brief written for another agent, the fallback.
+	const delegationTitle = (delegation: Delegation) => {
+		const title = titleOf(delegation.childSessionId)?.trim();
+		return title && !title.startsWith("Delegated ") ? title : delegationInstruction(delegation);
+	};
 
 	const cancel = async (delegation: Delegation) => {
 		setCancellingId(delegation.id);
@@ -182,7 +188,7 @@ export function DelegationLineageMenu({
 									) : null}
 								</span>
 								<span className="mt-0.5 line-clamp-2 text-[12px] leading-4 text-foreground">
-									{delegationInstruction(delegation)}
+									{delegationTitle(delegation)}
 								</span>
 							</span>
 							{active ? (
@@ -201,7 +207,7 @@ export function DelegationLineageMenu({
 									{cancellingId === delegation.id ? (
 										<LoaderCircle className="size-3 animate-spin" />
 									) : (
-										<Square className="size-3" />
+										<CircleStop className="size-3.5" />
 									)}
 								</button>
 							) : null}

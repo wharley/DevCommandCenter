@@ -23,11 +23,13 @@ import {
 } from "./ConversationExecutionState";
 import { ModelRouteDecisionCard, type ModelRouteDecision } from "./ModelRouteDecisionCard";
 import { ConversationLaunchState } from "./ConversationLaunchState";
-import type { ProviderCatalog } from "@dcc/contracts";
+import type { ProviderCatalog, WorkspaceSessionSummary } from "@dcc/contracts";
 import type { WorkspaceMessage } from "./thread-projection";
 import {
 	AssistantMessage,
 	DelegationCard,
+	DelegationHandBackRow,
+	DelegationReviewStrip,
 	SystemMessage,
 	UserMessage,
 } from "./message-components";
@@ -36,6 +38,7 @@ import {
 	latestConversationActivitySignature,
 	precedingUserPrompt, precedingUserTurn } from "./conversation-recovery";
 import { ConversationTrail } from "./ConversationTrail";
+import { delegationVerifications } from "@/features/sessions/delegation-verification";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import {
 	CONVERSATION_MESSAGE_PAGE_SIZE,
@@ -161,6 +164,8 @@ type ActiveThreadViewportProps = {
 	workspaceId?: string | null;
 	providers?: ProviderCatalog["providers"];
 	providerId?: string | null;
+	/** Workspace conversations, for the titles of delegated children. */
+	sessions?: readonly WorkspaceSessionSummary[];
 	planMessageId: string | null;
 	planApproved: boolean;
 	planReadOnly: boolean;
@@ -172,7 +177,7 @@ type ActiveThreadViewportProps = {
 	onAbortSession?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
 	onReviewChanges?: () => void;
-	onReviewDelegation?: (delegationId: string) => void;
+	onReviewDelegation?: (delegationId: string, path?: string) => void;
 	onRerunDelegation?: (input: {
 		delegationId: string;
 		targetProviderId: string;
@@ -216,6 +221,7 @@ export function ActiveThreadViewport({
 	workspacePath,
 	workspaceId,
 	providers,
+	sessions,
 	providerId,
 	planMessageId,
 	planApproved,
@@ -367,7 +373,14 @@ export function ActiveThreadViewport({
 	// with the rest of the viewport reserved below it. Opening a settled
 	// thread keeps the usual bottom-aligned history.
 	const userMessageCount = useMemo(
-		() => messages.reduce((count, message) => count + (message.role === "user" ? 1 : 0), 0),
+		// A [DCC] hand-back is written by DCC, not sent from this view: it
+		// must not re-anchor the page while the person reads.
+		() =>
+			messages.reduce(
+				(count, message) =>
+					count + (message.role === "user" && !message.delegationHandBack ? 1 : 0),
+				0,
+			),
 		[messages],
 	);
 	const anchorStateRef = useRef<{ sessionId: string | null; baseline: number; active: boolean } | null>(null);
@@ -387,7 +400,8 @@ export function ActiveThreadViewport({
 	const anchorVisibleIndex = useMemo(() => {
 		if (!anchorActive) return -1;
 		for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
-			if (visibleMessages[index]?.role === "user") return index;
+			const candidate = visibleMessages[index];
+			if (candidate?.role === "user" && !candidate.delegationHandBack) return index;
 		}
 		return -1;
 	}, [anchorActive, visibleMessages]);
@@ -442,6 +456,11 @@ export function ActiveThreadViewport({
 		}
 	}, [isAtBottom]);
 
+	const verificationByDelegation = useMemo(() => delegationVerifications(messages), [messages]);
+	const childTitleBySession = useMemo(
+		() => new Map((sessions ?? []).map((summary) => [summary.session.id, summary.thread.title])),
+		[sessions],
+	);
 	const threadSurfaceVisible =
 		!isModelRouting &&
 		hasLoaded &&
@@ -642,6 +661,17 @@ export function ActiveThreadViewport({
 							{(() => {
 								const renderMessage = (message: WorkspaceMessage, visibleMessageIndex: number) => {
 								const messageIndex = visibleStart + visibleMessageIndex;
+								if (message.role === "user" && message.delegationHandBack) {
+									return (
+										<div key={message.id} data-conversation-trail-id={message.id} className="scroll-mt-6 pb-4">
+											<DelegationHandBackRow
+												handBack={message.delegationHandBack}
+												content={message.content}
+												createdAt={message.createdAt}
+											/>
+										</div>
+									);
+								}
 								if (message.role === "user") {
 									return (
 										<div
@@ -795,6 +825,13 @@ export function ActiveThreadViewport({
 												onReviewDelegation={onReviewDelegation}
 												onRerunDelegation={onRerunDelegation}
 												onSendDelegationResult={onSendDelegationResult}
+												onReviewDelegationFile={onReviewDelegation}
+												childTitle={
+													message.delegation.childSessionId
+														? childTitleBySession.get(message.delegation.childSessionId) ?? null
+														: null
+												}
+												verification={verificationByDelegation.get(message.delegation.id)}
 											/>
 										</div>
 									);
@@ -830,11 +867,20 @@ export function ActiveThreadViewport({
 									<ConversationStartingIndicator phase={startingPhase} />
 								</div>
 							) : null;
+								const reviewStrip = onReviewDelegation ? (
+									<DelegationReviewStrip
+										workspaceId={workspaceId ?? null}
+										sessionId={sessionId}
+										providers={providers ?? []}
+										onReviewDelegation={onReviewDelegation}
+									/>
+								) : null;
 								if (anchorVisibleIndex < 0) {
 									return (
 										<>
 											{visibleMessages.map(renderMessage)}
 											{startingIndicator}
+											{reviewStrip}
 										</>
 									);
 								}
@@ -853,6 +899,7 @@ export function ActiveThreadViewport({
 													renderMessage(message, anchorVisibleIndex + index),
 												)}
 											{startingIndicator}
+											{reviewStrip}
 										</div>
 									</>
 								);

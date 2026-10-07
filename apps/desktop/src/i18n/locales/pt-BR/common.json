@@ -137,7 +137,7 @@
     },
     "card": {
       "title": "Delegação",
-      "openChild": "Abrir sessão filha",
+      "openChild": "Ver conversa do {{agent}}",
       "canEditFiles": "pode editar",
       "readOnly": "somente leitura",
       "rerun": "Re-rodar em outro agente",
@@ -146,7 +146,28 @@
       "sendResult": "Enviar ao agente",
       "sendResultHint": "Coloca o resultado no composer desta conversa para você revisar e enviar",
       "sendResultUnavailable": "Esta delegação ainda não tem resultado para enviar.",
-      "reviewInInspector": "Revisar no Inspector"
+      "reviewInInspector": "Revisar no Inspector",
+      "reviewChanges": "Revisar mudanças",
+      "working": "{{agent}} está trabalhando nisso…",
+      "agentFallback": "agente",
+      "showReport": "Ver relatório completo",
+      "hideReport": "Recolher relatório",
+      "verified": "Conferido nesta conversa",
+      "verifiedWithFailures": "Falhas ao conferir nesta conversa",
+      "changedFiles_one": "{{count}} arquivo alterado",
+      "changedFiles_other": "{{count}} arquivos alterados"
+    },
+    "handBack": {
+      "finished": "Resultado da delegação entregue ao agente",
+      "failed": "Falha da delegação avisada ao agente",
+      "applied": "Agente avisado: você aplicou as mudanças delegadas",
+      "discarded": "Agente avisado: você descartou as mudanças delegadas",
+      "showSent": "ver texto enviado"
+    },
+    "reviewStrip": {
+      "message_one": "{{agent}} deixou {{count}} arquivo para você revisar",
+      "message_other": "{{agent}} deixou {{count}} arquivos para você revisar",
+      "action": "Revisar"
     }
   },
   "agents": {
@@ -562,7 +583,8 @@
       "waitingPermission": "Aguardando aprovação",
       "completed": "Concluído",
       "aborted": "Interrompido",
-      "completedUnseen": "Resultado novo"
+      "completedUnseen": "Resultado novo",
+      "reviewPending": "Aguardando sua revisão"
     },
     "workspaceState": {
       "readyToStart": "Pronto para começar",
@@ -1018,6 +1040,9 @@
       "discarded": "Mudanças da delegação descartadas",
       "reviewingOutput": "Revisando saída da delegação de {{provider}}",
       "reviewingOutputCompact": "Delegação · {{provider}}",
+      "pendingFromSession_one": "{{agent}} deixou {{count}} arquivo aguardando revisão",
+      "pendingFromSession_other": "{{agent}} deixou {{count}} arquivos aguardando revisão",
+      "showPendingChanges": "Ver mudanças",
       "reviewingOutputHint": "Revise estas mudanças antes de aplicar no workspace pai.",
       "backToWorkspace": "Voltar ao workspace",
       "applyShort": "Aplicar",
@@ -3105,8 +3130,8 @@
         "whenToUse": "Para paralelizar: um agente implementa enquanto outro escreve testes ou revisa. Ou para pedir a segunda opinião de outro modelo sobre o mesmo diff.",
         "steps": [
           "Peça no chat, em linguagem natural, dizendo o provider e a tarefa: \"delega pro Codex revisar este diff\" ou \"pede pro Claude escrever os testes\". Diga também se é para revisar, explicar ou implementar: revisar e explicar só leem o código.",
-          "Acompanhe pelo card [Delegação] na conversa. Use [Abrir sessão filha] para ver o trabalho em andamento.",
-          "Quando a filha termina, o agente recebe o resultado e segue a tarefa. Delegações de implementação ficam isoladas até você usar [Revisar no Inspector] e aplicar ou descartar.",
+          "Acompanhe pelo card [Delegação] na conversa: o robô do agente anda enquanto ele trabalha, e o link da conversa dele mostra o trabalho em andamento.",
+          "Quando a filha termina, o agente recebe o resultado e segue a tarefa. Delegações de implementação ficam isoladas até você usar [Revisar mudanças] (no card, na faixa no fim da conversa ou no Inspector) e aplicar ou descartar.",
           "Para comparar, use [Re-rodar em outro agente]. Num resultado que você mesmo delegou, [Enviar ao agente] coloca o texto no composer."
         ],
         "tip": "Delegar é para outro provider. Se você pedir outro modelo do mesmo provider (por exemplo, Opus estando no Claude), o agente usa os subagentes dele, sem sessão filha. Funciona nos providers que recebem as ferramentas do DCC (Claude, Codex e Cursor), e um agente delegado não delega de novo.",

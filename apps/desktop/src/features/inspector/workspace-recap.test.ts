@@ -156,7 +156,7 @@ describe("buildWorkspaceRecap", () => {
 		);
 		expect(recap.messageKey).toBe("delegationResults");
 		expect(recap.params.count).toBe(2);
-		expect(recap.tone).toBe("ready");
+		expect(recap.tone).toBe("attention");
 		expect(recap.action?.kind).toBe("activity");
 	});
 

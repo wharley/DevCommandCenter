@@ -50,6 +50,10 @@ const KIND_BY_ACTION: Record<string, ToolKind> = {
 };
 
 export function classifyToolAction(action: string): ToolKind {
+	// DCC's own delegation tool hands work to another agent; it is the turn's
+	// headline, not an anonymous "other action". Codex names it bare, Claude
+	// as `mcp__<server>__dcc_delegate_task`.
+	if ((action.split("__").at(-1) ?? action) === "dcc_delegate_task") return "agent";
 	if (action.startsWith("mcp__")) return "mcp";
 	const normalized = action.toLowerCase().replace(/[^a-z0-9]/g, "");
 	return KIND_BY_ACTION[normalized] ?? "other";

@@ -294,7 +294,7 @@ type WorkspacePanelProps = {
 	onOpenMultiProjectDelivery?: () => void;
 	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
 	/** Opens the inspector and previews an implementation delegation diff. */
-	onReviewDelegation?: (delegationId: string) => void;
+	onReviewDelegation?: (delegationId: string, path?: string) => void;
 	onRerunDelegation?: (input: {
 		delegationId: string;
 		targetProviderId: string;
@@ -1669,6 +1669,7 @@ export function WorkspacePanel({
 					workspaceId={workspaceId}
 					providers={providerChoices}
 					providerId={sessionSnapshot?.providerId ?? selectedProviderId}
+					sessions={sessions}
 					planMessageId={latestPlanMessage?.id ?? null}
 					planApproved={isLatestPlanApproved}
 					planReadOnly={isLatestPlanReadOnly}

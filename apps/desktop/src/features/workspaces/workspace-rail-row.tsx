@@ -376,6 +376,10 @@ export const WorkspaceRailRowItem = memo(
 			...(workspace.memberWorkspaceIds ?? []),
 		]);
 		const displayTitle = workspaceRailDisplayTitle(workspace);
+		// The agent finished, but edits it delegated wait on the person: that is
+		// the state to show, not "Completed".
+		const awaitsDelegatedReview =
+			activity?.state === "completed" && pendingDelegatedReviews > 0;
 		const workspacePath = workspace.worktreePath ?? workspace.rootPath ?? null;
 		const railState = useWorkspaceRailRecap({
 			workspacePath,
@@ -678,8 +682,9 @@ export const WorkspaceRailRowItem = memo(
 												"size-[6px] shrink-0 rounded-full",
 												activity.state === "active" &&
 													"bg-emerald-500 animate-pulse",
-												activity.state === "waiting" && "bg-amber-500",
+												(activity.state === "waiting" || awaitsDelegatedReview) && "bg-amber-500",
 												activity.state === "completed" &&
+													!awaitsDelegatedReview &&
 													(unseenResult ? "bg-sky-500" : "bg-muted-foreground/45"),
 												activity.state === "aborted" && "bg-destructive",
 											)}
@@ -689,9 +694,10 @@ export const WorkspaceRailRowItem = memo(
 												className={cn(
 													activity.state === "active" &&
 														"text-emerald-700 dark:text-emerald-300/90",
-													activity.state === "waiting" &&
+													(activity.state === "waiting" || awaitsDelegatedReview) &&
 														"text-amber-700 dark:text-amber-300/90",
 													activity.state === "completed" &&
+														!awaitsDelegatedReview &&
 														(unseenResult
 															? "text-sky-700 dark:text-sky-300/90"
 															: "text-foreground/70"),
@@ -701,7 +707,9 @@ export const WorkspaceRailRowItem = memo(
 												{activity.state === "waiting" &&
 												activity.waitingFor === "permission"
 													? t("sidebar.agentState.waitingPermission")
-													: activity.state === "completed" && unseenResult
+													: awaitsDelegatedReview
+														? t("sidebar.agentState.reviewPending")
+														: activity.state === "completed" && unseenResult
 														? t("sidebar.agentState.completedUnseen")
 														: t(`sidebar.agentState.${activity.state}`)}
 											</span>

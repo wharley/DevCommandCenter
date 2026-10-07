@@ -825,6 +825,7 @@ export default function App() {
 	const [reviewDelegationRequest, setReviewDelegationRequest] = useState<{
 		delegationId: string;
 		nonce: number;
+		path?: string;
 	} | null>(null);
 	const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
 	const [workspaceCreationMode, setWorkspaceCreationMode] = useState<"open" | "clone">(
@@ -1803,7 +1804,7 @@ export default function App() {
 		openContextualInspector();
 	}, [openContextualInspector]);
 	const handleReviewDelegation = useCallback(
-		(delegationId: string) => {
+		(delegationId: string, path?: string) => {
 			setTurnReviewRequest(null);
 			requestSurfaceSelection(null, () => {
 				setInspectorMode("git");
@@ -1811,6 +1812,7 @@ export default function App() {
 				setReviewDelegationRequest((current) => ({
 					delegationId,
 					nonce: (current?.nonce ?? 0) + 1,
+					...(path ? { path } : {}),
 				}));
 			});
 		},

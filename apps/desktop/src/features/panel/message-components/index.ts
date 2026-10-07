@@ -1,5 +1,7 @@
 export { AssistantMessage } from "./AssistantMessage";
 export { DelegationCard } from "./DelegationCard";
+export { DelegationHandBackRow } from "./DelegationHandBackRow";
+export { DelegationReviewStrip } from "./DelegationReviewStrip";
 export { PendingPermissionPanel } from "./PendingPermissionPanel";
 export { PlanReviewCard } from "./PlanReviewCard";
 export { PlanSummaryCard } from "./PlanSummaryCard";

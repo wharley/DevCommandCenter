@@ -228,7 +228,7 @@ type SessionWorkbenchProps = {
 	onReviewChanges?: () => void;
 	onCompleteWorkspace?: (workspaceId: string) => Promise<void> | void;
 	/** Opens the inspector and previews an implementation delegation diff. */
-	onReviewDelegation?: (delegationId: string) => void;
+	onReviewDelegation?: (delegationId: string, path?: string) => void;
 	onRerunDelegation?: (input: {
 		delegationId: string;
 		targetProviderId: string;

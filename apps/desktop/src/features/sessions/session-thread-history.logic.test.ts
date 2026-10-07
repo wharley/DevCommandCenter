@@ -1700,3 +1700,44 @@ describe("projectWorkspaceMessages", () => {
 		expect(project()?.turnEndedAt).toBe(first?.turnEndedAt);
 	});
 });
+
+describe("delegations in the parent thread", () => {
+	function delegationRequested(sequence: number, occurredAt: string): SessionEventRecord {
+		return {
+			eventId: `evt-parent-delegation-${sequence}`,
+			sessionId: "parent",
+			sequence,
+			occurredAt,
+			kind: { type: "delegation_requested", delegationId: "d-1" },
+		} as SessionEventRecord;
+	}
+
+	it("places the card after the reply of the turn that delegated", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("parent", "turn-1", "Delegate the fix", "2026-05-01T12:00:00Z"),
+				sessionTurnToolCallStarted("parent", "turn-1", "call-1", "dcc_delegate_task"),
+				delegationRequested(3, "2026-05-01T12:00:02Z"),
+				assistantMessageCompleted("parent", "turn-1", "m-1", "final_answer", "I delegated it.", 4),
+				sessionTurnCompleted("parent", "turn-1", "2026-05-01T12:00:05Z", 5),
+				sessionTurnStarted(
+					"parent",
+					"turn-2",
+					"[DCC] Delegated implement task finished — Claude Code (task d-1).\n\nResult:\nDone",
+					"2026-05-01T12:01:00Z",
+				),
+			],
+			[],
+			"parent",
+		);
+
+		expect(messages.map((message) => message.delegation?.id ?? message.role)).toEqual([
+			"user",
+			"assistant",
+			"d-1",
+			"user",
+		]);
+		expect(messages[0]?.delegationHandBack).toBeUndefined();
+		expect(messages[3]?.delegationHandBack).toEqual({ delegationId: "d-1", outcome: "finished" });
+	});
+});

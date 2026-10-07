@@ -137,7 +137,7 @@
     },
     "card": {
       "title": "Delegation",
-      "openChild": "Open child session",
+      "openChild": "See {{agent}}'s conversation",
       "canEditFiles": "can edit",
       "readOnly": "read-only",
       "rerun": "Rerun on another agent",
@@ -146,7 +146,28 @@
       "sendResult": "Send to agent",
       "sendResultHint": "Puts the result in this conversation's composer for you to review and send",
       "sendResultUnavailable": "This delegation has no result to send yet.",
-      "reviewInInspector": "Review in Inspector"
+      "reviewInInspector": "Review in Inspector",
+      "reviewChanges": "Review changes",
+      "working": "{{agent}} is working on it…",
+      "agentFallback": "the agent",
+      "showReport": "Show full report",
+      "hideReport": "Collapse report",
+      "verified": "Checked in this conversation",
+      "verifiedWithFailures": "Failures when checked in this conversation",
+      "changedFiles_one": "{{count}} file changed",
+      "changedFiles_other": "{{count}} files changed"
+    },
+    "handBack": {
+      "finished": "Delegation result handed to the agent",
+      "failed": "Delegation failure reported to the agent",
+      "applied": "Agent told: you applied the delegated changes",
+      "discarded": "Agent told: you discarded the delegated changes",
+      "showSent": "show sent text"
+    },
+    "reviewStrip": {
+      "message_one": "{{agent}} left {{count}} file for you to review",
+      "message_other": "{{agent}} left {{count}} files for you to review",
+      "action": "Review"
     }
   },
   "agents": {
@@ -562,7 +583,8 @@
       "waitingPermission": "Waiting for approval",
       "completed": "Completed",
       "aborted": "Aborted",
-      "completedUnseen": "New result"
+      "completedUnseen": "New result",
+      "reviewPending": "Awaiting your review"
     },
     "workspaceState": {
       "readyToStart": "Ready to start",
@@ -1018,6 +1040,9 @@
       "discarded": "Delegation changes discarded",
       "reviewingOutput": "Reviewing delegation output from {{provider}}",
       "reviewingOutputCompact": "Delegation · {{provider}}",
+      "pendingFromSession_one": "{{agent}} left {{count}} file awaiting review",
+      "pendingFromSession_other": "{{agent}} left {{count}} files awaiting review",
+      "showPendingChanges": "See changes",
       "reviewingOutputHint": "Review these changes before applying them to the parent workspace.",
       "backToWorkspace": "Back to workspace",
       "applyShort": "Apply",
@@ -3105,8 +3130,8 @@
         "whenToUse": "To parallelize: one agent implements while another writes tests or reviews. Or to get a second opinion from another model on the same diff.",
         "steps": [
           "Ask in the chat, in plain language, naming the provider and the task: \"delegate to Codex to review this diff\" or \"ask Claude to write the tests\". Also say whether it should review, explain or implement: review and explain only read the code.",
-          "Follow the [Delegation] card in the conversation. Use [Open child session] to see the work in progress.",
-          "When the child finishes, the agent receives the result and carries on. Implementation delegations stay isolated until you use [Review in Inspector] and apply or discard.",
+          "Follow the [Delegation] card in the conversation: the agent's robot walks while it works, and the link to its conversation shows the work in progress.",
+          "When the child finishes, the agent receives the result and carries on. Implementation delegations stay isolated until you use [Review changes] (on the card, the strip at the end of the conversation or the Inspector) and apply or discard.",
           "To compare, use [Rerun on another agent]. On a result you delegated yourself, [Send to agent] puts the text in the composer."
         ],
         "tip": "Delegating is for another provider. If you ask for another model of the same provider (for example, Opus while on Claude), the agent uses its own subagents, with no child session. Works on providers that receive DCC's tools (Claude, Codex and Cursor), and a delegated agent cannot delegate again.",

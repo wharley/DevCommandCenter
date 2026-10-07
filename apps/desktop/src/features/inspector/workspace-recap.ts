@@ -236,7 +236,8 @@ function buildWorkspaceRecapPrimary(
 			state: "needs_attention",
 			messageKey: "delegationResults",
 			params: { count: input.pendingDelegationResultsCount },
-			tone: "ready",
+			// It waits on the person, like the sidebar's amber "needs you".
+			tone: "attention",
 			action: { kind: "activity", labelKey: "inspector.recap.actions.activity" },
 		};
 	}
