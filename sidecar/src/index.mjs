@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import readline from "node:readline";
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { getSessionInfo, query } from "@anthropic-ai/claude-agent-sdk";
 import {
 	dccMcpQueryOptions,
 	failedDccMcpStatus,
@@ -30,6 +30,12 @@ import { createNativeSubagentHooks } from "./native-subagent-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
 import { waitForPendingResponse } from "./pending-response.mjs";
 import { claudeCommand, resolveClaudeExecutable } from "./claude-executable.mjs";
+import {
+	createTurnTrace,
+	initialNativeResumeId,
+	recordTurnStderr,
+	runTurnWithNativeResume,
+} from "./native-resume.mjs";
 
 const SIDECAR_VERSION = "0.1.87";
 
@@ -86,7 +92,7 @@ function handleAuthStatus() {
 	process.exit(result.status ?? 1);
 }
 
-function updateResumeSessionId(message, state) {
+function updateResumeSessionId(message, state, trace) {
 	if (
 		message &&
 		message.type === "system" &&
@@ -95,6 +101,7 @@ function updateResumeSessionId(message, state) {
 		message.session_id.length > 0
 	) {
 		state.resumeSessionId = message.session_id;
+		trace.sawInit = true;
 	}
 }
 
@@ -262,7 +269,7 @@ async function handleAskUserQuestion(input, options, state) {
 	};
 }
 
-async function runTurn(payload, state) {
+async function runTurn(payload, state, trace = createTurnTrace()) {
 	const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
 	let additionalDirectories = [];
 	try {
@@ -319,6 +326,8 @@ async function runTurn(payload, state) {
 					? createDccMcpPermissionHooks(state, emit)
 					: {}),
 			},
+			// Only a bounded tail is kept, to recognize a refused resume.
+			stderr: (data) => recordTurnStderr(trace, data),
 			effort: normalizeEffort(payload?.effort),
 			systemPrompt: buildSystemPrompt(payload?.fastMode, payload?.toolInstructions),
 			canUseTool: async (toolName, input, options) => {
@@ -386,7 +395,7 @@ async function runTurn(payload, state) {
 		publishMcpOauthUpdates();
 		deferredPrompt?.release();
 		for await (const message of q) {
-			updateResumeSessionId(message, state);
+			updateResumeSessionId(message, state, trace);
 			if (message && message.type === "result") {
 				terminalResult = message;
 				continue;
@@ -444,8 +453,10 @@ async function main() {
 		return;
 	}
 
+	const nativeResumeId = initialNativeResumeId(process.env);
 	const state = {
-		resumeSessionId: null,
+		resumeSessionId: nativeResumeId,
+		nativeResumePending: nativeResumeId !== null,
 		running: false,
 		activeTurnPromise: null,
 		pendingUserInputs: new Map(),
@@ -569,7 +580,11 @@ async function main() {
 		state.activeTurnPromise = (async () => {
 			let terminalResult;
 			try {
-				terminalResult = await runTurn(payload, state);
+				terminalResult = await runTurnWithNativeResume(payload, state, runTurn, {
+					emit,
+					getSessionInfo,
+					cwd: process.cwd(),
+				});
 			} catch (error) {
 				terminalResult = {
 					type: "result",

@@ -489,6 +489,12 @@ pub enum ProviderEvent {
     McpOauthStateChanged {
         definition_id: crate::domain::mcp::McpDefinitionId,
     },
+    /// Backend-only signal carrying the provider-native conversation id that
+    /// a later runtime can resume. `None` means the provider refused the
+    /// persisted id and it must be forgotten.
+    NativeSessionChanged {
+        native_session_id: Option<String>,
+    },
     NativeSubagentActivity {
         id: String,
         agent_id: Option<String>,

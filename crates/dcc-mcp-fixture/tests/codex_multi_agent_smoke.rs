@@ -406,6 +406,7 @@ async fn authenticated_codex_sol_delegates_to_terra_and_integrates_result() {
             additional_working_directories: Vec::new(),
             provider_runtime: None,
             mcp_servers: Vec::new(),
+            native_resume_id: None,
         })
         .await;
 
@@ -440,6 +441,7 @@ async fn authenticated_codex_sol_delegates_to_terra_and_integrates_result() {
                 effort: Some("low".to_string()),
                 fast_mode: Some(true),
                 approval_policy: None,
+                resume_fallback_context: None,
             }),
         )
         .await;
@@ -487,6 +489,7 @@ async fn authenticated_codex_can_steer_a_running_terra_child_directly() {
             additional_working_directories: Vec::new(),
             provider_runtime: None,
             mcp_servers: Vec::new(),
+            native_resume_id: None,
         })
         .await
         .expect("prepare authenticated Codex steering session");
@@ -555,6 +558,7 @@ async fn authenticated_codex_can_steer_a_running_terra_child_directly() {
                 effort: Some("low".to_string()),
                 fast_mode: Some(true),
                 approval_policy: None,
+                resume_fallback_context: None,
             }),
         )
         .await;
@@ -614,6 +618,7 @@ async fn authenticated_codex_can_interrupt_terra_without_stopping_sol() {
             additional_working_directories: Vec::new(),
             provider_runtime: None,
             mcp_servers: Vec::new(),
+            native_resume_id: None,
         })
         .await
         .expect("prepare authenticated Codex interruption session");
@@ -679,6 +684,7 @@ async fn authenticated_codex_can_interrupt_terra_without_stopping_sol() {
                 effort: Some("low".to_string()),
                 fast_mode: Some(true),
                 approval_policy: None,
+                resume_fallback_context: None,
             }),
         )
         .await;

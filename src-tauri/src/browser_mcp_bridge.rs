@@ -2434,6 +2434,7 @@ mod tests {
             additional_working_directories: Vec::new(),
             provider_runtime: None,
             mcp_servers: vec![projection.server],
+            native_resume_id: None,
         };
         let handle =
             match tokio::time::timeout(Duration::from_secs(30), adapter.prepare_session(config))

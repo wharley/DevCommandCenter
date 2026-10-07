@@ -2109,6 +2109,7 @@ async fn send_turn_handler(
         effort: input.effort.clone(),
         fast_mode: input.fast_mode,
         approval_policy: input.approval_policy,
+        resume_fallback_context: None,
     };
     let retry_of_turn_id = input.retry_of_turn_id.clone();
     let output = send_turn(&*state, &*state, &*state, input)

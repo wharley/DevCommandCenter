@@ -335,6 +335,7 @@ where
                 additional_working_directories: Vec::new(),
                 provider_runtime: None,
                 mcp_servers: servers,
+                native_resume_id: None,
             })
             .await
             .map_err(|_| McpConformanceAdapterError::ProviderSession)?;
@@ -362,6 +363,7 @@ where
                     effort: Some("low".to_string()),
                     fast_mode: Some(true),
                     approval_policy: None,
+                    resume_fallback_context: None,
                 }),
             )
             .await
@@ -1007,6 +1009,7 @@ where
                                 effort: Some("low".to_string()),
                                 fast_mode: Some(true),
                                 approval_policy: None,
+                                resume_fallback_context: None,
                             }),
                         )
                         .await

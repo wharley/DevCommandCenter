@@ -228,6 +228,29 @@ pub(crate) fn build_cold_attach_reanchor(history: &[SessionEventRecord]) -> Opti
     )
 }
 
+/// Places a cold-attach re-anchor on the first turn of a fresh runtime. When
+/// the runtime resumes the provider's native conversation the snapshot would
+/// duplicate it, so it only rides along as the refusal fallback.
+pub(crate) fn route_cold_attach_reanchor(
+    turn: &mut dcc_core::ports::ProviderTurnInput,
+    reanchor: Option<String>,
+    native_resume_armed: bool,
+) {
+    let Some(reanchor) = reanchor else {
+        return;
+    };
+    if native_resume_armed {
+        turn.resume_fallback_context = Some(reanchor);
+        return;
+    }
+    turn.tool_instructions = Some(match turn.tool_instructions.take() {
+        Some(existing) if !existing.trim().is_empty() => {
+            format!("{}\n\n{reanchor}", existing.trim_end())
+        }
+        _ => reanchor,
+    });
+}
+
 /// A dynamic-model snapshot older than this is re-asked before a miss is
 /// treated as an unknown model.
 const DYNAMIC_MODEL_SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_secs(600);
@@ -1309,6 +1332,10 @@ pub(crate) struct SessionStore {
     /// attached fresh after history already exists (crash, restart, resume).
     /// Runtime-only; consumed by the next turn input.
     cold_attach_reanchors: HashMap<SessionId, String>,
+    /// Sessions whose current binding was started with a persisted native
+    /// resume id. Their first turn carries the re-anchor as a fallback the
+    /// adapter uses only if the provider refuses the resume.
+    native_resume_armed: HashSet<SessionId>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1879,6 +1906,7 @@ impl SessionCommandState {
                 additional_working_directories: Vec::new(),
                 provider_runtime: Some(runtime),
                 mcp_servers: Vec::new(),
+                native_resume_id: None,
             })
             .await?;
         let mut events = provider.stream_events(&handle);
@@ -1895,6 +1923,7 @@ impl SessionCommandState {
                     effort,
                     fast_mode: None,
                     approval_policy: None,
+                    resume_fallback_context: None,
                 }),
             )
             .await
@@ -4091,6 +4120,9 @@ impl SessionCommandState {
             }
         }
 
+        let native_resume_id =
+            self.native_resume_id_for_attach(session, provider.supports_native_resume());
+        let native_resume_armed = native_resume_id.is_some();
         let handle = match provider
             .prepare_session(SessionConfig {
                 workspace_id: session.workspace_id.clone(),
@@ -4100,6 +4132,7 @@ impl SessionCommandState {
                 additional_working_directories,
                 provider_runtime: Some(provider_runtime),
                 mcp_servers,
+                native_resume_id,
             })
             .await
         {
@@ -4181,6 +4214,11 @@ impl SessionCommandState {
             match store.provider_sessions.entry(session.id.clone()) {
                 Entry::Vacant(entry) => {
                     entry.insert(binding.clone());
+                    if native_resume_armed {
+                        store.native_resume_armed.insert(session.id.clone());
+                    } else {
+                        store.native_resume_armed.remove(&session.id);
+                    }
                     true
                 }
                 Entry::Occupied(_) => false,
@@ -4633,6 +4671,14 @@ impl SessionCommandState {
             // A deliberate provider switch is re-anchored by the handoff packet
             // the renderer assembles; never stack a second snapshot on it.
             self.clear_cold_attach_reanchor(&input.session_id);
+            // Another provider or account cannot resume the old native
+            // conversation; a model change alone keeps it.
+            let (provider_id, _, provider_runtime) =
+                merge_send_turn_session_selection(&current, input);
+            if provider_id != current.provider_id || provider_runtime != current.provider_runtime {
+                self.session_repo
+                    .delete_provider_native_sessions(&input.session_id, None)?;
+            }
         } else {
             self.mark_cold_attach_if_needed(&input.session_id).await?;
         }
@@ -5030,6 +5076,70 @@ impl SessionCommandState {
         }
     }
 
+    /// Persisted native conversation id to resume when attaching `session`'s
+    /// provider. Ids left by another provider are dropped first: they never
+    /// saw the turns made since. Lookup failures attach fresh.
+    fn native_resume_id_for_attach(
+        &self,
+        session: &Session,
+        supports_native_resume: bool,
+    ) -> Option<String> {
+        if let Err(error) = self
+            .session_repo
+            .retain_provider_native_session(&session.id, &session.provider_id)
+        {
+            eprintln!("[DCC] provider native session cleanup failed: {error}");
+        }
+        if !supports_native_resume {
+            return None;
+        }
+        match self
+            .session_repo
+            .load_provider_native_session(&session.id, &session.provider_id)
+        {
+            Ok(native_id) => native_id,
+            Err(error) => {
+                eprintln!("[DCC] provider native session lookup failed: {error}");
+                None
+            }
+        }
+    }
+
+    fn take_native_resume_armed(&self, session_id: &SessionId) -> bool {
+        self.store
+            .lock()
+            .map(|mut store| store.native_resume_armed.remove(session_id))
+            .unwrap_or(false)
+    }
+
+    /// Persists or forgets the native conversation id an adapter reported for
+    /// `binding`. A report from a binding that is no longer current (the
+    /// session switched provider meanwhile) is ignored.
+    fn record_provider_native_session(
+        &self,
+        session_id: &SessionId,
+        binding: &ProviderSessionBinding,
+        native_session_id: Option<&str>,
+    ) -> Result<()> {
+        let current = self
+            .provider_binding(session_id)?
+            .is_some_and(|current| current.handle.handle_id == binding.handle.handle_id);
+        if !current {
+            return Ok(());
+        }
+        match native_session_id {
+            Some(native_id) => self.session_repo.save_provider_native_session(
+                session_id,
+                &binding.provider_id,
+                native_id,
+            ),
+            None => self
+                .session_repo
+                .delete_provider_native_sessions(session_id, Some(&binding.provider_id))
+                .map(|_| ()),
+        }
+    }
+
     /// Model authority for every provider. Static catalogs are checked in the
     /// registry; dynamic runtimes are checked against the last complete list
     /// the runtime reported, refreshed on a miss or when stale, and a runtime
@@ -5286,6 +5396,15 @@ impl SessionCommandState {
                                     statuses,
                                 )
                                 .await;
+                        }
+                    }
+                    Ok(ProviderEvent::NativeSessionChanged { native_session_id }) => {
+                        if let Err(error) = state.record_provider_native_session(
+                            &session_id,
+                            &binding,
+                            native_session_id.as_deref(),
+                        ) {
+                            eprintln!("[DCC] provider native session persistence failed: {error}");
                         }
                     }
                     Ok(ProviderEvent::McpOauthStateChanged { definition_id }) => {
@@ -6114,14 +6233,11 @@ impl SessionCommandState {
                         _ => scope_instructions,
                     });
                 }
-                if let Some(reanchor) = self.take_cold_attach_reanchor(session_id) {
-                    turn.tool_instructions = Some(match turn.tool_instructions {
-                        Some(existing) if !existing.trim().is_empty() => {
-                            format!("{}\n\n{reanchor}", existing.trim_end())
-                        }
-                        _ => reanchor,
-                    });
-                }
+                route_cold_attach_reanchor(
+                    &mut turn,
+                    self.take_cold_attach_reanchor(session_id),
+                    self.take_native_resume_armed(session_id),
+                );
                 turn.tool_instructions = append_dcc_app_mcp_tool_instructions(
                     turn.tool_instructions,
                     binding.ephemeral_mcp_lease_id.is_some(),
@@ -6422,6 +6538,7 @@ impl SessionCommandState {
             effort: input.effort.clone(),
             fast_mode: input.fast_mode,
             approval_policy: input.approval_policy,
+            resume_fallback_context: None,
         };
         let output = run_send_turn(self, self, self, input).await?;
         let turn_id = output.turn.id.clone();
@@ -8198,6 +8315,129 @@ mod tests {
             .await
             .expect("mark");
         assert_eq!(state.take_cold_attach_reanchor(&session.id), None);
+    }
+
+    fn reanchor_turn(tool_instructions: Option<&str>) -> dcc_core::ports::ProviderTurnInput {
+        dcc_core::ports::ProviderTurnInput {
+            prompt: "next".to_string(),
+            tool_instructions: tool_instructions.map(str::to_string),
+            plan_mode: None,
+            effort: None,
+            fast_mode: None,
+            approval_policy: None,
+            resume_fallback_context: None,
+        }
+    }
+
+    #[test]
+    fn native_resume_holds_the_cold_attach_snapshot_back_as_a_fallback() {
+        let snapshot = "<dcc_reanchor>earlier</dcc_reanchor>".to_string();
+
+        // Native resume armed: the provider already has the conversation, so
+        // the snapshot only travels as the refusal fallback.
+        let mut turn = reanchor_turn(Some("scope"));
+        route_cold_attach_reanchor(&mut turn, Some(snapshot.clone()), true);
+        assert_eq!(turn.tool_instructions.as_deref(), Some("scope"));
+        assert_eq!(
+            turn.resume_fallback_context.as_deref(),
+            Some(snapshot.as_str())
+        );
+
+        // No native resume: today's flow, appended to the instructions.
+        let mut turn = reanchor_turn(Some("scope"));
+        route_cold_attach_reanchor(&mut turn, Some(snapshot.clone()), false);
+        assert_eq!(
+            turn.tool_instructions.as_deref(),
+            Some(format!("scope\n\n{snapshot}").as_str())
+        );
+        assert_eq!(turn.resume_fallback_context, None);
+        let mut turn = reanchor_turn(None);
+        route_cold_attach_reanchor(&mut turn, Some(snapshot.clone()), false);
+        assert_eq!(turn.tool_instructions.as_deref(), Some(snapshot.as_str()));
+
+        // Nothing to re-anchor leaves the turn untouched either way.
+        let mut turn = reanchor_turn(None);
+        route_cold_attach_reanchor(&mut turn, None, true);
+        assert_eq!(turn.tool_instructions, None);
+        assert_eq!(turn.resume_fallback_context, None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn claude_native_session_id_is_persisted_resumed_and_cleared_on_refusal() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let mut session = sample_session("native-resume");
+        session.provider_id = "claude_code".to_string();
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("session");
+        let binding = inert_provider_binding_for(&session.id, "claude_code");
+
+        // Nothing persisted yet: the first runtime starts fresh.
+        assert_eq!(state.native_resume_id_for_attach(&session, true), None);
+
+        // The adapter reports the SDK session from `system/init`.
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), binding.clone());
+        state
+            .record_provider_native_session(&session.id, &binding, Some("native-1"))
+            .expect("persist native id");
+
+        // After the runtime dies (Stop, app restart) the next attach resumes it.
+        state.store.lock().expect("store").provider_sessions.clear();
+        assert_eq!(
+            state.native_resume_id_for_attach(&session, true).as_deref(),
+            Some("native-1")
+        );
+        assert_eq!(
+            state.native_resume_id_for_attach(&session, false),
+            None,
+            "adapters without native resume never receive the id"
+        );
+
+        // A report from a binding that is no longer current is ignored.
+        state
+            .record_provider_native_session(&session.id, &binding, Some("stale"))
+            .expect("stale report");
+        assert_eq!(
+            state.native_resume_id_for_attach(&session, true).as_deref(),
+            Some("native-1")
+        );
+
+        // Fallback: the SDK refused the resume, so the id is forgotten and
+        // the next attach is fresh (with the bounded snapshot).
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), binding.clone());
+        state
+            .record_provider_native_session(&session.id, &binding, None)
+            .expect("forget refused id");
+        assert_eq!(state.native_resume_id_for_attach(&session, true), None);
+
+        // The retried fresh conversation reports its own id.
+        state
+            .record_provider_native_session(&session.id, &binding, Some("native-2"))
+            .expect("persist new id");
+        assert_eq!(
+            state.native_resume_id_for_attach(&session, true).as_deref(),
+            Some("native-2")
+        );
+
+        // Handoff to another provider drops the Claude conversation: coming
+        // back must not resume a transcript that missed the other turns.
+        let mut handed_off = session.clone();
+        handed_off.provider_id = "codex".to_string();
+        assert_eq!(state.native_resume_id_for_attach(&handed_off, true), None);
+        assert_eq!(state.native_resume_id_for_attach(&session, true), None);
     }
 
     #[tokio::test(flavor = "current_thread")]

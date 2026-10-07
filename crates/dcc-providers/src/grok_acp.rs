@@ -730,6 +730,7 @@ mod tests {
             effort: None,
             fast_mode: None,
             approval_policy: None,
+            resume_fallback_context: None,
         });
         assert!(prompt.contains("Continue the task"));
         assert!(prompt.contains("DCC handoff context"));

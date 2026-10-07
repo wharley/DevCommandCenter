@@ -1191,6 +1191,7 @@ impl Provider for CursorAcpAdapter {
                         effort: None,
                         fast_mode: None,
                         approval_policy: None,
+                        resume_fallback_context: None,
                     })
                     .await
             }

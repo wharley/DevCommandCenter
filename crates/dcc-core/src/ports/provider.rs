@@ -40,6 +40,11 @@ pub struct SessionConfig {
     #[serde(skip)]
     #[specta(skip)]
     pub mcp_servers: Vec<ProviderMcpServerConfig>,
+    /// Provider-native conversation id persisted from an earlier runtime of
+    /// this DCC session. Only adapters that report `supports_native_resume`
+    /// receive one; they must fall back to a fresh conversation on refusal.
+    #[serde(default)]
+    pub native_resume_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -188,6 +193,13 @@ pub struct ProviderTurnInput {
     pub fast_mode: Option<bool>,
     #[serde(default)]
     pub approval_policy: Option<ProviderApprovalPolicy>,
+    /// Bounded snapshot of durable history held back because the runtime was
+    /// attached with a native resume id. The adapter uses it only when the
+    /// provider refuses that resume, so context is never sent twice.
+    /// Backend-only: the renderer contract never carries it.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub resume_fallback_context: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -273,6 +285,11 @@ pub trait Provider: Send + Sync {
     /// The running session may use an older CLI than newly created sessions.
     async fn session_mcp_projection_version(&self, _handle: &SessionHandle) -> Option<String> {
         self.dcc_mcp_projection_version()
+    }
+    /// Whether `SessionConfig::native_resume_id` is honored and
+    /// `ProviderEvent::NativeSessionChanged` is reported by this adapter.
+    fn supports_native_resume(&self) -> bool {
+        false
     }
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
     async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;
@@ -374,6 +391,7 @@ mod tests {
                 )),
                 tool_policies: Vec::new(),
             }],
+            native_resume_id: None,
         };
 
         let serialized = serde_json::to_string(&config).expect("serialize session config");

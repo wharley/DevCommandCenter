@@ -35,6 +35,7 @@ fn config(session: &str) -> SessionConfig {
             oauth_state: None,
             tool_policies: Vec::new(),
         }],
+        native_resume_id: None,
     }
 }
 

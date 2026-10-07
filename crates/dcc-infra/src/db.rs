@@ -381,6 +381,20 @@ CREATE TABLE IF NOT EXISTS dcc_session_objectives (
 );
 "#;
 
+/// Provider-native conversation id per DCC session, so a restarted runtime
+/// can resume the provider's own transcript instead of a bounded snapshot.
+/// The row dies with its session and is replaced or cleared by the adapter.
+const PROVIDER_NATIVE_SESSION_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_provider_native_sessions (
+	session_id TEXT NOT NULL CHECK(length(session_id) BETWEEN 1 AND 256),
+	provider_id TEXT NOT NULL CHECK(length(provider_id) BETWEEN 1 AND 128),
+	native_id TEXT NOT NULL CHECK(length(native_id) BETWEEN 1 AND 256),
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY (session_id, provider_id),
+	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
+);
+"#;
+
 /// Resident agents are global to the installation. A deleted agent keeps its
 /// row so a removed preset is not seeded again and old sessions keep a name.
 const RESIDENT_AGENT_TABLE_SQL: &str = r#"
@@ -2191,7 +2205,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
@@ -7443,6 +7457,104 @@ impl SqliteSessionRepo {
             ));
         }
         Ok(())
+    }
+
+    /// Native conversation id last reported by `provider_id` for a session.
+    pub fn load_provider_native_session(
+        &self,
+        session_id: &SessionId,
+        provider_id: &str,
+    ) -> Result<Option<String>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            "SELECT native_id FROM dcc_provider_native_sessions WHERE session_id = ?1 AND provider_id = ?2",
+            params![session_id.0, provider_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Replaces the native conversation id for a session and provider.
+    pub fn save_provider_native_session(
+        &self,
+        session_id: &SessionId,
+        provider_id: &str,
+        native_id: &str,
+    ) -> Result<()> {
+        let native_id = native_id.trim();
+        if native_id.is_empty() || native_id.chars().count() > 256 {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "provider native session id is invalid".to_string(),
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_provider_native_sessions (session_id, provider_id, native_id, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(session_id, provider_id) DO UPDATE SET
+                native_id = excluded.native_id,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                session_id.0,
+                provider_id,
+                native_id,
+                Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    /// Forgets native conversation ids for a session: one provider's when
+    /// `provider_id` is given, otherwise every provider's.
+    pub fn delete_provider_native_sessions(
+        &self,
+        session_id: &SessionId,
+        provider_id: Option<&str>,
+    ) -> Result<usize> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let removed = match provider_id {
+            Some(provider_id) => conn.execute(
+                "DELETE FROM dcc_provider_native_sessions WHERE session_id = ?1 AND provider_id = ?2",
+                params![session_id.0, provider_id],
+            ),
+            None => conn.execute(
+                "DELETE FROM dcc_provider_native_sessions WHERE session_id = ?1",
+                params![session_id.0],
+            ),
+        }
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(removed)
+    }
+
+    /// Keeps only `provider_id`'s native id for a session. Another provider's
+    /// conversation never saw the turns made since, so it cannot be resumed.
+    pub fn retain_provider_native_session(
+        &self,
+        session_id: &SessionId,
+        provider_id: &str,
+    ) -> Result<usize> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_provider_native_sessions WHERE session_id = ?1 AND provider_id <> ?2",
+            params![session_id.0, provider_id],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
     }
 
     pub fn delete_session_objective(&self, session_id: &SessionId) -> Result<bool> {
@@ -14074,6 +14186,95 @@ mod tests {
         );
         assert_eq!(recap.created_workspace_ids, vec!["task-new".to_string()]);
         assert_eq!(recap.completed_workspace_ids, vec!["task-done".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn provider_native_session_round_trips_replaces_and_dies_with_its_session() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        // Re-running the schema must be a no-op for existing databases.
+        repo.ensure_schema().unwrap();
+        let session_id = SessionId("session-native".to_string());
+        SessionRepo::save_session(
+            &repo,
+            &dcc_core::domain::session::Session {
+                id: session_id.clone(),
+                project_id: ProjectId("project".to_string()),
+                workspace_id: WorkspaceId("workspace".to_string()),
+                provider_id: "claude_code".to_string(),
+                model: None,
+                provider_runtime: None,
+                working_directory_override: None,
+                additional_workspace_ids: Vec::new(),
+                state: SessionState::Active,
+                created_at: "t0".to_string(),
+                updated_at: "t0".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            repo.load_provider_native_session(&session_id, "claude_code")
+                .unwrap(),
+            None
+        );
+        repo.save_provider_native_session(&session_id, "claude_code", "native-1")
+            .unwrap();
+        repo.save_provider_native_session(&session_id, "claude_code", " native-2 ")
+            .unwrap();
+        assert_eq!(
+            repo.load_provider_native_session(&session_id, "claude_code")
+                .unwrap()
+                .as_deref(),
+            Some("native-2")
+        );
+        assert_eq!(
+            repo.load_provider_native_session(&session_id, "codex")
+                .unwrap(),
+            None,
+            "ids are scoped to the provider that reported them"
+        );
+        assert!(repo
+            .save_provider_native_session(&session_id, "claude_code", "  ")
+            .is_err());
+        assert_eq!(
+            repo.delete_provider_native_sessions(&session_id, Some("codex"))
+                .unwrap(),
+            0
+        );
+        repo.save_provider_native_session(&session_id, "codex", "thread-1")
+            .unwrap();
+        assert_eq!(
+            repo.retain_provider_native_session(&session_id, "claude_code")
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            repo.load_provider_native_session(&session_id, "codex")
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            repo.delete_provider_native_sessions(&session_id, None)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            repo.load_provider_native_session(&session_id, "claude_code")
+                .unwrap(),
+            None
+        );
+
+        repo.save_provider_native_session(&session_id, "claude_code", "native-3")
+            .unwrap();
+        SessionRepo::delete_session(&repo, &session_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.load_provider_native_session(&session_id, "claude_code")
+                .unwrap(),
+            None,
+            "deleting the session removes its native id"
+        );
     }
 
     #[test]

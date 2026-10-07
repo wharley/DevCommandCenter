@@ -186,6 +186,40 @@ fn parse_claude_mcp_oauth_update(raw: &str) -> Option<Result<ProviderMcpOauthUpd
     }))
 }
 
+/// Longest native id DCC persists or hands back to the sidecar.
+const NATIVE_SESSION_ID_MAX_CHARS: usize = 256;
+
+fn valid_native_session_id(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.chars().count() <= NATIVE_SESSION_ID_MAX_CHARS
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_')))
+    .then_some(value)
+}
+
+/// The Claude SDK names its resumable conversation in `system/init`; the
+/// sidecar reports a refused persisted id on a private message. Both become
+/// `NativeSessionChanged` so DCC can persist or forget the id.
+fn parse_claude_native_session_change(value: &Value) -> Option<ProviderEvent> {
+    match value.get("type").and_then(Value::as_str)? {
+        "system" if value.get("subtype").and_then(Value::as_str) == Some("init") => {
+            let native_session_id = value
+                .get("session_id")
+                .and_then(Value::as_str)
+                .and_then(valid_native_session_id)?;
+            Some(ProviderEvent::NativeSessionChanged {
+                native_session_id: Some(native_session_id.to_string()),
+            })
+        }
+        "dcc_native_resume_rejected" => Some(ProviderEvent::NativeSessionChanged {
+            native_session_id: None,
+        }),
+        _ => None,
+    }
+}
+
 fn claude_reset_time(value: &Value) -> Option<String> {
     match value {
         Value::Number(number) => {
@@ -586,6 +620,14 @@ impl ClaudeSdkSidecarAdapter {
         let additional_directories = serde_json::to_string(&cfg.additional_working_directories)
             .map_err(|error| CoreError::Provider(error.to_string()))?;
         command.env("DCC_ADDITIONAL_DIRECTORIES", additional_directories);
+        command.env_remove("DCC_RESUME_SESSION_ID");
+        if let Some(native_id) = cfg
+            .native_resume_id
+            .as_deref()
+            .and_then(valid_native_session_id)
+        {
+            command.env("DCC_RESUME_SESSION_ID", native_id);
+        }
         if let Some(ref working_directory) = cfg.working_directory {
             let cwd = PathBuf::from(working_directory);
             if !working_directory.trim().is_empty() {
@@ -680,6 +722,18 @@ impl ClaudeSdkSidecarAdapter {
                     continue;
                 }
                 if let Ok(value) = serde_json::from_str::<Value>(&content) {
+                    if let Some(event) = parse_claude_native_session_change(&value) {
+                        let private = matches!(
+                            event,
+                            ProviderEvent::NativeSessionChanged {
+                                native_session_id: None
+                            }
+                        );
+                        let _ = runtime_for_task.events_tx.send(event);
+                        if private {
+                            continue;
+                        }
+                    }
                     cache_claude_account_usage(&runtime_state, &account_usage_key, &value).await;
                     if let Some(snapshot) = parse_claude_mcp_status_snapshot(
                         &value,
@@ -793,6 +847,10 @@ impl Provider for ClaudeSdkSidecarAdapter {
         Some(self.runtime.claude_mcp_runtime_version())
     }
 
+    fn supports_native_resume(&self) -> bool {
+        true
+    }
+
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle> {
         self.start_runtime(cfg).await
     }
@@ -857,6 +915,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
                     "effort": Self::sidecar_effort(turn.effort.as_deref()),
                     "fastMode": turn.fast_mode,
                     "approvalPolicy": turn.approval_policy,
+                    "resumeFallbackContext": turn.resume_fallback_context,
                 });
                 let serialized = serde_json::to_string(&payload).map_err(|error| {
                     CoreError::Provider(format!("failed to encode Claude sidecar input: {error}"))
@@ -1225,6 +1284,7 @@ mod account_usage_tests {
                         additional_working_directories: vec![],
                         provider_runtime: None,
                         mcp_servers: vec![],
+                        native_resume_id: None,
                     })
                     .await
                     .expect_err("missing CLI must not start a session");
@@ -1275,6 +1335,123 @@ exit 43
         fs::remove_dir_all(root).expect("remove fixture");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_resume_id_reaches_the_sidecar_and_its_answers_reach_dcc() {
+        use futures::StreamExt;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Each case runs in a child test process so DCC_CLAUDE_SIDECAR_PATH
+        // cannot leak into concurrently running provider tests.
+        if let Ok(mode) = std::env::var("DCC_CLAUDE_NATIVE_RESUME_TEST_CHILD") {
+            let adapter = crate::claude_code::adapter();
+            assert!(adapter.supports_native_resume());
+            let session_id = SessionId(format!("native-{mode}"));
+            let handle = adapter
+                .prepare_session(SessionConfig {
+                    workspace_id: dcc_core::domain::workspace::WorkspaceId("fixture".to_string()),
+                    session_id,
+                    model: None,
+                    working_directory: None,
+                    additional_working_directories: vec![],
+                    provider_runtime: None,
+                    mcp_servers: vec![],
+                    native_resume_id: match mode.as_str() {
+                        "resumed" => Some("live-native-id".to_string()),
+                        "refused" => Some("gone-native-id".to_string()),
+                        _ => None,
+                    },
+                })
+                .await
+                .expect("fake sidecar session");
+            let mut events = adapter.stream_events(&handle);
+            adapter
+                .send_input(
+                    &handle,
+                    Input::Turn(dcc_core::ports::ProviderTurnInput {
+                        prompt: "next".to_string(),
+                        tool_instructions: None,
+                        plan_mode: None,
+                        effort: None,
+                        fast_mode: None,
+                        approval_policy: None,
+                        resume_fallback_context: Some(
+                            "<dcc_reanchor>snap</dcc_reanchor>".to_string(),
+                        ),
+                    }),
+                )
+                .await
+                .expect("turn input");
+            let mut changes = Vec::new();
+            while let Ok(Some(event)) =
+                tokio::time::timeout(Duration::from_secs(10), events.next()).await
+            {
+                if let Ok(ProviderEvent::NativeSessionChanged { native_session_id }) = event {
+                    changes.push(native_session_id);
+                }
+            }
+            let expected: Vec<Option<String>> = match mode.as_str() {
+                // The persisted id came back from the sidecar's init.
+                "resumed" => vec![Some("live-native-id".to_string())],
+                // Refused: forget the old id, then store the fresh one; the
+                // fake proves the fallback snapshot reached the sidecar.
+                "refused" => vec![None, Some("fresh-with-fallback".to_string())],
+                _ => vec![Some("first-native-id".to_string())],
+            };
+            assert_eq!(changes, expected);
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("dcc-claude-native-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("fixture directory");
+        let helper = root.join("DCC Claude helper");
+        fs::write(
+            &helper,
+            r##"#!/bin/sh
+if [ "$1" = "--resolve-cli" ]; then
+  echo '{"path":"/usr/bin/false","version":"2.1.999 (Claude Code)"}'; exit 0
+fi
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"input"'*)
+      case "$DCC_RESUME_SESSION_ID" in
+        gone-native-id)
+          echo '{"type":"dcc_native_resume_rejected","session_id":"gone-native-id"}'
+          case "$line" in
+            *'"resumeFallbackContext":"<dcc_reanchor>snap'*) id=fresh-with-fallback ;;
+            *) id=fresh-without-fallback ;;
+          esac ;;
+        "") id=first-native-id ;;
+        *) id="$DCC_RESUME_SESSION_ID" ;;
+      esac
+      echo "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$id\"}"
+      exit 0 ;;
+  esac
+done
+"##,
+        )
+        .expect("helper fixture");
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o755))
+            .expect("executable fixture");
+        for mode in ["first", "resumed", "refused"] {
+            let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+                .args(["--exact", "claude_sdk_sidecar::account_usage_tests::native_resume_id_reaches_the_sidecar_and_its_answers_reach_dcc", "--nocapture"])
+                .env("DCC_CLAUDE_SIDECAR_PATH", &helper)
+                .env("DCC_CLAUDE_NATIVE_RESUME_TEST_CHILD", mode)
+                // A value inherited from the developer shell must not leak in.
+                .env("DCC_RESUME_SESSION_ID", "inherited-id")
+                .output()
+                .expect("isolated native resume test");
+            assert!(
+                output.status.success(),
+                "{mode}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
+
     #[test]
     fn captures_mcp_oauth_state_only_on_the_private_adapter_channel() {
         let update = parse_claude_mcp_oauth_update(
@@ -1301,6 +1478,48 @@ exit 43
         .expect("recognized cleared OAuth message")
         .expect("valid cleared OAuth message")
         .state
+        .is_none());
+    }
+
+    #[test]
+    fn reports_native_session_from_init_and_forgets_it_on_refusal() {
+        match parse_claude_native_session_change(&json!({
+            "type": "system",
+            "subtype": "init",
+            "session_id": "3f1c2b8e-1111-4000-8000-000000000000",
+        })) {
+            Some(ProviderEvent::NativeSessionChanged {
+                native_session_id: Some(id),
+            }) => assert_eq!(id, "3f1c2b8e-1111-4000-8000-000000000000"),
+            other => panic!("expected native session id, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_claude_native_session_change(&json!({
+                "type": "dcc_native_resume_rejected",
+                "session_id": "3f1c2b8e-1111-4000-8000-000000000000",
+            })),
+            Some(ProviderEvent::NativeSessionChanged {
+                native_session_id: None
+            })
+        ));
+        // Other system messages and malformed ids never touch the stored id.
+        assert!(parse_claude_native_session_change(&json!({
+            "type": "system",
+            "subtype": "status",
+            "session_id": "abc",
+        }))
+        .is_none());
+        assert!(parse_claude_native_session_change(&json!({
+            "type": "system",
+            "subtype": "init",
+            "session_id": "../../etc/passwd",
+        }))
+        .is_none());
+        assert!(parse_claude_native_session_change(&json!({
+            "type": "system",
+            "subtype": "init",
+            "session_id": "",
+        }))
         .is_none());
     }
 

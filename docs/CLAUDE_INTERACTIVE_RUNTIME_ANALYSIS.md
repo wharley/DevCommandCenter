@@ -354,6 +354,7 @@ Isso nao invalida a migracao. So muda a ordem de entrega.
 
 5. Resume de sessao.
    O sidecar hoje usa `resumeSessionId`; no modo PTY isso pode exigir outra estrategia.
+   Desde 2026-10 o id nativo e persistido por sessao DCC (ver "Nota: resume nativo do Claude persistido").
 
 ## Recomendacao de entrega por fases
 
@@ -419,3 +420,17 @@ Em termos de decisao de produto/engenharia:
 
 - regra e UX sao mitigacao;
 - PTY interativo e a solucao.
+
+## Nota: resume nativo do Claude persistido (2026-10)
+
+Antes, o `session_id` do Claude SDK vivia so na memoria do sidecar. Stop (que mata o sidecar) ou reiniciar o app perdia a conversa nativa, e o DCC religava com o "bounded snapshot" (`<dcc_reanchor>`) do historico duravel no primeiro turno. Agora o DCC guarda o id, como T3 Code e Monocode.
+
+Fluxo:
+
+- O adapter (`crates/dcc-providers/src/claude_sdk_sidecar.rs`) le o `system/init` que o sidecar ja repassa e emite `ProviderEvent::NativeSessionChanged { native_session_id: Some(id) }`. O bridge em `crates/dcc-tauri/src/state.rs` grava em `dcc_provider_native_sessions(session_id, provider_id, native_id, updated_at)` (`crates/dcc-infra/src/db.rs`; `CREATE TABLE IF NOT EXISTS`, FK com `ON DELETE CASCADE` para `dcc_sessions`). Relato de um binding que ja nao e o atual e ignorado.
+- Ao anexar um runtime novo, `native_resume_id_for_attach` le o id (so para adapters com `supports_native_resume`) e o passa em `SessionConfig::native_resume_id`; o adapter exporta `DCC_RESUME_SESSION_ID` e o sidecar semeia `state.resumeSessionId` (`sidecar/src/native-resume.mjs`).
+- Com resume nativo armado, o snapshot nao entra em `toolInstructions`: vai em `ProviderTurnInput::resume_fallback_context` (backend-only), e o sidecar so o usa se o resume falhar. Sem contexto duplicado.
+- Fallback: no primeiro turno o sidecar confere `getSessionInfo(id, { dir: cwd })`. Se a sessao nao existe, ou se o CLI recusa em runtime ("No conversation found with session ID", antes de qualquer `system/init`, no `result.errors` ou no stderr), o sidecar emite `dcc_native_resume_rejected` (o DCC apaga o id), refaz o turno uma vez sem `resume` e com o snapshot, e o `init` novo grava o id fresco. Falhas depois do `init` nao contam como recusa.
+- Handoff e fork seguem o fluxo antigo: trocar de provider ou de runtime (home/conta) apaga os ids da sessao, e anexar um provider descarta ids de outros providers, entao voltar ao Claude depois do Codex nao retoma uma conversa que nao viu os turnos do meio. Trocar so o modelo mantem o resume. Fork cria outra sessao DCC, sem id.
+
+Testes: `cargo test -p dcc-infra provider_native_session`, `cargo test -p dcc-providers native_resume reports_native_session`, `cargo test -p dcc-tauri native_resume native_session` e `node --test sidecar/src/native-resume.test.mjs`.

@@ -2386,6 +2386,7 @@ mod tests {
                 max_concurrent_subagents: None,
             }),
             mcp_servers: Vec::new(),
+            native_resume_id: None,
         };
 
         let layout = resolve_codex_home_layout(&cfg);
