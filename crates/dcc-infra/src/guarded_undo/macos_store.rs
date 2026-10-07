@@ -193,8 +193,19 @@ struct InitializedDirectories {
 pub struct MacArtifactStoreLease {
     app_data: File,
     ancestry: Vec<PhysicalRootId>,
-    _lock: File,
+    lock: File,
     directories: Mutex<Option<InitializedDirectories>>,
+}
+
+impl Drop for MacArtifactStoreLease {
+    fn drop(&mut self) {
+        // A child spawned by any thread shares this open file description until
+        // its exec closes the CLOEXEC copy; closing alone would leave the
+        // instance lock held for that window.
+        unsafe {
+            libc::flock(self.lock.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
 }
 
 impl fmt::Debug for MacArtifactStoreLease {
@@ -249,7 +260,7 @@ impl MacArtifactStoreLease {
         Ok(Self {
             app_data,
             ancestry,
-            _lock: lock,
+            lock,
             directories: Mutex::new(None),
         })
     }
@@ -1504,6 +1515,22 @@ mod tests {
         drop(store);
         drop(workspace);
         drop(workspace_dir);
+    }
+
+    #[test]
+    fn dropped_lease_releases_lock_while_its_descriptor_is_still_shared() {
+        let app_data_dir = tempdir_in("/private/tmp").unwrap();
+        let lease = MacArtifactStoreLease::acquire(app_data_dir.path()).unwrap();
+        // Same open file description a concurrently spawned child holds until exec.
+        let shared = lease.lock.try_clone().unwrap();
+        drop(lease);
+        let reacquired = MacArtifactStoreLease::acquire(app_data_dir.path()).unwrap();
+        assert!(matches!(
+            MacArtifactStoreLease::acquire(app_data_dir.path()),
+            Err(MacArtifactStoreError::LockUnavailable)
+        ));
+        drop(reacquired);
+        drop(shared);
     }
 
     #[test]
