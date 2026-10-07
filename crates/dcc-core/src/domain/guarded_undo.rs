@@ -400,6 +400,39 @@ impl fmt::Debug for GitIdentityV1 {
 }
 
 impl GitIdentityV1 {
+    /// Whether `other` observes the same repository state: same worktree,
+    /// Git dir and common dir, `HEAD`, checkout ref, and index raw bytes
+    /// (SHA-256 and size). Only the index `stat_identity` is left out: Git
+    /// rewrites an unchanged index (a `git status` refresh, an IDE) with a new
+    /// inode and new times, and Git reads its staged state only from the
+    /// bytes. Compare a current observation with a captured identity with
+    /// this; a record that binds its own identity still compares exactly.
+    pub fn same_repository_state(&self, other: &Self) -> bool {
+        // Destructured so that a new field cannot be ignored silently.
+        let Self {
+            schema_version,
+            worktree_identity,
+            git_dir_identity,
+            common_dir_identity,
+            head_oid,
+            checkout_ref,
+            index:
+                IndexIdentityV1 {
+                    sha256,
+                    size,
+                    stat_identity: _,
+                },
+        } = self;
+        *schema_version == other.schema_version
+            && *worktree_identity == other.worktree_identity
+            && *git_dir_identity == other.git_dir_identity
+            && *common_dir_identity == other.common_dir_identity
+            && *head_oid == other.head_oid
+            && *checkout_ref == other.checkout_ref
+            && *sha256 == other.index.sha256
+            && *size == other.index.size
+    }
+
     pub fn validate(&self) -> Result<(), GuardedUndoSchemaError> {
         require_schema(
             "git_identity",
@@ -863,7 +896,8 @@ pub struct UndoChainSource {
 
 /// Whether `expected` may stand for the result identity of `file` in `set`
 /// because `source`, a completed Undo of another set, installed it: same
-/// workspace, physical root and Git identity, the installed bytes are exactly
+/// workspace, physical root and repository state
+/// ([`GitIdentityV1::same_repository_state`]), the installed bytes are exactly
 /// what `file`'s turn left, only the physical identity differs from the
 /// turn's own result, and `expected` is exactly the installed file.
 pub fn chained_result_is_bound(
@@ -875,7 +909,10 @@ pub fn chained_result_is_bound(
     source.restore_set_id != set.restore_set_id
         && source.workspace_id == set.workspace_id
         && set.root_id.as_ref() == Some(&source.root_id)
-        && set.git_identity.as_ref() == Some(&source.git)
+        && set
+            .git_identity
+            .as_ref()
+            .is_some_and(|git| git.same_repository_state(&source.git))
         && source.path_bytes == file.path_bytes
         && source.pre_size == file.result_size
         && source.pre_sha256 == file.result_sha256
@@ -1300,6 +1337,50 @@ mod tests {
             ..installed
         };
         assert!(!other_adapter.same_attributes(&original));
+    }
+
+    fn git_identity() -> GitIdentityV1 {
+        GitIdentityV1 {
+            schema_version: GIT_IDENTITY_SCHEMA_VERSION,
+            worktree_identity: b"worktree".to_vec(),
+            git_dir_identity: b"git-dir".to_vec(),
+            common_dir_identity: b"common-dir".to_vec(),
+            head_oid: vec![0x42; 20],
+            checkout_ref: CheckoutRefV1::Symbolic {
+                full_name: "refs/heads/main".into(),
+            },
+            index: IndexIdentityV1 {
+                sha256: Sha256Digest::of(b"index"),
+                size: 5,
+                stat_identity: b"inode-1-ctime-1".to_vec(),
+            },
+        }
+    }
+
+    #[test]
+    fn same_repository_state_ignores_only_the_index_stat_identity() {
+        let captured = git_identity();
+        let mut rewritten = git_identity();
+        rewritten.index.stat_identity = b"inode-2-ctime-2".to_vec();
+        assert!(rewritten.same_repository_state(&captured));
+        assert_ne!(rewritten, captured, "exact equality still sees the rewrite");
+
+        let changes: [fn(&mut GitIdentityV1); 8] = [
+            |git| git.schema_version += 1,
+            |git| git.worktree_identity = b"other".to_vec(),
+            |git| git.git_dir_identity = b"other".to_vec(),
+            |git| git.common_dir_identity = b"other".to_vec(),
+            |git| git.head_oid = vec![0x43; 20],
+            |git| git.checkout_ref = CheckoutRefV1::Detached,
+            |git| git.index.sha256 = Sha256Digest::of(b"staged"),
+            |git| git.index.size += 1,
+        ];
+        for change in changes {
+            let mut changed = rewritten.clone();
+            change(&mut changed);
+            assert!(!changed.same_repository_state(&captured));
+            assert!(!captured.same_repository_state(&changed));
+        }
     }
 
     fn file(ordinal: u32, path: &[u8], size: u64) -> TurnRestoreFile {

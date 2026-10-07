@@ -361,7 +361,7 @@ impl RestoreService {
         if authority.mode() != AuthorityMode::Shared || authority.root_id() != set.root_id {
             return blocked(GuardedUndoReasonCode::RepositoryIdentityChanged);
         }
-        if authority.git_identity().ok().as_ref() != Some(&set.git) {
+        if !same_repository_state(authority.as_ref(), &set.git) {
             return blocked(GuardedUndoReasonCode::RepositoryIdentityChanged);
         }
         let mut previews = Vec::with_capacity(set.files.len());
@@ -495,7 +495,7 @@ impl RestoreService {
         for (snapshot_id, set) in &sets {
             // Undo never changes HEAD, ref or index, so every set must match
             // the repository as it is now, exactly as a lone prepare would.
-            if set.git != git {
+            if !set.git.same_repository_state(&git) {
                 return blocked(
                     snapshot_id,
                     GuardedUndoReasonCode::RepositoryIdentityChanged,
@@ -888,7 +888,7 @@ impl RestoreService {
                 );
             }
         }
-        if authority.git_identity().ok().as_ref() != Some(&operation.prepared_identity.git) {
+        if !same_repository_state(authority.as_ref(), &operation.prepared_identity.git) {
             return self.rollback_operation(
                 authority.as_ref(),
                 &operation_id,
@@ -920,7 +920,7 @@ impl RestoreService {
         if journal_files
             .iter()
             .any(|file| !pair_is_applied(authority.as_ref(), file))
-            || authority.git_identity().ok().as_ref() != Some(&operation.prepared_identity.git)
+            || !same_repository_state(authority.as_ref(), &operation.prepared_identity.git)
         {
             return self.rollback_operation(
                 authority.as_ref(),
@@ -1022,7 +1022,7 @@ impl RestoreService {
                     continue;
                 }
             };
-            if authority.git_identity().ok().as_ref() != Some(&operation.prepared_identity.git) {
+            if !same_repository_state(authority.as_ref(), &operation.prepared_identity.git) {
                 let _ = self.require_recovery(
                     &operation.operation_id,
                     operation.state,
@@ -1629,7 +1629,10 @@ impl RestoreService {
         if authority.coordinator_generations() != expected_generations {
             return Err(GuardedUndoReasonCode::PreviewContextChanged);
         }
-        if authority.git_identity()? != prepared.git {
+        if !authority
+            .git_identity()?
+            .same_repository_state(&prepared.git)
+        {
             return Err(GuardedUndoReasonCode::RepositoryIdentityChanged);
         }
         if files.len() != prepared.expected.len() {
@@ -1732,6 +1735,15 @@ fn pair_is_applied(authority: &dyn RestoreAuthority, file: &UndoOperationFile) -
     })
 }
 
+/// The repository as `authority` observes it now is in the state `captured`
+/// recorded. An index Git only rewrote with identical bytes since then does
+/// not count as a change (see [`GitIdentityV1::same_repository_state`]).
+fn same_repository_state(authority: &dyn RestoreAuthority, captured: &GitIdentityV1) -> bool {
+    authority
+        .git_identity()
+        .is_ok_and(|current| current.same_repository_state(captured))
+}
+
 fn matches_result(evidence: &FileEvidence, file: &TurnRestoreFile) -> bool {
     evidence.size == file.result_size
         && evidence.sha256 == file.result_sha256
@@ -1822,6 +1834,10 @@ mod tests {
     #[derive(Default)]
     struct FakeFs {
         generation: u64,
+        /// The repository as the authority observes it now.
+        git: Option<GitIdentityV1>,
+        /// What the repository becomes while the first exchange runs.
+        git_on_exchange: Option<GitIdentityV1>,
         targets: HashMap<Vec<u8>, FileEvidence>,
         siblings: HashMap<(Vec<u8>, [u8; 16]), FileEvidence>,
         artifacts: HashMap<[u8; 16], FileEvidence>,
@@ -1834,14 +1850,12 @@ mod tests {
 
     struct FakeAdapter {
         root: PhysicalRootId,
-        git: GitIdentityV1,
         fs: Arc<Mutex<FakeFs>>,
     }
 
     struct FakeAuthority {
         mode: AuthorityMode,
         root: PhysicalRootId,
-        git: GitIdentityV1,
         generation: u64,
         fs: Arc<Mutex<FakeFs>>,
     }
@@ -1869,7 +1883,6 @@ mod tests {
             Ok(Box::new(FakeAuthority {
                 mode,
                 root: self.root.clone(),
-                git: self.git.clone(),
                 generation,
                 fs: Arc::clone(&self.fs),
             }))
@@ -1886,7 +1899,12 @@ mod tests {
         }
 
         fn git_identity(&self) -> Result<GitIdentityV1, GuardedUndoReasonCode> {
-            Ok(self.git.clone())
+            self.fs
+                .lock()
+                .unwrap()
+                .git
+                .clone()
+                .ok_or(GuardedUndoReasonCode::RepositoryIdentityChanged)
         }
 
         fn coordinator_generations(&self) -> AuthorityGenerations {
@@ -2002,6 +2020,9 @@ mod tests {
         ) -> Result<(), GuardedUndoReasonCode> {
             let mut fs = self.fs.lock().unwrap();
             fs.exchange_calls += 1;
+            if let Some(git) = fs.git_on_exchange.take() {
+                fs.git = Some(git);
+            }
             if fs.fail_exchange_call == Some(fs.exchange_calls) {
                 fs.fail_exchange_call = None;
                 return Err(GuardedUndoReasonCode::IoError);
@@ -2122,7 +2143,10 @@ mod tests {
                 ..collecting
             };
             repo.finalize_turn_restore_set(&restore, &files).unwrap();
-            let mut fs = FakeFs::default();
+            let mut fs = FakeFs {
+                git: Some(git),
+                ..FakeFs::default()
+            };
             for file in &files {
                 fs.targets.insert(
                     path_key(&file.path_bytes),
@@ -2143,7 +2167,6 @@ mod tests {
             }
             let adapter = Arc::new(FakeAdapter {
                 root,
-                git,
                 fs: Arc::new(Mutex::new(fs)),
             });
             let service = RestoreService::new(
@@ -2164,6 +2187,18 @@ mod tests {
         /// A later turn's eligible set that changed `file-0.txt` from
         /// `pre` to `result`, leaving `result` on disk.
         fn add_later_turn(&self, pre: &str, result: &str, mode: u32) -> TurnRestoreFile {
+            let git = self.restore.git_identity.clone().unwrap();
+            self.add_later_turn_with_git(pre, result, mode, git)
+        }
+
+        /// [`Self::add_later_turn`], captured with the repository as `git`.
+        fn add_later_turn_with_git(
+            &self,
+            pre: &str,
+            result: &str,
+            mode: u32,
+            git: GitIdentityV1,
+        ) -> TurnRestoreFile {
             self.connection
                 .lock()
                 .unwrap()
@@ -2180,6 +2215,7 @@ mod tests {
                 restore_set_id: RestoreSetId("restore-later".to_owned()),
                 snapshot_id: "snapshot-later".to_owned(),
                 turn_id: TurnId("turn-later".to_owned()),
+                git_identity: Some(git),
                 state: RestoreSetState::Collecting,
                 artifact_bytes: 0,
                 file_count: 0,
@@ -2720,6 +2756,217 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(operation.state, UndoOperationState::RolledBack);
+    }
+
+    /// The captured identity after Git rewrote the index with the same bytes:
+    /// new inode and times, same staged state.
+    fn rewritten_index(git: &GitIdentityV1, stat_identity: &[u8]) -> GitIdentityV1 {
+        let mut rewritten = git.clone();
+        rewritten.index.stat_identity = stat_identity.to_vec();
+        rewritten
+    }
+
+    #[test]
+    fn an_index_rewritten_with_the_same_bytes_does_not_block_undo() {
+        let fixture = Fixture::new(2);
+        let captured = fixture.restore.git_identity.clone().unwrap();
+        // `git status` in a terminal refreshes the index after the turn...
+        fixture.adapter.fs.lock().unwrap().git = Some(rewritten_index(&captured, b"refresh-1"));
+        let ready = fixture.prepare();
+        // ...again between the preview and the confirmation, and once more
+        // while the files are being exchanged.
+        {
+            let mut fs = fixture.adapter.fs.lock().unwrap();
+            fs.git = Some(rewritten_index(&captured, b"refresh-2"));
+            fs.git_on_exchange = Some(rewritten_index(&captured, b"refresh-3"));
+        }
+        let operation_id = match fixture
+            .service
+            .execute_at(&ready.preview_token, true, fixture.now)
+        {
+            ExecuteGuardedUndoResult::Completed { operation_id } => operation_id,
+            result => panic!("unexpected execute result: {result:?}"),
+        };
+        let (operation, _) = fixture
+            .repo
+            .get_undo_operation(&UndoOperationId(operation_id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(operation.state, UndoOperationState::Completed);
+        // The journal still binds exactly the identity the set captured.
+        assert_eq!(operation.prepared_identity.git, captured);
+        let fs = fixture.adapter.fs.lock().unwrap();
+        assert!(fs.git_on_exchange.is_none());
+        for file in &fixture.files {
+            let target = &fs.targets[&path_key(&file.path_bytes)];
+            assert_eq!(
+                (target.size, target.sha256),
+                (file.pre_size, file.pre_sha256)
+            );
+        }
+    }
+
+    #[test]
+    fn an_index_with_other_bytes_still_blocks_undo() {
+        let changes: [fn(&mut GitIdentityV1); 3] = [
+            |git| git.index.sha256 = Sha256Digest::of(b"staged"),
+            |git| git.index.size += 1,
+            |git| git.head_oid = vec![0x43; 20],
+        ];
+        for change in changes {
+            let fixture = Fixture::new(1);
+            let mut current =
+                rewritten_index(fixture.restore.git_identity.as_ref().unwrap(), b"refresh");
+            change(&mut current);
+            fixture.adapter.fs.lock().unwrap().git = Some(current.clone());
+            assert!(matches!(
+                fixture.prepare_snapshot("snapshot", ResultBinding::TurnResult),
+                PrepareGuardedUndoResult::Blocked {
+                    reason_code: GuardedUndoReasonCode::RepositoryIdentityChanged,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                fixture.plan(&["snapshot"]),
+                PlanGuardedUndoChainResult::Blocked {
+                    reason_code: GuardedUndoReasonCode::RepositoryIdentityChanged,
+                    ..
+                }
+            ));
+
+            // A change between the preview and the confirmation blocks
+            // execute before anything is journaled or written.
+            fixture.adapter.fs.lock().unwrap().git = fixture.restore.git_identity.clone();
+            let ready = fixture.prepare();
+            fixture.adapter.fs.lock().unwrap().git = Some(current.clone());
+            assert!(matches!(
+                fixture
+                    .service
+                    .execute_at(&ready.preview_token, true, fixture.now),
+                ExecuteGuardedUndoResult::Blocked(GuardedUndoReasonCode::RepositoryIdentityChanged)
+            ));
+            assert!(fixture
+                .repo
+                .list_active_undo_operations()
+                .unwrap()
+                .is_empty());
+            assert_eq!(fixture.target().sha256, fixture.files[0].result_sha256);
+        }
+    }
+
+    #[test]
+    fn staging_while_files_are_exchanged_rolls_the_undo_back() {
+        let fixture = Fixture::new(2);
+        let ready = fixture.prepare();
+        let mut staged = rewritten_index(fixture.restore.git_identity.as_ref().unwrap(), b"staged");
+        staged.index.sha256 = Sha256Digest::of(b"staged");
+        fixture.adapter.fs.lock().unwrap().git_on_exchange = Some(staged);
+        assert!(matches!(
+            fixture
+                .service
+                .execute_at(&ready.preview_token, true, fixture.now),
+            ExecuteGuardedUndoResult::RolledBack { .. }
+        ));
+        let fs = fixture.adapter.fs.lock().unwrap();
+        for file in &fixture.files {
+            assert_eq!(
+                fs.targets[&path_key(&file.path_bytes)].sha256,
+                file.result_sha256
+            );
+        }
+    }
+
+    #[test]
+    fn a_chain_survives_an_index_rewritten_between_the_turns() {
+        let fixture = Fixture::new(1);
+        let captured = fixture.restore.git_identity.clone().unwrap();
+        // The index was refreshed between the two turns, so the later turn
+        // captured another stat identity for the very same bytes.
+        let later_git = rewritten_index(&captured, b"between-turns");
+        fixture.add_later_turn_with_git("result-0", "later-0", 0o100644, later_git);
+        fixture.adapter.fs.lock().unwrap().git = Some(rewritten_index(&captured, b"before-rewind"));
+        assert!(matches!(
+            fixture.plan(&["snapshot-later", "snapshot"]),
+            PlanGuardedUndoChainResult::Ready(planned) if planned.len() == 2
+        ));
+        let later_operation = fixture.undo("snapshot-later", ResultBinding::TurnResult);
+        let operation_id = fixture.undo("snapshot", ResultBinding::AfterCompletedUndo);
+        let (operation, journal) = fixture
+            .repo
+            .get_undo_operation(&operation_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(operation.prepared_identity.git, captured);
+        assert_eq!(journal[0].chained_from_operation_id, Some(later_operation));
+        let target = fixture.target();
+        assert_eq!(
+            (target.size, target.sha256),
+            (fixture.files[0].pre_size, fixture.files[0].pre_sha256)
+        );
+    }
+
+    #[test]
+    fn a_chain_breaks_when_the_index_bytes_changed_between_the_turns() {
+        let fixture = Fixture::new(1);
+        let mut later_git = fixture.restore.git_identity.clone().unwrap();
+        later_git.index.sha256 = Sha256Digest::of(b"staged-between-turns");
+        fixture.add_later_turn_with_git("result-0", "later-0", 0o100644, later_git.clone());
+        fixture.adapter.fs.lock().unwrap().git = Some(later_git);
+        assert_eq!(
+            fixture.plan(&["snapshot-later", "snapshot"]),
+            PlanGuardedUndoChainResult::Blocked {
+                snapshot_id: "snapshot".to_owned(),
+                reason_code: GuardedUndoReasonCode::RepositoryIdentityChanged,
+            }
+        );
+        let later_operation = fixture.undo("snapshot-later", ResultBinding::TurnResult);
+        // Even with the index bytes back to what the older turn captured, the
+        // installed file came from an Undo bound to another index.
+        fixture.adapter.fs.lock().unwrap().git = fixture.restore.git_identity.clone();
+        assert!(matches!(
+            fixture.prepare_snapshot("snapshot", ResultBinding::AfterCompletedUndo),
+            PrepareGuardedUndoResult::Blocked {
+                reason_code: GuardedUndoReasonCode::TargetResultMismatch,
+                ..
+            }
+        ));
+        let (operation, mut files) = fixture.planned_operation("cross-index");
+        files[0].expected_metadata = fixture.target().metadata;
+        files[0].chained_from_operation_id = Some(later_operation);
+        assert!(fixture
+            .repo
+            .create_undo_operation(&operation, &files)
+            .is_err());
+    }
+
+    #[test]
+    fn startup_recovery_tolerates_an_index_rewritten_with_the_same_bytes() {
+        let fixture = Fixture::new(2);
+        let (operation, files) = fixture.planned_operation("planned");
+        fixture
+            .repo
+            .create_undo_operation(&operation, &files)
+            .unwrap();
+        let captured = fixture.restore.git_identity.clone().unwrap();
+        fixture.adapter.fs.lock().unwrap().git = Some(rewritten_index(&captured, b"after-crash"));
+        let report = fixture
+            .service
+            .recover_startup(|_| Some(PathBuf::from("/workspace")));
+        assert_eq!(report.rolled_back, 1);
+
+        let fixture = Fixture::new(2);
+        let (operation, files) = fixture.planned_operation("planned");
+        fixture
+            .repo
+            .create_undo_operation(&operation, &files)
+            .unwrap();
+        let mut staged = rewritten_index(&captured, b"after-crash");
+        staged.index.sha256 = Sha256Digest::of(b"staged");
+        fixture.adapter.fs.lock().unwrap().git = Some(staged);
+        let report = fixture
+            .service
+            .recover_startup(|_| Some(PathBuf::from("/workspace")));
+        assert_eq!(report.recovery_required, 1);
     }
 
     fn restore_file(ordinal: u32) -> TurnRestoreFile {

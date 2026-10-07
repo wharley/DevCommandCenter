@@ -144,7 +144,7 @@ collapsing them into “the repository”:
 | Git worktree | Stable Git common-dir/worktree-dir identity derived by the Git adapter | Same worktree; no path-only trust |
 | `HEAD` | Exact object ID | Equal to captured baseline/result object ID |
 | Checkout ref | `symbolic` plus full ref name, or `detached` | Same checkout kind; symbolic uses the same full ref and detached uses the same exact `HEAD` OID |
-| Index | SHA-256 over bounded raw index bytes plus relevant stat identity | Equal at baseline, result, prepare, and execute |
+| Index | SHA-256 over bounded raw index bytes plus relevant stat identity | Equal, stat identity included, at baseline and result. Prepare, execute and recovery require the same raw bytes (SHA-256 and size); the stat identity may differ (see [Index rewritten with identical bytes](#index-rewritten-with-identical-bytes)) |
 | Target worktree file | Normalized repository-relative byte path, size, SHA-256, result regular-file identity including link count, and supported metadata fingerprint | Current raw result fingerprint, result file identity, and supported metadata MUST match; link count is exactly one |
 | Preimage | Raw bytes, size, SHA-256, and artifact SHA-256 | Artifact digest and length MUST verify before use |
 
@@ -165,7 +165,10 @@ identity for the filesystem, Guarded Undo returns `adapter_unsupported`.
 
 The index fingerprint is evidence, not a lock. Git may replace the index file;
 the adapter MUST resolve and read the active index on every validation. An
-unreadable or oversized index blocks capture or execution.
+unreadable or oversized index blocks capture or execution. One observation
+requires the same physical index file, stat identity included, from its first
+read to its last; comparisons across observations are defined in
+[Index rewritten with identical bytes](#index-rewritten-with-identical-bytes).
 
 ## Capture v2 contract
 
@@ -734,8 +737,12 @@ last turn") is unchanged.
 3. `O`'s preimage bytes for `p` (size and SHA-256) are exactly this set's
    result bytes.
 4. `O`'s restore set has the same `workspace_id` and physical `root_id`, and
-   `O`'s prepared Git identity is exactly this set's Git identity, `HEAD`, ref
-   and index fingerprint included.
+   `O`'s prepared Git identity is in the same repository state as this set's
+   (`GitIdentityV1::same_repository_state`: worktree, Git dir, common dir,
+   `HEAD`, ref and index raw bytes; see
+   [Index rewritten with identical bytes](#index-rewritten-with-identical-bytes)).
+   Before that extension this was exact equality, index stat identity
+   included.
 5. The current metadata has the same supported attributes as this set's
    result (`RegularFileMetadataV1::same_attributes`: adapter, link count and
    every field except the physical-identity fields `file_id` and
@@ -790,8 +797,8 @@ adversary who can rewrite both the database and the workspace.
   preimage differs and the chain breaks before anything is written. Rule 5
   does the same for a permission or owner change.
 - **Repository state cannot drift through the chain.** Rule 4, plus the
-  unchanged check that the current Git identity equals the set's, keeps every
-  link on one `HEAD`, ref and index fingerprint.
+  check that the current repository is in the set's captured state, keeps
+  every link on one `HEAD`, ref and index content.
 - **Recovery stays exact.** The chained identity is the journal's expected
   result, so a crash at any step is recovered by exchanging the same two
   validated files back, as in v1. The source row is checked again whenever
@@ -808,11 +815,10 @@ adversary who can rewrite both the database and the workspace.
 
 ### Not addressed
 
-The Git identity still includes the index `stat_identity` (inode, size,
-mtime, ctime). An index rewritten with identical bytes between two turns (for
-example, `git status` in a terminal refreshing it) still blocks the older set
-with `repository_identity_changed`, chained or not. Relaxing that to the raw
-index digest is a separate contract change and is not part of this extension.
+This extension alone kept the index `stat_identity` in every comparison, so an
+index rewritten with identical bytes between two turns blocked the older set
+with `repository_identity_changed`. That is addressed separately by
+[Index rewritten with identical bytes](#index-rewritten-with-identical-bytes).
 
 ### Contributor checklist answers
 
@@ -829,6 +835,153 @@ index digest is a separate contract change and is not part of this extension.
 5. Paths and limits are unchanged. The chain matches `path_bytes` exactly.
 6. No content leaves the local store. The chained preview reads the newer
    set's verified preimage artifact.
+7. Capture v1 and the M3 quarantine are not touched.
+
+## Index rewritten with identical bytes
+
+Status: implemented locally behind `guarded-undo-capture-v2`; pending
+core-maintainer and security review.
+
+### Problem
+
+`GitIdentityV1.index` records the SHA-256 and size of the raw index bytes and a
+`stat_identity` of the index file (`st_dev`, `st_ino`, mode, owner, link
+count, size, `mtime` and `ctime` with nanoseconds; see
+`canonical_index_stat_identity`). Git writes the index through `index.lock`
+and a rename, so every write produces a new inode and new times even when the
+bytes do not change. `git status` does exactly that when it refreshes an index
+with racily clean entries, and IDEs run it all the time. Comparing the whole
+identity after capture therefore blocked Undo with
+`repository_identity_changed` although the repository was in exactly the
+captured state. "Edit from here", which restores turns captured minutes or
+hours earlier, hit this most.
+
+### Contract extension
+
+`GitIdentityV1::same_repository_state(other)` holds when the schema version,
+worktree, Git-dir and common-dir physical identities, `HEAD` OID, checkout ref,
+index SHA-256 and index size are all equal. It ignores only
+`index.stat_identity`, and it destructures the struct so that a field added
+later cannot be skipped silently.
+
+| Comparison | Rule |
+| --- | --- |
+| Capture: baseline edge against result edge (rule 3 of the minimum eligible scope) | Exact, stat identity included (unchanged) |
+| One index observation: `fstat` around each read, two reads per observation, two observations per inspection | Exact, stat identity included (unchanged) |
+| Prepare: current repository against the set | `same_repository_state` |
+| `plan_chain`: current repository against every set | `same_repository_state` |
+| Execute, under the exclusive lease, before journaling | `same_repository_state` |
+| Execute, after the exchanges and at final verification | `same_repository_state` against the journal's prepared identity |
+| Startup recovery: current repository against the journal | `same_repository_state` |
+| Chain rule 4: the source Undo's prepared identity against this set (prepare, execute and the database binding validation) | `same_repository_state` |
+| Journal: `prepared_identity.git` against the set's captured identity (`create_undo_operation`, `validate_operation_manifest_binding`) | Exact (unchanged) |
+| Token against the set (`prepared_matches_set`), restore-set finalize compare-and-swap | Exact (unchanged) |
+
+Execute still journals the set's captured identity as `prepared_identity.git`,
+not the stat identity it observed, so the journal remains bound exactly to its
+restoration manifest. No column, schema version or reason code changes: the
+same `repository_identity_changed` (or `rolled_back` / `recovery_required`
+after the first exchange) represents an index whose bytes differ.
+
+### Threat model and why it stays fail-closed
+
+The trust boundary is unchanged: this protects against accidental overwrite
+and unexpected Git state, not against a same-user adversary.
+
+- **Which file is the index is not decided by its stat.** The Git inspector
+  resolves `--git-path index` twice per inspection and requires the path to
+  stay the same; the authority reads only `<git-dir>/index` through the
+  retained Git-dir handle, whose physical identity is part of
+  `same_repository_state`. The index inode was never stable across a Git
+  write, so it identified nothing beyond the current write.
+- **Identical raw bytes are identical Git index state.** Git parses the
+  staged state only from the file's bytes: entries (object ID, mode, stage,
+  `assume-unchanged`, `skip-worktree` and `intent-to-add` flags, and the
+  cached stat of each worktree file), extensions (cache tree, resolve undo,
+  untracked cache, fsmonitor token, split-index link) and the trailing
+  checksum. With split index, the `link` extension names the shared index by
+  its hash, so the same bytes name the same shared file; split-index
+  repositories are ineligible at capture anyway. SHA-256 over the complete
+  bounded bytes plus the size makes a different index with the same
+  fingerprint infeasible.
+- **Racy Git.** The one thing Git reads from the index file's own stat is its
+  `mtime`: an entry whose cached `mtime` is not older than the index's is
+  racily clean, and Git re-hashes that worktree file instead of trusting the
+  cached stat. A newer index `mtime` can therefore make Git trust a cached
+  stat it used to re-check. That changes only how Git reports the worktree
+  (`git status`, `git diff`); it changes no staged content, and Guarded Undo
+  never consults Git's stat cache: every target is verified by raw bytes,
+  physical identity and metadata through the platform adapter. Every file
+  Undo installs is a new inode with a new `ctime`, so Git's cached stat misses
+  and Git re-hashes it whatever the index `mtime` is. When Git itself rewrites
+  an index whose entries are racy at write time, it smudges them, which
+  changes the bytes and blocks, fail closed.
+- **TOCTOU during the read is unchanged.** One observation still requires
+  `fstat` equality before and after hashing on the same descriptor, two such
+  reads with equal stat identity, and the inspector's observations before and
+  after its `ls-files` and attribute commands to be equal, stat identity
+  included (`IndexChangedDuringInspection` otherwise). The digest compared
+  across time is thus the digest of one physical file that stayed put during
+  the whole inspection. Only comparisons between observations separated in
+  time relax.
+- **ABA on the index.** An index that changed and then returned to exactly
+  the captured bytes between capture and execute is no longer detected. The
+  repository is then in the captured staged state, which is all prepare and
+  execute rely on. The contract already disclaims intermediate Git operations
+  that return `HEAD`, ref and index to their edge values (rule 3 and
+  Non-goals), and `HEAD` and ref ABA were never detectable. What is lost is
+  only a hint that some Git process ran; no rule used it, since targets are
+  checked directly and unrelated paths are outside the contract.
+- **Staging during Undo is still caught.** The post-apply and final checks
+  compare the index bytes, so a `git add` while files are being exchanged
+  rolls the operation back through the exact displaced files, as before.
+- **An in-flight writer** holding `index.lock` was invisible to the stat
+  identity as well; if it renames before a check, other bytes block and
+  identical bytes are harmless.
+- **Recovery stays exact.** Recovery still exchanges only files that match
+  their journaled identities exactly; the relaxed comparison decides only
+  whether the repository is in the state the journal was written for.
+
+### Not addressed
+
+- Capture edges still compare the index exactly, so an index refreshed by
+  another process during a turn still makes that turn ineligible
+  (`index_changed`, or `capture_race` when the refresh races the read).
+  Relaxing that is an eligibility change and needs its own review.
+- Only the macOS adapter produces stat identities today; other adapters remain
+  `adapter_unsupported`.
+
+### Tests
+
+- `dcc-core`: `same_repository_state_ignores_only_the_index_stat_identity`
+  changes every other field and expects a mismatch in both directions.
+- `restore_service` (fakes): an index rewritten with the same bytes before
+  prepare, between prepare and execute, and during the exchange completes and
+  still journals the captured identity; other index bytes, another size or
+  another `HEAD` block prepare, plan and execute before anything is written;
+  staging during the exchange rolls back; a chain survives a rewrite between
+  the turns and breaks when the bytes changed between them (including the
+  database refusing that chained journal); startup recovery rolls back across
+  a rewrite and requires recovery when the bytes changed.
+- `capture_v2_service` (real filesystem and system Git): `.git/index` replaced
+  by a copy of its own bytes (new inode) between capture and prepare and
+  between prepare and execute restores the turn; `git add` after capture
+  blocks with `repository_identity_changed`; two real turns with a rewrite
+  between them and before the rewind restore through the chain.
+
+### Contributor checklist answers
+
+1. Before the mutation: the index raw SHA-256 and size, `HEAD`, ref and the
+   physical worktree, Git-dir and common-dir identities, against the set's
+   captured identity; every target as before.
+2. `repository_identity_changed` before the first exchange;
+   `rolled_back` or `recovery_required` after it, as before.
+3. Unchanged: the v1 journal, bound exactly to the captured identity.
+4. Unchanged: the exact displaced file, validated against its journaled
+   identity.
+5. Paths, filters and limits are unchanged; the index bound still applies.
+6. No content leaves the local store; the stat identity is still persisted
+   only inside the redacted Git identity.
 7. Capture v1 and the M3 quarantine are not touched.
 
 ## Phased implementation

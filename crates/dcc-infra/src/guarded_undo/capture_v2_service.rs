@@ -1468,7 +1468,10 @@ mod tests {
     use std::{
         ffi::CString,
         fs,
-        os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+        os::unix::{
+            ffi::OsStrExt,
+            fs::{MetadataExt, PermissionsExt},
+        },
         process::Command,
         sync::Mutex,
     };
@@ -1593,6 +1596,27 @@ mod tests {
             let path = self.request.workspace_absolute.join("tracked.txt");
             fs::write(&path, bytes).unwrap();
             remove_xattrs(&path);
+        }
+
+        /// Replaces `.git/index` with a copy of its own bytes, as Git does
+        /// when a refresh finds nothing to change: same content, new inode
+        /// and times.
+        fn rewrite_index_with_same_bytes(&self) {
+            let index = self.request.workspace_absolute.join(".git/index");
+            let before = fs::metadata(&index).unwrap();
+            let bytes = fs::read(&index).unwrap();
+            let replacement = self.request.workspace_absolute.join(".git/index.dcc-test");
+            fs::write(&replacement, &bytes).unwrap();
+            fs::set_permissions(&replacement, before.permissions()).unwrap();
+            remove_xattrs(&replacement);
+            fs::rename(&replacement, &index).unwrap();
+            let after = fs::metadata(&index).unwrap();
+            assert_eq!(fs::read(&index).unwrap(), bytes);
+            assert_ne!(
+                after.ino(),
+                before.ino(),
+                "the index stat identity must change"
+            );
         }
 
         fn second_request(&self) -> CaptureV2Request {
@@ -1938,6 +1962,119 @@ mod tests {
             }
         ));
         assert_eq!(fs::read(&target).unwrap(), b"first turn\n");
+    }
+
+    #[test]
+    fn an_index_rewritten_with_the_same_bytes_still_restores_the_turn() {
+        use crate::guarded_undo::restore_service::{
+            ExecuteGuardedUndoResult, PrepareGuardedUndoResult,
+        };
+
+        let fixture = Fixture::new();
+        let workspace = fixture.request.workspace_absolute.clone();
+        let handle = fixture.service.begin(fixture.request.clone()).unwrap();
+        fixture.write_tracked(b"after\n");
+        assert_eq!(
+            fixture.service.finish(handle).unwrap().state,
+            RestoreSetState::Eligible
+        );
+
+        fixture.rewrite_index_with_same_bytes();
+        let ready = match fixture
+            .service
+            .prepare_guarded_undo(&fixture.request.snapshot_id, &workspace)
+        {
+            PrepareGuardedUndoResult::Ready(ready) => ready,
+            other => panic!("expected a same-bytes index to prepare, got {other:?}"),
+        };
+        fixture.rewrite_index_with_same_bytes();
+        assert!(matches!(
+            fixture
+                .service
+                .execute_guarded_undo(&ready.preview_token, true),
+            ExecuteGuardedUndoResult::Completed { .. }
+        ));
+        assert_eq!(
+            fs::read(workspace.join("tracked.txt")).unwrap(),
+            b"before\n"
+        );
+    }
+
+    #[test]
+    fn an_index_with_other_bytes_still_blocks_the_restore() {
+        use crate::guarded_undo::restore_service::PrepareGuardedUndoResult;
+
+        let fixture = Fixture::new();
+        let workspace = fixture.request.workspace_absolute.clone();
+        let handle = fixture.service.begin(fixture.request.clone()).unwrap();
+        fixture.write_tracked(b"after\n");
+        assert_eq!(
+            fixture.service.finish(handle).unwrap().state,
+            RestoreSetState::Eligible
+        );
+
+        // Staging the turn's change rewrites the index with other bytes.
+        run_git(&workspace, &["add", "--", "tracked.txt"]);
+        remove_xattrs(&workspace.join(".git/index"));
+        assert!(matches!(
+            fixture
+                .service
+                .prepare_guarded_undo(&fixture.request.snapshot_id, &workspace),
+            PrepareGuardedUndoResult::Blocked {
+                reason_code: GuardedUndoReasonCode::RepositoryIdentityChanged,
+                ..
+            }
+        ));
+        assert_eq!(fs::read(workspace.join("tracked.txt")).unwrap(), b"after\n");
+    }
+
+    #[test]
+    fn a_chain_survives_an_index_rewritten_between_real_turns() {
+        use crate::guarded_undo::restore_service::{
+            ExecuteGuardedUndoResult, PlanGuardedUndoChainResult, PrepareGuardedUndoResult,
+        };
+
+        let fixture = Fixture::new();
+        let workspace = fixture.request.workspace_absolute.clone();
+        let target = workspace.join("tracked.txt");
+        let first = fixture.service.begin(fixture.request.clone()).unwrap();
+        fixture.write_tracked(b"first turn\n");
+        assert_eq!(
+            fixture.service.finish(first).unwrap().state,
+            RestoreSetState::Eligible
+        );
+        fixture.rewrite_index_with_same_bytes();
+        let second = fixture.service.begin(fixture.second_request()).unwrap();
+        fixture.write_tracked(b"second turn\n");
+        assert_eq!(
+            fixture.service.finish(second).unwrap().state,
+            RestoreSetState::Eligible
+        );
+        fixture.rewrite_index_with_same_bytes();
+
+        let newest_first = vec!["snapshot-2".to_owned(), "snapshot-1".to_owned()];
+        assert!(matches!(
+            fixture
+                .service
+                .plan_guarded_undo_chain(&newest_first, &workspace),
+            PlanGuardedUndoChainResult::Ready(planned) if planned.len() == 2
+        ));
+        for snapshot_id in &newest_first {
+            let ready = match fixture
+                .service
+                .prepare_guarded_undo_after_completed_undo(snapshot_id, &workspace)
+            {
+                PrepareGuardedUndoResult::Ready(ready) => ready,
+                other => panic!("expected {snapshot_id} to prepare, got {other:?}"),
+            };
+            assert!(matches!(
+                fixture
+                    .service
+                    .execute_guarded_undo(&ready.preview_token, true),
+                ExecuteGuardedUndoResult::Completed { .. }
+            ));
+        }
+        assert_eq!(fs::read(&target).unwrap(), b"before\n");
     }
 
     #[test]
