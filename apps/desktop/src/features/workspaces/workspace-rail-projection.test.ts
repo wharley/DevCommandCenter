@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { Repository } from "@dcc/contracts";
 import {
+	freezeRailGroupOrder,
 	projectWorkspaceRailGroups,
 	projectWorkspaceRepositories,
 	workspaceRailGroupSignal,
@@ -191,6 +193,53 @@ describe("projectWorkspaceRailGroups", () => {
 			"pinned",
 			"newer",
 		]);
+	});
+
+	it("keeps pinned projects in pin order and the rest by the user's last interaction", () => {
+		const { activeGroups } = projectWorkspaceRailGroups(
+			[
+				{ id: "a1", name: "A", branch: "main", status: "ready", rootPath: "/projects/alpha", createdAt: "2026-04-01T10:00:00.000Z" },
+				{ id: "b1", name: "B", branch: "main", status: "ready", rootPath: "/projects/beta", createdAt: "2026-04-02T10:00:00.000Z", updatedAt: "2026-04-20T10:00:00.000Z" },
+				{ id: "g1", name: "G", branch: "main", status: "ready", rootPath: "/projects/gamma", createdAt: "2026-04-03T10:00:00.000Z" },
+				{ id: "p1", name: "P", branch: "main", status: "ready", rootPath: "/projects/pinned-late", createdAt: "2026-04-01T10:00:00.000Z" },
+			],
+			[
+				railRepository("empty", null),
+				railRepository("alpha", null),
+				railRepository("beta", null),
+				railRepository("gamma", null),
+				railRepository("pinned-late", "2026-04-09T10:00:00.000Z"),
+				railRepository("pinned-early", "2026-04-05T10:00:00.000Z"),
+			],
+			// Alpha was touched last; beta's newer metadata update must not count.
+			{ a1: "2026-04-15T10:00:00.000Z", p1: "2026-04-30T10:00:00.000Z" },
+		);
+
+		expect(activeGroups.map((group) => group.label)).toEqual([
+			"pinned-early",
+			"pinned-late",
+			"alpha",
+			"gamma",
+			"beta",
+			"empty",
+		]);
+	});
+
+	it("freezes unpinned project order while keeping pins live and new projects on top", () => {
+		const group = (id: string, pinnedAt: string | null = null) => ({
+			id,
+			label: id,
+			sourceKey: id,
+			pinnedAt,
+			rows: [],
+		});
+
+		const frozen = freezeRailGroupOrder(
+			[group("pin", "2026-04-01T10:00:00.000Z"), group("new"), group("c"), group("a"), group("b")],
+			["a", "b", "c", "pin"],
+		);
+
+		expect(frozen.map((entry) => entry.id)).toEqual(["pin", "new", "a", "b", "c"]);
 	});
 
 	it("builds repository-level options for quick workspace creation", () => {
@@ -386,3 +435,23 @@ describe("snoozed tasks in the rail", () => {
 		]);
 	});
 });
+
+function railRepository(name: string, pinnedAt: string | null): Repository {
+	return {
+		id: `/projects/${name}`,
+		projectId: name,
+		name,
+		displayName: null,
+		icon: null,
+		color: null,
+		pinnedAt,
+		rootPath: `/projects/${name}`,
+		baseBranch: "main",
+		remote: null,
+		remoteUrl: null,
+		forgeProvider: null,
+		forgeLogin: null,
+		createdAt: "2026-04-01T10:00:00.000Z",
+		updatedAt: "2026-04-01T10:00:00.000Z",
+	};
+}

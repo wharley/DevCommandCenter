@@ -165,12 +165,63 @@ export function projectWorkspaceRailGroups(
 				rows: sorted,
 			};
 		})
+		.map((group) => ({
+			group,
+			recencyMs: projectRecencyMs(group.rows, lastInteractionAt),
+		}))
 		.sort((a, b) => {
-			const pinnedOrder = Number(Boolean(b.pinnedAt)) - Number(Boolean(a.pinnedAt));
-			return pinnedOrder || a.label.localeCompare(b.label);
-		});
+			const pinnedOrder = Number(Boolean(b.group.pinnedAt)) - Number(Boolean(a.group.pinnedAt));
+			if (pinnedOrder !== 0) return pinnedOrder;
+			// Pinned projects stay where you put them: oldest pin first.
+			if (a.group.pinnedAt && b.group.pinnedAt) {
+				return (
+					a.group.pinnedAt.localeCompare(b.group.pinnedAt) ||
+					a.group.label.localeCompare(b.group.label)
+				);
+			}
+			return b.recencyMs - a.recencyMs || a.group.label.localeCompare(b.group.label);
+		})
+		.map(({ group }) => group);
 
 	return { activeGroups, waitingRows, completedRows };
+}
+
+/**
+ * When the user last worked in the project: their newest turn in any of its
+ * tasks, or a task's creation. Agent progress and backend metadata updates do
+ * not count, so a project only moves up because of something the user did.
+ */
+function projectRecencyMs(
+	rows: readonly DccWorkspaceRailRow[],
+	lastInteractionAt: Readonly<Record<string, string | null | undefined>>,
+): number {
+	let latest = Number.NEGATIVE_INFINITY;
+	for (const row of rows) {
+		for (const value of [lastInteractionAt[row.id], row.createdAt]) {
+			const ms = value ? Date.parse(value) : Number.NaN;
+			if (!Number.isNaN(ms) && ms > latest) latest = ms;
+		}
+	}
+	return latest;
+}
+
+/**
+ * Holds the unpinned projects in the order they had when the pointer entered
+ * the rail, so nothing moves under the cursor. Pinning stays live (it is the
+ * user's own click); projects that appear meanwhile go on top, as the newest.
+ */
+export function freezeRailGroupOrder(
+	groups: readonly DccWorkspaceRailGroup[],
+	frozenIds: readonly string[],
+): DccWorkspaceRailGroup[] {
+	const frozenIndex = new Map(frozenIds.map((id, index) => [id, index]));
+	const pinned = groups.filter((group) => group.pinnedAt);
+	const unpinned = groups.filter((group) => !group.pinnedAt);
+	const fresh = unpinned.filter((group) => !frozenIndex.has(group.id));
+	const known = unpinned
+		.filter((group) => frozenIndex.has(group.id))
+		.sort((a, b) => frozenIndex.get(a.id)! - frozenIndex.get(b.id)!);
+	return [...pinned, ...fresh, ...known];
 }
 
 /**

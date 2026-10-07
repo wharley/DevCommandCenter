@@ -81,6 +81,11 @@ const rowVariants = cva(
 export type WorkspaceRailRowProps = {
 	workspace: WorkspaceSummary;
 	selected: boolean;
+	/**
+	 * Em espera/Concluídos: two lines and no live status. Active rows keep a
+	 * fixed height because their third line comes and goes while agents run.
+	 */
+	compact?: boolean;
 	activity?: WorkspaceAgentActivity | null;
 	/** The latest finished result has not been opened yet. */
 	unseenResult?: boolean;
@@ -346,6 +351,7 @@ export const WorkspaceRailRowItem = memo(
 	function WorkspaceRailRowItem({
 		workspace,
 		selected,
+		compact = false,
 		activity,
 		unseenResult = false,
 		pendingDelegatedReviews = 0,
@@ -536,6 +542,7 @@ export const WorkspaceRailRowItem = memo(
 					}}
 					className={cn(
 						rowVariants({ active: selected }),
+						compact && "min-h-0",
 						"w-full text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
 						(workspace.status === "archived" || workspace.status === "completed") &&
 							!selected &&
@@ -639,7 +646,7 @@ export const WorkspaceRailRowItem = memo(
 											{t("sidebar.snooze.until", { time: snoozedUntilLabel })}
 										</span>
 									</span>
-								) : workspaceStatusMessage ? (
+								) : workspaceStatusMessage && !compact ? (
 									<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
 										<span
 											aria-hidden
@@ -663,7 +670,7 @@ export const WorkspaceRailRowItem = memo(
 											{workspaceStatusMessage}
 										</span>
 									</div>
-								) : activity && !hasPriorityWorkspaceStatus ? (
+								) : activity && !hasPriorityWorkspaceStatus && !compact ? (
 									<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
 										<span
 											aria-hidden
@@ -711,7 +718,7 @@ export const WorkspaceRailRowItem = memo(
 								)}
 								{railMeta ? <WorkspaceRailMetaChips meta={railMeta} /> : null}
 							</div>
-							{nextActionMessage && railRecap && !hasPriorityWorkspaceStatus ? (
+							{compact ? null : nextActionMessage && railRecap && !hasPriorityWorkspaceStatus ? (
 								<p
 									className={cn(
 										"mt-px min-w-0 truncate text-[10.5px] leading-4",

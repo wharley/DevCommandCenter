@@ -93,6 +93,7 @@ import {
 	writeStoredRailSectionState,
 } from "./workspace-rail-open-state";
 import {
+	freezeRailGroupOrder,
 	projectGroupingKey,
 	projectWorkspaceRailGroups,
 	workspaceRailGroupSignal,
@@ -101,7 +102,9 @@ import {
 	COMPLETED_SECTION_ID,
 	findSelectedRailSectionId,
 	initialsFromWorkspaceLabel,
+	PINNED_SECTION_ID,
 	ProjectGroupGlyph,
+	RECENT_SECTION_ID,
 	WAITING_SECTION_ID,
 	workspaceRailDisplayTitle,
 } from "./workspace-rail-shared";
@@ -148,14 +151,21 @@ type VirtualItem =
 			rowCount: number;
 			canCollapse: boolean;
 			headerVariant: "project" | "waiting" | "completed";
-			pinnedAt?: string | null;
 	  }
 	| { kind: "row"; groupId: string; workspace: WorkspaceSummary }
+	| {
+			kind: "section-label";
+			sectionId: typeof PINNED_SECTION_ID | typeof RECENT_SECTION_ID;
+			label: string;
+			groupIds: string[];
+	  }
 	| { kind: "group-gap"; size: number }
 	| { kind: "bottom-padding" };
 
 const HEADER_HEIGHT = 42;
+const SECTION_LABEL_HEIGHT = 24;
 const ROW_HEIGHT = 76;
+const COMPACT_ROW_HEIGHT = 54;
 const GROUP_GAP = 10;
 const EMPTY_GROUP_GAP = 8;
 const EMPTY_AGENTS: AgentView[] = [];
@@ -189,6 +199,10 @@ const ATTENTION_TEXT_CLASS: Record<AttentionReason, string> = {
 	aborted: "text-destructive/85",
 	completed: "text-sky-700 dark:text-sky-300/90",
 };
+
+function isCompactRailSection(groupId: string) {
+	return groupId === WAITING_SECTION_ID || groupId === COMPLETED_SECTION_ID;
+}
 
 function getGroupGapSize(previousHasRows: boolean, nextHasRows: boolean) {
 	return previousHasRows && nextHasRows ? GROUP_GAP : EMPTY_GROUP_GAP;
@@ -526,6 +540,54 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		() => projectWorkspaceRailGroups(workspaces, repositories, lastInteractionAt, now),
 		[lastInteractionAt, repositories, workspaces],
 	);
+	// A task moved into Em espera/Concluídos leaves its project group; the
+	// destination header glows once so the move reads as "went there", not "gone".
+	const [flashSectionId, setFlashSectionId] = useState<string | null>(null);
+	const previousSectionMembershipRef = useRef<{
+		workspaceIds: Set<string>;
+		sections: Record<string, Set<string>>;
+	} | null>(null);
+	useEffect(() => {
+		const sections: Record<string, Set<string>> = {
+			[WAITING_SECTION_ID]: new Set(waitingRows.map((row) => row.id)),
+			[COMPLETED_SECTION_ID]: new Set(completedRows.map((row) => row.id)),
+		};
+		const previous = previousSectionMembershipRef.current;
+		previousSectionMembershipRef.current = {
+			workspaceIds: new Set(workspaces.map((workspace) => workspace.id)),
+			sections,
+		};
+		if (!previous) {
+			return;
+		}
+		// Only moves count: a task that was already listed elsewhere, not one
+		// that just finished loading.
+		const movedInto = Object.keys(sections).find((sectionId) =>
+			[...sections[sectionId]!].some(
+				(id) => previous.workspaceIds.has(id) && !previous.sections[sectionId]?.has(id),
+			),
+		);
+		if (!movedInto) {
+			return;
+		}
+		setFlashSectionId(movedInto);
+	}, [completedRows, waitingRows, workspaces]);
+	useEffect(() => {
+		if (!flashSectionId) {
+			return;
+		}
+		const timeout = window.setTimeout(() => setFlashSectionId(null), 1600);
+		return () => window.clearTimeout(timeout);
+	}, [flashSectionId]);
+	// Projects reorder by recency, but never while the pointer is over the rail.
+	const [frozenProjectOrder, setFrozenProjectOrder] = useState<string[] | null>(null);
+	const displayedGroups = useMemo(
+		() =>
+			frozenProjectOrder
+				? freezeRailGroupOrder(activeGroups, frozenProjectOrder)
+				: activeGroups,
+		[activeGroups, frozenProjectOrder],
+	);
 	const repositoriesBySourceKey = useMemo(
 		() =>
 			new Map(
@@ -753,6 +815,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				}
 			}
 
+			for (const sectionId of [PINNED_SECTION_ID, RECENT_SECTION_ID]) {
+				const sectionValue = current[sectionId] ?? true;
+				next[sectionId] = sectionValue;
+				if (current[sectionId] !== sectionValue) {
+					changed = true;
+				}
+			}
+
 			const waitingValue = current[WAITING_SECTION_ID] ?? false;
 			next[WAITING_SECTION_ID] = waitingValue;
 			if (current[WAITING_SECTION_ID] !== waitingValue) {
@@ -795,18 +865,55 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		}
 
 		lastAutoExpandedIdRef.current = selectedWorkspaceId;
+		const selectedGroup = activeGroups.find((group) => group.id === selectedSectionId);
+		const parentSectionId =
+			selectedGroup && activeGroups.some((group) => group.pinnedAt)
+				? selectedGroup.pinnedAt
+					? PINNED_SECTION_ID
+					: RECENT_SECTION_ID
+				: null;
 		setSectionOpenState((current) =>
-			current[selectedSectionId] ? current : { ...current, [selectedSectionId]: true },
+			current[selectedSectionId] && (!parentSectionId || current[parentSectionId] !== false)
+				? current
+				: {
+						...current,
+						[selectedSectionId]: true,
+						...(parentSectionId ? { [parentSectionId]: true } : {}),
+					},
 		);
 	}, [activeGroups, completedRows, selectedWorkspaceId, waitingRows]);
 
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
-		const visibleGroups = activeGroups;
+		const visibleGroups = displayedGroups;
+		const hasPinnedGroups = visibleGroups.some((group) => group.pinnedAt);
 
 		for (let gi = 0; gi < visibleGroups.length; gi++) {
 			const group = visibleGroups[gi]!;
-			if (gi > 0) {
+			const startsPinned = hasPinnedGroups && gi === 0;
+			const startsRecent =
+				hasPinnedGroups && !group.pinnedAt && Boolean(visibleGroups[gi - 1]?.pinnedAt);
+			if (startsPinned || startsRecent) {
+				const sectionId = startsPinned ? PINNED_SECTION_ID : RECENT_SECTION_ID;
+				if (startsRecent) {
+					items.push({ kind: "group-gap", size: GROUP_GAP });
+				}
+				items.push({
+					kind: "section-label",
+					sectionId,
+					label: t(startsPinned ? "sidebar.pinnedSection" : "sidebar.recentSection"),
+					groupIds: visibleGroups
+						.filter((candidate) => Boolean(candidate.pinnedAt) === startsPinned)
+						.map((candidate) => candidate.id),
+				});
+			}
+			if (
+				hasPinnedGroups &&
+				sectionOpenState[group.pinnedAt ? PINNED_SECTION_ID : RECENT_SECTION_ID] === false
+			) {
+				continue;
+			}
+			if (!startsPinned && !startsRecent && gi > 0) {
 				const previousGroup = visibleGroups[gi - 1]!;
 				items.push({
 					kind: "group-gap",
@@ -826,7 +933,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				rowCount: group.rows.length,
 				canCollapse,
 				headerVariant: "project",
-				pinnedAt: group.pinnedAt,
 			});
 
 			if (sectionOpenState[group.id] !== false && group.rows.length > 0) {
@@ -856,6 +962,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		];
 		let previousHasRows = (visibleGroups.at(-1)?.rows.length ?? 0) > 0;
 		for (const section of specialSections) {
+			// An empty section says nothing; it shows up with the first task moved in.
+			if (section.rows.length === 0) {
+				continue;
+			}
 			items.push({
 				kind: "group-gap",
 				size: getGroupGapSize(previousHasRows, section.rows.length > 0),
@@ -883,7 +993,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		items.push({ kind: "bottom-padding" });
 		return items;
-	}, [activeGroups, completedRows, sectionOpenState, t, waitingRows]);
+	}, [completedRows, displayedGroups, sectionOpenState, t, waitingRows]);
 
 	const virtualizer = useVirtualizer({
 		count: flatItems.length,
@@ -893,8 +1003,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			switch (item.kind) {
 				case "group-header":
 					return HEADER_HEIGHT;
+				case "section-label":
+					return SECTION_LABEL_HEIGHT;
 				case "row":
-					return ROW_HEIGHT;
+					return isCompactRailSection(item.groupId) ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
 				case "group-gap":
 					return item.size;
 				case "bottom-padding":
@@ -906,6 +1018,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			switch (item.kind) {
 				case "group-header":
 					return `header-${item.groupId}`;
+				case "section-label":
+					return `section-${item.sectionId}`;
 				case "row":
 					return `row-${item.groupId}-${item.workspace.id}`;
 				case "group-gap":
@@ -1045,6 +1159,61 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				return null;
 			}
 
+			if (item.kind === "section-label") {
+				const isOpen = sectionOpenState[item.sectionId] !== false;
+				// Collapsed, the label carries what its projects would have said.
+				const sectionSignals = item.groupIds.map((groupId) => groupSignals.get(groupId) ?? null);
+				const sectionSignal = sectionSignals.includes("attention")
+					? "attention"
+					: sectionSignals.includes("running")
+						? "running"
+						: null;
+				return (
+					<button
+						type="button"
+						data-rail-section={item.sectionId}
+						aria-expanded={isOpen}
+						onClick={() => toggleSection(item.sectionId)}
+						className="group/dccRailSection flex h-full w-full cursor-pointer select-none items-end gap-1 px-3 pb-1 text-muted-foreground/70 transition-colors hover:text-foreground"
+					>
+						{/* Sized on the span: see the button font reset note on project headers. */}
+						<span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em]">
+							<ChevronRight
+								className={cn(
+									"size-2.5 shrink-0 transition-transform duration-150",
+									isOpen && "rotate-90",
+								)}
+								strokeWidth={2.4}
+								aria-hidden
+							/>
+							{item.sectionId === PINNED_SECTION_ID ? (
+								<Pin className="size-2.5 rotate-[-12deg]" strokeWidth={2.2} aria-hidden />
+							) : null}
+							{item.label}
+						</span>
+						{!isOpen ? (
+							<span className="ml-1 flex items-center gap-1.5 pb-px text-[10px] font-medium tabular-nums">
+								{item.groupIds.length}
+								{sectionSignal ? (
+									<span
+										role="img"
+										data-group-signal={sectionSignal}
+										aria-label={t(`sidebar.groupSignal.${sectionSignal}`)}
+										title={t(`sidebar.groupSignal.${sectionSignal}`)}
+										className={cn(
+											"size-[6px] rounded-full",
+											sectionSignal === "attention"
+												? "bg-amber-500"
+												: "animate-pulse bg-emerald-500",
+										)}
+									/>
+								) : null}
+							</span>
+						) : null}
+					</button>
+				);
+			}
+
 			if (item.kind === "group-header") {
 				const isOpen =
 					item.headerVariant === "project"
@@ -1093,6 +1262,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							"dcc-project-heading group/dccRailHeader flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent/50",
 						)}
 						data-empty-group={isEmptyGroup ? "true" : "false"}
+						data-flash={flashSectionId === item.groupId ? "true" : undefined}
 						data-current={item.headerVariant === "project" && item.sourceKey === selectedProjectSourceKey ? "true" : "false"}
 					>
 						<button
@@ -1158,13 +1328,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 											i18n.resolvedLanguage,
 										)}
 									</span>
-								) : null}
-								{item.pinnedAt ? (
-									<Pin
-										className="size-3 shrink-0 rotate-[-12deg] text-muted-foreground/65"
-										strokeWidth={1.9}
-										aria-label={t("sidebar.pinnedProject")}
-									/>
 								) : null}
 							</span>
 
@@ -1330,6 +1493,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				<WorkspaceRailRowItem
 					workspace={item.workspace}
 					selected={selectedWorkspaceId === item.workspace.id}
+					compact={isCompactRailSection(item.groupId)}
 					activity={workspaceAgentActivities[item.workspace.id] ?? null}
 					unseenResult={unseenResultWorkspaceIds.has(item.workspace.id)}
 					pendingDelegatedReviews={
@@ -1367,6 +1531,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		},
 		[
 			completedDiskUsage,
+			flashSectionId,
 			groupSignals,
 			i18n.resolvedLanguage,
 			isCreatingWorkspace,
@@ -1967,6 +2132,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				<div
 					ref={scrollContainerRef}
 					data-slot="workspace-groups-scroll"
+					onPointerEnter={() =>
+						setFrozenProjectOrder(
+							displayedGroups.filter((group) => !group.pinnedAt).map((group) => group.id),
+						)
+					}
+					onPointerLeave={() => setFrozenProjectOrder(null)}
 					className="scrollbar-stable min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-width:thin]"
 				>
 					{activeGroups.length === 0 &&
