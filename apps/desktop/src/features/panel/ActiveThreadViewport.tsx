@@ -1,6 +1,7 @@
 import { DecisionEvaluationDetails } from "./DecisionEvaluationDetails";
 import { TurnReviewTimelineCard } from "./turn-review-timeline-card";
 import {
+	memo,
 	useCallback,
 	useEffect,
 	useLayoutEffect,
@@ -42,6 +43,105 @@ import {
 } from "./conversation-window";
 import { conversationStartingPhase, shouldShowConversationStarting, shouldShowInitialConversationStarting } from "./conversation-starting.logic";
 import { ComputerUsePreview } from "@/features/computer-use/computer-use-preview";
+import { useStableMessages } from "./stable-messages";
+
+type AssistantRowContext = {
+	workspacePath: string | null;
+	planApproved: boolean;
+	planReadOnly: boolean;
+	sessionId: string | null;
+	providers?: ProviderCatalog["providers"];
+	providerId?: string | null;
+	activeMissionSpecRelativePath: string | null;
+	activeMissionSpecHash: string | null;
+	autoSaveMissionValidation: boolean;
+	canContinue: boolean;
+	canFork: boolean;
+	canRetry: boolean;
+	continueInterrupted: (prompt: string | null) => void;
+	forkFromMessage: (messageId: string) => void;
+	retryInterrupted: (input: { prompt: string; turnId: string }) => void;
+	openPlan: () => void;
+	openFileReference?: (reference: WorkspaceFileReference) => void;
+};
+
+/**
+ * One assistant turn. Memoized on the (structurally shared) message and a
+ * context whose handlers are stable, so live frames only re-render the turn
+ * that is actually streaming.
+ */
+const AssistantMessageRow = memo(function AssistantMessageRow({
+	message,
+	context,
+	isLatestAssistant,
+	isPlanMessage,
+	precedingPrompt,
+	precedingTurnId,
+}: {
+	message: WorkspaceMessage;
+	context: AssistantRowContext;
+	isLatestAssistant: boolean;
+	isPlanMessage: boolean;
+	precedingPrompt: string | null;
+	precedingTurnId: string | null;
+}) {
+	const incomplete = message.status?.type === "incomplete";
+	const onContinue = useMemo(
+		() =>
+			isLatestAssistant && incomplete && context.canContinue
+				? () => context.continueInterrupted(precedingPrompt)
+				: undefined,
+		[context, incomplete, isLatestAssistant, precedingPrompt],
+	);
+	const onFork = useMemo(
+		() =>
+			context.canFork && message.streaming !== true && !message.status
+				? () => context.forkFromMessage(message.id)
+				: undefined,
+		[context, message.id, message.status, message.streaming],
+	);
+	const onRetry = useMemo(
+		() =>
+			isLatestAssistant && incomplete && context.canRetry && precedingTurnId
+				? () =>
+						context.retryInterrupted({
+							prompt: precedingPrompt ?? "",
+							turnId: precedingTurnId,
+						})
+				: undefined,
+		[context, incomplete, isLatestAssistant, precedingPrompt, precedingTurnId],
+	);
+	return (
+		<AssistantMessage
+			content={message.content}
+			streaming={message.streaming}
+			createdAt={message.createdAt}
+			turnId={message.turnId}
+			turnStartedAt={message.turnStartedAt}
+			turnEndedAt={message.turnEndedAt}
+			status={message.status}
+			annotations={message.annotations}
+			plan={message.plan ?? null}
+			workspacePath={context.workspacePath}
+			isPlanContext={isPlanMessage}
+			isPlanApproved={isPlanMessage && context.planApproved}
+			isPlanReadOnly={isPlanMessage && context.planReadOnly}
+			sessionId={context.sessionId}
+			providers={context.providers}
+			providerId={context.providerId}
+			modelId={message.model}
+			activeMissionSpecRelativePath={context.activeMissionSpecRelativePath}
+			activeMissionSpecHash={context.activeMissionSpecHash}
+			autoSaveMissionValidation={context.autoSaveMissionValidation}
+			onContinue={onContinue}
+			onFork={onFork}
+			onRetry={onRetry}
+			onOpenPlan={context.openPlan}
+			onOpenFileReference={context.openFileReference}
+			hidePendingApprovals
+		/>
+	);
+});
 
 type ActiveThreadViewportProps = {
 	messages: WorkspaceMessage[];
@@ -101,7 +201,7 @@ type ActiveThreadViewportProps = {
 };
 
 export function ActiveThreadViewport({
-	messages,
+	messages: projectedMessages,
 	hasLoaded,
 	isEmpty,
 	workspaceName,
@@ -143,6 +243,79 @@ export function ActiveThreadViewport({
 	modelLabel = (modelId) => modelId ?? "—",
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
+	const messages = useStableMessages(projectedMessages);
+	// Handlers change identity on every parent render; rows read the latest
+	// through a ref so memoized turns are not invalidated by them.
+	const handlersRef = useRef({
+		onContinueInterrupted,
+		onForkFromMessage,
+		onRetryInterrupted,
+		onOpenPlan,
+		onOpenFileReference,
+	});
+	handlersRef.current = {
+		onContinueInterrupted,
+		onForkFromMessage,
+		onRetryInterrupted,
+		onOpenPlan,
+		onOpenFileReference,
+	};
+	const continueInterrupted = useCallback((prompt: string | null) => {
+		void handlersRef.current.onContinueInterrupted?.(prompt);
+	}, []);
+	const forkFromMessage = useCallback((messageId: string) => {
+		handlersRef.current.onForkFromMessage?.(messageId);
+	}, []);
+	const retryInterrupted = useCallback((input: { prompt: string; turnId: string }) => {
+		void handlersRef.current.onRetryInterrupted?.(input);
+	}, []);
+	const openPlan = useCallback(() => handlersRef.current.onOpenPlan(), []);
+	const openFileReference = useCallback(
+		(reference: WorkspaceFileReference) => handlersRef.current.onOpenFileReference?.(reference),
+		[],
+	);
+	const hasOpenFileReference = Boolean(onOpenFileReference);
+	const assistantRowContext = useMemo<AssistantRowContext>(
+		() => ({
+			workspacePath,
+			planApproved,
+			planReadOnly,
+			sessionId,
+			providers,
+			providerId,
+			activeMissionSpecRelativePath,
+			activeMissionSpecHash,
+			autoSaveMissionValidation,
+			canContinue: Boolean(onContinueInterrupted),
+			canFork: Boolean(onForkFromMessage),
+			canRetry: Boolean(onRetryInterrupted),
+			continueInterrupted,
+			forkFromMessage,
+			retryInterrupted,
+			openPlan,
+			openFileReference: hasOpenFileReference ? openFileReference : undefined,
+		}),
+		[
+			activeMissionSpecHash,
+			activeMissionSpecRelativePath,
+			autoSaveMissionValidation,
+			continueInterrupted,
+			forkFromMessage,
+			hasOpenFileReference,
+			onContinueInterrupted,
+			onForkFromMessage,
+			onRetryInterrupted,
+			openFileReference,
+			openPlan,
+			planApproved,
+			planReadOnly,
+			providerId,
+			providers,
+			retryInterrupted,
+			sessionId,
+			workspacePath,
+		],
+	);
 	const [hasNewActivity, setHasNewActivity] = useState(false);
 	const [conversationWindow, setConversationWindow] = useState({
 		sessionId,
@@ -422,64 +595,15 @@ export function ActiveThreadViewport({
 												focusedMessageId === message.id && "dcc-thread-find-focus",
 											)}
 										>
-											<AssistantMessage
-												content={message.content}
-												streaming={message.streaming}
-												createdAt={message.createdAt}
-												status={message.status}
-												annotations={message.annotations}
-												plan={message.plan ?? null}
-												workspacePath={workspacePath}
-												isPlanContext={message.id === planMessageId}
-												isPlanApproved={
-													message.id === planMessageId && planApproved
+											<AssistantMessageRow
+												message={message}
+												context={assistantRowContext}
+												isLatestAssistant={message.id === latestAssistantMessageId}
+												isPlanMessage={message.id === planMessageId}
+												precedingPrompt={precedingUserPrompt(messages, messageIndex)}
+												precedingTurnId={
+													precedingUserTurn(messages, messageIndex)?.turnId ?? null
 												}
-												isPlanReadOnly={
-													message.id === planMessageId && planReadOnly
-												}
-												sessionId={sessionId}
-												providers={providers}
-												providerId={providerId}
-												modelId={message.model}
-												activeMissionSpecRelativePath={activeMissionSpecRelativePath}
-												activeMissionSpecHash={activeMissionSpecHash}
-												autoSaveMissionValidation={autoSaveMissionValidation}
-												onContinue={
-													message.id === latestAssistantMessageId &&
-													message.status?.type === "incomplete" &&
-													onContinueInterrupted
-														? () => {
-																void onContinueInterrupted(
-																	precedingUserPrompt(messages, messageIndex),
-																);
-															}
-														: undefined
-												}
-												onFork={
-													onForkFromMessage &&
-													message.streaming !== true &&
-													!message.status
-														? () => onForkFromMessage(message.id)
-														: undefined
-												}
-												onRetry={(() => {
-													if (
-														message.id !== latestAssistantMessageId ||
-														message.status?.type !== "incomplete" ||
-														!onRetryInterrupted
-													) {
-														return undefined;
-													}
-													const turn = precedingUserTurn(messages, messageIndex);
-													if (!turn?.turnId) return undefined;
-													const { prompt, turnId } = turn;
-													return () => {
-														void onRetryInterrupted({ prompt, turnId });
-													};
-												})()}
-												onOpenPlan={onOpenPlan}
-												onOpenFileReference={onOpenFileReference}
-												hidePendingApprovals
 											/>
 											{completionReview && message.turnSettled && !message.streaming ? (
 												<div className="mt-2 flex flex-wrap items-center gap-2">

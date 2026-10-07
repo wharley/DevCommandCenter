@@ -31,7 +31,9 @@ use dcc_core::{
     CoreError, Result,
 };
 
-use crate::common::{append_tool_instructions, apply_cli_spawn_environment, augmented_path};
+use crate::common::{
+    acp_tool_call_detail, append_tool_instructions, apply_cli_spawn_environment, augmented_path,
+};
 
 const PROVIDER_ID: &str = "grok";
 const PROVIDER_LABEL: &str = "Grok Build";
@@ -470,6 +472,7 @@ fn tool_call_update_events(update: &Value, at: String) -> Vec<ProviderEvent> {
     let status = update.get("status").and_then(Value::as_str).unwrap_or("");
     if matches!(status, "failed" | "error") {
         return vec![ProviderEvent::ToolCallFailed {
+            detail: acp_tool_call_detail(update),
             id,
             reason: update
                 .get("error")
@@ -481,7 +484,11 @@ fn tool_call_update_events(update: &Value, at: String) -> Vec<ProviderEvent> {
         }];
     }
     if matches!(status, "completed" | "complete" | "success") {
-        return vec![ProviderEvent::ToolCallCompleted { id, at }];
+        return vec![ProviderEvent::ToolCallCompleted {
+            id,
+            detail: acp_tool_call_detail(update),
+            at,
+        }];
     }
     update_text(update)
         .map(|content| ProviderEvent::ToolCallDelta { id, content })

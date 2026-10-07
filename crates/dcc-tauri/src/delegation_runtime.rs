@@ -387,14 +387,31 @@ pub fn summarize_child_turn(events: &[dcc_core::domain::session::SessionEventRec
                 command,
                 ..
             } if *id == turn_id => {
-                let value = command
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or(action.as_str())
-                    .trim()
-                    .to_string();
+                let command = command.as_deref().filter(|value| !value.trim().is_empty());
+                // Claude streams Bash input after the start; the command
+                // arrives in TurnToolCallUpdated instead of a bare "Bash".
+                if command.is_none() && action == "Bash" {
+                    continue;
+                }
+                let value = command.unwrap_or(action.as_str()).trim().to_string();
                 if !value.is_empty() && !commands.contains(&value) {
                     commands.push(value);
+                }
+            }
+            SessionEventKind::TurnToolCallUpdated {
+                turn_id: id,
+                detail,
+                ..
+            } if *id == turn_id => {
+                if let Some(value) = detail
+                    .command
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    if !commands.iter().any(|existing| existing == value) {
+                        commands.push(value.to_string());
+                    }
                 }
             }
             _ => {}

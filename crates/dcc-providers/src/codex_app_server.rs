@@ -37,7 +37,7 @@ use dcc_core::{
             Capabilities, HealthStatus, NativeSubagentStatus, ProviderAccountUsage,
             ProviderAccountUsageState, ProviderApprovalPolicy, ProviderEvent, ProviderId,
             ProviderResetCredit, ProviderResetCredits, ProviderResetOutcome, ProviderUsageWindow,
-            SessionHandle,
+            SessionHandle, ToolCallDetail,
         },
         session::{AssistantMessagePhase, SessionId},
         usage::ModelTokenUsage,
@@ -55,7 +55,7 @@ use crate::codex_mcp::{
     parse_codex_mcp_startup_status, parse_codex_mcp_status_snapshot, prepare_thread_start_request,
     CodexMcpDefinitionMap, CodexMcpToolPolicyMap,
 };
-use crate::common::{append_tool_instructions, augmented_path};
+use crate::common::{append_tool_instructions, augmented_path, codex_item_detail};
 
 const CODEX_MULTI_AGENT_V2_FEATURE: &str = "multi_agent_v2";
 
@@ -131,10 +131,20 @@ fn turn_start_params(
     sandbox_policy: Value,
     summary: Option<&str>,
 ) -> Value {
+    // Images the composer referenced as `@/path.png` also travel as native
+    // `localImage` input so the model sees them without a tool call; the
+    // textual reference stays in the prompt.
+    let images = crate::common::referenced_image_paths(&prompt);
+    let mut input = vec![json!({ "type": "text", "text": prompt })];
+    input.extend(
+        images
+            .into_iter()
+            .map(|path| json!({ "type": "localImage", "path": path })),
+    );
     json!({
         "threadId": thread_id,
         "model": model,
-        "input": [{ "type": "text", "text": prompt }],
+        "input": input,
         "effort": effort,
         "approvalPolicy": approval_policy,
         "sandboxPolicy": sandbox_policy,
@@ -1043,6 +1053,7 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
                     file: item
                         .get("file_path")
                         .or_else(|| item.get("filePath"))
+                        .or_else(|| item.pointer("/changes/0/path"))
                         .and_then(Value::as_str)
                         .map(str::to_string),
                     at,
@@ -1090,14 +1101,16 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
                         .get("status")
                         .and_then(Value::as_str)
                         .is_some_and(|status| status == "failed");
+                    let detail = codex_mcp_tool_detail(item);
                     if failed {
                         Some(ProviderEvent::ToolCallFailed {
+                            detail,
                             id,
                             reason: Some("MCP tool call failed".to_string()),
                             at,
                         })
                     } else {
-                        Some(ProviderEvent::ToolCallCompleted { id, at })
+                        Some(ProviderEvent::ToolCallCompleted { id, detail, at })
                     }
                 }
                 "commandExecution" | "file_change" | "fileChange" | "web_search" => {
@@ -1105,8 +1118,15 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
                         .get("status")
                         .and_then(Value::as_str)
                         .is_some_and(|s| s == "failed");
+                    let detail = item.as_object().and_then(codex_item_detail);
+                    let failed = failed
+                        || detail
+                            .as_ref()
+                            .and_then(|detail| detail.exit_code)
+                            .is_some_and(|code| code != 0);
                     if failed {
                         Some(ProviderEvent::ToolCallFailed {
+                            detail,
                             id,
                             reason: item
                                 .get("error")
@@ -1116,12 +1136,23 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
                             at,
                         })
                     } else {
-                        Some(ProviderEvent::ToolCallCompleted { id, at })
+                        Some(ProviderEvent::ToolCallCompleted { id, detail, at })
                     }
                 }
                 "reasoning" => Some(ProviderEvent::ReasoningCompleted { id, at }),
                 _ => None,
             }
+        }
+        "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
+            let content = params.get("delta").and_then(Value::as_str)?;
+            (!content.is_empty()).then(|| ProviderEvent::ToolCallDelta {
+                id: params
+                    .get("itemId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("item")
+                    .to_string(),
+                content: content.to_string(),
+            })
         }
         "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
             Some(ProviderEvent::ReasoningDelta {
@@ -1139,6 +1170,35 @@ fn notification_to_event(method: &str, params: &Value) -> Option<ProviderEvent> 
         }
         _ => None,
     }
+}
+
+fn codex_mcp_tool_detail(item: &Value) -> Option<ToolCallDetail> {
+    let input = item
+        .get("arguments")
+        .filter(|arguments| !arguments.is_null())
+        .and_then(|arguments| serde_json::to_string_pretty(arguments).ok());
+    let output = item
+        .pointer("/result/content")
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .or_else(|| {
+            item.pointer("/error/message")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let detail = ToolCallDetail {
+        input,
+        output,
+        ..ToolCallDetail::default()
+    }
+    .bounded();
+    (!detail.is_empty()).then_some(detail)
 }
 
 fn json_u64(object: &serde_json::Map<String, Value>, key: &str) -> u64 {

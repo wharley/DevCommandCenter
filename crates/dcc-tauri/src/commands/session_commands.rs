@@ -35,7 +35,7 @@ use dcc_core::{
             SessionSearchResult, TurnReviewFile, WorkspaceSessionSummary,
         },
         thread::Thread,
-        usage::{UsageDashboard, UsageDashboardInput},
+        usage::{SessionTurnUsage, UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
     },
     ports::{
@@ -2183,25 +2183,32 @@ pub async fn send_turn_with_state(
     }
 
     let preflight_model_route = input.decision_provider_model_route.clone();
-    if preflight_model_route.is_none() {
-        // Keep the backend/API path compatible with callers that do not have
-        // the desktop preflight yet. The desktop path supplies the result and
-        // therefore avoids spending a second Jev request here.
-        record_decision_provider_model_route(&state, &session, &input.prompt).await;
-    }
     let mut tool_instructions = state
         .objective_tool_instructions(&input.session_id, input.tool_instructions.clone())
         .map_err(|error| error.to_string())?;
-    if let Some(skill_context) =
-        decision_provider_skill_context_for_turn(&state, &session, &input.prompt).await
-    {
+    // The model route, skill router and memory recall are independent
+    // lookups; running them together keeps the time before the provider
+    // sees the prompt at the slowest one instead of their sum.
+    let model_route_lookup = async {
+        if preflight_model_route.is_none() {
+            // Keep the backend/API path compatible with callers that do not have
+            // the desktop preflight yet. The desktop path supplies the result and
+            // therefore avoids spending a second Jev request here.
+            record_decision_provider_model_route(&state, &session, &input.prompt).await;
+        }
+    };
+    let ((), skill_context, memory_context) = futures::join!(
+        model_route_lookup,
+        decision_provider_skill_context_for_turn(&state, &session, &input.prompt),
+        ai_memory_context_for_turn(&state, &session, &input.prompt),
+    );
+    if let Some(skill_context) = skill_context {
         tool_instructions = Some(match tool_instructions {
             Some(existing) => format!("{existing}\n\n{skill_context}"),
             None => skill_context,
         });
     }
-    if let Some(memory_context) = ai_memory_context_for_turn(&state, &session, &input.prompt).await
-    {
+    if let Some(memory_context) = memory_context {
         tool_instructions = Some(match tool_instructions {
             Some(existing) => format!("{existing}\n\n{memory_context}"),
             None => memory_context,
@@ -2856,6 +2863,17 @@ pub async fn usage_dashboard(
 ) -> Result<UsageDashboard, String> {
     state
         .usage_dashboard(&input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn session_turn_usage(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Vec<SessionTurnUsage>, String> {
+    state
+        .session_turn_usage(&SessionId(session_id))
         .await
         .map_err(|error| error.to_string())
 }

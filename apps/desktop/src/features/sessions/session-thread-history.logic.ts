@@ -4,6 +4,7 @@ import type {
 	ProviderUserInputAnswer,
 	ProviderUserInputQuestion,
 	SessionEventRecord,
+	ToolCallDetail,
 	TurnEvidenceSummary,
 } from "@dcc/contracts";
 import { parsePlanContent, type ParsedPlanContent } from "@/features/panel/plan-content";
@@ -37,7 +38,10 @@ export type WorkspaceMessageAnnotation =
 			action: string;
 			command?: string;
 			file?: string;
+			/** Streamed output (stdout/progress). Never raw tool input. */
 			content: string;
+			/** Provider-reported facts: final input, result output, exit code, diff. */
+			detail?: ToolCallDetail;
 			streaming?: boolean;
 			createdAt?: string;
 			status?: {
@@ -93,6 +97,9 @@ export type WorkspaceMessage = {
 	role: WorkspaceMessageRole;
 	turnId?: string;
 	turnSettled?: boolean;
+	/** Durable start/end of the turn this assistant row belongs to (ISO). */
+	turnStartedAt?: string;
+	turnEndedAt?: string;
 	assistantPhase?: AssistantMessagePhase;
 	content: string;
 	label: string;
@@ -236,12 +243,22 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					content: record.kind.content,
 				},
 			};
+		case "turn_tool_call_updated":
+			return {
+				sessionTurnToolCallUpdated: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					tool_call_id: record.kind.toolCallId,
+					detail: record.kind.detail,
+				},
+			};
 		case "turn_tool_call_completed":
 			return {
 				sessionTurnToolCallCompleted: {
 					session_id: record.sessionId,
 					turn_id: record.kind.turnId,
 					tool_call_id: record.kind.toolCallId,
+					detail: record.kind.detail ?? null,
 				},
 			};
 		case "turn_tool_call_failed":
@@ -251,6 +268,7 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					turn_id: record.kind.turnId,
 					tool_call_id: record.kind.toolCallId,
 					reason: record.kind.reason,
+					detail: record.kind.detail ?? null,
 				},
 			};
 		case "turn_user_input_requested":
@@ -501,6 +519,9 @@ function getEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) {
 		return event.sessionTurnToolCallDelta.session_id;
 	}
+	if ("sessionTurnToolCallUpdated" in event && event.sessionTurnToolCallUpdated) {
+		return event.sessionTurnToolCallUpdated.session_id;
+	}
 	if ("sessionTurnToolCallCompleted" in event && event.sessionTurnToolCallCompleted) {
 		return event.sessionTurnToolCallCompleted.session_id;
 	}
@@ -597,6 +618,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnReasoningCompleted" in event) return "session.turn.reasoning.completed";
 	if ("sessionTurnToolCallStarted" in event) return "session.turn.tool-call.started";
 	if ("sessionTurnToolCallDelta" in event) return "session.turn.tool-call.delta";
+	if ("sessionTurnToolCallUpdated" in event) return "session.turn.tool-call.updated";
 	if ("sessionTurnToolCallCompleted" in event) return "session.turn.tool-call.completed";
 	if ("sessionTurnToolCallFailed" in event) return "session.turn.tool-call.failed";
 	if ("sessionTurnUserInputRequested" in event) return "session.turn.user-input.requested";
@@ -671,6 +693,10 @@ function eventSummary(event: CoreEvent): string {
 	}
 	if ("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) {
 		return event.sessionTurnToolCallDelta.content;
+	}
+	if ("sessionTurnToolCallUpdated" in event && event.sessionTurnToolCallUpdated) {
+		const detail = event.sessionTurnToolCallUpdated.detail;
+		return detail.command ?? detail.file ?? event.sessionTurnToolCallUpdated.tool_call_id;
 	}
 	if ("sessionTurnToolCallCompleted" in event && event.sessionTurnToolCallCompleted) {
 		return event.sessionTurnToolCallCompleted.tool_call_id;
@@ -834,17 +860,10 @@ export function mergeSessionThreadEvents(
 		return [];
 	}
 
-	const merged: TimelineEvent[] = [];
-	const seen = new Set<string>();
-	const historyCounts = new Map<string, number>();
+	const history = historyTimeline(historyEvents, sessionId);
+	const merged: TimelineEvent[] = history.events.slice();
+	const seen = new Set<string>(history.seen);
 	const liveCounts = new Map<string, number>();
-
-	for (const record of historyEvents) {
-		if (record.sessionId !== sessionId) {
-			continue;
-		}
-		pushHistoryEvent(merged, seen, historyCounts, record);
-	}
 
 	for (const event of liveEvents) {
 		if (getEventSessionId(event) !== sessionId) {
@@ -854,6 +873,38 @@ export function mergeSessionThreadEvents(
 	}
 
 	return merged;
+}
+
+type HistoryTimeline = { events: readonly TimelineEvent[]; seen: ReadonlySet<string> };
+
+/**
+ * The durable history only changes when it is refetched (turn end, reconnect),
+ * while live events change every frame. Converting and signing every history
+ * record is the expensive part of a projection, so it is done once per
+ * history array and session.
+ */
+const historyTimelineCache = new WeakMap<SessionEventRecord[], Map<string, HistoryTimeline>>();
+
+function historyTimeline(historyEvents: SessionEventRecord[], sessionId: string): HistoryTimeline {
+	let bySession = historyTimelineCache.get(historyEvents);
+	const cached = bySession?.get(sessionId);
+	if (cached) return cached;
+	const events: TimelineEvent[] = [];
+	const seen = new Set<string>();
+	const counts = new Map<string, number>();
+	for (const record of historyEvents) {
+		if (record.sessionId !== sessionId) {
+			continue;
+		}
+		pushHistoryEvent(events, seen, counts, record);
+	}
+	const timeline = { events, seen };
+	if (!bySession) {
+		bySession = new Map();
+		historyTimelineCache.set(historyEvents, bySession);
+	}
+	bySession.set(sessionId, timeline);
+	return timeline;
 }
 
 function ensureAssistantMessage(
@@ -1053,6 +1104,28 @@ function foldAssistantTurnMessages(
 	return hidden.size > 0 ? messages.filter((message) => !hidden.has(message)) : messages;
 }
 
+/**
+ * Folds a provider detail update into a tool-call annotation. Later non-empty
+ * fields win; the event's own object is never mutated because history events
+ * are re-projected on every frame.
+ */
+function mergeToolCallDetail(
+	annotation: Extract<WorkspaceMessageAnnotation, { type: "tool-call" }>,
+	detail: ToolCallDetail | null | undefined,
+) {
+	if (!detail) return;
+	const next: ToolCallDetail = { ...annotation.detail };
+	for (const key of ["command", "file", "input", "output", "diff"] as const) {
+		const value = detail[key];
+		if (typeof value === "string" && value.length > 0) next[key] = value;
+	}
+	if (typeof detail.exitCode === "number") next.exitCode = detail.exitCode;
+	if (detail.truncated) next.truncated = true;
+	annotation.detail = next;
+	if (!annotation.command && next.command) annotation.command = next.command;
+	if (!annotation.file && next.file) annotation.file = next.file;
+}
+
 function getOrCreateAnnotation(
 	message: WorkspaceMessage,
 	annotation: WorkspaceMessageAnnotation,
@@ -1112,6 +1185,7 @@ export function projectWorkspaceMessages(
 	const completedTurns = new Set<string>();
 	const abortedTurns = new Map<string, string>();
 	const turnStartedAtByTurnId = new Map<string, string>();
+	const turnEndedAtByTurnId = new Map<string, string>();
 	const turnModelByTurnId = new Map<string, string | null>();
 	const requestedSubagentModels = new Map<string, string>();
 	const confirmedSubagentModels = new Map<string, string>();
@@ -1415,6 +1489,21 @@ export function projectWorkspaceMessages(
 			);
 			if (annotation && annotation.type === "tool-call") {
 				annotation.streaming = false;
+				mergeToolCallDetail(annotation, event.sessionTurnToolCallCompleted.detail);
+			}
+			continue;
+		}
+
+		if ("sessionTurnToolCallUpdated" in event && event.sessionTurnToolCallUpdated) {
+			const key = event.sessionTurnToolCallUpdated.turn_id;
+			const message = assistantBuckets.get(key);
+			const annotation = message?.annotations?.find(
+				(item) =>
+					item.type === "tool-call" &&
+					item.id === event.sessionTurnToolCallUpdated.tool_call_id,
+			);
+			if (annotation && annotation.type === "tool-call") {
+				mergeToolCallDetail(annotation, event.sessionTurnToolCallUpdated.detail);
 			}
 			continue;
 		}
@@ -1436,6 +1525,7 @@ export function projectWorkspaceMessages(
 					type: "failed",
 					reason: event.sessionTurnToolCallFailed.reason ?? "Tool call failed",
 				};
+				mergeToolCallDetail(annotation, event.sessionTurnToolCallFailed.detail);
 			}
 			continue;
 		}
@@ -1584,6 +1674,7 @@ export function projectWorkspaceMessages(
 		if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 			const key = event.sessionTurnCompleted.turn_id;
 			completedTurns.add(key);
+			if (occurredAt) turnEndedAtByTurnId.set(key, occurredAt);
 			const turnMessages = assistantMessagesByTurn.get(key) ?? [assistantBuckets.get(key)].filter(
 				(message): message is WorkspaceMessage => Boolean(message),
 			);
@@ -1599,6 +1690,7 @@ export function projectWorkspaceMessages(
 		if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
 			const key = event.sessionTurnAborted.turn_id;
 			abortedTurns.set(key, event.sessionTurnAborted.reason ?? "Turn aborted");
+			if (occurredAt) turnEndedAtByTurnId.set(key, occurredAt);
 			let turnMessages = assistantMessagesByTurn.get(key) ?? [assistantBuckets.get(key)].filter(
 				(message): message is WorkspaceMessage => Boolean(message),
 			);
@@ -1789,6 +1881,10 @@ export function projectWorkspaceMessages(
 	for (const message of messages) {
 		if (message.role === "assistant" && message.turnId) {
 			message.turnSettled = completedTurns.has(message.turnId) || abortedTurns.has(message.turnId);
+			const startedAt = turnStartedAtByTurnId.get(message.turnId);
+			if (startedAt) message.turnStartedAt = startedAt;
+			const endedAt = turnEndedAtByTurnId.get(message.turnId);
+			if (endedAt) message.turnEndedAt = endedAt;
 		}
 	}
 

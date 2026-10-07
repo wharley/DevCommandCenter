@@ -451,6 +451,7 @@ describe("projectWorkspaceMessages", () => {
 				id: "assistant-session-a-turn-1",
 				turnId: "turn-1",
 				turnSettled: false,
+				turnStartedAt: "2026-05-01T12:00:00Z",
 				role: "assistant",
 				label: "Assistant",
 				content: "Hello world",
@@ -921,6 +922,8 @@ describe("projectWorkspaceMessages", () => {
 				id: "assistant-session-a-turn-1",
 				turnId: "turn-1",
 				turnSettled: true,
+				turnStartedAt: "2026-05-01T12:00:00Z",
+				turnEndedAt: "2026-05-01T12:00:05Z",
 				role: "assistant",
 				label: "Assistant",
 				content: "Hello from assistant",
@@ -1110,6 +1113,8 @@ describe("projectWorkspaceMessages", () => {
 				id: "assistant-session-a-turn-1",
 				turnId: "turn-1",
 				turnSettled: true,
+				turnStartedAt: "2026-05-01T12:00:00Z",
+				turnEndedAt: "2026-05-01T12:00:05Z",
 				role: "assistant",
 				label: "Assistant",
 				content: "Hello",
@@ -1162,6 +1167,8 @@ describe("projectWorkspaceMessages", () => {
 				id: "assistant-session-a-turn-1",
 				turnId: "turn-1",
 				turnSettled: true,
+				turnStartedAt: "2026-05-01T12:00:00Z",
+				turnEndedAt: "2026-05-01T12:00:05Z",
 				role: "assistant",
 				label: "Assistant",
 				content: "Continuing after approval.",
@@ -1602,5 +1609,56 @@ describe("projectWorkspaceMessages", () => {
 			{ eventId: "effective", sessionId: "session-a", sequence: 2, occurredAt: "2026-05-01T12:00:01Z", kind: { type: "turn_model_effective", turnId: "turn-1", model: "gpt-5.6-luna" } },
 		], [], "session-a");
 		expect(messages.find((message) => message.role === "assistant")?.model).toBe("gpt-5.6-luna");
+	});
+
+	it("folds provider tool detail into the tool-call annotation", () => {
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Run tests"),
+				sessionTurnToolCallStarted("session-a", "turn-1", "bash-1", "Bash"),
+				{
+					eventId: "evt-bash-1-updated",
+					sessionId: "session-a",
+					sequence: 3,
+					occurredAt: "2026-05-01T12:00:02Z",
+					kind: {
+						type: "turn_tool_call_updated",
+						turnId: "turn-1",
+						toolCallId: "bash-1",
+						detail: { command: "npm test", input: "{}" },
+					},
+				},
+				{
+					eventId: "evt-bash-1-failed",
+					sessionId: "session-a",
+					sequence: 4,
+					occurredAt: "2026-05-01T12:00:03Z",
+					kind: {
+						type: "turn_tool_call_failed",
+						turnId: "turn-1",
+						toolCallId: "bash-1",
+						reason: "1 failing",
+						detail: { output: "1 failing\nError: boom", exitCode: 1 },
+					},
+				},
+				sessionTurnCompleted("session-a", "turn-1"),
+			],
+			[],
+			"session-a",
+		);
+		const assistant = messages.find((message) => message.role === "assistant");
+		const tool = assistant?.annotations?.find((annotation) => annotation.type === "tool-call");
+		expect(tool).toMatchObject({
+			type: "tool-call",
+			id: "bash-1",
+			command: "npm test",
+			status: { type: "failed", reason: "1 failing" },
+			detail: {
+				command: "npm test",
+				input: "{}",
+				output: "1 failing\nError: boom",
+				exitCode: 1,
+			},
+		});
 	});
 });

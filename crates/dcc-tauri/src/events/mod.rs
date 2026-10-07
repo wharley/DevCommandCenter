@@ -66,6 +66,9 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionTurnToolCallDelta { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/tool-call/delta")
         }
+        CoreEvent::SessionTurnToolCallUpdated { .. } => {
+            format!("{SESSION_EVENT_PREFIX}/turn/tool-call/updated")
+        }
         CoreEvent::SessionTurnToolCallCompleted { .. } => {
             format!("{SESSION_EVENT_PREFIX}/turn/tool-call/completed")
         }

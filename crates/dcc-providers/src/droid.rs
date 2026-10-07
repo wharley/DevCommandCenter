@@ -656,6 +656,7 @@ fn parse_droid_tool_result(value: &Value, at: String) -> Vec<ProviderEvent> {
         == Some(true)
     {
         events.push(ProviderEvent::ToolCallFailed {
+            detail: None,
             id,
             reason: value
                 .get("error")
@@ -664,7 +665,7 @@ fn parse_droid_tool_result(value: &Value, at: String) -> Vec<ProviderEvent> {
             at,
         });
     } else {
-        events.push(ProviderEvent::ToolCallCompleted { id, at });
+        events.push(ProviderEvent::ToolCallCompleted { id, detail: None, at });
     }
 
     events

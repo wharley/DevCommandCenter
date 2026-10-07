@@ -10,7 +10,7 @@ use dcc_core::application::{
 use dcc_core::domain::session::{
     QueuedTurn, SessionEventRecord, SessionSearchResult, WorkspaceSessionSummary,
 };
-use dcc_core::domain::usage::{UsageDashboard, UsageDashboardInput};
+use dcc_core::domain::usage::{SessionTurnUsage, UsageDashboard, UsageDashboardInput};
 use dcc_tauri::{
     commands::session_commands::{
         self as session_command_impl, AiMemoryExportHistoryOutput, AiMemoryOutboxStatusOutput,
@@ -529,6 +529,14 @@ pub async fn usage_dashboard(
     input: UsageDashboardInput,
 ) -> Result<UsageDashboard, String> {
     session_command_impl::usage_dashboard(state, input).await
+}
+
+#[tauri::command]
+pub async fn session_turn_usage(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Vec<SessionTurnUsage>, String> {
+    session_command_impl::session_turn_usage(state, session_id).await
 }
 
 #[tauri::command]

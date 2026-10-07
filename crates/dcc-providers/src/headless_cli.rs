@@ -610,6 +610,7 @@ fn parse_gemini_stream_value(
                 .unwrap_or("success");
             if status == "error" {
                 Some(ProviderEvent::ToolCallFailed {
+                    detail: None,
                     id,
                     reason: value
                         .get("error")
@@ -625,7 +626,7 @@ fn parse_gemini_stream_value(
                     at,
                 })
             } else {
-                Some(ProviderEvent::ToolCallCompleted { id, at })
+                Some(ProviderEvent::ToolCallCompleted { id, detail: None, at })
             }
         }
         "error" => {

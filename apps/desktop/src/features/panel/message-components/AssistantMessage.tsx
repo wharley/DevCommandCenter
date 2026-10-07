@@ -1,5 +1,5 @@
 import {
-	Suspense,
+	memo,
 	useCallback,
 	useMemo,
 	useState,
@@ -22,7 +22,7 @@ import type { ProviderCatalog } from "@dcc/contracts";
 import { StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { LazyStreamdown } from "@/components/streamdown-loader";
+
 import { WorkspaceFileLinkProvider } from "@/components/workspace-file-link-context";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { AgentMascot } from "@/features/providers/agent-mascot";
@@ -55,10 +55,14 @@ import {
 	interruptNativeSubagent,
 	steerNativeSubagent,
 } from "@/lib/session-api";
+import { AssistantProse } from "./AssistantProse";
+import { useSessionTurnUsage } from "@/features/sessions/use-session-turn-usage";
 import {
-	ASSISTANT_STREAMDOWN_SHIKI_THEME,
-	assistantStreamingAnimation,
-} from "./assistant-streaming-rendering";
+	formatElapsed,
+	formatTokenCount,
+	totalTurnTokens,
+	turnDurationMs,
+} from "./turn-activity.logic";
 
 type AssistantStatus = {
 	type: "incomplete";
@@ -74,15 +78,7 @@ type NativeSubagentSupervision = {
 	providerId?: string | null;
 };
 
-function AssistantTextFallback({ text }: { text: string }) {
-	return (
-		<div className="assistant-markdown-scale max-w-none break-words text-foreground">
-			<p className="whitespace-pre-wrap text-[13px] leading-7 text-foreground">
-				{text}
-			</p>
-		</div>
-	);
-}
+
 
 function resolveModelLabel(
 	model: string | null | undefined,
@@ -404,10 +400,69 @@ function NativeSubagentTree({
 	);
 }
 
-export function AssistantMessage({
+function TurnFooter({
+	createdAt,
+	sessionId,
+	turnId,
+	turnStartedAt,
+	turnEndedAt,
+	streaming,
+}: {
+	createdAt?: string;
+	sessionId?: string | null;
+	turnId?: string;
+	turnStartedAt?: string;
+	turnEndedAt?: string;
+	streaming?: boolean;
+}) {
+	const { t } = useTranslation("common");
+	const usageByTurn = useSessionTurnUsage(streaming ? null : sessionId);
+	const tokens = turnId ? totalTurnTokens(usageByTurn.get(turnId)) : null;
+	const duration = streaming ? null : turnDurationMs(turnStartedAt, turnEndedAt);
+	const tokenTitle = tokens
+		? [
+				t("conversation.turnFooter.tokensIn", { value: tokens.input.toLocaleString() }),
+				t("conversation.turnFooter.tokensOut", { value: tokens.output.toLocaleString() }),
+				tokens.cached
+					? t("conversation.turnFooter.tokensCached", { value: tokens.cached.toLocaleString() })
+					: null,
+				tokens.reasoning
+					? t("conversation.turnFooter.tokensReasoning", { value: tokens.reasoning.toLocaleString() })
+					: null,
+				tokens.costUsd != null
+					? t("conversation.turnFooter.cost", { value: tokens.costUsd.toFixed(4) })
+					: null,
+			]
+				.filter(Boolean)
+				.join("\n")
+		: undefined;
+	return (
+		<div className="dcc-turn-footer">
+			<MessageTimestamp createdAt={createdAt} />
+			{duration != null ? (
+				<span data-sep title={t("conversation.turnFooter.durationHint")}>
+					{formatElapsed(duration)}
+				</span>
+			) : null}
+			{tokens ? (
+				<span data-sep title={tokenTitle}>
+					{t("conversation.turnFooter.tokens", {
+						input: formatTokenCount(tokens.input),
+						output: formatTokenCount(tokens.output),
+					})}
+				</span>
+			) : null}
+		</div>
+	);
+}
+
+export const AssistantMessage = memo(function AssistantMessage({
 	content: rawContent,
 	streaming,
 	createdAt,
+	turnId,
+	turnStartedAt,
+	turnEndedAt,
 	status,
 	annotations,
 	plan,
@@ -432,6 +487,9 @@ export function AssistantMessage({
 	content: string;
 	streaming?: boolean;
 	createdAt?: string;
+	turnId?: string;
+	turnStartedAt?: string;
+	turnEndedAt?: string;
 	status?: AssistantStatus;
 	annotations?: WorkspaceMessageAnnotation[];
 	plan?: ParsedPlanContent | null;
@@ -584,9 +642,11 @@ export function AssistantMessage({
 						turnStreaming={streaming}
 						interrupted={status?.type === "incomplete"}
 						waitingForInput={waitingForInput}
-					/>
-				) : null}
-				{nativeSubagentAnnotations.length > 0 ? (
+						startedAt={turnStartedAt}
+						endedAt={turnEndedAt}
+/>
+) : null}
+{nativeSubagentAnnotations.length > 0 ? (
 					<NativeSubagentTree
 						annotations={nativeSubagentAnnotations}
 						providers={providers}
@@ -649,29 +709,21 @@ export function AssistantMessage({
 						activeSpecHash={activeMissionSpecHash}
 					/>
 				) : hasAssistantText ? (
-					<div className={cn("assistant-markdown-scale max-w-none break-words text-foreground")}>
-						<Suspense fallback={<AssistantTextFallback text={content} />}>
-							<LazyStreamdown
-								mode={streaming ? "streaming" : "static"}
-								animated={assistantStreamingAnimation(streaming, content.length)}
-								caret={streaming ? "block" : undefined}
-								className="conversation-streamdown"
-								isAnimating={Boolean(streaming)}
-								shikiTheme={ASSISTANT_STREAMDOWN_SHIKI_THEME}
-							>
-								{content}
-							</LazyStreamdown>
-						</Suspense>
-					</div>
+					<AssistantProse content={content} streaming={Boolean(streaming)} />
 				) : null}
 				{reviewFindings && reviewFindings.length > 0 ? (
 					<ReviewFindingsCard sessionId={sessionId} findings={reviewFindings} />
 				) : reviewFindings ? (
 					<p className="mt-2 text-[12px] text-muted-foreground">{t("agents.review.clean")}</p>
 				) : null}
-				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
-					<MessageTimestamp createdAt={createdAt} />
-				</div>
+				<TurnFooter
+					createdAt={createdAt}
+					sessionId={sessionId}
+					turnId={turnId}
+					turnStartedAt={turnStartedAt}
+					turnEndedAt={turnEndedAt}
+					streaming={streaming}
+				/>
 				{status?.type === "incomplete" ? (
 					<div className="mt-2 flex max-w-2xl flex-wrap items-start gap-2.5 rounded-lg border border-destructive/20 bg-destructive/[0.045] px-3 py-2.5">
 						<AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
@@ -754,4 +806,4 @@ export function AssistantMessage({
 			</div>
 		</WorkspaceFileLinkProvider>
 	);
-}
+});

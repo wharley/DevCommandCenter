@@ -551,6 +551,9 @@ function getCoreEventSessionId(event: CoreEvent): string | null {
 	if ("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) {
 		return event.sessionTurnToolCallDelta.session_id;
 	}
+	if ("sessionTurnToolCallUpdated" in event && event.sessionTurnToolCallUpdated) {
+		return event.sessionTurnToolCallUpdated.session_id;
+	}
 	if ("sessionTurnToolCallCompleted" in event && event.sessionTurnToolCallCompleted) {
 		return event.sessionTurnToolCallCompleted.session_id;
 	}

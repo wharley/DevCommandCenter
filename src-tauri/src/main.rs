@@ -7290,6 +7290,7 @@ pub fn run() {
             session_commands::list_workspace_sessions,
             session_commands::search_sessions,
             session_commands::usage_dashboard,
+            session_commands::session_turn_usage,
             session_commands::respond_to_user_input,
             session_commands::respond_to_permission_request
         ])

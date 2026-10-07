@@ -388,6 +388,7 @@ export const SESSION_EVENT_NAMES = [
 	"dcc/session/turn/reasoning/completed",
 	"dcc/session/turn/tool-call/started",
 	"dcc/session/turn/tool-call/delta",
+	"dcc/session/turn/tool-call/updated",
 	"dcc/session/turn/tool-call/completed",
 	"dcc/session/turn/tool-call/failed",
 	"dcc/session/turn/user-input/requested",

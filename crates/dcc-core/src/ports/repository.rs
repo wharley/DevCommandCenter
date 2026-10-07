@@ -18,7 +18,7 @@ use crate::{
         repository::{Repository, RepositoryId},
         session::{Session, SessionEventKind, SessionEventRecord, SessionId, TurnId},
         thread::{Thread, ThreadId},
-        usage::{ModelTokenUsage, UsageDashboard, UsageDashboardInput},
+        usage::{ModelTokenUsage, SessionTurnUsage, UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
         workspace_bundle::{
             WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
@@ -224,6 +224,12 @@ pub trait UsageRepo: Send + Sync {
         models: &[ModelTokenUsage],
     ) -> Result<()>;
     async fn usage_dashboard(&self, input: &UsageDashboardInput) -> Result<UsageDashboard>;
+    async fn list_session_turn_usage(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<SessionTurnUsage>> {
+        Ok(Vec::new())
+    }
 }
 
 #[async_trait]

@@ -1,315 +1,288 @@
-import { memo, useId, useMemo, useRef, useState } from "react";
-import {
-	Activity,
-	AlertCircle,
-	ChevronDown,
-	ChevronRight,
-	MessageSquare,
-	PauseCircle,
-} from "lucide-react";
+import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { AlertCircle, Brain, ChevronRight, PauseCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
-import { ToolCall } from "@/components/ai/tool-call";
+import { ToolCallRow } from "@/components/ai/tool-call";
 import { Reasoning } from "@/components/ai/reasoning";
+import type { AssistantActivityAnnotation } from "./assistant-activity-disclosure";
+import { AssistantProse } from "./AssistantProse";
 import {
-	ASSISTANT_ACTIVITY_PAGE_SIZE,
-	classifyAssistantActivityAction,
-	selectAssistantActivity,
-	summarizeAssistantActivity,
-	type AssistantActivityAnnotation,
-	type ActivityFilter,
-} from "./assistant-activity-disclosure";
+	formatElapsed,
+	segmentTurn,
+	summarizeTurnWork,
+	SUMMARY_KIND_ORDER,
+	turnDurationMs,
+	type TurnSegment,
+} from "./turn-activity.logic";
 import "./assistant-activity.css";
 
+type WorkItem = Extract<TurnSegment, { type: "work" }>["items"][number];
+
+/** Long runs show their most recent steps; older ones are one click away. */
+const RUN_PAGE_SIZE = 30;
+
+/**
+ * Ticks without React commits: the clock writes its own text node, so a
+ * running turn does not re-render the transcript every second.
+ */
+function ElapsedClock({ since }: { since: number }) {
+	const ref = useRef<HTMLSpanElement>(null);
+	useEffect(() => {
+		const update = () => {
+			if (ref.current) ref.current.textContent = formatElapsed(Date.now() - since);
+		};
+		update();
+		const timer = window.setInterval(update, 1000);
+		return () => window.clearInterval(timer);
+	}, [since]);
+	return <span ref={ref} className="dcc-turn-clock" />;
+}
+
+function WorkItemRow({ item, live }: { item: WorkItem; live: boolean }) {
+	const { t } = useTranslation("common");
+	if (item.type === "tool-call") return <ToolCallRow annotation={item} live={live} />;
+	const thinking = live && Boolean(item.streaming);
+	return (
+		<div className="dcc-turn-thought">
+			<Reasoning
+				label={
+					thinking
+						? t("conversation.activity.turn.thinking")
+						: item.label && item.label !== "Thinking"
+							? item.label
+							: t("conversation.activity.turn.thought")
+				}
+				defaultOpen={false}
+			>
+				<div className="whitespace-pre-wrap break-words">
+					{item.content.trim() || t("conversation.reasoning.empty")}
+				</div>
+			</Reasoning>
+		</div>
+	);
+}
+
+function WorkRunList({ items, live }: { items: WorkItem[]; live: boolean }) {
+	const { t } = useTranslation("common");
+	const [limit, setLimit] = useState(RUN_PAGE_SIZE);
+	const hidden = Math.max(0, items.length - limit);
+	const visible = hidden > 0 ? items.slice(-limit) : items;
+	return (
+		<div className="dcc-turn-run-list">
+			{hidden > 0 ? (
+				<button
+					type="button"
+					className="dcc-turn-earlier"
+					onClick={() => setLimit((value) => value + RUN_PAGE_SIZE)}
+				>
+					{t("conversation.activity.timeline.earlier", {
+						count: Math.min(RUN_PAGE_SIZE, hidden),
+					})}
+				</button>
+			) : null}
+			{visible.map((item) => (
+				<WorkItemRow key={`${item.type}:${item.id}`} item={item} live={live} />
+			))}
+		</div>
+	);
+}
+
+/** A burst of work while the turn runs: one line wearing the latest step. */
+function LiveWorkRun({ items, live, isLast }: { items: WorkItem[]; live: boolean; isLast: boolean }) {
+	const { t } = useTranslation("common");
+	const [open, setOpen] = useState(false);
+	const latest = items.at(-1);
+	if (!latest) return null;
+	const active = live && isLast;
+	if (open) {
+		return (
+			<div className="dcc-turn-run" data-open="true">
+				<button
+					type="button"
+					className="dcc-turn-run-toggle"
+					aria-expanded
+					onClick={() => setOpen(false)}
+				>
+					<ChevronRight className="size-3 rotate-90" aria-hidden />
+					{t("conversation.activity.turn.steps", { count: items.length })}
+				</button>
+				<WorkRunList items={items} live={active} />
+			</div>
+		);
+	}
+	return (
+		<div className="dcc-turn-run" data-open="false">
+			<div className="dcc-turn-run-current">
+				<WorkItemRow item={latest} live={active} />
+			</div>
+			{items.length > 1 ? (
+				<button
+					type="button"
+					className="dcc-turn-run-more"
+					aria-expanded={false}
+					onClick={() => setOpen(true)}
+				>
+					{t("conversation.activity.turn.moreSteps", { count: items.length - 1 })}
+				</button>
+			) : null}
+		</div>
+	);
+}
+
+function useTurnSummary(annotations: readonly AssistantActivityAnnotation[]) {
+	const { t } = useTranslation("common");
+	return useMemo(() => {
+		const summary = summarizeTurnWork(annotations);
+		const parts: string[] = [];
+		for (const kind of SUMMARY_KIND_ORDER) {
+			const count = kind === "edit" ? summary.editedFiles : (summary.counts[kind] ?? 0);
+			if (count > 0) parts.push(t(`conversation.activity.turn.parts.${kind}`, { count }));
+		}
+		if (parts.length === 0 && summary.thoughts > 0) {
+			parts.push(t("conversation.activity.turn.parts.thoughts", { count: summary.thoughts }));
+		}
+		return { text: parts.join(", "), failures: summary.failures };
+	}, [annotations, t]);
+}
+
+/**
+ * The status line names the phase only; the current step itself is already
+ * on the live work row right above it.
+ */
+function liveStatusLabel(
+	segments: TurnSegment[],
+	t: ReturnType<typeof useTranslation>["t"],
+): string {
+	const last = segments.at(-1);
+	if (!last || last.type === "prose") return t("conversation.activity.turn.writing");
+	const item = last.items.at(-1);
+	if (item?.type === "reasoning" && item.streaming) return t("conversation.activity.turn.thinking");
+	return t("conversation.activity.turn.working");
+}
+
+/**
+ * Everything the agent did in a turn besides its final answer.
+ *
+ * While the turn runs, narration is shown as it streams and each burst of work
+ * is a single line showing the current step. Once it settles, all of it folds
+ * behind "Worked for 1m 12s · edited 2 files, ran 3 commands".
+ */
 export const AssistantActivity = memo(function AssistantActivity({
 	annotations,
 	turnStreaming,
 	interrupted = false,
 	waitingForInput = false,
+	startedAt,
+	endedAt,
 }: {
 	annotations: AssistantActivityAnnotation[];
 	turnStreaming?: boolean;
 	interrupted?: boolean;
 	waitingForInput?: boolean;
+	startedAt?: string;
+	endedAt?: string;
 }) {
 	const { t } = useTranslation("common");
-	const summary = useMemo(
-		() =>
-			summarizeAssistantActivity(
-				annotations,
-				turnStreaming,
-				interrupted,
-				waitingForInput,
-			),
-		[annotations, turnStreaming, interrupted, waitingForInput],
-	);
-	// Keep the live activity compact by default. The latest record remains
-	// visible in the summary row, and the user can expand the full timeline.
-	const [isOpen, setIsOpen] = useState(false);
-	const [filter, setFilter] = useState<ActivityFilter>("all");
-	const [limit, setLimit] = useState(ASSISTANT_ACTIVITY_PAGE_SIZE);
-	const manualRef = useRef(false);
-	const readingBaselineRef = useRef(annotations.length);
-	const markManual = () => {
-		if (!manualRef.current) readingBaselineRef.current = annotations.length;
-		manualRef.current = true;
-	};
+	const live =
+		!interrupted && (turnStreaming ?? annotations.some((item) => item.streaming));
+	const segments = useMemo(() => segmentTurn(annotations), [annotations]);
+	const summary = useTurnSummary(annotations);
+	const [open, setOpen] = useState(false);
 	const contentId = useId();
-	// Retain already visible entries while the user reads and new events arrive.
-	const visibleLimit =
-		limit +
-		(manualRef.current
-			? Math.max(0, annotations.length - readingBaselineRef.current)
-			: 0);
-	const windowed = useMemo(
-		() => selectAssistantActivity(annotations, filter, visibleLimit),
-		[annotations, filter, visibleLimit],
-	);
-	const changeFilter = (value: ActivityFilter) => {
-		markManual();
-		readingBaselineRef.current = annotations.length;
-		setFilter(value);
-		setLimit(ASSISTANT_ACTIVITY_PAGE_SIZE);
-		setIsOpen(true);
-	};
-	const latest = summary.latest;
-	const preview =
-		latest?.type === "tool-call"
-			? getToolActionLabel(latest.action, t)
-			: latest?.content.trim() ||
-				(latest?.type === "reasoning"
-					? latest.label || t("conversation.reasoning.label")
-					: "");
-	const counts = {
-		all: annotations.length,
-		tools: summary.tools,
-		updates: summary.updates,
-		failures: summary.failures,
-	};
-	const running = summary.state === "running";
-	return (
-		<div
-			className="dcc-assistant-activity dcc-activity-timeline"
-			data-live={summary.live ? "true" : "false"}
-			data-state={isOpen ? "open" : "closed"}
-			onPointerDown={markManual}
-			onFocusCapture={markManual}
-		>
-			<div className="dcc-activity-heading">
-				<span
-					className="dcc-activity-mark"
-					data-status={summary.state}
-					aria-hidden
-				>
-					{running ? (
-						<DccThinkingIndicator size={15} />
-					) : summary.state === "waiting" ? (
-						<PauseCircle size={16} />
-					) : interrupted ? (
-						<AlertCircle size={16} />
+	const mountedAtRef = useRef(Date.now());
+	const liveSince = useMemo(() => {
+		const parsed = startedAt ? Date.parse(startedAt) : Number.NaN;
+		if (Number.isFinite(parsed)) return parsed;
+		const first = annotations.find((item) => item.createdAt)?.createdAt;
+		const firstParsed = first ? Date.parse(first) : Number.NaN;
+		return Number.isFinite(firstParsed) ? firstParsed : mountedAtRef.current;
+	}, [annotations, startedAt]);
+
+	if (live) {
+		return (
+			<div className="dcc-turn dcc-turn-live" data-waiting={waitingForInput ? "true" : "false"}>
+				{segments.map((segment, index) =>
+					segment.type === "prose" ? (
+						<AssistantProse
+							key={segment.key}
+							content={segment.annotation.content}
+							streaming={Boolean(segment.annotation.streaming) && index === segments.length - 1}
+							className="dcc-turn-prose"
+						/>
 					) : (
-						<Activity size={16} />
-					)}
-				</span>
-				<div className="dcc-activity-heading-copy">
-					<span className="dcc-activity-title" role="status">
-						{t(`conversation.activity.timeline.${summary.state}`)}
-					</span>
-					<span className="dcc-activity-total">
-						{t("conversation.activity.timeline.records", {
-							count: annotations.length,
-						})}
-					</span>
-				</div>
-				{summary.failures > 0 && (
-					<button
-						type="button"
-						className="dcc-activity-failures"
-						onClick={() => changeFilter("failures")}
-						aria-label={t("conversation.activity.timeline.showFailures", {
-							count: summary.failures,
-						})}
-					>
-						<AlertCircle size={12} aria-hidden />
-						{t("conversation.activity.failed", { count: summary.failures })}
-					</button>
+						<LiveWorkRun
+							key={segment.key}
+							items={segment.items}
+							live={live}
+							isLast={index === segments.length - 1}
+						/>
+					),
 				)}
-				<button
-					type="button"
-					className="dcc-activity-toggle"
-					aria-expanded={isOpen}
-					aria-controls={contentId}
-					aria-label={t(
-						isOpen
-							? "conversation.activity.timeline.collapse"
-							: "conversation.activity.timeline.expand",
+				<div className="dcc-turn-status" role="status">
+					{waitingForInput ? (
+						<PauseCircle className="size-3.5 shrink-0" aria-hidden />
+					) : (
+						<DccThinkingIndicator size={13} />
 					)}
-					onClick={() => {
-						markManual();
-						setIsOpen((value) => !value);
-					}}
-				>
-					<ChevronDown
-						size={16}
-						className={isOpen ? "rotate-180" : ""}
-						aria-hidden
-					/>
-				</button>
+					<span className="dcc-turn-status-label">
+						{waitingForInput
+							? t("conversation.activity.timeline.waiting")
+							: liveStatusLabel(segments, t)}
+					</span>
+					<ElapsedClock since={liveSince} />
+				</div>
 			</div>
-			{preview && (
-				<div className="dcc-activity-latest">
-					<span>{t("conversation.activity.timeline.latest")}</span>
-					<p>
-						{preview.slice(0, 280)}
-						{preview.length > 280 ? "…" : ""}
-					</p>
-				</div>
-			)}
-			{summary.failures > 0 && (
-				<p className="dcc-activity-attention">
-					<AlertCircle size={13} aria-hidden />
-					{t("conversation.activity.timeline.attention", {
-						count: summary.failures,
-					})}
-				</p>
-			)}
-			{isOpen && (
-				<div id={contentId} className="dcc-activity-body">
-					<div
-						className="dcc-activity-filters"
-						role="group"
-						aria-label={t("conversation.activity.timeline.filterLabel")}
-					>
-						{(["all", "tools", "updates", "failures"] as const).map((value) => (
-							<button
-								type="button"
-								key={value}
-								aria-pressed={filter === value}
-								onClick={() => changeFilter(value)}
-							>
-								{t(`conversation.activity.timeline.filters.${value}`)}
-								<span>{counts[value]}</span>
-							</button>
-						))}
-					</div>
-					{windowed.hidden > 0 && (
-						<button
-							type="button"
-							className="dcc-activity-earlier"
-							onClick={() => {
-								markManual();
-								setLimit((value) => value + ASSISTANT_ACTIVITY_PAGE_SIZE);
-							}}
-						>
-							<ChevronRight size={13} aria-hidden />
-							{t("conversation.activity.timeline.earlier", {
-								count: Math.min(ASSISTANT_ACTIVITY_PAGE_SIZE, windowed.hidden),
-							})}
-							<span>
-								{t("conversation.activity.timeline.remaining", {
-									count: windowed.hidden,
-								})}
-							</span>
-						</button>
-					)}
-					<ol
-						className="dcc-activity-steps"
-						aria-label={t("conversation.activity.timeline.steps")}
-					>
-						{windowed.entries.map(({ annotation, index }) => (
-							<li
-								key={`${annotation.type}:${annotation.id}`}
-								className="dcc-activity-step"
-								data-activity-id={annotation.id}
-							>
-								<span className="dcc-activity-ordinal" aria-hidden>
-									{String(index + 1).padStart(2, "0")}
-								</span>
-								<div className="dcc-activity-step-content">
-									<ActivityEntry
-										annotation={annotation}
-										live={summary.live && !waitingForInput}
-									/>
-								</div>
-							</li>
-						))}
-					</ol>
-					{!windowed.total && (
-						<p className="dcc-activity-empty" role="status">
-							{t("conversation.activity.timeline.empty")}
-						</p>
+		);
+	}
+
+	const duration = turnDurationMs(startedAt, endedAt);
+	const title = interrupted
+		? duration != null
+			? t("conversation.activity.turn.interrupted", { duration: formatElapsed(duration) })
+			: t("conversation.activity.turn.interruptedNoDuration")
+		: duration != null
+			? t("conversation.activity.turn.worked", { duration: formatElapsed(duration) })
+			: t("conversation.activity.turn.workedNoDuration");
+
+	return (
+		<div className="dcc-turn dcc-turn-settled" data-open={open ? "true" : "false"}>
+			<button
+				type="button"
+				className="dcc-turn-fold"
+				aria-expanded={open}
+				aria-controls={contentId}
+				onClick={() => setOpen((value) => !value)}
+			>
+				<ChevronRight className="dcc-turn-fold-chevron size-3.5 shrink-0" aria-hidden />
+				{interrupted ? (
+					<AlertCircle className="size-3.5 shrink-0" aria-hidden />
+				) : summary.text ? null : (
+					<Brain className="size-3.5 shrink-0" aria-hidden />
+				)}
+				<span className="dcc-turn-fold-title">{title}</span>
+				{summary.text ? <span className="dcc-turn-fold-summary">· {summary.text}</span> : null}
+				{summary.failures > 0 ? (
+					<span className="dcc-turn-fold-failures">
+						<AlertCircle className="size-3" aria-hidden />
+						{t("conversation.activity.failed", { count: summary.failures })}
+					</span>
+				) : null}
+			</button>
+			{open ? (
+				<div id={contentId} className="dcc-turn-body">
+					{segments.map((segment) =>
+						segment.type === "prose" ? (
+							<AssistantProse
+								key={segment.key}
+								content={segment.annotation.content}
+								className="dcc-turn-prose dcc-turn-prose-folded"
+							/>
+						) : (
+							<WorkRunList key={segment.key} items={segment.items} live={false} />
+						),
 					)}
 				</div>
-			)}
+			) : null}
 		</div>
 	);
 });
-
-function ActivityEntry({
-	annotation,
-	live,
-}: {
-	annotation: AssistantActivityAnnotation;
-	live: boolean;
-}) {
-	const { t } = useTranslation("common");
-	if (annotation.type === "commentary")
-		return (
-			<div className="dcc-activity-commentary">
-				<div>
-					<MessageSquare size={13} aria-hidden />
-					<span>{t("conversation.commentary.label")}</span>
-				</div>
-				<p>{annotation.content}</p>
-			</div>
-		);
-	if (annotation.type === "reasoning")
-		return (
-			<Reasoning
-				label={annotation.label ?? t("conversation.reasoning.label")}
-				defaultOpen={live && Boolean(annotation.streaming)}
-			>
-				<div className="whitespace-pre-wrap break-words">
-					{annotation.content.trim() ||
-						t(
-							live && annotation.streaming
-								? "conversation.reasoning.label"
-								: "conversation.reasoning.empty",
-						)}
-				</div>
-			</Reasoning>
-		);
-	const failed = annotation.status?.type === "failed";
-	return (
-		<ToolCall
-			action={getToolActionLabel(annotation.action, t)}
-			command={annotation.command}
-			file={annotation.file}
-			isLive={!failed && live && Boolean(annotation.streaming)}
-			isError={failed}
-			isUnfinished={!failed && !live && Boolean(annotation.streaming)}
-		>
-			<div className="min-w-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-5">
-				{annotation.content.trim()
-					? annotation.content.trimEnd()
-					: failed
-						? (annotation.status?.reason ??
-							t("conversation.toolCall.failedFallback"))
-						: live && annotation.streaming
-							? t("conversation.toolCall.running")
-							: t("conversation.toolCall.noOutput")}
-			</div>
-		</ToolCall>
-	);
-}
-
-function getToolActionLabel(
-	action: string,
-	t: ReturnType<typeof useTranslation>["t"],
-) {
-	const kind = classifyAssistantActivityAction(action);
-	if (kind) return t(`conversation.activity.timeline.actions.${kind}`);
-	return /\s/.test(action.trim())
-		? action
-		: t("conversation.activity.timeline.actions.generic");
-}

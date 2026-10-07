@@ -51,7 +51,7 @@ use dcc_core::{
             SessionSearchResult, TurnChangeSet, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
-        usage::{ModelTokenUsage, UsageDashboard, UsageDashboardInput},
+        usage::{ModelTokenUsage, SessionTurnUsage, UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
         workspace_bundle::WorkspaceBundleState,
     },
@@ -2585,6 +2585,10 @@ impl SessionCommandState {
 
     pub async fn usage_dashboard(&self, input: &UsageDashboardInput) -> Result<UsageDashboard> {
         UsageRepo::usage_dashboard(&self.session_repo, input).await
+    }
+
+    pub async fn session_turn_usage(&self, session_id: &SessionId) -> Result<Vec<SessionTurnUsage>> {
+        UsageRepo::list_session_turn_usage(&self.session_repo, session_id).await
     }
 
     async fn record_turn_usage(
@@ -5264,7 +5268,10 @@ impl SessionCommandState {
     ) {
         let state = self.clone();
         tokio::spawn(async move {
-            let mut events = provider.stream_events(&binding.handle);
+            let mut events = crate::provider_delta_coalescer::coalesce_provider_deltas(
+                provider.stream_events(&binding.handle),
+                crate::provider_delta_coalescer::DEFAULT_DELTA_WINDOW,
+            );
 
             while let Some(event) = events.next().await {
                 match event {
@@ -5730,28 +5737,54 @@ impl SessionCommandState {
                                 .await;
                         }
                     }
-                    Ok(ProviderEvent::ToolCallCompleted { id, .. }) => {
+                    Ok(ProviderEvent::ToolCallUpdated { id, detail, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
+                            let detail = detail.bounded();
                             let _ = state
-								.append_and_publish_session_event(
-									&session_id,
-									SessionEventKind::TurnToolCallCompleted {
-										turn_id: TurnId(turn_id.clone()),
-										tool_call_id: id.clone(),
-									},
-									dcc_core::ports::events::CoreEvent::SessionTurnToolCallCompleted {
-										session_id: session_id.0.clone(),
-										turn_id,
-										tool_call_id: id,
-									},
-								)
-								.await;
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnToolCallUpdated {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        tool_call_id: id.clone(),
+                                        detail: detail.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnToolCallUpdated {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        tool_call_id: id,
+                                        detail,
+                                    },
+                                )
+                                .await;
                         }
                     }
-                    Ok(ProviderEvent::ToolCallFailed { id, reason, .. }) => {
+                    Ok(ProviderEvent::ToolCallCompleted { id, detail, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
+                            let detail = detail.map(dcc_core::domain::provider::ToolCallDetail::bounded);
+                            let _ = state
+                                .append_and_publish_session_event(
+                                    &session_id,
+                                    SessionEventKind::TurnToolCallCompleted {
+                                        turn_id: TurnId(turn_id.clone()),
+                                        tool_call_id: id.clone(),
+                                        detail: detail.clone(),
+                                    },
+                                    dcc_core::ports::events::CoreEvent::SessionTurnToolCallCompleted {
+                                        session_id: session_id.0.clone(),
+                                        turn_id,
+                                        tool_call_id: id,
+                                        detail,
+                                    },
+                                )
+                                .await;
+                        }
+                    }
+                    Ok(ProviderEvent::ToolCallFailed { id, reason, detail, .. }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        if let Some(turn_id) = turn_id {
+                            let detail = detail.map(dcc_core::domain::provider::ToolCallDetail::bounded);
                             let _ = state
                                 .append_and_publish_session_event(
                                     &session_id,
@@ -5759,12 +5792,14 @@ impl SessionCommandState {
                                         turn_id: TurnId(turn_id.clone()),
                                         tool_call_id: id.clone(),
                                         reason: reason.clone(),
+                                        detail: detail.clone(),
                                     },
                                     dcc_core::ports::events::CoreEvent::SessionTurnToolCallFailed {
                                         session_id: session_id.0.clone(),
                                         turn_id,
                                         tool_call_id: id,
                                         reason,
+                                        detail,
                                     },
                                 )
                                 .await;

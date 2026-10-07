@@ -16,6 +16,14 @@ pub struct ModelTokenUsage {
     pub cost_usd: Option<f64>,
 }
 
+/// Exact provider-reported usage of one turn, for the per-turn footer.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTurnUsage {
+    pub turn_id: String,
+    pub models: Vec<ModelTokenUsage>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageDashboardInput {

@@ -3691,6 +3691,42 @@
       "user": "Usuário"
     },
     "activity": {
+      "turn": {
+        "working": "Trabalhando",
+        "writing": "Escrevendo",
+        "thinking": "Pensando",
+        "thought": "Pensou",
+        "worked": "Trabalhou por {{duration}}",
+        "workedNoDuration": "Trabalho do agente",
+        "interrupted": "Interrompido após {{duration}}",
+        "interruptedNoDuration": "Interrompido",
+        "steps_one": "{{count}} passo",
+        "steps_other": "{{count}} passos",
+        "moreSteps_one": "+{{count}} passo antes",
+        "moreSteps_other": "+{{count}} passos antes",
+        "parts": {
+          "edit_one": "editou {{count}} arquivo",
+          "edit_other": "editou {{count}} arquivos",
+          "command_one": "rodou {{count}} comando",
+          "command_other": "rodou {{count}} comandos",
+          "read_one": "leu {{count}} arquivo",
+          "read_other": "leu {{count}} arquivos",
+          "search_one": "fez {{count}} busca",
+          "search_other": "fez {{count}} buscas",
+          "web_one": "{{count}} pesquisa na web",
+          "web_other": "{{count}} pesquisas na web",
+          "mcp_one": "usou {{count}} ferramenta externa",
+          "mcp_other": "usou {{count}} ferramentas externas",
+          "agent_one": "delegou {{count}} tarefa",
+          "agent_other": "delegou {{count}} tarefas",
+          "plan_one": "atualizou o plano",
+          "plan_other": "atualizou o plano {{count}} vezes",
+          "other_one": "{{count}} outra ação",
+          "other_other": "{{count}} outras ações",
+          "thoughts_one": "pensou",
+          "thoughts_other": "pensou {{count}} vezes"
+        }
+      },
       "timeline": {
         "running": "Agente trabalhando",
         "waiting": "Aguardando você",
@@ -3772,11 +3808,65 @@
       "open": "Abrir {{path}} no Code Dock",
       "openAtPosition": "Abrir {{path}} no Code Dock em {{position}}"
     },
+    "turnFooter": {
+      "tokens": "{{input}} entrada · {{output}} saída",
+      "tokensIn": "Entrada: {{value}} tokens",
+      "tokensOut": "Saída: {{value}} tokens",
+      "tokensCached": "Do cache: {{value}} tokens",
+      "tokensReasoning": "Raciocínio: {{value}} tokens",
+      "cost": "Custo informado: US$ {{value}}",
+      "durationHint": "Duração do turno"
+    },
     "toolCall": {
       "running": "Executando",
       "failed": "Falhou",
       "failedFallback": "A execução falhou",
-      "noOutput": "Nenhuma saída capturada."
+      "noOutput": "Nenhuma saída capturada.",
+      "command": "Comando",
+      "changes": "Alterações",
+      "output": "Saída",
+      "input": "Parâmetros",
+      "copy": "Copiar",
+      "exitCode": "código {{code}}",
+      "truncated": "Saída longa: mostrando o começo e o fim.",
+      "verbs": {
+        "command": {
+          "live": "Rodando",
+          "done": "Rodou"
+        },
+        "edit": {
+          "live": "Editando",
+          "done": "Editou"
+        },
+        "read": {
+          "live": "Lendo",
+          "done": "Leu"
+        },
+        "search": {
+          "live": "Buscando",
+          "done": "Buscou"
+        },
+        "web": {
+          "live": "Pesquisando",
+          "done": "Pesquisou"
+        },
+        "plan": {
+          "live": "Atualizando o plano",
+          "done": "Atualizou o plano"
+        },
+        "agent": {
+          "live": "Delegando",
+          "done": "Delegou"
+        },
+        "mcp": {
+          "live": "Usando",
+          "done": "Usou"
+        },
+        "other": {
+          "live": "Usando",
+          "done": "Usou"
+        }
+      }
     },
     "permission": {
       "label": "Autorização",

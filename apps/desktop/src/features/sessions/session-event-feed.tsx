@@ -32,6 +32,7 @@ function eventSessionId(event: CoreEvent): string | null {
 			event.sessionTurnReasoningCompleted) ||
 		("sessionTurnToolCallStarted" in event && event.sessionTurnToolCallStarted) ||
 		("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) ||
+		("sessionTurnToolCallUpdated" in event && event.sessionTurnToolCallUpdated) ||
 		("sessionTurnToolCallCompleted" in event &&
 			event.sessionTurnToolCallCompleted) ||
 		("sessionTurnToolCallFailed" in event && event.sessionTurnToolCallFailed) ||
@@ -66,6 +67,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionTurnReasoningCompleted" in event) return "session.turn.reasoning.completed";
 	if ("sessionTurnToolCallStarted" in event) return "session.turn.tool-call.started";
 	if ("sessionTurnToolCallDelta" in event) return "session.turn.tool-call.delta";
+	if ("sessionTurnToolCallUpdated" in event) return "session.turn.tool-call.updated";
 	if ("sessionTurnToolCallCompleted" in event) return "session.turn.tool-call.completed";
 	if ("sessionTurnToolCallFailed" in event) return "session.turn.tool-call.failed";
 	if ("sessionTurnNativeSubagentActivity" in event)

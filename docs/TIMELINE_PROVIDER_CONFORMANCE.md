@@ -21,6 +21,35 @@ Providers without message lifecycle continue to emit `TextDelta`. The Tauri
 normalizer creates a stable synthetic item and closes it at semantic boundaries
 such as reasoning, tool calls, permissions, user input, and turn completion.
 
+## Tool-call contract
+
+1. `ToolCallStarted` with the provider's call ID, tool name and whatever
+   command/file is already known.
+2. `ToolCallDelta` carries streamed **output** only (stdout, progress text).
+   Raw tool input is never sent as a delta: Claude's `input_json_delta`
+   fragments are buffered in the adapter.
+3. `ToolCallUpdated { detail }` when structured facts become known mid-flight,
+   for example the command or edit diff once Claude's streamed input closes.
+4. `ToolCallCompleted` / `ToolCallFailed` with an optional `detail` holding the
+   result: output text, exit code and unified diff.
+
+`ToolCallDetail` fields are all optional and merge (later non-empty fields win).
+Every adapter bounds them through `ToolCallDetail::bounded`: input 8K chars,
+output 8K head + 16K tail, diff 64K. Sources:
+
+| Provider path | Command / file | Output | Exit code | Diff |
+| --- | --- | --- | --- | --- |
+| Claude Agent SDK | Buffered tool input at block stop | `tool_result` content; Bash `stdout`/`stderr` | — | Edit/MultiEdit/Write input, then SDK `structuredPatch` |
+| Codex app-server | `item/started` | `item/commandExecution/outputDelta`, then `aggregatedOutput` | `exitCode` | `fileChange.changes[].diff` |
+| ACP (Cursor, Grok, Antigravity) | `rawInput` | `content` text blocks or `rawOutput` | `rawOutput.exitCode` | `content` diff blocks |
+
+## Streaming persistence
+
+The Tauri bridge merges consecutive deltas of the same item that arrive within
+50 ms (`provider_delta_coalescer`) before they reach the durable log. Any other
+event closes the window immediately, so ordering and terminal latency are
+unchanged.
+
 ## Current provider matrix
 
 | Provider path | Identity | Streaming | Authoritative completion | Phase | Notes |
@@ -56,3 +85,8 @@ providers remain `Unknown`; after the turn settles, the timeline selects the
 explicit `final_answer` when present, otherwise the last non-empty assistant
 message. Earlier assistant messages are retained as commentary annotations,
 not deleted.
+
+While a turn runs, commentary is rendered inline in execution order between
+bursts of work, so text is visible as it streams for every provider. Once the
+turn settles, everything except the final answer folds behind one
+"Worked for …" row with a one-line summary of the work.

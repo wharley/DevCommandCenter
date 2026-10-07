@@ -3691,6 +3691,42 @@
       "user": "User"
     },
     "activity": {
+      "turn": {
+        "working": "Working",
+        "writing": "Writing",
+        "thinking": "Thinking",
+        "thought": "Thought",
+        "worked": "Worked for {{duration}}",
+        "workedNoDuration": "Agent work",
+        "interrupted": "Stopped after {{duration}}",
+        "interruptedNoDuration": "Stopped",
+        "steps_one": "{{count}} step",
+        "steps_other": "{{count}} steps",
+        "moreSteps_one": "+{{count}} earlier step",
+        "moreSteps_other": "+{{count}} earlier steps",
+        "parts": {
+          "edit_one": "edited {{count}} file",
+          "edit_other": "edited {{count}} files",
+          "command_one": "ran {{count}} command",
+          "command_other": "ran {{count}} commands",
+          "read_one": "read {{count}} file",
+          "read_other": "read {{count}} files",
+          "search_one": "ran {{count}} search",
+          "search_other": "ran {{count}} searches",
+          "web_one": "{{count}} web lookup",
+          "web_other": "{{count}} web lookups",
+          "mcp_one": "used {{count}} external tool",
+          "mcp_other": "used {{count}} external tools",
+          "agent_one": "delegated {{count}} task",
+          "agent_other": "delegated {{count}} tasks",
+          "plan_one": "updated the plan",
+          "plan_other": "updated the plan {{count}} times",
+          "other_one": "{{count}} other action",
+          "other_other": "{{count}} other actions",
+          "thoughts_one": "thought",
+          "thoughts_other": "thought {{count}} times"
+        }
+      },
       "timeline": {
         "running": "Agent working",
         "waiting": "Waiting for you",
@@ -3772,11 +3808,65 @@
       "open": "Open {{path}} in Code Dock",
       "openAtPosition": "Open {{path}} in Code Dock at {{position}}"
     },
+    "turnFooter": {
+      "tokens": "{{input}} in · {{output}} out",
+      "tokensIn": "Input: {{value}} tokens",
+      "tokensOut": "Output: {{value}} tokens",
+      "tokensCached": "From cache: {{value}} tokens",
+      "tokensReasoning": "Reasoning: {{value}} tokens",
+      "cost": "Reported cost: US$ {{value}}",
+      "durationHint": "Turn duration"
+    },
     "toolCall": {
       "running": "Running",
       "failed": "Failed",
       "failedFallback": "Tool call failed",
-      "noOutput": "No output captured."
+      "noOutput": "No output captured.",
+      "command": "Command",
+      "changes": "Changes",
+      "output": "Output",
+      "input": "Parameters",
+      "copy": "Copy",
+      "exitCode": "exit {{code}}",
+      "truncated": "Long output: showing the beginning and the end.",
+      "verbs": {
+        "command": {
+          "live": "Running",
+          "done": "Ran"
+        },
+        "edit": {
+          "live": "Editing",
+          "done": "Edited"
+        },
+        "read": {
+          "live": "Reading",
+          "done": "Read"
+        },
+        "search": {
+          "live": "Searching",
+          "done": "Searched"
+        },
+        "web": {
+          "live": "Researching",
+          "done": "Researched"
+        },
+        "plan": {
+          "live": "Updating the plan",
+          "done": "Updated the plan"
+        },
+        "agent": {
+          "live": "Delegating",
+          "done": "Delegated"
+        },
+        "mcp": {
+          "live": "Using",
+          "done": "Used"
+        },
+        "other": {
+          "live": "Using",
+          "done": "Used"
+        }
+      }
     },
     "permission": {
       "label": "Approval",

@@ -22,6 +22,116 @@ pub enum NativeSubagentStatus {
     Failed,
 }
 
+/// What a tool call actually did, as reported by the provider. Every field is
+/// optional because providers expose different subsets; consumers merge the
+/// non-empty fields of successive updates for the same tool call.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallDetail {
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub file: Option<String>,
+    /// Final tool input, pretty-printed JSON, bounded.
+    #[serde(default)]
+    pub input: Option<String>,
+    /// Tool result text (stdout/stderr, file excerpt, MCP text), bounded.
+    #[serde(default)]
+    pub output: Option<String>,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    /// Unified diff of the edit this call performed, bounded.
+    #[serde(default)]
+    pub diff: Option<String>,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+impl ToolCallDetail {
+    pub const MAX_INPUT_CHARS: usize = 8 * 1024;
+    pub const MAX_OUTPUT_HEAD_CHARS: usize = 8 * 1024;
+    pub const MAX_OUTPUT_TAIL_CHARS: usize = 16 * 1024;
+    pub const MAX_DIFF_CHARS: usize = 64 * 1024;
+
+    pub fn is_empty(&self) -> bool {
+        self.command.is_none()
+            && self.file.is_none()
+            && self.input.is_none()
+            && self.output.is_none()
+            && self.exit_code.is_none()
+            && self.diff.is_none()
+    }
+
+    /// Bounds every text field so a single tool call cannot bloat the
+    /// durable session log. Output keeps head and tail, where errors and
+    /// summaries usually live.
+    pub fn bounded(mut self) -> Self {
+        let mut truncated = self.truncated;
+        if let Some(input) = self.input.take() {
+            let (value, cut) = bound_head(input, Self::MAX_INPUT_CHARS);
+            truncated |= cut;
+            self.input = Some(value);
+        }
+        if let Some(output) = self.output.take() {
+            let (value, cut) =
+                bound_head_tail(output, Self::MAX_OUTPUT_HEAD_CHARS, Self::MAX_OUTPUT_TAIL_CHARS);
+            truncated |= cut;
+            self.output = Some(value);
+        }
+        if let Some(diff) = self.diff.take() {
+            let (value, cut) = bound_head(diff, Self::MAX_DIFF_CHARS);
+            truncated |= cut;
+            self.diff = Some(value);
+        }
+        self.output = self.output.filter(|value| !value.is_empty());
+        self.input = self.input.filter(|value| !value.is_empty());
+        self.diff = self.diff.filter(|value| !value.is_empty());
+        self.truncated = truncated;
+        self
+    }
+
+    /// Fields of `newer` win when present.
+    pub fn merge(&mut self, newer: ToolCallDetail) {
+        if newer.command.is_some() {
+            self.command = newer.command;
+        }
+        if newer.file.is_some() {
+            self.file = newer.file;
+        }
+        if newer.input.is_some() {
+            self.input = newer.input;
+        }
+        if newer.output.is_some() {
+            self.output = newer.output;
+        }
+        if newer.exit_code.is_some() {
+            self.exit_code = newer.exit_code;
+        }
+        if newer.diff.is_some() {
+            self.diff = newer.diff;
+        }
+        self.truncated |= newer.truncated;
+    }
+}
+
+fn bound_head(value: String, max_chars: usize) -> (String, bool) {
+    if value.chars().count() <= max_chars {
+        return (value, false);
+    }
+    (value.chars().take(max_chars).collect(), true)
+}
+
+fn bound_head_tail(value: String, head: usize, tail: usize) -> (String, bool) {
+    let total = value.chars().count();
+    if total <= head + tail {
+        return (value, false);
+    }
+    let start: String = value.chars().take(head).collect();
+    let end: String = value.chars().skip(total - tail).collect();
+    let omitted = total - head - tail;
+    (format!("{start}\n… {omitted} characters omitted …\n{end}"), true)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(transparent)]
 pub struct ProviderId(pub String);
@@ -453,17 +563,27 @@ pub enum ProviderEvent {
         file: Option<String>,
         at: String,
     },
+    /// Streamed tool output (stdout, progress text). Never raw tool input.
     ToolCallDelta {
         id: String,
         content: String,
     },
+    /// Structured facts learned while the call is in flight, for example the
+    /// command once its streamed input is complete.
+    ToolCallUpdated {
+        id: String,
+        detail: ToolCallDetail,
+        at: String,
+    },
     ToolCallCompleted {
         id: String,
+        detail: Option<ToolCallDetail>,
         at: String,
     },
     ToolCallFailed {
         id: String,
         reason: Option<String>,
+        detail: Option<ToolCallDetail>,
         at: String,
     },
     UserInputRequested {

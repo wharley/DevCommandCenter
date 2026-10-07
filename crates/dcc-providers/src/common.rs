@@ -23,7 +23,7 @@ use dcc_core::{
     domain::{
         provider::{
             Capabilities, HealthStatus, McpSupportLevel, NativeSubagentStatus, ProviderEvent,
-            ProviderId, SessionHandle,
+            ProviderId, SessionHandle, ToolCallDetail,
         },
         session::{AssistantMessagePhase, SessionId},
         usage::ModelTokenUsage,
@@ -92,6 +92,10 @@ pub(crate) struct ProviderStreamState {
     claude_native_subagent_inputs: HashMap<String, String>,
     claude_native_subagent_event_ids: HashMap<String, String>,
     claude_native_subagent_terminal_statuses: HashMap<String, NativeSubagentStatus>,
+    /// Streamed `input_json_delta` fragments per ordinary tool call. Raw
+    /// input JSON is never forwarded as tool output; once the block closes
+    /// it becomes a structured `ToolCallUpdated`.
+    claude_tool_inputs: HashMap<String, ClaudeToolInput>,
     claude_active_message_id: Option<String>,
     claude_text_message_started: bool,
     /// Events discovered while parsing one envelope that must be emitted
@@ -100,6 +104,12 @@ pub(crate) struct ProviderStreamState {
     claude_pending_events: Vec<ProviderEvent>,
     pub(crate) gemini_streamed_text_emitted: bool,
     pub(crate) gemini_active_message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ClaudeToolInput {
+    action: String,
+    json: String,
 }
 
 #[derive(Debug, Clone)]
@@ -532,9 +542,9 @@ fn parse_custom_envelope(value: &Value) -> Option<ProviderEvent> {
         ProviderEnvelope::ToolCallDelta { id, content } => {
             ProviderEvent::ToolCallDelta { id, content }
         }
-        ProviderEnvelope::ToolCallCompleted { id } => ProviderEvent::ToolCallCompleted { id, at },
+        ProviderEnvelope::ToolCallCompleted { id } => ProviderEvent::ToolCallCompleted { id, detail: None, at },
         ProviderEnvelope::ToolCallFailed { id, reason } => {
-            ProviderEvent::ToolCallFailed { id, reason, at }
+            ProviderEvent::ToolCallFailed { id, reason, detail: None, at }
         }
     })
 }
@@ -653,6 +663,17 @@ fn parse_claude_stream_value(
                         .insert(index, ClaudeBlockState::ToolCall { id: id.clone() });
                     let input = block.get("input");
                     let (command, file) = claude_tool_input_metadata(input);
+                    let initial_input = input
+                        .filter(|input| input.as_object().is_some_and(|input| !input.is_empty()))
+                        .map(Value::to_string)
+                        .unwrap_or_default();
+                    state.claude_tool_inputs.insert(
+                        id.clone(),
+                        ClaudeToolInput {
+                            action: action.to_string(),
+                            json: initial_input,
+                        },
+                    );
                     Some(ProviderEvent::ToolCallStarted {
                         id,
                         action: action.to_string(),
@@ -707,10 +728,12 @@ fn parse_claude_stream_value(
                         input.push_str(content);
                         return None;
                     }
-                    Some(ProviderEvent::ToolCallDelta {
-                        id,
-                        content: content.to_string(),
-                    })
+                    if let Some(input) = state.claude_tool_inputs.get_mut(&id) {
+                        if input.json.len() < CLAUDE_TOOL_INPUT_BUFFER_LIMIT {
+                            input.json.push_str(content);
+                        }
+                    }
+                    None
                 }
                 "signature_delta" => None,
                 _ => None,
@@ -723,6 +746,15 @@ fn parse_claude_stream_value(
                     Some(ProviderEvent::ReasoningCompleted { id, at })
                 }
                 Some(ClaudeBlockState::ToolCall { id }) => {
+                    if let Some(buffer) = state.claude_tool_inputs.get(&id) {
+                        let input = serde_json::from_str::<Value>(&buffer.json).ok()?;
+                        let detail = claude_tool_detail_from_input(&buffer.action, &input);
+                        return (!detail.is_empty()).then_some(ProviderEvent::ToolCallUpdated {
+                            id,
+                            detail,
+                            at,
+                        });
+                    }
                     let input = state.claude_native_subagent_inputs.remove(&id)?;
                     if input.is_empty() {
                         return None;
@@ -871,19 +903,33 @@ fn parse_claude_terminal_value(
                         at,
                     });
                 }
+                let action = state
+                    .claude_tool_inputs
+                    .remove(id)
+                    .map(|input| input.action)
+                    .unwrap_or_default();
+                let detail = claude_tool_result_detail(&action, block, value.get("tool_use_result"));
+                let detail = (!detail.is_empty()).then_some(detail);
                 return if block
                     .get("is_error")
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
                 {
+                    let reason = detail
+                        .as_ref()
+                        .and_then(|detail| detail.output.as_deref())
+                        .and_then(first_meaningful_line)
+                        .unwrap_or_else(|| "tool execution failed".to_string());
                     Some(ProviderEvent::ToolCallFailed {
                         id: id.to_string(),
-                        reason: Some("tool execution failed".to_string()),
+                        reason: Some(reason),
+                        detail,
                         at,
                     })
                 } else {
                     Some(ProviderEvent::ToolCallCompleted {
                         id: id.to_string(),
+                        detail,
                         at,
                     })
                 };
@@ -1209,14 +1255,16 @@ fn parse_codex_stream_value(
                         .unwrap_or("command")
                         .to_string();
                     let failed = codex_item_failed(item);
+                    let detail = codex_item_detail(item);
                     if failed {
                         Some(ProviderEvent::ToolCallFailed {
+                            detail,
                             id,
                             reason: codex_failure_reason(item),
                             at,
                         })
                     } else {
-                        Some(ProviderEvent::ToolCallCompleted { id, at })
+                        Some(ProviderEvent::ToolCallCompleted { id, detail, at })
                     }
                 }
                 "web_search" | "mcp_tool_call" | "file_change" | "todo_list" => {
@@ -1226,14 +1274,16 @@ fn parse_codex_stream_value(
                         .unwrap_or("tool")
                         .to_string();
                     let failed = codex_item_failed(item);
+                    let detail = codex_item_detail(item);
                     if failed {
                         Some(ProviderEvent::ToolCallFailed {
+                            detail,
                             id,
                             reason: codex_failure_reason(item),
                             at,
                         })
                     } else {
-                        Some(ProviderEvent::ToolCallCompleted { id, at })
+                        Some(ProviderEvent::ToolCallCompleted { id, detail, at })
                     }
                 }
                 _ => None,
@@ -1324,6 +1374,323 @@ fn claude_tool_input_metadata(input: Option<&Value>) -> (Option<String>, Option<
         .and_then(Value::as_str)
         .map(str::to_string);
     (command, file)
+}
+
+const MAX_REFERENCED_IMAGES: usize = 8;
+const MAX_REFERENCED_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Existing absolute image files a prompt references as `@/path.png`, in
+/// order, once each. The composer serializes pasted and attached images this
+/// way; providers with native image input attach them as well.
+pub(crate) fn referenced_image_paths(prompt: &str) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for token in prompt.split_whitespace() {
+        let Some(path) = token.strip_prefix('@') else {
+            continue;
+        };
+        if !path.starts_with('/') {
+            continue;
+        }
+        let lower = path.to_ascii_lowercase();
+        if ![".png", ".jpg", ".jpeg", ".gif", ".webp"]
+            .iter()
+            .any(|extension| lower.ends_with(extension))
+        {
+            continue;
+        }
+        if paths.iter().any(|existing| existing == path) {
+            continue;
+        }
+        let usable = std::fs::metadata(path)
+            .map(|metadata| metadata.is_file() && metadata.len() <= MAX_REFERENCED_IMAGE_BYTES)
+            .unwrap_or(false);
+        if usable {
+            paths.push(path.to_string());
+        }
+        if paths.len() >= MAX_REFERENCED_IMAGES {
+            break;
+        }
+    }
+    paths
+}
+
+/// Upper bound for buffered streamed tool input. Larger inputs (a huge Write)
+/// still produce metadata from the start block; the JSON simply stops
+/// parsing and no input-derived update is emitted.
+const CLAUDE_TOOL_INPUT_BUFFER_LIMIT: usize = 512 * 1024;
+
+fn json_str<'a>(object: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a str> {
+    object.get(key).and_then(Value::as_str)
+}
+
+/// Minimal unified diff for a single replacement. Providers report edits as
+/// old/new text, not hunks with line numbers, so context lines are omitted.
+pub(crate) fn replacement_diff(file: Option<&str>, old: &str, new: &str) -> String {
+    let mut out = String::new();
+    if let Some(file) = file {
+        out.push_str(&format!("--- a/{file}\n+++ b/{file}\n"));
+    }
+    out.push_str("@@\n");
+    for line in old.lines() {
+        out.push('-');
+        out.push_str(line);
+        out.push('\n');
+    }
+    for line in new.lines() {
+        out.push('+');
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+fn claude_tool_detail_from_input(action: &str, input: &Value) -> ToolCallDetail {
+    let (command, file) = claude_tool_input_metadata(Some(input));
+    let mut detail = ToolCallDetail {
+        command,
+        file: file.clone(),
+        ..ToolCallDetail::default()
+    };
+    let Some(object) = input.as_object() else {
+        return detail.bounded();
+    };
+    match action {
+        "Edit" => {
+            let old = json_str(object, "old_string").unwrap_or("");
+            let new = json_str(object, "new_string").unwrap_or("");
+            detail.diff = Some(replacement_diff(file.as_deref(), old, new));
+        }
+        "MultiEdit" => {
+            let diff = object
+                .get("edits")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_object)
+                .enumerate()
+                .map(|(index, edit)| {
+                    replacement_diff(
+                        (index == 0).then_some(file.as_deref()).flatten(),
+                        json_str(edit, "old_string").unwrap_or(""),
+                        json_str(edit, "new_string").unwrap_or(""),
+                    )
+                })
+                .collect::<String>();
+            detail.diff = (!diff.is_empty()).then_some(diff);
+        }
+        "Write" => {
+            let content = json_str(object, "content").unwrap_or("");
+            detail.diff = Some(replacement_diff(file.as_deref(), "", content));
+        }
+        "NotebookEdit" => {
+            let source = json_str(object, "new_source").unwrap_or("");
+            detail.diff = Some(replacement_diff(file.as_deref(), "", source));
+        }
+        _ => {
+            detail.input = serde_json::to_string_pretty(input).ok();
+        }
+    }
+    detail.bounded()
+}
+
+fn claude_tool_result_text(block: &serde_json::Map<String, Value>) -> Option<String> {
+    match block.get("content")? {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(parts) => {
+            let text = parts
+                .iter()
+                .filter_map(Value::as_object)
+                .filter_map(|part| match json_str(part, "type") {
+                    Some("text") => json_str(part, "text").map(str::to_string),
+                    Some("image") => Some("[image]".to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(text)
+        }
+        _ => None,
+    }
+}
+
+/// Unified diff text from the Agent SDK's `structuredPatch` hunks, which
+/// carry real line numbers and context.
+fn claude_structured_patch_diff(file: Option<&str>, patch: &[Value]) -> Option<String> {
+    let mut out = String::new();
+    if let Some(file) = file {
+        out.push_str(&format!("--- a/{file}\n+++ b/{file}\n"));
+    }
+    let mut hunks = 0;
+    for hunk in patch.iter().filter_map(Value::as_object) {
+        let number = |key: &str| hunk.get(key).and_then(Value::as_u64).unwrap_or(0);
+        out.push_str(&format!(
+            "@@ -{},{} +{},{} @@\n",
+            number("oldStart"),
+            number("oldLines"),
+            number("newStart"),
+            number("newLines"),
+        ));
+        for line in hunk
+            .get("lines")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+        hunks += 1;
+    }
+    (hunks > 0).then_some(out)
+}
+
+fn claude_tool_result_detail(
+    action: &str,
+    block: &serde_json::Map<String, Value>,
+    structured: Option<&Value>,
+) -> ToolCallDetail {
+    let mut detail = ToolCallDetail {
+        output: claude_tool_result_text(block),
+        ..ToolCallDetail::default()
+    };
+    if let Some(structured) = structured.and_then(Value::as_object) {
+        let file = json_str(structured, "filePath").map(str::to_string);
+        if let Some(patch) = structured.get("structuredPatch").and_then(Value::as_array) {
+            detail.diff = claude_structured_patch_diff(file.as_deref(), patch);
+        }
+        if action == "Bash" {
+            let stdout = json_str(structured, "stdout").unwrap_or("");
+            let stderr = json_str(structured, "stderr").unwrap_or("");
+            let combined = match (stdout.is_empty(), stderr.is_empty()) {
+                (false, false) => format!("{stdout}\n{stderr}"),
+                (false, true) => stdout.to_string(),
+                (true, false) => stderr.to_string(),
+                (true, true) => String::new(),
+            };
+            if !combined.is_empty() {
+                detail.output = Some(combined);
+            }
+        }
+        if detail.diff.is_some() {
+            // The patch says everything; the textual result for edits is a
+            // boilerplate confirmation.
+            detail.output = None;
+        }
+    }
+    detail.bounded()
+}
+
+pub(crate) fn first_meaningful_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(240).collect())
+}
+
+/// Structured result of a Codex `commandExecution` / `fileChange` item.
+pub(crate) fn codex_item_detail(item: &serde_json::Map<String, Value>) -> Option<ToolCallDetail> {
+    let mut detail = ToolCallDetail::default();
+    match json_str(item, "type")? {
+        "commandExecution" | "command_execution" => {
+            detail.command = json_str(item, "command").map(str::to_string);
+            detail.output = item
+                .get("aggregatedOutput")
+                .or_else(|| item.get("aggregated_output"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            detail.exit_code = item
+                .get("exitCode")
+                .or_else(|| item.get("exit_code"))
+                .and_then(Value::as_i64)
+                .and_then(|code| i32::try_from(code).ok());
+        }
+        "fileChange" | "file_change" => {
+            let changes = item.get("changes").and_then(Value::as_array)?;
+            let mut diff = String::new();
+            let mut first_path = None;
+            for change in changes.iter().filter_map(Value::as_object) {
+                let path = json_str(change, "path").unwrap_or("");
+                first_path.get_or_insert_with(|| path.to_string());
+                let body = json_str(change, "diff").unwrap_or("");
+                if !body.starts_with("---") {
+                    diff.push_str(&format!("--- a/{path}\n+++ b/{path}\n"));
+                }
+                diff.push_str(body);
+                if !body.ends_with('\n') {
+                    diff.push('\n');
+                }
+            }
+            detail.file = first_path.filter(|path| !path.is_empty());
+            detail.diff = (!diff.is_empty()).then_some(diff);
+        }
+        _ => return None,
+    }
+    let detail = detail.bounded();
+    (!detail.is_empty()).then_some(detail)
+}
+
+/// Structured result of an ACP `tool_call_update` (Cursor, Grok,
+/// Antigravity): text content blocks, diff blocks and raw output.
+pub(crate) fn acp_tool_call_detail(update: &Value) -> Option<ToolCallDetail> {
+    let mut detail = ToolCallDetail::default();
+    let mut output = Vec::new();
+    let mut diff = String::new();
+    for entry in update
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+    {
+        match json_str(entry, "type") {
+            Some("content") => {
+                if let Some(text) = entry.get("content").and_then(|c| c.get("text")).and_then(Value::as_str) {
+                    output.push(text.to_string());
+                }
+            }
+            Some("diff") => {
+                let path = json_str(entry, "path");
+                detail.file = detail.file.take().or_else(|| path.map(str::to_string));
+                diff.push_str(&replacement_diff(
+                    path,
+                    json_str(entry, "oldText").unwrap_or(""),
+                    json_str(entry, "newText").unwrap_or(""),
+                ));
+            }
+            _ => {}
+        }
+    }
+    if output.is_empty() {
+        match update.get("rawOutput") {
+            Some(Value::String(text)) => output.push(text.clone()),
+            Some(Value::Object(raw)) => {
+                for key in ["output", "stdout", "stderr", "formatted_output"] {
+                    if let Some(text) = json_str(raw, key).filter(|text| !text.is_empty()) {
+                        output.push(text.to_string());
+                    }
+                }
+                detail.exit_code = raw
+                    .get("exitCode")
+                    .or_else(|| raw.get("exit_code"))
+                    .and_then(Value::as_i64)
+                    .and_then(|code| i32::try_from(code).ok());
+            }
+            _ => {}
+        }
+    }
+    if let Some(raw_input) = update.get("rawInput").filter(|input| input.is_object()) {
+        let (command, file) = claude_tool_input_metadata(Some(raw_input));
+        detail.command = command;
+        detail.file = detail.file.take().or(file);
+        if diff.is_empty() {
+            detail.input = serde_json::to_string_pretty(raw_input).ok();
+        }
+    }
+    detail.output = (!output.is_empty()).then(|| output.join("\n"));
+    detail.diff = (!diff.is_empty()).then_some(diff);
+    let detail = detail.bounded();
+    (!detail.is_empty()).then_some(detail)
 }
 
 fn codex_reasoning_label(item: &serde_json::Map<String, Value>) -> Option<String> {
@@ -2632,8 +2999,12 @@ mod tests {
             &mut state,
         );
         match completed {
-            ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted { id, .. }) => {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted { id, detail, .. }) => {
                 assert_eq!(id, "tool-success");
+                assert_eq!(
+                    detail.and_then(|detail| detail.output).as_deref(),
+                    Some("fixture result")
+                );
             }
             other => panic!("expected executed tool completion, got {other:?}"),
         }
@@ -2651,12 +3022,115 @@ mod tests {
             &mut state,
         );
         match denied {
-            ParsedProviderLine::Event(ProviderEvent::ToolCallFailed { id, reason, .. }) => {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallFailed { id, reason, detail, .. }) => {
                 assert_eq!(id, "tool-denied");
-                assert_eq!(reason.as_deref(), Some("tool execution failed"));
+                assert_eq!(reason.as_deref(), Some("User denied tool execution."));
+                assert_eq!(
+                    detail.and_then(|detail| detail.output).as_deref(),
+                    Some("User denied tool execution.")
+                );
             }
             other => panic!("expected denied tool failure, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn claude_tool_input_becomes_structured_detail_instead_of_output_deltas() {
+        let mut state = ProviderStreamState::default();
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"bash-1","name":"Bash","input":{}}}}"#,
+            &mut state,
+        );
+        let fragment = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\": \"npm te"}}}"#,
+            &mut state,
+        );
+        assert!(matches!(fragment, ParsedProviderLine::Ignored));
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"st\"}"}}}"#,
+            &mut state,
+        );
+        match parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            &mut state,
+        ) {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallUpdated { id, detail, .. }) => {
+                assert_eq!(id, "bash-1");
+                assert_eq!(detail.command.as_deref(), Some("npm test"));
+                assert!(detail.input.is_some());
+            }
+            other => panic!("expected structured tool update, got {other:?}"),
+        }
+        match parse_provider_stream_line(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bash-1","content":"ignored","is_error":true}]},"tool_use_result":{"stdout":"1 failing","stderr":"Error: boom"}}"#,
+            &mut state,
+        ) {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallFailed { detail, .. }) => {
+                assert_eq!(
+                    detail.and_then(|detail| detail.output).as_deref(),
+                    Some("1 failing\nError: boom")
+                );
+            }
+            other => panic!("expected failed bash result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn claude_edit_input_and_structured_patch_become_diffs() {
+        let mut state = ProviderStreamState::default();
+        let _ = parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"edit-1","name":"Edit","input":{"file_path":"src/a.ts","old_string":"let a = 1;","new_string":"let a = 2;"}}}}"#,
+            &mut state,
+        );
+        match parse_provider_stream_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            &mut state,
+        ) {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallUpdated { detail, .. }) => {
+                assert_eq!(detail.file.as_deref(), Some("src/a.ts"));
+                let diff = detail.diff.expect("edit diff");
+                assert!(diff.contains("-let a = 1;"));
+                assert!(diff.contains("+let a = 2;"));
+            }
+            other => panic!("expected edit update, got {other:?}"),
+        }
+        match parse_provider_stream_line(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"edit-1","content":"The file has been updated."}]},"tool_use_result":{"filePath":"src/a.ts","structuredPatch":[{"oldStart":3,"oldLines":1,"newStart":3,"newLines":1,"lines":["-let a = 1;","+let a = 2;"]}]}}"#,
+            &mut state,
+        ) {
+            ParsedProviderLine::Event(ProviderEvent::ToolCallCompleted { detail, .. }) => {
+                let detail = detail.expect("detail");
+                assert!(detail.output.is_none());
+                assert!(detail.diff.expect("diff").contains("@@ -3,1 +3,1 @@"));
+            }
+            other => panic!("expected edit completion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn finds_existing_image_references_in_prompt() {
+        let dir = std::env::temp_dir().join(format!("dcc-image-ref-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let image = dir.join("shot.PNG");
+        std::fs::write(&image, b"png").expect("image");
+        let image = image.to_string_lossy().to_string();
+        let prompt = format!("see @{image} and @{image} plus @/missing/x.png and @rel/y.png");
+        assert_eq!(referenced_image_paths(&prompt), vec![image]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tool_detail_output_keeps_head_and_tail_when_bounded() {
+        let output = format!("{}{}", "a".repeat(30_000), "TAIL-ERROR");
+        let detail = ToolCallDetail {
+            output: Some(output),
+            ..ToolCallDetail::default()
+        }
+        .bounded();
+        let bounded = detail.output.expect("output");
+        assert!(detail.truncated);
+        assert!(bounded.ends_with("TAIL-ERROR"));
+        assert!(bounded.contains("characters omitted"));
     }
 
     #[test]

@@ -17,6 +17,7 @@ export function isSemanticSessionEvent(event: CoreEvent): boolean {
 		"sessionMcpRuntimeStatusChanged" in event ||
 		"sessionTurnToolCallStarted" in event ||
 		"sessionTurnToolCallDelta" in event ||
+		"sessionTurnToolCallUpdated" in event ||
 		"sessionTurnToolCallCompleted" in event
 	);
 }

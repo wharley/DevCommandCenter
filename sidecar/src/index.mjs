@@ -17,7 +17,9 @@ import {
 import {
 	createDeferredUserPrompt,
 	waitForDccMcpReadiness,
+	userMessage,
 } from "./mcp-readiness.mjs";
+import { promptImageBlocks } from "./prompt-images.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 import {
 	mergedDisallowedTools,
@@ -285,11 +287,20 @@ async function runTurn(payload, state) {
 		payload,
 		additionalDirectories,
 	);
+	const imageBlocks = await promptImageBlocks(prompt);
 	const deferredPrompt = hasDccMcpServers
-		? createDeferredUserPrompt(prompt)
+		? createDeferredUserPrompt(prompt, imageBlocks)
 		: null;
+	// Images need structured content, which a plain string prompt cannot carry.
+	const promptInput =
+		deferredPrompt?.stream ??
+		(imageBlocks.length > 0
+			? (async function* singleUserMessage() {
+					yield userMessage(prompt, imageBlocks);
+				})()
+			: prompt);
 	const q = query({
-		prompt: deferredPrompt?.stream ?? prompt,
+		prompt: promptInput,
 		options: {
 			cwd: process.cwd(),
 			additionalDirectories,

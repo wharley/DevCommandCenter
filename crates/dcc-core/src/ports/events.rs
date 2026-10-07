@@ -5,7 +5,7 @@ use specta::Type;
 use super::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
 use crate::domain::{
     mcp::McpRuntimeStatus,
-    provider::NativeSubagentStatus,
+    provider::{NativeSubagentStatus, ToolCallDetail},
     session::{AssistantMessagePhase, SessionEventKind, SessionEventRecord},
 };
 use crate::Result;
@@ -142,16 +142,24 @@ pub enum CoreEvent {
         tool_call_id: String,
         content: String,
     },
+    SessionTurnToolCallUpdated {
+        session_id: String,
+        turn_id: String,
+        tool_call_id: String,
+        detail: ToolCallDetail,
+    },
     SessionTurnToolCallCompleted {
         session_id: String,
         turn_id: String,
         tool_call_id: String,
+        detail: Option<ToolCallDetail>,
     },
     SessionTurnToolCallFailed {
         session_id: String,
         turn_id: String,
         tool_call_id: String,
         reason: Option<String>,
+        detail: Option<ToolCallDetail>,
     },
     SessionTurnUserInputRequested {
         session_id: String,
@@ -297,6 +305,7 @@ impl CoreEvent {
             | Self::SessionTurnReasoningCompleted { session_id, .. }
             | Self::SessionTurnToolCallStarted { session_id, .. }
             | Self::SessionTurnToolCallDelta { session_id, .. }
+            | Self::SessionTurnToolCallUpdated { session_id, .. }
             | Self::SessionTurnToolCallCompleted { session_id, .. }
             | Self::SessionTurnToolCallFailed { session_id, .. }
             | Self::SessionTurnUserInputRequested { session_id, .. }
@@ -570,32 +579,58 @@ impl CoreEvent {
                     && content == actual_content
             }
             (
+                SessionEventKind::TurnToolCallUpdated {
+                    turn_id,
+                    tool_call_id,
+                    detail,
+                },
+                Self::SessionTurnToolCallUpdated {
+                    turn_id: actual_turn_id,
+                    tool_call_id: actual_tool_call_id,
+                    detail: actual_detail,
+                    ..
+                },
+            ) => {
+                turn_id.0 == *actual_turn_id
+                    && tool_call_id == actual_tool_call_id
+                    && detail == actual_detail
+            }
+            (
                 SessionEventKind::TurnToolCallCompleted {
                     turn_id,
                     tool_call_id,
+                    detail,
                 },
                 Self::SessionTurnToolCallCompleted {
                     turn_id: actual_turn_id,
                     tool_call_id: actual_tool_call_id,
+                    detail: actual_detail,
                     ..
                 },
-            ) => turn_id.0 == *actual_turn_id && tool_call_id == actual_tool_call_id,
+            ) => {
+                turn_id.0 == *actual_turn_id
+                    && tool_call_id == actual_tool_call_id
+                    && detail == actual_detail
+            }
             (
                 SessionEventKind::TurnToolCallFailed {
                     turn_id,
                     tool_call_id,
                     reason,
+                    detail,
                 },
                 Self::SessionTurnToolCallFailed {
                     turn_id: actual_turn_id,
                     tool_call_id: actual_tool_call_id,
                     reason: actual_reason,
+                    detail: actual_detail,
                     ..
                 },
             ) => {
                 turn_id.0 == *actual_turn_id
                     && tool_call_id == actual_tool_call_id
                     && reason == actual_reason
+                    && detail == actual_detail
             }
             (
                 SessionEventKind::TurnUserInputRequested {

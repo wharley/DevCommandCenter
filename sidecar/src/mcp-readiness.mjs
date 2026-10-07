@@ -3,19 +3,19 @@ import { readDccMcpStatus } from "./mcp-config.mjs";
 const DEFAULT_ATTACH_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_INTERVAL_MS = 250;
 
-function userMessage(prompt) {
+export function userMessage(prompt, imageBlocks = []) {
 	return {
 		type: "user",
 		session_id: "",
 		message: {
 			role: "user",
-			content: [{ type: "text", text: prompt }],
+			content: [...imageBlocks, { type: "text", text: prompt }],
 		},
 		parent_tool_use_id: null,
 	};
 }
 
-export function createDeferredUserPrompt(prompt) {
+export function createDeferredUserPrompt(prompt, imageBlocks = []) {
 	let settle;
 	let settled = false;
 	const gate = new Promise((resolve) => {
@@ -25,7 +25,7 @@ export function createDeferredUserPrompt(prompt) {
 	return {
 		stream: (async function* deferredPrompt() {
 			if (await gate) {
-				yield userMessage(prompt);
+				yield userMessage(prompt, imageBlocks);
 			}
 		})(),
 		release() {

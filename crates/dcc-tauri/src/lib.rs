@@ -8,6 +8,7 @@ pub mod events;
 pub mod git;
 pub mod guarded_undo_runtime;
 pub mod process_runtime_registry;
+pub mod provider_delta_coalescer;
 pub mod run;
 pub mod state;
 pub mod terminal_arbiter;

@@ -201,7 +201,7 @@ use dcc_core::{
         },
         usage::{
             DailyUsageSummary, ModelTokenUsage, ModelUsageSummary, ProviderUsageSummary,
-            UsageDashboard, UsageDashboardInput, UsageTotals,
+            SessionTurnUsage, UsageDashboard, UsageDashboardInput, UsageTotals,
         },
         workspace::{
             Workspace, WorkspaceId, WorkspacePushTarget, WorkspaceSetupReport,
@@ -608,6 +608,7 @@ struct SessionMethods {
     list_workspace_sessions: String,
     search_sessions: String,
     usage_dashboard: String,
+    session_turn_usage: String,
     respond_to_user_input: String,
     respond_to_permission_request: String,
 }
@@ -1056,6 +1057,7 @@ fn main() {
         .typ::<ModelUsageSummary>()
         .typ::<DailyUsageSummary>()
         .typ::<UsageDashboard>()
+        .typ::<SessionTurnUsage>()
         .typ::<CreateDelegationInput>()
         .typ::<CreateDelegationOutput>()
         .typ::<ListDelegationsInput>()
@@ -1265,6 +1267,7 @@ fn main() {
             list_workspace_sessions: "list_workspace_sessions".to_string(),
             search_sessions: "search_sessions".to_string(),
             usage_dashboard: "usage_dashboard".to_string(),
+            session_turn_usage: "session_turn_usage".to_string(),
             respond_to_user_input: "respond_to_user_input".to_string(),
             respond_to_permission_request: "respond_to_permission_request".to_string(),
         },

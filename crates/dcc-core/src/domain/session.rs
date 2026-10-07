@@ -9,7 +9,7 @@ use crate::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion}
 use crate::ports::ProviderRuntimeConfig;
 
 use super::delegation::DelegationId;
-use super::provider::NativeSubagentStatus;
+use super::provider::{NativeSubagentStatus, ToolCallDetail};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct SessionId(pub String);
@@ -332,11 +332,20 @@ pub enum SessionEventKind {
         tool_call_id: String,
         content: String,
     },
+    TurnToolCallUpdated {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+        detail: ToolCallDetail,
+    },
     TurnToolCallCompleted {
         #[serde(rename = "turnId")]
         turn_id: TurnId,
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
+        #[serde(default)]
+        detail: Option<ToolCallDetail>,
     },
     TurnToolCallFailed {
         #[serde(rename = "turnId")]
@@ -344,6 +353,8 @@ pub enum SessionEventKind {
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
         reason: Option<String>,
+        #[serde(default)]
+        detail: Option<ToolCallDetail>,
     },
     TurnUserInputRequested {
         #[serde(rename = "turnId")]
@@ -633,6 +644,7 @@ impl SessionProjection {
             | SessionEventKind::TurnReasoningCompleted { .. }
             | SessionEventKind::TurnToolCallStarted { .. }
             | SessionEventKind::TurnToolCallDelta { .. }
+            | SessionEventKind::TurnToolCallUpdated { .. }
             | SessionEventKind::TurnToolCallCompleted { .. }
             | SessionEventKind::TurnToolCallFailed { .. }
             | SessionEventKind::TurnUserInputRequested { .. }

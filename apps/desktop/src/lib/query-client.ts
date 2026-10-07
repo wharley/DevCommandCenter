@@ -218,6 +218,7 @@ export const dccQueryKeys = {
 	ideas: ["ideas"] as const,
 	sessionThreads: (sessionId: string, scope = "local") =>
 		["sessionThreads", scope, sessionId] as const,
+	sessionTurnUsage: (sessionId: string) => ["sessionTurnUsage", sessionId] as const,
 	sessionSearch: (query: string, scope = "local") =>
 		["sessionSearch", scope, query] as const,
 	workspaceSessions: (workspaceId: string, scope = "local") =>
@@ -396,6 +397,9 @@ export function applyCoreEventQueryRefresh(
 		void queryClient.invalidateQueries({
 			queryKey: ["sessionThreads"],
 			predicate: (query) => query.queryKey[2] === plan.sessionId,
+		});
+		void queryClient.invalidateQueries({
+			queryKey: dccQueryKeys.sessionTurnUsage(plan.sessionId),
 		});
 	}
 	if (plan.refreshInspectorGit) {

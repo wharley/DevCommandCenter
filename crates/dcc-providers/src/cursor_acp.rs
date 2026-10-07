@@ -807,6 +807,7 @@ async fn cursor_tool_call_update_events(
     if matches!(status, "failed" | "error") {
         runtime.owned_tool_calls.lock().await.remove(&id);
         return vec![ProviderEvent::ToolCallFailed {
+            detail: crate::common::acp_tool_call_detail(update),
             id,
             reason: (!owned).then(|| "Cursor tool call failed".to_string()),
             at,
@@ -814,7 +815,11 @@ async fn cursor_tool_call_update_events(
     }
     if matches!(status, "completed" | "complete" | "success") {
         runtime.owned_tool_calls.lock().await.remove(&id);
-        return vec![ProviderEvent::ToolCallCompleted { id, at }];
+        return vec![ProviderEvent::ToolCallCompleted {
+            id,
+            detail: crate::common::acp_tool_call_detail(update),
+            at,
+        }];
     }
     if owned {
         Vec::new()

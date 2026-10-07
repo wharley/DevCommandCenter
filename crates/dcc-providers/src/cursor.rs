@@ -534,8 +534,9 @@ fn parse_cursor_tool_call(value: &Value, at: String) -> Option<ProviderEvent> {
                 at,
             })
         }
-        "completed" => Some(ProviderEvent::ToolCallCompleted { id: call_id, at }),
+        "completed" => Some(ProviderEvent::ToolCallCompleted { id: call_id, detail: None, at }),
         "failed" => Some(ProviderEvent::ToolCallFailed {
+            detail: None,
             id: call_id,
             reason: extract_cursor_tool_call_failure(tool_value),
             at,

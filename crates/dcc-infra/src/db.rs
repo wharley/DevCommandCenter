@@ -52,7 +52,7 @@ use dcc_core::{
         thread::{Thread, ThreadId},
         usage::{
             DailyUsageSummary, ModelTokenUsage, ModelUsageSummary, ProviderUsageSummary,
-            UsageDashboard, UsageDashboardInput, UsageTotals,
+            SessionTurnUsage, UsageDashboard, UsageDashboardInput, UsageTotals,
         },
         workspace::{Workspace, WorkspaceId, WorkspaceSource, WorkspaceState},
         workspace_bundle::{
@@ -4968,10 +4968,28 @@ impl SqliteSessionRepo {
                         .content
                         .push_str(content);
                 }
+                SessionEventKind::TurnToolCallCompleted {
+                    turn_id,
+                    tool_call_id,
+                    detail: Some(detail),
+                } => {
+                    if let (Some(tool_call), Some(output)) = (
+                        tool_calls_by_turn
+                            .entry(turn_id.0.clone())
+                            .or_default()
+                            .get_mut(tool_call_id),
+                        detail.output.as_deref(),
+                    ) {
+                        if tool_call.content.is_empty() {
+                            tool_call.content.push_str(output);
+                        }
+                    }
+                }
                 SessionEventKind::TurnToolCallFailed {
                     turn_id,
                     tool_call_id,
                     reason,
+                    detail,
                 } => {
                     if let Some(tool_call) = tool_calls_by_turn
                         .entry(turn_id.0.clone())
@@ -4979,6 +4997,11 @@ impl SqliteSessionRepo {
                         .get_mut(tool_call_id)
                     {
                         tool_call.failure_reason = reason.clone();
+                        if let Some(output) = detail.as_ref().and_then(|d| d.output.as_deref()) {
+                            if tool_call.content.is_empty() {
+                                tool_call.content.push_str(output);
+                            }
+                        }
                     }
                 }
                 SessionEventKind::TurnUserInputRequested { questions, .. } => {
@@ -5069,6 +5092,7 @@ impl SqliteSessionRepo {
                 | SessionEventKind::TurnReasoningStarted { .. }
                 | SessionEventKind::TurnReasoningCompleted { .. }
                 | SessionEventKind::TurnToolCallCompleted { .. }
+                | SessionEventKind::TurnToolCallUpdated { .. }
                 | SessionEventKind::SessionCompleted
                 | SessionEventKind::DelegationRequested { .. }
                 | SessionEventKind::DelegationStarted { .. }
@@ -8096,6 +8120,60 @@ impl UsageRepo for SqliteSessionRepo {
             .commit()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
+    }
+
+    async fn list_session_turn_usage(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<SessionTurnUsage>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                r#"
+				SELECT turn_id, model, input_tokens, output_tokens, cached_input_tokens,
+				       cache_write_input_tokens, reasoning_output_tokens, total_tokens, cost_usd
+				  FROM dcc_turn_model_usage
+				 WHERE session_id = ?1
+				 ORDER BY recorded_at, turn_id, model
+				"#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map(params![session_id.0.clone()], |row| {
+                let tokens = |index: usize| -> rusqlite::Result<u64> {
+                    Ok(row.get::<_, i64>(index)?.max(0) as u64)
+                };
+                Ok((
+                    row.get::<_, String>(0)?,
+                    ModelTokenUsage {
+                        model: Some(row.get::<_, String>(1)?),
+                        input_tokens: tokens(2)?,
+                        output_tokens: tokens(3)?,
+                        cached_input_tokens: tokens(4)?,
+                        cache_write_input_tokens: tokens(5)?,
+                        reasoning_output_tokens: tokens(6)?,
+                        total_tokens: tokens(7)?,
+                        cost_usd: row.get::<_, Option<f64>>(8)?,
+                    },
+                ))
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut turns: Vec<SessionTurnUsage> = Vec::new();
+        for row in rows {
+            let (turn_id, usage) =
+                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            match turns.iter_mut().find(|turn| turn.turn_id == turn_id) {
+                Some(turn) => turn.models.push(usage),
+                None => turns.push(SessionTurnUsage {
+                    turn_id,
+                    models: vec![usage],
+                }),
+            }
+        }
+        Ok(turns)
     }
 
     async fn usage_dashboard(&self, input: &UsageDashboardInput) -> Result<UsageDashboard> {

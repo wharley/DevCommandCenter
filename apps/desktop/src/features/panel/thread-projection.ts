@@ -11,6 +11,7 @@ function isHeavyActivityEvent(event: CoreEvent) {
 		"sessionTurnReasoningCompleted" in event ||
 		"sessionTurnToolCallStarted" in event ||
 		"sessionTurnToolCallDelta" in event ||
+		"sessionTurnToolCallUpdated" in event ||
 		"sessionTurnToolCallCompleted" in event ||
 		"sessionTurnToolCallFailed" in event ||
 		"sessionTurnNativeSubagentActivity" in event

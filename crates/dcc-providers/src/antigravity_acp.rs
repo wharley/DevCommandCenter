@@ -40,7 +40,7 @@ use dcc_core::{
     CoreError, Result,
 };
 
-use crate::common::{append_tool_instructions, augmented_path};
+use crate::common::{acp_tool_call_detail, append_tool_instructions, augmented_path};
 
 const PROVIDER_ID: &str = "antigravity";
 const PROVIDER_LABEL: &str = "Antigravity";
@@ -1300,10 +1300,13 @@ async fn notification_events(
         "tool_call_update" => {
             let id = update_id(update, "tool");
             match update.get("status").and_then(Value::as_str).unwrap_or("") {
-                "completed" | "complete" | "success" => {
-                    vec![ProviderEvent::ToolCallCompleted { id, at }]
-                }
+                "completed" | "complete" | "success" => vec![ProviderEvent::ToolCallCompleted {
+                    id,
+                    detail: acp_tool_call_detail(update),
+                    at,
+                }],
                 "failed" | "error" => vec![ProviderEvent::ToolCallFailed {
+                    detail: acp_tool_call_detail(update),
                     id,
                     reason: Some("Antigravity tool call failed".into()),
                     at,

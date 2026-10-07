@@ -59,6 +59,31 @@ pub fn conversation_context(
     }
 }
 
+/// Folds the provider-reported result into tool evidence. The output tail is
+/// kept because test summaries and errors sit at the end.
+fn apply_tool_detail_evidence(
+    data: &mut serde_json::Value,
+    output: &mut String,
+    detail: Option<&dcc_core::domain::provider::ToolCallDetail>,
+) -> bool {
+    let Some(detail) = detail else {
+        return false;
+    };
+    if let Some(code) = detail.exit_code {
+        data["exit_code"] = json!(code);
+    }
+    let Some(text) = detail.output.as_deref() else {
+        return detail.truncated;
+    };
+    let count = text.chars().count();
+    *output = if count > 1_000 {
+        text.chars().skip(count - 1_000).collect()
+    } else {
+        text.to_string()
+    };
+    detail.truncated || count > 1_000
+}
+
 pub fn execution_evidence(
     events: &[SessionEventRecord],
     turn: &TurnId,
@@ -96,14 +121,33 @@ pub fn execution_evidence(
                     truncated = true;
                 }
             }
-            SessionEventKind::TurnToolCallCompleted {
+            SessionEventKind::TurnToolCallUpdated {
                 turn_id,
                 tool_call_id,
+                detail,
             } if turn_id == turn => {
                 if let Some((_, data, _)) =
                     tools.iter_mut().rev().find(|(id, _, _)| id == tool_call_id)
                 {
+                    if let Some(command) = detail.command.as_deref() {
+                        truncated |= command.chars().count() > 500;
+                        data["command"] = json!(excerpt(command, 500));
+                    }
+                    if let Some(file) = detail.file.as_deref() {
+                        data["file"] = json!(excerpt(file, 300));
+                    }
+                }
+            }
+            SessionEventKind::TurnToolCallCompleted {
+                turn_id,
+                tool_call_id,
+                detail,
+            } if turn_id == turn => {
+                if let Some((_, data, output)) =
+                    tools.iter_mut().rev().find(|(id, _, _)| id == tool_call_id)
+                {
                     data["status"] = json!("completed (does not imply tests passed)");
+                    truncated |= apply_tool_detail_evidence(data, output, detail.as_ref());
                 } else {
                     truncated = true;
                 }
@@ -112,13 +156,15 @@ pub fn execution_evidence(
                 turn_id,
                 tool_call_id,
                 reason,
+                detail,
             } if turn_id == turn => {
-                if let Some((_, data, _)) =
+                if let Some((_, data, output)) =
                     tools.iter_mut().rev().find(|(id, _, _)| id == tool_call_id)
                 {
                     truncated |= reason.as_ref().is_some_and(|s| s.chars().count() > 500);
                     data["status"] = json!("failed");
                     data["reason"] = json!(reason.as_deref().map(|s| excerpt(s, 500)));
+                    truncated |= apply_tool_detail_evidence(data, output, detail.as_ref());
                 } else {
                     truncated = true;
                 }
