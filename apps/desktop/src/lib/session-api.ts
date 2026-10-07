@@ -208,6 +208,15 @@ export function steerTurn(input: SteerTurnInput) {
 	return invoke<SteerTurnOutput>(SESSION_METHODS.steerTurn, { input });
 }
 
+/** `STEER_WINDOW_CLOSED` in dcc-core: the turn was already finishing. */
+const STEER_WINDOW_CLOSED = "steer_window_closed";
+
+/** A steer the provider refused because the turn was wrapping up; queue it instead. */
+export function isSteerWindowClosedError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.includes(STEER_WINDOW_CLOSED);
+}
+
 export function steerNativeSubagent(input: SteerNativeSubagentInput) {
 	return invoke<NativeSubagentControlOutput>(
 		SESSION_METHODS.steerNativeSubagent,

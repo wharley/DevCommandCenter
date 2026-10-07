@@ -20,6 +20,8 @@ pub fn adapter() -> ClaudeSdkSidecarAdapter {
 
 fn claude_code_capabilities() -> Capabilities {
     let mut capabilities = stable_cli_capabilities();
+    // The sidecar keeps the turn's prompt open and folds guidance in mid-turn.
+    capabilities.supports_steering = true;
     capabilities.mcp_support = McpSupportLevel::NativeConfig;
     capabilities.mcp_oauth_support = McpOauthSupport::ManagedDuringTurn;
     capabilities.can_request_delegation = true;

@@ -1842,6 +1842,7 @@
       "noActiveTurn": "O turno ativo já terminou.",
       "steerUnsupported": "Este provedor não aceita orientações durante um turno ativo.",
       "steerFailed": "Não foi possível orientar o turno ativo.",
+      "steerQueued": "O agente já estava terminando, então a mensagem entrou na fila como a próxima.",
       "steerNow": "Orientar o agente agora",
       "queue": "Enfileirar para depois",
       "queueTitle": "Próximas mensagens · {{count}}",

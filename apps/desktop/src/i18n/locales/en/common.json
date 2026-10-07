@@ -1842,6 +1842,7 @@
       "noActiveTurn": "The active turn already finished.",
       "steerUnsupported": "This provider cannot receive guidance during an active turn.",
       "steerFailed": "Unable to steer the active turn.",
+      "steerQueued": "The agent was already wrapping up, so this went to the queue as the next message.",
       "steerNow": "Guide the agent now",
       "queue": "Queue for later",
       "queueTitle": "Next messages · {{count}}",

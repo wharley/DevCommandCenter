@@ -24,10 +24,7 @@ import {
 	createEphemeralMcpOAuthBridge,
 	projectRemoteHttpServersThroughOAuthProxy,
 } from "./mcp-oauth-bridge.mjs";
-import {
-	createDeferredUserPrompt,
-	waitForDccMcpReadiness,
-} from "./mcp-readiness.mjs";
+import { waitForDccMcpReadiness } from "./mcp-readiness.mjs";
 
 test("normalizes DCC-owned stdio and HTTP servers for the Agent SDK", () => {
 	const projection = normalizeDccMcpServers([
@@ -303,34 +300,6 @@ test("restores and captures provider-neutral OAuth state in the private session 
 
 	bridge.cleanup();
 	assert.equal(existsSync(authConfigDir), false);
-});
-
-test("does not deliver the user prompt until MCP attachment is ready", async () => {
-	const deferred = createDeferredUserPrompt("read remote task");
-	const iterator = deferred.stream[Symbol.asyncIterator]();
-	let delivered = false;
-	const next = iterator.next().then((value) => {
-		delivered = true;
-		return value;
-	});
-
-	await Promise.resolve();
-	assert.equal(delivered, false);
-
-	deferred.release();
-	assert.deepEqual(await next, {
-		done: false,
-		value: {
-			type: "user",
-			session_id: "",
-			message: {
-				role: "user",
-				content: [{ type: "text", text: "read remote task" }],
-			},
-			parent_tool_use_id: null,
-		},
-	});
-	assert.deepEqual(await iterator.next(), { done: true, value: undefined });
 });
 
 test("waits through pending MCP status before releasing a connected snapshot", async () => {

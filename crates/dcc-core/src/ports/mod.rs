@@ -29,7 +29,7 @@ pub use mcp_probe::{McpProbe, McpProbeResult};
 pub use provider::{
     Input, Provider, ProviderMcpOauthStart, ProviderMcpOauthState, ProviderMcpOauthUpdate,
     ProviderMcpSecret, ProviderMcpServerConfig, ProviderMcpToolPolicy, ProviderMcpTransport,
-    ProviderRuntimeConfig, ProviderTurnInput, SessionConfig,
+    ProviderRuntimeConfig, ProviderTurnInput, SessionConfig, STEER_WINDOW_CLOSED,
 };
 pub use repository::{
     AppendEventOutcome, DelegationApplyTransactionRepo, DelegationRepo,

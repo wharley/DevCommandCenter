@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, Command},
-    sync::{broadcast, Mutex},
+    sync::{broadcast, oneshot, Mutex},
 };
 use uuid::Uuid;
 use zeroize::Zeroize;
@@ -23,7 +23,7 @@ use dcc_core::{
     },
     ports::{
         Input, Provider, ProviderMcpOauthState, ProviderMcpOauthUpdate, ProviderRuntimeConfig,
-        SecretValue, SessionConfig,
+        SecretValue, SessionConfig, STEER_WINDOW_CLOSED,
     },
     CoreError, Result,
 };
@@ -76,7 +76,12 @@ struct SessionRuntime {
     child: Mutex<Child>,
     events_tx: broadcast::Sender<ProviderEvent>,
     mcp_oauth_updates: Mutex<Vec<ProviderMcpOauthUpdate>>,
+    /// Steers written to the sidecar, by request id, until it accepts or refuses.
+    pending_steers: Mutex<HashMap<String, oneshot::Sender<bool>>>,
 }
+
+/// The sidecar answers a steer at once; past this the turn is left alone.
+const STEER_ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -184,6 +189,39 @@ fn parse_claude_mcp_oauth_update(raw: &str) -> Option<Result<ProviderMcpOauthUpd
         definition_id: McpDefinitionId(message.definition_id),
         state,
     }))
+}
+
+/// `(request_id, accepted)` from the sidecar's answer to a steer.
+fn parse_claude_steer_result(value: &Value) -> Option<(String, bool)> {
+    if value.get("type").and_then(Value::as_str) != Some("dcc_steer_result") {
+        return None;
+    }
+    let request_id = value.get("request_id").and_then(Value::as_str)?.to_string();
+    let accepted = value
+        .get("accepted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Some((request_id, accepted))
+}
+
+async fn write_sidecar_line(runtime: &SessionRuntime, payload: &Value) -> Result<()> {
+    let mut stdin = runtime.stdin.lock().await;
+    let stream = stdin.as_mut().ok_or_else(|| {
+        CoreError::Provider(format!(
+            "stdin closed for session {}",
+            runtime.handle.session_id.0
+        ))
+    })?;
+    let mut line = serde_json::to_string(payload).map_err(|error| {
+        CoreError::Provider(format!("failed to encode Claude sidecar message: {error}"))
+    })?;
+    line.push('\n');
+    stream.write_all(line.as_bytes()).await.map_err(|error| {
+        CoreError::Provider(format!("failed to write Claude sidecar message: {error}"))
+    })?;
+    stream.flush().await.map_err(|error| {
+        CoreError::Provider(format!("failed to flush Claude sidecar message: {error}"))
+    })
 }
 
 /// Longest native id DCC persists or hands back to the sidecar.
@@ -668,6 +706,7 @@ impl ClaudeSdkSidecarAdapter {
             child: Mutex::new(child),
             events_tx: events_tx.clone(),
             mcp_oauth_updates: Mutex::new(Vec::new()),
+            pending_steers: Mutex::new(HashMap::new()),
         });
 
         self.runtime
@@ -722,6 +761,17 @@ impl ClaudeSdkSidecarAdapter {
                     continue;
                 }
                 if let Ok(value) = serde_json::from_str::<Value>(&content) {
+                    if let Some((request_id, accepted)) = parse_claude_steer_result(&value) {
+                        let waiter = runtime_for_task
+                            .pending_steers
+                            .lock()
+                            .await
+                            .remove(&request_id);
+                        if let Some(waiter) = waiter {
+                            let _ = waiter.send(accepted);
+                        }
+                        continue;
+                    }
                     if let Some(event) = parse_claude_native_session_change(&value) {
                         let private = matches!(
                             event,
@@ -778,6 +828,8 @@ impl ClaudeSdkSidecarAdapter {
                 }
             }
 
+            // A steer still waiting gets its answer as an error, not a timeout.
+            runtime_for_task.pending_steers.lock().await.clear();
             let stderr_output = stderr_task.await.unwrap_or_default();
             let exit_result = {
                 let mut child = runtime_for_task.child.lock().await;
@@ -1014,6 +1066,57 @@ impl Provider for ClaudeSdkSidecarAdapter {
         }
 
         Ok(())
+    }
+
+    async fn steer(&self, handle: &SessionHandle, prompt: &str) -> Result<()> {
+        let runtime = self
+            .runtime_for_session(&handle.session_id)
+            .await
+            .ok_or_else(|| {
+                CoreError::Provider(format!(
+                    "no runtime for session {} on provider {}",
+                    handle.session_id.0, self.label
+                ))
+            })?;
+        let request_id = Uuid::new_v4().to_string();
+        let (answer_tx, answer_rx) = oneshot::channel();
+        runtime
+            .pending_steers
+            .lock()
+            .await
+            .insert(request_id.clone(), answer_tx);
+        let written = write_sidecar_line(
+            &runtime,
+            &json!({
+                "type": "steer",
+                "requestId": request_id,
+                "prompt": prompt,
+            }),
+        )
+        .await;
+        if let Err(error) = written {
+            runtime.pending_steers.lock().await.remove(&request_id);
+            return Err(error);
+        }
+
+        match tokio::time::timeout(STEER_ANSWER_TIMEOUT, answer_rx).await {
+            Ok(Ok(true)) => Ok(()),
+            Ok(Ok(false)) => Err(CoreError::Provider(format!(
+                "{STEER_WINDOW_CLOSED}: {} is already finishing this turn",
+                self.label
+            ))),
+            Ok(Err(_)) => Err(CoreError::Provider(format!(
+                "{} stopped before taking the guidance",
+                self.label
+            ))),
+            Err(_) => {
+                runtime.pending_steers.lock().await.remove(&request_id);
+                Err(CoreError::Provider(format!(
+                    "{} did not answer the guidance in time",
+                    self.label
+                )))
+            }
+        }
     }
 
     async fn take_mcp_oauth_updates(
@@ -1450,6 +1553,113 @@ done
             );
         }
         fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn steering_waits_for_the_sidecar_to_accept_or_refuse_the_guidance() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Runs in a child test process so DCC_CLAUDE_SIDECAR_PATH cannot leak
+        // into concurrently running provider tests.
+        if std::env::var("DCC_CLAUDE_STEER_TEST_CHILD").is_ok() {
+            let adapter = crate::claude_code::adapter();
+            assert!(adapter.capabilities().supports_steering);
+            let handle = adapter
+                .prepare_session(SessionConfig {
+                    workspace_id: dcc_core::domain::workspace::WorkspaceId("fixture".to_string()),
+                    session_id: SessionId("steer".to_string()),
+                    model: None,
+                    working_directory: None,
+                    additional_working_directories: vec![],
+                    provider_runtime: None,
+                    mcp_servers: vec![],
+                    native_resume_id: None,
+                })
+                .await
+                .expect("fake sidecar session");
+            adapter
+                .steer(&handle, "fold this")
+                .await
+                .expect("an accepted steer succeeds");
+            let refused = adapter
+                .steer(&handle, "too late")
+                .await
+                .expect_err("a refused steer fails");
+            assert!(
+                refused.to_string().contains(STEER_WINDOW_CLOSED),
+                "the composer queues on this marker: {refused}"
+            );
+            let lost = adapter
+                .steer(&handle, "vanish")
+                .await
+                .expect_err("a sidecar that exits does not leave the steer hanging");
+            assert!(!lost.to_string().contains(STEER_WINDOW_CLOSED), "{lost}");
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!("dcc-claude-steer-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("fixture directory");
+        let helper = root.join("DCC Claude helper");
+        fs::write(
+            &helper,
+            r##"#!/bin/sh
+if [ "$1" = "--resolve-cli" ]; then
+  echo '{"path":"/usr/bin/false","version":"2.1.999 (Claude Code)"}'; exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"requestId":"\([^"]*\)".*/\1/p')
+  case "$line" in
+    *'"prompt":"fold this"'*)
+      echo "{\"type\":\"dcc_steer_result\",\"request_id\":\"$id\",\"accepted\":true}" ;;
+    *'"prompt":"too late"'*)
+      echo "{\"type\":\"dcc_steer_result\",\"request_id\":\"$id\",\"accepted\":false}" ;;
+    *'"prompt":"vanish"'*) exit 0 ;;
+  esac
+done
+"##,
+        )
+        .expect("helper fixture");
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o755))
+            .expect("executable fixture");
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--exact", "claude_sdk_sidecar::account_usage_tests::steering_waits_for_the_sidecar_to_accept_or_refuse_the_guidance", "--nocapture"])
+            .env("DCC_CLAUDE_SIDECAR_PATH", &helper)
+            .env("DCC_CLAUDE_STEER_TEST_CHILD", "1")
+            .output()
+            .expect("isolated steer test");
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn steer_answers_are_read_only_from_the_sidecar_channel() {
+        assert_eq!(
+            parse_claude_steer_result(&json!({
+                "type": "dcc_steer_result",
+                "request_id": "r1",
+                "accepted": true,
+            })),
+            Some(("r1".to_string(), true))
+        );
+        assert_eq!(
+            parse_claude_steer_result(&json!({ "type": "dcc_steer_result", "request_id": "r2" })),
+            Some(("r2".to_string(), false)),
+            "an answer without a verdict is a refusal"
+        );
+        assert_eq!(
+            parse_claude_steer_result(&json!({ "type": "dcc_steer_result", "accepted": true })),
+            None
+        );
+        assert_eq!(
+            parse_claude_steer_result(&json!({ "type": "result", "request_id": "r1" })),
+            None
+        );
     }
 
     #[test]

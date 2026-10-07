@@ -163,6 +163,53 @@ Codex details (`codex_turn_payload` in `crates/dcc-providers/src/codex_app_serve
   `collaborationMode` replaces Codex's built-in mode instructions, so neither
   fits per-turn context.
 
+## Steering an active turn
+
+Steering adds the user's guidance to the running turn instead of queueing it.
+`steer_turn` calls the adapter first and appends `TurnSteered` only after the
+provider accepts the text. The timeline renders that event as a user bubble
+for every provider. An adapter that can tell the turn is already finishing
+refuses with an error starting with `STEER_WINDOW_CLOSED`
+(`dcc_core::ports`). The composer then queues the same text as the next
+message. Delegation hand-backs queue on any steer error.
+
+| Provider path | Steering channel | When it is refused |
+| --- | --- | --- |
+| Codex app-server | `turn/steer { threadId, input, expectedTurnId }` | No active turn id (error, not queued) |
+| Claude Agent SDK | Extra `user` message on the turn's open SDK prompt stream, `priority: "next"` | Before Claude reports `running`, after the turn's `result`, or when the turn input has ended |
+| ACP, stream-json CLIs | None: the composer offers the queue only | — |
+
+Claude details (`sidecar/src/turn-input.mjs`, `steer` in `claude_sdk_sidecar.rs`):
+
+- The SDK `prompt` is an async iterable that stays open while the turn runs.
+  Rust writes `{"type":"steer","requestId","prompt"}` to the sidecar's stdin.
+  The sidecar answers `dcc_steer_result { request_id, accepted }` on stdout.
+  Rust waits up to 10 s for the answer and never forwards it as a provider event.
+- The sidecar sets `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, so Claude
+  reports `system/session_state_changed` (`running`, `requires_action`,
+  `idle`). The sidecar consumes these messages and does not forward them.
+  Steering is offered only after Claude reports `running`, which proves that
+  Claude will also report `idle`. A Claude Code that never reports state never
+  steers, and its turn ends at the `result` exactly as before.
+- `priority: "next"` lets Claude Code fold the guidance in at its next tool
+  boundary ("address this before completing your current task"). If the turn
+  had no tool boundary left, Claude runs the guidance as a follow-up in the same
+  process. That follow-up reports `running` again and can be steered too. The
+  last `result` closes the DCC turn. `modelUsage` is cumulative per process,
+  so that `result` covers the whole turn.
+- An unsteered turn ends its input at the `result`. A steered turn ends it at
+  `idle`, after a 1 s settle window. A steer written just as Claude went idle
+  starts as a follow-up within that window. If Claude never reports `idle`
+  after a steered `result`, the input ends 15 s later.
+- Referenced images (`@/abs/path.png`) in the steer text become image blocks,
+  as in a turn prompt. Steers carry no DCC context: they are user words only.
+- Native resume: a refused resume fails before `system/init` and before
+  `running`, so no guidance is accepted by an attempt that the sidecar then
+  retries fresh. With DCC MCP servers, the first message waits for them to
+  attach, and steering waits with it.
+- Not verified against a live Claude Code. The protocol was read from the
+  Agent SDK 0.2.126 types and the Claude Code 2.1.287 binary.
+
 ## Streaming persistence
 
 The Tauri bridge merges consecutive deltas of the same item that arrive within

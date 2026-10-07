@@ -15,34 +15,6 @@ export function userMessage(prompt, imageBlocks = []) {
 	};
 }
 
-export function createDeferredUserPrompt(prompt, imageBlocks = []) {
-	let settle;
-	let settled = false;
-	const gate = new Promise((resolve) => {
-		settle = resolve;
-	});
-
-	return {
-		stream: (async function* deferredPrompt() {
-			if (await gate) {
-				yield userMessage(prompt, imageBlocks);
-			}
-		})(),
-		release() {
-			if (!settled) {
-				settled = true;
-				settle(true);
-			}
-		},
-		cancel() {
-			if (!settled) {
-				settled = true;
-				settle(false);
-			}
-		},
-	};
-}
-
 function timedOutSnapshot(snapshot) {
 	const servers = snapshot.servers.map((server) =>
 		server.status === "pending"

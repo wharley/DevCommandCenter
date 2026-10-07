@@ -183,6 +183,7 @@ import {
 	checkpointAiMemorySession,
 	closeSession,
 	inheritSessionObjective,
+	isSteerWindowClosedError,
 	loadSessionThreadEvents,
 	queueTurn,
 	resumeSession,
@@ -3626,11 +3627,14 @@ export default function App() {
 				});
 				recordUxMetric("steer_prompt");
 			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: t("composer.followUp.steerFailed");
-				toast.error(message);
+				// The composer queues guidance that arrived as the turn finished.
+				if (!isSteerWindowClosedError(error)) {
+					const message =
+						error instanceof Error
+							? error.message
+							: t("composer.followUp.steerFailed");
+					toast.error(message);
+				}
 				throw error;
 			}
 		},

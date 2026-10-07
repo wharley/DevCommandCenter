@@ -125,6 +125,7 @@ import {
 } from "@/features/providers/provider-account-usage";
 import {
 	dispatchNextQueuedTurn,
+	isSteerWindowClosedError,
 	loadTurnQueue,
 	removeQueuedTurn,
 	reorderTurnQueue,
@@ -437,7 +438,18 @@ export function WorkspaceComposer({
 			if (hasActiveTurn) {
 				if (behavior === "steer") {
 					if (!canSteerActiveTurn || !onSteerPrompt) return false;
-					await onSteerPrompt(turn);
+					try {
+						await onSteerPrompt(turn);
+					} catch (error) {
+						// The agent was already wrapping up: the guidance becomes the
+						// next message instead of being lost.
+						if (!isSteerWindowClosedError(error) || !canQueueActiveTurn || !onQueuePrompt) {
+							throw error;
+						}
+						await onQueuePrompt(turn);
+						await refreshTurnQueue();
+						toast.info(t("composer.followUp.steerQueued"));
+					}
 				} else {
 					if (!canQueueActiveTurn || !onQueuePrompt) return false;
 					await onQueuePrompt(turn);

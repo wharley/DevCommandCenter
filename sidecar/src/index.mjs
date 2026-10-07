@@ -14,11 +14,7 @@ import {
 	createEphemeralMcpOAuthBridge,
 	runBundledMcpRemoteProxy,
 } from "./mcp-oauth-bridge.mjs";
-import {
-	createDeferredUserPrompt,
-	waitForDccMcpReadiness,
-	userMessage,
-} from "./mcp-readiness.mjs";
+import { waitForDccMcpReadiness } from "./mcp-readiness.mjs";
 import { promptImageBlocks } from "./prompt-images.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 import {
@@ -28,6 +24,7 @@ import {
 import { createDccMcpPermissionHooks } from "./mcp-permission-hook.mjs";
 import { createNativeSubagentHooks } from "./native-subagent-hook.mjs";
 import { finishTurn } from "./turn-lifecycle.mjs";
+import { createTurnInput, SESSION_STATE_ENV } from "./turn-input.mjs";
 import { waitForPendingResponse } from "./pending-response.mjs";
 import { claudeCommand, resolveClaudeExecutable } from "./claude-executable.mjs";
 import {
@@ -295,21 +292,18 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 		additionalDirectories,
 	);
 	const imageBlocks = await promptImageBlocks(prompt);
-	const deferredPrompt = hasDccMcpServers
-		? createDeferredUserPrompt(prompt, imageBlocks)
-		: null;
-	// Images need structured content, which a plain string prompt cannot carry.
-	const promptInput =
-		deferredPrompt?.stream ??
-		(imageBlocks.length > 0
-			? (async function* singleUserMessage() {
-					yield userMessage(prompt, imageBlocks);
-				})()
-			: prompt);
+	// The prompt stays open during the turn so steering can add guidance. With
+	// DCC MCP servers the first message waits until they are attached.
+	const turnInput = createTurnInput();
+	if (!hasDccMcpServers) {
+		turnInput.start(prompt, imageBlocks);
+	}
+	state.activeTurnInput = turnInput;
 	const q = query({
-		prompt: promptInput,
+		prompt: turnInput.stream,
 		options: {
 			cwd: process.cwd(),
+			env: { ...process.env, ...SESSION_STATE_ENV },
 			additionalDirectories,
 			pathToClaudeCodeExecutable: claudeBinPath,
 			executable: "node",
@@ -393,9 +387,14 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 			throw new Error("one or more DCC MCP servers failed to attach");
 		}
 		publishMcpOauthUpdates();
-		deferredPrompt?.release();
+		turnInput.start(prompt, imageBlocks);
 		for await (const message of q) {
 			updateResumeSessionId(message, state, trace);
+			if (turnInput.observe(message)) {
+				continue;
+			}
+			// With steering Claude can run a follow-up and report again; the
+			// last result closes the DCC turn.
 			if (message && message.type === "result") {
 				terminalResult = message;
 				continue;
@@ -413,7 +412,10 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 			};
 		}
 	} finally {
-		deferredPrompt?.cancel();
+		if (state.activeTurnInput === turnInput) {
+			state.activeTurnInput = null;
+		}
+		turnInput.close();
 		try {
 			q.close();
 		} catch {
@@ -429,6 +431,27 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 			session_id: state.resumeSessionId ?? null,
 		}
 	);
+}
+
+// DCC records guidance only after this answer accepts it; a refusal means the
+// turn is already finishing and DCC queues the text as a follow-up instead.
+async function handleSteer(payload, state) {
+	const requestId =
+		typeof payload.requestId === "string" ? payload.requestId.trim() : "";
+	const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
+	const turnInput = state.activeTurnInput;
+	let accepted = false;
+	try {
+		if (requestId && prompt && turnInput?.canSteer()) {
+			const imageBlocks = await promptImageBlocks(prompt);
+			// Reading images yields, so the turn may have ended meanwhile.
+			accepted =
+				state.activeTurnInput === turnInput && turnInput.steer(prompt, imageBlocks);
+		}
+	} catch {
+		accepted = false;
+	}
+	emit({ type: "dcc_steer_result", request_id: requestId, accepted });
 }
 
 async function main() {
@@ -459,6 +482,7 @@ async function main() {
 		nativeResumePending: nativeResumeId !== null,
 		running: false,
 		activeTurnPromise: null,
+		activeTurnInput: null,
 		pendingUserInputs: new Map(),
 		pendingPermissions: new Map(),
 		mcpProjection: normalizeDccMcpServers([]),
@@ -553,6 +577,11 @@ async function main() {
 					? payload.behavior.trim()
 					: "deny",
 			);
+			continue;
+		}
+
+		if (payload.type === "steer") {
+			void handleSteer(payload, state);
 			continue;
 		}
 

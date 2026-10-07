@@ -264,6 +264,10 @@ pub enum Input {
     PermissionResponse(ProviderPermissionResponse),
 }
 
+/// Starts the error of a steer refused because the turn is already finishing.
+/// The desktop composer then queues the guidance as a follow-up instead.
+pub const STEER_WINDOW_CLOSED: &str = "steer_window_closed";
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn id(&self) -> ProviderId;
@@ -293,6 +297,9 @@ pub trait Provider: Send + Sync {
     }
     async fn prepare_session(&self, cfg: SessionConfig) -> Result<SessionHandle>;
     async fn send_input(&self, handle: &SessionHandle, input: Input) -> Result<()>;
+    /// Adds guidance to the active turn. A provider that can tell the turn is
+    /// already finishing fails with a message starting with
+    /// [`STEER_WINDOW_CLOSED`].
     async fn steer(&self, _handle: &SessionHandle, _prompt: &str) -> Result<()> {
         Err(crate::CoreError::Provider(
             "This provider does not support steering an active turn".to_string(),
