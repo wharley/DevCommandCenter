@@ -2166,6 +2166,11 @@ export type RunDelegationInput = {
 	 *  inherit them from the newest session of the same provider.
 	 */
 	providerRuntime?: ProviderRuntimeConfig | null,
+	/**
+	 *  A short name for the task, shown to the person as the child
+	 *  conversation's title. Omitted: derived from the instruction.
+	 */
+	title?: string | null,
 };
 
 export type RunDelegationOutput = {

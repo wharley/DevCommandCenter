@@ -62,6 +62,7 @@ export function buildDelegateTaskToolInstructions(
 		"- To hand a bounded, self-contained task to a different provider, call the DCC tool dcc_delegate_task when it is in your tool list.",
 		"- It returns a taskId at once; DCC delivers the result later as a message starting with [DCC] (mid-turn if you are still working). Keep working on independent parts or end your turn — do not poll. Use wait=true or dcc_task_wait only when you cannot continue without the result.",
 		"- review and explain are read-only; implement edits an isolated worktree that the human reviews before anything reaches this workspace.",
+		"- Pass a short title (a few words, in the human's language) naming the task; the human sees it as the child conversation's title.",
 		`Available external-provider delegation targets: ${targets
 			.map((provider) => `${provider.id} (${provider.label})`)
 			.join(", ")}.`,

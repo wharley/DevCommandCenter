@@ -90,6 +90,7 @@ const DCC_MCP_TOOL_COUNT: usize =
 /// returns the task id; the child's turn itself runs in the background.
 const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_DELEGATED_TASK_CHARS: usize = 32_000;
+const MAX_DELEGATED_TITLE_CHARS: usize = 80;
 const COMPUTER_CONTROL_REQUEST_HTTP_TIMEOUT: Duration = Duration::from_secs(50);
 const DCC_MCP_SERVER_INSTRUCTIONS: &str = "DCC exposes browser and desktop tools for this session. For a web task, call dcc_browser_status first. If the target is not open, call dcc_browser_open with an explicit HTTP(S) URL and a concise reason. It waits for the user to approve the visible DCC Browser. At sign-in, MFA, CAPTCHA, payment, or identity-sensitive steps, let the user complete the handoff; never request, copy, import, or invent cookies, passwords, or credentials. The user can use the Browser Sessions menu to import an eligible existing site session locally or sign in manually, including in an owned login popup; agents never receive or import cookies. After every navigation, click, fill, select, key press, reload, or user handoff, call dcc_browser_context again and use its fresh anchors before reporting a result, login state, or blocker; never infer one from the action alone. Do not use curl or another HTTP client to judge that Browser's authenticated access. Computer Use is separate experimental capability for an explicitly user-requested external desktop-app task; it is never an automatic Browser fallback. To hand a bounded task to another coding agent (another provider or model), call dcc_delegate_task: it returns a taskId at once and DCC later delivers the result into this conversation as a message starting with [DCC] (mid-turn when you are still working). Continue independent work or end your turn instead of polling; pass wait=true, or call dcc_task_wait, only when you cannot continue without the result.";
 
@@ -872,6 +873,8 @@ struct DelegateTaskArgs {
     wait: bool,
     #[serde(default)]
     timeout_seconds: Option<u64>,
+    #[serde(default)]
+    title: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -914,6 +917,9 @@ fn delegate_task_args_are_well_formed(args: &DelegateTaskArgs) -> bool {
             .as_deref()
             .is_none_or(|model| model.chars().count() <= 128 && !model.chars().any(char::is_control))
         && valid_wait_seconds(args.timeout_seconds)
+        && args.title.as_deref().is_none_or(|title| {
+            title.chars().count() <= MAX_DELEGATED_TITLE_CHARS && !title.chars().any(char::is_control)
+        })
 }
 
 fn valid_wait_seconds(value: Option<u64>) -> bool {
@@ -2014,6 +2020,7 @@ async fn dispatch_delegation_tool(
                     effort: None,
                     fast_mode: None,
                     provider_runtime: None,
+                    title: args.title,
                 },
             )
             .await;
@@ -2335,7 +2342,7 @@ fn tools() -> Vec<Value> {
         json!({"name":"dcc_computer_scroll","description":"Request one bounded accessibility scroll step at a point within a just-captured allowed target window. x/y are screenshot window-local pixels with top-left origin. Deltas select direction and are not pixel-precise. A generation can be used once; capture again afterwards.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"x":{"type":"number"},"y":{"type":"number"},"deltaX":{"type":"integer","minimum":-1000,"maximum":1000,"default":0},"deltaY":{"type":"integer","minimum":-1000,"maximum":1000}},"required":["target","x","y","deltaY"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_computer_type","description":"Type bounded text into the focused just-captured allowed target window. A generation can be used once.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"text":{"type":"string","maxLength":2000}},"required":["target","text"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_computer_key","description":"Send one supported key combination to the focused just-captured allowed target window. A generation can be used once.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target,"key":{"type":"string","enum":computer_keys},"modifiers":{"type":"array","maxItems":4,"items":{"type":"string","enum":["SHIFT","CONTROL","OPTION","COMMAND"]}}},"required":["target","key"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
-        json!({"name":"dcc_delegate_task","description":"Delegate a bounded, self-contained task to another coding agent (a different provider or model) working in this same workspace. Returns a taskId immediately; DCC later sends you the result as a new message starting with [DCC]. End your turn or keep working on independent parts — do not poll. The child sees only `task` plus the workspace's git context, so include everything it needs. review and explain are read-only. implement edits an isolated git worktree; the human reviews those edits before anything reaches your workspace and DCC tells you whether they were applied. A delegated agent cannot delegate again.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"task":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS},"mode":{"type":"string","enum":["review","explain","implement"],"default":"review"},"provider":{"type":"string","enum":dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS,"description":"Target provider. Omit to let DCC pick an available provider other than yours."},"model":{"type":"string","maxLength":128,"description":"Target model id. Omit for the provider's default."},"wait":{"type":"boolean","default":false,"description":"Block until the task finishes (or timeoutSeconds) and return its result. Use only when you cannot continue without it."},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600,"default":300}},"required":["task"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
+        json!({"name":"dcc_delegate_task","description":"Delegate a bounded, self-contained task to another coding agent (a different provider or model) working in this same workspace. Returns a taskId immediately; DCC later sends you the result as a new message starting with [DCC]. End your turn or keep working on independent parts — do not poll. The child sees only `task` plus the workspace's git context, so include everything it needs. review and explain are read-only. implement edits an isolated git worktree; the human reviews those edits before anything reaches your workspace and DCC tells you whether they were applied. A delegated agent cannot delegate again.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"task":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS},"title":{"type":"string","maxLength":MAX_DELEGATED_TITLE_CHARS,"description":"A short name for the task (a few words, in the human's language), shown to them as the child conversation's title, e.g. \"Corrigir respostas antigas\"."},"mode":{"type":"string","enum":["review","explain","implement"],"default":"review"},"provider":{"type":"string","enum":dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS,"description":"Target provider. Omit to let DCC pick an available provider other than yours."},"model":{"type":"string","maxLength":128,"description":"Target model id. Omit for the provider's default."},"wait":{"type":"boolean","default":false,"description":"Block until the task finishes (or timeoutSeconds) and return its result. Use only when you cannot continue without it."},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600,"default":300}},"required":["task"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
         json!({"name":"dcc_task_status","description":"Read the status and, once finished, the result of a task you delegated with dcc_delegate_task. Only needed if you must check before DCC delivers the result.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64}},"required":["taskId"]},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}),
         json!({"name":"dcc_task_wait","description":"Block until a task you delegated finishes, up to timeoutSeconds, and return its result. Use only when you cannot continue without it; otherwise DCC delivers the result on its own. If it times out the task keeps running and the result still arrives as a [DCC] message.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600,"default":300}},"required":["taskId"]},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}),
         json!({"name":"dcc_task_cancel","description":"Cancel a task you delegated that is still running. Its partial work is discarded.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64},"reason":{"type":"string","maxLength":2000}},"required":["taskId"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}}),
@@ -2435,6 +2442,7 @@ mod tests {
             provider_runtime: None,
             mcp_servers: vec![projection.server],
             native_resume_id: None,
+            native_rewind_checkpoint: None,
         };
         let handle =
             match tokio::time::timeout(Duration::from_secs(30), adapter.prepare_session(config))
@@ -3277,6 +3285,18 @@ mod tests {
         assert!(tool_call_is_well_formed(&call(
             "dcc_delegate_task",
             json!({"task":"x","wait":true,"timeoutSeconds":120})
+        )));
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"x","title":"Corrigir respostas antigas"})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"x","title":"y".repeat(MAX_DELEGATED_TITLE_CHARS + 1)})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"x","title":"line\nbreak"})
         )));
         assert!(!tool_call_is_well_formed(&call(
             "dcc_delegate_task",

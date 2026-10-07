@@ -101,6 +101,10 @@ pub struct RunDelegationInput {
     /// inherit them from the newest session of the same provider.
     #[serde(default)]
     pub provider_runtime: Option<ProviderRuntimeConfig>,
+    /// A short name for the task, shown to the person as the child
+    /// conversation's title. Omitted: derived from the instruction.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -163,6 +167,31 @@ pub fn extract_delegation_instruction(prompt: &str) -> String {
         .min()
         .unwrap_or(rest.len());
     rest[..end].trim().to_string()
+}
+
+const MAX_CHILD_TITLE_CHARS: usize = 80;
+
+/// The child conversation's title: the agent's own name for the task, else
+/// the instruction's first line, else the parent's title. The lineage already
+/// marks it as delegated, so no "Delegated …" prefix eats the space.
+fn child_thread_title(title: Option<&str>, instruction: &str, parent_title: &str) -> String {
+    let candidate = title
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            instruction
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+        })
+        .unwrap_or(parent_title);
+    let mut chars = candidate.chars();
+    let clipped: String = chars.by_ref().take(MAX_CHILD_TITLE_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{}…", clipped.trim_end())
+    } else {
+        clipped
+    }
 }
 
 fn delegation_instruction(delegation: &Delegation) -> String {
@@ -953,10 +982,10 @@ pub async fn run_delegation(
             working_directory_override: prepared
                 .as_ref()
                 .map(|prepared| prepared.worktree_path.clone()),
-            title: Some(format!(
-                "Delegated {}: {}",
-                mode_label(&input.mode),
-                parent_title
+            title: Some(child_thread_title(
+                input.title.as_deref(),
+                &instruction,
+                &parent_title,
             )),
             forked_from: None,
         };
@@ -1770,6 +1799,24 @@ mod tests {
     }
 
     #[test]
+    fn child_title_prefers_the_agents_name_then_the_instruction() {
+        assert_eq!(
+            child_thread_title(Some("  Corrigir respostas antigas "), "long task", "Parent"),
+            "Corrigir respostas antigas"
+        );
+        assert_eq!(
+            child_thread_title(Some("  "), "\nFix stale replies\nmore detail", "Parent"),
+            "Fix stale replies"
+        );
+        assert_eq!(child_thread_title(None, "", "Parent"), "Parent");
+        let long = "x".repeat(MAX_CHILD_TITLE_CHARS + 5);
+        assert_eq!(
+            child_thread_title(None, &long, "Parent").chars().count(),
+            MAX_CHILD_TITLE_CHARS + 1
+        );
+    }
+
+    #[test]
     fn instruction_is_read_from_the_prompt_when_not_stored() {
         assert_eq!(
             extract_delegation_instruction(&delegation(DelegationStatus::Running).prompt),
@@ -2162,6 +2209,7 @@ mod tests {
                     effort: None,
                     fast_mode: None,
                     provider_runtime: None,
+                    title: None,
                 },
             )
             .await
@@ -2186,6 +2234,7 @@ mod tests {
                     effort: None,
                     fast_mode: None,
                     provider_runtime: None,
+                    title: None,
                 },
             )
             .await
