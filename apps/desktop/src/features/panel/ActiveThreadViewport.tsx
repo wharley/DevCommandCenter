@@ -34,9 +34,7 @@ import {
 	UserMessage,
 } from "./message-components";
 import { EmptyState } from "./EmptyState";
-import {
-	latestConversationActivitySignature,
-	precedingUserPrompt, precedingUserTurn } from "./conversation-recovery";
+import { latestConversationActivitySignature } from "./conversation-recovery";
 import { ConversationTrail } from "./ConversationTrail";
 import { delegationVerifications } from "@/features/sessions/delegation-verification";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
@@ -51,6 +49,25 @@ import { useStableMessages } from "./stable-messages";
 
 /** Bottom spacer (40px) plus the gap kept above an anchored prompt (16px). */
 const TURN_ANCHOR_RESERVED_PX = 56;
+/** After a switch, rows settle (prose, review cards) without animating the scroll. */
+const SESSION_SWITCH_SETTLE_MS = 800;
+const REMEMBERED_SCROLL_LIMIT = 50;
+
+/**
+ * Where the person left each conversation. A thread read mid-history
+ * reopens there; one followed to the end reopens at the end.
+ */
+const rememberedScroll = new Map<string, number>();
+
+function rememberScroll(sessionId: string, scrollTop: number | null) {
+	rememberedScroll.delete(sessionId);
+	if (scrollTop === null) return;
+	rememberedScroll.set(sessionId, scrollTop);
+	if (rememberedScroll.size > REMEMBERED_SCROLL_LIMIT) {
+		const oldest = rememberedScroll.keys().next().value;
+		if (oldest !== undefined) rememberedScroll.delete(oldest);
+	}
+}
 
 type AssistantRowContext = {
 	workspacePath: string | null;
@@ -146,6 +163,49 @@ const AssistantMessageRow = memo(function AssistantMessageRow({
 			onOpenPlan={context.openPlan}
 			onOpenFileReference={context.openFileReference}
 			hidePendingApprovals
+		/>
+	);
+});
+
+/** One user prompt, memoized so a live frame does not re-render past prompts. */
+const UserMessageRow = memo(function UserMessageRow({
+	message,
+	canEdit,
+	canFork,
+	editFromMessage,
+	forkFromMessage,
+}: {
+	message: WorkspaceMessage;
+	canEdit: boolean;
+	canFork: boolean;
+	editFromMessage: (request: EditFromHereRequest) => void;
+	forkFromMessage: (messageId: string) => void;
+}) {
+	const onFork = useMemo(
+		() => (canFork ? () => forkFromMessage(message.id) : undefined),
+		[canFork, forkFromMessage, message.id],
+	);
+	const onEdit = useMemo(
+		() =>
+			canEdit
+				? () =>
+						editFromMessage({
+							messageId: message.id,
+							turnId: message.turnId ?? null,
+							prompt: message.content,
+						})
+				: undefined,
+		[canEdit, editFromMessage, message.content, message.id, message.turnId],
+	);
+	return (
+		<UserMessage
+			label={message.label}
+			content={message.content}
+			createdAt={message.createdAt}
+			evidence={message.evidence ?? null}
+			retryOfTurnId={message.retryOfTurnId ?? null}
+			onFork={onFork}
+			onEdit={onEdit}
 		/>
 	);
 });
@@ -259,6 +319,7 @@ export function ActiveThreadViewport({
 	// through a ref so memoized turns are not invalidated by them.
 	const handlersRef = useRef({
 		onContinueInterrupted,
+		onEditFromMessage,
 		onForkFromMessage,
 		onRetryInterrupted,
 		onOpenPlan,
@@ -266,6 +327,7 @@ export function ActiveThreadViewport({
 	});
 	handlersRef.current = {
 		onContinueInterrupted,
+		onEditFromMessage,
 		onForkFromMessage,
 		onRetryInterrupted,
 		onOpenPlan,
@@ -276,6 +338,9 @@ export function ActiveThreadViewport({
 	}, []);
 	const forkFromMessage = useCallback((messageId: string) => {
 		handlersRef.current.onForkFromMessage?.(messageId);
+	}, []);
+	const editFromMessage = useCallback((request: EditFromHereRequest) => {
+		handlersRef.current.onEditFromMessage?.(request);
 	}, []);
 	const retryInterrupted = useCallback((input: { prompt: string; turnId: string }) => {
 		void handlersRef.current.onRetryInterrupted?.(input);
@@ -408,11 +473,14 @@ export function ActiveThreadViewport({
 	const startingPhase = isModelRouting
 		? "routing"
 		: conversationStartingPhase(sessionId, lastTurnState);
+	const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
+	const settlingAfterSwitch = settledSessionId !== sessionId;
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom, stopScroll } = useStickToBottom({
 		initial: "instant",
 		// Token-by-token height changes should not start overlapping smooth-scroll
-		// animations. Explicit user navigation remains smooth below.
-		resize: hasStreamingMessage ? "instant" : "smooth",
+		// animations, nor should rows settling right after a switch. Explicit
+		// user navigation remains smooth below.
+		resize: hasStreamingMessage || settlingAfterSwitch ? "instant" : "smooth",
 	});
 
 	const activitySignature = latestConversationActivitySignature(messages);
@@ -422,15 +490,29 @@ export function ActiveThreadViewport({
 	const previousActivityRef = useRef<string | null>(null);
 	const wasAtBottomRef = useRef(true);
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		prependScrollAnchorRef.current = null;
 		previousActivityRef.current = activitySignature;
-		wasAtBottomRef.current = true;
 		setHasNewActivity(false);
-		void scrollToBottom("instant");
+		const remembered = sessionId ? rememberedScroll.get(sessionId) : undefined;
+		const scrollElement = scrollRef.current;
+		if (remembered !== undefined && scrollElement && !hasStreamingMessage) {
+			stopScroll();
+			wasAtBottomRef.current = false;
+			scrollElement.scrollTop = remembered;
+		} else {
+			wasAtBottomRef.current = true;
+			void scrollToBottom("instant");
+		}
+		const timeout = window.setTimeout(
+			() => setSettledSessionId(sessionId),
+			SESSION_SWITCH_SETTLE_MS,
+		);
+		return () => window.clearTimeout(timeout);
 		// A session switch is the only time the viewport intentionally resets.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [sessionId]);
+
 
 	useLayoutEffect(() => {
 		const anchor = prependScrollAnchorRef.current;
@@ -456,14 +538,31 @@ export function ActiveThreadViewport({
 		}
 	}, [isAtBottom]);
 
+	// The prompt each row answers, in one pass instead of a backward scan per row.
+	const precedingUserTurns = useMemo(() => {
+		const turns: Array<{ prompt: string; turnId: string | null } | null> = [];
+		let latest: { prompt: string; turnId: string | null } | null = null;
+		for (const message of messages) {
+			turns.push(latest);
+			if (message.role === "user") {
+				latest = { prompt: message.content, turnId: message.turnId ?? null };
+			}
+		}
+		return turns;
+	}, [messages]);
+
 	const verificationByDelegation = useMemo(() => delegationVerifications(messages), [messages]);
 	const childTitleBySession = useMemo(
 		() => new Map((sessions ?? []).map((summary) => [summary.session.id, summary.thread.title])),
 		[sessions],
 	);
+	// Once a conversation is on screen it stays mounted: routing a model,
+	// choosing one or a rehydrate show below the last turn instead of
+	// replacing (and later remounting) the whole timeline. Only the first
+	// turn keeps its full preparation steps.
 	const threadSurfaceVisible =
-		!isModelRouting &&
 		hasLoaded &&
+		!startingSession &&
 		!(isEmpty || messages.length === 0) &&
 		!shouldShowInitialConversationStarting(messages, pendingPrompt, lastTurnState);
 
@@ -505,6 +604,25 @@ export function ActiveThreadViewport({
 		return () => observer.disconnect();
 		// The scroll area only mounts once there is a thread to show.
 	}, [contentRef, scrollRef, scrollToBottom, threadSurfaceVisible]);
+
+	// Remember where the person is reading, per conversation.
+	const scrollSessionIdRef = useRef(sessionId);
+	scrollSessionIdRef.current = sessionId;
+	useEffect(() => {
+		const scrollElement = scrollRef.current;
+		if (!scrollElement) return;
+		const onScroll = () => {
+			const id = scrollSessionIdRef.current;
+			if (!id) return;
+			const distanceFromEnd =
+				scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight;
+			rememberScroll(id, distanceFromEnd <= 70 ? null : scrollElement.scrollTop);
+		};
+		scrollElement.addEventListener("scroll", onScroll, { passive: true });
+		return () => scrollElement.removeEventListener("scroll", onScroll);
+		// The scroll area only mounts once there is a thread to show.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [scrollRef, threadSurfaceVisible]);
 
 	// When the running turn settles its activity folds; if the person was
 	// following, keep the end of the answer in view.
@@ -562,7 +680,7 @@ export function ActiveThreadViewport({
 		}));
 	}, [scrollRef, sessionId]);
 
-	if (modelRouteDecision && onResolveModelRoute) {
+	if (!threadSurfaceVisible && modelRouteDecision && onResolveModelRoute) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 				<ModelRouteDecisionCard
@@ -584,7 +702,7 @@ export function ActiveThreadViewport({
 		);
 	}
 
-	if (isModelRouting) {
+	if (!threadSurfaceVisible && isModelRouting) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 				<ConversationExecutionState phase="routing" />
@@ -635,7 +753,10 @@ export function ActiveThreadViewport({
 	}
 
 	return (
-		<div className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden">
+		<div
+			className="dcc-conversation-scroll-area relative min-h-0 flex-1 overflow-hidden"
+			data-thread-settling={settlingAfterSwitch ? "true" : undefined}
+		>
 			<div
 				ref={scrollRef}
 				tabIndex={0}
@@ -682,27 +803,12 @@ export function ActiveThreadViewport({
 												focusedMessageId === message.id && "dcc-thread-find-focus",
 											)}
 										>
-											<UserMessage
-												label={message.label}
-												content={message.content}
-												createdAt={message.createdAt}
-												evidence={message.evidence ?? null}
-												retryOfTurnId={message.retryOfTurnId ?? null}
-												onFork={
-													onForkFromMessage
-														? () => onForkFromMessage(message.id)
-														: undefined
-												}
-												onEdit={
-													onEditFromMessage
-														? () =>
-																onEditFromMessage({
-																	messageId: message.id,
-																	turnId: message.turnId ?? null,
-																	prompt: message.content,
-																})
-														: undefined
-												}
+											<UserMessageRow
+												message={message}
+												canEdit={Boolean(onEditFromMessage)}
+												canFork={Boolean(onForkFromMessage)}
+												editFromMessage={editFromMessage}
+												forkFromMessage={forkFromMessage}
 											/>
 										</div>
 									);
@@ -711,9 +817,8 @@ export function ActiveThreadViewport({
 									const completionReview = message.turnId
 										? completionReviews?.get(message.turnId)
 										: undefined;
-									const sourceTurn = message.turnId
-										? precedingUserTurn(messages, messageIndex)
-										: null;
+									const precedingTurn = precedingUserTurns[messageIndex] ?? null;
+									const sourceTurn = message.turnId ? precedingTurn : null;
 									return (
 										<div
 											key={message.id}
@@ -728,10 +833,8 @@ export function ActiveThreadViewport({
 												context={assistantRowContext}
 												isLatestAssistant={message.id === latestAssistantMessageId}
 												isPlanMessage={message.id === planMessageId}
-												precedingPrompt={precedingUserPrompt(messages, messageIndex)}
-												precedingTurnId={
-													precedingUserTurn(messages, messageIndex)?.turnId ?? null
-												}
+												precedingPrompt={precedingTurn?.prompt ?? null}
+												precedingTurnId={precedingTurn?.turnId ?? null}
 											/>
 											{completionReview && message.turnSettled && !message.streaming ? (
 												<div className="mt-2 flex flex-wrap items-center gap-2">
@@ -862,11 +965,21 @@ export function ActiveThreadViewport({
 									</div>
 								);
 							};
-								const startingIndicator = showConversationStarting ? (
+								const routeDecision =
+									modelRouteDecision && onResolveModelRoute ? (
+										<div className="-mx-5 pb-4">
+											<ModelRouteDecisionCard
+												decision={modelRouteDecision}
+												modelLabel={modelLabel}
+												onSelect={onResolveModelRoute}
+											/>
+										</div>
+									) : null;
+								const startingIndicator = routeDecision ?? (showConversationStarting || isModelRouting ? (
 								<div className="pb-4">
 									<ConversationStartingIndicator phase={startingPhase} />
 								</div>
-							) : null;
+							) : null);
 								const reviewStrip = onReviewDelegation ? (
 									<DelegationReviewStrip
 										workspaceId={workspaceId ?? null}

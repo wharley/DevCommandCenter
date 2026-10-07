@@ -349,6 +349,12 @@
 		animation: conversation-fade-in 220ms ease-out both;
 	}
 
+	/* Opening a conversation shows it as it is; only rows that arrive while it
+	   is open fade in. */
+	[data-thread-settling="true"] .conversation-fade-in {
+		animation: none;
+	}
+
 	.inspector-enter {
 		animation: inspector-enter 200ms ease-out both;
 	}

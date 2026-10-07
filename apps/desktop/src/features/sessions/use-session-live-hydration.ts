@@ -1,25 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import {
 	listenSessionLiveEvents,
 	loadSessionLiveSnapshot,
 } from "@/lib/session-api";
 
-import {
-	SessionLiveReconciler,
-	type SessionLiveReconcileState,
-} from "./session-live-reconciler";
+import { SessionLiveReconciler } from "./session-live-reconciler";
+import { useSessionTimelineStore, type SessionTimelineEntry } from "./session-timeline-store";
 
-type HydrationState = SessionLiveReconcileState & { active: boolean };
 const MAX_CONSECUTIVE_REHYDRATES = 2;
 
-function inactiveState(sessionId: string | null): HydrationState {
+function inactiveState(sessionId: string | null): SessionTimelineEntry {
 	return {
 		sessionId: sessionId ?? "",
 		history: [],
 		liveEvents: [],
 		ready: false,
 		active: Boolean(sessionId),
+		refreshing: false,
+		touchedAt: 0,
 	};
 }
 
@@ -27,17 +26,26 @@ function inactiveState(sessionId: string | null): HydrationState {
  * Subscribes before every durable snapshot. The request generation and
  * unsubscribe cleanup make session/workspace changes fail closed without
  * polling or persisting runtime identity.
+ *
+ * Reconciled timelines live in a session-keyed store: revisiting a recent
+ * conversation shows it at once while a fresh snapshot loads behind it, and
+ * a rehydrate keeps the current conversation on screen instead of blanking it.
  */
 export function useSessionLiveHydration(sessionId: string | null) {
-	const [state, setState] = useState<HydrationState>(() => inactiveState(sessionId));
 	const requestRef = useRef(0);
+	const entry = useSessionTimelineStore((store) =>
+		sessionId ? store.entries[sessionId] : undefined,
+	);
+	const fallback = useMemo(() => inactiveState(sessionId), [sessionId]);
 
 	useEffect(() => {
 		const request = ++requestRef.current;
-		if (!sessionId) {
-			setState(inactiveState(null));
-			return;
-		}
+		if (!sessionId) return;
+		const { publish: publishState, fallBackToLegacy, entries } =
+			useSessionTimelineStore.getState();
+		// A conversation past the snapshot limits fails the same way on every
+		// visit; it stays on the legacy feed instead of retrying each switch.
+		if (entries[sessionId]?.active === false) return;
 
 		let disposed = false;
 		let unlisten: (() => void) | null = null;
@@ -47,7 +55,7 @@ export function useSessionLiveHydration(sessionId: string | null) {
 		let frame: number | null = null;
 		let legacyOnly = false;
 		const reconciler = new SessionLiveReconciler(sessionId);
-		setState({ ...reconciler.current(), active: true });
+		publishState(reconciler.current());
 
 		const publish = () => {
 			if (disposed || request !== requestRef.current) return;
@@ -55,7 +63,7 @@ export function useSessionLiveHydration(sessionId: string | null) {
 			frame = requestAnimationFrame(() => {
 				frame = null;
 				if (disposed || request !== requestRef.current) return;
-				setState({ ...reconciler.current(), active: true });
+				publishState(reconciler.current());
 			});
 		};
 		const fallbackToLegacy = () => {
@@ -65,7 +73,7 @@ export function useSessionLiveHydration(sessionId: string | null) {
 				cancelAnimationFrame(frame);
 				frame = null;
 			}
-			setState({ ...inactiveState(sessionId), active: false });
+			fallBackToLegacy(sessionId);
 			unlisten?.();
 		};
 
@@ -146,5 +154,5 @@ export function useSessionLiveHydration(sessionId: string | null) {
 		};
 	}, [sessionId]);
 
-	return state;
+	return entry ?? fallback;
 }
