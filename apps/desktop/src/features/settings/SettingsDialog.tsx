@@ -118,6 +118,8 @@ import {
 } from "@/lib/session-api";
 import {
 	SettingsNavigation,
+	DCC_OPEN_SETTINGS_EVENT,
+	type OpenSettingsEventDetail,
 	type SettingsSectionId,
 	type SettingsSectionMeta,
 } from "./settings-navigation";
@@ -801,6 +803,20 @@ export function SettingsDialog({
 		}));
 	}, [aiMemorySettingsQuery.data]);
 	const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
+	// Survives the reset-to-"general" that runs when the dialog opens.
+	const requestedSectionRef = useRef<SettingsSectionId | null>(null);
+	useEffect(() => {
+		const openSection = (event: Event) => {
+			const section = (event as CustomEvent<OpenSettingsEventDetail>).detail?.section;
+			if (section) {
+				if (!open) requestedSectionRef.current = section;
+				setActiveSection(section);
+			}
+			onOpenChange(true);
+		};
+		window.addEventListener(DCC_OPEN_SETTINGS_EVENT, openSection);
+		return () => window.removeEventListener(DCC_OPEN_SETTINGS_EVENT, openSection);
+	}, [onOpenChange, open]);
 	const panelId = useId();
 	const headingId = useId();
 	const contentRef = useRef<HTMLDivElement>(null);
@@ -1065,7 +1081,8 @@ export function SettingsDialog({
 
 	useEffect(() => {
 		if (open) {
-			setActiveSection("general");
+			setActiveSection(requestedSectionRef.current ?? "general");
+			requestedSectionRef.current = null;
 		}
 	}, [open]);
 

@@ -73,6 +73,19 @@ describe("provider-model-registry", () => {
 			.toEqual(PROVIDER_MODEL_REGISTRY[providerId]);
 	});
 
+	it("points the haiku alias at Haiku 5.5 and keeps Haiku 4.5 selectable", () => {
+		for (const alias of ["haiku", "haiku-5.5", "haiku-5-5", "claude-haiku-5-5"]) {
+			expect(resolveModelAlias("claude_code", alias)).toBe("claude-haiku-5-5");
+		}
+		expect(resolveModelAlias("claude_code", "haiku-4.5")).toBe("claude-haiku-4-5");
+		const ids = PROVIDER_MODEL_REGISTRY.claude_code.map((model) => model.id);
+		expect(ids.indexOf("claude-haiku-5-5")).toBeLessThan(ids.indexOf("claude-haiku-4-5"));
+		expect(
+			PROVIDER_MODEL_REGISTRY.claude_code.find((model) => model.id === "claude-haiku-5-5")
+				?.effortLevels,
+		).toEqual(["low", "medium", "high", "xhigh", "max"]);
+	});
+
 	it("resolves Droid aliases to canonical IDs", () => {
 		expect(resolveModelAlias("droid", "auto")).toBe("auto");
 		expect(resolveModelAlias("droid", "sonnet")).toBe("claude-sonnet-5-5");

@@ -1,85 +1,30 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-	Check,
-	ChevronDown,
-	ChevronRight,
-	LoaderCircle,
-	RefreshCcw,
-	RotateCcw,
-	Settings2,
-	Star,
-} from "lucide-react";
-import type { ProviderAccountUsage, ProviderCatalog } from "@dcc/contracts";
+import { ChevronDown } from "lucide-react";
 import { ProviderIcon } from "@/features/providers/provider-icons";
-import {
-	Command,
-	CommandEmpty,
-	CommandGroup,
-	CommandInput,
-	CommandItem,
-	CommandList,
-} from "@/components/ui/command";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuSub,
-	DropdownMenuSubContent,
-	DropdownMenuSubTrigger,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import {
-	formatProviderUsageReset,
-	providerUsageSeverity,
-	supportsProviderAccountUsage,
-} from "@/features/providers/provider-account-usage";
-import { isProviderEnabled } from "@/features/providers/provider-selection.logic";
+import { supportsProviderAccountUsage } from "@/features/providers/provider-account-usage";
 import {
 	composerToolbarTriggerClassName,
 	getCompactComposerModelLabel,
 } from "./WorkspaceComposer.logic";
-import { clampEffort, DEFAULT_EFFORT_LEVEL, getEffortDisplay } from "./effort";
-import { EffortBrainIcon } from "./EffortBrainIcon";
+import { getEffortDisplay } from "./effort";
 import { ModelFavoritesDialog } from "./ModelFavoritesDialog";
-import {
-	addModelFavorite, modelFavoriteKey, resolveModelFavorite, useModelFavorites,
-	type ModelFavorite,
-} from "./model-favorites";
-
+import { ModelPickerPanel } from "./ModelPickerPanel";
+import type { ModelFavorite } from "./model-favorites";
 import { CompactExecutionPicker } from "./CompactExecutionPicker";
+import {
+	AccountUsageStrip,
+	useComposerSelection,
+	useOpenModelPickerShortcut,
+	type ComposerExecutionMenuProps,
+} from "./ComposerExecutionShared";
 
-export const DCC_OPEN_MODEL_PICKER_EVENT = "dcc:open-model-picker";
-
-type ComposerProvider = ProviderCatalog["providers"][number];
-type ComposerModel = ComposerProvider["models"][number];
-
-export type ComposerExecutionMenuProps = {
-	compact?: boolean;
-	onReturnToComposer?: () => void;
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	providers: ProviderCatalog["providers"];
-	selectedProviderId: string | null;
-	selectedModelId: string | null;
-	availableEffortLevels: readonly string[];
-	selectedEffortId: string;
-	directResponse: boolean;
-	onSelectProvider: (providerId: string) => void;
-	onSelectModel: (modelId: string) => void;
-	onSelectEffort: (effortId: string) => void;
-	onSelectUltrathink: () => void;
-	onSetDirectResponse: (direct: boolean) => void;
-	accountUsage?: ProviderAccountUsage | null;
-	isAccountUsageFetching?: boolean;
-	hasAccountUsageError?: boolean;
-	onRefreshAccountUsage?: () => void;
-	disabled?: boolean;
-};
+export {
+	DCC_OPEN_MODEL_PICKER_EVENT,
+	type ComposerExecutionMenuProps,
+} from "./ComposerExecutionShared";
 
 export function ComposerExecutionMenu(props: ComposerExecutionMenuProps) {
 	return props.compact ? (
@@ -109,129 +54,48 @@ function FullExecutionMenu({
 	onRefreshAccountUsage,
 	disabled = false,
 }: ComposerExecutionMenuProps) {
-	const { t, i18n } = useTranslation("common");
-	const [modelSubOpen, setModelSubOpen] = useState(false);
-	const [modelSearch, setModelSearch] = useState("");
-	const [cursorAdvancedOpen, setCursorAdvancedOpen] = useState(false);
+	const { t } = useTranslation("common");
 	const [editingFavorites, setEditingFavorites] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement>(null);
-	const favorites = useModelFavorites();
-
-	const selectedProvider = useMemo(() => {
-		const explicit =
-			providers.find((provider) => provider.id === selectedProviderId) ?? null;
-		if (
-			explicit &&
-			(!selectedModelId ||
-				explicit.models.some((model) => model.id === selectedModelId))
-		) {
-			return explicit;
-		}
-		if (selectedModelId) {
-			const owner = providers.find((provider) =>
-				provider.models.some((model) => model.id === selectedModelId),
-			);
-			if (owner) return owner;
-		}
-		return explicit ?? providers[0] ?? null;
-	}, [providers, selectedProviderId, selectedModelId]);
-
-	const selectedModel = useMemo(() => {
-		if (!selectedModelId || !selectedProvider) return null;
-		return (
-			selectedProvider.models.find((model) => model.id === selectedModelId) ??
-			null
-		);
-	}, [selectedModelId, selectedProvider]);
+	const { selectedProvider, selectedModel } = useComposerSelection(
+		providers,
+		selectedProviderId,
+		selectedModelId,
+	);
 	const currentFavorite: ModelFavorite | null = selectedProvider && selectedModel
 		? { providerId: selectedProvider.id, modelId: selectedModel.id,
 			effort: selectedModel.effortLevels.length ? selectedEffortId : null }
 		: null;
-	const currentFavoriteSaved = currentFavorite && favorites.some((favorite) =>
-		modelFavoriteKey(favorite) === modelFavoriteKey(currentFavorite));
 
 	const compactModelLabel = selectedModel
 		? getCompactComposerModelLabel(selectedProvider?.id ?? null, selectedModel.label)
 		: (selectedModelId ?? t("composer.model.select"));
-	const effortDisplay = getEffortDisplay(selectedEffortId);
 	const effortLabel = t(`composer.effort.${selectedEffortId}`, {
-		defaultValue: effortDisplay.label,
+		defaultValue: getEffortDisplay(selectedEffortId).label,
 	});
-	const sliderEffortId = selectedEffortId === "ultrathink"
-		? availableEffortLevels[availableEffortLevels.length - 1]
-		: selectedEffortId;
-	const sliderEffortIndex = Math.max(0, availableEffortLevels.indexOf(sliderEffortId ?? ""));
-	const responseLabel = directResponse
-		? t("composer.execution.response.direct")
-		: t("composer.execution.response.standard");
 	const triggerTitle = selectedModel
 		? `${selectedModel.label} — ${selectedProvider?.label ?? "Provider"} · ${effortLabel}`
 		: compactModelLabel;
 
-	useEffect(() => {
-		const openModelPicker = () => {
-			if (disabled || providers.length === 0) return;
+	useOpenModelPickerShortcut({
+		disabled,
+		hasProviders: providers.length > 0,
+		onOpen: () => {
 			onOpenChange(true);
-			setModelSubOpen(favorites.length === 0);
 			onRefreshAccountUsage?.();
-		};
-		window.addEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openModelPicker);
-		return () =>
-			window.removeEventListener(DCC_OPEN_MODEL_PICKER_EVENT, openModelPicker);
-	}, [disabled, onOpenChange, onRefreshAccountUsage, providers.length, favorites.length]);
-
-	const closeModelMenu = () => {
-		setModelSubOpen(false);
-		setModelSearch("");
-		setCursorAdvancedOpen(false);
-	};
-
-	const renderModelItem = (provider: ComposerProvider, model: ComposerModel) => {
-		const isActive =
-			provider.id === selectedProvider?.id && model.id === selectedModelId;
-		return (
-			<CommandItem
-				key={`${provider.id}-${model.id}`}
-				value={`${provider.label} ${model.label} ${model.id} ${model.description}`}
-				disabled={disabled || !isProviderEnabled(provider)}
-				onSelect={() => {
-					if (provider.id !== selectedProviderId) {
-						onSelectProvider(provider.id);
-					}
-					onSelectModel(model.id);
-					closeModelMenu();
-				}}
-				className="[&>svg:last-child]:hidden flex items-center gap-2 font-mono text-[13px] tabular-nums"
-			>
-				<ProviderIcon provider={provider.id} className="size-4" />
-				<span className="min-w-0 flex-1 truncate">{model.label}</span>
-				{!isProviderEnabled(provider) ? (
-					<span className="text-[10px] text-muted-foreground">
-						{t("settings.model.disabled")}
-					</span>
-				) : null}
-				{isActive ? (
-					<Check className="size-4 shrink-0" strokeWidth={2} />
-				) : (
-					<span className="size-4 shrink-0" aria-hidden />
-				)}
-			</CommandItem>
-		);
-	};
-
-	const hasModelSearch = modelSearch.trim().length > 0;
+		},
+	});
 
 	return (
 		<>
-		<DropdownMenu
+		<Popover
 			open={open}
 			onOpenChange={(nextOpen) => {
 				onOpenChange(nextOpen);
 				if (nextOpen) onRefreshAccountUsage?.();
-				if (!nextOpen) closeModelMenu();
 			}}
 		>
-			<DropdownMenuTrigger
+			<PopoverTrigger
 				ref={triggerRef}
 				type="button"
 				disabled={disabled || providers.length === 0}
@@ -260,336 +124,46 @@ function FullExecutionMenu({
 					</span>
 				) : null}
 				<ChevronDown className="size-3 shrink-0 opacity-40" strokeWidth={2} />
-			</DropdownMenuTrigger>
+			</PopoverTrigger>
 
-			<DropdownMenuContent side="top" align="end" sideOffset={4}
-				className="flex w-80 max-w-[calc(100vw-2rem)] flex-col"
-				onCloseAutoFocus={(event) => { if (editingFavorites) event.preventDefault(); }}>
-				{availableEffortLevels.length > 0 ? (
-					<div className="mx-1 mb-1 px-1.5 py-2" role="group" aria-label={t("composer.execution.effort")}>
-						<div className="flex items-center justify-between gap-2">
-							<div className="flex min-w-0 items-center gap-2">
-								<EffortBrainIcon level={effortDisplay.icon} />
-								<div className="min-w-0">
-									<div className="text-[12px] font-semibold leading-4">{effortLabel}</div>
-									<div className="truncate text-[10px] leading-3 text-muted-foreground">
-										{compactModelLabel}
-									</div>
-								</div>
-							</div>
-							<button
-								type="button"
-								className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-								aria-label={t("composer.execution.resetEffort")}
-								title={t("composer.execution.resetEffort")}
-								disabled={disabled}
-								onClick={() => onSelectEffort(
-									clampEffort(DEFAULT_EFFORT_LEVEL, [...availableEffortLevels]),
-								)}
-							>
-								<RotateCcw className="size-3.5" />
-							</button>
-						</div>
-						<div className="mt-1.5 px-0.5">
-							<input
-								type="range"
-								min={0}
-								max={availableEffortLevels.length - 1}
-								step={1}
-								value={sliderEffortIndex}
-								aria-label={t("composer.execution.effort")}
-								aria-valuetext={effortLabel}
-								className="h-4 w-full cursor-pointer accent-primary disabled:cursor-not-allowed"
-								disabled={disabled || availableEffortLevels.length === 1}
-								onKeyDown={(event) => event.stopPropagation()}
-								onChange={(event) => {
-									const level = availableEffortLevels[Number(event.currentTarget.value)];
-									if (level) onSelectEffort(level);
-								}}
-							/>
-							<div
-								className="grid text-center text-[9px] leading-3 text-muted-foreground"
-								style={{ gridTemplateColumns: `repeat(${availableEffortLevels.length}, minmax(0, 1fr))` }}
-							>
-								{availableEffortLevels.map((level) => (
-									<span key={level} aria-hidden="true">·</span>
-								))}
-							</div>
-						</div>
-						<button
-							type="button"
-							className={cn(
-								"mt-1 flex h-6 w-full items-center justify-between rounded px-1.5 text-left text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50",
-								selectedEffortId === "ultrathink" && "bg-accent text-foreground",
-							)}
-							aria-pressed={selectedEffortId === "ultrathink"}
-							disabled={disabled}
-							onClick={onSelectUltrathink}
-						>
-							<span>{t("composer.effort.ultrathink")}</span>
-							<span className="text-[9px]">{t("composer.execution.ultrathinkHint")}</span>
-						</button>
-					</div>
-				) : null}
-				<DropdownMenuLabel className="shrink-0">{t("composer.favorites.title")}</DropdownMenuLabel>
-				<DropdownMenuGroup
-					aria-label={t("composer.favorites.title")}
-					className="min-h-0 max-h-64 shrink overflow-y-auto overscroll-contain"
-				>
-				{favorites.length ? favorites.map((favorite) => {
-					const { provider, model, available } = resolveModelFavorite(favorite, providers);
-					const isActive = currentFavorite && modelFavoriteKey(currentFavorite) === modelFavoriteKey(favorite);
-					const label = favorite.effort === null ? t("composer.favorites.managed")
-						: t(`composer.effort.${favorite.effort}`, { defaultValue: getEffortDisplay(favorite.effort).label });
-					const description = `${model?.label ?? favorite.modelId} · ${provider?.label ?? favorite.providerId} · ${label}${
-						available ? "" : ` · ${t("composer.favorites.unavailable")}`
-					}`;
-					return <DropdownMenuItem key={modelFavoriteKey(favorite)}
-						disabled={disabled || !available}
-						textValue={`${model?.label ?? favorite.modelId} ${label}`}
-						title={description}
-						aria-label={description}
-						className="h-8 gap-2 py-1"
-						onSelect={() => {
-							if (disabled || !available) return;
-							if (favorite.providerId !== selectedProviderId) onSelectProvider(favorite.providerId);
-							onSelectModel(favorite.modelId);
-							if (favorite.effort === "ultrathink") onSelectUltrathink();
-							else onSelectEffort(favorite.effort ?? DEFAULT_EFFORT_LEVEL);
-							closeModelMenu();
-							onOpenChange(false);
-						}}>
-						<ProviderIcon provider={favorite.providerId} className="size-4 shrink-0" />
-						<span className="min-w-0 flex-1 truncate text-[13px]">
-							{model?.label ?? favorite.modelId}
-							{!available && <span className="text-[11px] text-muted-foreground">
-								{` · ${t("composer.favorites.unavailable")}`}
-							</span>}
-						</span>
-						<span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>
-						{isActive ? <Check className="size-3.5 shrink-0" /> : <span className="size-3.5 shrink-0" />}
-					</DropdownMenuItem>;
-				}) : <p className="px-1.5 py-2 text-xs text-muted-foreground">{t("composer.favorites.emptyMenu")}</p>}
-				</DropdownMenuGroup>
-				<div className="shrink-0">
-				<DropdownMenuSeparator />
-
-				<DropdownMenuSub
-					open={modelSubOpen}
-					onOpenChange={(nextOpen) => {
-						setModelSubOpen(nextOpen);
-						if (!nextOpen) {
-							setModelSearch("");
-							setCursorAdvancedOpen(false);
-						}
+			<PopoverContent
+				side="top"
+				align="end"
+				sideOffset={6}
+				collisionPadding={12}
+				className="w-[min(20rem,calc(100vw-2rem))] gap-0 overflow-hidden rounded-2xl p-0 shadow-lg"
+				onOpenAutoFocus={(event) => event.preventDefault()}
+				onCloseAutoFocus={(event) => { if (editingFavorites) event.preventDefault(); }}
+			>
+				<ModelPickerPanel
+					providers={providers}
+					selectedProviderId={selectedProvider?.id ?? selectedProviderId}
+					selectedModelId={selectedModelId}
+					availableEffortLevels={availableEffortLevels}
+					selectedEffortId={selectedEffortId}
+					directResponse={directResponse}
+					disabled={disabled}
+					onSelectProvider={onSelectProvider}
+					onSelectModel={onSelectModel}
+					onSelectEffort={onSelectEffort}
+					onSelectUltrathink={onSelectUltrathink}
+					onSetDirectResponse={onSetDirectResponse}
+					onDone={() => onOpenChange(false)}
+					onEditFavorites={() => {
+						onOpenChange(false);
+						setEditingFavorites(true);
 					}}
-				>
-					<DropdownMenuSubTrigger className="justify-between gap-3">
-						<span>{t("composer.favorites.allModels")}</span>
-						<ChevronRight className="size-3.5 shrink-0 opacity-50" />
-					</DropdownMenuSubTrigger>
-					<DropdownMenuSubContent
-						sideOffset={6}
-						className="w-[min(22rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0"
-					>
-						<Command className="rounded-lg border-0 shadow-none">
-							<CommandInput
-								placeholder={t("composer.model.search")}
-								className="h-9"
-								value={modelSearch}
-								onValueChange={setModelSearch}
-								onKeyDown={(event) => event.stopPropagation()}
-							/>
-							<CommandList>
-								<CommandEmpty>{t("composer.model.empty")}</CommandEmpty>
-								{providers.map((provider) => {
-									const isCursor = provider.id === "cursor";
-					const primaryModels = isCursor
-						? provider.models.filter(
-								(model) => model.id.trim().toLowerCase() === "auto",
-							)
-						: provider.models;
-					const advancedModels = isCursor
-						? provider.models.filter(
-								(model) =>
-									model.id.trim().toLowerCase() !== "auto" &&
-									!model.id.includes(" - "),
-							)
-										: [];
-									const revealAdvanced = cursorAdvancedOpen || hasModelSearch;
-
-									return (
-										<Fragment key={provider.id}>
-											<CommandGroup heading={provider.label}>
-												{primaryModels.map((model) =>
-													renderModelItem(provider, model),
-												)}
-												{isCursor && advancedModels.length > 0 && !hasModelSearch ? (
-													<CommandItem
-														value={t("composer.model.cursorAdvanced")}
-														onSelect={() =>
-															setCursorAdvancedOpen((current) => !current)
-														}
-														className="[&>svg:last-child]:hidden flex items-center gap-2 text-[12px] text-muted-foreground"
-													>
-														<ProviderIcon provider={provider.id} className="size-4" />
-														<span className="min-w-0 flex-1">
-															{t("composer.model.cursorAdvanced")}
-														</span>
-														{cursorAdvancedOpen ? (
-															<ChevronDown className="size-3.5" />
-														) : (
-															<ChevronRight className="size-3.5" />
-														)}
-													</CommandItem>
-												) : null}
-											</CommandGroup>
-											{isCursor && revealAdvanced && advancedModels.length > 0 ? (
-												<CommandGroup heading={t("composer.model.cursorAdvancedHeading")}>
-													{advancedModels.map((model) =>
-														renderModelItem(provider, model),
-													)}
-												</CommandGroup>
-											) : null}
-										</Fragment>
-									);
-								})}
-							</CommandList>
-						</Command>
-					</DropdownMenuSubContent>
-				</DropdownMenuSub>
-
-				<DropdownMenuItem disabled={disabled || !currentFavorite || Boolean(currentFavoriteSaved) ||
-					Boolean(currentFavorite && !resolveModelFavorite(currentFavorite, providers).available)}
-					onSelect={(event) => {
-						event.preventDefault();
-						if (currentFavorite) addModelFavorite(currentFavorite);
-					}}>
-					<Star className="size-3.5" />
-					{t(currentFavoriteSaved ? "composer.favorites.saved" : "composer.favorites.saveCurrent")}
-				</DropdownMenuItem>
-				<DropdownMenuItem onSelect={() => { closeModelMenu(); setEditingFavorites(true); }}>
-					<Settings2 className="size-3.5" />{t("composer.favorites.edit")}
-				</DropdownMenuItem>
-				<DropdownMenuSeparator />
-
-				<DropdownMenuSub>
-					<DropdownMenuSubTrigger className="justify-between gap-3">
-						<span>{t("composer.execution.response.title")}</span>
-						<span className="ml-auto text-[12px] text-muted-foreground">{responseLabel}</span>
-						<ChevronRight className="size-3.5 shrink-0 opacity-50" />
-					</DropdownMenuSubTrigger>
-					<DropdownMenuSubContent sideOffset={6} className="w-64">
-						{([false, true] as const).map((direct) => (
-							<DropdownMenuItem
-								key={String(direct)}
-								className="items-start justify-between gap-3 py-2"
-								onClick={() => onSetDirectResponse(direct)}
-							>
-								<span>
-									<span className="block">
-										{direct
-											? t("composer.execution.response.direct")
-											: t("composer.execution.response.standard")}
-									</span>
-									<span className="mt-0.5 block text-[12px] leading-4 text-muted-foreground">
-										{direct
-											? t("composer.execution.response.directHint")
-											: t("composer.execution.response.standardHint")}
-										{direct &&
-										selectedProvider?.capabilities.fastModeSupport === "prompt_fallback"
-											? ` ${t("composer.execution.response.directPromptFallback")}`
-											: ""}
-									</span>
-								</span>
-								{directResponse === direct ? <Check className="mt-0.5 size-4" /> : null}
-							</DropdownMenuItem>
-						))}
-					</DropdownMenuSubContent>
-				</DropdownMenuSub>
-
-				{supportsProviderAccountUsage(selectedProvider) ? (
-					<>
-						<DropdownMenuSeparator />
-						<div className="px-1.5 py-1.5">
-							<div className="mb-1.5 flex items-center justify-between gap-3">
-								<span className="text-[11px] font-medium text-foreground">
-									{t("composer.accountUsage.title")}
-								</span>
-								<button
-									type="button"
-									className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-									aria-label={t("composer.accountUsage.refresh")}
-									disabled={isAccountUsageFetching}
-									onClick={onRefreshAccountUsage}
-								>
-									{isAccountUsageFetching ? (
-										<LoaderCircle className="size-3 animate-spin" />
-									) : (
-										<RefreshCcw className="size-3" />
-									)}
-								</button>
-							</div>
-							{accountUsage?.state === "available" && accountUsage.windows.length ? (
-								<div className="space-y-1">
-									{accountUsage.windows.map((window) => {
-										const severity = providerUsageSeverity(window);
-										const reset = formatProviderUsageReset(window, i18n.language);
-										return (
-											<div
-												key={window.id}
-												className="flex items-start justify-between gap-3 text-[11px]"
-											>
-												<span className="min-w-0 truncate text-muted-foreground">
-													<span className="block truncate">
-														{window.windowDurationMinutes === 300
-															? t("composer.accountUsage.fiveHour")
-															: window.windowDurationMinutes === 10_080
-																? t("composer.accountUsage.sevenDay")
-																: window.id.replaceAll("_", " ")}
-													</span>
-													{reset ? (
-														<span className="block truncate text-[10px] text-muted-foreground/80">
-															{t("composer.accountUsage.nextReset", { date: reset })}
-														</span>
-													) : null}
-												</span>
-												<span
-													className={cn(
-														"shrink-0 font-medium tabular-nums",
-														severity === "warning" && "text-amber-600 dark:text-amber-400",
-														severity === "critical" && "text-destructive",
-													)}
-												>
-													{t("composer.accountUsage.remaining", {
-														percent: Math.round(window.remainingPercent),
-													})}
-												</span>
-											</div>
-										);
-									})}
-								</div>
-							) : accountUsage?.state === "awaitingActivity" ? (
-								<p className="text-[11px] leading-relaxed text-muted-foreground">
-									{t("composer.accountUsage.awaitingActivity")}
-								</p>
-							) : hasAccountUsageError ? (
-								<p className="text-[11px] text-destructive">
-									{t("composer.accountUsage.error")}
-								</p>
-							) : (
-								<p className="text-[11px] text-muted-foreground">
-									{isAccountUsageFetching
-										? t("composer.accountUsage.loading")
-										: t("composer.accountUsage.openToLoad")}
-								</p>
-							)}
-						</div>
-					</>
-				) : null}
-				</div>
-			</DropdownMenuContent>
-		</DropdownMenu>
+					footer={supportsProviderAccountUsage(selectedProvider) ? (
+						<AccountUsageStrip
+							accountUsage={accountUsage}
+							isFetching={isAccountUsageFetching}
+							hasError={hasAccountUsageError}
+							onRefresh={onRefreshAccountUsage}
+						/>
+					) : null}
+				/>
+			</PopoverContent>
+		</Popover>
 		{editingFavorites && <ModelFavoritesDialog providers={providers} initialFavorite={currentFavorite}
 			onClose={() => setEditingFavorites(false)} onRestoreFocus={() => triggerRef.current?.focus()} />}
 		</>

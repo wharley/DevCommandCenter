@@ -21,6 +21,19 @@ export type SettingsSectionId =
 	| "git"
 	| "experimental"
 	| "account";
+
+/** Opens Settings on a section from anywhere (e.g. "manage providers" in the model picker). */
+export const DCC_OPEN_SETTINGS_EVENT = "dcc:open-settings";
+export type OpenSettingsEventDetail = { section: SettingsSectionId };
+
+export function openSettingsSection(section: SettingsSectionId) {
+	window.dispatchEvent(
+		new CustomEvent<OpenSettingsEventDetail>(DCC_OPEN_SETTINGS_EVENT, {
+			detail: { section },
+		}),
+	);
+}
+
 const groups = ["workspace", "services", "advanced"] as const;
 export type SettingsSectionMeta = {
 	id: SettingsSectionId;

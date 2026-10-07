@@ -1,45 +1,78 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProviderCatalog } from "@dcc/contracts";
 import { FALLBACK_PROVIDER_CATALOG } from "@/lib/fallback-provider-catalog";
+import { DCC_OPEN_SETTINGS_EVENT } from "@/features/settings/settings-navigation";
 import { ComposerExecutionMenu } from "./ComposerExecutionMenu";
 import { getModelFavorites, saveModelFavorites } from "./model-favorites";
 
 vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (key: string, options?: { model?: string }) =>
-		options?.model ? `${key}: ${options.model}` : key }),
+	useTranslation: () => ({ t: (key: string, options?: { model?: string; provider?: string }) =>
+		options?.model ? `${key}: ${options.model}` : options?.provider ? `${key}: ${options.provider}` : key }),
 }));
 
 const high = { providerId: "codex", modelId: "gpt-6-astra", effort: "high" };
 const extraHigh = { ...high, effort: "xhigh" };
+const IS_MAC = /mac/i.test(navigator.platform);
 let container: HTMLDivElement;
 let root: Root;
 const selected = vi.fn();
 
-function Harness({ disabled = false, managed = false, compact = false }: { disabled?: boolean; managed?: boolean; compact?: boolean }) {
+function Harness({
+	disabled = false,
+	compact = false,
+	providers = FALLBACK_PROVIDER_CATALOG.providers,
+	initialProvider = "cursor",
+	initialModel = "auto",
+}: {
+	disabled?: boolean;
+	compact?: boolean;
+	providers?: ProviderCatalog["providers"];
+	initialProvider?: string;
+	initialModel?: string;
+}) {
 	const [open, setOpen] = useState(true);
-	const [providerId, setProviderId] = useState(managed ? "antigravity" : "cursor");
-	const [modelId, setModelId] = useState(managed ? "default" : "auto");
+	const [providerId, setProviderId] = useState(initialProvider);
+	const [modelId, setModelId] = useState(initialModel);
 	const [effort, setEffort] = useState("medium");
+	const [direct, setDirect] = useState(false);
 	return <ComposerExecutionMenu compact={compact} open={open} onOpenChange={setOpen}
-		providers={FALLBACK_PROVIDER_CATALOG.providers}
+		providers={providers}
 		selectedProviderId={providerId} selectedModelId={modelId}
 		availableEffortLevels={["low", "medium", "high", "xhigh"]} selectedEffortId={effort}
-		directResponse={false} disabled={disabled}
+		directResponse={direct} disabled={disabled}
 		onSelectProvider={(value) => { selected("provider", value); setProviderId(value); setModelId("default"); }}
 		onSelectModel={(value) => { selected("model", value); setModelId(value); }}
 		onSelectEffort={(value) => { selected("effort", value); setEffort(value); }}
 		onSelectUltrathink={() => { selected("effort", "ultrathink"); setEffort("ultrathink"); }}
-		onSetDirectResponse={() => {}}
+		onSetDirectResponse={(value) => { selected("direct", value); setDirect(value); }}
 	/>;
 }
 
-function item(text: string) {
-	const element = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-		.find((entry) => entry.textContent?.includes(text));
+const options = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+function option(text: string) {
+	const element = options().find((entry) => entry.textContent?.includes(text));
 	expect(element, text).toBeDefined();
 	return element!;
 }
+function tab(label: string) {
+	const element = [...document.querySelectorAll<HTMLElement>('[role="tab"]')]
+		.find((entry) => entry.getAttribute("aria-label") === label);
+	expect(element, label).toBeDefined();
+	return element!;
+}
+async function search(text: string) {
+	const input = document.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+	await act(async () => {
+		const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+		setter.call(input, text);
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+	});
+	return input;
+}
+const providerLabel = (id: string) =>
+	FALLBACK_PROVIDER_CATALOG.providers.find((provider) => provider.id === id)!.label;
 
 beforeEach(() => {
 	vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -58,111 +91,121 @@ afterEach(async () => {
 	vi.unstubAllGlobals();
 });
 
-describe("favorite picker interactions", () => {
-	it("shows saved order and applies provider, model and effort together", async () => {
+describe("model picker", () => {
+	it("opens on favorites and applies provider, model and effort together", async () => {
 		await act(async () => root.render(<Harness />));
-		const rows = [...document.querySelectorAll('[role="menuitem"]')];
-		expect(rows[0].textContent).toContain("composer.effort.xhigh");
-		expect(rows[1].textContent).toContain("composer.effort.high");
-		await act(async () => item("composer.effort.xhigh").click());
+		expect(tab("composer.favorites.title").getAttribute("aria-selected")).toBe("true");
+		expect(options().map((row) => row.textContent)).toEqual([
+			expect.stringContaining("composer.effort.xhigh"),
+			expect.stringContaining("composer.effort.high"),
+		]);
+		await act(async () => option("composer.effort.xhigh").click());
 		expect(selected.mock.calls).toEqual([
 			["provider", "codex"], ["model", "gpt-6-astra"], ["effort", "xhigh"],
 		]);
-		expect(container.textContent).toContain("composer.effort.xhigh");
-		expect(document.querySelector('[role="menu"]')).toBeNull();
+		expect(document.querySelector('[data-model-picker-panel]')).toBeNull();
 		expect(getModelFavorites()).toEqual([extraHigh, high]);
 	});
 
-	it("opens the editor, reorders by keyboard, edits effort and removes a favorite", async () => {
-		await act(async () => root.render(<Harness />));
-		await act(async () => item("composer.favorites.edit").click());
-		const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
-		expect(dialog).not.toBeNull();
-		expect(document.querySelector('[role="menu"]')).toBeNull();
-		const handle = dialog.querySelector<HTMLButtonElement>('button[aria-label^="composer.favorites.reorder:"]')!;
-		await act(async () => handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
-		expect(getModelFavorites()).toEqual([high, extraHigh]);
-		const effort = dialog.querySelector<HTMLSelectElement>('select[aria-label^="composer.favorites.effortFor:"]')!;
-		await act(async () => {
-			effort.value = "low";
-			effort.dispatchEvent(new Event("change", { bubbles: true }));
-		});
-		expect(getModelFavorites()[0].effort).toBe("low");
-		await act(async () => dialog.querySelector<HTMLButtonElement>('button[aria-label^="composer.favorites.remove:"]')!.click());
-		expect(getModelFavorites()).toEqual([extraHigh]);
+	it("leaves providers switched off in Settings out of the tabs and the search", async () => {
+		const providers = FALLBACK_PROVIDER_CATALOG.providers.map((provider) =>
+			provider.id === "codex" ? { ...provider, enabled: false } : provider);
+		await act(async () => root.render(<Harness providers={providers} />));
+		const labels = [...document.querySelectorAll('[role="tab"]')].map((entry) => entry.getAttribute("aria-label"));
+		expect(labels).not.toContain(providerLabel("codex"));
+		expect(labels).toContain(providerLabel("cursor"));
+		// Codex favorites are hidden too, so the picker opens on the current provider.
+		expect(tab(providerLabel("cursor")).getAttribute("aria-selected")).toBe("true");
+		await search("gpt-6");
+		expect(options().some((row) => row.textContent?.includes("GPT-6"))).toBe(false);
+		expect(document.body.textContent).not.toContain("settings.model.disabled");
 	});
 
-	it("saves the current automatic model without assigning an unsupported effort", async () => {
-		await act(async () => root.render(<Harness managed />));
-		await act(async () => item("composer.favorites.saveCurrent").click());
-		expect(getModelFavorites().at(-1)).toEqual({ providerId: "antigravity", modelId: "default", effort: null });
-		expect(item("composer.favorites.saved").getAttribute("data-disabled")).not.toBeNull();
+	it("searches the open tab first and then other providers", async () => {
+		await act(async () => root.render(<Harness />));
+		await act(async () => tab(providerLabel("cursor")).click());
+		await search("luna");
+		expect(document.body.textContent).toContain("composer.picker.otherProviders");
+		await act(async () => option("GPT-6 Luna").click());
+		expect(selected.mock.calls).toEqual([["provider", "codex"], ["model", "gpt-6-luna"]]);
 	});
 
-	it("adds multiple efforts from the editor and restores focus when finished", async () => {
+	it("stars a model with the current effort and unstars it", async () => {
+		saveModelFavorites([]);
 		await act(async () => root.render(<Harness />));
-		await act(async () => item("composer.favorites.edit").click());
-		const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
-		const form = dialog.querySelector("form")!;
-		await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-		expect(getModelFavorites().at(-1)).toEqual({ providerId: "cursor", modelId: "auto", effort: "medium" });
-		expect(form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
-		const effort = form.querySelector<HTMLSelectElement>('select[id$="-effort"]')!;
-		await act(async () => {
-			effort.value = "high";
-			effort.dispatchEvent(new Event("change", { bubbles: true }));
-		});
-		await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-		expect(getModelFavorites().slice(-2).map((entry) => entry.effort)).toEqual(["medium", "high"]);
+		await act(async () => tab(providerLabel("codex")).click());
+		const star = () => option("GPT-6 Luna").querySelector<HTMLButtonElement>("button[aria-pressed]")!;
+		await act(async () => star().click());
+		expect(getModelFavorites()).toEqual([{ providerId: "codex", modelId: "gpt-6-luna", effort: "medium" }]);
 		expect(selected).not.toHaveBeenCalled();
-		const done = [...dialog.querySelectorAll("button")].find((button) => button.textContent === "composer.favorites.done")!;
-		await act(async () => done.click());
-		expect(document.querySelector('[role="dialog"]')).toBeNull();
-		// Radix restores focus in a deferred unmount callback.
-		await act(async () => {
-			await vi.waitFor(() => expect(document.activeElement).toBe(container.querySelector("button")));
-		});
+		await act(async () => star().click());
+		expect(getModelFavorites()).toEqual([]);
 	});
 
-	it("applies an ultrathink favorite through the existing effort control", async () => {
-		saveModelFavorites([{ ...high, effort: "ultrathink" }]);
+	it("picks the nth row with the platform shortcut", async () => {
 		await act(async () => root.render(<Harness />));
-		await act(async () => item("composer.effort.ultrathink").click());
+		await act(async () => {
+			window.dispatchEvent(new KeyboardEvent("keydown", {
+				key: "2", metaKey: IS_MAC, ctrlKey: !IS_MAC, bubbles: true,
+			}));
+		});
 		expect(selected.mock.calls).toEqual([
-			["provider", "codex"], ["model", "gpt-6-astra"], ["effort", "ultrathink"],
+			["provider", "codex"], ["model", "gpt-6-astra"], ["effort", "high"],
 		]);
 	});
 
-	it.each(["disabled", "unavailable"])("does not apply a %s favorite", async (reason) => {
-		if (reason === "unavailable") saveModelFavorites([{ ...high, effort: "removed-effort" }]);
-		await act(async () => root.render(<Harness disabled={reason === "disabled"} />));
-		const favorite = item(reason === "disabled" ? "composer.effort.xhigh" : "composer.favorites.unavailable");
-		expect(favorite.getAttribute("data-disabled")).not.toBeNull();
-		await act(async () => favorite.click());
+	it("moves effort along the slider, with ultrathink as the last stop", async () => {
+		await act(async () => root.render(<Harness />));
+		const slider = document.querySelector<HTMLElement>('[role="slider"]')!;
+		expect(slider.getAttribute("aria-valuetext")).toBe("composer.effort.medium");
+		await act(async () => slider.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+		expect(selected).toHaveBeenLastCalledWith("effort", "high");
+		await act(async () => slider.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })));
+		expect(selected).toHaveBeenLastCalledWith("effort", "ultrathink");
+		const direct = document.querySelector<HTMLButtonElement>('button[aria-label="composer.picker.directOff"]')!;
+		await act(async () => direct.click());
+		expect(selected).toHaveBeenLastCalledWith("direct", true);
+	});
+
+	it("sends manage providers to Settings → Providers", async () => {
+		const listener = vi.fn();
+		window.addEventListener(DCC_OPEN_SETTINGS_EVENT, listener);
+		await act(async () => root.render(<Harness />));
+		await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="composer.picker.manageProviders"]')!.click());
+		expect((listener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ section: "model" });
+		window.removeEventListener(DCC_OPEN_SETTINGS_EVENT, listener);
+	});
+
+	it("does not pick while the composer is disabled", async () => {
+		await act(async () => root.render(<Harness disabled />));
+		expect(document.querySelector('[data-model-picker-panel]')).not.toBeNull();
+		await act(async () => option("composer.effort.xhigh").click());
 		expect(selected).not.toHaveBeenCalled();
+	});
+
+	it("opens the favorites editor, reorders by keyboard and removes a favorite", async () => {
+		await act(async () => root.render(<Harness />));
+		const edit = [...document.querySelectorAll<HTMLButtonElement>("button")]
+			.find((button) => button.textContent === "composer.favorites.edit")!;
+		await act(async () => edit.click());
+		const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+		expect(dialog).not.toBeNull();
+		expect(document.querySelector('[data-model-picker-panel]')).toBeNull();
+		const handle = dialog.querySelector<HTMLButtonElement>('button[aria-label^="composer.favorites.reorder:"]')!;
+		await act(async () => handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+		expect(getModelFavorites()).toEqual([high, extraHigh]);
+		await act(async () => dialog.querySelector<HTMLButtonElement>('button[aria-label^="composer.favorites.remove:"]')!.click());
+		expect(getModelFavorites()).toEqual([extraHigh]);
 	});
 });
 
 describe("compact picker", () => {
-	it("selects a favorite with its effort inside one dialog and returns to the composer", async () => {
+	it("shows the same picker in one dialog and closes after a pick", async () => {
 		await act(async () => root.render(<Harness compact />));
-		expect(document.querySelector('[role="menu"]')).toBeNull();
-		const favorite = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((row) => row.textContent?.includes("composer.effort.xhigh"))!;
-		await act(async () => favorite.click());
-		expect(selected.mock.calls).toEqual([["provider", "codex"], ["model", "gpt-6-astra"], ["effort", "xhigh"]]);
 		expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
-		const done = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "composer.execution.backToPrompt")!;
-		await act(async () => done.click());
+		expect(document.querySelector('[data-model-picker-panel]')).not.toBeNull();
+		await act(async () => option("composer.effort.xhigh").click());
+		expect(selected.mock.calls).toEqual([["provider", "codex"], ["model", "gpt-6-astra"], ["effort", "xhigh"]]);
 		expect(document.querySelector('[role="dialog"]')).toBeNull();
-	});
-	it("selects a model from another provider and adjusts effort without opening a submenu", async () => {
-		await act(async () => root.render(<Harness compact />));
-		const model = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((row) => row.textContent === "GPT-6 Luna")!;
-		await act(async () => model.click());
-		expect(selected.mock.calls).toEqual([["provider", "codex"], ["model", "gpt-6-luna"]]);
-		const effort = document.querySelector<HTMLSelectElement>('select[aria-label="composer.execution.effort"]')!;
-		await act(async () => { effort.value = "high"; effort.dispatchEvent(new Event("change", { bubbles: true })); });
-		expect(selected).toHaveBeenLastCalledWith("effort", "high");
-		expect(document.querySelector('[role="menu"]')).toBeNull();
 	});
 });

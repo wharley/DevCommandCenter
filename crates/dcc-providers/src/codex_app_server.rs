@@ -627,35 +627,58 @@ fn codex_usage_window(id: &str, value: &Value) -> Option<ProviderUsageWindow> {
     })
 }
 
+/// Each credit is consumed on its own (`creditId`) and can expire on a
+/// different day, so only usable ones are listed, soonest expiry first.
 fn codex_reset_credits(value: &Value) -> Option<ProviderResetCredits> {
     let summary = value.get("rateLimitResetCredits")?;
     let available_count = summary.get("availableCount")?.as_u64()?;
-    let credits = summary
+    let now = Utc::now().timestamp();
+    let mut credits: Vec<(i64, ProviderResetCredit)> = summary
         .get("credits")
         .and_then(Value::as_array)
         .map(|credits| {
             credits
                 .iter()
+                .filter(|credit| {
+                    credit
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .is_none_or(|status| status == "available")
+                })
+                .filter(|credit| {
+                    credit
+                        .get("expiresAt")
+                        .and_then(Value::as_i64)
+                        .is_none_or(|expires_at| expires_at > now)
+                })
                 .filter_map(|credit| {
-                    Some(ProviderResetCredit {
-                        id: credit.get("id")?.as_str()?.to_string(),
-                        title: credit
-                            .get("title")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                        description: credit
-                            .get("description")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                        expires_at: credit.get("expiresAt").and_then(codex_reset_time),
-                    })
+                    let expires_sort = credit
+                        .get("expiresAt")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(i64::MAX);
+                    Some((
+                        expires_sort,
+                        ProviderResetCredit {
+                            id: credit.get("id")?.as_str()?.to_string(),
+                            title: credit
+                                .get("title")
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
+                            description: credit
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
+                            expires_at: credit.get("expiresAt").and_then(codex_reset_time),
+                        },
+                    ))
                 })
                 .collect()
         })
         .unwrap_or_default();
+    credits.sort_by_key(|(expires_at, _)| *expires_at);
     Some(ProviderResetCredits {
         available_count,
-        credits,
+        credits: credits.into_iter().map(|(_, credit)| credit).collect(),
     })
 }
 
@@ -5279,7 +5302,7 @@ unified_exec                         stable             true
                     "id": "reset-1",
                     "title": "Full reset",
                     "description": "Refresh Codex limits",
-                    "expiresAt": 1_800_200_000,
+                    "expiresAt": 4_000_000_000_i64,
                     "grantedAt": 1_800_000_000,
                     "resetType": "codexRateLimits",
                     "status": "available"
@@ -5299,6 +5322,33 @@ unified_exec                         stable             true
             Some("Full reset")
         );
         assert!(reset_credits.credits[0].expires_at.is_some());
+    }
+
+    #[test]
+    fn codex_reset_credits_list_usable_credits_soonest_expiry_first() {
+        let future = Utc::now().timestamp() + 86_400;
+        let usage = parse_codex_account_usage(&json!({
+            "rateLimits": { "primary": { "usedPercent": 10.0 } },
+            "rateLimitResetCredits": {
+                "availableCount": 2,
+                "credits": [
+                    { "id": "later", "expiresAt": future + 7 * 86_400, "status": "available" },
+                    { "id": "redeemed", "expiresAt": future, "status": "redeemed" },
+                    { "id": "expired", "expiresAt": 1_000, "status": "available" },
+                    { "id": "sooner", "expiresAt": future, "status": "available" }
+                ]
+            }
+        }))
+        .expect("usage should parse");
+
+        let credits = usage.reset_credits.expect("reset credits should parse");
+        assert_eq!(credits.available_count, 2);
+        let ids: Vec<_> = credits
+            .credits
+            .iter()
+            .map(|credit| credit.id.as_str())
+            .collect();
+        assert_eq!(ids, ["sooner", "later"]);
     }
 
     #[tokio::test]

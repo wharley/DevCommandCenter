@@ -168,7 +168,7 @@ export function ComposerProviderModelMenu({
 					<CommandInput placeholder={t("composer.model.search")} className="h-9" />
 					<CommandList>
 						<CommandEmpty>{t("composer.model.empty")}</CommandEmpty>
-						{providers.map((provider) => (
+						{providers.filter(isProviderEnabled).map((provider) => (
 							<CommandGroup key={provider.id} heading={provider.label}>
 								{provider.models.map((model) => {
 									const isActive =
@@ -179,7 +179,7 @@ export function ComposerProviderModelMenu({
 										<CommandItem
 											key={`${provider.id}-${model.id}`}
 											value={searchBlob}
-											disabled={disabled || !isProviderEnabled(provider)}
+											disabled={disabled}
 											onSelect={() => {
 												if (provider.id !== selectedProviderId) {
 													onSelectProvider(provider.id);
@@ -194,11 +194,6 @@ export function ComposerProviderModelMenu({
 												className="size-4"
 											/>
 											<span className="min-w-0 flex-1 truncate">{model.label}</span>
-											{!isProviderEnabled(provider) ? (
-												<span className="text-[10px] text-muted-foreground">
-													{t("settings.model.disabled")}
-												</span>
-											) : null}
 											{isActive ? (
 												<CheckIcon
 													className="size-4 shrink-0 text-foreground"

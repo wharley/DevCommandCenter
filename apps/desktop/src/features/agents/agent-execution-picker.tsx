@@ -89,7 +89,8 @@ export function AgentExecutionPicker({
 					<Selected when={!provider} />
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
-				{providers.map((candidate) => (
+				{/* Switched-off providers stay out, unless this agent already runs on one. */}
+				{providers.filter((candidate) => isProviderEnabled(candidate) || candidate.id === provider?.id).map((candidate) => (
 					<DropdownMenuSub key={candidate.id}>
 						<DropdownMenuSubTrigger
 							className={itemClass}

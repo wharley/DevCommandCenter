@@ -76,7 +76,9 @@ pub const CLAUDE_CODE_ALIASES: &[(&str, &str)] = &[
     ("sonnet-4.6", "claude-sonnet-5-5"),
     ("claude-sonnet-4-6", "claude-sonnet-5-5"),
     ("claude-sonnet-4-6-20251117", "claude-sonnet-5-5"),
-    ("haiku", "claude-haiku-4-5"),
+    ("haiku", "claude-haiku-5-5"),
+    ("haiku-5.5", "claude-haiku-5-5"),
+    ("haiku-5-5", "claude-haiku-5-5"),
     ("haiku-4.5", "claude-haiku-4-5"),
     ("claude-haiku-4-5-20251001", "claude-haiku-4-5"),
 ];
@@ -196,9 +198,16 @@ pub const CLAUDE_CODE: &[ModelEntry] = &[
         effort_levels: &["low", "medium", "high", "xhigh", "max"],
     },
     ModelEntry {
+        id: "claude-haiku-5-5",
+        label: "Claude Haiku 5.5",
+        description: "Fastest and cheapest Claude model for quick follow-ups and subagent work.",
+        recommended: false,
+        effort_levels: &["low", "medium", "high", "xhigh", "max"],
+    },
+    ModelEntry {
         id: "claude-haiku-4-5",
         label: "Claude Haiku 4.5",
-        description: "Fast, lightweight option for quick follow-ups.",
+        description: "Previous small model; use it on Claude Code older than 2.1.293.",
         recommended: false,
         effort_levels: &["low", "medium", "high"],
     },
@@ -487,5 +496,26 @@ mod tests {
             resolve_alias("claude_code", "claude-sonnet-4-6-20251117"),
             "claude-sonnet-5-5"
         );
+    }
+
+    #[test]
+    fn haiku_alias_moves_to_haiku_55_and_keeps_45_selectable() {
+        for alias in ["haiku", "haiku-5.5", "haiku-5-5", "claude-haiku-5-5"] {
+            assert_eq!(resolve_alias("claude_code", alias), "claude-haiku-5-5");
+        }
+        for alias in ["haiku-4.5", "claude-haiku-4-5-20251001"] {
+            assert_eq!(resolve_alias("claude_code", alias), "claude-haiku-4-5");
+        }
+        let haiku = CLAUDE_CODE
+            .iter()
+            .find(|model| model.id == "claude-haiku-5-5")
+            .expect("Haiku 5.5 should be in the Claude catalog");
+        assert_eq!(
+            haiku.effort_levels,
+            &["low", "medium", "high", "xhigh", "max"]
+        );
+        assert!(CLAUDE_CODE
+            .iter()
+            .any(|model| model.id == "claude-haiku-4-5"));
     }
 }
