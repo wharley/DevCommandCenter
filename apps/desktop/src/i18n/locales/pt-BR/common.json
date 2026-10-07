@@ -3054,11 +3054,11 @@
         "whatIs": "O [Repórter] monta um resumo do que aconteceu nas suas tarefas desde o resumo anterior: o que está travado agora, o que andou, o que foi concluído e o que é novo. Ele lê o que o DCC registrou e não usa modelo, então não gasta tokens.",
         "whenToUse": "Ao começar o dia ou ao voltar depois de um tempo longe, para saber onde retomar sem abrir tarefa por tarefa.",
         "steps": [
-          "Quando há um resumo novo, o Repórter avisa num balão abaixo dele na seção [Agentes] da barra lateral. Clique em [Ver resumo].",
+          "Quando há um resumo novo, o Repórter sai da seção [Agentes] da barra lateral e avisa num balão acima do composer. Clique em [Ver resumo] para abrir o resumo na página dele.",
           "Ou abra o [Repórter] em [Agentes] a qualquer momento para ver o resumo atual.",
           "Comece por [Travado agora]: são as tarefas que esperam por você, com o tempo desde quando estão paradas. Depois veja [Andou], [Concluídas] e [Novas].",
           "Clique numa tarefa do resumo para abri-la e retomar dali.",
-          "Se as concluídas passarem do limite que você escolhe em [Editar], o Repórter avisa quanto elas ocupam. [Revisar] abre a lista e [Limpar as seguras] apaga só as que estão commitadas e publicadas."
+          "Se as concluídas passarem do limite que você escolhe em [Editar], o Repórter avisa acima do composer quanto elas ocupam. [Revisar] abre a lista e [Limpar as seguras] apaga só as que estão commitadas e publicadas."
         ],
         "tip": "Um resumo novo começa na primeira abertura depois das 4h e cobre tudo desde o anterior.",
         "keywords": "agentes do dcc agente repórter resumo diário recap o que andou travado concluídas novas manhã retomar espaço disco limpar faxina worktrees liberar"

@@ -3054,11 +3054,11 @@
         "whatIs": "The [Reporter] builds a recap of what happened in your tasks since the previous one: what is blocked now, what moved, what was completed and what is new. It reads what DCC recorded and runs no model, so it spends no tokens.",
         "whenToUse": "When you start the day or come back after some time away, to know where to pick up without opening task after task.",
         "steps": [
-          "When there is a new recap, the Reporter tells you in a bubble under it in the [Agents] section of the sidebar. Select [See recap].",
+          "When there is a new recap, the Reporter leaves the [Agents] section of the sidebar and tells you in a bubble above the composer. Select [See recap] to open the recap on its page.",
           "Or open the [Reporter] in [Agents] at any time to see the current recap.",
           "Start with [Blocked now]: these are the tasks waiting on you, with how long they have been stuck. Then look at [Moved], [Completed] and [New].",
           "Select a task in the recap to open it and pick up from there.",
-          "If completed tasks pass the limit you choose in [Edit], the Reporter tells you how much they take. [Review] opens the list and [Clean up the safe ones] deletes only those already committed and pushed."
+          "If completed tasks pass the limit you choose in [Edit], the Reporter tells you above the composer how much they take. [Review] opens the list and [Clean up the safe ones] deletes only those already committed and pushed."
         ],
         "tip": "A new recap starts at the first opening after 4am and covers everything since the previous one.",
         "keywords": "dcc agents agent reporter daily recap summary what moved blocked completed new morning pick up space disk clean up worktrees free"

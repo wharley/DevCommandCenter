@@ -34,7 +34,13 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentsSidebarSection } from "@/features/agents/agents-sidebar-section";
-import { RECAP_BLOCKING_REASONS } from "@/features/agents/daily-recap";
+import {
+	dismissDailyRecapBubble,
+	isRecapBubbleVisible,
+	RECAP_BLOCKING_REASONS,
+	useDailyRecap,
+} from "@/features/agents/daily-recap";
+import { useRecapBubbleText } from "@/features/agents/recap-news";
 import type { AgentView } from "@/features/agents/use-agents";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/button";
@@ -74,6 +80,12 @@ import {
 	syncCleanupAlert,
 	useCleanupAlert,
 } from "@/features/agents/cleanup-alert";
+import {
+	publishReporterCleanup,
+	publishReporterRecap,
+	type ReporterCleanupOffer,
+	type ReporterRecapNews,
+} from "@/features/agents/reporter-store";
 import type { WorkspaceSummary } from "./types";
 import {
 	createInitialRailSectionState,
@@ -652,22 +664,61 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			setCleanupProgress(null);
 		}
 	}, [cleanupProgress, completedRows, i18n.resolvedLanguage, onDeleteWorkspace, t]);
-	const reporterCleanup =
-		onDeleteWorkspace && completedTotalBytes !== null && (cleanupAlertDue || cleanupProgress)
-			? {
-					alert: {
-						totalBytes: completedTotalBytes,
-						safeCount: completedCleanupSummaryValue.safeCount,
-						safeBytes: completedCleanupSummaryValue.safeBytes,
-						progress: cleanupProgress,
-					},
-					onReview: () => setIsCleanupOpen(true),
-					onCleanSafe: () => {
-						void handleCleanSafeCompleted();
-					},
-					onDismiss: () => dismissCleanupAlert(completedTotalBytes),
-				}
-			: null;
+	// The reporter delivers this above the composer; the sidebar keeps the data
+	// and the cleanup list.
+	const reporterCleanup = useMemo<ReporterCleanupOffer | null>(
+		() =>
+			onDeleteWorkspace && completedTotalBytes !== null && (cleanupAlertDue || cleanupProgress)
+				? {
+						alert: {
+							totalBytes: completedTotalBytes,
+							safeCount: completedCleanupSummaryValue.safeCount,
+							safeBytes: completedCleanupSummaryValue.safeBytes,
+							progress: cleanupProgress,
+						},
+						onReview: () => setIsCleanupOpen(true),
+						onCleanSafe: () => {
+							void handleCleanSafeCompleted();
+						},
+						onDismiss: () => dismissCleanupAlert(completedTotalBytes),
+					}
+				: null,
+		[
+			cleanupAlertDue,
+			cleanupProgress,
+			completedCleanupSummaryValue,
+			completedTotalBytes,
+			handleCleanSafeCompleted,
+			onDeleteWorkspace,
+		],
+	);
+	useEffect(() => {
+		publishReporterCleanup(reporterCleanup);
+	}, [reporterCleanup]);
+	useEffect(() => () => publishReporterCleanup(null), []);
+
+	// The reporter's daily recap, also said above the composer.
+	const dailyRecap = useDailyRecap();
+	const recapText = useRecapBubbleText(
+		isRecapBubbleVisible(dailyRecap) ? dailyRecap.current : null,
+		attentionItems.filter((item) => RECAP_BLOCKING_REASONS.has(item.reason)).length,
+	);
+	const reporterId = agents.find((agent) => agent.preset === "chronicler")?.id ?? null;
+	const reporterRecap = useMemo<ReporterRecapNews | null>(
+		() =>
+			recapText && reporterId && onOpenAgent
+				? {
+						text: recapText,
+						onOpen: () => onOpenAgent(reporterId),
+						onDismiss: dismissDailyRecapBubble,
+					}
+				: null,
+		[onOpenAgent, recapText, reporterId],
+	);
+	useEffect(() => {
+		publishReporterRecap(reporterRecap);
+	}, [reporterRecap]);
+	useEffect(() => () => publishReporterRecap(null), []);
 
 	const workspaceDeletionBytes = useMemo(() => {
 		if (!workspaceDeletionTarget || completedDiskUsage.status !== "ready") {
@@ -1697,10 +1748,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						agents={agents}
 						activeAgentId={activeAgentId}
 						onOpenAgent={onOpenAgent}
-						recapBlockedCount={
-							attentionItems.filter((item) => RECAP_BLOCKING_REASONS.has(item.reason)).length
-						}
-						cleanup={reporterCleanup}
 					/>
 				)}
 
