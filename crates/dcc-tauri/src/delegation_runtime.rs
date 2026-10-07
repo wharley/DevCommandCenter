@@ -55,6 +55,7 @@ use crate::{
     },
     state::{SessionCommandState, WorkspaceCommandState},
 };
+use dcc_infra::db::SqliteWorkspaceRepo;
 
 /// Provider ids a delegation can target (validated against availability at run time).
 pub use dcc_providers::PROVIDER_IDS as DELEGATION_PROVIDER_IDS;
@@ -836,7 +837,11 @@ pub async fn run_delegation(
         }
     }
 
-    let workspace = WorkspaceRepo::get_workspace(state, &parent.workspace_id)
+    // SessionCommandState's WorkspaceRepo impl is a stub that never finds a
+    // workspace; the durable workspace store lives in its own repository.
+    let workspace_repo =
+        SqliteWorkspaceRepo::open(state.db_path()).map_err(|error| error.to_string())?;
+    let workspace = WorkspaceRepo::get_workspace(&workspace_repo, &parent.workspace_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("workspace not found: {}", parent.workspace_id.0))?;
@@ -2162,6 +2167,31 @@ mod tests {
             .await
             .expect_err("nested delegation must be refused");
             assert!(error.contains("cannot delegate further"));
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn an_agent_delegation_finds_the_parent_workspace() {
+            let fixture = fixture().await;
+            let error = run_delegation(
+                &fixture.state,
+                RunDelegationInput {
+                    parent_session_id: SessionId("parent".to_string()),
+                    target_provider_id: Some("not-a-provider".to_string()),
+                    target_model_id: None,
+                    mode: DelegationMode::Review,
+                    instruction: "review".to_string(),
+                    context_policy: DelegationContextPolicy::Minimal,
+                    origin: DelegationOrigin::Agent,
+                    prebuilt_prompt: None,
+                    effort: None,
+                    fast_mode: None,
+                    provider_runtime: None,
+                },
+            )
+            .await
+            .expect_err("an unknown provider is refused");
+            // The refusal must come from the provider check, past the workspace lookup.
+            assert!(!error.contains("workspace not found"), "{error}");
         }
 
         #[tokio::test(flavor = "current_thread")]
