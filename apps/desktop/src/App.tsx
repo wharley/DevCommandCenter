@@ -1030,6 +1030,8 @@ export default function App() {
 					.fetchQuery(
 						sessionThreadHistoryQueryOptions(durabilityTarget.sessionId, {
 							scope: backendCacheKey,
+							// Durability is proven by the history as it is now.
+							staleTime: 0,
 						}),
 					)
 					.then((history) => {

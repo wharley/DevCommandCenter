@@ -5,7 +5,12 @@ import { loadSessionThreadEvents } from "@/lib/session-api";
 
 export function sessionThreadHistoryQueryOptions(
 	sessionId: string | null,
-	input?: { scope?: string; enabled?: boolean; refetchInterval?: number | false },
+	input?: {
+		scope?: string;
+		enabled?: boolean;
+		refetchInterval?: number | false;
+		staleTime?: number;
+	},
 ) {
 	const scope = input?.scope ?? "local";
 	const isEnabled = input?.enabled ?? true;
@@ -22,7 +27,9 @@ export function sessionThreadHistoryQueryOptions(
 			return loadSessionThreadEvents(sessionId);
 		},
 		enabled: isEnabled && Boolean(sessionId),
-		staleTime: 0,
+		// Lifecycle events invalidate this history when it changes; switching
+		// back and forth within a minute reuses it instead of re-reading it.
+		staleTime: input?.staleTime ?? 60_000,
 		refetchInterval,
 	});
 }

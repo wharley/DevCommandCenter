@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CoreEvent, SessionEventRecord } from "@dcc/contracts";
 import {
+	compactDeltaRuns,
 	mergeSessionThreadEvents,
 	projectWorkspaceMessages,
 } from "./session-thread-history.logic";
@@ -837,6 +838,35 @@ describe("projectWorkspaceMessages", () => {
 			role: "assistant",
 			content: "Vou rastrear onde",
 		});
+	});
+
+	it("joins only consecutive deltas to the same item", () => {
+		const delta = (turnId: string, content: string, occurredAt: string) => ({
+			event: sessionTurnDelta("session-a", turnId, content),
+			occurredAt,
+			signature: "",
+		});
+		const started = {
+			event: { sessionTurnStarted: { session_id: "session-a", turn_id: "turn-2", prompt: "Beta" } },
+			signature: "",
+		} as unknown as Parameters<typeof compactDeltaRuns>[0][number];
+
+		const compacted = compactDeltaRuns([
+			delta("turn-1", "Vou", "t1"),
+			delta("turn-1", " ler", "t2"),
+			delta("turn-2", "Outro", "t3"),
+			delta("turn-1", " já", "t4"),
+			started,
+			delta("turn-1", " fim", "t5"),
+		]);
+
+		expect(compacted.map(({ event, occurredAt }) => [event, occurredAt])).toEqual([
+			[sessionTurnDelta("session-a", "turn-1", "Vou ler"), "t1"],
+			[sessionTurnDelta("session-a", "turn-2", "Outro"), "t3"],
+			[sessionTurnDelta("session-a", "turn-1", " já"), "t4"],
+			[started.event, undefined],
+			[sessionTurnDelta("session-a", "turn-1", " fim"), "t5"],
+		]);
 	});
 
 	it("ignores buffered assistant deltas after an authoritative item snapshot", () => {

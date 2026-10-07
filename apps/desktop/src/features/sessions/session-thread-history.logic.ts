@@ -873,30 +873,6 @@ function occurrenceSignature(
 	return `${base}#${nextCount}`;
 }
 
-function pushHistoryEvent(
-	events: TimelineEvent[],
-	seen: Set<string>,
-	counts: Map<string, number>,
-	record: SessionEventRecord,
-) {
-	const coreEvent = recordToCoreEvent(record);
-	if (!coreEvent) {
-		return;
-	}
-
-	const signature = occurrenceSignature(coreEvent, counts);
-	if (seen.has(signature)) {
-		return;
-	}
-
-	seen.add(signature);
-	events.push({
-		event: coreEvent,
-		occurredAt: record.occurredAt,
-		signature,
-	});
-}
-
 /**
  * Live events carry no durable timestamp until the history is refetched. The
  * first time a projection sees a live turn start or terminal, its arrival time
@@ -914,24 +890,6 @@ function observedAt(event: CoreEvent): string {
 	return stamp;
 }
 
-function pushLiveEvent(
-	events: TimelineEvent[],
-	seen: Set<string>,
-	counts: Map<string, number>,
-	event: CoreEvent,
-) {
-	const signature = occurrenceSignature(event, counts);
-	if (seen.has(signature)) {
-		return;
-	}
-
-	seen.add(signature);
-	events.push({
-		event,
-		signature,
-	});
-}
-
 export function mergeSessionThreadEvents(
 	historyEvents: SessionEventRecord[],
 	liveEvents: CoreEvent[],
@@ -946,26 +904,150 @@ export function mergeSessionThreadEvents(
 
 	const history = historyTimeline(historyEvents, sessionId);
 	const merged: TimelineEvent[] = history.events.slice();
-	const seen = new Set<string>(history.seen);
 	const liveCounts = new Map<string, number>();
 
 	for (const event of liveEvents) {
 		if (getEventSessionId(event) !== sessionId) {
 			continue;
 		}
-		pushLiveEvent(merged, seen, liveCounts, event);
+		// Occurrence counts make every signature unique within its source, so
+		// a live event is only ever a copy of a history record.
+		const signature = occurrenceSignature(event, liveCounts);
+		if (history.signatures.has(signature, coreEventTurnId(event))) {
+			continue;
+		}
+		merged.push({ event, signature });
 	}
 
 	return merged;
 }
 
-type HistoryTimeline = { events: readonly TimelineEvent[]; seen: ReadonlySet<string> };
+type HistoryTimeline = { events: readonly TimelineEvent[]; signatures: HistorySignatures };
+
+/**
+ * Signing a record means serializing it, and a long conversation has tens of
+ * thousands. Live copies only ever repeat records of the turns still in the
+ * live feed, so records are signed one turn at a time, on first need.
+ * Identical events share their turn (the turn id is part of the event), so
+ * occurrence counts within a turn equal counts over the whole history.
+ */
+class HistorySignatures {
+	private readonly byTurn = new Map<string | null, CoreEvent[]>();
+	private readonly signed = new Map<string | null, Set<string>>();
+
+	constructor(events: readonly CoreEvent[]) {
+		for (const event of events) {
+			const turnId = coreEventTurnId(event);
+			const group = this.byTurn.get(turnId);
+			if (group) group.push(event);
+			else this.byTurn.set(turnId, [event]);
+		}
+	}
+
+	has(signature: string, turnId: string | null): boolean {
+		let signed = this.signed.get(turnId);
+		if (!signed) {
+			signed = new Set();
+			const counts = new Map<string, number>();
+			for (const event of this.byTurn.get(turnId) ?? []) {
+				signed.add(occurrenceSignature(event, counts));
+			}
+			this.byTurn.delete(turnId);
+			this.signed.set(turnId, signed);
+		}
+		return signed.has(signature);
+	}
+}
+
+/** The item a streaming delta appends to, or null for any other event. */
+function deltaTarget(event: CoreEvent): string | null {
+	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
+		return `turn\u0000${event.sessionTurnDelta.session_id}\u0000${event.sessionTurnDelta.turn_id}`;
+	}
+	if ("sessionTurnAssistantMessageDelta" in event && event.sessionTurnAssistantMessageDelta) {
+		const delta = event.sessionTurnAssistantMessageDelta;
+		return `message\u0000${delta.session_id}\u0000${delta.turn_id}\u0000${delta.message_id}`;
+	}
+	if ("sessionTurnReasoningDelta" in event && event.sessionTurnReasoningDelta) {
+		const delta = event.sessionTurnReasoningDelta;
+		return `reasoning\u0000${delta.session_id}\u0000${delta.turn_id}\u0000${delta.reasoning_id}`;
+	}
+	if ("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) {
+		const delta = event.sessionTurnToolCallDelta;
+		return `tool\u0000${delta.session_id}\u0000${delta.turn_id}\u0000${delta.tool_call_id}`;
+	}
+	return null;
+}
+
+function withDeltaContent(event: CoreEvent, content: string): CoreEvent {
+	if ("sessionTurnDelta" in event && event.sessionTurnDelta) {
+		return { sessionTurnDelta: { ...event.sessionTurnDelta, content } };
+	}
+	if ("sessionTurnAssistantMessageDelta" in event && event.sessionTurnAssistantMessageDelta) {
+		return {
+			sessionTurnAssistantMessageDelta: { ...event.sessionTurnAssistantMessageDelta, content },
+		};
+	}
+	if ("sessionTurnReasoningDelta" in event && event.sessionTurnReasoningDelta) {
+		return { sessionTurnReasoningDelta: { ...event.sessionTurnReasoningDelta, content } };
+	}
+	if ("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) {
+		return { sessionTurnToolCallDelta: { ...event.sessionTurnToolCallDelta, content } };
+	}
+	return event;
+}
+
+function deltaContent(event: CoreEvent): string {
+	if ("sessionTurnDelta" in event && event.sessionTurnDelta) return event.sessionTurnDelta.content;
+	if ("sessionTurnAssistantMessageDelta" in event && event.sessionTurnAssistantMessageDelta) {
+		return event.sessionTurnAssistantMessageDelta.content;
+	}
+	if ("sessionTurnReasoningDelta" in event && event.sessionTurnReasoningDelta) {
+		return event.sessionTurnReasoningDelta.content;
+	}
+	if ("sessionTurnToolCallDelta" in event && event.sessionTurnToolCallDelta) {
+		return event.sessionTurnToolCallDelta.content;
+	}
+	return "";
+}
+
+/**
+ * A settled turn is mostly streaming deltas (tens of thousands in a long
+ * conversation), and every projection folds all of them again. Deltas only
+ * append to their item, so a run of consecutive deltas to the same item
+ * projects exactly like one delta carrying the joined text and the first
+ * one's timestamp. Runs never cross another event, so no state between
+ * them is skipped.
+ */
+export function compactDeltaRuns(events: readonly TimelineEvent[]): TimelineEvent[] {
+	const compacted: TimelineEvent[] = [];
+	let index = 0;
+	while (index < events.length) {
+		const first = events[index]!;
+		const target = deltaTarget(first.event);
+		let end = index + 1;
+		if (target !== null) {
+			while (end < events.length && deltaTarget(events[end]!.event) === target) end += 1;
+		}
+		if (end - index === 1) {
+			compacted.push(first);
+		} else {
+			let content = "";
+			for (let cursor = index; cursor < end; cursor += 1) {
+				content += deltaContent(events[cursor]!.event);
+			}
+			compacted.push({ ...first, event: withDeltaContent(first.event, content) });
+		}
+		index = end;
+	}
+	return compacted;
+}
 
 /**
  * The durable history only changes when it is refetched (turn end, reconnect),
- * while live events change every frame. Converting and signing every history
- * record is the expensive part of a projection, so it is done once per
- * history array and session.
+ * while live events change every frame. Converting every history record is
+ * the expensive part of a projection, so it is done once per history array
+ * and session.
  */
 const historyTimelineCache = new WeakMap<SessionEventRecord[], Map<string, HistoryTimeline>>();
 
@@ -974,15 +1056,25 @@ function historyTimeline(historyEvents: SessionEventRecord[], sessionId: string)
 	const cached = bySession?.get(sessionId);
 	if (cached) return cached;
 	const events: TimelineEvent[] = [];
-	const seen = new Set<string>();
-	const counts = new Map<string, number>();
+	// Only a steer's row id uses its signature; identical steers are all
+	// steers, so counting among them matches counting over every record.
+	const steerCounts = new Map<string, number>();
 	for (const record of historyEvents) {
 		if (record.sessionId !== sessionId) {
 			continue;
 		}
-		pushHistoryEvent(events, seen, counts, record);
+		const event = recordToCoreEvent(record);
+		if (!event) continue;
+		const signature =
+			"sessionTurnSteered" in event && event.sessionTurnSteered
+				? occurrenceSignature(event, steerCounts)
+				: "";
+		events.push({ event, occurredAt: record.occurredAt, signature });
 	}
-	const timeline = { events, seen };
+	const timeline = {
+		events: compactDeltaRuns(events),
+		signatures: new HistorySignatures(events.map(({ event }) => event)),
+	};
 	if (!bySession) {
 		bySession = new Map();
 		historyTimelineCache.set(historyEvents, bySession);
