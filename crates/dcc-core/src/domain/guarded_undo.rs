@@ -513,6 +513,26 @@ impl RegularFileMetadataV1 {
         Ok(())
     }
 
+    /// Equal supported metadata apart from which physical file carries it:
+    /// same adapter, link count and every field except the physical identity
+    /// ones. Any other field is compared exactly, so an adapter that adds an
+    /// identity field fails closed instead of being ignored.
+    pub fn same_attributes(&self, other: &Self) -> bool {
+        const PHYSICAL_IDENTITY_FIELDS: &[&str] = &["volume_serial", "file_id"];
+        let attributes = |metadata: &Self| {
+            metadata
+                .fields
+                .iter()
+                .filter(|(key, _)| !PHYSICAL_IDENTITY_FIELDS.contains(&key.as_str()))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<BTreeMap<_, _>>()
+        };
+        self.schema_version == other.schema_version
+            && self.adapter == other.adapter
+            && self.link_count == other.link_count
+            && attributes(self) == attributes(other)
+    }
+
     fn write_canonical(&self, output: &mut Vec<u8>) -> Result<(), GuardedUndoSchemaError> {
         self.validate()?;
         push_u32(output, self.schema_version);
@@ -819,12 +839,62 @@ pub struct UndoOperationFile {
     pub verification_outcome: VerificationOutcome,
     pub recovery_details: Option<RecoveryDetailsV1>,
     pub updated_at: String,
+    /// `None`: `expected_metadata` is the identity the turn left (v1).
+    /// `Some(operation)`: a later turn's completed Undo installed the file
+    /// now at the path, and `expected_metadata` is that operation's verified
+    /// staged identity (see [`chained_result_is_bound`]).
+    pub chained_from_operation_id: Option<UndoOperationId>,
+}
+
+/// A completed Undo's verified journal row for one path: the exact file it
+/// installed (`staged_metadata`) and the bytes that file carries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UndoChainSource {
+    pub operation_id: UndoOperationId,
+    pub restore_set_id: RestoreSetId,
+    pub workspace_id: WorkspaceId,
+    pub root_id: PhysicalRootId,
+    pub git: GitIdentityV1,
+    pub path_bytes: OpaqueRepoPath,
+    pub pre_size: u64,
+    pub pre_sha256: Sha256Digest,
+    pub staged_metadata: RegularFileMetadataV1,
+}
+
+/// Whether `expected` may stand for the result identity of `file` in `set`
+/// because `source`, a completed Undo of another set, installed it: same
+/// workspace, physical root and Git identity, the installed bytes are exactly
+/// what `file`'s turn left, only the physical identity differs from the
+/// turn's own result, and `expected` is exactly the installed file.
+pub fn chained_result_is_bound(
+    set: &TurnRestoreSet,
+    file: &TurnRestoreFile,
+    source: &UndoChainSource,
+    expected: &RegularFileMetadataV1,
+) -> bool {
+    source.restore_set_id != set.restore_set_id
+        && source.workspace_id == set.workspace_id
+        && set.root_id.as_ref() == Some(&source.root_id)
+        && set.git_identity.as_ref() == Some(&source.git)
+        && source.path_bytes == file.path_bytes
+        && source.pre_size == file.result_size
+        && source.pre_sha256 == file.result_sha256
+        && source.staged_metadata == *expected
+        && expected.same_attributes(&file.metadata_fingerprint)
 }
 
 impl UndoOperationFile {
     pub fn validate(&self) -> Result<(), GuardedUndoSchemaError> {
         require_text("operation_id", &self.operation_id.0)?;
         require_text("restore_set_id", &self.restore_set_id.0)?;
+        if let Some(source) = &self.chained_from_operation_id {
+            require_text("chained_from_operation_id", &source.0)?;
+            if *source == self.operation_id {
+                return Err(GuardedUndoSchemaError::InvalidField(
+                    "an undo operation cannot chain from itself".to_owned(),
+                ));
+            }
+        }
         self.path_bytes.validate()?;
         if self.pre_size > MAX_PREIMAGE_BYTES_PER_FILE {
             return Err(GuardedUndoSchemaError::AccountingLimit(
@@ -1208,6 +1278,30 @@ mod tests {
             ]),
         }
     }
+
+    #[test]
+    fn same_attributes_ignores_only_the_physical_identity() {
+        let original = metadata();
+        let mut installed = RegularFileMetadataV1 {
+            file_identity: b"dev1ino9".to_vec(),
+            ..metadata()
+        };
+        installed.fields.insert("file_id".into(), b"ino9".to_vec());
+        assert!(installed.same_attributes(&original));
+
+        let mut chmod = installed.clone();
+        chmod.fields.insert("mode".into(), b"100755".to_vec());
+        assert!(!chmod.same_attributes(&original));
+        let mut new_field = installed.clone();
+        new_field.fields.insert("attributes".into(), b"x".to_vec());
+        assert!(!new_field.same_attributes(&original));
+        let other_adapter = RegularFileMetadataV1 {
+            adapter: "other".into(),
+            ..installed
+        };
+        assert!(!other_adapter.same_attributes(&original));
+    }
+
     fn file(ordinal: u32, path: &[u8], size: u64) -> TurnRestoreFile {
         TurnRestoreFile {
             restore_set_id: RestoreSetId("restore-1".into()),

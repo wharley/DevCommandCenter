@@ -35,12 +35,12 @@ use dcc_core::{
             DelegationWorktreeOperationState,
         },
         guarded_undo::{
-            validate_restore_set_manifest, ArtifactKey, GitIdentityV1, GuardedUndoReasonCode,
-            OpaqueRepoPath, PhysicalRootId, PreparedIdentityV1, RecoveryDetailsV1,
-            RegularFileMetadataV1, RestoreSetId, RestoreSetState, Sha256Digest, TurnRestoreFile,
-            TurnRestoreSet, UndoOperation, UndoOperationFile, UndoOperationFileState,
-            UndoOperationId, UndoOperationState, VerificationOutcome, MAX_RESTORE_FILES,
-            RESTORE_CAPTURE_VERSION, UNDO_JOURNAL_SCHEMA_VERSION,
+            chained_result_is_bound, validate_restore_set_manifest, ArtifactKey, GitIdentityV1,
+            GuardedUndoReasonCode, OpaqueRepoPath, PhysicalRootId, PreparedIdentityV1,
+            RecoveryDetailsV1, RegularFileMetadataV1, RestoreSetId, RestoreSetState, Sha256Digest,
+            TurnRestoreFile, TurnRestoreSet, UndoChainSource, UndoOperation, UndoOperationFile,
+            UndoOperationFileState, UndoOperationId, UndoOperationState, VerificationOutcome,
+            MAX_RESTORE_FILES, RESTORE_CAPTURE_VERSION, UNDO_JOURNAL_SCHEMA_VERSION,
         },
         project::ProjectId,
         repository::{Repository, RepositoryId},
@@ -661,6 +661,7 @@ CREATE TABLE IF NOT EXISTS dcc_undo_operation_files (
     verification_outcome TEXT NOT NULL CHECK(length(verification_outcome) BETWEEN 1 AND 64),
     recovery_details_json TEXT NULL CHECK(recovery_details_json IS NULL OR length(recovery_details_json) BETWEEN 1 AND 1024),
     updated_at TEXT NOT NULL,
+    chained_from_operation_id TEXT NULL CHECK(chained_from_operation_id IS NULL OR length(chained_from_operation_id) BETWEEN 1 AND 256),
     CHECK(
         (displaced_size IS NULL AND displaced_sha256 IS NULL AND displaced_metadata_json IS NULL)
         OR
@@ -2308,6 +2309,14 @@ impl SqliteSessionRepo {
             "staged_metadata_json",
             "TEXT NULL",
         )?;
+        // Journals written before chained restores always bind the turn's own
+        // result identity, which a NULL source states exactly.
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_undo_operation_files",
+            "chained_from_operation_id",
+            "TEXT NULL CHECK(chained_from_operation_id IS NULL OR length(chained_from_operation_id) BETWEEN 1 AND 256)",
+        )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_undo_operations",
@@ -3714,7 +3723,13 @@ impl SqliteSessionRepo {
                 "prepared identity is not bound to the restoration manifest",
             ));
         }
-        validate_operation_manifest_binding(operation, files, &restore_set, &restore_files)?;
+        validate_operation_manifest_binding(
+            &transaction,
+            operation,
+            files,
+            &restore_set,
+            &restore_files,
+        )?;
         transaction
             .execute(
                 r#"INSERT INTO dcc_undo_operations (
@@ -3766,6 +3781,7 @@ impl SqliteSessionRepo {
             let restore = load_turn_restore_set(&conn, &operation.0.restore_set_id)?
                 .ok_or_else(|| guarded_undo_error("restoration set disappeared"))?;
             validate_operation_manifest_binding(
+                &conn,
                 &operation.0,
                 &operation.1,
                 &restore.0,
@@ -3836,6 +3852,22 @@ impl SqliteSessionRepo {
             .collect()
     }
 
+    /// Files that completed Undo operations installed at `path_bytes` in
+    /// this workspace root, most recent first: the candidates a chained
+    /// restore of an older turn may bind to.
+    pub fn list_undo_chain_sources(
+        &self,
+        workspace_id: &WorkspaceId,
+        root_id: &PhysicalRootId,
+        path_bytes: &OpaqueRepoPath,
+    ) -> Result<Vec<UndoChainSource>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        query_undo_chain_sources(&conn, workspace_id, root_id, path_bytes, None)
+    }
+
     pub fn finish_undo_operation_cleanup(&self, operation_id: &UndoOperationId) -> Result<bool> {
         let conn = self
             .conn
@@ -3880,7 +3912,13 @@ impl SqliteSessionRepo {
         let (restore_set, restore_files) =
             load_turn_restore_set(&transaction, &operation.restore_set_id)?
                 .ok_or_else(|| guarded_undo_error("restoration set disappeared"))?;
-        validate_operation_manifest_binding(&operation, &files, &restore_set, &restore_files)?;
+        validate_operation_manifest_binding(
+            &transaction,
+            &operation,
+            &files,
+            &restore_set,
+            &restore_files,
+        )?;
         let current = files
             .into_iter()
             .find(|file| file.ordinal == next_file.ordinal)
@@ -3908,6 +3946,7 @@ impl SqliteSessionRepo {
             || current.expected_metadata != next_file.expected_metadata
             || current.pre_size != next_file.pre_size
             || current.pre_sha256 != next_file.pre_sha256
+            || current.chained_from_operation_id != next_file.chained_from_operation_id
             || (current.staged_metadata != next_file.staged_metadata
                 && !(current.state == UndoOperationFileState::Planned
                     && next_file.state == UndoOperationFileState::Staged
@@ -4000,7 +4039,13 @@ impl SqliteSessionRepo {
             .ok_or_else(|| guarded_undo_error("undo operation disappeared"))?;
         let restore = load_turn_restore_set(&transaction, &persisted.0.restore_set_id)?
             .ok_or_else(|| guarded_undo_error("restoration set disappeared"))?;
-        validate_operation_manifest_binding(&persisted.0, &persisted.1, &restore.0, &restore.1)?;
+        validate_operation_manifest_binding(
+            &transaction,
+            &persisted.0,
+            &persisted.1,
+            &restore.0,
+            &restore.1,
+        )?;
         if &current == next {
             if persisted.0.reason_code.as_ref() == reason
                 && persisted.0.recovery_details.as_ref() == recovery_details
@@ -6271,6 +6316,7 @@ fn artifact_key_from_blob(bytes: Vec<u8>) -> Result<ArtifactKey> {
 }
 
 fn validate_operation_manifest_binding(
+    conn: &Connection,
     operation: &UndoOperation,
     operation_files: &[UndoOperationFile],
     restore_set: &TurnRestoreSet,
@@ -6312,7 +6358,7 @@ fn validate_operation_manifest_binding(
             || journal.path_bytes != restored.path_bytes
             || journal.expected_result_size != restored.result_size
             || journal.expected_result_sha256 != restored.result_sha256
-            || journal.expected_metadata != restored.metadata_fingerprint
+            || !expected_result_is_bound(conn, restore_set, restored, journal)?
             || journal.pre_size != restored.pre_size
             || journal.pre_sha256 != restored.pre_sha256
             || !exchange_keys.insert(journal.exchange_artifact_key.0)
@@ -6323,6 +6369,109 @@ fn validate_operation_manifest_binding(
         }
     }
     Ok(())
+}
+
+/// The journal expects either the identity the turn left or, for a chained
+/// restore, the exact file a completed Undo of a later turn installed.
+fn expected_result_is_bound(
+    conn: &Connection,
+    restore_set: &TurnRestoreSet,
+    restored: &TurnRestoreFile,
+    journal: &UndoOperationFile,
+) -> Result<bool> {
+    let Some(source_id) = &journal.chained_from_operation_id else {
+        return Ok(journal.expected_metadata == restored.metadata_fingerprint);
+    };
+    let Some(root_id) = &restore_set.root_id else {
+        return Ok(false);
+    };
+    Ok(query_undo_chain_sources(
+        conn,
+        &restore_set.workspace_id,
+        root_id,
+        &restored.path_bytes,
+        Some(source_id),
+    )?
+    .iter()
+    .any(|source| {
+        chained_result_is_bound(restore_set, restored, source, &journal.expected_metadata)
+    }))
+}
+
+/// Verified journal rows of completed Undo operations for one path in one
+/// workspace root, most recent first.
+fn query_undo_chain_sources(
+    conn: &Connection,
+    workspace_id: &WorkspaceId,
+    root_id: &PhysicalRootId,
+    path_bytes: &OpaqueRepoPath,
+    operation_id: Option<&UndoOperationId>,
+) -> Result<Vec<UndoChainSource>> {
+    let mut statement = conn
+        .prepare(
+            r#"SELECT files.operation_id, files.restore_set_id, operation.prepared_identity_json,
+                      files.pre_size, files.pre_sha256, files.staged_metadata_json
+                 FROM dcc_undo_operation_files files
+                 JOIN dcc_undo_operations operation
+                   ON operation.operation_id = files.operation_id
+                  AND operation.restore_set_id = files.restore_set_id
+                 JOIN dcc_turn_restore_sets restore
+                   ON restore.restore_set_id = files.restore_set_id
+                WHERE operation.state = 'completed' AND operation.active = 0
+                  AND files.state = 'verified' AND files.verification_outcome = 'verified'
+                  AND files.staged_metadata_json IS NOT NULL
+                  AND restore.workspace_id = ?1 AND restore.root_id = ?2
+                  AND files.path_bytes = ?3
+                  AND (?4 IS NULL OR files.operation_id = ?4)
+                ORDER BY operation.completed_at DESC, files.operation_id
+                LIMIT 64"#,
+        )
+        .map_err(guarded_undo_error)?;
+    let rows = statement
+        .query_map(
+            params![
+                workspace_id.0,
+                root_id.0,
+                path_bytes.as_persisted_bytes(),
+                operation_id.map(|id| id.0.as_str()),
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Vec<u8>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .map_err(guarded_undo_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(guarded_undo_error)?;
+    let mut sources = Vec::with_capacity(rows.len());
+    for (operation_id, restore_set_id, prepared_json, pre_size, pre_digest, staged_json) in rows {
+        let prepared: PreparedIdentityV1 = parse_guarded_json(&prepared_json, "prepared identity")?;
+        prepared.validate().map_err(guarded_undo_error)?;
+        let staged_metadata: RegularFileMetadataV1 =
+            parse_guarded_json(&staged_json, "staged metadata")?;
+        staged_metadata.validate().map_err(guarded_undo_error)?;
+        if prepared.root_id != *root_id {
+            continue;
+        }
+        sources.push(UndoChainSource {
+            operation_id: UndoOperationId(operation_id),
+            restore_set_id: RestoreSetId(restore_set_id),
+            workspace_id: workspace_id.clone(),
+            root_id: prepared.root_id,
+            git: prepared.git,
+            path_bytes: path_bytes.clone(),
+            pre_size: checked_u64(pre_size, "pre_size")?,
+            pre_sha256: digest_from_blob(pre_digest)?,
+            staged_metadata,
+        });
+    }
+    Ok(sources)
 }
 
 fn insert_turn_restore_file(conn: &Connection, file: &TurnRestoreFile) -> Result<()> {
@@ -6556,8 +6705,8 @@ fn insert_undo_operation_file(conn: &Connection, file: &UndoOperationFile) -> Re
             expected_result_size, expected_result_sha256, expected_metadata_json,
             pre_size, pre_sha256, staged_metadata_json, displaced_size, displaced_sha256,
             displaced_metadata_json, state, verification_outcome,
-            recovery_details_json, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"#,
+            recovery_details_json, updated_at, chained_from_operation_id
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"#,
         params![
             file.operation_id.0,
             file.restore_set_id.0,
@@ -6582,6 +6731,7 @@ fn insert_undo_operation_file(conn: &Connection, file: &UndoOperationFile) -> Re
             file.verification_outcome.as_str(),
             optional_json(&file.recovery_details)?,
             file.updated_at,
+            file.chained_from_operation_id.as_ref().map(|id| id.0.as_str()),
         ],
     )
     .map_err(guarded_undo_error)?;
@@ -6721,7 +6871,7 @@ fn load_undo_operation(
                   expected_result_sha256, expected_metadata_json, pre_size,
                   pre_sha256, staged_metadata_json, displaced_size, displaced_sha256,
                   displaced_metadata_json, state, verification_outcome,
-                  recovery_details_json, updated_at
+                  recovery_details_json, updated_at, chained_from_operation_id
              FROM dcc_undo_operation_files WHERE operation_id = ?1 ORDER BY ordinal"#,
         )
         .map_err(guarded_undo_error)?;
@@ -6745,6 +6895,7 @@ fn load_undo_operation(
                 row.get::<_, String>(14)?,
                 row.get::<_, Option<String>>(15)?,
                 row.get::<_, String>(16)?,
+                row.get::<_, Option<String>>(17)?,
             ))
         })
         .map_err(guarded_undo_error)?
@@ -6769,6 +6920,7 @@ fn load_undo_operation(
         outcome,
         recovery,
         updated_at,
+        chained_from,
     ) in rows
     {
         let file = UndoOperationFile {
@@ -6801,6 +6953,7 @@ fn load_undo_operation(
                 .map(|json| parse_guarded_json(json, "file recovery details"))
                 .transpose()?,
             updated_at,
+            chained_from_operation_id: chained_from.map(UndoOperationId),
         };
         if file.state.is_known() && file.verification_outcome.is_known() {
             file.validate().map_err(guarded_undo_error)?;
@@ -12779,6 +12932,7 @@ mod tests {
             verification_outcome: VerificationOutcome::Pending,
             recovery_details: None,
             updated_at: "t3".to_owned(),
+            chained_from_operation_id: None,
         };
         repo.create_undo_operation(&operation, std::slice::from_ref(&operation_file))
             .unwrap();

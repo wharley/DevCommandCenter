@@ -4,7 +4,7 @@ Status: macOS beta enabled in the desktop build; release validation remains requ
 
 Milestone: M4
 
-Last updated: 2026-08-29
+Last updated: 2026-10-07
 
 User-facing guide: [Last Turn Review and Guarded Undo](GUARDED_UNDO.md)
 
@@ -279,6 +279,8 @@ token digest, identity revalidation, timestamps, per-file exchange locators,
 expected and displaced identities/digests, per-file application state,
 verification outcome, and recovery details. Journal rows and their displaced
 files MUST survive until the operation is in a verified terminal state.
+A file row MAY name `chained_from_operation_id`; see
+[Chained restore after a completed Undo](#chained-restore-after-a-completed-undo).
 
 ### Restoration-set states
 
@@ -699,6 +701,135 @@ recovery lazily at the first feature-enabled capture attempt: it acquires the
 single-instance lifetime lock and converts leftover `collecting` rows to
 `failed(capture_interrupted)` before admitting any new M4 begin. Until that
 gate succeeds, it performs neither capture nor global cleanup.
+
+## Chained restore after a completed Undo
+
+Status: implemented locally behind `guarded-undo-capture-v2`, used only by
+[Edit from here](EDIT_FROM_HERE.md); pending core-maintainer and security
+review.
+
+### Problem
+
+A restore set binds each target to the exact physical file its turn left
+(`RegularFileMetadataV1.file_identity` is `st_dev`/`st_ino` on macOS). Execute
+does not write a target in place: it exchanges a newly staged file in. When two
+turns T1 (older) and T2 (newer) both changed path `p`, undoing T2 leaves at `p`
+a new physical file whose bytes are exactly what T1 left. T1's own binding no
+longer matches, so a rewind across both turns could never restore `p`.
+
+### Contract extension
+
+A restore set MAY be prepared with the `AfterCompletedUndo` binding. Under it,
+a target that does not match its own result identity is still accepted when
+all of the following hold. The default binding (`TurnResult`, used by "Undo
+last turn") is unchanged.
+
+1. The current raw bytes have exactly the set's recorded result size and
+   SHA-256.
+2. A completed Undo operation `O` of a **different** restore set exists whose
+   journal row for the same `path_bytes` is `verified`, and whose
+   `staged_metadata` is **exactly** the current file's metadata, physical
+   identity included. `O` installed that file, and its execute and final
+   verification observed it at `p`.
+3. `O`'s preimage bytes for `p` (size and SHA-256) are exactly this set's
+   result bytes.
+4. `O`'s restore set has the same `workspace_id` and physical `root_id`, and
+   `O`'s prepared Git identity is exactly this set's Git identity, `HEAD`, ref
+   and index fingerprint included.
+5. The current metadata has the same supported attributes as this set's
+   result (`RegularFileMetadataV1::same_attributes`: adapter, link count and
+   every field except the physical-identity fields `file_id` and
+   `volume_serial`; unknown fields compare exactly).
+
+Everything else stays as in v1: the set itself must be `eligible` and
+unexpired, the current repository identity must equal the set's, every
+preimage must verify, and the root and generation checks are unchanged.
+
+Prepare records, per file, the expected identity and its source (`None` or
+`O`) in the server-side token. Execute derives both again under the exclusive
+lease and blocks with `preview_context_changed` if either differs. The journal
+row stores the chained identity as `expected_metadata` and the source as
+`chained_from_operation_id`, so the exchange, the displaced-file validation,
+rollback and startup recovery all use the exact identity that was actually at
+`p`. The database binding (`validate_operation_manifest_binding`) accepts a
+journal whose `expected_metadata` differs from the captured result only when
+`chained_from_operation_id` names a source that satisfies rules 2 to 5. A
+`NULL` source keeps the v1 equality. Journals written before this column exist
+read as `NULL`.
+
+`plan_chain` is the read-only check before the person confirms. It takes the
+sets newest first and opens one shared lease. For a path that a newer set in
+the plan restores, it requires that set's preimage to be exactly this set's
+result, with the same attributes (rules 3 and 5, applied to what the newer
+Undo will stage). Every other path is checked against the disk as above. It
+issues no token: every set is prepared again, against the disk, right before
+it executes.
+
+No reason code is added. A target that satisfies neither binding is
+`target_result_mismatch`, as before.
+
+### Threat model and why it stays fail-closed
+
+This keeps the v1 trust boundary. It protects against accidental overwrite of
+changes made outside the restored turns, by the person, editors, other
+programs, or other DCC actions. It is not a defence against a same-user
+adversary who can rewrite both the database and the workspace.
+
+- **No content-only trust.** A file with the right bytes that DCC did not
+  install (an editor's atomic save, a `git checkout`, a copy) has another
+  physical identity and is refused. The real-filesystem test
+  `a_same_bytes_file_no_undo_installed_never_continues_a_chain` replaces the
+  installed file with identical bytes and expects `target_result_mismatch`.
+- **Every accepted identity is journaled by DCC.** It is either the turn's own
+  result or a staged file that a completed, verified Undo installed. Nothing
+  is inferred from timestamps, paths or the UI.
+- **Nothing outside the chain is lost.** Rule 1 means the bytes about to be
+  displaced are exactly the turn's result. Rule 3 means the newer turn started
+  from exactly those bytes, so nothing was changed in between that the chain
+  would discard. If the person edited `p` between the two turns, the newer
+  preimage differs and the chain breaks before anything is written. Rule 5
+  does the same for a permission or owner change.
+- **Repository state cannot drift through the chain.** Rule 4, plus the
+  unchanged check that the current Git identity equals the set's, keeps every
+  link on one `HEAD`, ref and index fingerprint.
+- **Recovery stays exact.** The chained identity is the journal's expected
+  result, so a crash at any step is recovered by exchanging the same two
+  validated files back, as in v1. The source row is checked again whenever
+  the journal is validated, and it cannot disappear while the chained journal
+  is active: journal rows are deleted only with the whole workspace history,
+  which refuses to run while any journal is active.
+- **Inode reuse.** If the installed file is deleted and the filesystem hands
+  its identity to a new file at `p` with the same bytes and attributes, the
+  chain accepts it. This is the same residual that v1 accepts for an in-place
+  rewrite with identical bytes, and it overwrites only bytes equal to the
+  turn's result. APFS object IDs are not reused in practice.
+- **Opt-in.** Only the rewind's per-turn prepare uses `AfterCompletedUndo`.
+  "Undo last turn" keeps binding the turn's own result.
+
+### Not addressed
+
+The Git identity still includes the index `stat_identity` (inode, size,
+mtime, ctime). An index rewritten with identical bytes between two turns (for
+example, `git status` in a terminal refreshing it) still blocks the older set
+with `repository_identity_changed`, chained or not. Relaxing that to the raw
+index digest is a separate contract change and is not part of this extension.
+
+### Contributor checklist answers
+
+1. Before the mutation: current bytes and metadata against the expected
+   identity, which is the turn's result or the chain source's staged identity,
+   derived again under the exclusive lease and equal to what prepare bound.
+2. Reason codes: `target_result_mismatch` (no binding holds),
+   `preview_context_changed` (the binding or its source changed after
+   prepare), and the unchanged v1 codes.
+3. If the process stops on the next instruction, the durable state is the v1
+   journal with the chained expected identity and its source.
+4. Recovery uses the exact displaced file, validated against the journaled
+   chained identity.
+5. Paths and limits are unchanged. The chain matches `path_bytes` exactly.
+6. No content leaves the local store. The chained preview reads the newer
+   set's verified preimage artifact.
+7. Capture v1 and the M3 quarantine are not touched.
 
 ## Phased implementation
 

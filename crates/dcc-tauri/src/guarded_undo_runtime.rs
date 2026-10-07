@@ -605,6 +605,37 @@ pub(crate) enum GuardedUndoPrepareResult {
     },
 }
 
+/// Which current file a restore set's targets may be; see
+/// `dcc_infra::guarded_undo::restore_service::ResultBinding`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GuardedUndoBinding {
+    /// Exactly the file the turn left ("Undo last turn").
+    TurnResult,
+    /// Also the file a later turn's completed Undo installed with the same
+    /// bytes (a rewind restoring several turns newest first).
+    AfterCompletedUndo,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GuardedUndoPlannedRestore {
+    pub snapshot_id: String,
+    pub files: Vec<GuardedUndoPreview>,
+}
+
+/// A read-only plan of several restores, newest first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum GuardedUndoChainPlanResult {
+    Ready(Vec<GuardedUndoPlannedRestore>),
+    Blocked {
+        snapshot_id: String,
+        reason_code: String,
+    },
+    Unavailable {
+        snapshot_id: String,
+        reason_code: String,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum GuardedUndoExecuteResult {
     Completed {
@@ -660,9 +691,21 @@ trait CaptureDriver: Send + Sync {
         &self,
         snapshot_id: String,
         _workspace_absolute: PathBuf,
+        _binding: GuardedUndoBinding,
     ) -> GuardedUndoPrepareResult {
         GuardedUndoPrepareResult::Unavailable {
             snapshot_id,
+            reason_code: "adapter_unsupported".to_owned(),
+        }
+    }
+
+    fn plan_guarded_undo_chain(
+        &self,
+        snapshot_ids: Vec<String>,
+        _workspace_absolute: PathBuf,
+    ) -> GuardedUndoChainPlanResult {
+        GuardedUndoChainPlanResult::Unavailable {
+            snapshot_id: snapshot_ids.into_iter().next().unwrap_or_default(),
             reason_code: "adapter_unsupported".to_owned(),
         }
     }
@@ -1220,6 +1263,7 @@ impl GuardedUndoRuntime {
         &self,
         snapshot_id: String,
         workspace_absolute: PathBuf,
+        binding: GuardedUndoBinding,
     ) -> GuardedUndoPrepareResult {
         if snapshot_id.trim().is_empty() || !workspace_absolute.is_absolute() {
             return GuardedUndoPrepareResult::Unavailable {
@@ -1242,7 +1286,7 @@ impl GuardedUndoRuntime {
         let fallback_snapshot = snapshot_id.clone();
         tokio::task::spawn_blocking(move || {
             catch_unwind(AssertUnwindSafe(|| {
-                driver.prepare_guarded_undo(snapshot_id, workspace_absolute)
+                driver.prepare_guarded_undo(snapshot_id, workspace_absolute, binding)
             }))
             .unwrap_or(GuardedUndoPrepareResult::Unavailable {
                 snapshot_id: fallback_snapshot,
@@ -1254,6 +1298,39 @@ impl GuardedUndoRuntime {
             snapshot_id: String::new(),
             reason_code: "operation_interrupted".to_owned(),
         })
+    }
+
+    /// Read-only plan of restoring `snapshot_ids`, newest first, each after
+    /// the ones before it.
+    pub(crate) async fn plan_guarded_undo_chain(
+        &self,
+        snapshot_ids: Vec<String>,
+        workspace_absolute: PathBuf,
+    ) -> GuardedUndoChainPlanResult {
+        let first = snapshot_ids.first().cloned().unwrap_or_default();
+        let unavailable = |reason_code: &str| GuardedUndoChainPlanResult::Unavailable {
+            snapshot_id: first.clone(),
+            reason_code: reason_code.to_owned(),
+        };
+        if snapshot_ids.iter().any(|id| id.trim().is_empty()) || !workspace_absolute.is_absolute() {
+            return unavailable("invalid_persisted_record");
+        }
+        let Ok(Some(driver)) = self.driver() else {
+            return unavailable("adapter_unsupported");
+        };
+        if !self.recovery_admits_capture().unwrap_or(false) {
+            return unavailable("operation_interrupted");
+        }
+        tokio::task::spawn_blocking(move || {
+            catch_unwind(AssertUnwindSafe(|| {
+                driver.plan_guarded_undo_chain(snapshot_ids, workspace_absolute)
+            }))
+            .ok()
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| unavailable("operation_interrupted"))
     }
 
     pub(crate) async fn execute_guarded_undo(
@@ -2244,13 +2321,19 @@ impl CaptureDriver for CaptureV2Driver {
         &self,
         snapshot_id: String,
         workspace_absolute: PathBuf,
+        binding: GuardedUndoBinding,
     ) -> GuardedUndoPrepareResult {
         use dcc_infra::guarded_undo::restore_service::PrepareGuardedUndoResult;
 
-        match self
-            .service
-            .prepare_guarded_undo(&snapshot_id, &workspace_absolute)
-        {
+        let prepared = match binding {
+            GuardedUndoBinding::TurnResult => self
+                .service
+                .prepare_guarded_undo(&snapshot_id, &workspace_absolute),
+            GuardedUndoBinding::AfterCompletedUndo => self
+                .service
+                .prepare_guarded_undo_after_completed_undo(&snapshot_id, &workspace_absolute),
+        };
+        match prepared {
             PrepareGuardedUndoResult::Ready(ready) => GuardedUndoPrepareResult::Ready {
                 snapshot_id: ready.snapshot_id,
                 preview_token: ready.preview_token,
@@ -2280,6 +2363,52 @@ impl CaptureDriver for CaptureV2Driver {
                 snapshot_id,
                 reason_code,
             } => GuardedUndoPrepareResult::Unavailable {
+                snapshot_id,
+                reason_code: reason_code.as_str().to_owned(),
+            },
+        }
+    }
+
+    fn plan_guarded_undo_chain(
+        &self,
+        snapshot_ids: Vec<String>,
+        workspace_absolute: PathBuf,
+    ) -> GuardedUndoChainPlanResult {
+        use dcc_infra::guarded_undo::restore_service::PlanGuardedUndoChainResult;
+
+        match self
+            .service
+            .plan_guarded_undo_chain(&snapshot_ids, &workspace_absolute)
+        {
+            PlanGuardedUndoChainResult::Ready(planned) => GuardedUndoChainPlanResult::Ready(
+                planned
+                    .into_iter()
+                    .map(|restore| GuardedUndoPlannedRestore {
+                        snapshot_id: restore.snapshot_id,
+                        files: restore
+                            .files
+                            .into_iter()
+                            .map(|file| GuardedUndoPreview {
+                                display_path: file.display_path,
+                                size: file.size,
+                                binary: file.binary,
+                                preview: file.preview,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            ),
+            PlanGuardedUndoChainResult::Blocked {
+                snapshot_id,
+                reason_code,
+            } => GuardedUndoChainPlanResult::Blocked {
+                snapshot_id,
+                reason_code: reason_code.as_str().to_owned(),
+            },
+            PlanGuardedUndoChainResult::Unavailable {
+                snapshot_id,
+                reason_code,
+            } => GuardedUndoChainPlanResult::Unavailable {
                 snapshot_id,
                 reason_code: reason_code.as_str().to_owned(),
             },

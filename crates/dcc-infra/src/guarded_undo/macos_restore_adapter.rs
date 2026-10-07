@@ -224,19 +224,25 @@ impl RestoreAuthority for MacRestoreAuthority {
         if current.sha256 != file.result_sha256 {
             return Err(GuardedUndoReasonCode::TargetResultMismatch);
         }
-        let preimage = self
+        self.preview_against(file, current.bytes.as_slice())
+    }
+
+    fn chained_inverse_preview(
+        &self,
+        file: &TurnRestoreFile,
+        newer: &TurnRestoreFile,
+    ) -> Result<InversePreview, GuardedUndoReasonCode> {
+        if newer.path_bytes != file.path_bytes
+            || newer.pre_size != file.result_size
+            || newer.pre_sha256 != file.result_sha256
+        {
+            return Err(GuardedUndoReasonCode::TargetResultMismatch);
+        }
+        let installed = self
             .store
-            .read_verified(file.pre_artifact_key, file.pre_size, file.pre_sha256)
+            .read_verified(newer.pre_artifact_key, newer.pre_size, newer.pre_sha256)
             .map_err(|error| error.reason_code())?;
-        let current_bytes = current.bytes.as_slice();
-        let preimage_bytes = preimage.as_slice();
-        let binary = is_binary(current_bytes) || is_binary(preimage_bytes);
-        Ok(InversePreview {
-            display_path: display_path(&file.path_bytes),
-            size: file.pre_size,
-            binary,
-            preview: (!binary).then(|| inverse_text_preview(current_bytes, preimage_bytes)),
-        })
+        self.preview_against(file, installed.as_slice())
     }
 
     fn stage_preimage(
@@ -298,6 +304,28 @@ impl RestoreAuthority for MacRestoreAuthority {
         self.root
             .cleanup_exchange_file(path, exchange_key, &verified(expected_exchange))
             .map_err(root_reason)
+    }
+}
+
+impl MacRestoreAuthority {
+    /// Inverse preview from `current` bytes back to `file`'s verified preimage.
+    fn preview_against(
+        &self,
+        file: &TurnRestoreFile,
+        current_bytes: &[u8],
+    ) -> Result<InversePreview, GuardedUndoReasonCode> {
+        let preimage = self
+            .store
+            .read_verified(file.pre_artifact_key, file.pre_size, file.pre_sha256)
+            .map_err(|error| error.reason_code())?;
+        let preimage_bytes = preimage.as_slice();
+        let binary = is_binary(current_bytes) || is_binary(preimage_bytes);
+        Ok(InversePreview {
+            display_path: display_path(&file.path_bytes),
+            size: file.pre_size,
+            binary,
+            preview: (!binary).then(|| inverse_text_preview(current_bytes, preimage_bytes)),
+        })
     }
 }
 

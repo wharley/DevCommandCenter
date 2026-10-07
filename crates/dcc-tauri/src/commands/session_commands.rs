@@ -60,7 +60,10 @@ use crate::conversation_rewind::{
     plan_files, restore_files, RewindFileRestorer, RewindFilesPlan, RewindFilesStopped,
     RewindProviderPlan, TurnFileFacts,
 };
-use crate::guarded_undo_runtime::{GuardedUndoExecuteResult, GuardedUndoPrepareResult};
+use crate::guarded_undo_runtime::{
+    GuardedUndoBinding, GuardedUndoChainPlanResult, GuardedUndoExecuteResult,
+    GuardedUndoPrepareResult,
+};
 use crate::state::SessionCommandState;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -912,7 +915,10 @@ pub async fn prepare_guarded_undo(
     if snapshot_id.is_empty() || snapshot_id.len() > 256 {
         return Err("Guarded Undo snapshot id is invalid.".to_owned());
     }
-    Ok(match state.prepare_guarded_undo(snapshot_id).await {
+    let prepared = state
+        .prepare_guarded_undo(snapshot_id, GuardedUndoBinding::TurnResult)
+        .await;
+    Ok(match prepared {
         GuardedUndoPrepareResult::Ready {
             snapshot_id,
             preview_token,
@@ -1110,8 +1116,19 @@ struct GuardedUndoRewindRestorer<'a>(&'a SessionCommandState);
 
 #[async_trait::async_trait]
 impl RewindFileRestorer for GuardedUndoRewindRestorer<'_> {
+    async fn plan(&self, snapshot_ids_newest_first: Vec<String>) -> GuardedUndoChainPlanResult {
+        self.0
+            .plan_guarded_undo_chain(snapshot_ids_newest_first)
+            .await
+    }
+
     async fn prepare(&self, snapshot_id: String) -> GuardedUndoPrepareResult {
-        self.0.prepare_guarded_undo(snapshot_id).await
+        // A newer removed turn's Undo may already have replaced a file this
+        // turn also changed; the restore service accepts only the exact
+        // file that Undo installed.
+        self.0
+            .prepare_guarded_undo(snapshot_id, GuardedUndoBinding::AfterCompletedUndo)
+            .await
     }
 
     async fn execute(&self, preview_token: String) -> GuardedUndoExecuteResult {

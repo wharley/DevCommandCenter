@@ -99,8 +99,8 @@ use crate::guarded_undo_runtime::{
     BeginDisposition, ConfigureOutcome, GuardedUndoCaptureRequest, RecoveryOutcome,
 };
 use crate::guarded_undo_runtime::{
-    CaptureTerminalMode, FinalizeTurnOutcome, GuardedUndoExecuteResult, GuardedUndoPrepareResult,
-    WorkspaceMutationRunError,
+    CaptureTerminalMode, FinalizeTurnOutcome, GuardedUndoBinding, GuardedUndoChainPlanResult,
+    GuardedUndoExecuteResult, GuardedUndoPrepareResult, WorkspaceMutationRunError,
 };
 use crate::process_runtime_registry::{
     ProcessRuntime, ProcessRuntimeRegistry, ProviderAvailabilityPhase,
@@ -1721,36 +1721,74 @@ impl SessionCommandState {
     pub(crate) async fn prepare_guarded_undo(
         &self,
         snapshot_id: String,
+        binding: GuardedUndoBinding,
     ) -> GuardedUndoPrepareResult {
-        let unavailable = |reason_code: &str| GuardedUndoPrepareResult::Unavailable {
-            snapshot_id: snapshot_id.clone(),
-            reason_code: reason_code.to_owned(),
+        match self.guarded_undo_workspace(&snapshot_id).await {
+            Ok(workspace_absolute) => {
+                self.runtime
+                    .guarded_undo_runtime()
+                    .prepare_guarded_undo(snapshot_id, workspace_absolute, binding)
+                    .await
+            }
+            Err(reason_code) => GuardedUndoPrepareResult::Unavailable {
+                snapshot_id,
+                reason_code: reason_code.to_owned(),
+            },
+        }
+    }
+
+    /// Read-only plan of restoring `snapshot_ids` newest first; they must
+    /// all belong to one workspace (the restore service checks it).
+    pub(crate) async fn plan_guarded_undo_chain(
+        &self,
+        snapshot_ids: Vec<String>,
+    ) -> GuardedUndoChainPlanResult {
+        let Some(first) = snapshot_ids.first().cloned() else {
+            return GuardedUndoChainPlanResult::Ready(Vec::new());
         };
+        match self.guarded_undo_workspace(&first).await {
+            Ok(workspace_absolute) => {
+                self.runtime
+                    .guarded_undo_runtime()
+                    .plan_guarded_undo_chain(snapshot_ids, workspace_absolute)
+                    .await
+            }
+            Err(reason_code) => GuardedUndoChainPlanResult::Unavailable {
+                snapshot_id: first,
+                reason_code: reason_code.to_owned(),
+            },
+        }
+    }
+
+    /// The durable workspace a capture belongs to, after Guarded Undo is
+    /// configured and startup recovery has run; or the reason it cannot be.
+    async fn guarded_undo_workspace(
+        &self,
+        snapshot_id: &str,
+    ) -> std::result::Result<PathBuf, &'static str> {
         let Some((restore, _)) = self
             .session_repo
-            .get_turn_restore_set_by_snapshot(&snapshot_id)
+            .get_turn_restore_set_by_snapshot(snapshot_id)
             .ok()
             .flatten()
         else {
-            return unavailable("capture_v2_missing");
+            return Err("capture_v2_missing");
         };
-        let workspace_repo = match SqliteWorkspaceRepo::open(&self.db_path) {
-            Ok(repo) => repo,
-            Err(_) => return unavailable("workspace_missing"),
-        };
+        let workspace_repo =
+            SqliteWorkspaceRepo::open(&self.db_path).map_err(|_| "workspace_missing")?;
         let Some(workspace) = WorkspaceRepo::get_workspace(&workspace_repo, &restore.workspace_id)
             .await
             .ok()
             .flatten()
         else {
-            return unavailable("workspace_missing");
+            return Err("workspace_missing");
         };
         let durable_path = workspace
             .worktree_path
             .as_deref()
             .unwrap_or(workspace.root_path.as_str());
         let Some(workspace_absolute) = Self::lexical_absolute_root(Path::new(durable_path)) else {
-            return unavailable("workspace_missing");
+            return Err("workspace_missing");
         };
 
         #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
@@ -1763,10 +1801,10 @@ impl SessionCommandState {
                 configured,
                 Ok(ConfigureOutcome::Configured | ConfigureOutcome::AlreadyConfigured)
             ) {
-                return unavailable("adapter_unsupported");
+                return Err("adapter_unsupported");
             }
             let Some(roots) = self.guarded_undo_recovery_roots().await else {
-                return unavailable("operation_interrupted");
+                return Err("operation_interrupted");
             };
             if !matches!(
                 self.runtime
@@ -1775,14 +1813,11 @@ impl SessionCommandState {
                     .await,
                 Ok(RecoveryOutcome::Recovered | RecoveryOutcome::AlreadyRecovered)
             ) {
-                return unavailable("operation_interrupted");
+                return Err("operation_interrupted");
             }
         }
 
-        self.runtime
-            .guarded_undo_runtime()
-            .prepare_guarded_undo(snapshot_id, workspace_absolute)
-            .await
+        Ok(workspace_absolute)
     }
 
     pub(crate) async fn execute_guarded_undo(

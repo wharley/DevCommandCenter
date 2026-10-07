@@ -45,7 +45,8 @@ use super::{
         PublishState, StagedArtifact, VerifiedArtifact,
     },
     restore_service::{
-        ExecuteGuardedUndoResult, PrepareGuardedUndoResult, RecoveryReport, RestoreService,
+        ExecuteGuardedUndoResult, PlanGuardedUndoChainResult, PrepareGuardedUndoResult,
+        RecoveryReport, RestoreService,
     },
 };
 
@@ -219,6 +220,26 @@ impl CaptureV2Service {
         workspace_absolute: &Path,
     ) -> PrepareGuardedUndoResult {
         self.restore.prepare(snapshot_id, workspace_absolute)
+    }
+
+    /// See [`RestoreService::prepare_after_completed_undo`].
+    pub fn prepare_guarded_undo_after_completed_undo(
+        &self,
+        snapshot_id: &str,
+        workspace_absolute: &Path,
+    ) -> PrepareGuardedUndoResult {
+        self.restore
+            .prepare_after_completed_undo(snapshot_id, workspace_absolute)
+    }
+
+    /// See [`RestoreService::plan_chain`].
+    pub fn plan_guarded_undo_chain(
+        &self,
+        snapshot_ids_newest_first: &[String],
+        workspace_absolute: &Path,
+    ) -> PlanGuardedUndoChainResult {
+        self.restore
+            .plan_chain(snapshot_ids_newest_first, workspace_absolute)
     }
 
     pub fn execute_guarded_undo(
@@ -1781,6 +1802,142 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .starts_with(".dcc-undo-")));
+    }
+
+    #[test]
+    fn two_real_turns_on_the_same_file_restore_newest_first_through_a_chain() {
+        use crate::guarded_undo::restore_service::{
+            ExecuteGuardedUndoResult, PlanGuardedUndoChainResult, PrepareGuardedUndoResult,
+        };
+
+        let fixture = Fixture::new();
+        let workspace = fixture.request.workspace_absolute.clone();
+        let target = workspace.join("tracked.txt");
+        let first = fixture.service.begin(fixture.request.clone()).unwrap();
+        fixture.write_tracked(b"first turn\n");
+        assert_eq!(
+            fixture.service.finish(first).unwrap().state,
+            RestoreSetState::Eligible
+        );
+        let second = fixture.service.begin(fixture.second_request()).unwrap();
+        fixture.write_tracked(b"second turn\n");
+        assert_eq!(
+            fixture.service.finish(second).unwrap().state,
+            RestoreSetState::Eligible
+        );
+
+        let newest_first = vec!["snapshot-2".to_owned(), "snapshot-1".to_owned()];
+        let PlanGuardedUndoChainResult::Ready(planned) = fixture
+            .service
+            .plan_guarded_undo_chain(&newest_first, &workspace)
+        else {
+            panic!("the chain should be plannable before anything is restored");
+        };
+        assert_eq!(planned.len(), 2);
+        assert!(planned[1].files[0]
+            .preview
+            .as_deref()
+            .is_some_and(|preview| preview.contains("-first turn") && preview.contains("+before")));
+        assert_eq!(
+            fs::read(&target).unwrap(),
+            b"second turn\n",
+            "planning never writes"
+        );
+
+        let ready = match fixture
+            .service
+            .prepare_guarded_undo_after_completed_undo("snapshot-2", &workspace)
+        {
+            PrepareGuardedUndoResult::Ready(ready) => ready,
+            other => panic!("expected the newest turn to prepare, got {other:?}"),
+        };
+        assert!(matches!(
+            fixture
+                .service
+                .execute_guarded_undo(&ready.preview_token, true),
+            ExecuteGuardedUndoResult::Completed { .. }
+        ));
+        assert_eq!(fs::read(&target).unwrap(), b"first turn\n");
+
+        // The Undo installed a new file, so the older turn's own result
+        // identity is gone: a lone "Undo last turn" still refuses it.
+        assert!(matches!(
+            fixture
+                .service
+                .prepare_guarded_undo("snapshot-1", &workspace),
+            PrepareGuardedUndoResult::Blocked {
+                reason_code: GuardedUndoReasonCode::TargetResultMismatch,
+                ..
+            }
+        ));
+        let ready = match fixture
+            .service
+            .prepare_guarded_undo_after_completed_undo("snapshot-1", &workspace)
+        {
+            PrepareGuardedUndoResult::Ready(ready) => ready,
+            other => panic!("expected the chained turn to prepare, got {other:?}"),
+        };
+        assert!(matches!(
+            fixture
+                .service
+                .execute_guarded_undo(&ready.preview_token, true),
+            ExecuteGuardedUndoResult::Completed { .. }
+        ));
+        assert_eq!(fs::read(&target).unwrap(), b"before\n");
+        assert!(fs::read_dir(&workspace)
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".dcc-undo-")));
+    }
+
+    #[test]
+    fn a_same_bytes_file_no_undo_installed_never_continues_a_chain() {
+        use crate::guarded_undo::restore_service::{
+            ExecuteGuardedUndoResult, PrepareGuardedUndoResult,
+        };
+
+        let fixture = Fixture::new();
+        let workspace = fixture.request.workspace_absolute.clone();
+        let target = workspace.join("tracked.txt");
+        let first = fixture.service.begin(fixture.request.clone()).unwrap();
+        fixture.write_tracked(b"first turn\n");
+        fixture.service.finish(first).unwrap();
+        let second = fixture.service.begin(fixture.second_request()).unwrap();
+        fixture.write_tracked(b"second turn\n");
+        fixture.service.finish(second).unwrap();
+        let ready = match fixture
+            .service
+            .prepare_guarded_undo_after_completed_undo("snapshot-2", &workspace)
+        {
+            PrepareGuardedUndoResult::Ready(ready) => ready,
+            other => panic!("expected the newest turn to prepare, got {other:?}"),
+        };
+        assert!(matches!(
+            fixture
+                .service
+                .execute_guarded_undo(&ready.preview_token, true),
+            ExecuteGuardedUndoResult::Completed { .. }
+        ));
+
+        // An editor saves the same bytes atomically over the file the Undo
+        // installed. Content alone proves nothing about who wrote it.
+        let replacement = workspace.join("tracked.txt.new");
+        fs::write(&replacement, b"first turn\n").unwrap();
+        remove_xattrs(&replacement);
+        fs::rename(&replacement, &target).unwrap();
+        assert!(matches!(
+            fixture
+                .service
+                .prepare_guarded_undo_after_completed_undo("snapshot-1", &workspace),
+            PrepareGuardedUndoResult::Blocked {
+                reason_code: GuardedUndoReasonCode::TargetResultMismatch,
+                ..
+            }
+        ));
+        assert_eq!(fs::read(&target).unwrap(), b"first turn\n");
     }
 
     #[test]

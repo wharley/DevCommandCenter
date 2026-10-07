@@ -15,7 +15,9 @@ use dcc_core::{
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::guarded_undo_runtime::{GuardedUndoExecuteResult, GuardedUndoPrepareResult};
+use crate::guarded_undo_runtime::{
+    GuardedUndoChainPlanResult, GuardedUndoExecuteResult, GuardedUndoPrepareResult,
+};
 
 /// Where the work continues after the rewind.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -144,6 +146,11 @@ pub enum RewindFilesPlan {
 /// Guarded Undo, as the rewind uses it.
 #[async_trait]
 pub(crate) trait RewindFileRestorer: Send + Sync {
+    /// Read-only: can these captures be restored in this order (newest
+    /// first), each after the ones before it?
+    async fn plan(&self, snapshot_ids_newest_first: Vec<String>) -> GuardedUndoChainPlanResult;
+    /// Prepares one capture against the disk as it is now, accepting a file
+    /// that a newer removed turn's completed restore just put back.
     async fn prepare(&self, snapshot_id: String) -> GuardedUndoPrepareResult;
     async fn execute(&self, preview_token: String) -> GuardedUndoExecuteResult;
 }
@@ -198,11 +205,12 @@ fn restorable_snapshots(
     Ok(snapshots)
 }
 
-/// Read-only check of every capture against the workspace as it is now.
-/// Because each capture verifies its own files' current content, a file a
-/// later turn or the person changed again blocks here, before anything is
-/// written; so do files two removed turns share (Guarded Undo binds each
-/// capture to the file it left behind, so they cannot be chained safely).
+/// Read-only check of every capture, newest first, before anything is
+/// written. Guarded Undo checks each path against what the newer captures
+/// will put back, or against the disk when no newer capture restores it, so
+/// a file the person changed after a turn, or between two turns that both
+/// changed it, blocks here. A file several removed turns changed is restored
+/// turn by turn and listed once.
 pub(crate) async fn plan_files(
     restorer: &dyn RewindFileRestorer,
     facts_oldest_first: &[TurnFileFacts],
@@ -211,48 +219,53 @@ pub(crate) async fn plan_files(
         Ok(snapshots) => snapshots,
         Err(plan) => return plan,
     };
-    if snapshots.is_empty() {
+    let Some((first_turn, _)) = snapshots.first() else {
         return RewindFilesPlan::NothingToRestore;
+    };
+    let turn_for = |snapshot_id: &str| {
+        snapshots
+            .iter()
+            .find(|(_, id)| id == snapshot_id)
+            .map_or(first_turn, |(turn_id, _)| turn_id)
+            .0
+            .clone()
+    };
+    let not_restorable = |turn_id: String, reason_code: String| RewindFilesPlan::NotRestorable {
+        turn_id,
+        stage: RewindFilesStage::Prepare,
+        reason_code,
+    };
+    let snapshot_ids = snapshots.iter().map(|(_, id)| id.clone()).collect();
+    let planned = match restorer.plan(snapshot_ids).await {
+        GuardedUndoChainPlanResult::Ready(planned) => planned,
+        GuardedUndoChainPlanResult::Blocked {
+            snapshot_id,
+            reason_code,
+        }
+        | GuardedUndoChainPlanResult::Unavailable {
+            snapshot_id,
+            reason_code,
+        } => return not_restorable(turn_for(&snapshot_id), reason_code),
+    };
+    if planned.len() != snapshots.len()
+        || planned
+            .iter()
+            .zip(&snapshots)
+            .any(|(restore, (_, snapshot_id))| restore.snapshot_id != *snapshot_id)
+    {
+        return not_restorable(first_turn.0.clone(), "invalid_persisted_record".to_string());
     }
     let mut files = Vec::new();
     let mut seen_paths = std::collections::HashSet::new();
-    for (turn_id, snapshot_id) in &snapshots {
-        match restorer.prepare(snapshot_id.clone()).await {
-            GuardedUndoPrepareResult::Ready {
-                files: previews,
-                unrelated_paths_are_not_targets: true,
-                ..
-            } => {
-                for preview in previews {
-                    if !seen_paths.insert(preview.display_path.clone()) {
-                        return RewindFilesPlan::NotRestorable {
-                            turn_id: turn_id.0.clone(),
-                            stage: RewindFilesStage::Prepare,
-                            reason_code: "target_result_mismatch".to_string(),
-                        };
-                    }
-                    files.push(RewindFilePreview {
-                        turn_id: turn_id.0.clone(),
-                        display_path: preview.display_path,
-                        binary: preview.binary,
-                        preview: preview.preview,
-                    });
-                }
-            }
-            GuardedUndoPrepareResult::Ready { .. } => {
-                return RewindFilesPlan::NotRestorable {
+    for (restore, (turn_id, _)) in planned.into_iter().zip(&snapshots) {
+        for preview in restore.files {
+            if seen_paths.insert(preview.display_path.clone()) {
+                files.push(RewindFilePreview {
                     turn_id: turn_id.0.clone(),
-                    stage: RewindFilesStage::Prepare,
-                    reason_code: "invalid_persisted_record".to_string(),
-                }
-            }
-            GuardedUndoPrepareResult::Blocked { reason_code, .. }
-            | GuardedUndoPrepareResult::Unavailable { reason_code, .. } => {
-                return RewindFilesPlan::NotRestorable {
-                    turn_id: turn_id.0.clone(),
-                    stage: RewindFilesStage::Prepare,
-                    reason_code,
-                }
+                    display_path: preview.display_path,
+                    binary: preview.binary,
+                    preview: preview.preview,
+                });
             }
         }
     }
@@ -277,8 +290,9 @@ pub struct RewindFilesStopped {
 }
 
 /// Restores the removed turns' files newest first, each through a fresh
-/// Guarded Undo prepare and execute. Stops at the first turn that does not
-/// complete; earlier restores stay done and are reported.
+/// Guarded Undo prepare and execute against the disk as the newer restores
+/// left it. Stops at the first turn that does not complete; earlier
+/// restores stay done and are reported.
 pub(crate) async fn restore_files(
     restorer: &dyn RewindFileRestorer,
     facts_oldest_first: &[TurnFileFacts],
@@ -348,7 +362,7 @@ pub(crate) async fn restore_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guarded_undo_runtime::GuardedUndoPreview;
+    use crate::guarded_undo_runtime::{GuardedUndoPlannedRestore, GuardedUndoPreview};
     use std::{
         collections::{HashMap, HashSet},
         sync::Mutex,
@@ -511,6 +525,40 @@ mod tests {
 
     #[async_trait]
     impl RewindFileRestorer for FakeWorkspace {
+        async fn plan(&self, snapshot_ids: Vec<String>) -> GuardedUndoChainPlanResult {
+            // What each path will hold when an older capture's turn comes.
+            let mut planned_files = self.files.lock().unwrap().clone();
+            let mut planned = Vec::new();
+            for snapshot_id in snapshot_ids {
+                let entries = &self.captures[&snapshot_id];
+                if entries
+                    .iter()
+                    .any(|(path, _, after)| planned_files[path] != *after)
+                {
+                    return GuardedUndoChainPlanResult::Blocked {
+                        snapshot_id,
+                        reason_code: "target_result_mismatch".to_string(),
+                    };
+                }
+                for (path, before, _) in entries {
+                    planned_files.insert(path.clone(), before.clone());
+                }
+                planned.push(GuardedUndoPlannedRestore {
+                    snapshot_id,
+                    files: entries
+                        .iter()
+                        .map(|(path, before, _)| GuardedUndoPreview {
+                            display_path: path.clone(),
+                            size: before.len() as u64,
+                            binary: false,
+                            preview: Some(format!("-> {before}")),
+                        })
+                        .collect(),
+                });
+            }
+            GuardedUndoChainPlanResult::Ready(planned)
+        }
+
         async fn prepare(&self, snapshot_id: String) -> GuardedUndoPrepareResult {
             self.prepares.lock().unwrap().push(snapshot_id.clone());
             if self.consumed.lock().unwrap().contains(&snapshot_id) {
@@ -684,22 +732,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_file_two_removed_turns_changed_is_a_conflict_not_a_chain() {
+    async fn a_file_two_removed_turns_changed_is_restored_through_both_turns() {
+        let workspace = FakeWorkspace::new(
+            &[("a.rs", "a3"), ("b.rs", "b2")],
+            &[
+                ("snap-t2", &[("a.rs", "a1", "a2"), ("b.rs", "b1", "b2")]),
+                ("snap-t3", &[("a.rs", "a2", "a3")]),
+            ],
+        );
+        let removed = [facts("t2", 2, "eligible"), facts("t3", 1, "eligible")];
+        let plan = plan_files(&workspace, &removed).await;
+        let RewindFilesPlan::Restorable {
+            turn_count,
+            file_count,
+            files,
+        } = plan
+        else {
+            panic!("expected restorable, got {plan:?}");
+        };
+        assert_eq!((turn_count, file_count), (2, 2), "a.rs is listed once");
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| (file.turn_id.as_str(), file.display_path.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("t3", "a.rs"), ("t2", "b.rs")]
+        );
+        assert_eq!(workspace.file("a.rs"), "a3", "planning never writes");
+        assert!(workspace.prepares.lock().unwrap().is_empty());
+
+        let restored = restore_files(&workspace, &removed).await.unwrap();
+        assert_eq!(
+            restored,
+            vec![TurnId("t3".to_string()), TurnId("t2".to_string())]
+        );
+        assert_eq!(
+            *workspace.prepares.lock().unwrap(),
+            vec!["snap-t3".to_string(), "snap-t2".to_string()],
+            "the older turn is prepared only after the newer one is restored"
+        );
+        assert_eq!(
+            (workspace.file("a.rs"), workspace.file("b.rs")),
+            ("a1".to_string(), "b1".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_changed_between_two_removed_turns_blocks_the_chain() {
+        // The person edited a.rs between t2 and t3 (a2 -> a2-mine).
         let workspace = FakeWorkspace::new(
             &[("a.rs", "a3")],
             &[
                 ("snap-t2", &[("a.rs", "a1", "a2")]),
-                ("snap-t3", &[("a.rs", "a2", "a3")]),
+                ("snap-t3", &[("a.rs", "a2-mine", "a3")]),
             ],
         );
         let removed = [facts("t2", 1, "eligible"), facts("t3", 1, "eligible")];
-        assert!(matches!(
+        assert_eq!(
             plan_files(&workspace, &removed).await,
             RewindFilesPlan::NotRestorable {
+                turn_id: "t2".to_string(),
                 stage: RewindFilesStage::Prepare,
-                ..
+                reason_code: "target_result_mismatch".to_string(),
             }
-        ));
+        );
         assert_eq!(workspace.file("a.rs"), "a3");
     }
 

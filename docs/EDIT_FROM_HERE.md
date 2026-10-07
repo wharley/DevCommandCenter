@@ -42,15 +42,23 @@ DCC restores the removed turns newest first. Each turn gets its own Guarded
 Undo preparation and verification. Before offering the restore, DCC checks
 every turn read-only:
 
-- each changed file must still be exactly what that turn left;
+- each changed file must still be exactly what that turn left. If a newer
+  removed turn also changed it, that newer turn must have started from exactly
+  those bytes and permissions;
 - every removed turn that changed files must be protected by Guarded Undo.
+
+When several removed turns changed the same file, it is restored turn by turn,
+and the dialog lists it once. After a newer turn's restore, the older turn
+accepts only the exact file that restore put back. A file with the same content
+written by anything else is refused. See
+[chained restore](GUARDED_UNDO_DESIGN.md#chained-restore-after-a-completed-undo).
 
 The restore is not offered, and files stay as they are, when:
 
-- you or a later turn changed a file again after the turn that the restore
-  would undo;
-- two removed turns changed the same file. Guarded Undo binds each capture to
-  the exact file its turn left, so it cannot chain them safely yet;
+- something other than the removed turns changed a file after the last
+  removed turn that changed it: you, an editor, or another task in the same
+  workspace;
+- something changed a file between two removed turns that both changed it;
 - a turn was not protected. This includes new or deleted files, untracked
   paths, Git index or HEAD changes, platforms without Guarded Undo, and
   expired captures.
