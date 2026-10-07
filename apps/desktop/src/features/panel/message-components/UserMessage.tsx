@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { Bug, Copy, File, FileImage, GitFork, Pencil, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TurnEvidenceSummary } from "@dcc/contracts";
@@ -8,6 +8,8 @@ import {
 	fenceBareJson,
 } from "@/components/ai/code-presentation";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { useImagePreview } from "@/lib/image-preview";
 import { LazyStreamdown } from "@/components/streamdown-loader";
 import { pathBasename } from "@/lib/path-basename";
 import { isImageFilePath } from "@/lib/is-image-path";
@@ -15,6 +17,67 @@ import { promptParts, type PromptPart } from "@/lib/prompt-attachments";
 import { cn } from "@/lib/utils";
 import { MessageTimestamp } from "./message-metadata";
 import { ASSISTANT_STREAMDOWN_SHIKI_THEME } from "./assistant-streaming-rendering";
+
+function AttachmentChip({ path }: { path: string }) {
+	const Icon = isImageFilePath(path) ? FileImage : File;
+	return (
+		<span
+			title={path}
+			className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/60 bg-background/70 px-2 py-1 text-[11px] leading-4 text-muted-foreground"
+		>
+			<Icon className="size-3.5 shrink-0 text-foreground/65" aria-hidden />
+			<span className="truncate">{pathBasename(path)}</span>
+		</span>
+	);
+}
+
+/**
+ * An attached image shows as itself, not as its generated file name; a click
+ * opens it full size. Falls back to the chip when the file is gone.
+ */
+function ImageAttachment({ path }: { path: string }) {
+	const { t } = useTranslation("common");
+	const preview = useImagePreview(path);
+	const [open, setOpen] = useState(false);
+	if (preview.isPending) {
+		return (
+			<span
+				className="block h-24 w-32 animate-pulse rounded-lg border border-border/50 bg-muted/40"
+				aria-hidden
+			/>
+		);
+	}
+	if (!preview.data) return <AttachmentChip path={path} />;
+	const name = pathBasename(path);
+	return (
+		<>
+			<button
+				type="button"
+				title={name}
+				aria-label={t("conversation.attachment.openImage", { name })}
+				className="block overflow-hidden rounded-lg border border-border/60 bg-background/70 transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring"
+				onClick={() => setOpen(true)}
+			>
+				<img
+					src={preview.data}
+					alt={name}
+					className="block max-h-28 w-auto max-w-[14rem] object-contain"
+					draggable={false}
+				/>
+			</button>
+			<Dialog open={open} onOpenChange={setOpen}>
+				<DialogContent className="max-h-[90vh] w-auto p-2 sm:max-w-[min(90vw,72rem)]">
+					<DialogTitle className="sr-only">{name}</DialogTitle>
+					<img
+						src={preview.data}
+						alt={name}
+						className="max-h-[calc(90vh-1rem)] w-auto max-w-full rounded-md object-contain"
+					/>
+				</DialogContent>
+			</Dialog>
+		</>
+	);
+}
 
 function UserPromptContent({ content }: { content: string }) {
 	const parts = promptParts(content);
@@ -34,21 +97,14 @@ function UserPromptContent({ content }: { content: string }) {
 	return (
 		<div className="conversation-body-text w-full overflow-hidden rounded-xl border border-border/45 bg-accent/35 px-3.5 py-3 leading-7">
 			{attachments.length > 0 ? (
-				<div className="mb-2 flex flex-wrap gap-1.5" data-testid="user-message-attachments">
-					{attachments.map(({ path }, index) => {
-						const image = isImageFilePath(path);
-						const Icon = image ? FileImage : File;
-						return (
-							<span
-								key={`${path}-${index}`}
-								title={path}
-								className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/60 bg-background/70 px-2 py-1 text-[11px] leading-4 text-muted-foreground"
-							>
-								<Icon className="size-3.5 shrink-0 text-foreground/65" aria-hidden />
-								<span className="truncate">{pathBasename(path)}</span>
-							</span>
-						);
-					})}
+				<div className="mb-2 flex flex-wrap items-end gap-1.5" data-testid="user-message-attachments">
+					{attachments.map(({ path }, index) =>
+						isImageFilePath(path) ? (
+							<ImageAttachment key={`${path}-${index}`} path={path} />
+						) : (
+							<AttachmentChip key={`${path}-${index}`} path={path} />
+						),
+					)}
 				</div>
 			) : null}
 			{text ? (

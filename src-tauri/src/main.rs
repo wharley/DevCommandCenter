@@ -4175,6 +4175,54 @@ async fn terminal_save_temp_image(image_data: Vec<u8>, extension: String) -> Api
     }))
 }
 
+const IMAGE_PREVIEW_MAX_BYTES: u64 = 15 * 1024 * 1024;
+
+fn image_preview_media_type(path: &std::path::Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("gif") => Some("image/gif"),
+        Some("webp") => Some("image/webp"),
+        _ => None,
+    }
+}
+
+/// Image a prompt referenced (`@/path.png`), as a data URL for the thumbnail
+/// in the person's message. Only absolute paths to image files within the
+/// size cap; a missing file (the OS cleans the temp dir) is a normal outcome.
+#[tauri::command]
+async fn read_image_preview(path: String) -> ApiResult<Value> {
+    use base64::Engine as _;
+
+    let not_found = || ApiError {
+        code: "IMAGE_PREVIEW_UNAVAILABLE",
+        message: "image preview unavailable".into(),
+    };
+    let path = std::path::PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err(not_found());
+    }
+    let media_type = image_preview_media_type(&path).ok_or_else(not_found)?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let metadata = std::fs::metadata(&path).ok()?;
+        if !metadata.is_file() || metadata.len() > IMAGE_PREVIEW_MAX_BYTES {
+            return None;
+        }
+        std::fs::read(&path).ok()
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or_else(not_found)?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(serde_json::json!({ "dataUrl": format!("data:{media_type};base64,{encoded}") }))
+}
+
 #[tauri::command]
 fn window_minimize(app: AppHandle) -> ApiResult<Value> {
     let window = app.get_webview_window("main").ok_or_else(|| ApiError {
@@ -7074,6 +7122,7 @@ pub fn run() {
             pair_get_lan_url,
             pair_get_endpoints,
             terminal_save_temp_image,
+            read_image_preview,
             attachment_commands::preview_composer_attachment,
             menu_bar::menu_bar_snapshot,
             menu_bar::menu_bar_visible,

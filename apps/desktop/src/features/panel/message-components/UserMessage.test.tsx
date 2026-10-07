@@ -1,7 +1,11 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { UserMessage } from "./UserMessage";
+
+const invokeMock = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
@@ -77,5 +81,56 @@ describe("UserMessage code blocks", () => {
 		expect(block.hasAttribute("data-language")).toBe(false);
 		expect(block.textContent).toContain("plain words");
 		expect(block.querySelector("pre")!.hasAttribute("data-numbered")).toBe(false);
+	});
+});
+
+describe("UserMessage image attachments", () => {
+	let container: HTMLDivElement;
+	let root: Root;
+
+	beforeEach(() => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		(window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+		invokeMock.mockReset();
+		container = document.createElement("div");
+		document.body.append(container);
+		root = createRoot(container);
+	});
+
+	afterEach(() => {
+		act(() => root.unmount());
+		container.remove();
+		Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+	});
+
+	async function render(content: string) {
+		const client = new QueryClient();
+		await act(async () => {
+			root.render(
+				<QueryClientProvider client={client}>
+					<UserMessage content={content} label="You" />
+				</QueryClientProvider>,
+			);
+		});
+	}
+
+	it("shows an attached image as a thumbnail instead of its file name", async () => {
+		invokeMock.mockResolvedValue({ dataUrl: "data:image/png;base64,AAAA" });
+		await render("@/tmp/dcc_img_1.png olha a imagem");
+		await vi.waitFor(() => {
+			expect(container.querySelector("img")?.getAttribute("src")).toBe(
+				"data:image/png;base64,AAAA",
+			);
+		});
+		expect(invokeMock).toHaveBeenCalledWith("read_image_preview", { path: "/tmp/dcc_img_1.png" });
+	});
+
+	it("falls back to the file chip when the image is gone", async () => {
+		invokeMock.mockRejectedValue(new Error("gone"));
+		await render("@/tmp/dcc_img_2.png olha");
+		await vi.waitFor(() => {
+			expect(container.textContent).toContain("dcc_img_2.png");
+		});
+		expect(container.querySelector("img")).toBeNull();
 	});
 });

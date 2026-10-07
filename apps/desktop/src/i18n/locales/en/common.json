@@ -3853,6 +3853,9 @@
       "open": "Open {{path}} in Code Dock",
       "openAtPosition": "Open {{path}} in Code Dock at {{position}}"
     },
+    "attachment": {
+      "openImage": "Open image {{name}}"
+    },
     "turnFooter": {
       "tokens": "{{input}} in · {{output}} out",
       "tokensIn": "Input: {{value}} tokens",
