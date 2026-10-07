@@ -27,23 +27,21 @@ type ConversationTrailProps = {
 	messages: readonly WorkspaceMessage[];
 	scrollRef: RefObject<HTMLElement | null>;
 	ordinalOffset?: number;
+	/**
+	 * A row's top within the scroll content. Rows away from the view are not
+	 * mounted (the thread is virtualized), so the trail asks instead of
+	 * reading the DOM.
+	 */
+	rowOffset: (messageId: string) => number | null;
+	revealRow: (messageId: string, align: "start" | "center", behavior: ScrollBehavior) => void;
 };
-
-function findMessageElement(
-	scrollElement: HTMLElement,
-	messageId: string,
-): HTMLElement | null {
-	return (
-		Array.from(
-			scrollElement.querySelectorAll<HTMLElement>("[data-conversation-trail-id]"),
-		).find((element) => element.dataset.conversationTrailId === messageId) ?? null
-	);
-}
 
 export function ConversationTrail({
 	messages,
 	scrollRef,
 	ordinalOffset = 0,
+	rowOffset,
+	revealRow,
 }: ConversationTrailProps) {
 	const { t } = useTranslation("common");
 	const tooltipId = useId();
@@ -61,6 +59,8 @@ export function ConversationTrail({
 	const pointerClientYRef = useRef<number | null>(null);
 	const trailItemsRef = useRef(trailItems);
 	trailItemsRef.current = trailItems;
+	const rowOffsetRef = useRef(rowOffset);
+	rowOffsetRef.current = rowOffset;
 	const [currentMessageId, setCurrentMessageId] = useState<string | null>(
 		trailItems[0]?.id ?? null,
 	);
@@ -79,11 +79,11 @@ export function ConversationTrail({
 			return;
 		}
 
-		const viewportTop = scrollElement.getBoundingClientRect().top + 32;
+		const viewportTop = scrollElement.scrollTop + 32;
 		let nextId = currentTrailItems[0]!.id;
 		for (const item of currentTrailItems) {
-			const element = findMessageElement(scrollElement, item.id);
-			if (!element || element.getBoundingClientRect().top > viewportTop) {
+			const top = rowOffsetRef.current(item.id);
+			if (top === null || top > viewportTop) {
 				break;
 			}
 			nextId = item.id;
@@ -163,14 +163,10 @@ export function ConversationTrail({
 
 	const navigateTo = (index: number) => {
 		const item = trailItems[index];
-		const scrollElement = scrollRef.current;
-		if (!item || !scrollElement) {
+		if (!item) {
 			return;
 		}
-		findMessageElement(scrollElement, item.id)?.scrollIntoView({
-			behavior: reduceMotion ? "auto" : "smooth",
-			block: "start",
-		});
+		revealRow(item.id, "start", reduceMotion ? "auto" : "smooth");
 	};
 
 	const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {

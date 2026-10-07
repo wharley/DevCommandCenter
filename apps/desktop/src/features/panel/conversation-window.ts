@@ -1,7 +1,8 @@
 import type { WorkspaceMessage } from "./thread-projection";
 
-export const INITIAL_CONVERSATION_MESSAGE_LIMIT = 80;
-export const CONVERSATION_MESSAGE_PAGE_SIZE = 80;
+// Settled rows are virtualized, so a large window costs only the rows in view.
+export const INITIAL_CONVERSATION_MESSAGE_LIMIT = 400;
+export const CONVERSATION_MESSAGE_PAGE_SIZE = 400;
 
 /**
  * Keeps the recent transcript mounted while avoiding a partial user/assistant

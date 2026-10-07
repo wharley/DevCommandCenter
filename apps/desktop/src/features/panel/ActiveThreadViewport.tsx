@@ -46,27 +46,53 @@ import {
 import { conversationStartingPhase, shouldShowConversationStarting, shouldShowInitialConversationStarting } from "./conversation-starting.logic";
 import { ComputerUsePreview } from "@/features/computer-use/computer-use-preview";
 import { useStableMessages } from "./stable-messages";
+import { ThreadVirtualRows, type ThreadRowsLocator } from "./thread-virtual-rows";
 
 /** Bottom spacer (40px) plus the gap kept above an anchored prompt (16px). */
 const TURN_ANCHOR_RESERVED_PX = 56;
 /** After a switch, rows settle (prose, review cards) without animating the scroll. */
 const SESSION_SWITCH_SETTLE_MS = 800;
-const REMEMBERED_SCROLL_LIMIT = 50;
+const REMEMBERED_READING_LIMIT = 50;
+
+type ReadingPosition = { rowId: string; offsetWithinRow: number };
 
 /**
- * Where the person left each conversation. A thread read mid-history
- * reopens there; one followed to the end reopens at the end.
+ * Where the person left each conversation: the row at the top of the view
+ * and how far into it. A thread read mid-history reopens there; one
+ * followed to the end reopens at the end. Anchored on a row, not a pixel
+ * offset, so it holds while rows above it are still being measured.
  */
-const rememberedScroll = new Map<string, number>();
+const rememberedReading = new Map<string, ReadingPosition>();
 
-function rememberScroll(sessionId: string, scrollTop: number | null) {
-	rememberedScroll.delete(sessionId);
-	if (scrollTop === null) return;
-	rememberedScroll.set(sessionId, scrollTop);
-	if (rememberedScroll.size > REMEMBERED_SCROLL_LIMIT) {
-		const oldest = rememberedScroll.keys().next().value;
-		if (oldest !== undefined) rememberedScroll.delete(oldest);
+function rememberReading(sessionId: string, position: ReadingPosition | null) {
+	rememberedReading.delete(sessionId);
+	if (position === null) return;
+	rememberedReading.set(sessionId, position);
+	if (rememberedReading.size > REMEMBERED_READING_LIMIT) {
+		const oldest = rememberedReading.keys().next().value;
+		if (oldest !== undefined) rememberedReading.delete(oldest);
 	}
+}
+
+function rowElement(scrollElement: HTMLElement, messageId: string) {
+	return scrollElement.querySelector<HTMLElement>(
+		`[data-conversation-trail-id="${CSS.escape(messageId)}"]`,
+	);
+}
+
+/** The first rendered row reaching the top edge of the view. */
+function readingPosition(scrollElement: HTMLElement): ReadingPosition | null {
+	const viewTop = scrollElement.getBoundingClientRect().top;
+	for (const element of scrollElement.querySelectorAll<HTMLElement>(
+		"[data-conversation-trail-id]",
+	)) {
+		const rect = element.getBoundingClientRect();
+		if (rect.bottom > viewTop + 1) {
+			const rowId = element.dataset.conversationTrailId;
+			return rowId ? { rowId, offsetWithinRow: viewTop - rect.top } : null;
+		}
+	}
+	return null;
 }
 
 type AssistantRowContext = {
@@ -490,16 +516,54 @@ export function ActiveThreadViewport({
 	const previousActivityRef = useRef<string | null>(null);
 	const wasAtBottomRef = useRef(true);
 
+	// Settled rows are virtualized (only those near the view are mounted);
+	// the latest turn is plain DOM. These find a row in either.
+	const virtualRowsRef = useRef<ThreadRowsLocator | null>(null);
+	const rowOffset = useCallback(
+		(messageId: string): number | null => {
+			const virtualTop = virtualRowsRef.current?.offsetOf(messageId);
+			if (virtualTop !== null && virtualTop !== undefined) return virtualTop;
+			const scrollElement = scrollRef.current;
+			const element = scrollElement ? rowElement(scrollElement, messageId) : null;
+			if (!scrollElement || !element) return null;
+			return (
+				element.getBoundingClientRect().top -
+				scrollElement.getBoundingClientRect().top +
+				scrollElement.scrollTop
+			);
+		},
+		[scrollRef],
+	);
+	const revealRow = useCallback(
+		(messageId: string, align: "start" | "center", behavior: ScrollBehavior) => {
+			if (virtualRowsRef.current?.reveal(messageId, align, behavior)) return;
+			const scrollElement = scrollRef.current;
+			const element = scrollElement ? rowElement(scrollElement, messageId) : null;
+			element?.scrollIntoView({ block: align, behavior });
+		},
+		[scrollRef],
+	);
+	// Decided once per conversation: reopen where the person left it, or at the end.
+	const openingRef = useRef<{ sessionId: string | null; row: ReadingPosition | null } | null>(null);
+	if (openingRef.current?.sessionId !== sessionId) {
+		openingRef.current = {
+			sessionId,
+			row: (!hasStreamingMessage && sessionId && rememberedReading.get(sessionId)) || null,
+		};
+	}
+	const openingRow = openingRef.current.row;
+
 	useLayoutEffect(() => {
 		prependScrollAnchorRef.current = null;
 		previousActivityRef.current = activitySignature;
 		setHasNewActivity(false);
-		const remembered = sessionId ? rememberedScroll.get(sessionId) : undefined;
+		const remembered = sessionId ? rememberedReading.get(sessionId) : undefined;
 		const scrollElement = scrollRef.current;
-		if (remembered !== undefined && scrollElement && !hasStreamingMessage) {
+		const rowTop = remembered ? rowOffset(remembered.rowId) : null;
+		if (remembered && rowTop !== null && scrollElement && !hasStreamingMessage) {
 			stopScroll();
 			wasAtBottomRef.current = false;
-			scrollElement.scrollTop = remembered;
+			scrollElement.scrollTop = rowTop + remembered.offsetWithinRow;
 		} else {
 			wasAtBottomRef.current = true;
 			void scrollToBottom("instant");
@@ -605,21 +669,78 @@ export function ActiveThreadViewport({
 		// The scroll area only mounts once there is a thread to show.
 	}, [contentRef, scrollRef, scrollToBottom, threadSurfaceVisible]);
 
+	// Reading back releases the bottom lock. use-stick-to-bottom infers it
+	// from scroll direction, but ignores scrolls while content is resizing,
+	// which is constant here (virtualized rows are measured as they come into
+	// view), and its wheel check misses this viewport. Intent is read directly.
+	useEffect(() => {
+		const scrollElement = scrollRef.current;
+		if (!scrollElement) return;
+		let touchY: number | null = null;
+		const release = () => stopScroll();
+		const onWheel = (event: WheelEvent) => {
+			if (event.deltaY < 0) release();
+		};
+		const onTouchStart = (event: TouchEvent) => {
+			touchY = event.touches[0]?.clientY ?? null;
+		};
+		const onTouchMove = (event: TouchEvent) => {
+			const y = event.touches[0]?.clientY;
+			if (touchY !== null && y !== undefined && y > touchY + 4) release();
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (
+				event.key === "ArrowUp" ||
+				event.key === "PageUp" ||
+				event.key === "Home" ||
+				(event.key === " " && event.shiftKey)
+			) {
+				release();
+			}
+		};
+		// A press on the viewport itself (not a row) is its scrollbar.
+		const onPointerDown = (event: PointerEvent) => {
+			if (event.target === scrollElement) release();
+		};
+		scrollElement.addEventListener("wheel", onWheel, { passive: true });
+		scrollElement.addEventListener("touchstart", onTouchStart, { passive: true });
+		scrollElement.addEventListener("touchmove", onTouchMove, { passive: true });
+		scrollElement.addEventListener("keydown", onKeyDown);
+		scrollElement.addEventListener("pointerdown", onPointerDown);
+		return () => {
+			scrollElement.removeEventListener("wheel", onWheel);
+			scrollElement.removeEventListener("touchstart", onTouchStart);
+			scrollElement.removeEventListener("touchmove", onTouchMove);
+			scrollElement.removeEventListener("keydown", onKeyDown);
+			scrollElement.removeEventListener("pointerdown", onPointerDown);
+		};
+		// The scroll area only mounts once there is a thread to show.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [scrollRef, stopScroll, threadSurfaceVisible]);
+
 	// Remember where the person is reading, per conversation.
 	const scrollSessionIdRef = useRef(sessionId);
 	scrollSessionIdRef.current = sessionId;
 	useEffect(() => {
 		const scrollElement = scrollRef.current;
 		if (!scrollElement) return;
-		const onScroll = () => {
+		let frame: number | null = null;
+		const record = () => {
+			frame = null;
 			const id = scrollSessionIdRef.current;
 			if (!id) return;
 			const distanceFromEnd =
 				scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight;
-			rememberScroll(id, distanceFromEnd <= 70 ? null : scrollElement.scrollTop);
+			rememberReading(id, distanceFromEnd <= 70 ? null : readingPosition(scrollElement));
+		};
+		const onScroll = () => {
+			if (frame === null) frame = requestAnimationFrame(record);
 		};
 		scrollElement.addEventListener("scroll", onScroll, { passive: true });
-		return () => scrollElement.removeEventListener("scroll", onScroll);
+		return () => {
+			scrollElement.removeEventListener("scroll", onScroll);
+			if (frame !== null) cancelAnimationFrame(frame);
+		};
 		// The scroll area only mounts once there is a thread to show.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [scrollRef, threadSurfaceVisible]);
@@ -655,13 +776,10 @@ export function ActiveThreadViewport({
 	}, [focusRequest, messages, sessionId, visibleStart]);
 	useLayoutEffect(() => {
 		if (!focusRequest) return;
-		const scrollElement = scrollRef.current;
-		if (!scrollElement) return;
-		const target = scrollElement.querySelector<HTMLElement>(
-			`[data-conversation-trail-id="${CSS.escape(focusRequest.messageId)}"]`,
-		);
-		target?.scrollIntoView({ block: "center" });
-	}, [focusRequest, scrollRef, visibleStart]);
+		stopScroll();
+		revealRow(focusRequest.messageId, "center", "auto");
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [focusRequest, revealRow, visibleStart]);
 
 	const handleLoadEarlier = useCallback(() => {
 		const scrollElement = scrollRef.current;
@@ -988,10 +1106,34 @@ export function ActiveThreadViewport({
 										onReviewDelegation={onReviewDelegation}
 									/>
 								) : null;
+								// The latest turn (or the turn anchored after a send) is plain
+								// DOM; everything before it is virtualized.
+								let tailStart = anchorVisibleIndex;
+								if (tailStart < 0) {
+									tailStart = visibleMessages.findLastIndex(
+										(message) => message.role === "user" && !message.delegationHandBack,
+									);
+								}
+								if (tailStart < 0) tailStart = 0;
+								const settledRows = visibleMessages.slice(0, tailStart);
+								const tailRows = visibleMessages
+									.slice(tailStart)
+									.map((message, index) => renderMessage(message, tailStart + index));
+								const virtualRows = settledRows.length > 0 ? (
+									<ThreadVirtualRows
+										key={sessionId ?? "none"}
+										rows={settledRows}
+										renderRow={renderMessage}
+										scrollRef={scrollRef}
+										initialRow={openingRow}
+										locatorRef={virtualRowsRef}
+									/>
+								) : null;
 								if (anchorVisibleIndex < 0) {
 									return (
 										<>
-											{visibleMessages.map(renderMessage)}
+											{virtualRows}
+											{tailRows}
 											{startingIndicator}
 											{reviewStrip}
 										</>
@@ -1002,15 +1144,9 @@ export function ActiveThreadViewport({
 								// grows (and later folds) without moving the page.
 								return (
 									<>
-										{visibleMessages
-											.slice(0, anchorVisibleIndex)
-											.map((message, index) => renderMessage(message, index))}
+										{virtualRows}
 										<div className="dcc-turn-anchor" data-turn-anchor>
-											{visibleMessages
-												.slice(anchorVisibleIndex)
-												.map((message, index) =>
-													renderMessage(message, anchorVisibleIndex + index),
-												)}
+											{tailRows}
 											{startingIndicator}
 											{reviewStrip}
 										</div>
@@ -1023,6 +1159,8 @@ export function ActiveThreadViewport({
 			</div>
 			<ConversationTrail
 				messages={visibleMessages}
+				rowOffset={rowOffset}
+				revealRow={revealRow}
 				scrollRef={scrollRef}
 				ordinalOffset={hiddenUserMessageCount}
 			/>
