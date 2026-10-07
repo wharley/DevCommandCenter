@@ -20,8 +20,9 @@ pub mod turn_queue;
 
 pub use abort_run::{abort_run, AbortRunInput, AbortRunOutput};
 pub use agent_turn_prompt::{
-    compose_behavior_prompt_for_provider, compose_fallback_prompt_for_provider,
-    compose_wire_prompt, compose_wire_prompt_for_provider, PromptInjectionOptions,
+    compose_behavior_prompt_for_provider, compose_fallback_directives_for_provider,
+    compose_fallback_prompt_for_provider, compose_wire_prompt, compose_wire_prompt_for_provider,
+    PromptInjectionOptions,
 };
 pub use approve_plan::{approve_plan, ApprovePlanInput, ApprovePlanOutput};
 pub use close_session::{close_session, CloseSessionInput, CloseSessionOutput};

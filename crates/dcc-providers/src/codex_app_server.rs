@@ -27,7 +27,10 @@ use tokio::{
 use uuid::Uuid;
 
 use dcc_core::{
-    application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
+    application::{
+        compose_fallback_directives_for_provider, compose_fallback_prompt_for_provider,
+        PromptInjectionOptions,
+    },
     domain::{
         mcp::{
             McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus,
@@ -44,7 +47,8 @@ use dcc_core::{
     },
     ports::{
         provider::{ProviderPermissionRequest, ProviderPermissionResponse},
-        Input, Provider, ProviderMcpOauthStart, ProviderRuntimeConfig, SessionConfig,
+        Input, Provider, ProviderMcpOauthStart, ProviderRuntimeConfig, ProviderTurnInput,
+        SessionConfig,
     },
     CoreError, Result,
 };
@@ -124,13 +128,17 @@ fn thread_start_params(
 
 fn turn_start_params(
     thread_id: &str,
-    prompt: String,
+    payload: CodexTurnPayload,
     model: Option<&str>,
     effort: Option<&str>,
     approval_policy: Value,
     sandbox_policy: Value,
     summary: Option<&str>,
 ) -> Value {
+    let CodexTurnPayload {
+        prompt,
+        additional_context,
+    } = payload;
     // Images the composer referenced as `@/path.png` also travel as native
     // `localImage` input so the model sees them without a tool call; the
     // textual reference stays in the prompt.
@@ -141,7 +149,7 @@ fn turn_start_params(
             .into_iter()
             .map(|path| json!({ "type": "localImage", "path": path })),
     );
-    json!({
+    let mut params = json!({
         "threadId": thread_id,
         "model": model,
         "input": input,
@@ -149,7 +157,152 @@ fn turn_start_params(
         "approvalPolicy": approval_policy,
         "sandboxPolicy": sandbox_policy,
         "summary": summary,
-    })
+    });
+    if let Some(additional_context) = additional_context {
+        params["additionalContext"] = additional_context;
+    }
+    params
+}
+
+/// `turn/start.additionalContext` (experimental API) shipped in codex-cli
+/// 0.135.0 (openai/codex#24154). Older app-servers drop unknown fields, so
+/// they keep receiving DCC context inside the prompt text.
+const CODEX_TURN_ADDITIONAL_CONTEXT_MIN_VERSION: (u64, u64, u64) = (0, 135, 0);
+/// Codex truncates the middle of each entry past 1,000 tokens, estimated at
+/// four bytes per token, so longer context travels as several entries.
+const CODEX_ADDITIONAL_CONTEXT_MAX_ENTRY_BYTES: usize = 4_000;
+
+fn codex_supports_turn_additional_context(cli_version: &str) -> bool {
+    let version = cli_version.split('+').next().unwrap_or_default();
+    let (core, prerelease) = match version.split_once('-') {
+        Some((core, prerelease)) => (core, Some(prerelease)),
+        None => (version, None),
+    };
+    let mut parts = core.split('.').map(str::parse::<u64>);
+    let (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    let version = (major, minor, patch);
+    version > CODEX_TURN_ADDITIONAL_CONTEXT_MIN_VERSION
+        || (version == CODEX_TURN_ADDITIONAL_CONTEXT_MIN_VERSION && prerelease.is_none())
+}
+
+/// Splits context at line boundaries into entries Codex will not truncate.
+fn split_codex_additional_context(text: &str, max_bytes: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut flush = |current: &mut String| {
+        let chunk = current.trim_end();
+        if !chunk.is_empty() {
+            chunks.push(chunk.to_string());
+        }
+        current.clear();
+    };
+    for line in text.lines() {
+        let mut line = line;
+        while line.len() > max_bytes {
+            let mut cut = max_bytes;
+            while !line.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            flush(&mut current);
+            current.push_str(&line[..cut]);
+            flush(&mut current);
+            line = &line[cut..];
+        }
+        if current.is_empty() && line.trim().is_empty() {
+            continue;
+        }
+        if !current.is_empty() && current.len() + 1 + line.len() > max_bytes {
+            flush(&mut current);
+        }
+        if !current.is_empty() {
+            current.push('\n');
+        }
+        current.push_str(line);
+    }
+    flush(&mut current);
+    chunks
+}
+
+/// The text a DCC turn hands to Codex and the app context that travels beside it.
+#[derive(Debug, PartialEq)]
+struct CodexTurnPayload {
+    prompt: String,
+    additional_context: Option<Value>,
+}
+
+/// With `native_context`, DCC's composer directives and tool instructions go
+/// out as developer-role `additionalContext` entries and the turn input keeps
+/// only the user's words. Without it they stay in the prompt text.
+fn codex_turn_payload(turn: &ProviderTurnInput, native_context: bool) -> CodexTurnPayload {
+    const OPTIONS: PromptInjectionOptions = PromptInjectionOptions {
+        plan: true,
+        effort: false,
+        fast: true,
+    };
+    if !native_context {
+        return CodexTurnPayload {
+            prompt: append_tool_instructions(
+                compose_fallback_prompt_for_provider(
+                    "codex",
+                    &turn.prompt,
+                    turn.plan_mode,
+                    turn.effort.as_deref(),
+                    turn.fast_mode,
+                    OPTIONS,
+                ),
+                turn.tool_instructions.as_deref(),
+            ),
+            additional_context: None,
+        };
+    }
+    let entry = |value: String| json!({ "value": value, "kind": "application" });
+    let mut context = serde_json::Map::new();
+    context.insert(
+        "dcc_directives".to_string(),
+        entry(compose_fallback_directives_for_provider(
+            "codex",
+            turn.plan_mode,
+            turn.effort.as_deref(),
+            turn.fast_mode,
+            OPTIONS,
+        )),
+    );
+    let instructions = turn.tool_instructions.as_deref().unwrap_or_default();
+    for (index, chunk) in
+        split_codex_additional_context(instructions, CODEX_ADDITIONAL_CONTEXT_MAX_ENTRY_BYTES)
+            .into_iter()
+            .enumerate()
+    {
+        context.insert(format!("dcc_instructions_{:03}", index + 1), entry(chunk));
+    }
+    CodexTurnPayload {
+        prompt: turn.prompt.trim().to_string(),
+        additional_context: Some(Value::Object(context)),
+    }
+}
+
+/// Codex re-sends an `additionalContext` entry only when its value changes and
+/// keeps that memory through compaction, so a summarized history would lose
+/// DCC's context. After a compaction the last context goes back into the
+/// thread as the same `<key>value</key>` developer messages Codex renders.
+fn codex_restore_context_params(thread_id: &str, additional_context: &Value) -> Option<Value> {
+    let items = additional_context
+        .as_object()?
+        .iter()
+        .filter_map(|(key, entry)| {
+            let value = entry.get("value")?.as_str()?;
+            Some(json!({
+                "type": "message",
+                "role": "developer",
+                "content": [{ "type": "input_text", "text": format!("<{key}>{value}</{key}>") }],
+            }))
+        })
+        .collect::<Vec<_>>();
+    (!items.is_empty()).then(|| json!({ "threadId": thread_id, "items": items }))
 }
 
 fn parse_codex_cli_version_output(output: &str) -> Option<&str> {
@@ -204,6 +357,12 @@ struct CodexRuntimeMetadata {
 }
 
 impl CodexRuntimeMetadata {
+    fn turn_additional_context_supported(&self) -> bool {
+        self.mcp_projection.as_ref().is_some_and(|projection| {
+            codex_supports_turn_additional_context(&projection.cli_version)
+        })
+    }
+
     fn require_version(&self) -> Result<()> {
         self.mcp_projection.as_ref().map(|_| ()).ok_or_else(|| {
             CoreError::Provider(
@@ -1708,6 +1867,9 @@ struct SessionRuntime {
     model: Option<String>,
     mcp_provider_version: Option<String>,
     multi_agent_v2_supported: bool,
+    turn_additional_context_supported: bool,
+    /// The root thread's latest `additionalContext`, restored after compaction.
+    last_additional_context: Mutex<Option<Value>>,
     stdin: Mutex<ChildStdin>,
     child: Mutex<Child>,
     thread_id: Mutex<Option<String>>,
@@ -1727,6 +1889,17 @@ struct SessionRuntime {
 }
 
 impl SessionRuntime {
+    async fn restore_additional_context(&self, thread_id: &str) {
+        let context = self.last_additional_context.lock().await.clone();
+        let Some(params) = context
+            .as_ref()
+            .and_then(|context| codex_restore_context_params(thread_id, context))
+        else {
+            return;
+        };
+        let _ = self.send_request("thread/inject_items", params).await;
+    }
+
     fn mcp_provider_version(&self) -> Result<&str> {
         self.mcp_provider_version.as_deref().ok_or_else(|| {
             CoreError::Provider("Codex MCP bridge runtime version is unavailable".to_string())
@@ -2459,6 +2632,8 @@ impl CodexAppServerAdapter {
             handle: handle.clone(),
             model: cfg.model.clone(),
             multi_agent_v2_supported: metadata.multi_agent_v2_supported,
+            turn_additional_context_supported: metadata.turn_additional_context_supported(),
+            last_additional_context: Mutex::new(None),
             mcp_provider_version: metadata
                 .mcp_projection
                 .as_ref()
@@ -2708,6 +2883,19 @@ impl CodexAppServerAdapter {
                     }
                     if (method == "turn/completed" || method == "error") && belongs_to_root {
                         *runtime.active_turn_id.lock().await = None;
+                    }
+                    if method == "item/completed"
+                        && belongs_to_root
+                        && params.pointer("/item/type").and_then(Value::as_str)
+                            == Some("contextCompaction")
+                    {
+                        if let Some(thread_id) = current_thread_id.clone() {
+                            // The response arrives on this reader, so never await it here.
+                            let restore_runtime = runtime.clone();
+                            tokio::spawn(async move {
+                                restore_runtime.restore_additional_context(&thread_id).await;
+                            });
+                        }
                     }
                     if let Some(event) = terminal_subagent_event.take() {
                         let _ = runtime.events_tx.send(event);
@@ -3036,9 +3224,12 @@ impl Provider for CodexAppServerAdapter {
             .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
 
         let has_dcc_mcp_servers = runtime.has_dcc_mcp_servers().await;
-        let (prompt, effort, summary, approval_policy, sandbox_policy) = match input {
+        let (payload, effort, summary, approval_policy, sandbox_policy) = match input {
             Input::Text(text) => (
-                text,
+                CodexTurnPayload {
+                    prompt: text,
+                    additional_context: None,
+                },
                 None,
                 None,
                 json!("never"),
@@ -3051,21 +3242,7 @@ impl Provider for CodexAppServerAdapter {
                     has_dcc_mcp_servers,
                 );
                 (
-                    append_tool_instructions(
-                        compose_fallback_prompt_for_provider(
-                            "codex",
-                            &turn.prompt,
-                            turn.plan_mode,
-                            turn.effort.as_deref(),
-                            turn.fast_mode,
-                            PromptInjectionOptions {
-                                plan: true,
-                                effort: false,
-                                fast: true,
-                            },
-                        ),
-                        turn.tool_instructions.as_deref(),
-                    ),
+                    codex_turn_payload(&turn, runtime.turn_additional_context_supported),
                     codex_reasoning_effort(runtime.model.as_deref(), turn.effort.as_deref()),
                     if turn.fast_mode.unwrap_or(false) {
                         Some("concise")
@@ -3083,12 +3260,15 @@ impl Provider for CodexAppServerAdapter {
             }
             Input::PermissionResponse(_) => unreachable!("handled before starting a turn"),
         };
+        if payload.additional_context.is_some() {
+            *runtime.last_additional_context.lock().await = payload.additional_context.clone();
+        }
         let result = runtime
             .send_request(
                 "turn/start",
                 turn_start_params(
                     &thread_id,
-                    prompt,
+                    payload,
                     runtime.model.as_deref(),
                     effort,
                     approval_policy,
@@ -3709,13 +3889,17 @@ unified_exec                         stable             true
 
         let turn = turn_start_params(
             "thread-root",
-            "delegate".to_string(),
+            CodexTurnPayload {
+                prompt: "delegate".to_string(),
+                additional_context: None,
+            },
             Some("gpt-5.6-terra"),
             Some("medium"),
             json!("never"),
             json!({ "type": "dangerFullAccess" }),
             Some("auto"),
         );
+        assert!(turn.get("additionalContext").is_none());
         assert_eq!(
             turn.get("model").and_then(Value::as_str),
             Some("gpt-5.6-terra")
@@ -3733,6 +3917,184 @@ unified_exec                         stable             true
                 }
             })
         );
+    }
+
+    fn codex_turn(prompt: &str, tool_instructions: Option<&str>) -> ProviderTurnInput {
+        ProviderTurnInput {
+            prompt: prompt.to_string(),
+            tool_instructions: tool_instructions.map(str::to_string),
+            plan_mode: Some(true),
+            effort: Some("high".to_string()),
+            fast_mode: Some(true),
+            approval_policy: None,
+            resume_fallback_context: None,
+        }
+    }
+
+    #[test]
+    fn turn_start_keeps_user_words_clean_and_sends_dcc_context_as_developer_entries() {
+        let turn = codex_turn(
+            "  Fix the login bug  ",
+            Some("Delegation rules: use dcc_delegate_task.\n\nObjective: ship the fix."),
+        );
+        let params = turn_start_params(
+            "thread-root",
+            codex_turn_payload(&turn, true),
+            Some("gpt-5.6-terra"),
+            Some("high"),
+            json!("never"),
+            json!({ "type": "dangerFullAccess" }),
+            Some("concise"),
+        );
+
+        assert_eq!(
+            params.get("input"),
+            Some(&json!([{ "type": "text", "text": "Fix the login bug" }]))
+        );
+        let context = params
+            .get("additionalContext")
+            .and_then(Value::as_object)
+            .expect("DCC context travels beside the user's words");
+        assert_eq!(
+            context.keys().collect::<Vec<_>>(),
+            vec!["dcc_directives", "dcc_instructions_001"]
+        );
+        let directives = &context["dcc_directives"];
+        assert_eq!(directives["kind"], "application");
+        let directives = directives["value"].as_str().expect("directive text");
+        assert!(directives.contains("PLAN ON"));
+        assert!(directives.contains("Direct response style"));
+        assert!(!directives.contains("Fix the login bug"));
+        assert_eq!(
+            context["dcc_instructions_001"],
+            json!({
+                "value": "Delegation rules: use dcc_delegate_task.\n\nObjective: ship the fix.",
+                "kind": "application",
+            })
+        );
+
+        let without_instructions = codex_turn_payload(&codex_turn("Hi", None), true);
+        assert_eq!(without_instructions.prompt, "Hi");
+        let keys = without_instructions
+            .additional_context
+            .as_ref()
+            .and_then(Value::as_object)
+            .map(|context| context.keys().cloned().collect::<Vec<_>>());
+        assert_eq!(keys, Some(vec!["dcc_directives".to_string()]));
+    }
+
+    #[test]
+    fn compaction_restores_the_last_context_as_developer_messages() {
+        let payload = codex_turn_payload(
+            &codex_turn("Fix the login bug", Some("Objective: ship the fix.")),
+            true,
+        );
+        let context = payload.additional_context.expect("native context");
+        let params = codex_restore_context_params("thread-root", &context).expect("restore params");
+
+        assert_eq!(params["threadId"], "thread-root");
+        let items = params["items"].as_array().expect("items");
+        assert_eq!(items.len(), 2);
+        assert!(items
+            .iter()
+            .all(|item| item["type"] == "message" && item["role"] == "developer"));
+        let text = |index: usize| {
+            items[index]
+                .pointer("/content/0/text")
+                .and_then(Value::as_str)
+        };
+        assert!(text(0).is_some_and(|text| text
+            .starts_with("<dcc_directives>[DCC · OpenAI Codex")
+            && text.ends_with("</dcc_directives>")));
+        assert_eq!(
+            text(1),
+            Some("<dcc_instructions_001>Objective: ship the fix.</dcc_instructions_001>")
+        );
+        assert_eq!(
+            codex_restore_context_params("thread-root", &json!({})),
+            None
+        );
+    }
+
+    #[test]
+    fn older_codex_keeps_dcc_context_in_the_prompt_text() {
+        let payload = codex_turn_payload(
+            &codex_turn("Fix the login bug", Some("Objective: ship the fix.")),
+            false,
+        );
+        assert_eq!(payload.additional_context, None);
+        assert!(payload
+            .prompt
+            .starts_with("[DCC · OpenAI Codex — composer directives]"));
+        assert!(payload.prompt.contains("PLAN ON"));
+        assert!(payload.prompt.contains(
+            "Fix the login bug\n\n[DCC provider tool instructions]\nObjective: ship the fix.\n[/DCC provider tool instructions]"
+        ));
+    }
+
+    #[test]
+    fn turn_additional_context_requires_codex_0_135() {
+        for (version, supported) in [
+            ("0.134.9", false),
+            ("0.135.0-alpha.2", false),
+            ("0.135.0", true),
+            ("0.135.1+build.7", true),
+            ("0.160.0", true),
+            ("1.0.0", true),
+            ("0.135", false),
+            ("next", false),
+        ] {
+            assert_eq!(
+                codex_supports_turn_additional_context(version),
+                supported,
+                "{version}"
+            );
+        }
+        let metadata = |output| CodexRuntimeMetadata {
+            mcp_projection: CodexMcpProjection::from_cli_output(output),
+            multi_agent_v2_supported: false,
+        };
+        assert!(metadata("codex-cli 0.135.0\n").turn_additional_context_supported());
+        assert!(!metadata("codex-cli 0.134.0\n").turn_additional_context_supported());
+        assert!(!metadata("").turn_additional_context_supported());
+    }
+
+    #[test]
+    fn long_dcc_context_splits_into_entries_codex_does_not_truncate() {
+        let paragraph = "Delegation rule — keep the parent informed. ".repeat(20);
+        let instructions = (0..12)
+            .map(|index| format!("## Section {index}\n{paragraph}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let long_line = "ç".repeat(CODEX_ADDITIONAL_CONTEXT_MAX_ENTRY_BYTES);
+        let instructions = format!("{instructions}\n{long_line}");
+
+        let chunks =
+            split_codex_additional_context(&instructions, CODEX_ADDITIONAL_CONTEXT_MAX_ENTRY_BYTES);
+        assert!(chunks.len() > 2);
+        assert!(chunks
+            .iter()
+            .all(|chunk| !chunk.is_empty()
+                && chunk.len() <= CODEX_ADDITIONAL_CONTEXT_MAX_ENTRY_BYTES));
+        let strip = |text: &str| {
+            text.chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+        };
+        assert_eq!(strip(&chunks.concat()), strip(&instructions));
+
+        let payload = codex_turn_payload(&codex_turn("Go", Some(&instructions)), true);
+        let context = payload
+            .additional_context
+            .as_ref()
+            .and_then(Value::as_object)
+            .expect("context entries");
+        let sent = context
+            .iter()
+            .filter(|(key, _)| key.starts_with("dcc_instructions_"))
+            .map(|(_, entry)| entry["value"].as_str().expect("entry text").to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(sent, chunks);
     }
 
     #[test]
@@ -3768,7 +4130,8 @@ unified_exec                         stable             true
             (json!("never"), json!({ "type": "readOnly" }))
         );
         assert_eq!(
-            codex_turn_execution_policy(Some(ProviderApprovalPolicy::ReadOnly), Some(false), true).1,
+            codex_turn_execution_policy(Some(ProviderApprovalPolicy::ReadOnly), Some(false), true)
+                .1,
             json!({ "type": "readOnly" })
         );
 

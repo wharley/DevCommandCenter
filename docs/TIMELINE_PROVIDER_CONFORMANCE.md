@@ -43,6 +43,40 @@ output 8K head + 16K tail, diff 64K. Sources:
 | Codex app-server | `item/started` | `item/commandExecution/outputDelta`, then `aggregatedOutput` | `exitCode` | `fileChange.changes[].diff` |
 | ACP (Cursor, Grok, Antigravity) | `rawInput` | `content` text blocks or `rawOutput` | `rawOutput.exitCode` | `content` diff blocks |
 
+## User words vs. DCC context
+
+A turn carries the user's prompt plus DCC context: composer directives
+(plan/fast), and `tool_instructions` (delegation rules, objective, skill and
+memory context, MCP routing, cold-attach snapshot). When the provider has a
+separate channel, the context goes there. The provider's native history then
+holds only what the user wrote.
+
+| Provider path | DCC context channel | Text the provider stores as the user turn |
+| --- | --- | --- |
+| Claude Agent SDK | `systemPrompt.append` (sidecar `buildSystemPrompt`) | Prompt only |
+| Codex app-server ≥ 0.135.0 | `turn/start.additionalContext`, `kind: "application"` (developer role, experimental API) | Prompt only |
+| Codex app-server < 0.135.0 or unknown version | Directive block + `[DCC provider tool instructions]` in the text | Prompt + context |
+| ACP (Cursor, Grok, Antigravity), stream-json (Gemini, Droid, Cursor) | Text fallback (`append_tool_instructions`) | Prompt + context |
+
+Codex details (`codex_turn_payload` in `crates/dcc-providers/src/codex_app_server.rs`):
+
+- `additionalContext` landed in codex-cli 0.135.0 (openai/codex#24154). Older
+  app-servers ignore the field, so the adapter gates on the version from
+  `codex --version` and keeps the text fallback below it.
+- Codex truncates the middle of each entry past 1,000 tokens (4 bytes per
+  token). Instructions are split at line boundaries into ≤ 4,000-byte entries
+  (`dcc_instructions_001`, `_002`, …). The directives go in `dcc_directives`.
+  Codex orders entries by key.
+- Codex re-injects an entry only when its value changes, and never resets that
+  memory on compaction. When a root-thread `contextCompaction` item completes,
+  DCC sends the last context back with `thread/inject_items` as the same
+  `<key>value</key>` developer messages, even mid-turn (T3 Code does the
+  same). A fresh runtime (including native resume) starts with an empty store
+  and injects everything on its first turn.
+- `thread/start.developerInstructions` is thread-scoped and
+  `collaborationMode` replaces Codex's built-in mode instructions, so neither
+  fits per-turn context.
+
 ## Streaming persistence
 
 The Tauri bridge merges consecutive deltas of the same item that arrive within

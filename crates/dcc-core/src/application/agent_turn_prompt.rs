@@ -64,8 +64,7 @@ fn maybe_push_fast_line(lines: &mut Vec<String>, fast: Option<bool>) {
     }
 }
 
-fn wire_claude_code_partial(
-    body: &str,
+fn wire_claude_code_directives(
     plan: Option<bool>,
     effort: Option<&str>,
     fast: Option<bool>,
@@ -83,17 +82,10 @@ fn wire_claude_code_partial(
     maybe_push_effort_line(&mut lines, effort);
     maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Claude Code]".to_string());
-    lines.push(String::new());
-    lines.push(body.to_string());
     lines.join("\n")
 }
 
-fn wire_codex_partial(
-    body: &str,
-    plan: Option<bool>,
-    effort: Option<&str>,
-    fast: Option<bool>,
-) -> String {
+fn wire_codex_directives(plan: Option<bool>, effort: Option<&str>, fast: Option<bool>) -> String {
     let mut lines = vec![
         "[DCC · OpenAI Codex — composer directives]".to_string(),
         "Runtime: Codex CLI — prefer repo-grounded edits and minimal destructive commands."
@@ -108,17 +100,10 @@ fn wire_codex_partial(
     maybe_push_effort_line(&mut lines, effort);
     maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Codex]".to_string());
-    lines.push(String::new());
-    lines.push(body.to_string());
     lines.join("\n")
 }
 
-fn wire_gemini_partial(
-    body: &str,
-    plan: Option<bool>,
-    effort: Option<&str>,
-    fast: Option<bool>,
-) -> String {
+fn wire_gemini_directives(plan: Option<bool>, effort: Option<&str>, fast: Option<bool>) -> String {
     let mut lines = vec![
         "[DCC · Google Gemini CLI — composer directives]".to_string(),
         "Runtime: Gemini coding agent — leverage context efficiently.".to_string(),
@@ -132,17 +117,10 @@ fn wire_gemini_partial(
     maybe_push_effort_line(&mut lines, effort);
     maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Gemini]".to_string());
-    lines.push(String::new());
-    lines.push(body.to_string());
     lines.join("\n")
 }
 
-fn wire_cursor_partial(
-    body: &str,
-    plan: Option<bool>,
-    effort: Option<&str>,
-    fast: Option<bool>,
-) -> String {
+fn wire_cursor_directives(plan: Option<bool>, effort: Option<&str>, fast: Option<bool>) -> String {
     let mut lines = vec![
         "[DCC · Cursor adapter — composer directives]".to_string(),
         "Runtime: experimental Cursor agent bridge — prefer safe, incremental edits.".to_string(),
@@ -156,17 +134,10 @@ fn wire_cursor_partial(
     maybe_push_effort_line(&mut lines, effort);
     maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Cursor]".to_string());
-    lines.push(String::new());
-    lines.push(body.to_string());
     lines.join("\n")
 }
 
-fn wire_grok_partial(
-    body: &str,
-    plan: Option<bool>,
-    effort: Option<&str>,
-    fast: Option<bool>,
-) -> String {
+fn wire_grok_directives(plan: Option<bool>, effort: Option<&str>, fast: Option<bool>) -> String {
     let mut lines = vec![
         "[DCC · Grok Build — composer directives]".to_string(),
         "Runtime: Grok Build ACP agent — use workspace tools deliberately and keep changes reviewable."
@@ -181,17 +152,10 @@ fn wire_grok_partial(
     maybe_push_effort_line(&mut lines, effort);
     maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC · Grok Build]".to_string());
-    lines.push(String::new());
-    lines.push(body.to_string());
     lines.join("\n")
 }
 
-fn wire_generic_partial(
-    body: &str,
-    plan: Option<bool>,
-    effort: Option<&str>,
-    fast: Option<bool>,
-) -> String {
+fn wire_generic_directives(plan: Option<bool>, effort: Option<&str>, fast: Option<bool>) -> String {
     let mut lines = vec!["[DCC composer directives — generic provider]".to_string()];
     maybe_push_plan_line(
         &mut lines,
@@ -202,9 +166,23 @@ fn wire_generic_partial(
     maybe_push_effort_line(&mut lines, effort);
     maybe_push_fast_line(&mut lines, fast);
     lines.push("[End DCC composer directives]".to_string());
-    lines.push(String::new());
-    lines.push(body.to_string());
     lines.join("\n")
+}
+
+fn compose_partial_directives_for_provider(
+    provider_id: &str,
+    plan: Option<bool>,
+    effort: Option<&str>,
+    fast: Option<bool>,
+) -> String {
+    match provider_id {
+        "claude_code" => wire_claude_code_directives(plan, effort, fast),
+        "codex" => wire_codex_directives(plan, effort, fast),
+        "gemini" => wire_gemini_directives(plan, effort, fast),
+        "cursor" => wire_cursor_directives(plan, effort, fast),
+        "grok" => wire_grok_directives(plan, effort, fast),
+        _ => wire_generic_directives(plan, effort, fast),
+    }
 }
 
 fn compose_partial_prompt_for_provider(
@@ -214,14 +192,10 @@ fn compose_partial_prompt_for_provider(
     effort: Option<&str>,
     fast: Option<bool>,
 ) -> String {
-    match provider_id {
-        "claude_code" => wire_claude_code_partial(body, plan, effort, fast),
-        "codex" => wire_codex_partial(body, plan, effort, fast),
-        "gemini" => wire_gemini_partial(body, plan, effort, fast),
-        "cursor" => wire_cursor_partial(body, plan, effort, fast),
-        "grok" => wire_grok_partial(body, plan, effort, fast),
-        _ => wire_generic_partial(body, plan, effort, fast),
-    }
+    format!(
+        "{}\n\n{body}",
+        compose_partial_directives_for_provider(provider_id, plan, effort, fast)
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,6 +250,23 @@ pub fn compose_fallback_prompt_for_provider(
     compose_partial_prompt_for_provider(
         provider_id,
         user_prompt.trim(),
+        options.plan.then(|| normalized_plan(plan_mode)),
+        options.effort.then(|| normalized_effort(effort)),
+        options.fast.then(|| normalized_fast(fast_mode)),
+    )
+}
+
+/// The directive block of [`compose_fallback_prompt_for_provider`] without the
+/// user's words, for providers that carry app context in a separate channel.
+pub fn compose_fallback_directives_for_provider(
+    provider_id: &str,
+    plan_mode: Option<bool>,
+    effort: Option<&str>,
+    fast_mode: Option<bool>,
+    options: PromptInjectionOptions,
+) -> String {
+    compose_partial_directives_for_provider(
+        provider_id,
         options.plan.then(|| normalized_plan(plan_mode)),
         options.effort.then(|| normalized_effort(effort)),
         options.fast.then(|| normalized_fast(fast_mode)),
@@ -412,5 +403,34 @@ mod tests {
         assert!(out.contains("PLAN ON"));
         assert!(!out.contains("Effort "));
         assert!(!out.contains("response style"));
+    }
+
+    #[test]
+    fn directives_are_the_fallback_prompt_without_the_user_words() {
+        let options = PromptInjectionOptions {
+            plan: true,
+            effort: false,
+            fast: true,
+        };
+        let directives = compose_fallback_directives_for_provider(
+            "codex",
+            Some(true),
+            None,
+            Some(false),
+            options,
+        );
+        assert!(directives.contains("PLAN ON"));
+        assert!(!directives.contains("Fix the bug"));
+        assert_eq!(
+            compose_fallback_prompt_for_provider(
+                "codex",
+                "  Fix the bug  ",
+                Some(true),
+                None,
+                Some(false),
+                options,
+            ),
+            format!("{directives}\n\nFix the bug")
+        );
     }
 }
