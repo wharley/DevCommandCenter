@@ -380,6 +380,52 @@
 		container-type: inline-size;
 	}
 
+	/* The turn sent from this view reserves the viewport below its prompt. */
+	.dcc-turn-anchor {
+		display: flex;
+		min-height: var(--dcc-turn-anchor-min-height, 0px);
+		flex-direction: column;
+	}
+
+	/*
+	 * Compact jump-to-end control. It sits in the right gutter of the reading
+	 * column (or at the edge when there is none) so it does not cover text.
+	 */
+	.conversation-scroll-jump {
+		position: absolute;
+		bottom: 0.75rem;
+		right: max(0.75rem, calc((100cqw - 52rem) / 2 - 2.75rem));
+		z-index: 30;
+		display: grid;
+		width: 2rem;
+		height: 2rem;
+		place-items: center;
+		border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
+		border-radius: 9999px;
+		background: var(--card);
+		color: var(--muted-foreground);
+		box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+		cursor: pointer;
+	}
+
+	.conversation-scroll-jump:hover {
+		border-color: var(--border);
+		background: var(--accent);
+		color: var(--accent-foreground);
+	}
+
+	.conversation-scroll-jump[data-new-activity="true"]::after {
+		content: "";
+		position: absolute;
+		top: 1px;
+		right: 1px;
+		width: 0.5rem;
+		height: 0.5rem;
+		border: 2px solid var(--card);
+		border-radius: 9999px;
+		background: var(--dcc-accent-calm);
+	}
+
 	.dcc-conversation-trail {
 		pointer-events: none;
 		position: absolute;

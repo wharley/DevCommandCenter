@@ -135,3 +135,15 @@ describe("turn activity", () => {
 		expect(nextPacedLength(0, long, 100)).toBeGreaterThan(150);
 	});
 });
+
+describe("live run headline", () => {
+	it("prefers the last action over a thought that already ended", async () => {
+		const { liveRunHeadline } = await import("./AssistantActivity");
+		const edit = { type: "tool-call", id: "t1", action: "Edit", content: "" } as const;
+		const doneThought = { type: "reasoning", id: "r1", content: "x" } as const;
+		const liveThought = { type: "reasoning", id: "r2", content: "y", streaming: true } as const;
+		expect(liveRunHeadline([edit, doneThought])?.id).toBe("t1");
+		expect(liveRunHeadline([edit, liveThought])?.id).toBe("r2");
+		expect(liveRunHeadline([doneThought])?.id).toBe("r1");
+	});
+});

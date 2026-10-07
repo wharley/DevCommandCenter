@@ -46,6 +46,9 @@ import { conversationStartingPhase, shouldShowConversationStarting, shouldShowIn
 import { ComputerUsePreview } from "@/features/computer-use/computer-use-preview";
 import { useStableMessages } from "./stable-messages";
 
+/** Bottom spacer (40px) plus the gap kept above an anchored prompt (16px). */
+const TURN_ANCHOR_RESERVED_PX = 56;
+
 type AssistantRowContext = {
 	workspacePath: string | null;
 	planApproved: boolean;
@@ -359,6 +362,35 @@ export function ActiveThreadViewport({
 		pendingPrompt,
 		lastTurnState,
 	);
+	// Turn anchoring (as in T3 Code and Monocode): a turn sent from this view,
+	// or one already running when the thread opens, is pinned near the top
+	// with the rest of the viewport reserved below it. Opening a settled
+	// thread keeps the usual bottom-aligned history.
+	const userMessageCount = useMemo(
+		() => messages.reduce((count, message) => count + (message.role === "user" ? 1 : 0), 0),
+		[messages],
+	);
+	const anchorStateRef = useRef<{ sessionId: string | null; baseline: number; active: boolean } | null>(null);
+	if (anchorStateRef.current?.sessionId !== sessionId) {
+		anchorStateRef.current = {
+			sessionId,
+			baseline: userMessageCount,
+			active: hasStreamingMessage,
+		};
+	} else if (userMessageCount > anchorStateRef.current.baseline) {
+		anchorStateRef.current = { sessionId, baseline: userMessageCount, active: true };
+	} else if (userMessageCount < anchorStateRef.current.baseline) {
+		// Edit-from-here rewound the thread: re-baseline without anchoring.
+		anchorStateRef.current = { sessionId, baseline: userMessageCount, active: false };
+	}
+	const anchorActive = anchorStateRef.current.active;
+	const anchorVisibleIndex = useMemo(() => {
+		if (!anchorActive) return -1;
+		for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+			if (visibleMessages[index]?.role === "user") return index;
+		}
+		return -1;
+	}, [anchorActive, visibleMessages]);
 	const startingPhase = isModelRouting
 		? "routing"
 		: conversationStartingPhase(sessionId, lastTurnState);
@@ -409,6 +441,64 @@ export function ActiveThreadViewport({
 			setHasNewActivity(false);
 		}
 	}, [isAtBottom]);
+
+	const threadSurfaceVisible =
+		!isModelRouting &&
+		hasLoaded &&
+		!(isEmpty || messages.length === 0) &&
+		!shouldShowInitialConversationStarting(messages, pendingPrompt, lastTurnState);
+
+	// A new turn sent from here scrolls its prompt to the anchor, even when
+	// the person was reading older messages.
+	const anchorBaseline = anchorStateRef.current.baseline;
+	const previousAnchorBaselineRef = useRef(anchorBaseline);
+	useLayoutEffect(() => {
+		const previous = previousAnchorBaselineRef.current;
+		previousAnchorBaselineRef.current = anchorBaseline;
+		if (anchorActive && anchorBaseline > previous) {
+			setHasNewActivity(false);
+			void scrollToBottom("smooth");
+		}
+	}, [anchorActive, anchorBaseline, scrollToBottom]);
+
+	// The reserved space is the visible height minus the bottom spacer and a
+	// small top inset. The viewport also shrinks when the composer dock grows
+	// (an agent offer, a multi-line draft); stay at the bottom if we were.
+	useEffect(() => {
+		const scrollElement = scrollRef.current;
+		const content = contentRef.current;
+		if (!scrollElement || !content || typeof ResizeObserver === "undefined") return;
+		let previousHeight = scrollElement.clientHeight;
+		const apply = () => {
+			const height = scrollElement.clientHeight;
+			content.style.setProperty(
+				"--dcc-turn-anchor-min-height",
+				`${Math.max(0, height - TURN_ANCHOR_RESERVED_PX)}px`,
+			);
+			if (height < previousHeight && wasAtBottomRef.current) {
+				void scrollToBottom("instant");
+			}
+			previousHeight = height;
+		};
+		apply();
+		const observer = new ResizeObserver(apply);
+		observer.observe(scrollElement);
+		return () => observer.disconnect();
+		// The scroll area only mounts once there is a thread to show.
+	}, [contentRef, scrollRef, scrollToBottom, threadSurfaceVisible]);
+
+	// When the running turn settles its activity folds; if the person was
+	// following, keep the end of the answer in view.
+	const followingWhileStreamingRef = useRef(false);
+	if (hasStreamingMessage) followingWhileStreamingRef.current = wasAtBottomRef.current;
+	const previousStreamingRef = useRef(hasStreamingMessage);
+	useLayoutEffect(() => {
+		const settled = previousStreamingRef.current && !hasStreamingMessage;
+		previousStreamingRef.current = hasStreamingMessage;
+		if (settled && followingWhileStreamingRef.current) {
+			void scrollToBottom("instant");
+		}
+	}, [hasStreamingMessage, scrollToBottom]);
 
 	const handleScrollToBottom = useCallback(() => {
 		setHasNewActivity(false);
@@ -549,7 +639,8 @@ export function ActiveThreadViewport({
 						</div>
 					) : null}
 						<div className="dcc-conversation-thread-list flex flex-col gap-0 px-5">
-							{visibleMessages.map((message, visibleMessageIndex) => {
+							{(() => {
+								const renderMessage = (message: WorkspaceMessage, visibleMessageIndex: number) => {
 								const messageIndex = visibleStart + visibleMessageIndex;
 								if (message.role === "user") {
 									return (
@@ -733,12 +824,39 @@ export function ActiveThreadViewport({
 										/>
 									</div>
 								);
-							})}
-							{showConversationStarting ? (
+							};
+								const startingIndicator = showConversationStarting ? (
 								<div className="pb-4">
 									<ConversationStartingIndicator phase={startingPhase} />
 								</div>
-							) : null}
+							) : null;
+								if (anchorVisibleIndex < 0) {
+									return (
+										<>
+											{visibleMessages.map(renderMessage)}
+											{startingIndicator}
+										</>
+									);
+								}
+								// The turn sent from this view is pinned near the top
+								// and reserves the rest of the viewport, so its reply
+								// grows (and later folds) without moving the page.
+								return (
+									<>
+										{visibleMessages
+											.slice(0, anchorVisibleIndex)
+											.map((message, index) => renderMessage(message, index))}
+										<div className="dcc-turn-anchor" data-turn-anchor>
+											{visibleMessages
+												.slice(anchorVisibleIndex)
+												.map((message, index) =>
+													renderMessage(message, anchorVisibleIndex + index),
+												)}
+											{startingIndicator}
+										</div>
+									</>
+								);
+							})()}
 						</div>
 					<div className="h-10 shrink-0" aria-hidden />
 				</div>
@@ -749,20 +867,24 @@ export function ActiveThreadViewport({
 				ordinalOffset={hiddenUserMessageCount}
 			/>
 			{!isAtBottom ? (
-				<div className="pointer-events-none absolute inset-x-0 bottom-1 z-30 flex justify-center py-1.5">
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="conversation-scroll-button pointer-events-auto"
-						onClick={handleScrollToBottom}
-					>
-						<ChevronDown className="size-3.5" strokeWidth={2} />
-						{hasNewActivity
+				<button
+					type="button"
+					className="conversation-scroll-jump"
+					data-new-activity={hasNewActivity ? "true" : "false"}
+					aria-label={
+						hasNewActivity
 							? t("conversation.newActivity")
-							: t("conversation.scrollToBottom")}
-					</Button>
-				</div>
+							: t("conversation.scrollToBottom")
+					}
+					title={
+						hasNewActivity
+							? t("conversation.newActivity")
+							: t("conversation.scrollToBottom")
+					}
+					onClick={handleScrollToBottom}
+				>
+					<ChevronDown className="size-4" strokeWidth={2} />
+				</button>
 			) : null}
 			<ComputerUsePreview
 				sessionId={sessionId}

@@ -510,11 +510,13 @@ describe("projectWorkspaceMessages", () => {
 			"session-a",
 		);
 
+		// Until the turn settles, even a final_answer stays in execution order
+		// inside the activity; it becomes the row's answer once settled.
 		expect(messages.filter((message) => message.role === "assistant")).toEqual([
 			expect.objectContaining({
 				id: "assistant-session-a-turn-1",
 				model: "claude-fable-5",
-				content: "Resolvido.",
+				content: "",
 				assistantPhase: "final_answer",
 				streaming: true,
 				annotations: [
@@ -522,6 +524,11 @@ describe("projectWorkspaceMessages", () => {
 						type: "commentary",
 						content: "Vou investigar.",
 						streaming: false,
+					}),
+					expect.objectContaining({
+						type: "commentary",
+						content: "Resolvido.",
+						streaming: true,
 					}),
 				],
 			}),
@@ -677,7 +684,7 @@ describe("projectWorkspaceMessages", () => {
 		expect(messages.filter((message) => message.role === "assistant")).toEqual([
 			expect.objectContaining({
 				id: "assistant-session-a-turn-1",
-				content: "Resolvido.",
+				content: "",
 				assistantPhase: "final_answer",
 				streaming: true,
 				turnSettled: false,
@@ -685,6 +692,11 @@ describe("projectWorkspaceMessages", () => {
 					expect.objectContaining({
 						type: "commentary",
 						content: "Ainda trabalhando.",
+					}),
+					expect.objectContaining({
+						type: "commentary",
+						content: "Resolvido.",
+						streaming: true,
 					}),
 				],
 			}),
@@ -1397,10 +1409,16 @@ describe("projectWorkspaceMessages", () => {
 
 		const assistant = messages.find((message) => message.role === "assistant");
 		expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+		// The turn is still live: the final answer streams inside the activity.
 		expect(assistant).toMatchObject({
 			id: "assistant-session-a-turn-1",
-			content: "Review concluído.",
+			content: "",
 		});
+		expect(
+			assistant?.annotations?.some(
+				(item) => item.type === "commentary" && item.content === "Review concluído.",
+			),
+		).toBe(true);
 		expect(assistant?.annotations?.filter((item) => item.type === "native-subagent")).toEqual([
 			expect.objectContaining({
 				id: "spawn-call",
@@ -1660,5 +1678,25 @@ describe("projectWorkspaceMessages", () => {
 				exitCode: 1,
 			},
 		});
+	});
+
+	it("gives a turn that just finished live a duration before history refetches", () => {
+		const liveCompleted: CoreEvent = {
+			sessionTurnCompleted: { session_id: "session-a", turn_id: "turn-1" },
+		};
+		const project = () =>
+			projectWorkspaceMessages(
+				[
+					sessionTurnStarted("session-a", "turn-1", "Alpha"),
+					sessionTurnDeltaRecord("session-a", "turn-1", "Done."),
+				],
+				[liveCompleted],
+				"session-a",
+			).find((message) => message.role === "assistant");
+		const first = project();
+		expect(first?.turnStartedAt).toBe("2026-05-01T12:00:00Z");
+		expect(first?.turnEndedAt).toEqual(expect.any(String));
+		// The observed time is stable across re-projections of the same event.
+		expect(project()?.turnEndedAt).toBe(first?.turnEndedAt);
 	});
 });

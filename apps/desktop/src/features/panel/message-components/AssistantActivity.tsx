@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AlertCircle, Brain, ChevronRight, PauseCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DccThinkingIndicator } from "@/components/DccThinkingIndicator";
@@ -87,11 +87,27 @@ function WorkRunList({ items, live }: { items: WorkItem[]; live: boolean }) {
 	);
 }
 
+/**
+ * The step a live run shows. A thought that already ended says little
+ * ("Thought"); the last action the agent took is the informative headline.
+ * A thought still in progress stays on top ("Thinking").
+ */
+export function liveRunHeadline(items: readonly WorkItem[]): WorkItem | undefined {
+	const last = items.at(-1);
+	if (last?.type === "reasoning" && !last.streaming) {
+		for (let index = items.length - 1; index >= 0; index -= 1) {
+			const item = items[index];
+			if (item?.type === "tool-call") return item;
+		}
+	}
+	return last;
+}
+
 /** A burst of work while the turn runs: one line wearing the latest step. */
 function LiveWorkRun({ items, live, isLast }: { items: WorkItem[]; live: boolean; isLast: boolean }) {
 	const { t } = useTranslation("common");
 	const [open, setOpen] = useState(false);
-	const latest = items.at(-1);
+	const latest = liveRunHeadline(items);
 	if (!latest) return null;
 	const active = live && isLast;
 	if (open) {
@@ -155,8 +171,6 @@ function liveStatusLabel(
 ): string {
 	const last = segments.at(-1);
 	if (!last || last.type === "prose") return t("conversation.activity.turn.writing");
-	const item = last.items.at(-1);
-	if (item?.type === "reasoning" && item.streaming) return t("conversation.activity.turn.thinking");
 	return t("conversation.activity.turn.working");
 }
 
@@ -174,6 +188,7 @@ export const AssistantActivity = memo(function AssistantActivity({
 	waitingForInput = false,
 	startedAt,
 	endedAt,
+	liveMascot,
 }: {
 	annotations: AssistantActivityAnnotation[];
 	turnStreaming?: boolean;
@@ -181,6 +196,8 @@ export const AssistantActivity = memo(function AssistantActivity({
 	waitingForInput?: boolean;
 	startedAt?: string;
 	endedAt?: string;
+	/** The agent's robot, shown on the live status line while it works. */
+	liveMascot?: ReactNode;
 }) {
 	const { t } = useTranslation("common");
 	const live =
@@ -218,12 +235,15 @@ export const AssistantActivity = memo(function AssistantActivity({
 						/>
 					),
 				)}
+				{/* Sticks to the bottom of the reading area, so the robot and the
+				    clock stay in sight while the reply grows past the fold. */}
 				<div className="dcc-turn-status" role="status">
-					{waitingForInput ? (
-						<PauseCircle className="size-3.5 shrink-0" aria-hidden />
-					) : (
-						<DccThinkingIndicator size={13} />
-					)}
+					{liveMascot ??
+						(waitingForInput ? (
+							<PauseCircle className="size-3.5 shrink-0" aria-hidden />
+						) : (
+							<DccThinkingIndicator size={13} />
+						))}
 					<span className="dcc-turn-status-label">
 						{waitingForInput
 							? t("conversation.activity.timeline.waiting")

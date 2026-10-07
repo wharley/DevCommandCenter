@@ -892,6 +892,23 @@ function pushHistoryEvent(
 	});
 }
 
+/**
+ * Live events carry no durable timestamp until the history is refetched. The
+ * first time a projection sees a live turn start or terminal, its arrival time
+ * stands in, so a turn shows its clock and duration immediately. Keyed by the
+ * event object, which the live feed keeps stable across frames.
+ */
+const liveTerminalObservedAt = new WeakMap<CoreEvent, string>();
+
+function observedAt(event: CoreEvent): string {
+	let stamp = liveTerminalObservedAt.get(event);
+	if (!stamp) {
+		stamp = new Date().toISOString();
+		liveTerminalObservedAt.set(event, stamp);
+	}
+	return stamp;
+}
+
 function pushLiveEvent(
 	events: TimelineEvent[],
 	seen: Set<string>,
@@ -1135,9 +1152,11 @@ function foldAssistantTurnMessages(
 
 		const foldedAnnotations: WorkspaceMessageAnnotation[] = [];
 		for (const message of turnMessages) {
-			const isVisibleAnswer =
-				message === terminal &&
-				(settled || message.assistantPhase === "final_answer");
+			// While the turn runs every message stays in execution order with
+			// the rest of the activity, even one the provider already labelled
+			// final_answer: Codex can label a mid-turn question that way and keep
+			// working, which would pin stale text under the live activity.
+			const isVisibleAnswer = message === terminal && settled;
 			if (!isVisibleAnswer && message.content.trim().length > 0) {
 				mergeTurnAnnotation(foldedAnnotations, {
 					type: "commentary",
@@ -1159,7 +1178,7 @@ function foldAssistantTurnMessages(
 		terminal.turnId = turnId;
 		terminal.streaming = !settled;
 		terminal.annotations = foldedAnnotations.length > 0 ? foldedAnnotations : undefined;
-		if (!settled && terminal.assistantPhase !== "final_answer") {
+		if (!settled) {
 			terminal.content = "";
 		}
 	}
@@ -1266,7 +1285,7 @@ export function projectWorkspaceMessages(
 			);
 			turnStartedAtByTurnId.set(
 				event.sessionTurnStarted.turn_id,
-				occurredAt ?? "",
+				occurredAt ?? observedAt(event),
 			);
 			messages.push({
 				id: `user-${event.sessionTurnStarted.session_id}-${event.sessionTurnStarted.turn_id}`,
@@ -1738,7 +1757,7 @@ export function projectWorkspaceMessages(
 		if ("sessionTurnCompleted" in event && event.sessionTurnCompleted) {
 			const key = event.sessionTurnCompleted.turn_id;
 			completedTurns.add(key);
-			if (occurredAt) turnEndedAtByTurnId.set(key, occurredAt);
+			turnEndedAtByTurnId.set(key, occurredAt ?? observedAt(event));
 			const turnMessages = assistantMessagesByTurn.get(key) ?? [assistantBuckets.get(key)].filter(
 				(message): message is WorkspaceMessage => Boolean(message),
 			);
@@ -1754,7 +1773,7 @@ export function projectWorkspaceMessages(
 		if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
 			const key = event.sessionTurnAborted.turn_id;
 			abortedTurns.set(key, event.sessionTurnAborted.reason ?? "Turn aborted");
-			if (occurredAt) turnEndedAtByTurnId.set(key, occurredAt);
+			turnEndedAtByTurnId.set(key, occurredAt ?? observedAt(event));
 			let turnMessages = assistantMessagesByTurn.get(key) ?? [assistantBuckets.get(key)].filter(
 				(message): message is WorkspaceMessage => Boolean(message),
 			);

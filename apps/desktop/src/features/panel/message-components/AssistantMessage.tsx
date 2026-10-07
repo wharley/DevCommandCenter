@@ -534,6 +534,7 @@ export const AssistantMessage = memo(function AssistantMessage({
 			(annotation.type === "approval" || annotation.type === "user-input") &&
 			annotation.streaming,
 	);
+	const mascotState = waitingForInput ? "waiting" : streaming ? "working" : "idle";
 	const provider = providers?.find((candidate) => candidate.id === providerId);
 	const nativeSubagentSupervision = useMemo<NativeSubagentSupervision>(
 		() => ({
@@ -563,6 +564,10 @@ export const AssistantMessage = memo(function AssistantMessage({
 		() => (annotations ?? []).filter(isActivityAnnotation),
 		[annotations],
 	);
+	const liveStatusCarriesMascot =
+		Boolean(streaming) &&
+		status?.type !== "incomplete" &&
+		activityAnnotations.length > 0;
 	const nativeSubagentAnnotations = useMemo(
 		() =>
 			(annotations ?? []).filter(
@@ -627,10 +632,12 @@ export const AssistantMessage = memo(function AssistantMessage({
 				>
 				{modelLabel ? (
 					<div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+						{/* While the live status line carries the walking robot, the
+						    header one stands still so only one moves. */}
 						<AgentMascot
 							provider={providerId}
 							model={modelId}
-							state={waitingForInput ? "waiting" : streaming ? "working" : "idle"}
+							state={liveStatusCarriesMascot ? "idle" : mascotState}
 						/>
 						<span className="sr-only">{t("conversation.modelLabel")}:</span>
 						<span className="font-medium text-foreground/80">{modelLabel}</span>
@@ -644,9 +651,14 @@ export const AssistantMessage = memo(function AssistantMessage({
 						waitingForInput={waitingForInput}
 						startedAt={turnStartedAt}
 						endedAt={turnEndedAt}
-/>
-) : null}
-{nativeSubagentAnnotations.length > 0 ? (
+						liveMascot={
+							liveStatusCarriesMascot ? (
+								<AgentMascot provider={providerId} model={modelId} state={mascotState} />
+							) : undefined
+						}
+					/>
+				) : null}
+				{nativeSubagentAnnotations.length > 0 ? (
 					<NativeSubagentTree
 						annotations={nativeSubagentAnnotations}
 						providers={providers}
