@@ -1,12 +1,13 @@
 use axum::{
     body::{to_bytes, Body},
-    extract::State,
-    http::{header::AUTHORIZATION, HeaderMap, Request, StatusCode},
+    extract::{ConnectInfo, State},
+    http::{header::AUTHORIZATION, Extensions, HeaderMap, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
 use serde_json::json;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -49,7 +50,8 @@ pub async fn auth_middleware(
     if let Some(token) = bearer_from_headers(request.headers()) {
         let configured = config.read().await.bearer_token.clone();
         if configured.as_deref() != Some(token.as_str()) {
-            match try_paired_session_bearer(&config, &token, request.headers()).await {
+            let ip = client_ip(request.headers(), request.extensions());
+            match try_paired_session_bearer(&config, &token, ip).await {
                 Some(Ok(device_id)) => {
                     request
                         .extensions_mut()
@@ -92,11 +94,9 @@ fn bearer_from_headers(headers: &HeaderMap) -> Option<String> {
 async fn try_paired_session_bearer(
     config: &Arc<RwLock<HttpConfig>>,
     token: &str,
-    headers: &HeaderMap,
+    client_ip: Option<String>,
 ) -> Option<Result<String, AuthError>> {
     let db_path: PathBuf = config.read().await.db_path.clone();
-    let client_ip = header_str(headers, "x-forwarded-for")
-        .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()));
 
     let token = token.to_string();
     let outcome = tokio::task::spawn_blocking(move || {
@@ -144,8 +144,7 @@ async fn validate_signed_request(
         .ok_or(AuthError::SignedRequestMissingHeader)?;
     let signature = header_str(request.headers(), "X-Signature")
         .ok_or(AuthError::SignedRequestMissingHeader)?;
-    let client_ip = header_str(request.headers(), "x-forwarded-for")
-        .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()));
+    let client_ip = client_ip(request.headers(), request.extensions());
 
     let (parts, body) = request.into_parts();
     let body_bytes = to_bytes(body, MAX_SIGNED_BODY_BYTES)
@@ -194,6 +193,25 @@ async fn validate_signed_request(
         }
         Err(_) => Err(AuthError::SignedRequestInvalidSignature),
     }
+}
+
+/// Address of the client, for rate limiting and the pairing audit trail.
+///
+/// The socket peer is the source of truth. `X-Forwarded-For` is only honoured
+/// when the peer is loopback, i.e. a proxy on this machine (Tailscale serve,
+/// cloudflared) forwarded the request; from anywhere else it is spoofable.
+/// `None` when the server was not started with connect info (tests).
+pub fn client_ip(headers: &HeaderMap, extensions: &Extensions) -> Option<String> {
+    let peer = extensions.get::<ConnectInfo<SocketAddr>>()?.0.ip();
+    if peer.is_loopback() {
+        if let Some(forwarded) = header_str(headers, "x-forwarded-for")
+            .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()))
+            .filter(|s| !s.is_empty())
+        {
+            return Some(forwarded);
+        }
+    }
+    Some(peer.to_string())
 }
 
 fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -419,6 +437,58 @@ mod tests {
         assert!(validate_auth(&config, &bearer_headers).is_ok());
     }
 
+    #[test]
+    fn lan_exposed_server_rejects_api_key() {
+        let config = HttpConfig {
+            lan: true,
+            ..config_with_mode(HttpAuthMode::Local)
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert("X-API-Key", HeaderValue::from_static("test-key"));
+
+        assert!(validate_auth(&config, &headers).is_err());
+    }
+
+    fn extensions_from(peer: &str) -> Extensions {
+        let mut extensions = Extensions::new();
+        extensions.insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
+        extensions
+    }
+
+    #[test]
+    fn client_ip_ignores_forwarded_for_from_the_network() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_static("10.9.9.9"));
+
+        assert_eq!(
+            client_ip(&headers, &extensions_from("192.168.1.50:51000")).as_deref(),
+            Some("192.168.1.50")
+        );
+    }
+
+    #[test]
+    fn client_ip_trusts_forwarded_for_from_a_local_proxy() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("100.64.0.7, 127.0.0.1"),
+        );
+
+        assert_eq!(
+            client_ip(&headers, &extensions_from("127.0.0.1:51000")).as_deref(),
+            Some("100.64.0.7")
+        );
+        assert_eq!(
+            client_ip(&HeaderMap::new(), &extensions_from("127.0.0.1:51000")).as_deref(),
+            Some("127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn client_ip_is_unknown_without_connect_info() {
+        assert_eq!(client_ip(&HeaderMap::new(), &Extensions::new()), None);
+    }
+
     // ----- signed-request middleware (end-to-end through an axum router) -----
 
     use axum::{
@@ -613,6 +683,57 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), AxumStatus::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn lan_mode_accepts_paired_bearer_and_rejects_api_key() {
+        let tmp = NamedTempFile::new().expect("tempfile");
+        let conn = rusqlite::Connection::open(tmp.path()).expect("open db");
+        conn.execute_batch(include_str!("../sql/schema.sql"))
+            .expect("schema");
+        let challenge = pairing::create_pairing_nonce(&conn).expect("nonce");
+        let (_device_id, token) = pairing::complete_pairing_bearer(
+            &conn,
+            &challenge.nonce,
+            &challenge.pin,
+            "phone",
+            None,
+            None,
+        )
+        .expect("complete_pairing_bearer");
+
+        let config = Arc::new(RwLock::new(HttpConfig {
+            db_path: tmp.path().to_path_buf(),
+            api_key: "valid-key".to_string(),
+            lan: true,
+            ..HttpConfig::default()
+        }));
+        let app = make_router(config);
+
+        let paired = app
+            .clone()
+            .oneshot(
+                AxumRequest::builder()
+                    .uri("/protected")
+                    .header(AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(paired.status(), AxumStatus::OK);
+
+        let api_key = app
+            .oneshot(
+                AxumRequest::builder()
+                    .uri("/protected")
+                    .header("X-API-Key", "valid-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(api_key.status(), AxumStatus::OK);
     }
 
     #[tokio::test]

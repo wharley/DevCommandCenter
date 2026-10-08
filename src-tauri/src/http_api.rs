@@ -1223,9 +1223,12 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
 }
 
 async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Response {
-    let database = {
+    let (database, network_exposed) = {
         let config = config.read().await;
-        config.db_path.to_string_lossy().to_string()
+        (
+            config.db_path.to_string_lossy().to_string(),
+            config.is_network_exposed(),
+        )
     };
 
     match rpc_value(config.clone(), "daemon.health", Value::Null, HEALTH_TIMEOUT).await {
@@ -1238,6 +1241,9 @@ async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Respon
                     "name": "DCC HTTP API",
                     "version": env!("CARGO_PKG_VERSION"),
                     "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
+                    // The desktop only reuses a running server for pairing when
+                    // it is reachable from the LAN.
+                    "lanListener": network_exposed,
                 },
                 "mobileWeb": mobile_spa_diagnostics(),
                 "database": database,
@@ -1254,6 +1260,7 @@ async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Respon
                     "name": "DCC HTTP API",
                     "version": env!("CARGO_PKG_VERSION"),
                     "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
+                    "lanListener": network_exposed,
                 },
                 "mobileWeb": mobile_spa_diagnostics(),
                 "database": database,
@@ -2561,21 +2568,16 @@ fn pair_rate_limit_check(client_ip: &str) -> bool {
 async fn complete_pairing_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     headers: axum::http::HeaderMap,
+    extensions: axum::http::Extensions,
     Json(body): Json<CompletePairingRequest>,
 ) -> Result<Json<CompletePairingResponse>, HttpApiError> {
     let user_agent = headers
         .get(axum::http::header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    let forwarded_ip = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string());
+    let client_ip = crate::http_auth::client_ip(&headers, &extensions);
 
-    let rate_key = forwarded_ip
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
+    let rate_key = client_ip.clone().unwrap_or_else(|| "unknown".to_string());
     if !pair_rate_limit_check(&rate_key) {
         return Err(HttpApiError::bad_request(
             "rate limit exceeded for /auth/pair",
@@ -2591,7 +2593,7 @@ async fn complete_pairing_handler(
                 &pubkey,
                 &body.device_name,
                 user_agent.as_deref(),
-                forwarded_ip.as_deref(),
+                client_ip.as_deref(),
             )
         })
         .await?;
@@ -2604,7 +2606,7 @@ async fn complete_pairing_handler(
                 &body.pin,
                 &body.device_name,
                 user_agent.as_deref(),
-                forwarded_ip.as_deref(),
+                client_ip.as_deref(),
             )
         })
         .await?;
@@ -2641,13 +2643,10 @@ async fn list_paired_devices_handler(
 async fn revoke_device_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     headers: axum::http::HeaderMap,
+    extensions: axum::http::Extensions,
     Path(device_id): Path<String>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let ip = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string());
+    let ip = crate::http_auth::client_ip(&headers, &extensions);
 
     let revoked = with_pairing_db(config, move |conn| {
         pairing::revoke_device(conn, &device_id, ip.as_deref())
@@ -2720,6 +2719,48 @@ mod tests {
                 { "projectId": "one", "name": "c" }
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn pair_rate_limit_keys_on_the_socket_peer_not_forwarded_for() {
+        use axum::extract::ConnectInfo;
+        use tower::util::ServiceExt;
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        rusqlite::Connection::open(tmp.path())
+            .unwrap()
+            .execute_batch(include_str!("../sql/schema.sql"))
+            .unwrap();
+        let config = Arc::new(RwLock::new(HttpConfig {
+            db_path: tmp.path().to_path_buf(),
+            api_key: "k".to_string(),
+            ..HttpConfig::default()
+        }));
+        let app = build_router(config);
+        // Unique to this test: the limiter is process-wide.
+        let peer: std::net::SocketAddr = "203.0.113.77:40000".parse().unwrap();
+
+        let mut last_body = String::new();
+        for attempt in 0..=PAIR_RATE_MAX_PER_WINDOW {
+            let mut request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/auth/pair")
+                .header("content-type", "application/json")
+                // A fresh spoofed address each time must not buy a fresh bucket.
+                .header("x-forwarded-for", format!("10.0.0.{attempt}"))
+                .body(axum::body::Body::from(
+                    r#"{"nonce":"nope","pin":"000000","deviceName":"x"}"#,
+                ))
+                .unwrap();
+            request.extensions_mut().insert(ConnectInfo(peer));
+            let response = app.clone().oneshot(request).await.unwrap();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            last_body = String::from_utf8_lossy(&bytes).to_string();
+        }
+
+        assert!(last_body.contains("rate limit"), "{last_body}");
     }
 
     #[test]

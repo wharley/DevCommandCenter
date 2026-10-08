@@ -25,12 +25,20 @@ Important details:
 ## Start The HTTP Daemon
 
 `yarn dev`, `yarn dev:desktop`, and `tauri dev` do not start the mobile HTTP
-daemon. Run it separately:
+daemon. Opening the pairing screen in the desktop app starts one; to run it
+yourself:
 
 ```bash
 cd src-tauri
-cargo run --bin dccd-http
+DCC_HTTP_LAN=1 cargo run --bin dccd-http
 ```
+
+By default `dccd-http` listens on `127.0.0.1` only. `DCC_HTTP_LAN=1` is the
+opt-in to listen on every interface so a phone can reach it; in that mode the
+API accepts only paired devices (or an operator bearer token), never the local
+`X-API-Key`. The API key is generated on first run and stored in
+`~/.dcc/http-config.json` (mode `0600`); the server refuses to start with the
+old public default key.
 
 The daemon should log that it is listening on port `9876`. From the same machine:
 

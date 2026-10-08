@@ -127,6 +127,10 @@ o lockout de 5 PIN errados por nonce, um atacante consegue no máximo 100
 tentativas/min por IP — abaixo do limite onde brute force de PIN se
 torna viável dentro da janela de 60 s.
 
+O IP é o do socket (`ConnectInfo`). `X-Forwarded-For` só vale quando o
+peer é loopback, ou seja, um proxy nesta máquina (Tailscale serve,
+cloudflared); vindo da rede ele é falsificável e é ignorado.
+
 ### 4.7 Garbage collection
 
 `create_pairing_nonce` deleta linhas com `created_at` mais antigo que

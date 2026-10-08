@@ -47,19 +47,10 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // Dual-bind policy: always listen on the configured host (loopback by
-    // default — preserves the existing safe local-only contract), and *also*
-    // open a LAN listener whenever an IPv4 LAN interface is up unless the
-    // operator opted out via `DCC_HTTP_DISABLE_LAN=1`. This eliminates the
-    // chicken-and-egg around first-time mobile pairing without changing the
-    // default loopback contract for headless deployments. Authentication is
-    // unchanged: API key + ECDSA-signed mobile requests gate every route.
-    let host_was_explicit = std::env::var("DCC_HTTP_HOST").is_ok();
-    let lan_disabled = matches!(
-        std::env::var("DCC_HTTP_DISABLE_LAN").ok().as_deref(),
-        Some("1") | Some("true")
-    );
-
+    // Loopback only unless the operator opted in with `DCC_HTTP_LAN=1` (the
+    // desktop does so when it starts this server for mobile pairing). With
+    // the opt-in we bind 0.0.0.0, which also covers loopback, and the config
+    // forces remote auth so only paired devices get past the pairing routes.
     let primary_addr = match config.host.parse::<IpAddr>() {
         Ok(ip) => SocketAddr::from((ip, config.port)),
         Err(error) => {
@@ -67,21 +58,10 @@ async fn main() {
             std::process::exit(1);
         }
     };
-
-    // The LAN listener uses 0.0.0.0:<port> — same router, separate socket —
-    // and is skipped when the primary bind already covers every interface
-    // (so we never double-bind the same port).
-    let lan_addr: Option<SocketAddr> = if lan_disabled {
-        None
-    } else if !host_was_explicit && is_loopback(&config.host) {
-        Some(SocketAddr::from(([0, 0, 0, 0], config.port)))
-    } else if config.host == "0.0.0.0" {
-        None
-    } else if host_was_explicit && !is_loopback(&config.host) {
-        // Operator picked a specific interface; respect it, don't second-guess.
-        None
+    let bind_addr = if config.lan && primary_addr.ip().is_loopback() {
+        SocketAddr::from(([0, 0, 0, 0], config.port))
     } else {
-        Some(SocketAddr::from(([0, 0, 0, 0], config.port)))
+        primary_addr
     };
 
     println!("[DCC HTTP] Auth mode: {:?}", config.effective_auth_mode());
@@ -89,20 +69,19 @@ async fn main() {
         println!("[DCC HTTP] Bearer token expires at: {expires_at}");
     }
 
+    let network_exposed = config.is_network_exposed();
     let config = Arc::new(RwLock::new(config));
     let app = build_router(config.clone());
-    let bind_addrs = bind_addresses(primary_addr, lan_addr);
 
-    println!("[DCC HTTP] Listening on http://{}", bind_addrs.primary);
-    if let Some(ip) = dev_command_center_tauri::net_info::detect_lan_ip() {
-        if bind_addrs.external.is_some() {
-            println!(
+    println!("[DCC HTTP] Listening on http://{bind_addr}");
+    if network_exposed && bind_addr.ip().is_unspecified() {
+        match dev_command_center_tauri::net_info::detect_lan_ip() {
+            Some(ip) => println!(
                 "[DCC HTTP] LAN reachable at:  http://{ip}:{}  (mobile clients connect here)",
-                bind_addrs.primary.port()
-            );
+                bind_addr.port()
+            ),
+            None => println!("[DCC HTTP] LAN listener ready but no LAN IPv4 detected yet."),
         }
-    } else if bind_addrs.external.is_some() {
-        println!("[DCC HTTP] LAN listener ready but no LAN IPv4 detected yet.");
     }
     println!("[DCC HTTP] Endpoints:");
     println!("[DCC HTTP]   GET  /             - Server info");
@@ -141,29 +120,12 @@ async fn main() {
     println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/respond-user-input");
     println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/respond-permission");
 
-    let primary_listener = match tokio::net::TcpListener::bind(&bind_addrs.primary).await {
+    let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!(
-                "[DCC HTTP] Failed to bind to {}: {error}",
-                bind_addrs.primary
-            );
+            eprintln!("[DCC HTTP] Failed to bind to {bind_addr}: {error}");
             std::process::exit(1);
         }
-    };
-
-    let lan_listener = if let Some(addr) = bind_addrs.secondary {
-        match tokio::net::TcpListener::bind(&addr).await {
-            Ok(listener) => Some(listener),
-            Err(error) => {
-                eprintln!(
-                    "[DCC HTTP] WARN: could not open LAN listener on {addr}: {error}. Continuing with primary bind only."
-                );
-                None
-            }
-        }
-    } else {
-        None
     };
 
     if let Err(error) =
@@ -173,72 +135,19 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let primary_app = app.clone();
-    let primary_task = tokio::spawn(async move {
-        if let Err(error) = axum::serve(primary_listener, primary_app).await {
-            eprintln!("[DCC HTTP] Primary listener error: {error}");
-        }
-    });
-
-    let lan_task = lan_listener.map(|listener| {
-        let lan_app = app.clone();
-        tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, lan_app).await {
-                eprintln!("[DCC HTTP] LAN listener error: {error}");
-            }
-        })
-    });
-
-    // Block until any listener exits (which should only happen on shutdown).
-    if let Some(lan) = lan_task {
-        let _ = tokio::try_join!(primary_task, lan);
-    } else {
-        let _ = primary_task.await;
-    }
-}
-
-struct BindAddresses {
-    primary: SocketAddr,
-    secondary: Option<SocketAddr>,
-    external: Option<SocketAddr>,
-}
-
-fn bind_addresses(primary: SocketAddr, lan: Option<SocketAddr>) -> BindAddresses {
-    let Some(lan) = lan else {
-        return BindAddresses {
-            primary,
-            secondary: None,
-            external: None,
-        };
-    };
-
-    if is_wildcard(lan.ip()) {
-        return BindAddresses {
-            primary: lan,
-            secondary: None,
-            external: Some(lan),
-        };
-    }
-
-    BindAddresses {
-        primary,
-        secondary: Some(lan),
-        external: Some(lan),
-    }
-}
-
-fn is_wildcard(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => ip.is_unspecified(),
-        IpAddr::V6(ip) => ip.is_unspecified(),
+    // ConnectInfo gives handlers the socket peer, which rate limiting and the
+    // pairing audit trust over any client-supplied header.
+    if let Err(error) = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    {
+        eprintln!("[DCC HTTP] Listener error: {error}");
     }
 }
 
 fn ensure_pairing_schema(db_path: &std::path::Path) -> Result<(), String> {
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
     dev_command_center_tauri::pairing::ensure_pairing_schema(&conn).map_err(|e| e.to_string())
-}
-
-fn is_loopback(host: &str) -> bool {
-    matches!(host, "127.0.0.1" | "localhost" | "::1")
 }

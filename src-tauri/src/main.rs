@@ -3884,8 +3884,16 @@ fn http_mobile_spa_ok(port: u16) -> bool {
     status == 200 && response.contains("<div id=\"root\"")
 }
 
+/// A server someone started loopback-only (e.g. `cargo run --bin dccd-http`)
+/// answers health checks but the phone cannot reach it, so it does not count.
+fn http_lan_listener_ok(port: u16) -> bool {
+    http_get_local(port, "/health")
+        .map(|(_status, response)| response.contains("\"lanListener\":true"))
+        .unwrap_or(false)
+}
+
 fn http_server_ready_for_pairing(port: u16) -> bool {
-    http_health_ok(port) && http_mobile_spa_ok(port)
+    http_health_ok(port) && http_lan_listener_ok(port) && http_mobile_spa_ok(port)
 }
 
 fn terminate_existing_http_sidecars(force: bool) {
@@ -3999,9 +4007,12 @@ fn ensure_http_server_running(app: &AppHandle) -> Result<(), ApiError> {
         cargo
     };
 
+    // Opening the pairing screen is the explicit opt-in to listen on the LAN;
+    // dccd-http then accepts only paired devices from the network.
     command
         .env("DCC_HTTP_DB_PATH", db_path)
         .env("DCC_APP_DATA_DIR", app_data_dir)
+        .env("DCC_HTTP_LAN", "1")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
