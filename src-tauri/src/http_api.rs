@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{FromRef, Path, Query, State},
     http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Method, StatusCode},
     middleware,
     response::{
@@ -12,24 +12,22 @@ use axum::{
 };
 use dcc_core::{
     application::{
-        abort_run, close_session, restore_session, resume_session, send_turn, start_thread,
-        AbortRunInput, CloseSessionInput, RestoreSessionInput, ResumeSessionInput, SendTurnInput,
+        close_session, restore_session, resume_session, start_thread, AbortRunInput,
+        CloseSessionInput, RestoreSessionInput, ResumeSessionInput, SendTurnInput,
         StartThreadInput,
     },
-    domain::session::{SessionId, SessionProjection},
+    domain::session::SessionId,
     domain::workspace::WorkspaceId,
-    ports::{
-        provider::ProviderPermissionResponse, provider::ProviderUserInputResponse, CoreEvent,
-        EventBus, Input, ProviderTurnInput, SessionEventRepo,
-    },
+    ports::{CoreEvent, EventBus},
 };
 use dcc_infra::db::SqliteSessionRepo;
 use dcc_tauri::{
     commands::session_commands::{
-        RespondToPermissionRequestInput, RespondToPermissionRequestOutput, RespondToUserInputInput,
-        RespondToUserInputOutput,
+        abort_run_with_state, respond_to_permission_request_with_state,
+        respond_to_user_input_with_state, send_turn_with_state, start_thread_with_state,
+        RespondToPermissionRequestInput, RespondToProviderRequestError, RespondToUserInputInput,
     },
-    state::{ProviderTransitionGuard, SessionCommandState},
+    state::SessionCommandState,
 };
 use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -59,7 +57,7 @@ pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
     mobile::recover_interrupted_tasks(db_path)
 }
 
-use crate::daemon_client::{default_app_data_dir, rpc_with_db_path_timeout};
+use crate::daemon_client::rpc_with_db_path_timeout;
 use crate::http_auth::auth_middleware;
 use crate::http_config::{HttpAuthMode, HttpConfig};
 use crate::http_rpc_handler::handle_rpc as handle_json_rpc;
@@ -70,11 +68,6 @@ use crate::pairing::{
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DCC_HTTP_PROTOCOL_VERSION: &str = "2026-05-15";
-static HEADLESS_SESSION_STATES: OnceLock<Mutex<HashMap<PathBuf, Arc<SessionCommandState>>>> =
-    OnceLock::new();
-static HEADLESS_EVENT_SENDERS: OnceLock<
-    Mutex<HashMap<PathBuf, tokio::sync::broadcast::Sender<CoreEvent>>>,
-> = OnceLock::new();
 static HEADLESS_TERMINALS: OnceLock<Mutex<HashMap<String, HeadlessManagedTerminal>>> =
     OnceLock::new();
 static HEADLESS_TERMINAL_EVENT_SENDER: OnceLock<
@@ -137,16 +130,82 @@ fn default_session_search_limit() -> usize {
     40
 }
 
+/// Feeds `/api/v1/events/stream`. Publishing only hands the event to a
+/// broadcast channel: a slow phone never holds up the desktop UI's events.
 #[derive(Clone)]
-struct HeadlessEventBus {
+struct HttpEventBus {
     sender: tokio::sync::broadcast::Sender<CoreEvent>,
 }
 
 #[async_trait]
-impl EventBus for HeadlessEventBus {
+impl EventBus for HttpEventBus {
     async fn publish(&self, event: CoreEvent) -> dcc_core::Result<()> {
         let _ = self.sender.send(event);
         Ok(())
+    }
+}
+
+/// The sessions the HTTP API acts on. Inside the desktop app it is the app's
+/// own `SessionCommandState`, so the phone sees and answers the sessions the
+/// desktop runs; `dccd-http` builds a headless one of its own.
+pub struct HttpBackend {
+    sessions: SessionCommandState,
+    events: tokio::sync::broadcast::Sender<CoreEvent>,
+    // The runtime keeps only a weak reference to its buses.
+    _bus: Arc<dyn EventBus>,
+    terminals: bool,
+}
+
+impl HttpBackend {
+    /// Serves sessions the desktop app owns. Remote shells are left out: the
+    /// phone has no use for them yet and they are the riskiest route.
+    pub fn embedded(sessions: SessionCommandState) -> Result<Self, String> {
+        let (events, _) = tokio::sync::broadcast::channel(256);
+        let bus: Arc<dyn EventBus> = Arc::new(HttpEventBus {
+            sender: events.clone(),
+        });
+        sessions
+            .register_event_bus(&bus)
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            sessions,
+            events,
+            _bus: bus,
+            terminals: false,
+        })
+    }
+
+    /// The standalone `dccd-http` server, owner of the sessions it starts.
+    pub fn headless(db_path: PathBuf, app_data_dir: PathBuf) -> Self {
+        let (events, _) = tokio::sync::broadcast::channel(256);
+        let bus: Arc<dyn EventBus> = Arc::new(HttpEventBus {
+            sender: events.clone(),
+        });
+        let sessions = SessionCommandState::new_with_event_bus(db_path, app_data_dir, bus.clone());
+        Self {
+            sessions,
+            events,
+            _bus: bus,
+            terminals: true,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct HttpState {
+    config: Arc<RwLock<HttpConfig>>,
+    backend: Arc<HttpBackend>,
+}
+
+impl FromRef<HttpState> for Arc<RwLock<HttpConfig>> {
+    fn from_ref(state: &HttpState) -> Self {
+        state.config.clone()
+    }
+}
+
+impl FromRef<HttpState> for Arc<HttpBackend> {
+    fn from_ref(state: &HttpState) -> Self {
+        state.backend.clone()
     }
 }
 
@@ -232,6 +291,8 @@ struct HeadlessTerminalSession {
 enum HttpApiError {
     BadRequest(String),
     NotFound(String),
+    /// The request was already answered; carries the answer that won.
+    Conflict(String, Value),
     ServiceUnavailable(String),
     GatewayTimeout(String),
     BadGateway(String),
@@ -267,6 +328,7 @@ impl HttpApiError {
         match self {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::Conflict(..) => StatusCode::CONFLICT,
             Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::GatewayTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
             Self::BadGateway(_) => StatusCode::BAD_GATEWAY,
@@ -278,6 +340,7 @@ impl HttpApiError {
         match self {
             Self::BadRequest(_) => "bad_request",
             Self::NotFound(_) => "not_found",
+            Self::Conflict(..) => "already_resolved",
             Self::ServiceUnavailable(_) => "service_unavailable",
             Self::GatewayTimeout(_) => "gateway_timeout",
             Self::BadGateway(_) => "bad_gateway",
@@ -289,6 +352,7 @@ impl HttpApiError {
         match self {
             Self::BadRequest(message)
             | Self::NotFound(message)
+            | Self::Conflict(message, _)
             | Self::ServiceUnavailable(message)
             | Self::GatewayTimeout(message)
             | Self::BadGateway(message)
@@ -300,22 +364,44 @@ impl HttpApiError {
 impl IntoResponse for HttpApiError {
     fn into_response(self) -> Response {
         let status = self.status();
-        let body = Json(json!({
-            "ok": false,
-            "error": {
-                "code": self.code(),
-                "message": self.message(),
-            }
-        }));
-        (status, body).into_response()
+        let mut error = json!({
+            "code": self.code(),
+            "message": self.message(),
+        });
+        if let Self::Conflict(_, outcome) = &self {
+            error["outcome"] = outcome.clone();
+        }
+        (status, Json(json!({ "ok": false, "error": error }))).into_response()
     }
 }
 
-pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
+pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) -> Router {
     let cors_config = config
         .try_read()
         .expect("config lock must be uncontended at router build time")
         .clone();
+    let terminal_routes = Router::new()
+        .route(
+            "/api/v1/terminals/events/stream",
+            get(terminals_stream_handler),
+        )
+        .route("/api/v1/terminals/spawn", post(terminal_spawn_handler))
+        .route(
+            "/api/v1/terminals/by-owner/:owner_key",
+            post(terminal_get_or_create_by_owner_handler),
+        )
+        .route(
+            "/api/v1/terminals/:pty_id/write",
+            post(terminal_write_handler),
+        )
+        .route(
+            "/api/v1/terminals/:pty_id/resize",
+            post(terminal_resize_handler),
+        )
+        .route(
+            "/api/v1/terminals/:pty_id/kill",
+            post(terminal_kill_handler),
+        );
     let protected_routes = Router::new()
         .route("/api/v1/mobile/catalog", get(mobile::catalog))
         .route(
@@ -327,10 +413,6 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .route("/rpc", post(handle_json_rpc))
         .route("/api/v1/shell/default", get(shell_default_handler))
         .route("/api/v1/events/stream", get(events_stream_handler))
-        .route(
-            "/api/v1/terminals/events/stream",
-            get(terminals_stream_handler),
-        )
         .route("/api/v1/status", get(status_handler))
         .route("/api/v1/tasks", get(list_tasks_handler))
         .route("/api/v1/tasks/:task_id/run", post(run_task_handler))
@@ -354,23 +436,6 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .route("/api/v1/combs", get(list_combs_handler))
         .route("/api/v1/panes", get(list_panes_handler))
         .route("/api/v1/diffs/bundle", post(diffs_bundle_handler))
-        .route("/api/v1/terminals/spawn", post(terminal_spawn_handler))
-        .route(
-            "/api/v1/terminals/by-owner/:owner_key",
-            post(terminal_get_or_create_by_owner_handler),
-        )
-        .route(
-            "/api/v1/terminals/:pty_id/write",
-            post(terminal_write_handler),
-        )
-        .route(
-            "/api/v1/terminals/:pty_id/resize",
-            post(terminal_resize_handler),
-        )
-        .route(
-            "/api/v1/terminals/:pty_id/kill",
-            post(terminal_kill_handler),
-        )
         .route("/api/v1/sessions/start", post(start_thread_handler))
         .route("/api/v1/sessions", get(list_workspace_sessions_handler))
         .route("/api/v1/sessions/search", get(search_sessions_handler))
@@ -415,11 +480,16 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .route(
             "/auth/devices/:device_id",
             axum::routing::delete(revoke_device_handler),
-        )
-        .route_layer(middleware::from_fn_with_state(
-            config.clone(),
-            auth_middleware,
-        ));
+        );
+    let protected_routes = if backend.terminals {
+        protected_routes.merge(terminal_routes)
+    } else {
+        protected_routes
+    }
+    .route_layer(middleware::from_fn_with_state(
+        config.clone(),
+        auth_middleware,
+    ));
 
     let mobile_spa = mobile_spa_service();
 
@@ -432,7 +502,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>) -> Router {
         .merge(protected_routes)
         .layer(build_cors_layer(&cors_config))
         .layer(TraceLayer::new_for_http())
-        .with_state(config)
+        .with_state(HttpState { config, backend })
 }
 
 /// Serves the Vite-built mobile SPA from `apps/mobile-web/dist/` with an
@@ -755,47 +825,6 @@ fn resolve_worktree_paths(
         }
     }
     Ok(out)
-}
-
-async fn headless_session_state(
-    config: Arc<RwLock<HttpConfig>>,
-) -> Result<Arc<SessionCommandState>, HttpApiError> {
-    let db_path = {
-        let config = config.read().await;
-        config.db_path.clone()
-    };
-
-    let cache = HEADLESS_SESSION_STATES.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = cache.lock().map_err(|error| {
-        HttpApiError::internal(format!("session runtime cache poisoned: {error}"))
-    })?;
-    if let Some(state) = guard.get(&db_path).cloned() {
-        return Ok(state);
-    }
-
-    let sender = headless_event_sender_for_db(&db_path)?;
-    let state = Arc::new(SessionCommandState::new_with_event_bus(
-        db_path.clone(),
-        default_app_data_dir(),
-        Arc::new(HeadlessEventBus { sender }),
-    ));
-    guard.insert(db_path, state.clone());
-    Ok(state)
-}
-
-fn headless_event_sender_for_db(
-    db_path: &PathBuf,
-) -> Result<tokio::sync::broadcast::Sender<CoreEvent>, HttpApiError> {
-    let cache = HEADLESS_EVENT_SENDERS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = cache
-        .lock()
-        .map_err(|error| HttpApiError::internal(format!("event sender cache poisoned: {error}")))?;
-    if let Some(sender) = guard.get(db_path).cloned() {
-        return Ok(sender);
-    }
-    let (sender, _) = tokio::sync::broadcast::channel(256);
-    guard.insert(db_path.clone(), sender.clone());
-    Ok(sender)
 }
 
 fn headless_terminal_sender() -> tokio::sync::broadcast::Sender<HeadlessTerminalEvent> {
@@ -1286,17 +1315,13 @@ async fn shell_default_handler() -> Json<Value> {
 }
 
 async fn events_stream_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
 ) -> Result<
     Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
     HttpApiError,
 > {
-    let db_path = {
-        let config = config.read().await;
-        config.db_path.clone()
-    };
-    let sender = headless_event_sender_for_db(&db_path)?;
-    let stream = BroadcastStream::new(sender.subscribe()).filter_map(|message| match message {
+    let receiver = backend.events.subscribe();
+    let stream = BroadcastStream::new(receiver).filter_map(|message| match message {
         Ok(event) => match serde_json::to_string(&event) {
             Ok(payload) => Some(Ok(Event::default().event("core-event").data(payload))),
             Err(_) => None,
@@ -2047,21 +2072,12 @@ async fn terminal_kill_handler(Path(pty_id): Path<String>) -> Result<Json<Value>
 }
 
 async fn start_thread_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<StartThreadInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let state = headless_session_state(config).await?;
-    state
-        .validate_start_thread_scope(&input)
+    let output = start_thread_with_state(&backend.sessions, input)
         .await
-        .map_err(|error| classify_session_error(error.to_string()))?;
-    let output = start_thread(&*state, &*state, &*state, &*state, input)
-        .await
-        .map_err(|error| classify_session_error(error.to_string()))?;
-    state
-        .attach_provider_session(&output.session)
-        .await
-        .map_err(|error| classify_session_error(error.to_string()))?;
+        .map_err(classify_session_error)?;
     Ok(Json(serde_json::to_value(output).map_err(|error| {
         HttpApiError::internal(error.to_string())
     })?))
@@ -2095,92 +2111,17 @@ async fn search_sessions_handler(
 }
 
 async fn send_turn_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Path(session_id): Path<String>,
     Json(mut input): Json<SendTurnInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let state = headless_session_state(config).await?;
     input.session_id = SessionId(session_id);
-    let transition = state
-        .acquire_provider_transition(&input.session_id)
+    let output = send_turn_with_state(&backend.sessions, input)
         .await
-        .map_err(|error| classify_session_error(error.to_string()))?;
-    prepare_http_provider_turn(&state, &transition, &input).await?;
-
-    let provider_turn_input = ProviderTurnInput {
-        prompt: input.prompt.clone(),
-        tool_instructions: state
-            .objective_tool_instructions(&input.session_id, input.tool_instructions.clone())
-            .map_err(|error| classify_session_error(error.to_string()))?,
-        plan_mode: input.plan_mode,
-        effort: input.effort.clone(),
-        fast_mode: input.fast_mode,
-        approval_policy: input.approval_policy,
-        resume_fallback_context: None,
-    };
-    let retry_of_turn_id = input.retry_of_turn_id.clone();
-    let output = send_turn(&*state, &*state, &*state, input)
-        .await
-        .map_err(|error| classify_session_error(error.to_string()))?;
-    let turn_id = output.turn.id.clone();
-    if retry_of_turn_id.is_some() {
-        if let Err(error) = state.record_objective_retry(&output.session.id, &turn_id) {
-            eprintln!("[DCC] objective retry accounting failed: {error}");
-        }
-    }
-    if let Err(error) = state
-        .set_active_turn(&output.session.id, Some(turn_id.0.clone()))
-        .await
-    {
-        let _ = state
-            .emit_unbound_started_turn_aborted(
-                &output.session.id,
-                &turn_id,
-                Some(error.to_string()),
-            )
-            .await;
-        return Err(classify_session_error(error.to_string()));
-    }
-    match state
-        .capture_turn_review_baseline(&output.session, &turn_id)
-        .await
-    {
-        Ok(baseline) => {
-            let _ = state
-                .begin_capture_v2_after_m3(&output.session, &turn_id, baseline)
-                .await;
-        }
-        Err(error) => eprintln!("[DCC] HTTP turn review baseline persistence failed: {error}"),
-    }
-
-    if let Err(error) = state
-        .send_provider_input(&output.session.id, Input::Turn(provider_turn_input))
-        .await
-    {
-        let _ = state
-            .emit_turn_aborted(&output.session.id, &turn_id, Some(error.to_string()))
-            .await;
-        return Err(classify_session_error(error.to_string()));
-    }
-
+        .map_err(classify_session_error)?;
     Ok(Json(serde_json::to_value(output).map_err(|error| {
         HttpApiError::internal(error.to_string())
     })?))
-}
-
-/// The headless route intentionally shares the Tauri command's provider
-/// preflight, including its per-session transition lock. Keep this separate
-/// from `send_turn` so invalid input cannot create durable turn history.
-async fn prepare_http_provider_turn(
-    state: &SessionCommandState,
-    transition: &ProviderTransitionGuard,
-    input: &SendTurnInput,
-) -> Result<(), HttpApiError> {
-    state
-        .prepare_provider_session_for_turn_under_transition(transition, input)
-        .await
-        .map(|_| ())
-        .map_err(|error| classify_session_error(error.to_string()))
 }
 
 async fn list_session_events_handler(
@@ -2198,44 +2139,28 @@ async fn list_session_events_handler(
 }
 
 async fn abort_session_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let state = headless_session_state(config).await?;
-    let session_id = SessionId(session_id);
-    let active_turn_id = state
-        .list_events_by_session(&session_id)
-        .await
-        .ok()
-        .and_then(|events| SessionProjection::fold(&events))
-        .and_then(|projection| projection.active_turn_id);
-    if let Some(turn_id) = active_turn_id.as_ref() {
-        state
-            .quiesce_turn_for_abort(&session_id, turn_id, Some("Stopped from remote HTTP"))
-            .await
-            .map_err(|error| classify_session_error(error.to_string()))?;
-    }
-    let output = abort_run(
-        &*state,
-        &*state,
-        &*state,
+    let output = abort_run_with_state(
+        &backend.sessions,
         AbortRunInput {
-            session_id,
+            session_id: SessionId(session_id),
             reason: Some("Stopped from remote HTTP".to_string()),
         },
     )
     .await
-    .map_err(|error| classify_session_error(error.to_string()))?;
+    .map_err(classify_session_error)?;
     Ok(Json(serde_json::to_value(output).map_err(|error| {
         HttpApiError::internal(error.to_string())
     })?))
 }
 
 async fn resume_session_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let state = headless_session_state(config).await?;
+    let state = &backend.sessions;
     let session_id = SessionId(session_id);
     let transition = state
         .acquire_provider_transition(&session_id)
@@ -2245,7 +2170,7 @@ async fn resume_session_handler(
         .validate_provider_resume_preflight_under_transition(&transition, &session_id)
         .await
         .map_err(|error| classify_session_error(error.to_string()))?;
-    let output = resume_session(&*state, &*state, &*state, ResumeSessionInput { session_id })
+    let output = resume_session(state, state, state, ResumeSessionInput { session_id })
         .await
         .map_err(|error| classify_session_error(error.to_string()))?;
     state
@@ -2258,12 +2183,12 @@ async fn resume_session_handler(
 }
 
 async fn close_session_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Path(session_id): Path<String>,
     body: Option<Json<CloseSessionRequest>>,
 ) -> Result<Json<Value>, HttpApiError> {
     let delete_history = body.map(|Json(body)| body.delete_history).unwrap_or(false);
-    let state = headless_session_state(config).await?;
+    let state = &backend.sessions;
     let session_id = SessionId(session_id);
     let transition = state.acquire_provider_transition(&session_id).await;
     let transition = transition.map_err(|error| classify_session_error(error.to_string()))?;
@@ -2272,9 +2197,9 @@ async fn close_session_handler(
         .await
         .map_err(|error| classify_session_error(error.to_string()))?;
     let output = close_session(
-        &*state,
-        &*state,
-        &*state,
+        state,
+        state,
+        state,
         CloseSessionInput {
             session_id,
             delete_history,
@@ -2288,13 +2213,13 @@ async fn close_session_handler(
 }
 
 async fn restore_session_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let state = headless_session_state(config).await?;
+    let state = &backend.sessions;
     let output = restore_session(
-        &*state,
-        &*state,
+        state,
+        state,
         RestoreSessionInput {
             session_id: SessionId(session_id),
         },
@@ -2306,50 +2231,42 @@ async fn restore_session_handler(
     })?))
 }
 
+fn classify_respond_error(error: RespondToProviderRequestError) -> HttpApiError {
+    match &error {
+        RespondToProviderRequestError::AlreadyAnswered(answer) => HttpApiError::Conflict(
+            error.to_string(),
+            serde_json::to_value(answer).unwrap_or(Value::Null),
+        ),
+        RespondToProviderRequestError::Failed(message) => classify_session_error(message.clone()),
+    }
+}
+
 async fn respond_to_user_input_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Path(session_id): Path<String>,
     Json(mut input): Json<RespondToUserInputInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let state = headless_session_state(config).await?;
     input.session_id = session_id;
-    state
-        .send_provider_input(
-            &SessionId(input.session_id),
-            Input::UserInputResponse(ProviderUserInputResponse {
-                request_id: input.request_id,
-                answers: input.answers,
-            }),
-        )
+    let output = respond_to_user_input_with_state(&backend.sessions, input)
         .await
-        .map_err(|error| classify_session_error(error.to_string()))?;
-    Ok(Json(
-        serde_json::to_value(RespondToUserInputOutput { ok: true })
-            .map_err(|error| HttpApiError::internal(error.to_string()))?,
-    ))
+        .map_err(classify_respond_error)?;
+    Ok(Json(serde_json::to_value(output).map_err(|error| {
+        HttpApiError::internal(error.to_string())
+    })?))
 }
 
 async fn respond_to_permission_request_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Path(session_id): Path<String>,
     Json(mut input): Json<RespondToPermissionRequestInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let state = headless_session_state(config).await?;
     input.session_id = session_id;
-    state
-        .send_provider_input(
-            &SessionId(input.session_id),
-            Input::PermissionResponse(ProviderPermissionResponse {
-                request_id: input.request_id,
-                behavior: input.behavior,
-            }),
-        )
+    let output = respond_to_permission_request_with_state(&backend.sessions, input)
         .await
-        .map_err(|error| classify_session_error(error.to_string()))?;
-    Ok(Json(
-        serde_json::to_value(RespondToPermissionRequestOutput { ok: true })
-            .map_err(|error| HttpApiError::internal(error.to_string()))?,
-    ))
+        .map_err(classify_respond_error)?;
+    Ok(Json(serde_json::to_value(output).map_err(|error| {
+        HttpApiError::internal(error.to_string())
+    })?))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -2700,7 +2617,7 @@ mod tests {
             session::{Session, SessionState},
             workspace::WorkspaceId,
         },
-        ports::SessionRepo,
+        ports::{SessionEventRepo, SessionRepo},
     };
 
     #[test]
@@ -2726,17 +2643,20 @@ mod tests {
         use axum::extract::ConnectInfo;
         use tower::util::ServiceExt;
 
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        rusqlite::Connection::open(tmp.path())
+        let root = tempfile::tempdir().unwrap();
+        let root_path = std::fs::canonicalize(root.path()).unwrap();
+        let db_path = root_path.join("state.sqlite");
+        rusqlite::Connection::open(&db_path)
             .unwrap()
             .execute_batch(include_str!("../sql/schema.sql"))
             .unwrap();
         let config = Arc::new(RwLock::new(HttpConfig {
-            db_path: tmp.path().to_path_buf(),
+            db_path: db_path.clone(),
             api_key: "k".to_string(),
             ..HttpConfig::default()
         }));
-        let app = build_router(config);
+        let backend = Arc::new(HttpBackend::headless(db_path, root_path.join("app-data")));
+        let app = build_router(config, backend);
         // Unique to this test: the limiter is process-wide.
         let peer: std::net::SocketAddr = "203.0.113.77:40000".parse().unwrap();
 
@@ -2786,6 +2706,203 @@ mod tests {
         assert_eq!(doc["paths"]["/"]["get"]["security"], json!([]));
     }
 
+    struct HttpFixture {
+        _root: tempfile::TempDir,
+        state: SessionCommandState,
+        app: Router,
+        session_id: SessionId,
+    }
+
+    /// A router on an embedded backend, as the desktop app serves it.
+    async fn embedded_fixture() -> HttpFixture {
+        let root = tempfile::tempdir().expect("http root");
+        let physical = std::fs::canonicalize(root.path()).expect("physical root");
+        let db_path = physical.join("state.sqlite");
+        let state = SessionCommandState::new_headless(db_path.clone(), physical.join("app-data"));
+        let session_id = SessionId("http-respond".to_string());
+        SessionRepo::save_session(
+            &state,
+            &Session {
+                id: session_id.clone(),
+                project_id: ProjectId("project".to_string()),
+                workspace_id: WorkspaceId("workspace".to_string()),
+                additional_workspace_ids: Vec::new(),
+                provider_id: "codex".to_string(),
+                model: None,
+                provider_runtime: None,
+                working_directory_override: None,
+                state: SessionState::Active,
+                created_at: "2026-10-08T00:00:00Z".to_string(),
+                updated_at: "2026-10-08T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .expect("save session");
+        let config = Arc::new(RwLock::new(HttpConfig {
+            db_path,
+            api_key: "k".to_string(),
+            ..HttpConfig::default()
+        }));
+        let backend = Arc::new(HttpBackend::embedded(state.clone()).expect("embedded backend"));
+        HttpFixture {
+            _root: root,
+            state,
+            app: build_router(config, backend),
+            session_id,
+        }
+    }
+
+    async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
+        use tower::util::ServiceExt;
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .header("X-API-Key", "k")
+                    .body(axum::body::Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn answering_a_resolved_permission_returns_conflict_with_the_outcome() {
+        use dcc_core::domain::session::{SessionEventKind, SessionEventRecord, TurnId};
+        let fixture = embedded_fixture().await;
+        for kind in [
+            SessionEventKind::TurnPermissionRequested {
+                turn_id: TurnId("t1".to_string()),
+                request_id: "p1".to_string(),
+                tool_name: "Bash".to_string(),
+                title: None,
+                description: None,
+                command: Some("yarn test".to_string()),
+                file: None,
+            },
+            SessionEventKind::TurnPermissionResolved {
+                turn_id: TurnId("t1".to_string()),
+                request_id: "p1".to_string(),
+                behavior: "allow".to_string(),
+            },
+        ] {
+            SessionEventRepo::append_event(
+                &fixture.state,
+                &SessionEventRecord {
+                    event_id: Uuid::new_v4().to_string(),
+                    session_id: fixture.session_id.clone(),
+                    sequence: 0,
+                    occurred_at: "2026-10-08T00:00:01Z".to_string(),
+                    kind,
+                },
+            )
+            .await
+            .expect("append event");
+        }
+
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/sessions/http-respond/respond-permission",
+            json!({ "sessionId": "", "requestId": "p1", "behavior": "deny" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["error"]["code"], "already_resolved");
+        assert_eq!(
+            body["error"]["outcome"],
+            json!({ "kind": "permission", "behavior": "allow" })
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_second_answer_while_the_first_is_in_flight_is_a_conflict() {
+        use dcc_tauri::state::AnsweredProviderRequest;
+        let fixture = embedded_fixture().await;
+        // The desktop claimed the request and is forwarding its answer.
+        assert_eq!(
+            fixture
+                .state
+                .claim_provider_request(
+                    &fixture.session_id,
+                    "q1",
+                    AnsweredProviderRequest::Permission {
+                        behavior: "deny".to_string(),
+                    },
+                )
+                .unwrap(),
+            None
+        );
+
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/sessions/http-respond/respond-permission",
+            json!({ "sessionId": "", "requestId": "q1", "behavior": "allow" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["error"]["outcome"]["behavior"], "deny");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_answer_that_never_reached_the_provider_can_be_given_again() {
+        let fixture = embedded_fixture().await;
+        let input = || RespondToPermissionRequestInput {
+            session_id: fixture.session_id.0.clone(),
+            request_id: "r1".to_string(),
+            behavior: "allow".to_string(),
+        };
+        // No provider is attached in the fixture, so forwarding fails.
+        for _ in 0..2 {
+            assert!(matches!(
+                respond_to_permission_request_with_state(&fixture.state, input()).await,
+                Err(RespondToProviderRequestError::Failed(_))
+            ));
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn embedded_backend_streams_the_desktop_runtime_events() {
+        let fixture = embedded_fixture().await;
+        let backend = HttpBackend::embedded(fixture.state.clone()).expect("embedded backend");
+        let mut receiver = backend.events.subscribe();
+
+        EventBus::publish(
+            &fixture.state,
+            CoreEvent::SessionResumed {
+                session_id: fixture.session_id.0.clone(),
+            },
+        )
+        .await
+        .expect("publish");
+
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(CoreEvent::SessionResumed { .. })
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn embedded_backend_serves_no_remote_terminals() {
+        let fixture = embedded_fixture().await;
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/terminals/spawn",
+            json!({ "cwd": "/tmp" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn http_turn_preflight_rejects_unknown_provider_without_persisting_selection() {
         let root = tempfile::tempdir().expect("http state root");
@@ -2824,13 +2941,7 @@ mod tests {
             decision_provider_model_route: None,
         };
 
-        let transition = state
-            .acquire_provider_transition(&input.session_id)
-            .await
-            .expect("HTTP transition");
-        assert!(prepare_http_provider_turn(&state, &transition, &input)
-            .await
-            .is_err());
+        assert!(send_turn_with_state(&state, input).await.is_err());
         assert_eq!(
             state
                 .peek_session(&session.id)

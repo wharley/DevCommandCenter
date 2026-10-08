@@ -1338,6 +1338,26 @@ pub(crate) struct SessionStore {
     /// resume id. Their first turn carries the re-anchor as a fallback the
     /// adapter uses only if the provider refuses the resume.
     native_resume_armed: HashSet<SessionId>,
+    /// Answers already given to provider permission/question requests, so the
+    /// desktop and a phone answering the same card cannot both go through.
+    /// Runtime-only and bounded; after a restart the durable `*Resolved`
+    /// events carry the same fact.
+    answered_provider_requests: HashMap<(SessionId, String), AnsweredProviderRequest>,
+    answered_provider_request_order: std::collections::VecDeque<(SessionId, String)>,
+}
+
+const ANSWERED_PROVIDER_REQUESTS_CAP: usize = 512;
+
+/// The outcome of a provider permission or question request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum AnsweredProviderRequest {
+    Permission {
+        behavior: String,
+    },
+    UserInput {
+        answers: Vec<dcc_core::ports::provider::ProviderUserInputAnswer>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1864,6 +1884,65 @@ impl SessionCommandState {
         self.store
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Records `answer` as the response to a provider request unless one was
+    /// already recorded, in which case the earlier answer is returned and the
+    /// caller must not forward its own.
+    pub fn claim_provider_request(
+        &self,
+        session_id: &SessionId,
+        request_id: &str,
+        answer: AnsweredProviderRequest,
+    ) -> Result<Option<AnsweredProviderRequest>> {
+        let mut store = self.lock_store()?;
+        let key = (session_id.clone(), request_id.to_string());
+        if let Some(existing) = store.answered_provider_requests.get(&key) {
+            return Ok(Some(existing.clone()));
+        }
+        store.answered_provider_requests.insert(key.clone(), answer);
+        store.answered_provider_request_order.push_back(key);
+        while store.answered_provider_request_order.len() > ANSWERED_PROVIDER_REQUESTS_CAP {
+            if let Some(oldest) = store.answered_provider_request_order.pop_front() {
+                store.answered_provider_requests.remove(&oldest);
+            }
+        }
+        Ok(None)
+    }
+
+    /// Replaces a claimed answer (e.g. the tool guard turned allow into deny).
+    pub fn settle_provider_request(
+        &self,
+        session_id: &SessionId,
+        request_id: &str,
+        answer: AnsweredProviderRequest,
+    ) -> Result<()> {
+        let mut store = self.lock_store()?;
+        if let Some(existing) = store
+            .answered_provider_requests
+            .get_mut(&(session_id.clone(), request_id.to_string()))
+        {
+            *existing = answer;
+        }
+        Ok(())
+    }
+
+    /// Drops a claim whose answer never reached the provider, so it can be
+    /// answered again.
+    pub fn release_provider_request(&self, session_id: &SessionId, request_id: &str) -> Result<()> {
+        let mut store = self.lock_store()?;
+        let key = (session_id.clone(), request_id.to_string());
+        store.answered_provider_requests.remove(&key);
+        store
+            .answered_provider_request_order
+            .retain(|entry| entry != &key);
+        Ok(())
+    }
+
+    /// Keeps `bus` receiving this runtime's events for as long as the caller
+    /// holds the `Arc` (the runtime only keeps a weak reference).
+    pub fn register_event_bus(&self, bus: &Arc<dyn EventBus>) -> Result<()> {
+        self.runtime.register_event_bus(bus)
     }
 
     fn provider_binding(&self, session_id: &SessionId) -> Result<Option<ProviderSessionBinding>> {

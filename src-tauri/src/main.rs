@@ -34,10 +34,11 @@ use dcc_tauri::{
     state::{SessionCommandState, WorkspaceCommandState},
 };
 use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar;
-use dev_command_center_tauri::daemon_client::{
-    ensure_sidecar_running, rpc_with_info, sidecar_binary_candidates_for, DaemonRuntimeInfo,
-};
+use dev_command_center_tauri::daemon_client::{ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo};
 use dev_command_center_tauri::decision_provider_settings::DecisionProviderSettings;
+use dev_command_center_tauri::embedded_http::EmbeddedHttpServer;
+use dev_command_center_tauri::http_api::HttpBackend;
+use dev_command_center_tauri::http_config::HttpConfig;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -3826,13 +3827,6 @@ fn open_pairing_conn(app: &AppHandle) -> Result<Connection, ApiError> {
     Connection::open(&path).map_err(|e| db_error(e.to_string()))
 }
 
-fn http_port() -> u16 {
-    std::env::var("DCC_HTTP_PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(9876)
-}
-
 fn http_get_local(port: u16, path: &str) -> Option<(u16, String)> {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(250))
@@ -3864,36 +3858,12 @@ fn http_get_local(port: u16, path: &str) -> Option<(u16, String)> {
     Some((status, response))
 }
 
-fn http_health_ok(port: u16) -> bool {
-    let Some((status, response)) = http_get_local(port, "/health") else {
-        return false;
-    };
-    status == 200 && response.contains("DCC HTTP API")
-}
-
-fn http_health_is_dcc(port: u16) -> bool {
-    http_get_local(port, "/health")
+/// True when a DCC HTTP API answers on the port (`/` needs no daemon, so it
+/// answers fast even when `/health` would wait on one).
+fn http_port_held_by_dcc(port: u16) -> bool {
+    http_get_local(port, "/")
         .map(|(_status, response)| response.contains("DCC HTTP API"))
         .unwrap_or(false)
-}
-
-fn http_mobile_spa_ok(port: u16) -> bool {
-    let Some((status, response)) = http_get_local(port, "/m/pair") else {
-        return false;
-    };
-    status == 200 && response.contains("<div id=\"root\"")
-}
-
-/// A server someone started loopback-only (e.g. `cargo run --bin dccd-http`)
-/// answers health checks but the phone cannot reach it, so it does not count.
-fn http_lan_listener_ok(port: u16) -> bool {
-    http_get_local(port, "/health")
-        .map(|(_status, response)| response.contains("\"lanListener\":true"))
-        .unwrap_or(false)
-}
-
-fn http_server_ready_for_pairing(port: u16) -> bool {
-    http_health_ok(port) && http_lan_listener_ok(port) && http_mobile_spa_ok(port)
 }
 
 fn terminate_existing_http_sidecars(force: bool) {
@@ -3939,102 +3909,74 @@ fn terminate_existing_http_sidecars(force: bool) {
     }
 }
 
-fn locate_http_sidecar_binary(app: &AppHandle) -> Option<PathBuf> {
-    if cfg!(dev) {
-        return None;
+/// The desktop serves the HTTP API itself now. A `dccd-http` left running by
+/// an older version would keep the port (and answer for the same database),
+/// so ask it to exit first; whatever still holds the port afterwards (e.g. a
+/// second copy of the app) only costs a warning.
+fn stop_stale_http_sidecar(port: u16) {
+    if !http_port_held_by_dcc(port) {
+        return;
     }
-
-    let binary_names = sidecar_binary_candidates_for("dccd-http");
-    let mut candidates = Vec::new();
-
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        for name in &binary_names {
-            candidates.push(resource_dir.join(name));
-        }
-    }
-
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(parent) = current_exe.parent() {
-            for name in &binary_names {
-                candidates.push(parent.join(name));
-            }
-            if let Some(grand_parent) = parent.parent() {
-                for name in &binary_names {
-                    candidates.push(grand_parent.join(name));
-                }
-            }
-        }
-    }
-
-    candidates.into_iter().find(|candidate| candidate.exists())
-}
-
-fn ensure_http_server_running(app: &AppHandle) -> Result<(), ApiError> {
-    let port = http_port();
-    if http_server_ready_for_pairing(port) {
-        return Ok(());
-    }
-
-    if http_health_is_dcc(port) {
-        terminate_existing_http_sidecars(false);
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(3) && http_health_is_dcc(port) {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        if http_health_is_dcc(port) {
-            terminate_existing_http_sidecars(true);
-            std::thread::sleep(Duration::from_millis(250));
-        }
-    }
-
-    let db_path = pairing_db_path(app)?;
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| db_error(format!("app data dir unavailable: {e}")))?;
-
-    let mut command = if let Some(binary) = locate_http_sidecar_binary(app) {
-        Command::new(binary)
-    } else {
-        let mut cargo = Command::new("cargo");
-        cargo
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .env(
-                "CARGO_TARGET_DIR",
-                std::env::temp_dir().join("dcc-sidecar-target"),
-            )
-            .args(["run", "--quiet", "--bin", "dccd-http", "--"]);
-        cargo
-    };
-
-    // Opening the pairing screen is the explicit opt-in to listen on the LAN;
-    // dccd-http then accepts only paired devices from the network.
-    command
-        .env("DCC_HTTP_DB_PATH", db_path)
-        .env("DCC_APP_DATA_DIR", app_data_dir)
-        .env("DCC_HTTP_LAN", "1")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| db_error(format!("failed to start dccd-http: {e}")))?;
-
-    let startup_timeout = if cfg!(dev) {
-        Duration::from_secs(30)
-    } else {
-        Duration::from_secs(6)
-    };
+    terminate_existing_http_sidecars(false);
     let started = Instant::now();
-    while started.elapsed() < startup_timeout {
-        if http_server_ready_for_pairing(port) {
-            return Ok(());
-        }
+    while started.elapsed() < Duration::from_secs(3) && http_port_held_by_dcc(port) {
         std::thread::sleep(Duration::from_millis(100));
     }
+    if http_port_held_by_dcc(port) {
+        terminate_existing_http_sidecars(true);
+    }
+}
 
-    Err(db_error(format!(
-        "dccd-http did not become ready for mobile pairing on port {port}"
-    )))
+fn start_embedded_http_server(
+    app: &tauri::App,
+    session_state: SessionCommandState,
+    db_path: PathBuf,
+) {
+    let mut config = match HttpConfig::load() {
+        Ok(config) if config.enabled => config,
+        Ok(_) => {
+            eprintln!("[DCC HTTP] disabled in configuration");
+            return;
+        }
+        Err(error) => {
+            eprintln!("[DCC HTTP] not started: {error}");
+            return;
+        }
+    };
+    config.db_path = db_path;
+    let lan = config.lan;
+    let backend = match HttpBackend::embedded(session_state) {
+        Ok(backend) => backend,
+        Err(error) => {
+            eprintln!("[DCC HTTP] not started: {error}");
+            return;
+        }
+    };
+    let server = Arc::new(EmbeddedHttpServer::new(config, backend));
+    app.manage(EmbeddedHttpServerState(server.clone()));
+    tauri::async_runtime::spawn(async move {
+        let port = server.port();
+        let _ = tauri::async_runtime::spawn_blocking(move || stop_stale_http_sidecar(port)).await;
+        match server.ensure_listening(lan).await {
+            Ok(addr) => eprintln!("[DCC HTTP] listening on http://{addr}"),
+            Err(error) => eprintln!("[DCC HTTP] WARN: {error}; mobile access unavailable"),
+        }
+    });
+}
+
+struct EmbeddedHttpServerState(Arc<EmbeddedHttpServer>);
+
+/// Opening mobile pairing is the explicit opt-in to listen on the LAN.
+async fn ensure_lan_http_server(app: &AppHandle) -> Result<u16, ApiError> {
+    let server = app
+        .try_state::<EmbeddedHttpServerState>()
+        .map(|state| state.0.clone())
+        .ok_or_else(|| db_error("the mobile HTTP API is not available".to_string()))?;
+    server
+        .ensure_listening(true)
+        .await
+        .map_err(|error| db_error(format!("mobile HTTP API unavailable: {error}")))?;
+    Ok(server.port())
 }
 
 fn pairing_error_to_api(err: dev_command_center_tauri::pairing::PairingError) -> ApiError {
@@ -4043,7 +3985,7 @@ fn pairing_error_to_api(err: dev_command_center_tauri::pairing::PairingError) ->
 
 #[tauri::command]
 async fn pair_init(app: AppHandle) -> ApiResult<Value> {
-    ensure_http_server_running(&app)?;
+    ensure_lan_http_server(&app).await?;
     tauri::async_runtime::spawn_blocking(move || {
         let conn = open_pairing_conn(&app)?;
         let challenge = dev_command_center_tauri::pairing::create_pairing_nonce(&conn)
@@ -4145,8 +4087,7 @@ async fn pair_purge_expired(app: AppHandle) -> ApiResult<Value> {
 /// "no LAN detected" rather than rendering a broken QR.
 #[tauri::command]
 async fn pair_get_lan_url(app: AppHandle) -> ApiResult<Value> {
-    ensure_http_server_running(&app)?;
-    let port = http_port();
+    let port = ensure_lan_http_server(&app).await?;
     let endpoint = dev_command_center_tauri::net_info::lan_endpoint(port);
     Ok(serde_json::to_value(endpoint).map_err(|e| db_error(e.to_string()))?)
 }
@@ -4157,8 +4098,7 @@ async fn pair_get_lan_url(app: AppHandle) -> ApiResult<Value> {
 /// to `tailscale status` does not block the Tauri runtime.
 #[tauri::command]
 async fn pair_get_endpoints(app: AppHandle) -> ApiResult<Value> {
-    ensure_http_server_running(&app)?;
-    let port = http_port();
+    let port = ensure_lan_http_server(&app).await?;
     let endpoints = tauri::async_runtime::spawn_blocking(move || {
         dev_command_center_tauri::net_info::discover_endpoints(port)
     })
@@ -7447,6 +7387,7 @@ pub fn run() {
             app.manage(workspace_command_state);
             app.manage(ai_memory_sidecar);
             app.manage(CodeRabbitReviewJobsState::default());
+            start_embedded_http_server(app, session_command_state.clone(), db_path.clone());
             app.manage(session_command_state);
             let ai_memory_retry_state = app
                 .try_state::<SessionCommandState>()

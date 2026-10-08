@@ -1,5 +1,5 @@
 use dev_command_center_tauri::daemon_client::default_app_data_dir;
-use dev_command_center_tauri::http_api::build_router;
+use dev_command_center_tauri::http_api::{build_router, HttpBackend};
 use dev_command_center_tauri::http_config::HttpConfig;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -70,8 +70,12 @@ async fn main() {
     }
 
     let network_exposed = config.is_network_exposed();
+    let backend = Arc::new(HttpBackend::headless(
+        config.db_path.clone(),
+        default_app_data_dir(),
+    ));
     let config = Arc::new(RwLock::new(config));
-    let app = build_router(config.clone());
+    let app = build_router(config.clone(), backend);
 
     println!("[DCC HTTP] Listening on http://{bind_addr}");
     if network_exposed && bind_addr.ip().is_unspecified() {

@@ -65,7 +65,7 @@ use crate::guarded_undo_runtime::{
     GuardedUndoBinding, GuardedUndoChainPlanResult, GuardedUndoExecuteResult,
     GuardedUndoPrepareResult,
 };
-use crate::state::SessionCommandState;
+use crate::state::{AnsweredProviderRequest, SessionCommandState};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1971,14 +1971,10 @@ async fn record_decision_provider_model_route(
     }
 }
 
-async fn pending_tool_guard_context(
-    state: &SessionCommandState,
-    session_id: &SessionId,
+fn pending_tool_guard_context(
+    events: &[SessionEventRecord],
     request_id: &str,
 ) -> Option<(String, ProviderPermissionRequest)> {
-    let events = SessionEventRepo::list_events_by_session(state, session_id)
-        .await
-        .ok()?;
     let (turn_id, request) = events.iter().rev().find_map(|event| {
         let SessionEventKind::TurnPermissionRequested {
             turn_id,
@@ -2444,11 +2440,20 @@ pub async fn start_thread(
     _app: AppHandle,
     input: StartThreadInput,
 ) -> Result<StartThreadOutput, String> {
+    start_thread_with_state(&state, input).await
+}
+
+/// Starting a session without Tauri `State`, shared with the HTTP API so a
+/// session started from the phone follows the desktop's rules.
+pub async fn start_thread_with_state(
+    state: &SessionCommandState,
+    input: StartThreadInput,
+) -> Result<StartThreadOutput, String> {
     state
         .validate_start_thread_scope(&input)
         .await
         .map_err(|error| error.to_string())?;
-    let output = run_start_thread(&*state, &*state, &*state, &*state, input)
+    let output = run_start_thread(state, state, state, state, input)
         .await
         .map_err(|error| error.to_string())?;
     state
@@ -2845,6 +2850,14 @@ pub async fn abort_run(
     _app: AppHandle,
     input: AbortRunInput,
 ) -> Result<AbortRunOutput, String> {
+    abort_run_with_state(&state, input).await
+}
+
+/// Stopping a run without Tauri `State`, shared with the HTTP API.
+pub async fn abort_run_with_state(
+    state: &SessionCommandState,
+    input: AbortRunInput,
+) -> Result<AbortRunOutput, String> {
     let session_id = input.session_id.clone();
     let active_turn_id = state
         .list_events_by_session(&session_id)
@@ -2858,7 +2871,7 @@ pub async fn abort_run(
             .await
             .map_err(|error| error.to_string())?;
     }
-    let output = run_abort_run(&*state, &*state, &*state, input)
+    let output = run_abort_run(state, state, state, input)
         .await
         .map_err(|error| error.to_string())?;
     Ok(output)
@@ -3284,23 +3297,124 @@ pub async fn search_sessions(
         .map_err(|error| error.to_string())
 }
 
+/// Why answering a provider request did not go through.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RespondToProviderRequestError {
+    /// Someone (the desktop, a phone, the provider itself) answered first.
+    AlreadyAnswered(AnsweredProviderRequest),
+    Failed(String),
+}
+
+impl std::fmt::Display for RespondToProviderRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyAnswered(AnsweredProviderRequest::Permission { behavior }) => {
+                write!(f, "This request was already answered ({behavior})")
+            }
+            Self::AlreadyAnswered(AnsweredProviderRequest::UserInput { .. }) => {
+                write!(f, "This question was already answered")
+            }
+            Self::Failed(message) => f.write_str(message),
+        }
+    }
+}
+
+/// The answer the durable history already holds for `request_id`, if any.
+fn answered_in_history(
+    events: &[SessionEventRecord],
+    request_id: &str,
+) -> Option<AnsweredProviderRequest> {
+    events.iter().rev().find_map(|event| match &event.kind {
+        SessionEventKind::TurnPermissionResolved {
+            request_id: resolved,
+            behavior,
+            ..
+        } if resolved == request_id => Some(AnsweredProviderRequest::Permission {
+            behavior: behavior.clone(),
+        }),
+        SessionEventKind::TurnUserInputResolved {
+            request_id: resolved,
+            answers,
+            ..
+        } if resolved == request_id => Some(AnsweredProviderRequest::UserInput {
+            answers: answers.clone(),
+        }),
+        _ => None,
+    })
+}
+
+/// Checks the durable history, then claims the request in memory. The claim
+/// covers the gap until the provider's own `*Resolved` event is persisted.
+async fn claim_unanswered_request(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+    request_id: &str,
+    answer: AnsweredProviderRequest,
+) -> Result<Vec<SessionEventRecord>, RespondToProviderRequestError> {
+    let events = SessionEventRepo::list_events_by_session(state, session_id)
+        .await
+        .map_err(|error| RespondToProviderRequestError::Failed(error.to_string()))?;
+    if let Some(earlier) = answered_in_history(&events, request_id) {
+        return Err(RespondToProviderRequestError::AlreadyAnswered(earlier));
+    }
+    match state
+        .claim_provider_request(session_id, request_id, answer)
+        .map_err(|error| RespondToProviderRequestError::Failed(error.to_string()))?
+    {
+        Some(earlier) => Err(RespondToProviderRequestError::AlreadyAnswered(earlier)),
+        None => Ok(events),
+    }
+}
+
+async fn forward_claimed_answer(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+    request_id: &str,
+    input: Input,
+) -> Result<(), RespondToProviderRequestError> {
+    if let Err(error) = state.send_provider_input(session_id, input).await {
+        let _ = state.release_provider_request(session_id, request_id);
+        return Err(RespondToProviderRequestError::Failed(error.to_string()));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn respond_to_user_input(
     state: State<'_, SessionCommandState>,
     _app: AppHandle,
     input: RespondToUserInputInput,
 ) -> Result<RespondToUserInputOutput, String> {
-    let session_id = dcc_core::domain::session::SessionId(input.session_id);
-    state
-        .send_provider_input(
-            &session_id,
-            Input::UserInputResponse(ProviderUserInputResponse {
-                request_id: input.request_id,
-                answers: input.answers,
-            }),
-        )
+    respond_to_user_input_with_state(&state, input)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())
+}
+
+/// Answers a provider question once, from the desktop or the HTTP API.
+pub async fn respond_to_user_input_with_state(
+    state: &SessionCommandState,
+    input: RespondToUserInputInput,
+) -> Result<RespondToUserInputOutput, RespondToProviderRequestError> {
+    let session_id = SessionId(input.session_id);
+    claim_unanswered_request(
+        state,
+        &session_id,
+        &input.request_id,
+        AnsweredProviderRequest::UserInput {
+            answers: input.answers.clone(),
+        },
+    )
+    .await?;
+    forward_claimed_answer(
+        state,
+        &session_id,
+        &input.request_id,
+        Input::UserInputResponse(ProviderUserInputResponse {
+            request_id: input.request_id.clone(),
+            answers: input.answers,
+        }),
+    )
+    .await?;
     Ok(RespondToUserInputOutput { ok: true })
 }
 
@@ -3310,13 +3424,31 @@ pub async fn respond_to_permission_request(
     _app: AppHandle,
     input: RespondToPermissionRequestInput,
 ) -> Result<RespondToPermissionRequestOutput, String> {
-    let session_id = dcc_core::domain::session::SessionId(input.session_id);
+    respond_to_permission_request_with_state(&state, input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Answers a provider permission request once, from the desktop or the HTTP
+/// API, after the decision provider's tool guard had its say.
+pub async fn respond_to_permission_request_with_state(
+    state: &SessionCommandState,
+    input: RespondToPermissionRequestInput,
+) -> Result<RespondToPermissionRequestOutput, RespondToProviderRequestError> {
+    let session_id = SessionId(input.session_id);
+    let events = claim_unanswered_request(
+        state,
+        &session_id,
+        &input.request_id,
+        AnsweredProviderRequest::Permission {
+            behavior: input.behavior.clone(),
+        },
+    )
+    .await?;
     let mut behavior = input.behavior;
     if behavior == "allow" {
-        if let Some((prompt, request)) =
-            pending_tool_guard_context(&state, &session_id, &input.request_id).await
-        {
-            if decision_provider_tool_guard(&state, &session_id, &prompt, &request).await
+        if let Some((prompt, request)) = pending_tool_guard_context(&events, &input.request_id) {
+            if decision_provider_tool_guard(state, &session_id, &prompt, &request).await
                 == Some(true)
             {
                 eprintln!(
@@ -3324,19 +3456,26 @@ pub async fn respond_to_permission_request(
                     input.request_id, request.tool_name
                 );
                 behavior = "deny".to_string();
+                let _ = state.settle_provider_request(
+                    &session_id,
+                    &input.request_id,
+                    AnsweredProviderRequest::Permission {
+                        behavior: behavior.clone(),
+                    },
+                );
             }
         }
     }
-    state
-        .send_provider_input(
-            &session_id,
-            Input::PermissionResponse(ProviderPermissionResponse {
-                request_id: input.request_id,
-                behavior,
-            }),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
+    forward_claimed_answer(
+        state,
+        &session_id,
+        &input.request_id,
+        Input::PermissionResponse(ProviderPermissionResponse {
+            request_id: input.request_id.clone(),
+            behavior,
+        }),
+    )
+    .await?;
     Ok(RespondToPermissionRequestOutput { ok: true })
 }
 

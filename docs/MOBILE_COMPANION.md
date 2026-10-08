@@ -1,6 +1,6 @@
 # DCC pelo celular
 
-O companion em `/m/` permite iniciar tarefas, acompanhar conversas, responder a decisões do agente e revisar alterações. O computador continua executando os agentes e precisa estar acordado, com `dccd-http` disponível.
+O companion em `/m/` permite iniciar tarefas, acompanhar conversas, responder a decisões do agente e revisar alterações. O computador continua executando os agentes e precisa estar acordado, com o app desktop aberto (ou o `dccd-http`, sem o app).
 
 ## Funcionalidades
 
@@ -35,7 +35,7 @@ Mudar entre HTTP e HTTPS muda a origem do armazenamento: será necessário parea
 - Web Push foi removido na 0.1.66. Não há avisos com o companion fechado; acompanhe tarefas e decisões com a página aberta. Notificações nativas do desktop continuam disponíveis.
 
 - PWA e reconexão não mantêm o Mac acordado nem executam os agentes sem o computador. O cache permite consultar snapshots e escrever rascunhos; enviar ações exige acesso ao host.
-- A arquitetura mantém runtimes de agentes separados por processo. Perguntas/aprovações de tarefas iniciadas pelo companion são encaminhadas ao runtime HTTP. Para um agente em execução no processo desktop, ainda não há encaminhamento dessas respostas entre processos. O histórico pode ser consultado, mas o controle completo dessa execução requer uma ponte de comandos ou um runtime único.
+- Com o app desktop aberto, a API do companion roda dentro dele, sobre as mesmas sessões: perguntas e aprovações de qualquer agente do desktop aparecem e podem ser respondidas pelo celular, e tarefas criadas no celular rodam no desktop. A primeira resposta vale; uma segunda (do desktop ou do celular) recebe 409 com o desfecho. O `dccd-http` sozinho só controla as sessões que ele mesmo iniciou.
 - A criação tem idempotência persistida. Envio de mensagens e respostas usam os endpoints existentes: após resultado de rede ambíguo, confira o histórico antes de repetir. Não há fila automática de ações offline.
 
 ## Desenvolvimento e validação

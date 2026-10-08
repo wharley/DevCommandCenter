@@ -2,6 +2,7 @@ pub mod ai_memory_sidecar;
 pub mod daemon_client;
 pub mod daemon_runtime;
 pub mod decision_provider_settings;
+pub mod embedded_http;
 pub mod http_api;
 pub mod http_auth;
 pub mod http_config;

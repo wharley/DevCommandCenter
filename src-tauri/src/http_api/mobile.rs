@@ -10,11 +10,12 @@ use rusqlite::OptionalExtension;
 
 pub(super) async fn catalog(
     State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let state = headless_session_state(config.clone()).await?;
-    let providers = dcc_tauri::commands::provider_commands::list_providers_for_state(&state)
-        .await
-        .map_err(HttpApiError::internal)?;
+    let providers =
+        dcc_tauri::commands::provider_commands::list_providers_for_state(&backend.sessions)
+            .await
+            .map_err(HttpApiError::internal)?;
     let repo = SqliteWorkspaceRepo::open(&config.read().await.db_path)
         .map_err(|e| HttpApiError::internal(e.to_string()))?;
     let repositories = repo.list_repositories().await.map_err(core_error)?;
@@ -135,6 +136,7 @@ pub(super) async fn task_status(
 
 pub(super) async fn create_task(
     State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<CreateTask>,
 ) -> Result<Json<Value>, HttpApiError> {
     validate_task(&input)?;
@@ -154,7 +156,7 @@ pub(super) async fn create_task(
         // Detach execution from the HTTP request: switching networks must not cancel creation.
         tokio::spawn(async move {
             let mut result = json!({"state":"creating"});
-            if let Err(error) = execute_task(config.clone(), &input, &mut result).await {
+            if let Err(error) = execute_task(config.clone(), backend, &input, &mut result).await {
                 result["state"] = json!("failed");
                 result["error"] = json!(error.message());
             }
@@ -173,10 +175,11 @@ pub(super) async fn create_task(
 
 async fn execute_task(
     config: Arc<RwLock<HttpConfig>>,
+    backend: Arc<HttpBackend>,
     input: &CreateTask,
     result: &mut Value,
 ) -> Result<(), HttpApiError> {
-    let state = headless_session_state(config.clone()).await?;
+    let state = &backend.sessions;
     // Validate provider/model before creating any worktree. The real workspace is checked below.
     let mut start: StartThreadInput = serde_json::from_value(json!({
         "workspaceId": input.workspace_id.as_deref().unwrap_or("pending"), "projectId": "pending",
@@ -209,7 +212,7 @@ async fn execute_task(
         let created = create_workspace_for_repo(
             &repo,
             &CommandGitOps::new(),
-            &*state,
+            state,
             CreateWorkspaceForRepoInput {
                 project_id: repository.project_id,
                 workspace_root: repository.root_path,
@@ -227,7 +230,7 @@ async fn execute_task(
     start.workspace_id = workspace.id;
     start.project_id = workspace.project_id;
     // Attach only when sending: start_thread persists the session before provider startup.
-    let output = start_thread(&*state, &*state, &*state, &*state, start)
+    let output = start_thread(state, state, state, state, start)
         .await
         .map_err(core_error)?;
     let session_id = output.session.id.0;
@@ -238,7 +241,7 @@ async fn execute_task(
         "approvalPolicy": ProviderApprovalPolicy::Ask,
     }))
     .map_err(|e| HttpApiError::BadRequest(e.to_string()))?;
-    let _ = send_turn_handler(State(config), Path(session_id), Json(turn)).await?;
+    let _ = send_turn_handler(State(backend.clone()), Path(session_id), Json(turn)).await?;
     result["state"] = json!("started");
     Ok(())
 }

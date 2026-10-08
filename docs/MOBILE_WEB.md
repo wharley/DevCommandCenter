@@ -1,7 +1,8 @@
 # Mobile Web Companion
 
-The mobile web companion is served by `dccd-http` and can be paired with the
-desktop app through a QR code plus PIN. It is intended for trusted local
+The mobile web companion is served by the desktop app itself (or by the
+headless `dccd-http` server when no desktop app runs) and is paired through a
+QR code plus PIN. It is intended for trusted local
 networks or private network overlays such as Tailscale.
 
 ## Server Model
@@ -10,37 +11,44 @@ There are two different servers during development:
 
 | Server | Port | Serves | Use it for |
 |---|---:|---|---|
-| `dccd-http` | `9876` | The HTTP API (`/api`, `/auth`) and the built SPA at `/m/` from `apps/mobile-web/dist/` | QR pairing and phone testing without OJ |
+| Desktop app (or `dccd-http`) | `9876` | The HTTP API (`/api`, `/auth`) and the built SPA at `/m/` from `apps/mobile-web/dist/` | QR pairing and phone testing without OJ |
 | OJ dev server | `5174` | The SPA at `/m/` with HMR, proxying `/api`, `/auth`, `/health`, and `/rpc` to `127.0.0.1:9876` | Live mobile UI development |
 
 Important details:
 
-- The HTTP daemon is required in both flows because it owns the API and reads the
-  same application database as the desktop app.
+- The HTTP API is required in both flows. Served by the desktop app it runs on
+  the app's own sessions, so the phone sees and answers (permissions,
+  questions) the agents the desktop is running; tasks started from the phone
+  run in the desktop and show in its sidebar.
 - The desktop QR code points at `http://<host>:9876/m/`, so QR pairing expects a
   built `apps/mobile-web/dist/`.
 - When using the OJ server, open the OJ URL manually and omit the `be`
   fragment parameter so the SPA uses the OJ origin and its API proxy.
 
-## Start The HTTP Daemon
+## Start The HTTP API
 
-`yarn dev`, `yarn dev:desktop`, and `tauri dev` do not start the mobile HTTP
-daemon. Opening the pairing screen in the desktop app starts one; to run it
-yourself:
+The desktop app (`tauri dev` included) serves the API on `127.0.0.1:9876` while
+it is open. Opening Settings -> Connections (mobile pairing) is the opt-in that
+moves it to every interface so a phone can reach it; it stays there until the
+app quits. In that mode the API accepts only paired devices (or an operator
+bearer token), never the local `X-API-Key`. Remote terminals
+(`/api/v1/terminals/*`) are not served by the desktop app.
+
+Without the desktop app, run the headless server (it owns the sessions it
+starts and still serves terminals):
 
 ```bash
 cd src-tauri
 DCC_HTTP_LAN=1 cargo run --bin dccd-http
 ```
 
-By default `dccd-http` listens on `127.0.0.1` only. `DCC_HTTP_LAN=1` is the
-opt-in to listen on every interface so a phone can reach it; in that mode the
-API accepts only paired devices (or an operator bearer token), never the local
-`X-API-Key`. The API key is generated on first run and stored in
+`dccd-http` listens on `127.0.0.1` unless `DCC_HTTP_LAN=1` is set. Do not run it
+next to the desktop app: the app stops a `dccd-http` it finds on the port at
+startup. The API key is generated on first run and stored in
 `~/.dcc/http-config.json` (mode `0600`); the server refuses to start with the
 old public default key.
 
-The daemon should log that it is listening on port `9876`. From the same machine:
+The server should be listening on port `9876`. From the same machine:
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:9876/health
@@ -48,16 +56,15 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:9876/health
 
 Expected response code: `200`.
 
-Keep a single desktop instance open when pairing. The desktop app creates the
-pairing nonce and PIN; `dccd-http` validates the pairing and serves the mobile
-API.
+Keep a single desktop instance open: a second copy finds the port taken and
+serves no API (it only logs a warning).
 
 ## Phone Via QR
 
 This is the recommended phone flow because the QR code opens the same daemon
 that serves the API.
 
-1. Start `dccd-http`.
+1. Open the desktop app (or start `dccd-http`).
 2. Build the mobile SPA:
 
    ```bash
@@ -81,7 +88,7 @@ The generated `apps/mobile-web/dist/` directory is intentionally ignored by Git.
 
 Use this when changing the mobile UI and testing on a physical phone.
 
-1. Start `dccd-http`.
+1. Open the desktop app (or start `dccd-http`).
 2. Expose OJ on the network:
 
    ```bash
@@ -110,7 +117,7 @@ http://localhost:5174/m/
 http://localhost:5174/m/pair#nonce=<NONCE>
 ```
 
-The OJ proxy sends API calls to the local `dccd-http` daemon.
+The OJ proxy sends API calls to the local HTTP API on `:9876`.
 
 ## Tailscale
 
@@ -124,7 +131,7 @@ you want transport encryption through the tailnet.
    tailscale ip -4
    ```
 
-3. Start `dccd-http`.
+3. Open the desktop app (or start `dccd-http`).
 4. Use one of the flows below.
 
 For QR pairing:
@@ -167,9 +174,9 @@ After pairing, verify these mobile paths:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| The QR URL does not open on the phone | `dccd-http` is not reachable or `apps/mobile-web/dist/` is missing | Start `dccd-http` and run `yarn build` in `apps/mobile-web` |
+| The QR URL does not open on the phone | The API is not reachable on the LAN or `apps/mobile-web/dist/` is missing | Open Settings -> Connections in the desktop app (LAN opt-in) and run `yarn build` in `apps/mobile-web` |
 | `localhost:5174/m/` does not load | The wrong path or server was opened | Use `http://localhost:5174/m/` while OJ is running |
 | The phone cannot reach OJ | OJ is bound to localhost only | Run `yarn dev --host` and use the displayed network URL |
 | API calls fail in the OJ flow | The URL includes `be=` and bypasses the OJ proxy | Use `/m/pair#nonce=<NONCE>` without `be=` |
 | Pairing says the nonce is invalid | The pairing window expired | Create a new pairing in the desktop app |
-| Port `9876` refuses connections | The HTTP daemon is not running or another process owns the port | Restart `dccd-http` and check the daemon logs |
+| Port `9876` refuses connections | The desktop app is closed, or another process (a second app copy) owns the port | Keep one desktop app open and look for `[DCC HTTP]` in its logs |
