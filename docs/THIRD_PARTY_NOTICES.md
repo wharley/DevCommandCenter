@@ -7,7 +7,7 @@ release-wide software composition review.
 ## ai-memory
 
 - Project: [akitaonrails/ai-memory](https://github.com/akitaonrails/ai-memory)
-- Pinned release in DCC artifacts: `v2.2.2`
+- Pinned release in DCC artifacts: `v2.6.1`
 - License: [MIT](https://github.com/akitaonrails/ai-memory/blob/main/LICENSE)
 - Use: optional local sidecar for project memory, scoped retrieval, and
   cross-session handoff

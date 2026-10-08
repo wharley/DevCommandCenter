@@ -21,7 +21,7 @@ const targetDir = join(srcTauriDir, 'target');
 const releaseDir = join(targetDir, 'release');
 const sidecarDistDir = join(sidecarDir, 'dist');
 const isDevMode = process.argv.includes('--dev');
-const aiMemoryVersion = process.env.AI_MEMORY_VERSION || 'v2.2.2';
+const aiMemoryVersion = process.env.AI_MEMORY_VERSION || 'v2.6.1';
 
 if (!/^v\d+\.\d+\.\d+$/.test(aiMemoryVersion)) {
   throw new Error(`invalid AI_MEMORY_VERSION: ${aiMemoryVersion}`);

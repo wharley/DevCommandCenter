@@ -1,0 +1,48 @@
+{
+  "upstream_version": "2.6.1",
+  "mcp_tool_count": 23,
+  "test_kind": "isolated HTTP/MCP protocol smoke",
+  "provider_runtime_executed": false,
+  "llm_calls": 0,
+  "resource_metrics": {
+    "query_count": 29,
+    "query_latency_ms": {
+      "p50": 2.95,
+      "p95": 10.02
+    },
+    "peak_rss_mb": 45.22,
+    "peak_cpu_percent": 49.6,
+    "peak_data_dir_mb": 4.79,
+    "measurement": "best-effort ps samples during the isolated protocol smoke"
+  },
+  "checks_passed": 27,
+  "checks": [
+    "upstream_version",
+    "mcp_discovers_memory_query",
+    "query_has_no_native_branch_or_task_filter",
+    "write_project-a",
+    "write_project-b",
+    "fts_recalls_written_decision",
+    "explicit_scope_excludes_other_project",
+    "unknown_project_fails_closed",
+    "20_concurrent_explicit_scope_reads_do_not_cross",
+    "same_project_query_includes_both_branch_tagged_pages",
+    "hook_start_accepted",
+    "retry_ingest_key_deduplicates_prompt",
+    "synthetic_api_key_redacted_from_retrieved_observations",
+    "assistant_text_not_captured_by_default",
+    "session_end_generates_searchable_page_without_llm",
+    "automatic_handoff_contains_prompt_context",
+    "handoff_accept_succeeds",
+    "accepted_handoff_leaves_open_list",
+    "hook_batch_accepts_events",
+    "hook_batch_ack_is_contiguous_or_indexed",
+    "hook_batch_event_is_searchable",
+    "hook_batch_retry_acknowledges_events",
+    "hook_batch_retry_is_idempotent",
+    "stopped_server_reports_unavailable",
+    "decision_survives_server_restart",
+    "captured_session_survives_restart",
+    "wiki_markdown_exists"
+  ]
+}

@@ -279,6 +279,24 @@ Esse binário passou 27 verificações e anuncia 19 ferramentas MCP. O smoke ant
 2.3.0 em desenvolvimento anunciou 23 ferramentas. O adaptador do DCC usa apenas `/hook/batch` e
 `memory_query`, presentes nas duas linhas.
 
+### Atualização para v2.6.1 (2026-10-08)
+
+O DCC passou a fixar a release **v2.6.1**. O mesmo smoke passou as **27 verificações**
+([resultado](AI_MEMORY_FEASIBILITY_RESULTS_2_6_1.json)); o binário anuncia 23 ferramentas MCP, com
+p50 de **2,95 ms**, p95 de **10,02 ms** e pico de **45,22 MiB RSS** no corpus sintético. Além do
+smoke, foram verificados os pontos específicos do adaptador:
+
+- nomes de projeto no formato `<prefixo>::<id do projeto>` aceitos na ingestão e na consulta;
+- formato de `hits` inalterado; `/hook/batch` mantém `accepted` e acrescenta `results` por evento;
+- o erro de projeto inexistente ainda contém "project … not found", preservando o tratamento do
+  primeiro acesso como índice vazio em `parse_query_hits`;
+- um diretório criado pela v2.2.2 abre na v2.6.1 com os dados antigos recuperáveis. Numa cópia de
+  um store real de 126 MB, as 13 migrações (V64–V76) foram aplicadas e o servidor respondeu em
+  0,4 s, abaixo do limite de 8 s do sidecar.
+
+As migrações são de mão única: depois de aberto pela v2.6.x, o diretório não abre mais na v2.2.2.
+Voltar a uma versão anterior do DCC exige restaurar um backup do diretório de dados.
+
 O script cria HOME e armazenamento temporários, não herda credenciais e encerra o servidor ao sair.
 
 ## Teste integrado do adaptador DCC
@@ -406,12 +424,12 @@ execute `install-hooks` nem `install-mcp` para Claude/Codex ainda, pois isso cri
 fonte de eventos e poderia duplicar observações. Esses instaladores serão avaliados depois, caso
 o fluxo nativo seja escolhido para complementar a exportação do DCC.
 
-No macOS Apple Silicon, instale a release publicada v2.2.2 em um diretório fixo:
+No macOS Apple Silicon, instale a release publicada v2.6.1 (a mesma fixada no build) em um diretório fixo:
 
 ```bash
 mkdir -p ~/Applications/ai-memory
 cd ~/Applications/ai-memory
-curl -fsSL -O https://github.com/akitaonrails/ai-memory/releases/download/v2.2.2/ai-memory-macos-aarch64.tar.gz
+curl -fsSL -O https://github.com/akitaonrails/ai-memory/releases/download/v2.6.1/ai-memory-macos-aarch64.tar.gz
 tar -xzf ai-memory-macos-aarch64.tar.gz
 ./ai-memory --data-dir /tmp/dcc-ai-memory init
 ```
@@ -463,7 +481,7 @@ contexto do modelo. Esse pacote usa no máximo 4.000 caracteres para complementa
 não altera o prompt persistido e instrui o modelo a verificar a evidência contra o pedido, arquivos,
 permissões e estado Git atuais.
 
-1. Iniciar uma instância local do ai-memory v2.2.2 em uma porta de teste, sem reutilizar o diretório
+1. Iniciar uma instância local do ai-memory v2.6.1 em uma porta de teste, sem reutilizar o diretório
    de produção. Por exemplo: `ai-memory init --data-dir /tmp/dcc-ai-memory` e depois
    `ai-memory serve --transport http --bind 127.0.0.1:49374`.
 2. Executar uma sessão curta no DCC, registrar uma decisão, uma tentativa falha e uma pendência.
