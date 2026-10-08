@@ -4,6 +4,7 @@ import {
 	freezeRailGroupOrder,
 	projectWorkspaceRailGroups,
 	projectWorkspaceRepositories,
+	splitIdleRailGroups,
 	workspaceRailGroupSignal,
 } from "./workspace-rail-projection";
 
@@ -240,6 +241,38 @@ describe("projectWorkspaceRailGroups", () => {
 		);
 
 		expect(frozen.map((entry) => entry.id)).toEqual(["pin", "new", "a", "b", "c"]);
+	});
+
+	it("tucks recent projects without tasks away, keeping pins and what is on screen", () => {
+		const task = {
+			id: "t",
+			name: "t",
+			branch: "main",
+			status: "ready" as const,
+			rootPath: "/projects/busy",
+		};
+		const group = (id: string, pinnedAt: string | null, rows: (typeof task)[] = []) => ({
+			id,
+			label: id,
+			sourceKey: id,
+			pinnedAt,
+			rows,
+		});
+		const groups = [
+			group("pinned-empty", "2026-04-01T10:00:00.000Z"),
+			group("busy", null, [task]),
+			group("just-emptied", null),
+			group("idle", null),
+		];
+
+		const { visibleGroups, idleGroups } = splitIdleRailGroups(groups, new Set(["just-emptied"]));
+
+		expect(visibleGroups.map((entry) => entry.id)).toEqual(["pinned-empty", "busy", "just-emptied"]);
+		expect(idleGroups.map((entry) => entry.id)).toEqual(["idle"]);
+		expect(splitIdleRailGroups(groups).idleGroups.map((entry) => entry.id)).toEqual([
+			"just-emptied",
+			"idle",
+		]);
 	});
 
 	it("builds repository-level options for quick workspace creation", () => {

@@ -96,11 +96,13 @@ import {
 	freezeRailGroupOrder,
 	projectGroupingKey,
 	projectWorkspaceRailGroups,
+	splitIdleRailGroups,
 	workspaceRailGroupSignal,
 } from "./workspace-rail-projection";
 import {
 	COMPLETED_SECTION_ID,
 	findSelectedRailSectionId,
+	IDLE_SECTION_ID,
 	initialsFromWorkspaceLabel,
 	PINNED_SECTION_ID,
 	ProjectGroupGlyph,
@@ -159,11 +161,13 @@ type VirtualItem =
 			label: string;
 			groupIds: string[];
 	  }
+	| { kind: "idle-toggle"; count: number; isOpen: boolean }
 	| { kind: "group-gap"; size: number }
 	| { kind: "bottom-padding" };
 
 const HEADER_HEIGHT = 42;
 const SECTION_LABEL_HEIGHT = 24;
+const IDLE_TOGGLE_HEIGHT = 30;
 const ROW_HEIGHT = 76;
 const COMPACT_ROW_HEIGHT = 54;
 const GROUP_GAP = 10;
@@ -588,6 +592,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				: activeGroups,
 		[activeGroups, frozenProjectOrder],
 	);
+	const { visibleGroups: railGroups, idleGroups } = useMemo(
+		() => splitIdleRailGroups(displayedGroups, new Set(frozenProjectOrder ?? [])),
+		[displayedGroups, frozenProjectOrder],
+	);
 	const repositoriesBySourceKey = useMemo(
 		() =>
 			new Map(
@@ -885,7 +893,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
-		const visibleGroups = displayedGroups;
+		const visibleGroups = railGroups;
 		const hasPinnedGroups = visibleGroups.some((group) => group.pinnedAt);
 
 		for (let gi = 0; gi < visibleGroups.length; gi++) {
@@ -946,6 +954,35 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			}
 		}
 
+		let previousHasRows = (visibleGroups.at(-1)?.rows.length ?? 0) > 0;
+		// Projects without tasks wait behind one line at the end of Recent.
+		const recentCollapsed =
+			hasPinnedGroups &&
+			visibleGroups.some((group) => !group.pinnedAt) &&
+			sectionOpenState[RECENT_SECTION_ID] === false;
+		if (idleGroups.length > 0 && !recentCollapsed) {
+			const isOpen = sectionOpenState[IDLE_SECTION_ID] ?? visibleGroups.length === 0;
+			if (visibleGroups.length > 0) {
+				items.push({ kind: "group-gap", size: getGroupGapSize(previousHasRows, false) });
+			}
+			items.push({ kind: "idle-toggle", count: idleGroups.length, isOpen });
+			if (isOpen) {
+				for (const group of idleGroups) {
+					items.push({ kind: "group-gap", size: EMPTY_GROUP_GAP });
+					items.push({
+						kind: "group-header",
+						groupId: group.id,
+						label: group.label,
+						sourceKey: group.sourceKey,
+						rowCount: 0,
+						canCollapse: false,
+						headerVariant: "project",
+					});
+				}
+			}
+			previousHasRows = false;
+		}
+
 		const specialSections = [
 			{
 				id: WAITING_SECTION_ID,
@@ -960,7 +997,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				headerVariant: "completed" as const,
 			},
 		];
-		let previousHasRows = (visibleGroups.at(-1)?.rows.length ?? 0) > 0;
 		for (const section of specialSections) {
 			// An empty section says nothing; it shows up with the first task moved in.
 			if (section.rows.length === 0) {
@@ -993,7 +1029,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		items.push({ kind: "bottom-padding" });
 		return items;
-	}, [completedRows, displayedGroups, sectionOpenState, t, waitingRows]);
+	}, [completedRows, idleGroups, railGroups, sectionOpenState, t, waitingRows]);
 
 	const virtualizer = useVirtualizer({
 		count: flatItems.length,
@@ -1005,6 +1041,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					return HEADER_HEIGHT;
 				case "section-label":
 					return SECTION_LABEL_HEIGHT;
+				case "idle-toggle":
+					return IDLE_TOGGLE_HEIGHT;
 				case "row":
 					return isCompactRailSection(item.groupId) ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
 				case "group-gap":
@@ -1020,6 +1058,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					return `header-${item.groupId}`;
 				case "section-label":
 					return `section-${item.sectionId}`;
+				case "idle-toggle":
+					return "idle-toggle";
 				case "row":
 					return `row-${item.groupId}-${item.workspace.id}`;
 				case "group-gap":
@@ -1210,6 +1250,36 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								) : null}
 							</span>
 						) : null}
+					</button>
+				);
+			}
+
+			if (item.kind === "idle-toggle") {
+				return (
+					<button
+						type="button"
+						data-rail-section={IDLE_SECTION_ID}
+						aria-expanded={item.isOpen}
+						onClick={() =>
+							setSectionOpenState((current) => ({
+								...current,
+								[IDLE_SECTION_ID]: !item.isOpen,
+							}))
+						}
+						className="flex h-full w-full cursor-pointer select-none items-center gap-1.5 px-3 text-muted-foreground/70 transition-colors hover:text-foreground"
+					>
+						{/* Sized on the span: see the button font reset note on project headers. */}
+						<span className="flex items-center gap-1.5 text-[12px]">
+							<ChevronRight
+								className={cn(
+									"size-3 shrink-0 transition-transform duration-150",
+									item.isOpen && "rotate-90",
+								)}
+								strokeWidth={2.2}
+								aria-hidden
+							/>
+							{t("sidebar.idleProjects", { count: item.count })}
+						</span>
 					</button>
 				);
 			}
@@ -2134,7 +2204,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					data-slot="workspace-groups-scroll"
 					onPointerEnter={() =>
 						setFrozenProjectOrder(
-							displayedGroups.filter((group) => !group.pinnedAt).map((group) => group.id),
+							railGroups.filter((group) => !group.pinnedAt).map((group) => group.id),
 						)
 					}
 					onPointerLeave={() => setFrozenProjectOrder(null)}

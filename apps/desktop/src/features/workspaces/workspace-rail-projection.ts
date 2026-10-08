@@ -225,6 +225,29 @@ export function freezeRailGroupOrder(
 }
 
 /**
+ * Recent projects without an active task step aside behind one "no tasks"
+ * line, so the rail lists where work is. Pinned projects always stay: the pin
+ * is the user asking for them. `keepIds` holds projects that were on screen
+ * when the pointer entered the rail, so one that just ran out of tasks does
+ * not vanish under the cursor.
+ */
+export function splitIdleRailGroups(
+	groups: readonly DccWorkspaceRailGroup[],
+	keepIds: ReadonlySet<string> = new Set(),
+): { visibleGroups: DccWorkspaceRailGroup[]; idleGroups: DccWorkspaceRailGroup[] } {
+	const visibleGroups: DccWorkspaceRailGroup[] = [];
+	const idleGroups: DccWorkspaceRailGroup[] = [];
+	for (const group of groups) {
+		if (group.pinnedAt || group.rows.length > 0 || keepIds.has(group.id)) {
+			visibleGroups.push(group);
+		} else {
+			idleGroups.push(group);
+		}
+	}
+	return { visibleGroups, idleGroups };
+}
+
+/**
  * Most recent moment the task was touched: the user's last turn, or its own
  * creation/metadata update when it has no turns yet (a fresh task goes on top).
  */

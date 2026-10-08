@@ -504,6 +504,8 @@
     "unpinProject": "Unpin project",
     "pinnedSection": "Pinned",
     "recentSection": "Recent",
+    "idleProjects_one": "{{count}} project without tasks",
+    "idleProjects_other": "{{count}} projects without tasks",
     "pinProjectError": "The pinned project could not be changed.",
     "pinWorkspace": "Pin task",
     "unpinWorkspace": "Unpin task",

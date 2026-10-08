@@ -9,6 +9,7 @@ export const COMPLETED_SECTION_ID = "dccCompleted";
 /** Subdivisions of the project list, shown only when a project is pinned. */
 export const PINNED_SECTION_ID = "dccPinned";
 export const RECENT_SECTION_ID = "dccRecent";
+export const IDLE_SECTION_ID = "dccIdle";
 
 /** Branch / workflow chroma aligned to shell tokens (maps DCC coarse status → rail hints). */
 export type WorkspaceRailBranchTone =
