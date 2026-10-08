@@ -2196,6 +2196,19 @@ impl SqliteSessionRepo {
         Ok(())
     }
 
+    pub fn clear_ai_memory_source_action(&self, source_key: &str) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "DELETE FROM dcc_ai_memory_source_actions WHERE source_key = ?1",
+            params![source_key],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
     pub fn fail_ai_memory_export(
         &self,
         session_id: &SessionId,

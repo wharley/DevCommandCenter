@@ -415,7 +415,7 @@ pub fn ai_memory_source_action_save(
     if source_key.is_empty() || source_key.chars().count() > 2_000 {
         return Err("sourceKey is required".to_string());
     }
-    if !matches!(action, "corrected" | "ignored" | "pinned") {
+    if !matches!(action, "corrected" | "ignored" | "pinned" | "cleared") {
         return Err("source action is invalid".to_string());
     }
     if input
@@ -425,9 +425,16 @@ pub fn ai_memory_source_action_save(
     {
         return Err("correction is too large".to_string());
     }
-    state
-        .save_ai_memory_source_action(source_key, action, input.correction.as_deref())
-        .map_err(|error| error.to_string())?;
+    // "cleared" undoes a pin, an ignore or a correction.
+    if action == "cleared" {
+        state
+            .clear_ai_memory_source_action(source_key)
+            .map_err(|error| error.to_string())?;
+    } else {
+        state
+            .save_ai_memory_source_action(source_key, action, input.correction.as_deref())
+            .map_err(|error| error.to_string())?;
+    }
     let updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     Ok(AiMemorySourceActionOutput {
         source_key: source_key.to_string(),

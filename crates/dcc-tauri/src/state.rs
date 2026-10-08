@@ -1562,12 +1562,13 @@ impl SessionCommandState {
             .ok()
             .and_then(|records| records.get(&session_id.0).cloned())
         {
-            return hits;
+            return dcc_infra::ai_memory::dedupe_hits(hits);
         }
-        let hits = self
-            .session_repo
-            .list_ai_memory_recovered_sources(session_id)
-            .unwrap_or_default();
+        let hits = dcc_infra::ai_memory::dedupe_hits(
+            self.session_repo
+                .list_ai_memory_recovered_sources(session_id)
+                .unwrap_or_default(),
+        );
         if !hits.is_empty() {
             if let Ok(mut records) = self.ai_memory_hits.lock() {
                 records.insert(session_id.0.clone(), hits.clone());
@@ -2486,6 +2487,10 @@ impl SessionCommandState {
     ) -> Result<()> {
         self.session_repo
             .save_ai_memory_source_action(source_key, action, correction)
+    }
+
+    pub fn clear_ai_memory_source_action(&self, source_key: &str) -> Result<()> {
+        self.session_repo.clear_ai_memory_source_action(source_key)
     }
 
     /// Retries due exports without holding any provider/session transition

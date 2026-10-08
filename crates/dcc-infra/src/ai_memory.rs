@@ -308,7 +308,7 @@ impl AiMemoryClient {
             .await
             .map_err(|error| AiMemoryError::Request(error.to_string()))?;
         let value: Value = self.decode_http(response).await?;
-        parse_query_hits(value)
+        parse_query_hits(value).map(dedupe_hits)
     }
 
     fn endpoint(&self, path: &str) -> Result<String, AiMemoryError> {
@@ -373,8 +373,16 @@ pub fn build_hook_batch(
     let cwd = session.working_directory_override.clone();
     let session_id = session.id.0.clone();
     let mut result = Vec::new();
+    let mut exported_prompts = std::collections::HashSet::new();
     for event in events {
         let (kind, body, source_event) = match &event.kind {
+            // Resending the same message (after an error or an abort) starts a
+            // new turn with identical text; memory only needs it once.
+            SessionEventKind::TurnStarted { prompt, .. }
+                if !exported_prompts.insert(prompt.trim().to_string()) =>
+            {
+                continue
+            }
             SessionEventKind::SessionStarted { .. } => (
                 "session-start",
                 json!({"session_id": session_id, "cwd": cwd}),
@@ -456,6 +464,43 @@ fn parse_query_hits(value: Value) -> Result<Vec<AiMemoryHit>, AiMemoryError> {
         .unwrap_or_default();
     serde_json::from_value(Value::Array(hits))
         .map_err(|error| AiMemoryError::Response(error.to_string()))
+}
+
+/// Collapses hits that carry the same text. The same prompt sent twice in a
+/// session is two observations in ai-memory; showing or injecting both only
+/// spends a slot of the bounded context on a repeat. The first (best ranked)
+/// hit wins.
+pub fn dedupe_hits(hits: Vec<AiMemoryHit>) -> Vec<AiMemoryHit> {
+    let mut seen = std::collections::HashSet::new();
+    hits.into_iter()
+        .filter(|hit| {
+            seen.insert((
+                comparable_text(hit.title.as_deref()),
+                comparable_text(hit.snippet.as_deref()),
+            ))
+        })
+        .collect()
+}
+
+/// Recovered text without ai-memory's `<mark>` highlights, case or spacing,
+/// which differ between two hits for the same text depending on the query.
+fn comparable_text(value: Option<&str>) -> String {
+    let value = value.unwrap_or_default();
+    let mut plain = String::with_capacity(value.len());
+    let mut in_tag = false;
+    for character in value.chars() {
+        match character {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if in_tag => {}
+            _ => plain.push(character),
+        }
+    }
+    plain
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Stamps the DCC's own event time so a session exported later keeps its real
@@ -591,6 +636,55 @@ mod tests {
             batch[0].body["message"],
             "A decisão validada foi usar Local."
         );
+    }
+
+    #[test]
+    fn a_resent_prompt_is_exported_once() {
+        let session = session();
+        let turn = |id: &str, prompt: &str| {
+            event(
+                id,
+                SessionEventKind::TurnStarted {
+                    turn_id: dcc_core::domain::session::TurnId(id.into()),
+                    prompt: prompt.into(),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                    approval_policy: None,
+                },
+            )
+        };
+        let batch = build_hook_batch(
+            &session,
+            &[
+                turn("t1", "Revise o fluxo de convite"),
+                turn("t2", "Revise o fluxo de convite "),
+                turn("t3", "Agora o CRM"),
+            ],
+        );
+        let keys: Vec<_> = batch.iter().map(|event| event.ingest_key.as_str()).collect();
+        assert_eq!(keys, ["dcc-session-1-t1", "dcc-session-1-t3"]);
+    }
+
+    #[test]
+    fn hits_with_the_same_text_are_shown_once() {
+        let hit = |title: &str, snippet: &str, rank: f64| AiMemoryHit {
+            path: None,
+            title: Some(title.into()),
+            snippet: Some(snippet.into()),
+            rank: Some(rank),
+            created_at: None,
+            session_id: None,
+            kind: Some("user-prompt".into()),
+        };
+        let hits = dedupe_hits(vec![
+            hit("Tem uma situacao do hosp", "…o <mark>convite</mark> para usuarios", -2.0),
+            hit("Tem uma situacao do hosp", "…o convite  para <mark>usuarios</mark>", -1.0),
+            hit("Outra coisa", "…o convite para usuarios", -0.5),
+        ]);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].rank, Some(-2.0));
     }
 
     #[test]
