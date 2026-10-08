@@ -2088,7 +2088,7 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let updated_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
         for hit in hits {
-            let source_key = ai_memory_source_key(hit);
+            let source_key = hit.source_key();
             transaction
                 .execute(
                     r#"
@@ -5678,22 +5678,6 @@ impl SqliteSessionRepo {
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
     }
-}
-
-fn ai_memory_source_key(hit: &AiMemoryHit) -> String {
-    let snippet: String = hit
-        .snippet
-        .as_deref()
-        .unwrap_or_default()
-        .chars()
-        .take(160)
-        .collect();
-    format!(
-        "{}|{}|{}",
-        hit.path.as_deref().unwrap_or_default(),
-        hit.title.as_deref().unwrap_or_default(),
-        snippet
-    )
 }
 
 #[async_trait]

@@ -15,7 +15,11 @@ use url::form_urlencoded::Serializer;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 pub const MAX_BATCH_EVENTS: usize = 256;
 const MAX_PROMPT_CHARS: usize = 16_000;
-const MAX_ASSISTANT_CHARS: usize = 4_000;
+/// ai-memory keeps at most 2 KB of a notification body, cutting the tail.
+/// Assistant answers put their conclusion last, so the DCC fits the message
+/// under that cap itself and keeps the opening and the ending.
+const MAX_ASSISTANT_BYTES: usize = 1_900;
+const ASSISTANT_HEAD_BYTES: usize = 400;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiMemoryConfig {
@@ -119,6 +123,54 @@ pub struct AiMemoryBatchAck {
     pub failed_index: Option<usize>,
     #[serde(default)]
     pub processed: Option<usize>,
+    /// Per-event outcomes (ai-memory 2.5+). An acknowledged event can still be
+    /// a terminal drop (`dropped_policy`, `dropped_invalid`, ...), which a
+    /// retry will never store. Older servers omit the field.
+    #[serde(default)]
+    pub results: Option<Vec<AiMemoryEventOutcome>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct AiMemoryEventOutcome {
+    pub index: usize,
+    pub outcome: String,
+}
+
+impl AiMemoryBatchAck {
+    /// Acknowledged events that ai-memory discarded instead of storing.
+    pub fn dropped(&self) -> Vec<&AiMemoryEventOutcome> {
+        self.results
+            .iter()
+            .flatten()
+            .filter(|result| result.outcome.starts_with("dropped_"))
+            .collect()
+    }
+
+    /// Events ai-memory acknowledged and kept, excluding terminal drops.
+    pub fn kept(&self) -> usize {
+        self.accepted.saturating_sub(self.dropped().len())
+    }
+
+    /// A short description of the drops, such as `dropped_policy×2`.
+    pub fn dropped_summary(&self) -> Option<String> {
+        let mut counts: Vec<(&str, usize)> = Vec::new();
+        for result in self.dropped() {
+            match counts
+                .iter_mut()
+                .find(|(outcome, _)| *outcome == result.outcome)
+            {
+                Some((_, count)) => *count += 1,
+                None => counts.push((result.outcome.as_str(), 1)),
+            }
+        }
+        (!counts.is_empty()).then(|| {
+            counts
+                .iter()
+                .map(|(outcome, count)| format!("{outcome}×{count}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -134,6 +186,26 @@ pub struct AiMemoryHit {
     pub session_id: Option<String>,
     #[serde(default)]
     pub kind: Option<String>,
+}
+
+impl AiMemoryHit {
+    /// Stable identity of a recovered source, shared with the UI's curation
+    /// actions: path, title and the first 160 characters of the snippet.
+    pub fn source_key(&self) -> String {
+        let snippet: String = self
+            .snippet
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .take(160)
+            .collect();
+        format!(
+            "{}|{}|{}",
+            self.path.as_deref().unwrap_or_default(),
+            self.title.as_deref().unwrap_or_default(),
+            snippet
+        )
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -322,7 +394,7 @@ pub fn build_hook_batch(
             {
                 (
                     "notification",
-                    json!({"message": truncate(content, MAX_ASSISTANT_CHARS)}),
+                    json!({"message": fit_head_and_tail(content, MAX_ASSISTANT_BYTES, ASSISTANT_HEAD_BYTES)}),
                     Some("dcc-assistant-message"),
                 )
             }
@@ -331,6 +403,7 @@ pub fn build_hook_batch(
             }
             _ => continue,
         };
+        let body = with_occurred_at(body, &event.occurred_at);
         result.push(AiMemoryHookEvent {
             event: kind.to_string(),
             agent: agent.clone(),
@@ -383,6 +456,37 @@ fn parse_query_hits(value: Value) -> Result<Vec<AiMemoryHit>, AiMemoryError> {
         .unwrap_or_default();
     serde_json::from_value(Value::Array(hits))
         .map_err(|error| AiMemoryError::Response(error.to_string()))
+}
+
+/// Stamps the DCC's own event time so a session exported later keeps its real
+/// chronology. ai-memory falls back to "now" for a missing or invalid value.
+fn with_occurred_at(mut body: Value, occurred_at: &str) -> Value {
+    if !occurred_at.trim().is_empty() {
+        if let Some(object) = body.as_object_mut() {
+            object.insert("occurred_at".to_string(), json!(occurred_at));
+        }
+    }
+    body
+}
+
+/// Keeps `value` within `max_bytes` UTF-8 bytes by dropping its middle:
+/// about `head_bytes` from the start, the rest from the end.
+fn fit_head_and_tail(value: &str, max_bytes: usize, head_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    const MARKER: &str = "\n…\n";
+    let budget = max_bytes.saturating_sub(MARKER.len());
+    let head_bytes = head_bytes.min(budget);
+    let mut head_end = head_bytes;
+    while !value.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    let mut tail_start = value.len() - (budget - head_end);
+    while !value.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+    format!("{}{MARKER}{}", &value[..head_end], &value[tail_start..])
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {
@@ -487,6 +591,60 @@ mod tests {
             batch[0].body["message"],
             "A decisão validada foi usar Local."
         );
+    }
+
+    #[test]
+    fn exported_events_carry_the_dcc_event_time() {
+        let session = session();
+        let batch = build_hook_batch(
+            &session,
+            &[event("end", SessionEventKind::SessionCompleted)],
+        );
+        assert_eq!(batch[0].body["occurred_at"], "2026-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn long_assistant_answers_keep_their_conclusion_under_the_server_cap() {
+        let session = session();
+        let content = format!(
+            "Contexto ação {}Conclusão: usar Worktree.",
+            "é".repeat(3_000)
+        );
+        let event = event(
+            "assistant",
+            SessionEventKind::TurnAssistantMessageCompleted {
+                turn_id: dcc_core::domain::session::TurnId("turn-1".into()),
+                message_id: "message-1".into(),
+                phase: dcc_core::domain::session::AssistantMessagePhase::FinalAnswer,
+                content: Some(content),
+            },
+        );
+        let batch = build_hook_batch(&session, &[event]);
+        let message = batch[0].body["message"].as_str().expect("message");
+        assert!(message.len() <= MAX_ASSISTANT_BYTES);
+        assert!(message.starts_with("Contexto ação"));
+        assert!(message.ends_with("Conclusão: usar Worktree."));
+    }
+
+    #[test]
+    fn batch_ack_separates_terminal_drops_from_stored_events() {
+        let ack: AiMemoryBatchAck = serde_json::from_value(json!({
+            "accepted": 4,
+            "results": [
+                {"index": 0, "outcome": "stored"},
+                {"index": 1, "outcome": "dropped_policy"},
+                {"index": 2, "outcome": "replayed"},
+                {"index": 3, "outcome": "dropped_policy"}
+            ]
+        }))
+        .expect("ack");
+        assert_eq!(ack.kept(), 2);
+        assert_eq!(ack.dropped_summary().as_deref(), Some("dropped_policy×2"));
+
+        let legacy: AiMemoryBatchAck =
+            serde_json::from_value(json!({"accepted": 3})).expect("legacy ack");
+        assert_eq!(legacy.kept(), 3);
+        assert_eq!(legacy.dropped_summary(), None);
     }
 
     #[test]

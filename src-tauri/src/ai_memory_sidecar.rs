@@ -26,6 +26,34 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(350);
 const SETTINGS_FILE_NAME: &str = "ai-memory-settings.json";
 const TOKEN_REFERENCE: &str = "ai-memory:default";
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+const VERSION_MARKER_FILE: &str = "dcc-sidecar-version";
+const UPGRADE_BACKUP_PREFIX: &str = "before-";
+
+/// Server settings the DCC pins on the sidecar it manages, over whatever the
+/// data directory's `config.toml` says. ai-memory reads `AI_MEMORY_<SECTION>__<KEY>`
+/// overrides; each value below was checked against the pinned release.
+///
+/// - The cross-project profile stays off: the DCC keeps one memory per
+///   project, and the profile would merge habits across them.
+/// - Session ends do not open handoffs: the DCC has its own re-anchor and
+///   nothing would ever accept them.
+/// - The background auto-improve job stays off, so the sidecar never starts
+///   LLM work the user did not ask for.
+/// - FTS stopwords cover Portuguese and English, because the DCC queries with
+///   the user's whole prompt and function words otherwise match every page.
+const PINNED_SERVER_ENV: &[(&str, &str)] = &[
+    ("AI_MEMORY_PROFILE__ENABLED", "false"),
+    ("AI_MEMORY_HANDOFF__CREATE_ON_SESSION_END", "false"),
+    ("AI_MEMORY_AUTO_IMPROVE__SCHEDULER__ENABLED", "false"),
+    (
+        "AI_MEMORY_SEARCH_FTS_STOPWORDS",
+        "a,o,e,é,as,os,um,uma,uns,umas,de,da,do,das,dos,em,no,na,nos,nas,ao,aos,à,às,\
+         por,pra,para,com,sem,que,se,não,nao,mais,mas,ou,como,isso,isto,esse,essa,este,esta,\
+         ele,ela,eu,me,meu,minha,seu,sua,the,an,and,or,of,to,in,on,at,for,with,from,by,\
+         is,are,was,be,it,this,that,these,those,as,if,not,do,does,can,should,i,you,we",
+    ),
+];
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -223,7 +251,20 @@ impl AiMemorySidecar {
             )
         })?;
 
-        let init_status = Command::new(&binary)
+        let version = sidecar_command(&binary)
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|value| !value.is_empty());
+        if let Err(error) = backup_before_upgrade(&data_dir, version.as_deref()) {
+            // Starting is still safe; only the way back to an older DCC is
+            // lost, so the failure is reported instead of disabling memory.
+            eprintln!("[DCC][ai-memory] pre-upgrade backup failed: {error}");
+        }
+
+        let init_status = sidecar_command(&binary)
             .args(["--data-dir"])
             .arg(&data_dir)
             .arg("init")
@@ -232,13 +273,6 @@ impl AiMemorySidecar {
         if !init_status.success() {
             return Err(format!("ai-memory init exited with status {init_status}"));
         }
-        let version = Command::new(&binary)
-            .arg("--version")
-            .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-            .filter(|value| !value.is_empty());
 
         let log_dir = data_dir.join("logs");
         fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
@@ -248,7 +282,7 @@ impl AiMemorySidecar {
             .open(log_dir.join("dcc-sidecar.log"))
             .map_err(|error| error.to_string())?;
         let error_file = log_file.try_clone().map_err(|error| error.to_string())?;
-        let child = Command::new(&binary)
+        let child = sidecar_command(&binary)
             .args(["--data-dir"])
             .arg(&data_dir)
             .args(["serve", "--transport", "http", "--bind"])
@@ -261,8 +295,7 @@ impl AiMemorySidecar {
 
         if !wait_until_healthy(&base_url) {
             let mut child = child;
-            let _ = child.kill();
-            let _ = child.wait();
+            stop_child(&mut child);
             return Err(format!(
                 "ai-memory did not become ready at {base_url} within {} seconds",
                 STARTUP_TIMEOUT.as_secs()
@@ -273,6 +306,11 @@ impl AiMemorySidecar {
         // process is healthy so a failed start cannot create a misleading URL.
         std::env::set_var("DCC_AI_MEMORY_URL", &base_url);
         std::env::set_var("DCC_AI_MEMORY_DATA_DIR", &data_dir);
+        if let Some(version) = version.as_deref() {
+            if let Err(error) = fs::write(data_dir.join(VERSION_MARKER_FILE), version) {
+                eprintln!("[DCC][ai-memory] could not record sidecar version: {error}");
+            }
+        }
         eprintln!(
             "[DCC][ai-memory] sidecar running at {base_url} (data: {})",
             data_dir.display()
@@ -365,8 +403,7 @@ impl AiMemorySidecar {
         let Some(mut child) = child.take() else {
             return;
         };
-        let _ = child.kill();
-        let _ = child.wait();
+        stop_child(&mut child);
         eprintln!("[DCC][ai-memory] sidecar stopped");
     }
 }
@@ -407,6 +444,11 @@ fn validate_settings(input: &AiMemorySettingsInput) -> Result<(), String> {
     for (label, value) in [("workspace", &input.workspace), ("project", &input.project)] {
         if value.trim().is_empty() || value.chars().count() > 200 || value.contains('\0') {
             return Err(format!("ai-memory {label} is invalid"));
+        }
+        // ai-memory reads `workspace/project` as a two-part label, so names
+        // themselves cannot contain a slash.
+        if value.contains('/') {
+            return Err(format!("ai-memory {label} cannot contain '/'"));
         }
     }
     if input.mode == "remote" {
@@ -453,6 +495,121 @@ fn apply_settings_to_environment(settings: &PersistedAiMemorySettings) -> Result
     } else {
         std::env::remove_var("DCC_AI_MEMORY_DATA_DIR");
     }
+    Ok(())
+}
+
+/// A command for the managed binary that does not inherit the user's own
+/// ai-memory configuration (`AI_MEMORY_*`, including LLM providers and
+/// keys) from the shell that launched the DCC, plus the DCC's pinned settings.
+fn sidecar_command(binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with("AI_MEMORY_"))
+        {
+            command.env_remove(name);
+        }
+    }
+    for (name, value) in PINNED_SERVER_ENV {
+        command.env(name, value);
+    }
+    command
+}
+
+/// Asks the server to exit so it can drain its writer, then forces it.
+fn stop_child(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+            // SAFETY: `pid` is our own live child; SIGTERM only asks it to exit.
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
+            let started = Instant::now();
+            while started.elapsed() < SHUTDOWN_GRACE {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// ai-memory migrations are one-way: once a newer release opens the store, an
+/// older DCC can no longer read it. Before the first start of a different
+/// binary version, copy the database aside so going back stays possible. The
+/// wiki is not copied; it is Markdown with its own git history. Only the
+/// newest backup is kept.
+fn backup_before_upgrade(data_dir: &Path, version: Option<&str>) -> Result<(), String> {
+    let Some(version) = version else {
+        return Ok(());
+    };
+    let db_dir = data_dir.join("db");
+    if !db_dir.join("memory.sqlite").is_file() {
+        return Ok(());
+    }
+    let previous = fs::read_to_string(data_dir.join(VERSION_MARKER_FILE)).ok();
+    if previous.as_deref().map(str::trim) == Some(version) {
+        return Ok(());
+    }
+    let backups = data_dir.join("backups");
+    let target = backups.join(format!(
+        "{UPGRADE_BACKUP_PREFIX}{}",
+        version.replace(|c: char| !c.is_ascii_alphanumeric() && c != '.', "-")
+    ));
+    if target.exists() {
+        return Ok(());
+    }
+    let staging = backups.join(".staging");
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(staging.join("db")).map_err(|error| error.to_string())?;
+    for entry in fs::read_dir(&db_dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            fs::copy(entry.path(), staging.join("db").join(entry.file_name()))
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    fs::write(
+        staging.join("README.txt"),
+        format!(
+            "ai-memory database copied by the DCC before {version} first opened it.\n\
+             Previous version: {}\n\
+             To go back, stop the DCC and replace <data dir>/db with this db folder.\n",
+            previous
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("unknown (before the DCC recorded it)")
+        ),
+    )
+    .map_err(|error| error.to_string())?;
+    fs::rename(&staging, &target).map_err(|error| error.to_string())?;
+    for entry in fs::read_dir(&backups)
+        .map_err(|error| error.to_string())?
+        .flatten()
+    {
+        let path = entry.path();
+        let is_older_backup = path != target
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(UPGRADE_BACKUP_PREFIX));
+        if is_older_backup {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+    eprintln!(
+        "[DCC][ai-memory] database backed up to {} before the first start of {version}",
+        target.display()
+    );
     Ok(())
 }
 
@@ -548,6 +705,61 @@ mod tests {
         assert!(validate_settings(&settings("remote", None)).is_err());
         assert!(validate_settings(&settings("remote", Some("file:///tmp/memory"))).is_err());
         assert!(validate_settings(&settings("remote", Some("http://127.0.0.1:49374"))).is_ok());
+    }
+
+    #[test]
+    fn settings_reject_slashes_in_scope_names() {
+        let mut input = settings("managed", None);
+        input.project = "team/dcc".to_string();
+        assert!(validate_settings(&input).is_err());
+    }
+
+    #[test]
+    fn sidecar_command_drops_inherited_ai_memory_settings() {
+        std::env::set_var("AI_MEMORY_LLM_PROVIDER", "openai");
+        let command = sidecar_command(Path::new("/bin/true"));
+        std::env::remove_var("AI_MEMORY_LLM_PROVIDER");
+        let envs: Vec<_> = command.get_envs().collect();
+        assert!(envs
+            .iter()
+            .any(|(name, value)| { *name == "AI_MEMORY_LLM_PROVIDER" && value.is_none() }));
+        let (_, stopwords) = PINNED_SERVER_ENV
+            .iter()
+            .find(|(name, _)| *name == "AI_MEMORY_SEARCH_FTS_STOPWORDS")
+            .unwrap();
+        assert!(stopwords.split(',').all(|word| !word.is_empty() && word.trim() == word));
+        assert!(stopwords.split(',').any(|word| word == "não"));
+        assert!(envs.iter().any(|(name, value)| {
+            *name == "AI_MEMORY_PROFILE__ENABLED"
+                && value.and_then(|value| value.to_str()) == Some("false")
+        }));
+    }
+
+    #[test]
+    fn upgrade_backup_runs_once_per_version_and_keeps_only_the_newest() {
+        let data_dir =
+            std::env::temp_dir().join(format!("dcc-ai-memory-backup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&data_dir);
+        fs::create_dir_all(data_dir.join("db")).unwrap();
+        fs::write(data_dir.join("db/memory.sqlite"), b"v63").unwrap();
+        fs::write(data_dir.join(VERSION_MARKER_FILE), "ai-memory 2.2.2").unwrap();
+
+        backup_before_upgrade(&data_dir, Some("ai-memory 2.6.1")).unwrap();
+        let first = data_dir.join("backups/before-ai-memory-2.6.1");
+        assert_eq!(fs::read(first.join("db/memory.sqlite")).unwrap(), b"v63");
+        assert!(fs::read_to_string(first.join("README.txt"))
+            .unwrap()
+            .contains("ai-memory 2.2.2"));
+
+        fs::write(data_dir.join(VERSION_MARKER_FILE), "ai-memory 2.6.1").unwrap();
+        fs::write(data_dir.join("db/memory.sqlite"), b"v76").unwrap();
+        backup_before_upgrade(&data_dir, Some("ai-memory 2.6.1")).unwrap();
+        assert_eq!(fs::read(first.join("db/memory.sqlite")).unwrap(), b"v63");
+
+        backup_before_upgrade(&data_dir, Some("ai-memory 2.7.0")).unwrap();
+        assert!(!first.exists());
+        assert!(data_dir.join("backups/before-ai-memory-2.7.0").is_dir());
+        let _ = fs::remove_dir_all(&data_dir);
     }
 
     #[test]

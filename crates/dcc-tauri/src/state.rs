@@ -2092,6 +2092,7 @@ impl SessionCommandState {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let mut ack = AiMemoryBatchAck::default();
         let mut accepted_indices = Vec::new();
+        let mut results = Vec::new();
         for (chunk_index, chunk) in batch.chunks(MAX_BATCH_EVENTS).enumerate() {
             let chunk_ack = client
                 .ingest_batch(chunk)
@@ -2105,6 +2106,12 @@ impl SessionCommandState {
                         .map(|index| chunk_index * MAX_BATCH_EVENTS + index),
                 );
             }
+            if let Some(chunk_results) = chunk_ack.results {
+                results.extend(chunk_results.into_iter().map(|mut result| {
+                    result.index += chunk_index * MAX_BATCH_EVENTS;
+                    result
+                }));
+            }
             if ack.failed_index.is_none() {
                 ack.failed_index = chunk_ack
                     .failed_index
@@ -2114,6 +2121,7 @@ impl SessionCommandState {
                 Some(ack.processed.unwrap_or(0) + chunk_ack.processed.unwrap_or(chunk.len()));
         }
         ack.accepted_indices = (!accepted_indices.is_empty()).then_some(accepted_indices);
+        ack.results = (!results.is_empty()).then_some(results);
         Ok(ack)
     }
 
@@ -2517,14 +2525,23 @@ impl SessionCommandState {
                 Ok(ack) if ack.failed_index.is_none() => {
                     self.record_ai_memory_export_success(&endpoint);
                     let finished_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+                    // A drop is terminal: retrying would be refused the same
+                    // way, so the export completes but says what was lost.
+                    let dropped_note = ack.dropped_summary().map(|summary| {
+                        format!(
+                            "ai-memory discarded {} of {} events ({summary})",
+                            ack.dropped().len(),
+                            ack.accepted
+                        )
+                    });
                     self.record_ai_memory_export_history(
                         &entry.session_id,
                         "completed",
                         entry.attempts.saturating_add(1),
                         event_count,
-                        ack.accepted,
+                        ack.kept(),
                         None,
-                        None,
+                        dropped_note.as_deref(),
                         &started_at,
                         &finished_at,
                     )?;
@@ -2547,7 +2564,7 @@ impl SessionCommandState {
                         "retrying",
                         entry.attempts.saturating_add(1),
                         event_count,
-                        ack.accepted,
+                        ack.kept(),
                         Some(&next_attempt),
                         Some(&error),
                         &started_at,

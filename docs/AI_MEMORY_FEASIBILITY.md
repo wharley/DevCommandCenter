@@ -295,7 +295,30 @@ smoke, foram verificados os pontos específicos do adaptador:
   0,4 s, abaixo do limite de 8 s do sidecar.
 
 As migrações são de mão única: depois de aberto pela v2.6.x, o diretório não abre mais na v2.2.2.
-Voltar a uma versão anterior do DCC exige restaurar um backup do diretório de dados.
+Por isso, antes do primeiro start de uma versão diferente do binário, o sidecar copia `db/` para
+`backups/before-<versão>/` (só o mais recente fica; o `README.txt` ao lado diz como voltar). O
+wiki não é copiado: é Markdown com histórico git próprio.
+
+#### Configuração fixada pelo DCC no sidecar
+
+A v2.6 liga por padrão, num servidor de um usuário só, recursos que contrariam decisões do DCC.
+O sidecar gerenciado não herda nenhuma variável `AI_MEMORY_*` do shell (inclusive provedores e
+chaves de LLM) e fixa, por cima do `config.toml`, os valores abaixo; cada um foi conferido contra
+a v2.6.1:
+
+| Variável | Valor | Motivo |
+|---|---|---|
+| `AI_MEMORY_PROFILE__ENABLED` | `false` | o perfil entre projetos misturaria a memória que o DCC isola por projeto |
+| `AI_MEMORY_HANDOFF__CREATE_ON_SESSION_END` | `false` | cada fim de sessão abriria um handoff que ninguém aceita; o DCC tem o próprio re-anchor |
+| `AI_MEMORY_AUTO_IMPROVE__SCHEDULER__ENABLED` | `false` | nenhum trabalho de LLM em segundo plano sem pedido do usuário |
+| `AI_MEMORY_SEARCH_FTS_STOPWORDS` | lista PT + EN | o DCC consulta com o prompt inteiro; "de/que/em" casavam com quase toda página |
+
+O adaptador também passou a usar o que a v2.6 oferece: `occurred_at` com a hora real de cada
+evento, o resultado por evento do `/hook/batch` (descartes terminais aparecem no histórico de
+exportação em vez de contarem como aceitos) e respostas do assistente encaixadas no limite de
+2 KB do servidor preservando o começo e o final. As ações de fonte do cabeçalho agora valem na
+injeção: fonte ignorada sai, fixada vem primeiro e corrigida entra com o texto do usuário. Elas só
+reordenam ou reescrevem o que a consulta do próprio projeto devolveu.
 
 O script cria HOME e armazenamento temporários, não herda credenciais e encerra o servidor ao sair.
 
