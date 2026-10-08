@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "dev-command-center-tauri"
-version = "0.1.88"
+version = "0.1.89"
 dependencies = [
  "aes",
  "async-trait",
