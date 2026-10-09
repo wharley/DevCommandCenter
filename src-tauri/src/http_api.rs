@@ -18,7 +18,10 @@ use dcc_core::{
     },
     domain::session::SessionId,
     domain::workspace::WorkspaceId,
-    ports::{CoreEvent, EventBus},
+    ports::{
+        events::{SessionLiveDurableIdentity, SessionLiveEventEnvelope},
+        CoreEvent, EventBus,
+    },
 };
 use dcc_infra::db::SqliteSessionRepo;
 use dcc_tauri::{
@@ -45,7 +48,10 @@ use std::{
     time::Duration,
 };
 use tokio::sync::RwLock;
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::{
+    wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
+    StreamExt,
+};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -130,17 +136,43 @@ fn default_session_search_limit() -> usize {
     40
 }
 
+/// One event on `/api/v1/events/stream`, with its durable session sequence
+/// when it has one.
+#[derive(Clone, Debug)]
+struct HttpStreamItem {
+    event: CoreEvent,
+    durable: Option<SessionLiveDurableIdentity>,
+}
+
 /// Feeds `/api/v1/events/stream`. Publishing only hands the event to a
 /// broadcast channel: a slow phone never holds up the desktop UI's events.
 #[derive(Clone)]
 struct HttpEventBus {
-    sender: tokio::sync::broadcast::Sender<CoreEvent>,
+    sender: tokio::sync::broadcast::Sender<HttpStreamItem>,
 }
 
 #[async_trait]
 impl EventBus for HttpEventBus {
     async fn publish(&self, event: CoreEvent) -> dcc_core::Result<()> {
-        let _ = self.sender.send(event);
+        // The runtime follows every session event with its live envelope,
+        // which carries the durable sequence; send those from there.
+        if event.session_id().is_none() {
+            let _ = self.sender.send(HttpStreamItem {
+                event,
+                durable: None,
+            });
+        }
+        Ok(())
+    }
+
+    async fn publish_session_live(
+        &self,
+        envelope: SessionLiveEventEnvelope,
+    ) -> dcc_core::Result<()> {
+        let _ = self.sender.send(HttpStreamItem {
+            event: envelope.event,
+            durable: envelope.durable,
+        });
         Ok(())
     }
 }
@@ -150,7 +182,7 @@ impl EventBus for HttpEventBus {
 /// desktop runs; `dccd-http` builds a headless one of its own.
 pub struct HttpBackend {
     sessions: SessionCommandState,
-    events: tokio::sync::broadcast::Sender<CoreEvent>,
+    events: tokio::sync::broadcast::Sender<HttpStreamItem>,
     // The runtime keeps only a weak reference to its buses.
     _bus: Arc<dyn EventBus>,
     terminals: bool,
@@ -1314,20 +1346,51 @@ async fn shell_default_handler() -> Json<Value> {
     }))
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EventsStreamQuery {
+    session_id: Option<String>,
+}
+
+/// Turns one broadcast item into an SSE frame. A session event carries its
+/// durable sequence as the SSE `id`; falling behind the broadcast becomes an
+/// explicit `resync` so the client refetches instead of silently missing
+/// events.
+fn events_stream_frame(
+    message: Result<HttpStreamItem, BroadcastStreamRecvError>,
+    session_filter: Option<&str>,
+) -> Option<Event> {
+    match message {
+        Ok(item) => {
+            if session_filter.is_some() && item.event.session_id() != session_filter {
+                return None;
+            }
+            let payload = serde_json::to_string(&item.event).ok()?;
+            let frame = Event::default().event("core-event").data(payload);
+            Some(match item.durable {
+                Some(durable) => frame.id(durable.sequence.to_string()),
+                None => frame,
+            })
+        }
+        Err(BroadcastStreamRecvError::Lagged(missed)) => Some(
+            Event::default()
+                .event("resync")
+                .data(json!({ "missed": missed }).to_string()),
+        ),
+    }
+}
+
 async fn events_stream_handler(
     State(backend): State<Arc<HttpBackend>>,
+    Query(query): Query<EventsStreamQuery>,
 ) -> Result<
     Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
     HttpApiError,
 > {
     let receiver = backend.events.subscribe();
-    let stream = BroadcastStream::new(receiver).filter_map(|message| match message {
-        Ok(event) => match serde_json::to_string(&event) {
-            Ok(payload) => Some(Ok(Event::default().event("core-event").data(payload))),
-            Err(_) => None,
-        },
-        Err(_) => None,
-    });
+    let session_filter = query.session_id.filter(|id| !id.is_empty());
+    let stream = BroadcastStream::new(receiver)
+        .filter_map(move |message| events_stream_frame(message, session_filter.as_deref()).map(Ok));
 
     Ok(Sse::new(stream).keep_alive(
         KeepAlive::new()
@@ -2124,15 +2187,48 @@ async fn send_turn_handler(
     })?))
 }
 
+const SESSION_EVENTS_DEFAULT_LIMIT: usize = 500;
+const SESSION_EVENTS_MAX_LIMIT: usize = 2000;
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionEventsQuery {
+    /// Durable sequence the client already holds; only later events return.
+    after: Option<u64>,
+    limit: Option<usize>,
+}
+
+/// Without `after`: the whole history as a bare array (the original shape).
+/// With `after`: `{events, lastSeq, hasMore}`, where `lastSeq` is the
+/// session's highest sequence even when the delta is empty, so the client can
+/// tell "up to date" from "history went backwards" (`lastSeq < cursor`).
 async fn list_session_events_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     Path(session_id): Path<String>,
+    Query(query): Query<SessionEventsQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
     let payload = session_repo_operation(config, move |repo| {
-        let items = repo
-            .list_events_by_session_sync(&SessionId(session_id))
+        let session_id = SessionId(session_id);
+        let Some(after) = query.after else {
+            let items = repo
+                .list_events_by_session_sync(&session_id)
+                .map_err(|error| error.to_string())?;
+            return serde_json::to_value(items).map_err(|error| error.to_string());
+        };
+        let limit = query
+            .limit
+            .unwrap_or(SESSION_EVENTS_DEFAULT_LIMIT)
+            .clamp(1, SESSION_EVENTS_MAX_LIMIT);
+        let mut events = repo
+            .list_events_by_session_after_sync(&session_id, after, limit + 1)
             .map_err(|error| error.to_string())?;
-        serde_json::to_value(items).map_err(|error| error.to_string())
+        let has_more = events.len() > limit;
+        events.truncate(limit);
+        // Read after the delta so `lastSeq` is never below an event in it.
+        let last_seq = repo
+            .last_event_sequence_sync(&session_id)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({ "events": events, "lastSeq": last_seq, "hasMore": has_more }))
     })
     .await?;
     Ok(Json(payload))
@@ -2709,6 +2805,7 @@ mod tests {
     struct HttpFixture {
         _root: tempfile::TempDir,
         state: SessionCommandState,
+        backend: Arc<HttpBackend>,
         app: Router,
         session_id: SessionId,
     }
@@ -2747,6 +2844,7 @@ mod tests {
         HttpFixture {
             _root: root,
             state,
+            backend: backend.clone(),
             app: build_router(config, backend),
             session_id,
         }
@@ -2771,7 +2869,10 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2887,8 +2988,213 @@ mod tests {
 
         assert!(matches!(
             receiver.try_recv(),
-            Ok(CoreEvent::SessionResumed { .. })
+            Ok(HttpStreamItem {
+                event: CoreEvent::SessionResumed { .. },
+                durable: None,
+            })
         ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn durable_session_events_reach_the_stream_with_their_sequence() {
+        use dcc_core::domain::session::{SessionEventKind, SessionEventRecord};
+        let fixture = embedded_fixture().await;
+        let mut receiver = fixture.backend.events.subscribe();
+        let record = SessionEventRecord {
+            event_id: "evt-42".to_string(),
+            session_id: fixture.session_id.clone(),
+            sequence: 42,
+            occurred_at: "2026-10-08T00:00:00Z".to_string(),
+            kind: SessionEventKind::SessionResumed,
+        };
+
+        EventBus::publish_durable_session(
+            &fixture.state,
+            &record,
+            CoreEvent::SessionResumed {
+                session_id: fixture.session_id.0.clone(),
+            },
+        )
+        .await
+        .expect("publish");
+
+        let item = receiver.try_recv().expect("stream item");
+        assert_eq!(item.durable.map(|durable| durable.sequence), Some(42));
+        // One frame per event, not one from `publish` and one from the envelope.
+        assert!(receiver.try_recv().is_err());
+    }
+
+    async fn get_json(app: &Router, uri: &str) -> (StatusCode, Value) {
+        use tower::util::ServiceExt;
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .header("X-API-Key", "k")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    async fn append_resumed_events(fixture: &HttpFixture, count: usize) {
+        use dcc_core::domain::session::{SessionEventKind, SessionEventRecord};
+        for _ in 0..count {
+            SessionEventRepo::append_event(
+                &fixture.state,
+                &SessionEventRecord {
+                    event_id: Uuid::new_v4().to_string(),
+                    session_id: fixture.session_id.clone(),
+                    sequence: 0,
+                    occurred_at: "2026-10-08T00:00:00Z".to_string(),
+                    kind: SessionEventKind::SessionResumed,
+                },
+            )
+            .await
+            .expect("append event");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_events_after_a_cursor_return_only_the_delta() {
+        let fixture = embedded_fixture().await;
+        append_resumed_events(&fixture, 5).await;
+
+        let (status, body) = get_json(
+            &fixture.app,
+            "/api/v1/sessions/http-respond/events?after=2&limit=2",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let sequences: Vec<u64> = body["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["sequence"].as_u64().unwrap())
+            .collect();
+        assert_eq!(sequences, vec![3, 4]);
+        assert_eq!(body["lastSeq"], 5);
+        assert_eq!(body["hasMore"], true);
+
+        let (_, caught_up) =
+            get_json(&fixture.app, "/api/v1/sessions/http-respond/events?after=5").await;
+        assert_eq!(caught_up["events"], json!([]));
+        assert_eq!(caught_up["lastSeq"], 5);
+        assert_eq!(caught_up["hasMore"], false);
+
+        // A cursor past the end (history deleted and recreated) still reports
+        // the real last sequence, so the client can reset.
+        let (_, ahead) = get_json(
+            &fixture.app,
+            "/api/v1/sessions/http-respond/events?after=99",
+        )
+        .await;
+        assert_eq!(ahead["lastSeq"], 5);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_events_without_a_cursor_keep_the_bare_array() {
+        let fixture = embedded_fixture().await;
+        append_resumed_events(&fixture, 2).await;
+
+        let (status, body) = get_json(&fixture.app, "/api/v1/sessions/http-respond/events").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_array().map(Vec::len), Some(2));
+    }
+
+    /// Opens the SSE stream and returns its body, ready to be read.
+    async fn open_stream(app: &Router, uri: &str) -> axum::body::BodyDataStream {
+        use tower::util::ServiceExt;
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .header("X-API-Key", "k")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.into_body().into_data_stream()
+    }
+
+    /// Reads SSE frames until one contains `needle` (keep-alives skipped).
+    async fn read_until(body: &mut axum::body::BodyDataStream, needle: &str) -> String {
+        let mut seen = String::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !seen.contains(needle) {
+            let data = tokio::time::timeout_at(deadline, body.next())
+                .await
+                .expect("SSE frame in time")
+                .expect("stream open")
+                .expect("frame");
+            seen.push_str(&String::from_utf8_lossy(&data));
+        }
+        seen
+    }
+
+    fn stream_item(session_id: &str, sequence: Option<u64>) -> HttpStreamItem {
+        HttpStreamItem {
+            event: CoreEvent::SessionResumed {
+                session_id: session_id.to_string(),
+            },
+            durable: sequence.map(|sequence| SessionLiveDurableIdentity {
+                session_id: session_id.to_string(),
+                event_id: format!("evt-{sequence}"),
+                sequence,
+            }),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn event_stream_filters_by_session_and_ids_frames_by_sequence() {
+        let fixture = embedded_fixture().await;
+        let mut body = open_stream(&fixture.app, "/api/v1/events/stream?sessionId=wanted").await;
+
+        fixture
+            .backend
+            .events
+            .send(stream_item("other", Some(3)))
+            .unwrap();
+        fixture
+            .backend
+            .events
+            .send(stream_item("wanted", Some(7)))
+            .unwrap();
+
+        let seen = read_until(&mut body, "wanted").await;
+        assert!(!seen.contains("other"), "{seen}");
+        assert!(seen.contains("id: 7"), "{seen}");
+        assert!(seen.contains("event: core-event"), "{seen}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn falling_behind_the_stream_sends_resync_instead_of_dropping() {
+        let fixture = embedded_fixture().await;
+        let mut body = open_stream(&fixture.app, "/api/v1/events/stream").await;
+
+        // Overflow the 256-slot broadcast before the client reads anything.
+        for sequence in 0..300 {
+            let _ = fixture
+                .backend
+                .events
+                .send(stream_item("busy", Some(sequence)));
+        }
+
+        let seen = read_until(&mut body, "event: resync").await;
+        assert!(seen.contains("missed"), "{seen}");
     }
 
     #[tokio::test(flavor = "current_thread")]

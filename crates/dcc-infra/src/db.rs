@@ -5448,6 +5448,67 @@ impl SqliteSessionRepo {
         Ok(events)
     }
 
+    /// Events with `sequence > after`, oldest first, at most `limit` — the
+    /// delta a client that already holds everything up to `after` needs.
+    /// Served by the `(session_id, sequence)` index.
+    pub fn list_events_by_session_after_sync(
+        &self,
+        session_id: &SessionId,
+        after: u64,
+        limit: usize,
+    ) -> Result<Vec<SessionEventRecord>> {
+        let after = i64::try_from(after).map_err(|_| {
+            dcc_core::CoreError::Repository("session event cursor overflow".to_string())
+        })?;
+        let limit = i64::try_from(limit).map_err(|_| {
+            dcc_core::CoreError::Repository("session event limit overflow".to_string())
+        })?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                r#"
+				SELECT event_id, session_id, sequence, kind_json, occurred_at
+				  FROM dcc_session_events
+				 WHERE session_id = ?1 AND sequence > ?2
+				 ORDER BY sequence ASC
+				 LIMIT ?3
+				"#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map(
+                params![session_id.0.clone(), after, limit],
+                Self::event_from_row,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?);
+        }
+
+        Ok(events)
+    }
+
+    /// Highest durable sequence of the session, 0 when it has no events.
+    pub fn last_event_sequence_sync(&self, session_id: &SessionId) -> Result<u64> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let last: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence), 0) FROM dcc_session_events WHERE session_id = ?1",
+                params![session_id.0.clone()],
+                |row| row.get(0),
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(u64::try_from(last).unwrap_or(0))
+    }
+
     fn build_summary(&self, session: Session, thread: Thread) -> Result<WorkspaceSessionSummary> {
         let events = self.list_events_by_session_sync(&session.id)?;
         let mut last_turn_prompt = None;
@@ -10136,6 +10197,49 @@ mod tests {
         assert_eq!(limited.len(), 2);
         assert_eq!(limited[0].sequence, 1);
         assert_eq!(limited[1].sequence, 2);
+    }
+
+    #[test]
+    fn event_delta_reads_after_the_cursor_and_reports_the_last_sequence() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        let session = Session {
+            id: SessionId("delta-event-session".to_string()),
+            project_id: ProjectId("delta-event-project".to_string()),
+            workspace_id: WorkspaceId("delta-event-workspace".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "codex".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-10-08T00:00:00Z".to_string(),
+            updated_at: "2026-10-08T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_session(&session)).expect("save session");
+        assert_eq!(repo.last_event_sequence_sync(&session.id).unwrap(), 0);
+        for sequence in 1..=5 {
+            futures::executor::block_on(repo.append_event(&SessionEventRecord {
+                event_id: format!("delta-event-{sequence}"),
+                session_id: session.id.clone(),
+                sequence,
+                occurred_at: "2026-10-08T00:00:00Z".to_string(),
+                kind: SessionEventKind::SessionResumed,
+            }))
+            .expect("append event");
+        }
+
+        let delta = repo
+            .list_events_by_session_after_sync(&session.id, 2, 2)
+            .expect("delta query");
+        assert_eq!(
+            delta.iter().map(|event| event.sequence).collect::<Vec<_>>(),
+            vec![3, 4]
+        );
+        assert!(repo
+            .list_events_by_session_after_sync(&session.id, 5, 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(repo.last_event_sequence_sync(&session.id).unwrap(), 5);
     }
 
     fn delegation_worktree_operation(id: &str) -> DelegationWorktreeOperation {

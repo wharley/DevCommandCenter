@@ -26,6 +26,12 @@ import { AgentQuestions } from "@/components/agent-questions";
 import { pendingQuestions, type QuestionRequest } from "@/lib/questions";
 import { ConnectionNotice } from "@/components/connection-notice";
 import {
+	deltaPath,
+	maxSequence,
+	planDelta,
+	type EventsDelta,
+} from "@/lib/threadSync";
+import {
 	applyEvents,
 	createThreadState,
 	incomingEventSessionId,
@@ -87,41 +93,76 @@ export function ThreadRoute() {
 	useEffect(() => {
 		if (!session) return;
 		const controller = new AbortController();
+		type SyncMode = "delta" | "full";
 		let running = false;
-		let queued = false;
+		let queued: SyncMode | null = null;
+		let pending: SyncMode | null = null;
 		let timer: ReturnType<typeof setTimeout> | undefined;
+		let opened = false;
 		const cached = readLocal<{ events: RawSessionEvent[]; at: string }>(
 			session,
 			`history:${threadId}`,
 		);
-		setState(applyEvents(createThreadState(), cached?.events ?? []));
-		setQuestions(pendingQuestions(cached?.events ?? []));
+		// Everything held locally and the durable sequence it reaches.
+		let held = cached?.events ?? [];
+		let cursor = maxSequence(held);
+		setState(applyEvents(createThreadState(), held));
+		setQuestions(pendingQuestions(held));
 		setLastSynced(cached?.at ?? null);
 		setLoading(!cached);
 		setLoadError(null);
 		setComposer(readLocal<string>(session, `draft:${threadId}`) ?? "");
 		stickToBottom.current = true;
-		const refresh = async () => {
+		const eventsPath = `/api/v1/sessions/${encodeURIComponent(threadId)}/events`;
+		const remember = (events: RawSessionEvent[]) => {
+			held = events;
+			setQuestions(pendingQuestions(events));
+			const at = new Date().toISOString();
+			setLastSynced(at);
+			writeLocal(session, `history:${threadId}`, { events, at });
+			setLoadError(null);
+		};
+		const fetchFull = async () => {
+			const events = await apiFetch<RawSessionEvent[]>(session, eventsPath, {
+				signal: controller.signal,
+			});
+			if (controller.signal.aborted) return;
+			// Durable sequence numbers are authoritative. Never merge synthetic SSE cursors.
+			cursor = maxSequence(events);
+			setState(applyEvents(createThreadState(), events));
+			remember(events);
+		};
+		const fetchDelta = async () => {
+			for (;;) {
+				const delta = await apiFetch<EventsDelta>(
+					session,
+					deltaPath(threadId, cursor),
+					{ signal: controller.signal },
+				);
+				if (controller.signal.aborted) return;
+				const plan = planDelta(cursor, delta);
+				if (plan.kind === "reset") return fetchFull();
+				if (plan.events.length > 0) {
+					const fresh = plan.events;
+					cursor = plan.cursor;
+					setState((prev) => applyEvents(prev, fresh));
+					remember([...held, ...fresh]);
+				} else {
+					setLastSynced(new Date().toISOString());
+					setLoadError(null);
+				}
+				if (!plan.more) return;
+			}
+		};
+		const sync = async (mode: SyncMode) => {
 			if (controller.signal.aborted) return;
 			if (running) {
-				queued = true;
+				queued = queued === "full" || mode === "full" ? "full" : "delta";
 				return;
 			}
 			running = true;
 			try {
-				const events = await apiFetch<RawSessionEvent[]>(
-					session,
-					`/api/v1/sessions/${encodeURIComponent(threadId)}/events`,
-					{ signal: controller.signal },
-				);
-				if (controller.signal.aborted) return;
-				// Durable sequence numbers are authoritative. Never merge synthetic SSE cursors.
-				setState(applyEvents(createThreadState(), events));
-				setQuestions(pendingQuestions(events));
-				const at = new Date().toISOString();
-				setLastSynced(at);
-				writeLocal(session, `history:${threadId}`, { events, at });
-				setLoadError(null);
+				await (mode === "full" ? fetchFull() : fetchDelta());
 			} catch (err) {
 				if (!controller.signal.aborted)
 					setLoadError(
@@ -132,34 +173,52 @@ export function ThreadRoute() {
 				if (!controller.signal.aborted) {
 					setLoading(false);
 					if (queued) {
-						queued = false;
-						schedule();
+						const next = queued;
+						queued = null;
+						schedule(next);
 					}
 				}
 			}
 		};
-		const schedule = () => {
-			if (timer || controller.signal.aborted) return;
+		// Coalesces bursts (one delta per streaming chunk burst); a full
+		// refetch requested meanwhile wins over a delta.
+		const schedule = (mode: SyncMode = "delta") => {
+			if (controller.signal.aborted) return;
+			pending = pending === "full" || mode === "full" ? "full" : "delta";
+			if (timer) return;
 			timer = setTimeout(() => {
 				timer = undefined;
-				void refresh();
+				const next = pending ?? "delta";
+				pending = null;
+				void sync(next);
 			}, 150);
 		};
-		reconcileRef.current = schedule;
-		const stop = openEventStream(session, "/api/v1/events/stream", {
-			onOpen: schedule,
-			onState: setConnection,
-			onMessage: (payload) => {
-				if (incomingEventSessionId(payload) === threadId) schedule();
+		reconcileRef.current = () => schedule("delta");
+		const stop = openEventStream(
+			session,
+			`/api/v1/events/stream?sessionId=${encodeURIComponent(threadId)}`,
+			{
+				// The first open races the initial load below; a reopen may have
+				// missed events while disconnected.
+				onOpen: () => {
+					if (opened) schedule("full");
+					opened = true;
+				},
+				onResync: () => schedule("full"),
+				onState: setConnection,
+				onMessage: (payload) => {
+					if (incomingEventSessionId(payload) === threadId) schedule("delta");
+				},
 			},
-		});
-		void refresh();
-		// Desktop and HTTP can own separate provider processes; durable polling also covers desktop work.
+		);
+		void sync("full");
+		// Desktop sessions stream here too now; the poll is only a safety net
+		// for a stream that is silently stuck, and costs one empty delta.
 		const poll = setInterval(() => {
-			if (document.visibilityState === "visible") schedule();
-		}, 10_000);
+			if (document.visibilityState === "visible") schedule("delta");
+		}, 60_000);
 		const visible = () => {
-			if (document.visibilityState === "visible") schedule();
+			if (document.visibilityState === "visible") schedule("delta");
 		};
 		document.addEventListener("visibilitychange", visible);
 		return () => {

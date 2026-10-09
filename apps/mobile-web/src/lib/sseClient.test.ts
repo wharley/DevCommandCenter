@@ -61,6 +61,29 @@ describe("mobile event recovery", () => {
 			Authorization: "Bearer test-token",
 		});
 	});
+	it("turns a resync frame into a reconcile instead of a message", async () => {
+		const { send } = streamingFetch();
+		const onOpen = vi.fn();
+		const onResync = vi.fn();
+		const onMessage = vi.fn();
+		stop = openEventStream(session, "/events", { onOpen, onResync, onMessage });
+		await vi.advanceTimersByTimeAsync(1);
+		send('event: resync\ndata: {"missed":12}\n\n');
+		send('event: core-event\nid: 7\ndata: {"sessionResumed":{"session_id":"s"}}\n\n');
+		await vi.advanceTimersByTimeAsync(1);
+		expect(onResync).toHaveBeenCalledTimes(1);
+		expect(onMessage).toHaveBeenCalledTimes(1);
+		expect(onMessage).toHaveBeenCalledWith({ sessionResumed: { session_id: "s" } });
+	});
+	it("falls back to the open reconcile when no resync handler is given", async () => {
+		const { send } = streamingFetch();
+		const onOpen = vi.fn();
+		stop = openEventStream(session, "/events", { onOpen, onMessage: vi.fn() });
+		await vi.advanceTimersByTimeAsync(1);
+		send('event: resync\ndata: {"missed":1}\n\n');
+		await vi.advanceTimersByTimeAsync(1);
+		expect(onOpen).toHaveBeenCalledTimes(2);
+	});
 	it("aborts a silent stream and reconnects after the heartbeat deadline", async () => {
 		const { mock } = streamingFetch();
 		const onOpen = vi.fn();

@@ -7,6 +7,11 @@ export type SseOptions = {
 	onMessage: (payload: unknown) => void;
 	/** Reconcile durable history on every connection, including the first. */
 	onOpen?: () => void;
+	/**
+	 * The server dropped events this client was too slow to receive. Defaults
+	 * to `onOpen`, which already reconciles durable history.
+	 */
+	onResync?: () => void;
 	onError?: (error: unknown) => void;
 	onState?: (state: StreamState) => void;
 };
@@ -102,8 +107,16 @@ export function openEventStream(
 						while ((match = /\r?\n\r?\n/u.exec(buffer))) {
 							const frame = buffer.slice(0, match.index);
 							buffer = buffer.slice(match.index + match[0].length);
-							const data = frame
-								.split(/\r?\n/u)
+							const lines = frame.split(/\r?\n/u);
+							const event = lines
+								.find((l) => l.startsWith("event:"))
+								?.slice(6)
+								.trim();
+							if (event === "resync") {
+								(options.onResync ?? options.onOpen)?.();
+								continue;
+							}
+							const data = lines
 								.filter((l) => l.startsWith("data:"))
 								.map((l) => l.slice(5).trimStart())
 								.join("\n");
