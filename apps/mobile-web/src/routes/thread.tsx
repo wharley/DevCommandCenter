@@ -23,22 +23,28 @@ import { loadSession, type PairingSession } from "@/lib/session";
 import { openEventStream, type StreamState } from "@/lib/sseClient";
 import { readLocal, writeLocal, removeLocal } from "@/lib/local-data";
 import { AgentQuestions } from "@/components/agent-questions";
-import { pendingQuestions, type QuestionRequest } from "@/lib/questions";
 import { ConnectionNotice } from "@/components/connection-notice";
-import {
-	deltaPath,
-	maxSequence,
-	planDelta,
-	type EventsDelta,
-} from "@/lib/threadSync";
 import {
 	applyEvents,
 	createThreadState,
+	deltaPath,
+	groupMessages,
 	incomingEventSessionId,
+	isThreadRunning,
+	maxSequence,
+	messageKey,
+	pendingQuestions,
+	planDelta,
+	stepIsLive,
+	stepLabel,
+	threadTitle as titleOf,
 	type ChatMessage,
+	type EventsDelta,
+	type QuestionRequest,
 	type RawSessionEvent,
 	type ThreadState,
-} from "@/lib/threadEvents";
+	type TraceStep,
+} from "@dcc/mobile-core";
 
 type SessionMeta = {
 	sessionId: string;
@@ -244,38 +250,12 @@ export function ThreadRoute() {
 		return null;
 	}, [state.messages]);
 
-	// Running = anything in flight: a streaming answer, a live tool call or
-	// reasoning block, or a prompt that hasn't produced output yet. Walking
-	// backwards means the freshest signal wins.
-	const isRunning = useMemo(() => {
-		for (let i = state.messages.length - 1; i >= 0; i--) {
-			const m = state.messages[i];
-			if (!m) continue;
-			if (m.kind === "assistant") return !m.completed && !m.aborted;
-			if (m.kind === "tool") {
-				if (m.status === "running") return true;
-				continue;
-			}
-			if (m.kind === "reasoning") {
-				if (!m.completed) return true;
-				continue;
-			}
-			if (m.kind === "user") return true;
-			if (m.kind === "system") return false;
-		}
-		return false;
-	}, [state.messages]);
+	const isRunning = useMemo(() => isThreadRunning(state.messages), [state.messages]);
 
-	const threadTitle = useMemo(() => {
-		const firstUser = state.messages.find(
-			(m) => m.kind === "user" && m.text.trim().length > 0,
-		);
-		if (firstUser && firstUser.kind === "user") {
-			const t = firstUser.text.trim().replace(/\s+/g, " ");
-			return t.length > 52 ? `${t.slice(0, 51)}…` : t;
-		}
-		return "Nova sessão";
-	}, [state.messages]);
+	const threadTitle = useMemo(
+		() => titleOf(state.messages) ?? "Nova sessão",
+		[state.messages],
+	);
 
 	// There's no per-session metadata endpoint, so locate this session in the
 	// search index once to learn which workspace (comb) it belongs to. Drives
@@ -566,55 +546,6 @@ function workspaceLabel(meta: SessionMeta | null): string | null {
 	return text || null;
 }
 
-/* ── Message grouping ─────────────────────────────────────────────────────
-   The raw stream interleaves conversation (user/assistant) with machinery
-   (reasoning, tool calls, resolved permissions). Rendering the machinery at
-   the same visual level as the conversation is what made the thread feel
-   chaotic — so contiguous runs of machinery fold into one collapsible
-   "trace" capsule, and the chat reads user → trace → answer again.
-   Unresolved permissions stay standalone: they need the user's thumb. */
-
-type TraceStep = Extract<
-	ChatMessage,
-	{ kind: "reasoning" } | { kind: "tool" } | { kind: "permission" }
->;
-
-type RenderItem =
-	| { type: "single"; key: string; message: ChatMessage }
-	| { type: "trace"; key: string; steps: TraceStep[] };
-
-function groupMessages(messages: ChatMessage[]): RenderItem[] {
-	const items: RenderItem[] = [];
-	let run: TraceStep[] = [];
-	const flush = () => {
-		if (run.length > 0) {
-			const first = run[0]!;
-			items.push({
-				type: "trace",
-				key: `trace-${messageKey(first, 0)}`,
-				steps: run,
-			});
-			run = [];
-		}
-	};
-	for (let i = 0; i < messages.length; i++) {
-		const msg = messages[i];
-		if (!msg) continue;
-		const isStep =
-			msg.kind === "reasoning" ||
-			msg.kind === "tool" ||
-			(msg.kind === "permission" && msg.resolved);
-		if (isStep) {
-			run.push(msg as TraceStep);
-			continue;
-		}
-		flush();
-		items.push({ type: "single", key: messageKey(msg, i), message: msg });
-	}
-	flush();
-	return items;
-}
-
 function MessageList({
 	messages,
 	onRespondPermission,
@@ -645,24 +576,6 @@ function MessageList({
 			})}
 		</div>
 	);
-}
-
-function messageKey(msg: ChatMessage, fallbackIndex: number): string {
-	switch (msg.kind) {
-		case "user":
-		case "assistant":
-			return `${msg.kind}-${msg.turnId}`;
-		case "reasoning":
-			return `reasoning-${msg.id}`;
-		case "tool":
-			return `tool-${msg.toolCallId}`;
-		case "permission":
-			return `perm-${msg.requestId}`;
-		case "system":
-			return `sys-${msg.id}`;
-		default:
-			return `evt-${fallbackIndex}`;
-	}
 }
 
 function MessageView({
@@ -739,22 +652,6 @@ function AssistantBlock({
 }
 
 /* ── Trace capsule ──────────────────────────────────────────────────────── */
-
-function stepIsLive(step: TraceStep): boolean {
-	if (step.kind === "reasoning") return !step.completed;
-	if (step.kind === "tool") return step.status === "running";
-	return false;
-}
-
-function stepLabel(step: TraceStep): string {
-	if (step.kind === "reasoning") return step.label;
-	if (step.kind === "tool") return step.toolName;
-	return firstLine(step.question) || "permissão";
-}
-
-function firstLine(text: string): string {
-	return text.split("\n", 1)[0]?.trim() ?? "";
-}
 
 function TraceBlock({ steps }: { steps: TraceStep[] }) {
 	const [open, setOpen] = useState(false);

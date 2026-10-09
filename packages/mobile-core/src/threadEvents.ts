@@ -388,7 +388,8 @@ function booleanField(source: CorePayload, key: string): boolean | undefined {
 	return typeof value === "boolean" ? value : undefined;
 }
 
-function permissionQuestion(body: CorePayload): string {
+/** What a permission request asks, from its title, description, command or file. */
+export function permissionQuestion(body: CorePayload): string {
 	const text = [
 		stringField(body, "title"),
 		stringField(body, "description"),

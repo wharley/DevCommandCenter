@@ -1,4 +1,4 @@
-import type { RawSessionEvent } from "./threadEvents";
+import type { RawSessionEvent } from "./threadEvents.ts";
 export type AgentQuestion = {
 	id: string;
 	header: string;

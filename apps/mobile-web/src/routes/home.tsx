@@ -20,14 +20,28 @@ import {
 import { ApiError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { loadSession, type PairingSession } from "@/lib/session";
-import { pendingQuestions } from "@/lib/questions";
 import { readLocal, writeLocal } from "@/lib/local-data";
 import { ConnectionNotice } from "@/components/connection-notice";
 import { openEventStream, type StreamState } from "@/lib/sseClient";
 import {
+	combsByProject,
+	formatRelative,
 	incomingEventKindType,
-	type RawSessionEvent,
-} from "@/lib/threadEvents";
+	latestSessionByWorkspace,
+	normalizeProvider,
+	runScan as scanSessions,
+	searchSessions,
+	sessionTitle,
+	sortCombs,
+	triageGroups,
+	withoutPending,
+	workspaceLabel,
+	type Comb,
+	type LiveStatus,
+	type PendingItem,
+	type Scan,
+	type SessionSearchResult,
+} from "@dcc/mobile-core";
 import { indexBundle, type BundleEntry, type WorktreeDiff } from "@/lib/diff";
 import {
 	Rest,
@@ -44,61 +58,12 @@ type DaemonStatus = {
 	memoryMb: number;
 };
 
-type SessionSearchResult = {
-	sessionId: string;
-	threadTitle: string | null;
-	snippet: string | null;
-	providerId: string | null;
-	model: string | null;
-	workspaceName: string | null;
-	workspaceBranch: string | null;
-	workspaceId: string | null;
-	projectId: string | null;
-	updatedAt: string;
-	archivedAt: string | null;
-};
-
-type Comb = {
-	id: string;
-	name: string | null;
-	branch: string | null;
-	projectId: string | null;
-	projectName: string | null;
-	projectPath?: string | null;
-	projectIcon?: string | null;
-	projectColor?: string | null;
-	worktreePath: string | null;
-	status: string | null;
-	lastOpenedAt: string | null;
-};
-
-type PendingItem = {
-	thread: SessionSearchResult;
-	requestId: string;
-	question: string;
-	choices: Array<{ id: string; label: string }>;
-	at: string;
-};
-
-/** Per-session outcome derived from its event stream (recent threads only). */
-type LiveStatus = "running" | "completed" | "aborted";
-
-type Scan = {
-	sessions: SessionSearchResult[];
-	/** sessionId → derived state from a recent-events sweep. */
-	statuses: Map<string, LiveStatus>;
-	needsYou: PendingItem[];
-};
-
 type Tab = "agents" | "workspaces";
 
 type Bootstrap =
 	| { state: "loading" }
 	| { state: "unpaired" }
 	| { state: "ready"; session: PairingSession };
-
-const RECENT_SCAN_WINDOW_MS = 48 * 3600 * 1000;
-const RECENT_SCAN_LIMIT = 20;
 
 export function HomeRoute() {
 	const [boot, setBoot] = useState<Bootstrap>({ state: "loading" });
@@ -325,18 +290,7 @@ function PairedHome({ session }: { session: PairingSession }) {
 				},
 			);
 			setScan((prev) =>
-				prev
-					? {
-							...prev,
-							needsYou: prev.needsYou.filter(
-								(p) =>
-									!(
-										p.thread.sessionId === item.thread.sessionId &&
-										p.requestId === item.requestId
-									),
-							),
-						}
-					: prev,
+				prev ? withoutPending(prev, item.thread.sessionId, item.requestId) : prev,
 			);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Falha ao responder.");
@@ -351,77 +305,20 @@ function PairedHome({ session }: { session: PairingSession }) {
 
 	const sessions = scan?.sessions ?? null;
 
-	const flatSearch = useMemo(() => {
-		if (!sessions) return null;
-		const q = search.trim().toLowerCase();
-		if (!q) return null;
-		return sessions.filter((s) => {
-			if (workspaceFilter && s.workspaceId !== workspaceFilter) return false;
-			return [
-				s.threadTitle,
-				s.workspaceName,
-				s.workspaceBranch,
-				s.projectId,
-				s.snippet,
-			]
-				.filter(Boolean)
-				.join(" ")
-				.toLowerCase()
-				.includes(q);
-		});
-	}, [sessions, search, workspaceFilter]);
+	const flatSearch = useMemo(
+		() => (sessions ? searchSessions(sessions, search, workspaceFilter) : null),
+		[sessions, search, workspaceFilter],
+	);
 
-	const groups = useMemo(() => {
-		if (!scan) return null;
-		const needsYou = workspaceFilter
-			? scan.needsYou.filter((p) => p.thread.workspaceId === workspaceFilter)
-			: scan.needsYou;
-		const blocked = new Set(needsYou.map((p) => p.thread.sessionId));
-		const visible = scan.sessions.filter(
-			(s) => !workspaceFilter || s.workspaceId === workspaceFilter,
-		);
-		const running = visible.filter(
-			(s) =>
-				scan.statuses.get(s.sessionId) === "running" &&
-				!blocked.has(s.sessionId),
-		);
-		const runningIds = new Set(running.map((s) => s.sessionId));
-		const recent = visible
-			.filter((s) => !blocked.has(s.sessionId) && !runningIds.has(s.sessionId))
-			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-		return { needsYou, running, recent };
-	}, [scan, workspaceFilter]);
+	const groups = useMemo(
+		() => (scan ? triageGroups(scan, workspaceFilter) : null),
+		[scan, workspaceFilter],
+	);
 
-	const sessionsByWorkspace = useMemo(() => {
-		const map = new Map<string, number>();
-		for (const s of sessions ?? []) {
-			if (s.workspaceId)
-				map.set(s.workspaceId, (map.get(s.workspaceId) ?? 0) + 1);
-		}
-		return map;
-	}, [sessions]);
-
-	const filteredCombs = useMemo(() => {
-		if (!combs) return null;
-		const q = search.trim().toLowerCase();
-		const active = combs.filter((c) => c.status !== "archived");
-		const base = q
-			? active.filter((c) =>
-					[c.name, c.projectName, c.projectId, c.branch]
-						.filter(Boolean)
-						.join(" ")
-						.toLowerCase()
-						.includes(q),
-				)
-			: active;
-		// Workspaces with threads float up; ties broken by recency.
-		return [...base].sort((a, b) => {
-			const an = sessionsByWorkspace.get(a.id) ?? 0;
-			const bn = sessionsByWorkspace.get(b.id) ?? 0;
-			if (an > 0 !== bn > 0) return bn - an;
-			return (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "");
-		});
-	}, [combs, search, sessionsByWorkspace]);
+	const filteredCombs = useMemo(
+		() => (combs ? sortCombs(combs, sessions ?? [], search) : null),
+		[combs, search, sessions],
+	);
 
 	const activeWorkspace = workspaceFilter
 		? (combs?.find((c) => c.id === workspaceFilter) ?? null)
@@ -909,30 +806,11 @@ function WorkspacesList({
 	statuses: Map<string, LiveStatus>;
 	diffs: Map<string, WorktreeDiff> | null;
 }) {
-	// Each worktree opens its most-recent session.
-	const latestByWorkspace = useMemo(() => {
-		const map = new Map<string, SessionSearchResult>();
-		for (const s of sessions) {
-			if (!s.workspaceId) continue;
-			const cur = map.get(s.workspaceId);
-			if (!cur || s.updatedAt.localeCompare(cur.updatedAt) > 0) {
-				map.set(s.workspaceId, s);
-			}
-		}
-		return map;
-	}, [sessions]);
-
-	// Group worktrees under their project (desktop's mental model).
-	const projects = useMemo(() => {
-		const map = new Map<string, Comb[]>();
-		for (const c of combs ?? []) {
-			const key = c.projectName ?? c.projectId ?? "—";
-			const list = map.get(key) ?? [];
-			list.push(c);
-			map.set(key, list);
-		}
-		return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-	}, [combs]);
+	const latestByWorkspace = useMemo(
+		() => latestSessionByWorkspace(sessions),
+		[sessions],
+	);
+	const projects = useMemo(() => combsByProject(combs ?? []), [combs]);
 
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
@@ -1073,19 +951,6 @@ function DiffPill({ diff }: { diff: WorktreeDiff | null | undefined }) {
 	);
 }
 
-/** Collapse any provider variant to a clean brand word (claude_interactive →
- *  "claude", openai/gpt → "codex", etc.). */
-function normalizeProvider(id: string): string {
-	const v = id.toLowerCase();
-	if (v.includes("claude") || v.includes("anthropic")) return "claude";
-	if (v.includes("codex") || v.includes("openai") || v.includes("gpt"))
-		return "codex";
-	if (v.includes("cursor")) return "cursor";
-	if (v.includes("gemini") || v.includes("google")) return "gemini";
-	if (v.includes("droid") || v.includes("factory")) return "droid";
-	return v.replace(/[_-]/g, " ");
-}
-
 function ProviderTag({ providerId }: { providerId: string | null }) {
 	if (!providerId) return null;
 	return (
@@ -1095,160 +960,6 @@ function ProviderTag({ providerId }: { providerId: string | null }) {
 	);
 }
 
-function sessionTitle(s: SessionSearchResult): string {
-	return (
-		s.threadTitle?.trim() ||
-		s.workspaceName ||
-		s.projectId ||
-		"Sessão sem título"
-	);
-}
-
-function workspaceLabel(s: SessionSearchResult): string {
-	return [s.workspaceName ?? s.projectId, s.workspaceBranch]
-		.filter(Boolean)
-		.join(" · ");
-}
-
-function formatRelative(iso: string): string {
-	try {
-		const date = new Date(iso);
-		const diffSec = (Date.now() - date.getTime()) / 1000;
-		if (diffSec < 60) return "agora";
-		if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min atrás`;
-		if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h atrás`;
-		const days = Math.floor(diffSec / 86400);
-		if (days < 30) return `${days} d atrás`;
-		return date.toLocaleDateString("pt-BR");
-	} catch {
-		return iso;
-	}
-}
-
-/**
- * One sweep that powers all three triage groups. We fetch the session
- * index, then fan out events only for threads touched in the last 48h
- * (capped) — the same budget the old permission counter spent, now reused
- * to also detect which agents are mid-turn.
- */
-async function runScan(
-	session: PairingSession,
-): Promise<{ scan: Scan; combs: Comb[] }> {
-	const [sessRaw, combs] = await Promise.all([
-		apiFetch<SessionSearchResult[]>(
-			session,
-			"/api/v1/sessions/search?limit=60",
-		),
-		apiFetch<Comb[]>(session, "/api/v1/combs").catch(() => [] as Comb[]),
-	]);
-
-	// Only surface sessions whose workspace is still live: drop session-level
-	// archives, plus anything under a workspace that was archived or deleted.
-	// Deleted combs are absent from the list; archived ones carry status.
-	// Guard: if the combs fetch came back empty we can't trust the set, so we
-	// skip the workspace filter rather than hide everything.
-	const activeWorkspaces =
-		combs.length > 0
-			? new Set(combs.filter((c) => c.status !== "archived").map((c) => c.id))
-			: null;
-	const sessions = sessRaw.filter((s) => {
-		if (s.archivedAt) return false;
-		if (
-			activeWorkspaces &&
-			s.workspaceId &&
-			!activeWorkspaces.has(s.workspaceId)
-		)
-			return false;
-		return true;
-	});
-
-	const cutoff = Date.now() - RECENT_SCAN_WINDOW_MS;
-	const recent = sessions
-		.filter((t) => {
-			const ts = Date.parse(t.updatedAt);
-			return Number.isFinite(ts) && ts > cutoff;
-		})
-		.slice(0, RECENT_SCAN_LIMIT);
-
-	const sweeps = await Promise.all(
-		recent.map((thread) =>
-			apiFetch<RawSessionEvent[]>(
-				session,
-				`/api/v1/sessions/${encodeURIComponent(thread.sessionId)}/events`,
-			)
-				.then((events) => ({ thread, events }))
-				.catch(() => ({ thread, events: [] as RawSessionEvent[] })),
-		),
-	);
-
-	const statuses = new Map<string, LiveStatus>();
-	const needsYou: PendingItem[] = [];
-	for (const { thread, events } of sweeps) {
-		for (const request of pendingQuestions(events))
-			needsYou.push({
-				thread,
-				requestId: request.requestId,
-				question: request.questions.map((q) => q.question).join(" · "),
-				choices: [],
-				at: request.at,
-			});
-		const requested = new Map<string, RawSessionEvent>();
-		const resolved = new Set<string>();
-		let live = false;
-		let lastEnd: "completed" | "aborted" | null = null;
-		for (const event of events) {
-			const kind = event.kind;
-			switch (kind?.type) {
-				case "turn_started":
-					live = true;
-					break;
-				case "turn_completed":
-				case "session_completed":
-					live = false;
-					lastEnd = "completed";
-					break;
-				case "turn_aborted":
-				case "session_aborted":
-					live = false;
-					lastEnd = "aborted";
-					break;
-				case "turn_permission_requested": {
-					const id =
-						typeof kind.requestId === "string" ? kind.requestId : event.eventId;
-					requested.set(id, event);
-					break;
-				}
-				case "turn_permission_resolved": {
-					const id = typeof kind.requestId === "string" ? kind.requestId : "";
-					resolved.add(id);
-					break;
-				}
-			}
-		}
-		if (live) statuses.set(thread.sessionId, "running");
-		else if (lastEnd) statuses.set(thread.sessionId, lastEnd);
-		for (const [id, event] of requested) {
-			if (resolved.has(id)) continue;
-			const kind = event.kind ?? {};
-			const choices = Array.isArray(kind.choices)
-				? (kind.choices as Array<{ id: string; label: string }>)
-				: [
-						{ id: "allow", label: "Permitir" },
-						{ id: "deny", label: "Negar" },
-					];
-			needsYou.push({
-				thread,
-				requestId: id,
-				question:
-					typeof kind.question === "string"
-						? kind.question
-						: "Pedido de permissão",
-				choices,
-				at: event.occurredAt,
-			});
-		}
-	}
-	needsYou.sort((a, b) => b.at.localeCompare(a.at));
-
-	return { scan: { sessions, statuses, needsYou }, combs };
+function runScan(session: PairingSession): Promise<{ scan: Scan; combs: Comb[] }> {
+	return scanSessions((path) => apiFetch(session, path));
 }

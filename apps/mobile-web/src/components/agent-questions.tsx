@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { QuestionRequest } from "@/lib/questions";
+import type { QuestionRequest } from "@dcc/mobile-core";
 import type { PairingSession } from "@/lib/session";
 import { apiFetch } from "@/lib/api";
 import { readLocal, removeLocal, writeLocal } from "@/lib/local-data";

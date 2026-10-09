@@ -3,7 +3,7 @@
  * `sequence` is the cursor; `GET .../events?after=<cursor>` returns only what
  * the client is missing, plus `lastSeq` so an empty delta still confirms it.
  */
-import type { RawSessionEvent } from "./threadEvents";
+import type { RawSessionEvent } from "./threadEvents.ts";
 
 export type EventsDelta = {
 	events: RawSessionEvent[];

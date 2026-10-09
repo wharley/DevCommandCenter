@@ -15,7 +15,7 @@ import { openEventStream } from "@/lib/sseClient";
 import {
 	incomingEventKindType,
 	type RawSessionEvent,
-} from "@/lib/threadEvents";
+} from "@dcc/mobile-core";
 
 type SessionSearchResult = {
 	sessionId: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { deltaPath, planDelta } from "./threadSync";
-import type { RawSessionEvent } from "./threadEvents";
+import { deltaPath, planDelta } from "./threadSync.ts";
+import type { RawSessionEvent } from "./threadEvents.ts";
 
 function event(sequence: number, type = "turn_delta"): RawSessionEvent {
 	return {

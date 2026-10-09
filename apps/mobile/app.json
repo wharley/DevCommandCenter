@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "DCC",
+    "slug": "dcc-mobile",
+    "scheme": "dcc",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0a0b0d",
+    "ios": {
+      "bundleIdentifier": "com.devcommandcenter.mobile",
+      "supportsTablet": true,
+      "config": { "usesNonExemptEncryption": false }
+    },
+    "android": {
+      "package": "com.devcommandcenter.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0a0b0d"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O DCC usa a câmera só para ler o QR de pareamento do seu computador.",
+          "recordAudioAndroid": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
