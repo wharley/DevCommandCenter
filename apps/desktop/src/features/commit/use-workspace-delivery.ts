@@ -22,8 +22,14 @@ import {
 	workspaceProjectAutomationConfig,
 	workspaceRunProjectTasks,
 	workspaceChangeRequestCreate,
+	workspaceDeliveryFailureSnapshot,
+	workspaceDeliveryRecoveryExecute,
 } from "@/lib/workspace-api";
-import type { ProviderRuntimeConfig, WorkspaceChangeRequestCreateInput } from "@dcc/contracts";
+import type {
+	ProviderRuntimeConfig,
+	WorkspaceChangeRequestCreateInput,
+	WorkspaceDeliveryFailureSnapshot,
+} from "@dcc/contracts";
 import {
 	WORKSPACE_GIT_STATUS_QUERY_KEY,
 } from "@/features/inspector/use-workspace-git-status";
@@ -34,6 +40,7 @@ import { WORKSPACE_PIPELINE_QUERY_KEY } from "@/features/inspector/use-workspace
 import { WORKSPACE_DELIVERY_FAILURE_QUERY_KEY } from "@/features/inspector/use-workspace-delivery-failure";
 import { WORKSPACE_REVIEW_STATE_QUERY_KEY } from "@/features/inspector/use-workspace-review-state";
 import {
+	isWorkspaceDeliveryBusy,
 	setWorkspaceDeliveryBusy,
 	useWorkspaceDeliveryBusy,
 } from "./workspace-delivery-busy";
@@ -68,6 +75,31 @@ export type WorkspaceDeliveryCreateRequestInput = WorkspaceChangeRequestCreateIn
 
 function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The push the user just attempted was rejected because the remote branch
+ * moved (another task, another machine, a merged PR). The backend already
+ * captured the failure and only offers `synchronize` when the captured push
+ * target is safe to merge from, so the dock can turn the raw git rejection
+ * into an "update and push" action instead of a dead end.
+ */
+async function capturedNonFastForwardPush(
+	root: string,
+): Promise<WorkspaceDeliveryFailureSnapshot | null> {
+	try {
+		const { snapshot } = await workspaceDeliveryFailureSnapshot({ workspaceRoot: root });
+		if (
+			snapshot?.operation === "push" &&
+			snapshot.classification === "non-fast-forward" &&
+			snapshot.availableActions.includes("synchronize")
+		) {
+			return snapshot;
+		}
+	} catch {
+		// Fall back to the generic failure toast.
+	}
+	return null;
 }
 
 async function commitMessageForStagedChanges(
@@ -182,6 +214,43 @@ export function useWorkspaceDelivery({
 		return output.report.status === "passed";
 	}, [invalidateGitState, queryClient]);
 
+	const syncAndPush = useCallback(async (failure: WorkspaceDeliveryFailureSnapshot) => {
+		const root = failure.workspaceRoot;
+		if (isWorkspaceDeliveryBusy(root)) return;
+		const target = failure.pushTarget
+			? `${failure.pushTarget.remote}/${failure.pushTarget.branch}`
+			: (failure.branch ?? "");
+
+		setWorkspaceDeliveryBusy(root, true);
+		const loadingToast = toast.loading(
+			t("composer.executionDock.actions.syncAndPushLoading", { target }),
+		);
+		try {
+			await workspaceDeliveryRecoveryExecute({
+				workspaceRoot: root,
+				attemptToken: failure.attemptToken,
+				action: "synchronize",
+				forgeLogin,
+			});
+			// The merge brought in code the configured checks have not seen yet.
+			if (!(await runBeforePushChecks(root))) {
+				throw new Error(t("composer.executionDock.actions.beforePushBlocked"));
+			}
+			await workspaceGitPush({ workspaceRoot: root, forgeLogin });
+			toast.success(t("composer.executionDock.actions.syncAndPushSuccess", { target }), {
+				id: loadingToast,
+			});
+		} catch (error) {
+			toast.error(t("composer.executionDock.actions.failed"), {
+				id: loadingToast,
+				description: errorMessage(error),
+			});
+		} finally {
+			setWorkspaceDeliveryBusy(root, false);
+			await invalidateGitState();
+		}
+	}, [forgeLogin, invalidateGitState, runBeforePushChecks, t]);
+
 	const run = useCallback(async (
 		mode: CommitMode | "commit" | "sync-base",
 		commitMessage?: string,
@@ -281,9 +350,27 @@ export function useWorkspaceDelivery({
 			}
 			await invalidateGitState();
 		} catch (error) {
-			toast.error(t("composer.executionDock.actions.failed"), {
-				description: errorMessage(error),
-			});
+			const pushed = mode === "push" || mode === "commit-and-push";
+			const behindRemote = pushed ? await capturedNonFastForwardPush(root) : null;
+			if (behindRemote) {
+				// A commit may have landed before the rejected push.
+				await invalidateGitState();
+				const target = behindRemote.pushTarget
+					? `${behindRemote.pushTarget.remote}/${behindRemote.pushTarget.branch}`
+					: (behindRemote.branch ?? "");
+				toast.error(t("composer.executionDock.actions.pushBehindRemote", { target }), {
+					description: t("composer.executionDock.actions.pushBehindRemoteHint"),
+					duration: 15_000,
+					action: {
+						label: t("composer.executionDock.actions.syncAndPush"),
+						onClick: () => void syncAndPush(behindRemote),
+					},
+				});
+			} else {
+				toast.error(t("composer.executionDock.actions.failed"), {
+					description: errorMessage(error),
+				});
+			}
 			throw error;
 		} finally {
 			setWorkspaceDeliveryBusy(root, false);
@@ -301,6 +388,7 @@ export function useWorkspaceDelivery({
 		onReview,
 		runBeforePushChecks,
 		stagedCount,
+		syncAndPush,
 		t,
 		// The optional preview text is user-editable; sanitize again at the
 		// boundary before it reaches the Git command.

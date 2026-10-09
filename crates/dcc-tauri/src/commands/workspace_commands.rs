@@ -4064,6 +4064,7 @@ pub async fn workspace_git_sync_base(
         input.base_branch.as_deref(),
         None,
         true,
+        SyncIntegration::Merge,
         input.forge_login.as_deref(),
         None,
         None,
@@ -4077,6 +4078,7 @@ async fn sync_workspace_branch(
     target_branch: Option<&str>,
     target_remote: Option<&str>,
     persist_target_as_base: bool,
+    integration: SyncIntegration,
     forge_login: Option<&str>,
     expected_identity: Option<PushIdentity>,
     recovery_claim: Option<DeliveryRecoveryClaim>,
@@ -4097,6 +4099,7 @@ async fn sync_workspace_branch(
                     root,
                     target_branch.as_deref(),
                     target_remote.as_deref(),
+                    integration,
                     forge_login.as_deref(),
                     expected_identity.as_ref(),
                 ),
@@ -4227,11 +4230,57 @@ impl WorkspaceSyncFailure {
     }
 }
 
+/// How remote commits are brought into the checkout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SyncIntegration {
+    /// Always merge. Used when updating a task branch from its base, where
+    /// rewriting already-published commits is never acceptable.
+    Merge,
+    /// Replay unpushed local commits on top of the remote branch so a rejected
+    /// push to the same branch (e.g. local-direct on `main`) stays linear.
+    /// Falls back to merge whenever rebasing is not clearly safe.
+    PreferRebase,
+}
+
+/// Rebase only when it cannot disturb anything besides the commits being
+/// replayed: a named branch, no tracked edits (another local-direct task may
+/// be writing to the same checkout), no merge commits to flatten and no
+/// rebase already in progress.
+fn rebase_onto_is_safe(root: &str, branch: &str, upstream: &str) -> bool {
+    if branch == "HEAD" {
+        return false;
+    }
+    if !git_command_succeeds(root, &["diff", "--quiet", "HEAD"])
+        || !git_command_succeeds(root, &["diff", "--cached", "--quiet"])
+    {
+        return false;
+    }
+    for state_dir in ["rebase-merge", "rebase-apply"] {
+        let in_progress = run_git_output(root, &["rev-parse", "--git-path", state_dir])
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                Path::new(root).join(path).exists()
+            })
+            .unwrap_or(true);
+        if in_progress {
+            return false;
+        }
+    }
+    let range = format!("{upstream}..HEAD");
+    run_git_output(root, &["rev-list", "--merges", "--count", &range])
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "0")
+}
+
 fn sync_workspace_branch_inner(
     db_path: &Path,
     root: &str,
     target_branch: Option<&str>,
     target_remote: Option<&str>,
+    integration: SyncIntegration,
     forge_login: Option<&str>,
     expected_identity: Option<&PushIdentity>,
 ) -> Result<WorkspaceSyncLocalOutcome, WorkspaceSyncFailure> {
@@ -4307,6 +4356,44 @@ fn sync_workspace_branch_inner(
             &remote,
             &base_branch,
         ));
+    }
+
+    if integration == SyncIntegration::PreferRebase && rebase_onto_is_safe(root, &branch, &base_ref) {
+        let rebased = run_git_output(root, &["rebase", "--no-autostash", &base_ref])
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if rebased {
+            let after = resolve_current_commit_sha(root)
+                .map_err(|error| {
+                    WorkspaceSyncFailure::delivery(
+                        WorkspaceSyncFailurePhase::Pull,
+                        error,
+                        &remote,
+                        &base_branch,
+                    )
+                })?
+                .unwrap_or_default();
+            return Ok(WorkspaceSyncLocalOutcome {
+                branch,
+                base_branch,
+                remote,
+                before,
+                after,
+                conflict_count: 0,
+            });
+        }
+        // A conflicting rebase stops midway. Restore the pre-rebase branch and
+        // let the merge below surface the conflicts through the merge
+        // resolver, which is the flow the UI knows how to finish.
+        let _ = run_git_output(root, &["rebase", "--abort"]);
+        if observe_push_identity(root).map(|identity| identity.head) != Ok(before.clone()) {
+            return Err(WorkspaceSyncFailure::delivery(
+                WorkspaceSyncFailurePhase::Pull,
+                "git rebase could not be undone; inspect the workspace before continuing",
+                &remote,
+                &base_branch,
+            ));
+        }
     }
 
     let merge = run_git_output(root, &["merge", "--no-edit", &base_ref]).map_err(|error| {
@@ -4416,6 +4503,7 @@ pub async fn workspace_delivery_recovery_execute(
                     Some(target),
                     snapshot.remote.as_deref(),
                     true,
+                    SyncIntegration::Merge,
                     input.forge_login.as_deref(),
                     Some(PushIdentity {
                         branch: snapshot.branch.clone().ok_or_else(|| {
@@ -4470,6 +4558,7 @@ pub async fn workspace_delivery_recovery_execute(
                 Some(target),
                 remote,
                 false,
+                SyncIntegration::PreferRebase,
                 input.forge_login.as_deref(),
                 Some(PushIdentity {
                     branch: snapshot.branch.clone().ok_or_else(|| {
@@ -10064,6 +10153,7 @@ mod editor_workspace_file_tests {
             repo.as_str(),
             Some("main"),
             Some("origin"),
+            SyncIntegration::Merge,
             None,
             Some(&stale),
         ) {
@@ -10071,6 +10161,101 @@ mod editor_workspace_file_tests {
             Ok(_) => panic!("stale recovery identity must fail before sync"),
         };
         assert!(matches!(error.phase, WorkspaceSyncFailurePhase::Preflight));
+    }
+
+    /// Local `main` with one unpushed commit while `origin/main` gained a
+    /// commit from another clone: the shape of a rejected local-direct push.
+    fn diverged_local_direct_checkout(name: &str, local_file: &str) -> (TestDir, String) {
+        let dir = TestDir::new(name);
+        let remote = dir.path.join("remote.git");
+        let root = dir.path.join("checkout");
+        let other = dir.path.join("other");
+        fs::create_dir_all(&remote).unwrap();
+        let remote = remote.to_str().unwrap().to_string();
+        let git = |cwd: &str, args: &[&str]| {
+            let output = run_git_output(cwd, args).expect("run git");
+            assert!(output.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&output.stderr));
+        };
+        git(&remote, &["init", "--bare", "-b", "main"]);
+        for path in [&root, &other] {
+            fs::create_dir_all(path).unwrap();
+            let path = path.to_str().unwrap();
+            git(path, &["init", "-b", "main"]);
+            git(path, &["config", "user.name", "DCC Tests"]);
+            git(path, &["config", "user.email", "dcc@example.invalid"]);
+            git(path, &["remote", "add", "origin", &remote]);
+        }
+        let root = root.to_str().unwrap().to_string();
+        let other = other.to_str().unwrap();
+        fs::write(Path::new(&root).join("shared.txt"), "base\n").unwrap();
+        git(&root, &["add", "shared.txt"]);
+        git(&root, &["commit", "-m", "base"]);
+        git(&root, &["push", "origin", "main"]);
+        git(other, &["pull", "origin", "main"]);
+        fs::write(Path::new(other).join("shared.txt"), "remote\n").unwrap();
+        git(other, &["commit", "-am", "remote work"]);
+        git(other, &["push", "origin", "main"]);
+        fs::write(Path::new(&root).join(local_file), "local\n").unwrap();
+        git(&root, &["add", local_file]);
+        git(&root, &["commit", "-m", "local work"]);
+        (dir, root)
+    }
+
+    fn sync_main_preferring_rebase(dir: &TestDir, root: &str) -> Result<WorkspaceSyncLocalOutcome, WorkspaceSyncFailure> {
+        sync_workspace_branch_inner(
+            &dir.path.join("workspaces.sqlite"),
+            root,
+            Some("main"),
+            Some("origin"),
+            SyncIntegration::PreferRebase,
+            None,
+            None,
+        )
+    }
+
+    fn head_parent_count(root: &str) -> usize {
+        let output = run_git_output(root, &["rev-list", "--parents", "-n", "1", "HEAD"]).unwrap();
+        String::from_utf8_lossy(&output.stdout).split_whitespace().count() - 1
+    }
+
+    #[test]
+    fn rejected_push_recovery_rebases_a_clean_checkout() {
+        let (dir, root) = diverged_local_direct_checkout("sync-rebase-clean", "local.txt");
+        let outcome = sync_main_preferring_rebase(&dir, &root)
+            .unwrap_or_else(|failure| panic!("rebase sync: {}", failure.detail));
+        assert_ne!(outcome.before, outcome.after);
+        assert_eq!(head_parent_count(&root), 1, "rebase keeps history linear");
+        assert_eq!(
+            resolve_commitish_sha(&root, "HEAD~1").unwrap(),
+            resolve_commitish_sha(&root, "refs/remotes/origin/main").unwrap()
+        );
+    }
+
+    #[test]
+    fn rejected_push_recovery_merges_when_another_task_has_edits() {
+        let (dir, root) = diverged_local_direct_checkout("sync-rebase-dirty", "local.txt");
+        fs::write(Path::new(&root).join("local.txt"), "other task editing\n").unwrap();
+        if let Err(failure) = sync_main_preferring_rebase(&dir, &root) {
+            panic!("merge sync: {}", failure.detail);
+        }
+        assert_eq!(head_parent_count(&root), 2, "dirty checkout falls back to merge");
+        assert_eq!(
+            fs::read_to_string(Path::new(&root).join("local.txt")).unwrap(),
+            "other task editing\n",
+            "uncommitted edits stay untouched"
+        );
+    }
+
+    #[test]
+    fn rejected_push_recovery_falls_back_to_merge_conflicts() {
+        let (dir, root) = diverged_local_direct_checkout("sync-rebase-conflict", "shared.txt");
+        let failure = match sync_main_preferring_rebase(&dir, &root) {
+            Err(failure) => failure,
+            Ok(_) => panic!("conflicting histories must stop"),
+        };
+        assert!(matches!(failure.phase, WorkspaceSyncFailurePhase::Pull));
+        assert!(git_command_succeeds(&root, &["rev-parse", "--verify", "-q", "MERGE_HEAD"]));
+        assert!(!rebase_onto_is_safe(&root, "main", "refs/remotes/origin/main"));
     }
 
     #[test]

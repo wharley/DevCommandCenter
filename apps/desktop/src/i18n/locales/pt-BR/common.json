@@ -1247,7 +1247,7 @@
       "sendToAgent": "Enviar ao agente",
       "openExternal": "Abrir provedor",
       "confirmRetry": "Repetir a operação de entrega capturada usando o mesmo contexto de branch e commit?",
-      "confirmSynchronize": "Buscar e mesclar a branch remota capturada neste workspace? O DCC interromperá se houver conflitos que precisem de atenção.",
+      "confirmSynchronize": "Buscar a branch remota capturada e colocar seus commits locais por cima dela (ou mesclar, se houver alterações não commitadas)? O DCC interromperá se houver conflitos que precisem de atenção.",
       "retrySuccess": "A operação de entrega foi concluída.",
       "synchronizeSuccess": "A branch remota capturada foi sincronizada.",
       "sentToAgent": "O contexto limitado da falha foi adicionado ao Composer.",
@@ -2019,7 +2019,12 @@
         "pushed": "Enviado",
         "committedAndPushed": "Commit criado e enviado",
         "opened": "Aberto no forge",
-        "failed": "A ação git falhou"
+        "failed": "A ação git falhou",
+        "pushBehindRemote": "{{target}} tem commits que você não tem localmente",
+        "pushBehindRemoteHint": "Alguém (ou outra tarefa) enviou antes. Atualizar coloca seus commits por cima dos remotos (ou mescla, se houver alterações não commitadas no checkout) e envia de novo; o DCC para se houver conflitos.",
+        "syncAndPush": "Atualizar e enviar",
+        "syncAndPushLoading": "Atualizando de {{target}} e enviando…",
+        "syncAndPushSuccess": "Atualizado de {{target}} e enviado"
       },
       "createRequest": {
         "title": "Criar {{requestLabel}}",

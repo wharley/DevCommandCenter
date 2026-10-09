@@ -1247,7 +1247,7 @@
       "sendToAgent": "Send to agent",
       "openExternal": "Open provider",
       "confirmRetry": "Retry the captured delivery operation using the same branch and commit context?",
-      "confirmSynchronize": "Fetch and merge the captured remote branch into this workspace? DCC will stop if conflicts require attention.",
+      "confirmSynchronize": "Fetch the captured remote branch and replay your local commits on top of it (or merge, if there are uncommitted edits)? DCC will stop if conflicts require attention.",
       "retrySuccess": "The delivery operation completed.",
       "synchronizeSuccess": "The captured remote branch was synchronized.",
       "sentToAgent": "Bounded failure context was added to the Composer.",
@@ -2019,7 +2019,12 @@
         "pushed": "Pushed",
         "committedAndPushed": "Committed and pushed",
         "opened": "Opened in the forge",
-        "failed": "Git action failed"
+        "failed": "Git action failed",
+        "pushBehindRemote": "{{target}} has commits you don't have locally",
+        "pushBehindRemoteHint": "Someone (or another task) pushed first. Update replays your commits on top of the remote ones (or merges, if the checkout has uncommitted edits) and sends again; DCC stops if there are conflicts.",
+        "syncAndPush": "Update and push",
+        "syncAndPushLoading": "Updating from {{target}} and pushing…",
+        "syncAndPushSuccess": "Updated from {{target}} and pushed"
       },
       "createRequest": {
         "title": "Create {{requestLabel}}",
