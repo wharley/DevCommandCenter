@@ -97,7 +97,7 @@ export function AiMemorySourcesMenu({ sessionId, projectLabel, workspacePath }: 
 	}, [sessionId]);
 
 	const sidecarMode = sidecarQuery.data?.mode;
-	const sidecarActive = sidecarMode === "managed" || sidecarMode === "remote";
+	const sidecarActive = sidecarMode === "managed" || sidecarMode === "remote" || sidecarMode === "shared";
 	const sidecarUnavailable = sidecarMode === "unavailable";
 	const actions = useMemo(
 		() => new Map<string, AiMemorySourceActionOutput>((actionsQuery.data ?? []).map((action) => [action.sourceKey, action])),

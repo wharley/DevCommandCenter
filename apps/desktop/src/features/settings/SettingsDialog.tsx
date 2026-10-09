@@ -1748,7 +1748,7 @@ export function SettingsDialog({
 										<div className="mt-4 rounded-lg border border-border/50 bg-background p-3">
 											<div className="flex items-center justify-between gap-3">
 												<div className="flex items-center gap-2 text-[12px] font-medium text-foreground">
-													{aiMemoryStatusQuery.data?.mode === "managed" || aiMemoryStatusQuery.data?.mode === "remote" ? (
+													{aiMemoryStatusQuery.data?.mode === "managed" || aiMemoryStatusQuery.data?.mode === "remote" || aiMemoryStatusQuery.data?.mode === "shared" ? (
 														<CircleCheck className="size-4 text-emerald-500" />
 													) : (
 														<CircleAlert className="size-4 text-amber-500" />

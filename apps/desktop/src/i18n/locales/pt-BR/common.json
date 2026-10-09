@@ -2862,6 +2862,7 @@
       "modes": {
         "managed": "Gerenciado pelo DCC",
         "remote": "Servidor configurado",
+        "shared": "Servidor já em execução",
         "disabled": "Desativado",
         "unavailable": "Indisponível",
         "unknown": "Desconhecido"
@@ -2869,6 +2870,7 @@
       "statusBody": {
         "managed": "O DCC iniciou um processo local único. Consultas de memória têm limite e tempo máximo; prompts não iniciam processos novos.",
         "remote": "O DCC usa o servidor configurado em DCC_AI_MEMORY_URL e não cria um processo local.",
+        "shared": "Já havia um ai-memory respondendo nesta porta que não foi iniciado por este DCC (outra instalação ou o build de desenvolvimento). O DCC usa esse servidor como está; versão e configuração dele não são conhecidas.",
         "disabled": "A memória não está ativa nesta instalação. O restante do DCC continua normal.",
         "unavailable": "O sidecar não pôde iniciar. A sessão não é bloqueada e o erro fica disponível no log.",
         "unknown": "Ainda não há informação suficiente sobre o serviço."
