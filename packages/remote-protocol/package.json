@@ -1,0 +1,27 @@
+{
+  "name": "@dcc/remote-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Phone side of the DCC remote channel: Noise IK/IKpsk2, framing and a relay client. Plain JS, runs in Node, React Native and browsers.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.1.2"
+  }
+}

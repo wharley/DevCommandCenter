@@ -1,6 +1,7 @@
 use dev_command_center_tauri::daemon_client::default_app_data_dir;
 use dev_command_center_tauri::http_api::{build_router, HttpBackend};
 use dev_command_center_tauri::http_config::HttpConfig;
+use dev_command_center_tauri::remote_connector::RemoteHub;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -74,8 +75,22 @@ async fn main() {
         config.db_path.clone(),
         default_app_data_dir(),
     ));
+    let db_path = config.db_path.clone();
     let config = Arc::new(RwLock::new(config));
-    let app = build_router(config.clone(), backend);
+    let app = build_router(config.clone(), backend.clone());
+
+    // Remote access through the relay (`DCC_RELAY_URL` or the saved relay).
+    // Idle until a relay phone is paired or a pairing offer is open.
+    match RemoteHub::new(app.clone(), db_path) {
+        Ok(hub) => {
+            backend.attach_remote(&hub);
+            hub.start();
+            if let Some(relay) = hub.relay_url() {
+                println!("[DCC HTTP] Relay: {relay}");
+            }
+        }
+        Err(error) => eprintln!("[DCC HTTP] Remote access unavailable: {error}"),
+    }
 
     println!("[DCC HTTP] Listening on http://{bind_addr}");
     if network_exposed && bind_addr.ip().is_unspecified() {
@@ -123,6 +138,10 @@ async fn main() {
     println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/restore");
     println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/respond-user-input");
     println!("[DCC HTTP]   POST /api/v1/sessions/:session_id/respond-permission");
+    println!("[DCC HTTP]   GET  /api/v1/remote/status");
+    println!("[DCC HTTP]   POST /api/v1/remote/pairing/offers");
+    println!("[DCC HTTP]   GET  /api/v1/remote/pairing/approvals");
+    println!("[DCC HTTP]   POST /api/v1/remote/pairing/approvals/:approval_id");
 
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
         Ok(listener) => listener,

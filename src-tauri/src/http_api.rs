@@ -64,12 +64,13 @@ pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
 }
 
 use crate::daemon_client::rpc_with_db_path_timeout;
-use crate::http_auth::auth_middleware;
+use crate::http_auth::{auth_middleware, PairedDeviceIdentity};
 use crate::http_config::{HttpAuthMode, HttpConfig};
 use crate::http_rpc_handler::handle_rpc as handle_json_rpc;
 use crate::pairing::{
     self, PairedDeviceSummary, PairingChallenge, PairingError, SignedRequestHeaders,
 };
+use crate::remote_connector::RemoteHub;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -186,6 +187,9 @@ pub struct HttpBackend {
     // The runtime keeps only a weak reference to its buses.
     _bus: Arc<dyn EventBus>,
     terminals: bool,
+    /// The relay connector serving this router, for the operator routes and
+    /// to drop a revoked phone at once. Weak: the hub holds the router.
+    remote: OnceLock<std::sync::Weak<RemoteHub>>,
 }
 
 impl HttpBackend {
@@ -204,6 +208,7 @@ impl HttpBackend {
             events,
             _bus: bus,
             terminals: false,
+            remote: OnceLock::new(),
         })
     }
 
@@ -219,7 +224,16 @@ impl HttpBackend {
             events,
             _bus: bus,
             terminals: true,
+            remote: OnceLock::new(),
         }
+    }
+
+    pub fn attach_remote(&self, hub: &Arc<RemoteHub>) {
+        let _ = self.remote.set(Arc::downgrade(hub));
+    }
+
+    fn remote(&self) -> Option<Arc<RemoteHub>> {
+        self.remote.get().and_then(std::sync::Weak::upgrade)
     }
 }
 
@@ -322,6 +336,7 @@ struct HeadlessTerminalSession {
 #[derive(Debug)]
 enum HttpApiError {
     BadRequest(String),
+    Forbidden(String),
     NotFound(String),
     /// The request was already answered; carries the answer that won.
     Conflict(String, Value),
@@ -359,6 +374,7 @@ impl HttpApiError {
     fn status(&self) -> StatusCode {
         match self {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(..) => StatusCode::CONFLICT,
             Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
@@ -371,6 +387,7 @@ impl HttpApiError {
     fn code(&self) -> &'static str {
         match self {
             Self::BadRequest(_) => "bad_request",
+            Self::Forbidden(_) => "forbidden",
             Self::NotFound(_) => "not_found",
             Self::Conflict(..) => "already_resolved",
             Self::ServiceUnavailable(_) => "service_unavailable",
@@ -383,6 +400,7 @@ impl HttpApiError {
     fn message(&self) -> &str {
         match self {
             Self::BadRequest(message)
+            | Self::Forbidden(message)
             | Self::NotFound(message)
             | Self::Conflict(message, _)
             | Self::ServiceUnavailable(message)
@@ -506,6 +524,19 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/auth/bearer/rotate",
             post(rotate_bearer_token_handler),
+        )
+        .route("/api/v1/remote/status", get(remote_status_handler))
+        .route(
+            "/api/v1/remote/pairing/offers",
+            post(remote_create_offer_handler),
+        )
+        .route(
+            "/api/v1/remote/pairing/approvals",
+            get(remote_list_approvals_handler),
+        )
+        .route(
+            "/api/v1/remote/pairing/approvals/:approval_id",
+            post(remote_respond_approval_handler),
         )
         .route("/auth/pair-init", post(pair_init_handler))
         .route("/auth/devices", get(list_paired_devices_handler))
@@ -2655,14 +2686,16 @@ async fn list_paired_devices_handler(
 
 async fn revoke_device_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
     headers: axum::http::HeaderMap,
     extensions: axum::http::Extensions,
     Path(device_id): Path<String>,
 ) -> Result<Json<Value>, HttpApiError> {
     let ip = crate::http_auth::client_ip(&headers, &extensions);
 
+    let target = device_id.clone();
     let revoked = with_pairing_db(config, move |conn| {
-        pairing::revoke_device(conn, &device_id, ip.as_deref())
+        pairing::revoke_device(conn, &target, ip.as_deref())
     })
     .await?;
 
@@ -2671,7 +2704,74 @@ async fn revoke_device_handler(
             "device not found or already revoked",
         ));
     }
+    if let Some(remote) = backend.remote() {
+        remote.device_revoked(&device_id);
+    }
 
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Relay administration is for the operator on this machine (API key), never
+/// for a paired device: a phone must not approve phones or mint QR codes.
+fn operator_remote(
+    backend: &HttpBackend,
+    device: Option<axum::Extension<PairedDeviceIdentity>>,
+) -> Result<Arc<RemoteHub>, HttpApiError> {
+    if device.is_some() {
+        return Err(HttpApiError::Forbidden(
+            "paired devices cannot manage remote access".into(),
+        ));
+    }
+    backend
+        .remote()
+        .ok_or_else(|| HttpApiError::service_unavailable("remote access is not running"))
+}
+
+async fn remote_status_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    device: Option<axum::Extension<PairedDeviceIdentity>>,
+) -> Result<Json<Value>, HttpApiError> {
+    let remote = operator_remote(&backend, device)?;
+    Ok(Json(json!(remote.status())))
+}
+
+async fn remote_create_offer_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    device: Option<axum::Extension<PairedDeviceIdentity>>,
+) -> Result<Json<Value>, HttpApiError> {
+    let remote = operator_remote(&backend, device)?;
+    let offer = remote
+        .create_offer()
+        .await
+        .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!(offer)))
+}
+
+async fn remote_list_approvals_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    device: Option<axum::Extension<PairedDeviceIdentity>>,
+) -> Result<Json<Value>, HttpApiError> {
+    let remote = operator_remote(&backend, device)?;
+    Ok(Json(json!({ "approvals": remote.pending_approvals() })))
+}
+
+#[derive(Deserialize)]
+struct RemoteApprovalBody {
+    approve: bool,
+}
+
+async fn remote_respond_approval_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    device: Option<axum::Extension<PairedDeviceIdentity>>,
+    Path(approval_id): Path<String>,
+    Json(body): Json<RemoteApprovalBody>,
+) -> Result<Json<Value>, HttpApiError> {
+    let remote = operator_remote(&backend, device)?;
+    if !remote.respond_approval(&approval_id, body.approve) {
+        return Err(HttpApiError::not_found(
+            "approval request not found or expired",
+        ));
+    }
     Ok(Json(json!({ "ok": true })))
 }
 

@@ -23,6 +23,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { RelayAccessCard } from "./relay-pairing";
 import { RemoteAccessQr } from "./remote-access-qr";
 import {
 	pairAuditLog,
@@ -162,9 +163,9 @@ export function PairedDevicesPanel({
 							</h3>
 						</div>
 						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-							Celulares e tablets autenticam por chave pública (ECDSA P-256). A
-							chave privada nunca sai do dispositivo. Você pode revogar
-							individualmente a qualquer momento.
+							Celulares e tablets autenticam por chave pública (ECDSA P-256 na
+							rede local, X25519 pelo relay). A chave privada nunca sai do
+							dispositivo. Você pode revogar individualmente a qualquer momento.
 						</p>
 					</div>
 					<Badge
@@ -198,6 +199,8 @@ export function PairedDevicesPanel({
 				</div>
 			</div>
 
+			<RelayAccessCard onPaired={() => void refresh()} />
+
 			{devices.length === 0 && !loading ? (
 				<div className="rounded-xl border border-dashed border-border/70 p-4 text-center text-[12px] text-muted-foreground">
 					Nenhum dispositivo pareado ainda.
@@ -223,8 +226,13 @@ export function PairedDevicesPanel({
 										<div className="flex items-center gap-2">
 											<KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
 											<div className="min-w-0">
-												<p className="truncate font-medium text-foreground">
+												<p className="flex items-center gap-1.5 truncate font-medium text-foreground">
 													{device.deviceName}
+													{device.kind === "relay" ? (
+														<span className="rounded border border-border/60 px-1 text-[9px] font-normal uppercase tracking-wider text-muted-foreground">
+															relay
+														</span>
+													) : null}
 												</p>
 												{device.userAgent ? (
 													<p className="truncate text-[10px] text-muted-foreground">
@@ -415,6 +423,30 @@ function describeEvent(event: string): {
 		case "pin_locked":
 			return {
 				label: "Nonce travado por brute-force",
+				icon: AlertTriangle,
+				tone: "text-red-500",
+			};
+		case "relay_offer":
+			return {
+				label: "QR do relay gerado",
+				icon: CheckCircle2,
+				tone: "text-muted-foreground",
+			};
+		case "relay_offer_invalid":
+			return {
+				label: "Código do relay inválido, expirado ou já usado",
+				icon: AlertTriangle,
+				tone: "text-amber-500",
+			};
+		case "relay_pair_denied":
+			return {
+				label: "Pareamento pelo relay recusado",
+				icon: XCircle,
+				tone: "text-amber-500",
+			};
+		case "relay_refused":
+			return {
+				label: "Aparelho não pareado tentou conectar pelo relay",
 				icon: AlertTriangle,
 				tone: "text-red-500",
 			};

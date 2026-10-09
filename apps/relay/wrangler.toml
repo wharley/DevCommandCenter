@@ -1,0 +1,19 @@
+# Local development only: `yarn workspace @dcc/relay dev`.
+# Deploying needs a Cloudflare account and a route; see README.md.
+name = "dcc-relay"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RelayRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]
+
+[vars]
+# "1" keeps the last frames of each room in memory and serves them at
+# /debug/rooms/<room>/traffic, for the end-to-end test that checks the relay
+# only ever sees ciphertext. Never enable it on a deployed relay.
+DCC_RELAY_DEBUG_TRAFFIC = "0"

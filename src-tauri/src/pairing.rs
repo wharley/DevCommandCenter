@@ -8,6 +8,11 @@
 //!    Backend verifies via `verify_signed_request`.
 //!
 //! Storage: `pairing_nonces` (60s TTL, one-shot), `paired_devices` (per-device pubkey + soft-revoke), `pair_audit_log`.
+//!
+//! Phones paired through the relay (`remote_connector`) live in the same table,
+//! identified by their Noise static key in `noise_public_key`; they share the
+//! device cap, the audit log and revocation, but not the 30-day expiry, which
+//! only applies to the legacy bearer/signature devices.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
@@ -26,7 +31,7 @@ const REPLAY_WINDOW_SECS: i64 = 60;
 const PIN_DIGITS: usize = 6;
 const MAX_PIN_ATTEMPTS: i64 = 5;
 const NONCE_GARBAGE_KEEP_SECS: i64 = 600;
-const MAX_ACTIVE_DEVICES: i64 = 10;
+pub const MAX_ACTIVE_DEVICES: i64 = 10;
 const SESSION_MAX_AGE_DAYS: i64 = 30;
 
 /// Created when the desktop initiates a pairing flow.
@@ -47,6 +52,8 @@ pub struct PairedDeviceSummary {
     pub last_used_at: Option<String>,
     pub last_ip: Option<String>,
     pub revoked: bool,
+    /// How the device authenticates: `relay` (Noise key), `bearer` or `signed`.
+    pub kind: String,
 }
 
 /// Headers a mobile client must send on every authenticated request.
@@ -155,6 +162,14 @@ pub fn ensure_pairing_schema(conn: &Connection) -> Result<(), PairingError> {
     add_column_if_missing(conn, "paired_devices", "session_token_hash", "TEXT")?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_paired_devices_token ON paired_devices(session_token_hash)",
+        [],
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
+
+    // Phones paired through the relay: their pinned Noise static key.
+    add_column_if_missing(conn, "paired_devices", "noise_public_key", "BLOB")?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_paired_devices_noise ON paired_devices(noise_public_key)",
         [],
     )
     .map_err(|e| PairingError::Database(e.to_string()))?;
@@ -664,6 +679,7 @@ pub fn verify_bearer_session(
         last_used_at: Some(now),
         last_ip: client_ip.map(str::to_string),
         revoked: false,
+        kind: "bearer".to_string(),
     })
 }
 
@@ -766,7 +782,146 @@ pub fn verify_signed_request(
         last_used_at: Some(now),
         last_ip: client_ip.map(str::to_string),
         revoked: false,
+        kind: "signed".to_string(),
     })
+}
+
+// ---------- relay (Noise) devices ----------
+
+/// A phone paired through the relay, found by its Noise static key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelayDevice {
+    pub device_id: String,
+    pub device_name: String,
+    pub revoked: bool,
+}
+
+pub fn find_relay_device(
+    conn: &Connection,
+    public_key: &[u8],
+) -> Result<Option<RelayDevice>, PairingError> {
+    conn.query_row(
+        "SELECT device_id, device_name, revoked_at FROM paired_devices
+         WHERE noise_public_key = ?1
+         ORDER BY revoked_at IS NULL DESC, created_at DESC LIMIT 1",
+        params![public_key],
+        |row| {
+            Ok(RelayDevice {
+                device_id: row.get(0)?,
+                device_name: row.get(1)?,
+                revoked: row.get::<_, Option<String>>(2)?.is_some(),
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| PairingError::Database(e.to_string()))
+}
+
+/// True while at least one relay phone is paired: the connector stays up.
+pub fn has_active_relay_devices(conn: &Connection) -> Result<bool, PairingError> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM paired_devices
+         WHERE noise_public_key IS NOT NULL AND revoked_at IS NULL)",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))
+}
+
+pub fn active_device_count(conn: &Connection) -> Result<i64, PairingError> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM paired_devices WHERE revoked_at IS NULL",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))
+}
+
+/// Pins an approved phone's Noise key. Pairing again with a key that is
+/// already active keeps its device id and takes the new name.
+pub fn register_relay_device(
+    conn: &Connection,
+    public_key: &[u8],
+    device_name: &str,
+    platform: Option<&str>,
+    fingerprint: &str,
+) -> Result<String, PairingError> {
+    let device_name = sanitize_device_name(device_name);
+    if let Some(existing) = find_relay_device(conn, public_key)?.filter(|d| !d.revoked) {
+        conn.execute(
+            "UPDATE paired_devices SET device_name = ?1, user_agent = ?2, last_used_at = ?3
+             WHERE device_id = ?4",
+            params![device_name, platform, now_iso(), existing.device_id],
+        )
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+        record_audit(
+            conn,
+            "pair",
+            Some(&existing.device_id),
+            None,
+            platform,
+            Some(&format!(
+                "{{\"device_name\":{device_name:?},\"mode\":\"relay\",\"fingerprint\":{fingerprint:?},\"repaired\":true}}"
+            )),
+        );
+        return Ok(existing.device_id);
+    }
+
+    let active = active_device_count(conn)?;
+    if active >= MAX_ACTIVE_DEVICES {
+        record_audit(
+            conn,
+            "limit_reached",
+            None,
+            None,
+            platform,
+            Some(&format!("{{\"active\":{active},\"mode\":\"relay\"}}")),
+        );
+        return Err(PairingError::DeviceLimitReached);
+    }
+
+    let device_id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO paired_devices
+            (device_id, device_name, public_key_spki, user_agent, noise_public_key, last_used_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            device_id,
+            device_name,
+            Vec::<u8>::new(),
+            platform,
+            public_key,
+            now_iso()
+        ],
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
+    record_audit(
+        conn,
+        "pair",
+        Some(&device_id),
+        None,
+        platform,
+        Some(&format!(
+            "{{\"device_name\":{device_name:?},\"mode\":\"relay\",\"fingerprint\":{fingerprint:?}}}"
+        )),
+    );
+    Ok(device_id)
+}
+
+pub fn device_is_active(conn: &Connection, device_id: &str) -> Result<bool, PairingError> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM paired_devices WHERE device_id = ?1 AND revoked_at IS NULL)",
+        params![device_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))
+}
+
+pub fn touch_device(conn: &Connection, device_id: &str) {
+    let _ = conn.execute(
+        "UPDATE paired_devices SET last_used_at = ?1 WHERE device_id = ?2",
+        params![now_iso(), device_id],
+    );
 }
 
 // ---------- device management ----------
@@ -776,10 +931,14 @@ pub fn list_paired_devices(
     include_revoked: bool,
 ) -> Result<Vec<PairedDeviceSummary>, PairingError> {
     let sql = if include_revoked {
-        "SELECT device_id, device_name, user_agent, created_at, last_used_at, last_ip, revoked_at
+        "SELECT device_id, device_name, user_agent, created_at, last_used_at, last_ip, revoked_at,
+                CASE WHEN noise_public_key IS NOT NULL THEN 'relay'
+                     WHEN session_token_hash IS NOT NULL THEN 'bearer' ELSE 'signed' END
          FROM paired_devices ORDER BY created_at DESC"
     } else {
-        "SELECT device_id, device_name, user_agent, created_at, last_used_at, last_ip, revoked_at
+        "SELECT device_id, device_name, user_agent, created_at, last_used_at, last_ip, revoked_at,
+                CASE WHEN noise_public_key IS NOT NULL THEN 'relay'
+                     WHEN session_token_hash IS NOT NULL THEN 'bearer' ELSE 'signed' END
          FROM paired_devices WHERE revoked_at IS NULL ORDER BY created_at DESC"
     };
 
@@ -797,6 +956,7 @@ pub fn list_paired_devices(
                 last_used_at: row.get(4)?,
                 last_ip: row.get(5)?,
                 revoked: revoked_at.is_some(),
+                kind: row.get(7)?,
             })
         })
         .map_err(|e| PairingError::Database(e.to_string()))?;
@@ -868,7 +1028,7 @@ pub fn list_audit_log(conn: &Connection, limit: i64) -> Result<Vec<AuditEntry>, 
     Ok(out)
 }
 
-fn record_audit(
+pub fn record_audit(
     conn: &Connection,
     event: &str,
     device_id: Option<&str>,

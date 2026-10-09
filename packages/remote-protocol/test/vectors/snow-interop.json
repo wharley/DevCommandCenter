@@ -1,0 +1,210 @@
+{
+  "cases": [
+    {
+      "clientHello": "{\"v\":1,\"pairId\":\"c1642e44505a4566\",\"device\":{\"name\":\"Pixel do Teste ✓\",\"platform\":\"android\"}}",
+      "desktopEphemeralPrivate": "54646562685608eee3fa22171d804bf5d101be7da28323ed854b165b73f8d018",
+      "desktopStaticPrivate": "d320b6b63f7a5764520365add42ffc7215cd76d788b7f718c6615e3496cf0642",
+      "desktopStaticPublic": "f0894f45e45cdc7e3945708088189821dbb2d13043f333de34360038cd1f3650",
+      "handshakeHash": "5c7fa6d86237ce017ca9566a4c522bbbe5526e1f5afe8d5289e1455ea367d229",
+      "mode": 1,
+      "name": "pair",
+      "otp": "ca8388c107a62039890dd896c6f91c27",
+      "pairId": "c1642e44505a4566",
+      "phoneEphemeralPrivate": "3f55625c5b481727d9766394dbef3a036460cdb5fc077ab9141255b7d1bcd1b9",
+      "phoneStaticPrivate": "5f3b177baa38a073b15deb7a868f763052c69bb6935614a2496adfbb611645d6",
+      "phoneStaticPublic": "550eb210b13d0d2ecca31fe51c4ab2db0b4bd06b00dabc40568f2749188ed120",
+      "prologue": "6463632d72656d6f74652f7631",
+      "protocolName": "Noise_IKpsk2_25519_ChaChaPoly_SHA256",
+      "psk": "5a1046b6814d2d6a7c2a2eee0ebecaee1ab4b2dccc9040537ee175bff4ee224e",
+      "serverHello": "{\"v\":1}",
+      "steps": [
+        {
+          "from": "phone",
+          "handshake": {
+            "hex": "0101a8cbb5366be8df1c95441dd4de3c2b0e91e7c06751d6659a62623bbcf0f8322a1fbe2fe2db732ad735ca1db81e9e072f66ebad9baf48288e3a5476bb31e12f5153937a887a5d98deb27a70035d1f750d0ac89e0b76313b0c589276f0bd2cb7b6db7f84cd302c4f6d418032cf0f0cba088049d9db0c45f6b5ff24a494fcae17aa271e9e9c567cf4927198e39b69c4d5ed57b6e1336977cea9b2763574aa93b4d265f587a043dc88ea02411f5d47658061459ce4df760deb8a1897eaf73319c7"
+          }
+        },
+        {
+          "from": "desktop",
+          "handshake": {
+            "hex": "02463e38ccdb4a8832c0c79a82a43ba54b28547d59724ff77832978e63f5f6a40bd06ca57af5e410146f3d5cabe1da7ae4eb471d09fc562d"
+          }
+        },
+        {
+          "from": "phone",
+          "message": {
+            "text": "{\"t\":\"ping\"}"
+          },
+          "wires": [
+            {
+              "hex": "037442fcc6f548e7aa0478bfebf717d334431459db275841baac1c7fb639"
+            }
+          ]
+        },
+        {
+          "from": "desktop",
+          "message": {
+            "text": "{\"t\":\"pairing\",\"status\":\"pending\"}"
+          },
+          "wires": [
+            {
+              "hex": "035d15682ff7ada2f48dc4deff5379aef508c15dd484d048606f25e56fff1c86292eee857a7e96e90cf2311e8dff2770353217b3"
+            }
+          ]
+        },
+        {
+          "from": "desktop",
+          "message": {
+            "generated": 131041
+          },
+          "wires": [
+            {
+              "headHex": "03685dc9145eef5f062a30bb11d19a1040d0d1fb4a32341cabdcfc09f1cfd0a8",
+              "len": 65536,
+              "sha256": "173f3e8e0ba59fcdb2984966136e0ab7251cf928d04784442d5018de87294185"
+            },
+            {
+              "headHex": "039198c0c768f42e2ab5f7fffd3ac6c13864b4da0469bfcfbf6edb7dbdd1e03a",
+              "len": 65536,
+              "sha256": "484671cc92ce7fbbe078ce2f5bda424cc56126cc89a61d7e84b509241c90c036"
+            },
+            {
+              "hex": "036c78d162a344a41ac0cbce981cea449de7e6ee139df0"
+            }
+          ]
+        },
+        {
+          "from": "phone",
+          "message": {
+            "generated": 65519
+          },
+          "wires": [
+            {
+              "headHex": "0333d3af4ab63bcfff4f5a1b6e91c0ae2a04f0f78411e5801d316e93e9f96ec1",
+              "len": 65536,
+              "sha256": "0017eafb7d988384efb98f16e7d608f83f5cd85b86f704d3e1968f4a464e6d44"
+            },
+            {
+              "hex": "03b331ca1211ad4ea17c3717ae96f4eaaf57af"
+            }
+          ]
+        },
+        {
+          "from": "phone",
+          "message": {
+            "text": ""
+          },
+          "wires": [
+            {
+              "hex": "0348e34c5936a2f0dec584606931d85aa8c9"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "clientHello": "{\"v\":1,\"device\":{\"name\":\"Pixel do Teste ✓\",\"platform\":\"android\"}}",
+      "desktopEphemeralPrivate": "e6360d532d9107affebf136b6294831e8f095dcb5f93132bff0b6fe3bbe18c83",
+      "desktopStaticPrivate": "90f84c8c8aad249c7c53a1b528e1ef0e7794e262f55904a8760368ada9b2417a",
+      "desktopStaticPublic": "ab2ef76c44c68ea429bf61a70f08b700cf16f8daab42d39e89aa03e8616fc53f",
+      "handshakeHash": "08f35bcc22b371e0a0659a801cfd34a723e9a6033dc45194b464f114be0673d3",
+      "mode": 2,
+      "name": "resume",
+      "otp": "4ddbeff606c467f706e558b271c82f22",
+      "pairId": "412282cca76aab56",
+      "phoneEphemeralPrivate": "5831c17d8463bd3343fdc5fcd9564c2ea38b1b96ca33dfe50e42aeaf47503888",
+      "phoneStaticPrivate": "0f0b1b6e44ef06a8516a769a0f77225b92f4178b4875df092335f5459c7347bc",
+      "phoneStaticPublic": "c8c1273de6769317739d316e8b2ffe203a10927b435cf7db4e1e1c5ae23e8368",
+      "prologue": "6463632d72656d6f74652f7631",
+      "protocolName": "Noise_IK_25519_ChaChaPoly_SHA256",
+      "psk": "07ab513178b01f3aea3394e040499a7e9382f67ffa0e7fad90b68a234cc521cc",
+      "serverHello": "{\"v\":1,\"deviceId\":\"3f2c5b9e-0000-4000-8000-000000000001\"}",
+      "steps": [
+        {
+          "from": "phone",
+          "handshake": {
+            "hex": "0102d4a52fb7fdc125b636e4a7793f618f827475c7874a63113fb80c657b4bff627b2ab44e30dad0219e1a54e1b38c3c2af5e607270086997ecf944ce3f327af9828b0f91f4f910d695d478750a8f77cb499c58c877b00a26d389c00928b13bca9a6dd53afc0777416f97780108e9e6508c17a1afa1624eb12f795d26da4ea3b319bc68d1c2cb9c365777b9a021c54e6674a57653701fbb12aa69b2d7b611e7d335b604c60"
+          }
+        },
+        {
+          "from": "desktop",
+          "handshake": {
+            "hex": "028b1f0eba9d0d64c1ac04304583e169250d758fca2c271da0c571160ae796ae7dbd6025dffde86cc78cd138ee464e0c5dc2649953f67c88ecb21778db722ccc257359445a4c0292021e21a9eb96119cfe082ff08d044c2f22e63e77035cc552e17078b7a8b956508f89"
+          }
+        },
+        {
+          "from": "phone",
+          "message": {
+            "text": "{\"t\":\"req\",\"id\":1,\"method\":\"GET\",\"path\":\"/api/v1/sessions\"}"
+          },
+          "wires": [
+            {
+              "hex": "036aba00f692dc20104e94a67a3e1624015ce5305dc241aa9dca480c662e534924c5903b80c5a5e73c0d5f7e59c9a748f40c717ff5f7a1295508dd06185d438822f171e2f56379a174b0dc2ea9"
+            }
+          ]
+        },
+        {
+          "from": "desktop",
+          "message": {
+            "text": "{\"t\":\"res\",\"id\":1,\"status\":200,\"body\":\"[]\"}"
+          },
+          "wires": [
+            {
+              "hex": "03467ce5b21e3a0264f95be2345b0b8c4dae5ee3053d026b1f222b0c8b8e827ebafb246009a4bb1b92816bd2f5042a104cc031a1eea3fe1974c85039c0"
+            }
+          ]
+        },
+        {
+          "from": "desktop",
+          "message": {
+            "generated": 131041
+          },
+          "wires": [
+            {
+              "headHex": "03b851ce7d9e3e668e0fdbed4a72d4a2647cdef30a29b9bfabca6a4f20c9c73c",
+              "len": 65536,
+              "sha256": "a08f4d92c69c2274d868256c0f9e1eaa60e902fba840276d37d23d400c4e0d1e"
+            },
+            {
+              "headHex": "03485518b74f950a0ba2cbd7c466cfe80a000e739949dd23ae03cca40269aa96",
+              "len": 65536,
+              "sha256": "140062bdd21104a9212cda2d265f29d187d4c6c636786518440a8a847ff2e688"
+            },
+            {
+              "hex": "0314e6c30f9bca2437f0b059e6edbde1ca809ce3d27b07"
+            }
+          ]
+        },
+        {
+          "from": "phone",
+          "message": {
+            "generated": 65519
+          },
+          "wires": [
+            {
+              "headHex": "0399212b07b185a8a2dc2c7c0a35f160751ab005ff857cc5a1aa1676aae900ac",
+              "len": 65536,
+              "sha256": "37c753af54039473da570dcb05526ebe6f0e279366dd689a78d621705b879e26"
+            },
+            {
+              "hex": "03640de00f1856e3a959e3887341ff7ba278f8"
+            }
+          ]
+        },
+        {
+          "from": "phone",
+          "message": {
+            "text": ""
+          },
+          "wires": [
+            {
+              "hex": "03c19db1b7bacdd1574ae8ff603a2c7910e4"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "generatedMessageRule": "byte i = (i * 31 + 7) % 251",
+  "generator": "crates/dcc-remote/tests/vectors.rs (snow); regenerate with DCC_REMOTE_WRITE_VECTORS=1 cargo test -p dcc-remote"
+}

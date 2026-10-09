@@ -15,7 +15,12 @@ use tokio::sync::RwLock;
 use crate::http_config::{HttpAuthMode, HttpConfig};
 use crate::pairing::{self, SignedRequestHeaders};
 
-#[derive(Clone)]
+/// The paired device a request comes from. The auth middleware sets it after
+/// checking a device credential; the relay connector (`remote_connector`) sets
+/// it on requests it decrypted from a phone's Noise channel. Request
+/// extensions never come from the network, so its presence on arrival means
+/// an in-process caller already authenticated the device.
+#[derive(Clone, Debug)]
 pub struct PairedDeviceIdentity(pub String);
 
 const MAX_SIGNED_BODY_BYTES: usize = 32 * 1024 * 1024;
@@ -40,6 +45,10 @@ pub async fn auth_middleware(
     mut request: Request<Body>,
     next: Next,
 ) -> Result<Response, AuthError> {
+    if request.extensions().get::<PairedDeviceIdentity>().is_some() {
+        return Ok(next.run(request).await);
+    }
+
     if has_signed_request_headers(request.headers()) {
         return validate_signed_request(config, request, next).await;
     }

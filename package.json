@@ -25,6 +25,7 @@
     "oj:build": "node scripts/ensure-oj.mjs && oj build --emptyOutDir",
     "oj:build:mobile": "yarn workspace @dcc/mobile-web build",
     "test:mcp:release-local": "bash scripts/validate-mcp-release-local.sh",
+    "test:remote:e2e": "node scripts/e2e-remote.mjs",
     "lint": "eslint .",
     "preinstall": "node scripts/check-node-version.mjs",
     "postinstall": "node scripts/patch-xterm-viewport.mjs && node scripts/patch-mcp-remote.mjs"

@@ -279,11 +279,14 @@ CREATE TABLE IF NOT EXISTS paired_devices (
   last_used_at         TEXT,
   last_ip              TEXT,
   revoked_at           TEXT,
-  session_token_hash   TEXT
+  session_token_hash   TEXT,
+  noise_public_key     BLOB
 );
 
 CREATE INDEX IF NOT EXISTS idx_paired_devices_revoked ON paired_devices(revoked_at);
 CREATE INDEX IF NOT EXISTS idx_paired_devices_token ON paired_devices(session_token_hash);
+-- idx_paired_devices_noise is created by pairing::ensure_pairing_schema, which
+-- adds the column on databases that predate it first.
 
 -- Trilha de auditoria
 CREATE TABLE IF NOT EXISTS pair_audit_log (

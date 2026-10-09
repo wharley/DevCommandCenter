@@ -1,0 +1,19 @@
+{
+  "name": "@dcc/relay",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Byte relay between the DCC desktop and paired phones (Cloudflare Worker + Durable Object). It never sees plaintext.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260925.2",
+    "typescript": "^5",
+    "vitest": "^4.1.2",
+    "wrangler": "4.140.0"
+  }
+}

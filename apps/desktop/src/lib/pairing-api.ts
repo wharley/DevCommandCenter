@@ -14,6 +14,8 @@ export type PairedDevice = {
 	lastUsedAt: string | null;
 	lastIp: string | null;
 	revoked: boolean;
+	/** How it authenticates: Noise key over the relay, bearer or signature. */
+	kind: "relay" | "bearer" | "signed";
 };
 
 export type AuditEntry = {
@@ -73,4 +75,59 @@ export type AdvertisedEndpoint = {
 
 export function pairGetEndpoints() {
 	return invoke<{ endpoints: AdvertisedEndpoint[] }>("pair_get_endpoints");
+}
+
+export type RemoteAccessStatus = {
+	relayUrl: string | null;
+	/** Set by DCC_RELAY_URL; the screen cannot change it. */
+	relayUrlFromEnv: boolean;
+	connected: boolean;
+	roomId: string | null;
+	desktopFingerprint: string | null;
+	activeConnections: number;
+};
+
+export type RelayPairingOffer = {
+	/** dcc://pair#... — the QR content; holds a one-time secret. */
+	url: string;
+	expiresAt: string;
+	desktopFingerprint: string;
+};
+
+export type RelayApprovalRequest = {
+	id: string;
+	deviceName: string;
+	platform: string | null;
+	fingerprint: string;
+	expiresAt: string;
+};
+
+export type RemoteAccessEvent =
+	| { type: "approvalRequested"; approval: RelayApprovalRequest }
+	| { type: "approvalResolved"; id: string; approved: boolean }
+	| { type: "statusChanged"; connected: boolean };
+
+export function remoteAccessStatus() {
+	return invoke<RemoteAccessStatus>("remote_access_status");
+}
+
+export function remoteAccessSetRelay(relayUrl: string | null) {
+	return invoke<RemoteAccessStatus>("remote_access_set_relay", { relayUrl });
+}
+
+export function remoteAccessCreateOffer() {
+	return invoke<RelayPairingOffer>("remote_access_create_offer");
+}
+
+export function remoteAccessPendingApprovals() {
+	return invoke<{ approvals: RelayApprovalRequest[] }>(
+		"remote_access_pending_approvals",
+	);
+}
+
+export function remoteAccessRespond(approvalId: string, approve: boolean) {
+	return invoke<{ delivered: boolean }>("remote_access_respond", {
+		approvalId,
+		approve,
+	});
 }

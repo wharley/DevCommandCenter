@@ -22,6 +22,7 @@ const BIND_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 pub struct EmbeddedHttpServer {
     config: Arc<RwLock<HttpConfig>>,
+    backend: Arc<HttpBackend>,
     router: Router,
     port: u16,
     listener: Mutex<Option<RunningListener>>,
@@ -37,9 +38,11 @@ impl EmbeddedHttpServer {
     pub fn new(config: HttpConfig, backend: HttpBackend) -> Self {
         let port = config.port;
         let config = Arc::new(RwLock::new(config));
-        let router = build_router(config.clone(), Arc::new(backend));
+        let backend = Arc::new(backend);
+        let router = build_router(config.clone(), backend.clone());
         Self {
             config,
+            backend,
             router,
             port,
             listener: Mutex::new(None),
@@ -48,6 +51,15 @@ impl EmbeddedHttpServer {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// The API router, for the relay connector to run phone requests on.
+    pub fn router(&self) -> Router {
+        self.router.clone()
+    }
+
+    pub fn backend(&self) -> &Arc<HttpBackend> {
+        &self.backend
     }
 
     /// Makes sure the API is listening, on every interface when `lan` is set.

@@ -39,6 +39,7 @@ use dev_command_center_tauri::decision_provider_settings::DecisionProviderSettin
 use dev_command_center_tauri::embedded_http::EmbeddedHttpServer;
 use dev_command_center_tauri::http_api::HttpBackend;
 use dev_command_center_tauri::http_config::HttpConfig;
+use dev_command_center_tauri::remote_connector::RemoteHub;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -3824,7 +3825,11 @@ fn pairing_db_path(app: &AppHandle) -> Result<PathBuf, ApiError> {
 
 fn open_pairing_conn(app: &AppHandle) -> Result<Connection, ApiError> {
     let path = pairing_db_path(app)?;
-    Connection::open(&path).map_err(|e| db_error(e.to_string()))
+    let conn = Connection::open(&path).map_err(|e| db_error(e.to_string()))?;
+    // Idempotent; brings older databases up to the current pairing columns.
+    dev_command_center_tauri::pairing::ensure_pairing_schema(&conn)
+        .map_err(pairing_error_to_api)?;
+    Ok(conn)
 }
 
 fn http_get_local(port: u16, path: &str) -> Option<(u16, String)> {
@@ -3943,7 +3948,7 @@ fn start_embedded_http_server(
             return;
         }
     };
-    config.db_path = db_path;
+    config.db_path = db_path.clone();
     let lan = config.lan;
     let backend = match HttpBackend::embedded(session_state) {
         Ok(backend) => backend,
@@ -3954,6 +3959,7 @@ fn start_embedded_http_server(
     };
     let server = Arc::new(EmbeddedHttpServer::new(config, backend));
     app.manage(EmbeddedHttpServerState(server.clone()));
+    start_remote_connector(app, &server, db_path);
     tauri::async_runtime::spawn(async move {
         let port = server.port();
         let _ = tauri::async_runtime::spawn_blocking(move || stop_stale_http_sidecar(port)).await;
@@ -3965,6 +3971,80 @@ fn start_embedded_http_server(
 }
 
 struct EmbeddedHttpServerState(Arc<EmbeddedHttpServer>);
+
+struct RemoteHubState(Arc<RemoteHub>);
+
+/// The relay connector lives as long as the app and serves the same router as
+/// the loopback API. It stays idle until a relay is configured and a phone is
+/// paired (or a pairing QR is open), so this costs nothing by default.
+fn start_remote_connector(app: &tauri::App, server: &Arc<EmbeddedHttpServer>, db_path: PathBuf) {
+    let hub = match RemoteHub::new(server.router(), db_path) {
+        Ok(hub) => hub,
+        Err(error) => {
+            eprintln!("[DCC Remote] not started: {error}");
+            return;
+        }
+    };
+    server.backend().attach_remote(&hub);
+    app.manage(RemoteHubState(hub.clone()));
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        let mut events = hub.subscribe();
+        hub.start();
+        loop {
+            match events.recv().await {
+                Ok(event) => {
+                    let _ = handle.emit("remote-access-event", event);
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+fn remote_hub(app: &AppHandle) -> Result<Arc<RemoteHub>, ApiError> {
+    app.try_state::<RemoteHubState>()
+        .map(|state| state.0.clone())
+        .ok_or_else(|| db_error("remote access is not available".to_string()))
+}
+
+#[tauri::command]
+async fn remote_access_status(app: AppHandle) -> ApiResult<Value> {
+    let hub = remote_hub(&app)?;
+    serde_json::to_value(hub.status()).map_err(|e| db_error(e.to_string()))
+}
+
+#[tauri::command]
+async fn remote_access_set_relay(app: AppHandle, relay_url: Option<String>) -> ApiResult<Value> {
+    let hub = remote_hub(&app)?;
+    hub.set_relay_url(relay_url).await.map_err(db_error)?;
+    serde_json::to_value(hub.status()).map_err(|e| db_error(e.to_string()))
+}
+
+#[tauri::command]
+async fn remote_access_create_offer(app: AppHandle) -> ApiResult<Value> {
+    let hub = remote_hub(&app)?;
+    let offer = hub.create_offer().await.map_err(db_error)?;
+    serde_json::to_value(offer).map_err(|e| db_error(e.to_string()))
+}
+
+#[tauri::command]
+async fn remote_access_pending_approvals(app: AppHandle) -> ApiResult<Value> {
+    let hub = remote_hub(&app)?;
+    Ok(serde_json::json!({ "approvals": hub.pending_approvals() }))
+}
+
+#[tauri::command]
+async fn remote_access_respond(
+    app: AppHandle,
+    approval_id: String,
+    approve: bool,
+) -> ApiResult<Value> {
+    let hub = remote_hub(&app)?;
+    let delivered = hub.respond_approval(&approval_id, approve);
+    Ok(serde_json::json!({ "delivered": delivered }))
+}
 
 /// Opening mobile pairing is the explicit opt-in to listen on the LAN.
 async fn ensure_lan_http_server(app: &AppHandle) -> Result<u16, ApiError> {
@@ -4019,6 +4099,7 @@ async fn pair_list_devices(app: AppHandle, include_revoked: Option<bool>) -> Api
                     "lastUsedAt": d.last_used_at,
                     "lastIp": d.last_ip,
                     "revoked": d.revoked,
+                    "kind": d.kind,
                 })
             })
             .collect();
@@ -4030,14 +4111,20 @@ async fn pair_list_devices(app: AppHandle, include_revoked: Option<bool>) -> Api
 
 #[tauri::command]
 async fn pair_revoke_device(app: AppHandle, device_id: String) -> ApiResult<Value> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let hub = remote_hub(&app).ok();
+    let target = device_id.clone();
+    let revoked = tauri::async_runtime::spawn_blocking(move || {
         let conn = open_pairing_conn(&app)?;
-        let revoked = dev_command_center_tauri::pairing::revoke_device(&conn, &device_id, None)
-            .map_err(pairing_error_to_api)?;
-        Ok(serde_json::json!({ "revoked": revoked }))
+        dev_command_center_tauri::pairing::revoke_device(&conn, &target, None)
+            .map_err(pairing_error_to_api)
     })
     .await
-    .map_err(|e| db_error(format!("pair_revoke_device task failed: {e}")))?
+    .map_err(|e| db_error(format!("pair_revoke_device task failed: {e}")))??;
+    // Revoking a relay phone also closes its live connection.
+    if let Some(hub) = hub {
+        hub.device_revoked(&device_id);
+    }
+    Ok(serde_json::json!({ "revoked": revoked }))
 }
 
 #[tauri::command]
@@ -7072,6 +7159,11 @@ pub fn run() {
             pair_purge_expired,
             pair_get_lan_url,
             pair_get_endpoints,
+            remote_access_status,
+            remote_access_set_relay,
+            remote_access_create_offer,
+            remote_access_pending_approvals,
+            remote_access_respond,
             terminal_save_temp_image,
             read_image_preview,
             attachment_commands::preview_composer_attachment,
