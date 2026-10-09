@@ -367,6 +367,24 @@ function describeEvent(event: string): {
 				icon: AlertTriangle,
 				tone: "text-red-500",
 			};
+		case "push_token_set":
+			return {
+				label: "Notificações ligadas no aparelho",
+				icon: CheckCircle2,
+				tone: "text-muted-foreground",
+			};
+		case "push_token_cleared":
+			return {
+				label: "Notificações desligadas no aparelho",
+				icon: XCircle,
+				tone: "text-muted-foreground",
+			};
+		case "push_token_forgotten":
+			return {
+				label: "App removido do aparelho: notificações paradas",
+				icon: XCircle,
+				tone: "text-muted-foreground",
+			};
 		default:
 			return {
 				label: event,

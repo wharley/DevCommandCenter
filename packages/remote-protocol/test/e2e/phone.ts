@@ -120,6 +120,34 @@ check(
 );
 log("listed sessions", { count: sessions.length });
 
+// 4b. Push notifications: register the token over the channel. While the app
+// says it is in the foreground, a permission request does not push.
+const pushToken = "ExponentPushToken[e2e-phone-A]";
+const badToken = await client.request("PUT", "/api/v1/remote/push-token", {
+	body: { token: "not-a-token", platform: "ios" },
+});
+check(badToken.status === 422, `a token that is not Expo's is refused: ${badToken.status}`);
+const registered = await client.request("PUT", "/api/v1/remote/push-token", {
+	body: { token: pushToken, platform: "ios" },
+});
+check(registered.status === 200, `push token registered: ${registered.status} ${registered.text()}`);
+const { expiresAt } = registered.json<{ expiresAt: string }>();
+const lease = Date.parse(expiresAt) - Date.now();
+check(lease > 47 * 3600_000 && lease <= 48 * 3600_000, `48 h lease: ${expiresAt}`);
+const turnedOff = await client.request("DELETE", "/api/v1/remote/push-token");
+check(turnedOff.json<{ cleared: boolean }>().cleared === true, "turning push off clears the token");
+const renewed = await client.request("PUT", "/api/v1/remote/push-token", {
+	body: { token: pushToken, platform: "ios" },
+});
+check(renewed.status === 200, `push token registered again: ${renewed.status}`);
+const active = await client.request("PUT", "/api/v1/remote/presence", { body: { state: "active" } });
+check(active.status === 200, `presence: ${active.status} ${active.text()}`);
+const foregroundOutcome = await ask("permission-in-foreground");
+check(foregroundOutcome === "go", foregroundOutcome);
+const background = await client.request("PUT", "/api/v1/remote/presence", { body: { state: "background" } });
+check(background.status === 200, `presence: ${background.status}`);
+log("push token registered; no push while in the foreground");
+
 // 5. The full history is larger than one Noise message (fragmentation).
 const history = await client.request("GET", `/api/v1/sessions/${config.sessionId}/events`);
 check(history.status === 200, `history: ${history.status}`);
@@ -162,7 +190,7 @@ check(
 log("replayed", { from: replayed[0], to: replayed.at(-1) });
 
 const liveStart = events.length;
-await ask("live", { after: lastSeq });
+await ask("live", { after: lastSeq, token: pushToken });
 await until(
 	() =>
 		events

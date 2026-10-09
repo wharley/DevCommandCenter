@@ -4,8 +4,8 @@ Status: implementado · 2026-10-09
 Escopo: pareamento e acesso do app nativo (`apps/mobile`) ao desktop DCC
 pelo relay, com Noise de ponta a ponta. Código: `crates/dcc-remote` (Rust),
 `packages/remote-protocol` (TypeScript), `src-tauri/src/remote_connector.rs`
-(conector do desktop), `src-tauri/src/pairing.rs` (aparelhos e auditoria) e
-`apps/relay` (o relay).
+(conector do desktop), `src-tauri/src/pairing.rs` (aparelhos e auditoria),
+`src-tauri/src/remote_push.rs` (notificações push) e `apps/relay` (o relay).
 
 ## 1. Objetivo
 
@@ -30,6 +30,7 @@ Não objetivos:
 | Segredo do QR (`otp`) | Durante 5 minutos, permite pedir um pareamento |
 | Banco de sessões/workspaces | Contém prompts, código e saídas dos agentes |
 | Capacidade de agir nas sessões | Mensagens, interrupções e respostas a permissões |
+| Token de push do celular | Quem o tem pode mandar notificações para o aparelho |
 
 ## 3. Modelo de adversário
 
@@ -112,7 +113,10 @@ com fragmentação para mensagens grandes.
 ### 4.5 O que um aparelho pareado alcança
 
 O conector só repassa caminhos em `/api/v1/` e recusa `/api/v1/auth/`,
-`/api/v1/remote/` e `/api/v1/terminals/`, além de `/rpc` e `/auth/`. Um
+`/api/v1/remote/` e `/api/v1/terminals/`, além de `/rpc` e `/auth/`. As
+únicas exceções são `/api/v1/remote/push-token` e `/api/v1/remote/presence`,
+que o próprio conector atende sem passar pelo roteador e que só agem sobre o
+aparelho daquela conexão (§4.9). Um
 celular não pode aprovar outros celulares, gerar QR, rotacionar credenciais
 nem abrir terminais. Cabeçalhos de credencial (`Authorization`, `X-API-Key`)
 vindos do celular são descartados; a identidade do aparelho entra só como
@@ -121,7 +125,7 @@ extensão interna da requisição, que a rede não consegue forjar.
 ### 4.6 Revogação e limite de aparelhos
 
 - **Revogar** (Configurações → Conexões → Dispositivos pareados) marca
-  `revoked_at` e derruba na
+  `revoked_at`, apaga o token de push do aparelho e derruba na
   hora a conexão aberta daquele aparelho (close `4499`). Conexões abertas
   também revalidam o aparelho a cada 15 s, o que cobre uma revogação feita
   por outro processo no mesmo banco. A chave revogada não reconecta; voltar
@@ -153,6 +157,39 @@ extensão interna da requisição, que a rede não consegue forjar.
   a 100 frames/s (rajada de 300) e a 8 celulares por sala, e não registra
   nada sobre o conteúdo.
 
+### 4.9 Notificações push
+
+O desktop manda as notificações direto para o serviço de push da Expo
+(`POST https://exp.host/--/api/v2/push/send`), que repassa à Apple (APNs) ou
+ao Google (FCM). Não há servidor do projeto no meio.
+
+- **Token só pelo canal cifrado.** O celular entrega seu Expo push token com
+  `PUT /api/v1/remote/push-token` dentro do canal Noise; o relay não o vê. O
+  conector aceita só o formato de token da Expo e grava em
+  `paired_devices.push_token` com validade de 48 h, renovada a cada conexão.
+  `DELETE` no mesmo caminho (desligar no app) apaga; revogar o aparelho
+  também. Um token que a Expo diz não existir mais (`DeviceNotRegistered`, no
+  ticket do envio ou no recibo lido depois) é apagado
+  (`push_token_forgotten`).
+- **O que sai do computador para Expo, Apple e Google**, por notificação:
+  o token do aparelho; o título `DCC`; o corpo com o **nome do projeto** e o
+  tipo do aviso ("precisa de você", "tarefa concluída", "tarefa
+  interrompida") — um nome que pareça caminho é trocado por texto genérico;
+  e em `data` o **id da sessão** (para o toque abrir a conversa) e o tipo.
+  Mais o IP do computador e o horário. **Nunca** a conversa, o comando, o
+  arquivo ou o título do pedido de permissão.
+- **Presença.** O app informa pelo canal (`PUT /api/v1/remote/presence`) se
+  está em primeiro plano, de novo a cada 30 s; o desktop não manda push a esse
+  aparelho enquanto a informação tiver menos de 75 s.
+- **Limites.** Cada pedido ou turno notifica uma vez; no máximo 5
+  notificações por aparelho por minuto.
+
+Limitação aceita: a Expo oferece "segurança reforçada" de push (um access
+token exigido em cada envio), mas esse segredo teria de viver no desktop, que
+é open source e roda na máquina de cada usuário. Sem ele, quem obtiver o token
+de um aparelho pode mandar notificações para ele — não ler nada nem agir no
+desktop. Por isso o token só circula cifrado e nunca é registrado em log.
+
 ## 5. O que o relay vê
 
 | Vê | Não vê |
@@ -174,6 +211,9 @@ mas não ler, alterar sem ser detectado nem se passar por uma das pontas.
 3. **Sem expiração automática**: um aparelho fica pareado até ser revogado.
 4. **Aprovação depende da pessoa**: aprovar sem comparar o fingerprint anula
    a proteção contra QR fotografado.
+5. **Texto da notificação em claro** para Expo, Apple e Google: nome do
+   projeto, tipo do aviso e id da sessão (§4.9). Quem não quer isso deixa as
+   notificações desligadas no app.
 
 ## 7. Auditoria
 
@@ -191,6 +231,9 @@ relay_refused          | chave não aprovada (ou revogada) tentou reconectar
 limit_reached          | pareamento recusado pelo limite de aparelhos
 revoke                 | aparelho revogado
 legacy_device_retired  | aparelho do pareamento antigo pela rede local revogado
+push_token_set         | o aparelho registrou um token de push novo
+push_token_cleared     | o aparelho desligou as notificações
+push_token_forgotten   | a Expo disse que o app saiu do aparelho (DeviceNotRegistered)
 ```
 
 A trilha é local — não é enviada para nenhum serviço externo.
@@ -215,7 +258,11 @@ A trilha é local — não é enviada para nenhum serviço externo.
 │ 5. Revogação                                                   │
 │    imediata · derruba a conexão aberta · até 10 aparelhos      │
 ├────────────────────────────────────────────────────────────────┤
-│ 6. Auditoria                                                   │
+│ 6. Notificações                                                │
+│    token só pelo canal cifrado · texto genérico via Expo ·     │
+│    nada para app aberto · revogar apaga o token                │
+├────────────────────────────────────────────────────────────────┤
+│ 7. Auditoria                                                   │
 │    pair_audit_log local                                        │
 └────────────────────────────────────────────────────────────────┘
 ```

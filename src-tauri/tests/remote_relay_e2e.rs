@@ -5,6 +5,10 @@
 //!
 //! Run it with `node scripts/e2e-remote.mjs`, which starts the relay and sets
 //! `DCC_E2E_RELAY_URL`. Without that variable the test does nothing.
+//!
+//! Push notifications go to a fake Expo push service started here: the
+//! phone registers its token over the channel, and a permission request
+//! reaches the fake only while the phone says it is in the background.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -27,6 +31,7 @@ use dev_command_center_tauri::http_api::{build_router, HttpBackend};
 use dev_command_center_tauri::http_config::HttpConfig;
 use dev_command_center_tauri::pairing;
 use dev_command_center_tauri::remote_connector::{RemoteEvent, RemoteHub};
+use dev_command_center_tauri::remote_push::PushConfig;
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
@@ -183,6 +188,68 @@ async fn publish_live(state: &SessionCommandState) {
     .await;
 }
 
+async fn publish_permission(state: &SessionCommandState, request_id: &str) {
+    append_and_publish(
+        state,
+        SessionEventKind::TurnPermissionRequested {
+            turn_id: TurnId("t1".to_string()),
+            request_id: request_id.to_string(),
+            tool_name: "Bash".to_string(),
+            title: None,
+            description: None,
+            command: Some("cat ~/.ssh/id_rsa".to_string()),
+            file: None,
+        },
+        CoreEvent::SessionTurnPermissionRequested {
+            session_id: SESSION.to_string(),
+            turn_id: "t1".to_string(),
+            request_id: request_id.to_string(),
+            tool_name: "Bash".to_string(),
+            title: None,
+            description: None,
+            command: Some("cat ~/.ssh/id_rsa".to_string()),
+            file: None,
+        },
+    )
+    .await;
+}
+
+type Pushes = Arc<std::sync::Mutex<Vec<Value>>>;
+
+/// Stands in for `https://exp.host/--/api/v2/push`: records every message
+/// and accepts it.
+async fn fake_expo() -> (String, Pushes) {
+    use axum::{extract::State, routing::post, Json, Router};
+    let pushes: Pushes = Arc::default();
+    let app = Router::new()
+        .route(
+            "/send",
+            post(
+                |State(pushes): State<Pushes>, Json(body): Json<Value>| async move {
+                    let messages = body.as_array().cloned().unwrap_or_default();
+                    let tickets: Vec<Value> = messages
+                        .iter()
+                        .enumerate()
+                        .map(|(n, _)| json!({ "status": "ok", "id": format!("ticket-{n}") }))
+                        .collect();
+                    pushes.lock().unwrap().extend(messages);
+                    Json(json!({ "data": tickets }))
+                },
+            ),
+        )
+        .route(
+            "/getReceipts",
+            post(|| async { Json(json!({ "data": {} })) }),
+        )
+        .with_state(pushes.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}"), pushes)
+}
+
 fn contains(haystack: &[u8], needle: &str) -> bool {
     haystack
         .windows(needle.len())
@@ -204,6 +271,20 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
     let db_path = physical.join("state.sqlite");
     let state = SessionCommandState::new_headless(db_path.clone(), physical.join("app-data"));
     seed(&state).await;
+    // The headless runtime does not create the repositories table (the
+    // desktop app does); the push names the project from it.
+    rusqlite::Connection::open(&db_path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS dcc_repositories (id TEXT PRIMARY KEY NOT NULL,
+                 project_id TEXT NOT NULL, name TEXT NOT NULL, display_name TEXT NULL,
+                 root_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+             INSERT INTO dcc_repositories (id, project_id, name, display_name, root_path, created_at)
+             VALUES ('repo', 'remote-e2e-project', 'e2e', 'Projeto E2E', '/tmp/e2e-repo',
+                 '2026-10-09T00:00:00Z');",
+        )
+        .expect("project row");
+    let (push_api, pushes) = fake_expo().await;
     let config = Arc::new(RwLock::new(HttpConfig {
         db_path: db_path.clone(),
         api_key: "e2e-operator-key".to_string(),
@@ -212,6 +293,12 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
     let backend = Arc::new(HttpBackend::embedded(state.clone()).expect("embedded backend"));
     let router = build_router(config, backend.clone());
     let hub = RemoteHub::new(router, db_path.clone()).expect("remote hub");
+    hub.configure_push(PushConfig {
+        api_base: push_api,
+        batch_window: Duration::from_millis(50),
+        receipt_delay: Duration::from_millis(100),
+        ..PushConfig::default()
+    });
     backend.attach_remote(&hub);
     hub.set_relay_url(Some(relay.clone()))
         .await
@@ -293,8 +380,46 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
         let (name, payload) = command.split_once(' ').unwrap_or((command, "{}"));
         let payload: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
         match name {
+            "permission-in-foreground" => {
+                // The phone said it is looking: no push.
+                publish_permission(&state, "p-foreground").await;
+                tokio::time::sleep(Duration::from_millis(800)).await;
+                let seen = pushes.lock().unwrap().clone();
+                let reply = if seen.is_empty() {
+                    "go".to_string()
+                } else {
+                    format!("pushed while in the foreground: {seen:?}")
+                };
+                writeln!(stdin, "{reply}").unwrap();
+            }
             "live" => {
                 publish_live(&state).await;
+                // In the background now: the permission request in
+                // `publish_live` reaches the fake Expo.
+                let mut seen = Vec::new();
+                for _ in 0..100 {
+                    seen = pushes.lock().unwrap().clone();
+                    if !seen.is_empty() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                assert_eq!(
+                    seen.len(),
+                    1,
+                    "one push for the permission request: {seen:?}"
+                );
+                let push = &seen[0];
+                assert_eq!(push["to"], payload["token"]);
+                assert_eq!(push["title"], "DCC");
+                assert_eq!(push["body"], "Projeto E2E precisa de você");
+                assert_eq!(
+                    push["data"],
+                    json!({ "sessionId": SESSION, "kind": "permission" })
+                );
+                let wire = push.to_string();
+                assert!(!wire.contains("rm -rf") && !wire.contains("Bash"), "{wire}");
+                println!("[desktop] push sent to the fake Expo: {wire}");
                 writeln!(stdin, "go").unwrap();
             }
             "permission-answered" => {
@@ -350,6 +475,14 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
         .expect("paired device row");
     assert_eq!(device.kind, "relay");
     assert!(device.revoked);
+    let token: Option<String> = conn
+        .query_row(
+            "SELECT push_token FROM paired_devices WHERE device_id = ?1",
+            [&device.device_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(token, None, "revoking took the push token with it");
     assert_eq!(devices.len(), 1, "refused phones are not stored");
     let audit: Vec<String> = pairing::list_audit_log(&conn, 100)
         .unwrap()
@@ -358,6 +491,8 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
         .collect();
     for event in [
         "pair",
+        "push_token_set",
+        "push_token_cleared",
         "relay_offer_invalid",
         "relay_pair_denied",
         "relay_refused",
@@ -399,6 +534,8 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
         "permission",
         "\"t\":",
         "requestId",
+        "PushToken",
+        "presence",
         approve.url.split("otp=").nth(1).unwrap(),
     ];
     let mut bytes_seen = 0usize;

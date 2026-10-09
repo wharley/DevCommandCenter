@@ -27,6 +27,26 @@ Detalhes de segurança em [SECURITY_MOBILE_PAIRING.md](SECURITY_MOBILE_PAIRING.m
 
 Depois disso o celular reconecta sozinho, de qualquer rede. Até 10 aparelhos ativos por desktop; para parear outro, revogue um na lista **Dispositivos pareados** da mesma seção. Revogar derruba a conexão do aparelho na hora.
 
+## Notificações
+
+Depois do pareamento o app pergunta se pode avisar quando um agente precisar de você (dá para mudar em **Configurações → Notificações deste aparelho**). Com elas ligadas, o computador manda uma notificação quando:
+
+- um agente pede permissão;
+- um agente faz uma pergunta;
+- uma tarefa termina ou é interrompida (o resultado de uma tarefa delegada volta para o agente que pediu, não notifica).
+
+São os mesmos motivos de "Precisa de você" na barra lateral que têm um evento próprio. Conflito de git, CI vermelho e edições delegadas para revisar ainda não notificam.
+
+Tocar na notificação abre a conversa. Não chega notificação:
+
+- no celular que está com o app aberto e conectado (ele já mostra o pedido);
+- enquanto você está usando o desktop (janela do DCC em foco e teclado/mouse usados nos últimos 3 minutos; vale só para o app desktop);
+- além de 5 por minuto por aparelho; e cada pedido ou turno notifica uma vez só.
+
+O texto é sempre genérico — título "DCC", corpo como "meu-projeto precisa de você" ou "meu-projeto: tarefa concluída" — porque passa em claro pelo serviço de push da Expo e pela Apple/Google. Nunca leva a conversa, comandos ou caminhos de arquivo; o resto chega cifrado pelo relay quando você abre o app. O que sai do computador está em [SECURITY_MOBILE_PAIRING.md](SECURITY_MOBILE_PAIRING.md#49-notificações-push).
+
+O computador manda as notificações direto para a Expo (`https://exp.host`), sem servidor do projeto no meio; precisa estar acordado e com o DCC (ou o `dccd-http`) aberto. O token de push do celular chega ao computador só pelo canal cifrado, vale 48 h e é renovado a cada conexão; revogar o aparelho apaga o token. Builds do app sem projeto EAS configurado não recebem token (ver o [README do app](../apps/mobile/README.md#push-notifications)).
+
 ## Servidor sem o app (`dccd-http`)
 
 O `dccd-http` serve a mesma API sem o app desktop e também se conecta ao relay. Por padrão escuta só em loopback com `X-API-Key` (gerada em `~/.dcc/http-config.json`, permissão `0600`). Sem interface gráfica, o operador pareia pela API, com a API key:
@@ -54,4 +74,4 @@ yarn test:remote:e2e
 cargo test -p dev-command-center-tauri --lib
 ```
 
-`yarn test:remote:e2e` sobe o relay com `wrangler dev` (sem conta Cloudflare), serve a API como o desktop num banco temporário e conduz um celular simulado em Node, e confere pareamento, reconexão, streams, rotas proibidas e revogação, além de verificar que o relay só viu bytes cifrados. Para testar o app num simulador contra um desktop descartável, veja `apps/mobile/scripts/desktop-fixture.mjs` no [README do app](../apps/mobile/README.md).
+`yarn test:remote:e2e` sobe o relay com `wrangler dev` (sem conta Cloudflare), serve a API como o desktop num banco temporário e conduz um celular simulado em Node, e confere pareamento, reconexão, streams, rotas proibidas, notificações (o celular registra o token, e um pedido de permissão chega a um serviço de push falso só quando o app está em segundo plano) e revogação, além de verificar que o relay só viu bytes cifrados. Para testar o app num simulador contra um desktop descartável, veja `apps/mobile/scripts/desktop-fixture.mjs` no [README do app](../apps/mobile/README.md).

@@ -33,6 +33,7 @@ cargo build --bin dccd-http
 node apps/mobile/scripts/desktop-fixture.mjs --open   # from the repo root
 ```
 
+It also stands in for Expo's push service (see "Push notifications").
 It prints a `dcc://pair#…` link (`--open` opens it in the booted simulator;
 otherwise `xcrun simctl openurl booted '<link>'`) and approves the phone when
 it asks, after printing its fingerprint (`--manual` waits for `approve`/`deny`).
@@ -42,6 +43,77 @@ login) with a prompt that needs a permission.
 Without a desktop, "Explorar demonstração" on the pairing screen opens the demo
 mode: fictional projects and an agent that streams, asks for permission and
 answers, all inside the app.
+
+## Push notifications
+
+The desktop sends a push when a task needs the person (permission request,
+question from the agent, task finished or interrupted), straight to Expo's
+push service — no server of ours in between. The phone hands its Expo push
+token to the desktop only over the encrypted channel
+(`PUT /api/v1/remote/push-token`) and renews it on every connection (48 h
+lease). The text is generic ("DCC" · "<project> precisa de você"); the payload
+carries only the session id that the tap opens. Code:
+`src/notifications/` here, `src-tauri/src/remote_push.rs` on the desktop.
+
+Expo issues push tokens only to an app tied to an EAS project, so until the
+steps below are done the app shows "Este build não tem o projectId do EAS" in
+Settings and the desktop never sends anything. Nothing else changes in code:
+the app reads `extra.eas.projectId` from `app.json` (or `Constants.easConfig`).
+
+### Turning on real push (one time, by the account owner)
+
+1. **Expo account and project.** Create/log into the account at expo.dev, then
+   from `apps/mobile`:
+   ```bash
+   npx eas-cli@latest login
+   npx eas-cli@latest init
+   ```
+   `eas init` creates the project and writes `extra.eas.projectId` (and
+   `owner`) into `app.json`. Commit that change — the id is not a secret.
+2. **iOS (APNs).** Needs the paid Apple Developer account. Register the
+   iPhone for development builds (`npx eas-cli device:create`, open the link on
+   the phone), then either let the first `eas build` set it up (answer yes to
+   "Setup Push Notifications for your project" and "Generating a new Apple Push
+   Notifications service key") or run `npx eas-cli credentials` → iOS →
+   Push Notifications: Manage your Apple Push Notifications Key → generate
+   (or upload an existing `.p8`). EAS keeps the key; it never goes into this
+   repository.
+3. **Android (FCM V1).** In the Firebase console create a project with an
+   Android app `com.devcommandcenter.mobile`. Project settings → Service
+   accounts → generate a private key (JSON, keep it out of git) and upload it:
+   `npx eas-cli credentials` → Android → production → Google Service Account →
+   Manage your Google Service Account Key for Push Notifications (FCM V1) →
+   Set up → Upload a new service account key. Download `google-services.json`,
+   put it in `apps/mobile/` and set `"android": { "googleServicesFile":
+   "./google-services.json" }` in `app.json` (this file can be committed).
+4. **Build for a real iPhone.** (Expo says simulators on Xcode 14+ can get
+   tokens too, but the phone is the test that counts: lock screen, background.)
+   ```bash
+   npx eas-cli build --profile development --platform ios   # or: npx expo run:ios --device
+   ```
+   Install it, pair with the desktop, accept "Avisar quando um agente precisar
+   de você?". Settings → "Notificações deste aparelho" should say "Ligadas".
+5. **Check it.** Put the app in the background (or lock the phone), step away
+   from the desktop (the desktop app holds pushes while its window has focus
+   and keyboard/mouse were used in the last 3 minutes) and ask an agent for
+   something that needs a permission. The notification opens the thread.
+   To test the token alone, paste it into https://expo.dev/notifications.
+
+### Trying it in the simulator without an EAS project
+
+The fixture below plays Expo's push service and delivers each push to the
+booted simulator with `xcrun simctl push`, in the APNs payload Expo builds.
+Give the debug build a stand-in token through Metro:
+
+```bash
+EXPO_PUBLIC_DCC_DEV_PUSH_TOKEN='ExponentPushToken[simulator]' npx expo start
+node apps/mobile/scripts/desktop-fixture.mjs --open   # from the repo root
+```
+
+Pair, accept notifications, send the app to the background (Home), type
+`agent` in the fixture: the permission request arrives as a banner, and
+tapping it opens the thread. `push <sessionId>` in the fixture delivers a
+sample notification without an agent.
 
 ## Tests
 

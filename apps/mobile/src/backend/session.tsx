@@ -1,7 +1,8 @@
 /**
  * Which backend the app runs on — the paired desktop, the demo, or none yet —
  * and the lifecycle around it: restore on launch, reconnect when the app
- * comes back to the foreground, forget on unpair.
+ * comes back to the foreground, push token and presence while paired, forget
+ * on unpair.
  */
 import { fingerprint, RemoteClient } from "@dcc/remote-protocol";
 import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -18,13 +19,21 @@ import {
 	saveDemoMode,
 	type Pairing,
 } from "./identity";
+import { appVisibility, nativePushPlatform, pushPreferences } from "../notifications/native";
+import { PushRegistration, reportPresence } from "../notifications/registration";
 import { RemoteBackend, type ChannelClient } from "./remote";
 import type { Backend, ConnectionState } from "./types";
 
 export type AppSession =
 	| { status: "loading" }
 	| { status: "unpaired" }
-	| { status: "remote"; backend: RemoteBackend; pairing: Pairing; deviceFingerprint: string }
+	| {
+			status: "remote";
+			backend: RemoteBackend;
+			pairing: Pairing;
+			deviceFingerprint: string;
+			push: PushRegistration;
+	  }
 	| { status: "demo"; backend: DemoBackend };
 
 type SessionApi = {
@@ -45,7 +54,8 @@ async function remoteSession(pairing: Pairing, initial?: ChannelClient): Promise
 		initial,
 		connect: () => RemoteClient.connect(pairingTarget(pairing), device),
 	});
-	return { status: "remote", backend, pairing, deviceFingerprint: fingerprint(keyPair.publicKey) };
+	const push = new PushRegistration(backend, nativePushPlatform, pushPreferences);
+	return { status: "remote", backend, pairing, deviceFingerprint: fingerprint(keyPair.publicKey), push };
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -97,11 +107,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 		setSession(await remoteSession(pairing, client));
 	}, []);
 
+	// Push token renewed on every connection; presence while paired.
+	useEffect(() => {
+		if (session.status !== "remote") return;
+		const stopPush = session.push.start();
+		const stopPresence = reportPresence(session.backend, appVisibility);
+		return () => {
+			stopPush();
+			stopPresence();
+		};
+	}, [session]);
+
 	const signOut = useCallback(async () => {
+		// Best effort: the desktop stops pushing to a phone that forgot it.
+		if (session.status === "remote") {
+			await Promise.race([session.push.forgetOnDesktop(), new Promise((resolve) => setTimeout(resolve, 3_000))]);
+		}
 		await saveDemoMode(false);
 		await clearPairing();
 		setSession({ status: "unpaired" });
-	}, []);
+	}, [session]);
 
 	const value = useMemo(
 		() => ({ session, startDemo, completePairing, signOut }),

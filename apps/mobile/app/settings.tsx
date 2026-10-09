@@ -1,10 +1,13 @@
 import { desktopFingerprint } from "@/backend/identity";
 import { useConnectionState, useSession } from "@/backend/session";
 import type { Backend } from "@/backend/types";
+import type { PushRegistration } from "@/notifications/registration";
+import { pushStatusText, usePushStatus } from "@/notifications/usePush";
 import { color } from "@/theme";
 import { Button, Mono, Panel, StateDot } from "@/ui/primitives";
 import { router } from "expo-router";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function SettingsScreen() {
@@ -34,6 +37,7 @@ export default function SettingsScreen() {
 			) : (
 				<>
 					<Connection backend={session.backend} />
+					<Notifications push={session.push} />
 					<Panel style={{ gap: 14, marginTop: 12 }}>
 						<Field label="Computador" value={desktopFingerprint(session.pairing)} mono accent />
 						<Field label="Este aparelho" value={session.deviceFingerprint} mono accent />
@@ -80,6 +84,36 @@ function Connection({ backend }: { backend: Backend }) {
 				<Pressable onPress={() => backend.reconnectNow()} hitSlop={8}>
 					<Text style={styles.action}>Tentar</Text>
 				</Pressable>
+			) : null}
+		</Panel>
+	);
+}
+
+function Notifications({ push }: { push: PushRegistration }) {
+	const status = usePushStatus(push);
+	const [busy, setBusy] = useState(false);
+	const on = status.kind === "on" || status.kind === "pending";
+	const toggle = (value: boolean) => {
+		setBusy(true);
+		void (value ? push.enable() : push.disable()).finally(() => setBusy(false));
+	};
+	return (
+		<Panel style={{ gap: 10, marginTop: 12 }}>
+			<View style={styles.connection}>
+				<Text style={[styles.body, { flex: 1, fontWeight: "600" }]}>Notificações deste aparelho</Text>
+				<Switch
+					accessibilityLabel="Notificações deste aparelho"
+					value={on}
+					disabled={busy || status.kind === "unsupported" || status.kind === "unavailable"}
+					onValueChange={toggle}
+					trackColor={{ true: color.accent, false: color.border }}
+				/>
+			</View>
+			<Text style={styles.hint}>{pushStatusText(status)}</Text>
+			{on ? (
+				<Text style={styles.hint}>
+					Só o nome do projeto e o tipo do aviso passam pela Expo e pela Apple/Google; o resto chega cifrado ao abrir.
+				</Text>
 			) : null}
 		</Panel>
 	);

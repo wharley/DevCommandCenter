@@ -146,6 +146,9 @@ struct HttpStreamItem {
 #[derive(Clone)]
 struct HttpEventBus {
     sender: tokio::sync::broadcast::Sender<HttpStreamItem>,
+    /// Only the events that may notify a phone (`remote_push`), apart from
+    /// the stream so a burst of deltas never pushes them out.
+    attention: tokio::sync::broadcast::Sender<CoreEvent>,
 }
 
 #[async_trait]
@@ -166,6 +169,9 @@ impl EventBus for HttpEventBus {
         &self,
         envelope: SessionLiveEventEnvelope,
     ) -> dcc_core::Result<()> {
+        if crate::remote_push::Attention::from_event(&envelope.event).is_some() {
+            let _ = self.attention.send(envelope.event.clone());
+        }
         let _ = self.sender.send(HttpStreamItem {
             event: envelope.event,
             durable: envelope.durable,
@@ -180,6 +186,7 @@ impl EventBus for HttpEventBus {
 pub struct HttpBackend {
     sessions: SessionCommandState,
     events: tokio::sync::broadcast::Sender<HttpStreamItem>,
+    attention: tokio::sync::broadcast::Sender<CoreEvent>,
     // The runtime keeps only a weak reference to its buses.
     _bus: Arc<dyn EventBus>,
     terminals: bool,
@@ -193,8 +200,10 @@ impl HttpBackend {
     /// phone has no use for them yet and they are the riskiest route.
     pub fn embedded(sessions: SessionCommandState) -> Result<Self, String> {
         let (events, _) = tokio::sync::broadcast::channel(256);
+        let (attention, _) = tokio::sync::broadcast::channel(64);
         let bus: Arc<dyn EventBus> = Arc::new(HttpEventBus {
             sender: events.clone(),
+            attention: attention.clone(),
         });
         sessions
             .register_event_bus(&bus)
@@ -202,6 +211,7 @@ impl HttpBackend {
         Ok(Self {
             sessions,
             events,
+            attention,
             _bus: bus,
             terminals: false,
             remote: OnceLock::new(),
@@ -211,21 +221,26 @@ impl HttpBackend {
     /// The standalone `dccd-http` server, owner of the sessions it starts.
     pub fn headless(db_path: PathBuf, app_data_dir: PathBuf) -> Self {
         let (events, _) = tokio::sync::broadcast::channel(256);
+        let (attention, _) = tokio::sync::broadcast::channel(64);
         let bus: Arc<dyn EventBus> = Arc::new(HttpEventBus {
             sender: events.clone(),
+            attention: attention.clone(),
         });
         let sessions = SessionCommandState::new_with_event_bus(db_path, app_data_dir, bus.clone());
         Self {
             sessions,
             events,
+            attention,
             _bus: bus,
             terminals: true,
             remote: OnceLock::new(),
         }
     }
 
+    /// Also hands the hub the events that notify phones.
     pub fn attach_remote(&self, hub: &Arc<RemoteHub>) {
         let _ = self.remote.set(Arc::downgrade(hub));
+        hub.attach_attention_events(self.attention.subscribe());
     }
 
     fn remote(&self) -> Option<Arc<RemoteHub>> {

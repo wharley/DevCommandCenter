@@ -202,7 +202,14 @@ export default function ThreadScreen() {
 	return (
 		<KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
 			<View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-				<Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Voltar" style={styles.back}>
+				<Pressable
+					// Opened from a notification on a cold start, the thread is the only screen.
+					onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))}
+					hitSlop={10}
+					accessibilityRole="button"
+					accessibilityLabel="Voltar"
+					style={styles.back}
+				>
 					<Feather name="arrow-left" size={18} color={color.mute} />
 				</Pressable>
 				<View style={{ flex: 1, minWidth: 0 }}>

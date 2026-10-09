@@ -10,18 +10,25 @@
 //     in the booted simulator (`xcrun simctl openurl`);
 //   - approves the phone when it asks (the "Aprovar <aparelho>?" click of the
 //     desktop), after printing its fingerprint; with --manual it waits for
-//     `approve` or `deny` typed in the terminal instead.
+//     `approve` or `deny` typed in the terminal instead;
+//   - a fake Expo push service (`DCC_PUSH_API_URL`): every push the desktop
+//     sends is printed and delivered to the booted simulator with
+//     `xcrun simctl push`, in the APNs payload Expo builds (data under
+//     `body`). The app only has a token without an EAS project when Metro
+//     runs with EXPO_PUBLIC_DCC_DEV_PUSH_TOKEN=ExponentPushToken[simulator].
 //
 // Then type in the terminal:
 //   agent [prompt]   start a Claude session in the workspace and send a prompt
 //                    that needs a permission (uses your claude CLI login)
 //   offer            a new pairing link
+//   push <sessionId> deliver a sample push for that thread to the simulator
 //   approve | deny   answer the pending pairing (with --manual)
 //   quit
 //
 //   node apps/mobile/scripts/desktop-fixture.mjs --open
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -33,6 +40,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const open = process.argv.includes("--open");
 const manual = process.argv.includes("--manual");
 const httpPort = Number(process.env.DCC_FIXTURE_PORT ?? 9877);
+const bundleId = "com.devcommandcenter.mobile";
 const apiKey = randomBytes(24).toString("hex");
 
 function freePort() {
@@ -87,6 +95,46 @@ execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
 execFileSync("git", ["add", "."], { cwd: repo });
 execFileSync("git", ["-c", "user.name=DCC", "-c", "user.email=dcc@example.invalid", "commit", "-qm", "init"], { cwd: repo });
 
+// What Expo hands APNs for a message of `/send`: the alert in `aps`, the
+// message's `data` under `body` (expo-notifications reads it from there).
+function deliverToSimulator(message) {
+	const payload = {
+		aps: { alert: { title: message.title, body: message.body }, sound: message.sound ?? "default" },
+		body: message.data ?? {},
+		experienceId: "@anonymous/dcc-mobile",
+		scopeKey: "@anonymous/dcc-mobile",
+	};
+	const file = join(tmp, `push-${Date.now()}-${Math.random().toString(16).slice(2)}.apns`);
+	writeFileSync(file, JSON.stringify(payload));
+	try {
+		execFileSync("xcrun", ["simctl", "push", "booted", bundleId, file]);
+		console.log(`  → entregue ao simulador (${JSON.stringify(payload)})`);
+	} catch (error) {
+		console.error(`  simctl push falhou: ${error.message}`);
+	}
+}
+
+const pushPort = await freePort();
+const fakeExpo = createHttpServer((request, response) => {
+	let raw = "";
+	request.on("data", (chunk) => (raw += chunk));
+	request.on("end", () => {
+		const body = raw ? JSON.parse(raw) : null;
+		let answer = { data: {} };
+		if (request.url === "/send") {
+			const messages = Array.isArray(body) ? body : [body];
+			for (const message of messages) {
+				console.log(`\n→ push para ${message.to}: "${message.title} · ${message.body}" ${JSON.stringify(message.data)}`);
+				deliverToSimulator(message);
+			}
+			answer = { data: messages.map((_, n) => ({ status: "ok", id: `fixture-${Date.now()}-${n}` })) };
+		}
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(JSON.stringify(answer));
+	});
+});
+await new Promise((resolve) => fakeExpo.listen(pushPort, "127.0.0.1", resolve));
+
 const relayPort = await freePort();
 const relay = spawn(
 	process.execPath,
@@ -107,6 +155,7 @@ const desktop = spawn(binary, [], {
 		DCC_HTTP_PORT: String(httpPort),
 		DCC_HTTP_API_KEY: apiKey,
 		DCC_RELAY_URL: `ws://127.0.0.1:${relayPort}`,
+		DCC_PUSH_API_URL: `http://127.0.0.1:${pushPort}`,
 	},
 	stdio: ["ignore", "pipe", "pipe"],
 });
@@ -117,6 +166,7 @@ desktop.stderr.on("data", (chunk) => (desktopLog += chunk));
 const stop = () => {
 	desktop.kill("SIGTERM");
 	relay.kill("SIGTERM");
+	fakeExpo.close();
 	rmSync(tmp, { recursive: true, force: true });
 };
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
@@ -231,7 +281,7 @@ async function agent(prompt) {
 	console.log(`sessão ${sessionId} iniciada`);
 }
 
-console.log(`relay ws://127.0.0.1:${relayPort} · dccd-http ${base} · dados em ${tmp}`);
+console.log(`relay ws://127.0.0.1:${relayPort} · dccd-http ${base} · push falso http://127.0.0.1:${pushPort} · dados em ${tmp}`);
 await offer();
 const rl = createInterface({ input: process.stdin });
 rl.on("line", (line) => {
@@ -245,10 +295,16 @@ rl.on("line", (line) => {
 				: Promise.resolve(console.log("nenhum pedido de pareamento esperando"))
 			: command === "offer"
 			? offer()
+			: command === "push" && rest[0]
+				? Promise.resolve(
+						deliverToSimulator({ title: "DCC", body: "loja-demo precisa de você", data: { sessionId: rest[0], kind: "permission" } }),
+					)
 			: command === "agent"
 				? agent(rest.join(" ") || "Rode `yarn test` no terminal e me diga o resultado em uma frase.")
 				: command === "quit"
 					? (stop(), process.exit(0))
-					: Promise.resolve(command ? console.log("comandos: agent [prompt] | offer | approve | deny | quit") : undefined);
+					: Promise.resolve(
+							command ? console.log("comandos: agent [prompt] | offer | push <sessionId> | approve | deny | quit") : undefined,
+						);
 	run.catch((error) => console.error(error.message));
 });

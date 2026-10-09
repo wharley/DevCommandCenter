@@ -24,6 +24,13 @@
       "expo-router",
       "expo-secure-store",
       [
+        "expo-notifications",
+        {
+          "color": "#34e2a0",
+          "defaultChannel": "attention"
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "O DCC usa a câmera só para ler o QR de pareamento do seu computador.",

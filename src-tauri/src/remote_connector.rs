@@ -21,6 +21,10 @@
 //! - The connector runs while a relay is configured and there is a paired
 //!   relay phone or an open pairing offer; it reconnects with backoff and
 //!   comes back with the app.
+//! - Two routes belong to the channel itself and never reach the router:
+//!   `/api/v1/remote/push-token` (the phone's Expo token, see `remote_push`)
+//!   and `/api/v1/remote/presence` (app in the foreground or not, so a phone
+//!   that is looking gets no push).
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -58,6 +62,8 @@ use tower::ServiceExt;
 
 use crate::http_auth::PairedDeviceIdentity;
 use crate::pairing::{self, PairingError};
+use crate::remote_push::{self, PushConfig, PushNotifier, PushPresence};
+use dcc_core::ports::events::CoreEvent;
 
 const OFFER_TTL: Duration = Duration::from_secs(5 * 60);
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -74,6 +80,14 @@ const OUTBOUND_QUEUE: usize = 256;
 const MAX_FRAMES_BEFORE_APPROVAL: usize = 32;
 const REPLAY_PAGE: usize = 500;
 const ROOM_SECRET_HEADER: &str = "x-dcc-room-secret";
+/// A phone in the foreground says so again within this time (the app
+/// repeats it every 30 s); past it, it counts as away and gets pushes.
+const PRESENCE_TTL: Duration = Duration::from_secs(75);
+/// The desktop counts as in use while its window has focus and the person
+/// touched keyboard or mouse this recently (Paseo's `PRESENCE_THRESHOLD_MS`).
+const DESKTOP_PRESENCE: Duration = Duration::from_secs(180);
+const PUSH_TOKEN_PATH: &str = "/api/v1/remote/push-token";
+const PRESENCE_PATH: &str = "/api/v1/remote/presence";
 pub const RELAY_URL_ENV: &str = "DCC_RELAY_URL";
 /// The relay the project runs (apps/relay). Used until the user saves another
 /// one or turns remote access off; nothing connects to it before a phone is
@@ -255,6 +269,8 @@ struct PendingApproval {
 struct LiveConnection {
     device_id: String,
     stop: Arc<watch::Sender<Option<u16>>>,
+    /// Until when the app said it is in the foreground.
+    foreground: Arc<StdMutex<Option<Instant>>>,
 }
 
 pub struct RemoteHub {
@@ -271,6 +287,10 @@ pub struct RemoteHub {
     wake: Notify,
     connected: AtomicBool,
     started: AtomicBool,
+    /// Session events that may notify, handed over by the HTTP backend.
+    attention_events: StdMutex<Option<broadcast::Receiver<CoreEvent>>>,
+    push_config: StdMutex<PushConfig>,
+    desktop_focused: AtomicBool,
 }
 
 fn lock<T>(mutex: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -311,6 +331,9 @@ impl RemoteHub {
             wake: Notify::new(),
             connected: AtomicBool::new(false),
             started: AtomicBool::new(false),
+            attention_events: StdMutex::new(None),
+            push_config: StdMutex::new(PushConfig::from_env()),
+            desktop_focused: AtomicBool::new(false),
         }))
     }
 
@@ -320,6 +343,46 @@ impl RemoteHub {
             return;
         }
         tokio::spawn(self.clone().supervise());
+        if let Some(events) = lock(&self.attention_events).take() {
+            let presence: Arc<dyn PushPresence> = Arc::new(HubPresence(Arc::downgrade(self)));
+            let notifier = PushNotifier::new(
+                lock(&self.push_config).clone(),
+                self.db_path.clone(),
+                presence,
+            );
+            tokio::spawn(notifier.run(events));
+        }
+    }
+
+    /// The session events push notifications come from; read from `start`.
+    pub fn attach_attention_events(&self, events: broadcast::Receiver<CoreEvent>) {
+        *lock(&self.attention_events) = Some(events);
+    }
+
+    /// Replaces the push settings (tests point them at a fake Expo). Takes
+    /// effect at `start`.
+    pub fn configure_push(&self, config: PushConfig) {
+        *lock(&self.push_config) = config;
+    }
+
+    /// The desktop window gained or lost focus.
+    pub fn set_desktop_focused(&self, focused: bool) {
+        self.desktop_focused.store(focused, Ordering::SeqCst);
+    }
+
+    /// True while one of the phone's connections reported the app in the
+    /// foreground recently.
+    pub fn device_in_foreground(&self, device_id: &str) -> bool {
+        let now = Instant::now();
+        lock(&self.connections).values().any(|connection| {
+            connection.device_id == device_id
+                && lock(&connection.foreground).is_some_and(|until| until > now)
+        })
+    }
+
+    fn desktop_in_use(&self) -> bool {
+        self.desktop_focused.load(Ordering::SeqCst)
+            && remote_push::system_idle().is_some_and(|idle| idle < DESKTOP_PRESENCE)
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<RemoteEvent> {
@@ -951,11 +1014,13 @@ impl RemoteHub {
         let (stop, mut stopped) = watch::channel(None::<u16>);
         let stop = Arc::new(stop);
         let connection = self.next_connection.fetch_add(1, Ordering::SeqCst);
+        let foreground = Arc::new(StdMutex::new(None));
         lock(&self.connections).insert(
             connection,
             LiveConnection {
                 device_id: device_id.clone(),
                 stop: stop.clone(),
+                foreground: foreground.clone(),
             },
         );
         let context = Arc::new(ChannelContext {
@@ -963,6 +1028,7 @@ impl RemoteHub {
             hub: Arc::downgrade(self),
             device_id: device_id.clone(),
             stop: stop.clone(),
+            foreground,
         });
         let mut tasks: HashMap<u64, AbortHandle> = HashMap::new();
         for frame in queued {
@@ -1114,6 +1180,21 @@ struct ChannelContext {
     hub: std::sync::Weak<RemoteHub>,
     device_id: String,
     stop: Arc<watch::Sender<Option<u16>>>,
+    foreground: Arc<StdMutex<Option<Instant>>>,
+}
+
+struct HubPresence(std::sync::Weak<RemoteHub>);
+
+impl PushPresence for HubPresence {
+    fn device_in_foreground(&self, device_id: &str) -> bool {
+        self.0
+            .upgrade()
+            .is_some_and(|hub| hub.device_in_foreground(device_id))
+    }
+
+    fn desktop_in_use(&self) -> bool {
+        self.0.upgrade().is_some_and(|hub| hub.desktop_in_use())
+    }
 }
 
 impl ChannelContext {
@@ -1193,6 +1274,148 @@ pub fn remote_path_allowed(path: &str) -> bool {
         && !route.starts_with("/api/v1/terminals/")
 }
 
+fn is_channel_route(path: &str) -> bool {
+    let route = path.split(['?', '#']).next().unwrap_or_default();
+    route == PUSH_TOKEN_PATH || route == PRESENCE_PATH
+}
+
+fn json_response(id: u64, status: u16, body: Value) -> Frame {
+    Frame::Res(FrameResponse {
+        id,
+        status,
+        headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
+        body: FrameBody::from_bytes(body.to_string().into_bytes()),
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct PushTokenBody {
+    token: String,
+    platform: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct PresenceBody {
+    /// React Native's `AppState`: only `active` counts as looking.
+    state: String,
+}
+
+/// The routes that act on this channel's phone rather than on the API.
+async fn handle_channel_route(
+    context: Arc<ChannelContext>,
+    request: FrameRequest,
+    tx: mpsc::Sender<Frame>,
+) {
+    let id = request.id;
+    if !context.ensure_active().await {
+        return;
+    }
+    let route = request
+        .path
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let body = request.body.into_bytes().unwrap_or_default();
+    let frame = match (request.method.as_str(), route.as_str()) {
+        ("PUT", PRESENCE_PATH) => match serde_json::from_slice::<PresenceBody>(&body) {
+            Ok(presence) => {
+                let foreground = presence.state == "active";
+                *lock(&context.foreground) = foreground.then(|| Instant::now() + PRESENCE_TTL);
+                json_response(
+                    id,
+                    200,
+                    json!({ "ok": true, "ttlSeconds": PRESENCE_TTL.as_secs() }),
+                )
+            }
+            Err(_) => error_response(id, 400, "expected {\"state\": \"active\" | \"background\"}"),
+        },
+        ("PUT", PUSH_TOKEN_PATH) => register_push_token(&context, id, &body).await,
+        ("DELETE", PUSH_TOKEN_PATH) => {
+            let device_id = context.device_id.clone();
+            let cleared = match context.hub.upgrade() {
+                Some(hub) => {
+                    hub.with_db(move |conn| {
+                        let cleared = pairing::clear_push_token(conn, &device_id)
+                            .map_err(|error| error.to_string())?;
+                        if cleared {
+                            pairing::record_audit(
+                                conn,
+                                "push_token_cleared",
+                                Some(&device_id),
+                                None,
+                                None,
+                                None,
+                            );
+                        }
+                        Ok(cleared)
+                    })
+                    .await
+                }
+                None => Err("shutting down".to_string()),
+            };
+            match cleared {
+                Ok(cleared) => json_response(id, 200, json!({ "ok": true, "cleared": cleared })),
+                Err(error) => error_response(id, 500, &error),
+            }
+        }
+        _ => error_response(id, 405, "method not allowed"),
+    };
+    let _ = tx.send(frame).await;
+}
+
+async fn register_push_token(context: &ChannelContext, id: u64, body: &[u8]) -> Frame {
+    let Ok(body) = serde_json::from_slice::<PushTokenBody>(body) else {
+        return error_response(id, 400, "expected {\"token\", \"platform\"}");
+    };
+    let token = body.token.trim().to_string();
+    if !remote_push::valid_push_token(&token) {
+        return error_response(id, 422, "not an Expo push token");
+    }
+    let platform = match body.platform.as_deref() {
+        None => None,
+        Some(platform @ ("ios" | "android")) => Some(platform.to_string()),
+        Some(_) => return error_response(id, 422, "platform must be ios or android"),
+    };
+    let Some(hub) = context.hub.upgrade() else {
+        return error_response(id, 503, "shutting down");
+    };
+    let device_id = context.device_id.clone();
+    let expires_at = remote_push::lease_time(
+        chrono::Utc::now()
+            + chrono::Duration::from_std(remote_push::TOKEN_LEASE).unwrap_or_default(),
+    );
+    let stored_until = expires_at.clone();
+    let stored = hub
+        .with_db(move |conn| {
+            let changed = pairing::set_push_token(
+                conn,
+                &device_id,
+                &token,
+                platform.as_deref(),
+                &stored_until,
+            )
+            .map_err(|error| error.to_string())?;
+            if changed == Some(true) {
+                pairing::record_audit(
+                    conn,
+                    "push_token_set",
+                    Some(&device_id),
+                    None,
+                    platform.as_deref(),
+                    None,
+                );
+            }
+            Ok(changed)
+        })
+        .await;
+    match stored {
+        Ok(Some(_)) => json_response(id, 200, json!({ "ok": true, "expiresAt": expires_at })),
+        Ok(None) => error_response(id, 403, "device not active"),
+        Err(error) => error_response(id, 500, &error),
+    }
+}
+
 fn forwardable_header(name: &str) -> bool {
     !matches!(
         name.to_ascii_lowercase().as_str(),
@@ -1233,6 +1456,13 @@ fn dispatch(
     match frame {
         Frame::Req(request) => {
             let id = request.id;
+            if is_channel_route(&request.path) {
+                let task = tokio::spawn(handle_channel_route(context.clone(), request, tx.clone()));
+                if let Some(previous) = tasks.insert(id, task.abort_handle()) {
+                    previous.abort();
+                }
+                return;
+            }
             if !remote_path_allowed(&request.path) {
                 let _ = tx.try_send(error_response(id, 403, "not available remotely"));
                 return;

@@ -89,6 +89,12 @@ pub fn ensure_pairing_schema(conn: &Connection) -> Result<(), PairingError> {
     )
     .map_err(|e| PairingError::Database(e.to_string()))?;
 
+    // Expo push token of the phone and the end of its lease (the phone
+    // renews it on every connection). Cleared on revocation.
+    add_column_if_missing(conn, "paired_devices", "push_token", "TEXT")?;
+    add_column_if_missing(conn, "paired_devices", "push_platform", "TEXT")?;
+    add_column_if_missing(conn, "paired_devices", "push_token_expires_at", "TEXT")?;
+
     retire_legacy_devices(conn)?;
 
     Ok(())
@@ -138,7 +144,8 @@ fn retire_legacy_devices(conn: &Connection) -> Result<(), PairingError> {
     for device_id in legacy {
         let retired = conn
             .execute(
-                "UPDATE paired_devices SET revoked_at = ?1
+                "UPDATE paired_devices SET revoked_at = ?1, push_token = NULL,
+                        push_platform = NULL, push_token_expires_at = NULL
                  WHERE device_id = ?2 AND revoked_at IS NULL",
                 params![now_iso(), device_id],
             )
@@ -357,7 +364,9 @@ pub fn revoke_device(
 ) -> Result<bool, PairingError> {
     let affected = conn
         .execute(
-            "UPDATE paired_devices SET revoked_at = ?1 WHERE device_id = ?2 AND revoked_at IS NULL",
+            "UPDATE paired_devices SET revoked_at = ?1, push_token = NULL,
+                    push_platform = NULL, push_token_expires_at = NULL
+             WHERE device_id = ?2 AND revoked_at IS NULL",
             params![now_iso(), device_id],
         )
         .map_err(|e| PairingError::Database(e.to_string()))?;
@@ -366,6 +375,114 @@ pub fn revoke_device(
         record_audit(conn, "revoke", Some(device_id), ip, None, None);
     }
     Ok(affected > 0)
+}
+
+// ---------- push tokens ----------
+
+/// A phone that gets push notifications: its Expo token while the lease lasts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushTarget {
+    pub device_id: String,
+    pub token: String,
+    pub platform: Option<String>,
+}
+
+/// Stores the phone's Expo push token until `expires_at` (RFC 3339). Only an
+/// active relay phone can hold one, and a token belongs to one phone: a
+/// re-paired phone takes it over from its old row. Returns whether the
+/// token is new for this phone (renewals return false).
+pub fn set_push_token(
+    conn: &Connection,
+    device_id: &str,
+    token: &str,
+    platform: Option<&str>,
+    expires_at: &str,
+) -> Result<Option<bool>, PairingError> {
+    let previous: Option<Option<String>> = conn
+        .query_row(
+            "SELECT push_token FROM paired_devices
+             WHERE device_id = ?1 AND revoked_at IS NULL AND noise_public_key IS NOT NULL",
+            params![device_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+    let Some(previous) = previous else {
+        return Ok(None);
+    };
+    conn.execute(
+        "UPDATE paired_devices SET push_token = NULL, push_platform = NULL,
+                push_token_expires_at = NULL
+         WHERE push_token = ?1 AND device_id != ?2",
+        params![token, device_id],
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
+    conn.execute(
+        "UPDATE paired_devices SET push_token = ?1, push_platform = ?2,
+                push_token_expires_at = ?3
+         WHERE device_id = ?4",
+        params![token, platform, expires_at, device_id],
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
+    Ok(Some(previous.as_deref() != Some(token)))
+}
+
+/// The phone turned notifications off. Returns whether it had a token.
+pub fn clear_push_token(conn: &Connection, device_id: &str) -> Result<bool, PairingError> {
+    conn.execute(
+        "UPDATE paired_devices SET push_token = NULL, push_platform = NULL,
+                push_token_expires_at = NULL
+         WHERE device_id = ?1 AND push_token IS NOT NULL",
+        params![device_id],
+    )
+    .map(|affected| affected > 0)
+    .map_err(|e| PairingError::Database(e.to_string()))
+}
+
+/// Expo said the token is dead (`DeviceNotRegistered`): forget it wherever it
+/// is. Returns the phones that held it.
+pub fn forget_push_token(conn: &Connection, token: &str) -> Result<Vec<String>, PairingError> {
+    let devices: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT device_id FROM paired_devices WHERE push_token = ?1")
+            .map_err(|e| PairingError::Database(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![token], |row| row.get::<_, String>(0))
+            .map_err(|e| PairingError::Database(e.to_string()))?;
+        rows.collect::<Result<_, _>>()
+            .map_err(|e| PairingError::Database(e.to_string()))?
+    };
+    conn.execute(
+        "UPDATE paired_devices SET push_token = NULL, push_platform = NULL,
+                push_token_expires_at = NULL
+         WHERE push_token = ?1",
+        params![token],
+    )
+    .map_err(|e| PairingError::Database(e.to_string()))?;
+    Ok(devices)
+}
+
+/// Active relay phones whose token lease has not run out at `now` (RFC 3339).
+pub fn push_targets(conn: &Connection, now: &str) -> Result<Vec<PushTarget>, PairingError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT device_id, push_token, push_platform FROM paired_devices
+             WHERE revoked_at IS NULL AND noise_public_key IS NOT NULL
+               AND push_token IS NOT NULL AND push_token_expires_at > ?1
+             ORDER BY created_at",
+        )
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+    let rows = stmt
+        .query_map(params![now], |row| {
+            Ok(PushTarget {
+                device_id: row.get(0)?,
+                token: row.get(1)?,
+                platform: row.get(2)?,
+            })
+        })
+        .map_err(|e| PairingError::Database(e.to_string()))?;
+    rows.collect::<Result<_, _>>()
+        .map_err(|e| PairingError::Database(e.to_string()))
 }
 
 /// Read recent audit-log entries, newest first.
@@ -486,6 +603,70 @@ mod tests {
         assert!(!has_active_relay_devices(&conn).unwrap());
         assert!(find_relay_device(&conn, &key).unwrap().unwrap().revoked);
         assert!(!revoke_device(&conn, &device_id, None).unwrap());
+    }
+
+    #[test]
+    fn push_tokens_follow_the_lease_and_die_with_the_device() {
+        let conn = fresh_db();
+        let phone = register_relay_device(&conn, &[1_u8; 32], "Phone", Some("ios"), "AB").unwrap();
+        let other = register_relay_device(&conn, &[2_u8; 32], "Other", None, "CD").unwrap();
+        let now = "2026-10-09T12:00:00.000Z";
+        let later = "2026-10-11T12:00:00.000Z";
+
+        assert_eq!(
+            set_push_token(&conn, &phone, "ExponentPushToken[a]", Some("ios"), later).unwrap(),
+            Some(true)
+        );
+        // Renewing the same token is not news.
+        assert_eq!(
+            set_push_token(&conn, &phone, "ExponentPushToken[a]", Some("ios"), later).unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            push_targets(&conn, now).unwrap(),
+            vec![PushTarget {
+                device_id: phone.clone(),
+                token: "ExponentPushToken[a]".to_string(),
+                platform: Some("ios".to_string()),
+            }]
+        );
+        // The lease ran out.
+        assert!(push_targets(&conn, "2026-10-12T00:00:00.000Z")
+            .unwrap()
+            .is_empty());
+
+        // A token belongs to one phone.
+        set_push_token(&conn, &other, "ExponentPushToken[a]", None, later).unwrap();
+        let targets = push_targets(&conn, now).unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].device_id, other);
+
+        // Turned off on the phone, or dead at Expo.
+        assert!(clear_push_token(&conn, &other).unwrap());
+        assert!(!clear_push_token(&conn, &other).unwrap());
+        set_push_token(&conn, &phone, "ExponentPushToken[b]", None, later).unwrap();
+        assert_eq!(
+            forget_push_token(&conn, "ExponentPushToken[b]").unwrap(),
+            vec![phone.clone()]
+        );
+        assert!(push_targets(&conn, now).unwrap().is_empty());
+
+        // Revoking takes the token with it, and a revoked phone cannot set one.
+        set_push_token(&conn, &phone, "ExponentPushToken[c]", None, later).unwrap();
+        assert!(revoke_device(&conn, &phone, None).unwrap());
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT push_token FROM paired_devices WHERE device_id = ?1",
+                params![phone],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, None);
+        assert_eq!(
+            set_push_token(&conn, &phone, "ExponentPushToken[c]", None, later).unwrap(),
+            None
+        );
+        assert!(push_targets(&conn, now).unwrap().is_empty());
     }
 
     #[test]

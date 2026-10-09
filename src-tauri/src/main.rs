@@ -7441,6 +7441,18 @@ pub fn run() {
             }
             if let tauri::RunEvent::WindowEvent {
                 label,
+                event: tauri::WindowEvent::Focused(focused),
+                ..
+            } = &event {
+                // No push to the phone while the person is at the desktop.
+                if label == "main" {
+                    if let Some(remote) = app_handle.try_state::<RemoteHubState>() {
+                        remote.0.set_desktop_focused(*focused);
+                    }
+                }
+            }
+            if let tauri::RunEvent::WindowEvent {
+                label,
                 event: tauri::WindowEvent::Destroyed,
                 ..
             } = &event {
