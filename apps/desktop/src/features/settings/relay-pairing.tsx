@@ -136,7 +136,7 @@ export function RelayAccessCard({ onPaired }: { onPaired: () => void }) {
 				<span className="mt-2 block text-[11px] font-normal leading-relaxed text-muted-foreground">
 					{status.relayUrlFromEnv
 						? "Definido pela variável DCC_RELAY_URL."
-						: "Use um relay seu (apps/relay) ou o que o projeto publicar. Fica conectado só enquanto houver celular pareado por aqui ou um QR aberto."}
+						: "Padrão: o relay do projeto (wss://relay.devcommandcenter.com). Dá para usar um seu (apps/relay); apagar e salvar desliga. Fica conectado só enquanto houver celular pareado por aqui ou um QR aberto."}
 				</span>
 			</label>
 

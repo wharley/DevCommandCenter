@@ -75,6 +75,10 @@ const MAX_FRAMES_BEFORE_APPROVAL: usize = 32;
 const REPLAY_PAGE: usize = 500;
 const ROOM_SECRET_HEADER: &str = "x-dcc-room-secret";
 pub const RELAY_URL_ENV: &str = "DCC_RELAY_URL";
+/// The relay the project runs (apps/relay). Used until the user saves another
+/// one or turns remote access off; nothing connects to it before a phone is
+/// paired or a QR is open.
+pub const DEFAULT_RELAY_URL: &str = "wss://relay.devcommandcenter.com";
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type Sink = SplitSink<Socket, Message>;
@@ -155,15 +159,23 @@ fn load_or_create_identity(conn: &Connection) -> Result<RelayIdentity, String> {
     load_identity(conn)?.ok_or_else(|| "relay identity missing after insert".to_string())
 }
 
+/// No row or NULL means never configured: the project relay. An empty string
+/// is the user turning remote access off.
 fn stored_relay_url(conn: &Connection) -> Result<Option<String>, String> {
-    conn.query_row(
-        "SELECT relay_url FROM remote_relay WHERE id = 1",
-        [],
-        |row| row.get::<_, Option<String>>(0),
-    )
-    .optional()
-    .map(Option::flatten)
-    .map_err(|error| error.to_string())
+    let stored = conn
+        .query_row(
+            "SELECT relay_url FROM remote_relay WHERE id = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
+        .map_err(|error| error.to_string())?;
+    Ok(match stored {
+        None => Some(DEFAULT_RELAY_URL.to_string()),
+        Some(url) if url.is_empty() => None,
+        Some(url) => Some(url),
+    })
 }
 
 pub fn validate_relay_url(url: &str) -> Result<String, String> {
@@ -339,7 +351,7 @@ impl RemoteHub {
             Some(url) => Some(validate_relay_url(&url)?),
             None => None,
         };
-        let stored = url.clone();
+        let stored = url.clone().unwrap_or_default();
         self.with_db(move |conn| {
             load_or_create_identity(conn)?;
             conn.execute(
@@ -1534,8 +1546,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_project_relay_is_the_default_until_changed_or_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("db.sqlite");
+        let reopen = || RemoteHub::new(Router::new(), db.clone()).unwrap();
+
+        assert_eq!(reopen().relay_url().as_deref(), Some(DEFAULT_RELAY_URL));
+
+        reopen().set_relay_url(None).await.unwrap();
+        assert_eq!(reopen().relay_url(), None, "turning it off sticks");
+
+        reopen()
+            .set_relay_url(Some("wss://relay.example".into()))
+            .await
+            .unwrap();
+        assert_eq!(reopen().relay_url().as_deref(), Some("wss://relay.example"));
+    }
+
+    #[tokio::test]
     async fn offers_are_single_use_and_need_a_relay() {
         let (_dir, hub) = hub();
+        hub.set_relay_url(None).await.unwrap();
         assert!(hub.create_offer().await.is_err());
         hub.set_relay_url(Some("ws://127.0.0.1:8787".into()))
             .await
