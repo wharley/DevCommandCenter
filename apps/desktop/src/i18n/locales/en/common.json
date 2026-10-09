@@ -2862,6 +2862,7 @@
       "modes": {
         "managed": "Managed by DCC",
         "remote": "Configured server",
+        "shared": "Server already running",
         "disabled": "Disabled",
         "unavailable": "Unavailable",
         "unknown": "Unknown"
@@ -2869,6 +2870,7 @@
       "statusBody": {
         "managed": "DCC started one local process. Memory queries are bounded and time limited; prompts do not start new processes.",
         "remote": "DCC uses the server configured by DCC_AI_MEMORY_URL and does not create a local process.",
+        "shared": "An ai-memory that this DCC did not start was already answering on this port (another install or the development build). The DCC uses that server as is; its version and settings are unknown.",
         "disabled": "Memory is not active in this installation. The rest of DCC continues normally.",
         "unavailable": "The sidecar could not start. The session is not blocked and the error remains available in the log.",
         "unknown": "There is not enough information about the service yet."

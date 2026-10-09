@@ -108,6 +108,9 @@ pub struct AiMemorySidecar {
     binary_path: Option<PathBuf>,
     version: Option<String>,
     startup_error: Option<String>,
+    /// A server this instance did not start was already answering on the
+    /// port, so the DCC uses it as is (its version and settings are unknown).
+    shared: bool,
 }
 
 impl AiMemorySidecar {
@@ -233,17 +236,41 @@ impl AiMemorySidecar {
             .filter(|port| *port > 0)
             .unwrap_or(DEFAULT_PORT);
         let base_url = format!("http://127.0.0.1:{port}");
-        if is_healthy_once(&base_url) {
-            eprintln!(
-                "[DCC][ai-memory] server already reachable at {base_url}; reusing it without spawning a child"
-            );
-            std::env::set_var("DCC_AI_MEMORY_URL", &base_url);
-            return Ok(Self::disabled());
-        }
-        let binary = locate_binary(app)?;
         let data_dir = std::env::var_os("DCC_AI_MEMORY_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| app_data_dir.join("ai-memory"));
+        if is_healthy_once(&base_url) {
+            // A crash, a force quit or an update relaunch skips the exit hook
+            // and leaves the previous sidecar running. Reusing it would keep
+            // an old binary and none of the pinned settings, so a server on
+            // our own data directory is replaced; anything else is shared.
+            match orphaned_sidecar_pid(port, &data_dir) {
+                Some(pid) if stop_orphan(pid, &base_url) => {
+                    eprintln!("[DCC][ai-memory] replaced orphaned sidecar (pid {pid}) left by a previous run");
+                }
+                Some(pid) => {
+                    return Err(format!(
+                        "an orphaned ai-memory (pid {pid}) is holding {base_url} and did not stop"
+                    ));
+                }
+                None => {
+                    eprintln!(
+                        "[DCC][ai-memory] server already reachable at {base_url}; reusing it without spawning a child"
+                    );
+                    std::env::set_var("DCC_AI_MEMORY_URL", &base_url);
+                    return Ok(Self {
+                        child: Mutex::new(None),
+                        base_url: Some(base_url),
+                        data_dir: None,
+                        binary_path: None,
+                        version: None,
+                        startup_error: None,
+                        shared: true,
+                    });
+                }
+            }
+        }
+        let binary = locate_binary(app)?;
         fs::create_dir_all(&data_dir).map_err(|error| {
             format!(
                 "could not create ai-memory data directory {}: {error}",
@@ -322,6 +349,7 @@ impl AiMemorySidecar {
             binary_path: Some(binary),
             version,
             startup_error: None,
+            shared: false,
         })
     }
 
@@ -333,6 +361,7 @@ impl AiMemorySidecar {
             binary_path: None,
             version: None,
             startup_error: None,
+            shared: false,
         }
     }
 
@@ -344,6 +373,7 @@ impl AiMemorySidecar {
             binary_path: None,
             version: None,
             startup_error: Some(error.into()),
+            shared: false,
         }
     }
 
@@ -358,6 +388,8 @@ impl AiMemorySidecar {
             .filter(|url| !url.trim().is_empty());
         let mode = if running {
             "managed"
+        } else if self.shared {
+            "shared"
         } else if configured_url.is_some() {
             "remote"
         } else if self.startup_error.is_some() {
@@ -652,6 +684,71 @@ fn locate_binary(app: &AppHandle) -> Result<PathBuf, String> {
         })
 }
 
+/// The pid of an ai-memory server listening on `port` for `data_dir`, i.e. a
+/// sidecar a previous DCC run started and never stopped. A server for any
+/// other data directory (another install, the dev build, a remote tunnel)
+/// is not ours and is left alone.
+fn orphaned_sidecar_pid(port: u16, data_dir: &Path) -> Option<u32> {
+    let listeners = Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
+        .output()
+        .ok()?;
+    let data_dir = data_dir.to_str()?;
+    String::from_utf8_lossy(&listeners.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .find(|pid| {
+            Command::new("ps")
+                .args(["-o", "command=", "-p", &pid.to_string()])
+                .output()
+                .is_ok_and(|output| {
+                    is_sidecar_command(&String::from_utf8_lossy(&output.stdout), data_dir)
+                })
+        })
+}
+
+fn is_sidecar_command(command: &str, data_dir: &str) -> bool {
+    let program = command.split(" --").next().unwrap_or_default();
+    Path::new(program.trim())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("ai-memory"))
+        && command.contains(&format!("--data-dir {data_dir} "))
+        && command.contains(" serve ")
+}
+
+/// Stops an orphaned sidecar and waits until its port is free.
+fn stop_orphan(pid: u32, base_url: &str) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(pid) = libc::pid_t::try_from(pid) else {
+            return false;
+        };
+        // SAFETY: `pid` was matched to an ai-memory serving our data directory.
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        let started = Instant::now();
+        while started.elapsed() < SHUTDOWN_GRACE {
+            if !is_healthy_once(base_url) {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        // SAFETY: as above; the server ignored SIGTERM.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+        thread::sleep(Duration::from_millis(200));
+        !is_healthy_once(base_url)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, base_url);
+        false
+    }
+}
+
 fn wait_until_healthy(base_url: &str) -> bool {
     let client = match reqwest::blocking::Client::builder()
         .timeout(HEALTH_TIMEOUT)
@@ -705,6 +802,19 @@ mod tests {
         assert!(validate_settings(&settings("remote", None)).is_err());
         assert!(validate_settings(&settings("remote", Some("file:///tmp/memory"))).is_err());
         assert!(validate_settings(&settings("remote", Some("http://127.0.0.1:49374"))).is_ok());
+    }
+
+    #[test]
+    fn only_a_server_on_our_data_directory_counts_as_an_orphan() {
+        let data_dir = "/Users/me/Library/Application Support/com.devcommandcenter.app/ai-memory";
+        let ours = format!(
+            "/Applications/Dev Command Center.app/Contents/MacOS/ai-memory --data-dir {data_dir} serve --transport http --bind 127.0.0.1:49374"
+        );
+        assert!(is_sidecar_command(&ours, data_dir));
+        let dev_build = ours.replace("com.devcommandcenter.app/", "com.devcommandcenter.app.dev/");
+        assert!(!is_sidecar_command(&dev_build, data_dir));
+        let other_program = ours.replace("MacOS/ai-memory", "MacOS/opencode");
+        assert!(!is_sidecar_command(&other_program, data_dir));
     }
 
     #[test]
