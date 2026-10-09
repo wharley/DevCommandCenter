@@ -1,12 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
 import {
 	AlertTriangle,
 	CheckCircle2,
-	Copy,
 	KeyRound,
 	Loader2,
-	QrCode,
 	RefreshCw,
 	Smartphone,
 	Trash2,
@@ -15,38 +12,14 @@ import {
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
 import { RelayAccessCard } from "./relay-pairing";
-import { RemoteAccessQr } from "./remote-access-qr";
 import {
 	pairAuditLog,
-	pairGetEndpoints,
-	pairInit,
 	pairListDevices,
 	pairRevokeDevice,
-	type AdvertisedEndpoint,
 	type AuditEntry,
 	type PairedDevice,
-	type PairingChallenge,
 } from "@/lib/pairing-api";
-
-/**
- * Builds the pairing URL the QR encodes. The landing page is served by the
- * desktop backend itself (same origin as the API) so the phone never hits a
- * mixed-content / CORS wall. `backendUrl` should already be the LAN URL of
- * the desktop, e.g. http://192.168.1.42:9876.
- */
-function buildPairUrl(backendUrl: string, nonce: string): string {
-	const params = new URLSearchParams({ be: backendUrl, nonce });
-	return `${backendUrl.replace(/\/$/, "")}/m/pair#${params.toString()}`;
-}
 
 function formatRelative(iso: string | null): string {
 	if (!iso) return "—";
@@ -64,27 +37,14 @@ function formatRelative(iso: string | null): string {
 	}
 }
 
-export function PairedDevicesPanel({
-	defaultBackendUrl,
-}: {
-	/**
-	 * Loopback URL kept as a last-resort fallback (e.g. tests, dev shells).
-	 * The real backend URL shown to mobile clients comes from `pair_get_lan_url`
-	 * and is the LAN address of this machine.
-	 */
-	defaultBackendUrl: string;
-}) {
+/**
+ * Phones paired with this desktop. Pairing itself happens in the relay card
+ * (QR + approval); this panel lists the pinned devices and revokes them.
+ */
+export function PairedDevicesPanel() {
 	const [devices, setDevices] = useState<PairedDevice[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [revokingId, setRevokingId] = useState<string | null>(null);
-	const [pairDialogOpen, setPairDialogOpen] = useState(false);
-	const [endpoints, setEndpoints] = useState<AdvertisedEndpoint[] | null>(null);
-
-	const refreshEndpoints = () => {
-		void pairGetEndpoints()
-			.then((res) => setEndpoints(res.endpoints))
-			.catch(() => setEndpoints([]));
-	};
 
 	const refresh = async () => {
 		setLoading(true);
@@ -102,37 +62,6 @@ export function PairedDevicesPanel({
 
 	useEffect(() => {
 		void refresh();
-		refreshEndpoints();
-	}, []);
-
-	useEffect(() => {
-		let unlisten: UnlistenFn | undefined;
-		void (async () => {
-			unlisten = await listen<AuditEntry>("pair-audit-event", (event) => {
-				const payload = event.payload;
-				switch (payload.event) {
-					case "pair":
-						toast.success("Novo dispositivo pareado", {
-							description: payload.userAgent ?? payload.deviceId ?? undefined,
-						});
-						void refresh();
-						break;
-					case "pin_locked":
-						toast.warning("Tentativa de brute-force detectada", {
-							description: payload.ip
-								? `Nonce travado para IP ${payload.ip}`
-								: "Nonce travado após 5 PINs incorretos",
-						});
-						break;
-					case "revoke":
-						void refresh();
-						break;
-				}
-			});
-		})();
-		return () => {
-			unlisten?.();
-		};
 	}, []);
 
 	const handleRevoke = async (device: PairedDevice) => {
@@ -163,9 +92,9 @@ export function PairedDevicesPanel({
 							</h3>
 						</div>
 						<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-							Celulares e tablets autenticam por chave pública (ECDSA P-256 na
-							rede local, X25519 pelo relay). A chave privada nunca sai do
-							dispositivo. Você pode revogar individualmente a qualquer momento.
+							Cada celular pareado pelo relay autentica com a própria chave
+							(X25519), fixada quando você aprova o pareamento. A chave privada
+							nunca sai do aparelho. Revogar derruba a conexão na hora.
 						</p>
 					</div>
 					<Badge
@@ -177,14 +106,6 @@ export function PairedDevicesPanel({
 				</div>
 
 				<div className="mt-3 flex flex-wrap gap-2">
-					<Button
-						type="button"
-						size="sm"
-						onClick={() => setPairDialogOpen(true)}
-					>
-						<QrCode className="size-3.5" />
-						Parear novo dispositivo
-					</Button>
 					<Button
 						type="button"
 						variant="outline"
@@ -271,17 +192,6 @@ export function PairedDevicesPanel({
 					</table>
 				</div>
 			)}
-
-			<PairDeviceDialog
-				open={pairDialogOpen}
-				onClose={() => {
-					setPairDialogOpen(false);
-					void refresh();
-				}}
-				endpoints={endpoints}
-				fallbackUrl={defaultBackendUrl}
-				onRefreshEndpoints={refreshEndpoints}
-			/>
 
 			<AuditLogSection />
 		</section>
@@ -414,6 +324,7 @@ function describeEvent(event: string): {
 				icon: XCircle,
 				tone: "text-amber-500",
 			};
+		// The retired LAN pairing wrote these; older logs still have them.
 		case "pin_failure":
 			return {
 				label: "PIN incorreto",
@@ -444,6 +355,12 @@ function describeEvent(event: string): {
 				icon: XCircle,
 				tone: "text-amber-500",
 			};
+		case "legacy_device_retired":
+			return {
+				label: "Pareamento antigo pela rede local desativado",
+				icon: XCircle,
+				tone: "text-muted-foreground",
+			};
 		case "relay_refused":
 			return {
 				label: "Aparelho não pareado tentou conectar pelo relay",
@@ -469,337 +386,4 @@ function formatTime(iso: string): string {
 	} catch {
 		return iso;
 	}
-}
-
-function EndpointOption({
-	endpoint,
-	selected,
-	onSelect,
-}: {
-	endpoint: AdvertisedEndpoint;
-	selected: boolean;
-	onSelect: () => void;
-}) {
-	const badge =
-		endpoint.provider === "tailscale"
-			? { text: "Tailscale", tone: "text-violet-400" }
-			: endpoint.reachability === "lan"
-				? { text: "LAN", tone: "text-emerald-400" }
-				: { text: endpoint.label, tone: "text-muted-foreground" };
-	return (
-		<button
-			type="button"
-			onClick={onSelect}
-			className={`flex w-full flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors ${
-				selected
-					? "border-foreground/40 bg-muted/30"
-					: "border-border/60 hover:bg-muted/15"
-			}`}
-		>
-			<div className="flex w-full items-center justify-between gap-2">
-				<span className="text-[12px] font-medium text-foreground">
-					{endpoint.label}
-				</span>
-				<span
-					className={`text-[10px] font-medium uppercase tracking-wider ${badge.tone}`}
-				>
-					{badge.text}
-				</span>
-			</div>
-			<span className="text-[11px] leading-snug text-muted-foreground">
-				{endpoint.description}
-			</span>
-		</button>
-	);
-}
-
-function PairDeviceDialog({
-	open,
-	onClose,
-	endpoints,
-	fallbackUrl,
-	onRefreshEndpoints,
-}: {
-	open: boolean;
-	onClose: () => void;
-	/** Null = still loading; empty array = no usable endpoint detected. */
-	endpoints: AdvertisedEndpoint[] | null;
-	/** Last-resort URL (defaults to loopback) when discovery returns nothing. */
-	fallbackUrl: string;
-	onRefreshEndpoints: () => void;
-}) {
-	const [challenge, setChallenge] = useState<PairingChallenge | null>(null);
-	const [generating, setGenerating] = useState(false);
-	const [remainingSecs, setRemainingSecs] = useState(0);
-	const [selectedEndpointId, setSelectedEndpointId] = useState<string | null>(
-		null,
-	);
-	const [httpsAddress, setHttpsAddress] = useState(() => {
-		try {
-			return localStorage.getItem("dcc.mobile.httpsOrigin") ?? "";
-		} catch {
-			return "";
-		}
-	});
-	const httpsOrigin = useMemo(() => {
-		try {
-			const url = new URL(httpsAddress.trim());
-			return url.protocol === "https:" &&
-				!url.username &&
-				!url.password &&
-				!url.search &&
-				!url.hash &&
-				["/", "/m", "/m/"].includes(url.pathname)
-				? url.origin
-				: null;
-		} catch {
-			return null;
-		}
-	}, [httpsAddress]);
-	useEffect(() => {
-		try {
-			if (httpsOrigin)
-				localStorage.setItem("dcc.mobile.httpsOrigin", httpsOrigin);
-			else if (!httpsAddress.trim())
-				localStorage.removeItem("dcc.mobile.httpsOrigin");
-		} catch {
-			/* Browser storage is optional. */
-		}
-	}, [httpsOrigin, httpsAddress]);
-
-	// Endpoints reachable from a phone, in display order. Loopback is hidden
-	// from the picker but still selectable as a debug fallback.
-	const externalEndpoints = useMemo(
-		() =>
-			(endpoints ?? []).filter(
-				(e) => e.reachability !== "loopback" && e.status !== "unavailable",
-			),
-		[endpoints],
-	);
-
-	// Pick a sensible default the first time endpoints land: prefer Tailscale
-	// (works from any network) over LAN, but never overwrite a user choice.
-	useEffect(() => {
-		if (selectedEndpointId) return;
-		if (!endpoints || endpoints.length === 0) return;
-		const tailscale = endpoints.find(
-			(e) => e.provider === "tailscale" && e.status !== "unavailable",
-		);
-		const lan = endpoints.find((e) => e.reachability === "lan");
-		const any = externalEndpoints[0] ?? endpoints[0];
-		setSelectedEndpointId((tailscale ?? lan ?? any)?.id ?? null);
-	}, [endpoints, selectedEndpointId, externalEndpoints]);
-
-	const selectedEndpoint =
-		endpoints?.find((e) => e.id === selectedEndpointId) ?? null;
-	const backendUrl = httpsOrigin ?? selectedEndpoint?.url ?? fallbackUrl;
-	const noEndpointsDetected =
-		endpoints !== null && externalEndpoints.length === 0 && !httpsOrigin;
-
-	const generate = async () => {
-		setGenerating(true);
-		try {
-			const result = await pairInit();
-			setChallenge(result);
-		} catch (err) {
-			toast.error(
-				err instanceof Error ? err.message : "Falha ao gerar pareamento",
-			);
-		} finally {
-			setGenerating(false);
-		}
-	};
-
-	useEffect(() => {
-		if (open && !challenge && !noEndpointsDetected) {
-			void generate();
-		}
-		if (!open) {
-			setChallenge(null);
-			setRemainingSecs(0);
-			setSelectedEndpointId(null);
-		}
-	}, [open, noEndpointsDetected]);
-
-	useEffect(() => {
-		if (!challenge) return;
-		const expires = new Date(challenge.expiresAt).getTime();
-		const tick = () => {
-			const secs = Math.max(0, Math.floor((expires - Date.now()) / 1000));
-			setRemainingSecs(secs);
-		};
-		tick();
-		const id = window.setInterval(tick, 1000);
-		return () => window.clearInterval(id);
-	}, [challenge]);
-
-	const pairUrl = useMemo(() => {
-		if (!challenge || (httpsAddress.trim() && !httpsOrigin)) return null;
-		return buildPairUrl(backendUrl, challenge.nonce);
-	}, [challenge, backendUrl, httpsAddress, httpsOrigin]);
-
-	const copyPairUrl = async () => {
-		if (!pairUrl) return;
-		try {
-			await navigator.clipboard.writeText(pairUrl);
-			toast.success("Link copiado");
-		} catch {
-			toast.error("Falha ao copiar");
-		}
-	};
-
-	const expired = challenge !== null && remainingSecs <= 0;
-
-	return (
-		<Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-			<DialogContent className="flex max-h-[90vh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
-				<DialogHeader className="border-b border-border/50 px-6 py-4">
-					<DialogTitle className="text-[15px]">
-						Parear novo dispositivo
-					</DialogTitle>
-					<DialogDescription className="text-[12px]">
-						Escaneie o QR code no celular e digite o PIN abaixo. O pareamento
-						expira em 60 segundos.
-					</DialogDescription>
-				</DialogHeader>
-
-				<div className="flex-1 overflow-y-auto px-6 py-5">
-					<label className="mb-5 block text-[12px] font-medium">
-						Endereço HTTPS para instalar no celular · opcional
-						<input
-							type="url"
-							value={httpsAddress}
-							onChange={(e) => setHttpsAddress(e.target.value)}
-							placeholder="https://meu-mac.minha-rede.ts.net"
-							className="mt-2 w-full rounded-lg border border-border bg-background p-2 font-mono text-xs"
-						/>
-						<span className="mt-2 block text-[11px] font-normal leading-relaxed text-muted-foreground">
-							Cole o endereço do Tailscale Serve já configurado para este DCC. O
-							QR usará esse endereço para habilitar instalação e notificações.
-						</span>
-						{httpsAddress.trim() && !httpsOrigin && (
-							<span
-								role="alert"
-								className="mt-1 block text-xs text-destructive"
-							>
-								Use um endereço HTTPS válido, sem credenciais ou parâmetros.
-							</span>
-						)}
-					</label>
-					{noEndpointsDetected ? (
-						<div className="flex h-[280px] flex-col items-center justify-center gap-3 px-4 text-center">
-							<AlertTriangle
-								className="size-6 text-amber-500"
-								strokeWidth={1.8}
-							/>
-							<p className="text-[13px] font-medium text-foreground">
-								Nenhuma rede alcançável detectada
-							</p>
-							<p className="text-[12px] leading-relaxed text-muted-foreground">
-								O celular precisa de uma rota até este desktop. Conecte ao Wi-Fi
-								(mesma rede do celular), ou instale o Tailscale em ambos para
-								parear de qualquer lugar.
-							</p>
-							<Button
-								type="button"
-								size="sm"
-								variant="outline"
-								onClick={onRefreshEndpoints}
-							>
-								<RefreshCw className="size-3.5" />
-								Verificar novamente
-							</Button>
-						</div>
-					) : generating || !challenge ? (
-						<div className="flex h-[280px] items-center justify-center">
-							<Loader2 className="size-5 animate-spin text-muted-foreground" />
-						</div>
-					) : expired ? (
-						<div className="flex h-[280px] flex-col items-center justify-center gap-3 text-center">
-							<p className="text-[13px] font-medium text-foreground">
-								PIN expirado
-							</p>
-							<p className="text-[12px] text-muted-foreground">
-								Gere um novo para tentar novamente.
-							</p>
-							<Button
-								type="button"
-								size="sm"
-								onClick={() => void generate()}
-								disabled={generating}
-							>
-								<RefreshCw className="size-3.5" />
-								Gerar novo
-							</Button>
-						</div>
-					) : (
-						<div className="flex flex-col items-center gap-4">
-							{pairUrl ? <RemoteAccessQr value={pairUrl} size={224} /> : null}
-
-							<div className="w-full rounded-xl border border-border/60 bg-muted/15 p-4 text-center">
-								<p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-									PIN
-								</p>
-								<p className="mt-1 font-mono text-[34px] font-semibold tracking-[0.35em] text-foreground">
-									{challenge.pin}
-								</p>
-								<p className="mt-1 text-[11px] text-muted-foreground">
-									expira em{" "}
-									<span className="font-mono text-foreground/80">
-										{remainingSecs}s
-									</span>
-								</p>
-							</div>
-
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								className="w-full"
-								onClick={() => void copyPairUrl()}
-								disabled={!pairUrl}
-							>
-								<Copy className="size-3.5" />
-								Copiar link do pareamento
-							</Button>
-
-							{externalEndpoints.length > 1 ? (
-								<div className="w-full space-y-1.5">
-									<p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-										Como o celular vai conectar
-									</p>
-									<div className="space-y-1.5">
-										{externalEndpoints.map((ep) => (
-											<EndpointOption
-												key={ep.id}
-												endpoint={ep}
-												selected={!httpsOrigin && ep.id === selectedEndpointId}
-												onSelect={() => {
-													setHttpsAddress("");
-													setSelectedEndpointId(ep.id);
-												}}
-											/>
-										))}
-									</div>
-								</div>
-							) : selectedEndpoint ? (
-								<p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-									{selectedEndpoint.description}
-								</p>
-							) : null}
-							<p className="text-center font-mono text-[10px] text-muted-foreground/70">
-								{backendUrl}
-							</p>
-						</div>
-					)}
-				</div>
-
-				<DialogFooter className="border-t border-border/50 px-6 py-3">
-					<Button type="button" variant="outline" onClick={onClose}>
-						Fechar
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
 }

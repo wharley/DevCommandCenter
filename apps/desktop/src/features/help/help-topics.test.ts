@@ -22,8 +22,8 @@ const LOCALES: Array<[string, LocaleBundle]> = [
  * a literal in the bundle.
  */
 const LABEL_ALLOWLIST: Record<string, string[]> = {
-	"pt-BR": ["/spec", "/clear", "Criar PR", "Parear novo dispositivo"],
-	en: ["/spec", "/clear", "Create PR", "Pair new device"],
+	"pt-BR": ["/spec", "/clear", "Criar PR", "Parear pelo relay"],
+	en: ["/spec", "/clear", "Create PR", "Pair via relay"],
 };
 
 function collectStringValues(node: unknown, out: Set<string>): Set<string> {

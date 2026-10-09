@@ -5,8 +5,7 @@ through the end-to-end encrypted relay (`packages/remote-protocol`,
 `apps/relay`); the relay only forwards ciphertext. No accounts.
 
 Expo SDK 55 (React 19.2.0, the same as the rest of the monorepo), Expo Router.
-Shared, transport-agnostic logic lives in `packages/mobile-core` (also used by
-`apps/mobile-web`).
+Shared, transport-agnostic logic lives in `packages/mobile-core`.
 
 ## Run it
 

@@ -250,26 +250,13 @@ BEGIN
 END;
 
 -- =============================================================================
--- Mobile / remote pairing (signed-request auth, ECDSA P-256)
+-- Mobile / remote pairing (relay + Noise, see src-tauri/src/pairing.rs)
 -- =============================================================================
 
--- Pareamento efêmero: nonce + PIN-hash, 60s, 1-use.
--- failed_attempts/locked_at bloqueiam brute-force do PIN.
-CREATE TABLE IF NOT EXISTS pairing_nonces (
-  nonce            TEXT PRIMARY KEY,
-  pin_hash         TEXT NOT NULL,
-  expires_at       TEXT NOT NULL,
-  consumed_at      TEXT,
-  failed_attempts  INTEGER NOT NULL DEFAULT 0,
-  locked_at        TEXT,
-  created_at       TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_pairing_nonces_expires ON pairing_nonces(expires_at);
-
--- Dispositivos pareados. Dois modos de auth:
---   1. ECDSA P-256: public_key_spki preenchido, session_token_hash NULL — native clients
---   2. Bearer token: session_token_hash preenchido, public_key_spki = blob vazio — browser clients
+-- Dispositivos pareados pelo relay: noise_public_key guarda a chave estática
+-- Noise fixada na aprovação. public_key_spki e session_token_hash são do
+-- pareamento LAN aposentado: ficam no esquema (sem migração destrutiva), mas
+-- linhas sem noise_public_key são revogadas por pairing::ensure_pairing_schema.
 CREATE TABLE IF NOT EXISTS paired_devices (
   device_id            TEXT PRIMARY KEY,
   device_name          TEXT NOT NULL,
@@ -284,7 +271,6 @@ CREATE TABLE IF NOT EXISTS paired_devices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_paired_devices_revoked ON paired_devices(revoked_at);
-CREATE INDEX IF NOT EXISTS idx_paired_devices_token ON paired_devices(session_token_hash);
 -- idx_paired_devices_noise is created by pairing::ensure_pairing_schema, which
 -- adds the column on databases that predate it first.
 

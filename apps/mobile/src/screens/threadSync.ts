@@ -1,8 +1,8 @@
 /**
- * Keeps one thread's history in sync over the channel. Same model as the PWA
- * (apps/mobile-web/src/routes/thread.tsx, `planDelta` in @dcc/mobile-core):
- * the durable `sequence` is the cursor, live events only trigger a delta
- * fetch (debounced), a rewind or a shrinking history refetches everything.
+ * Keeps one thread's history in sync over the channel (`planDelta` in
+ * @dcc/mobile-core): the durable `sequence` is the cursor, live events only
+ * trigger a delta fetch (debounced), a rewind or a shrinking history
+ * refetches everything.
  *
  * What the relay channel adds: the subscription carries `after=<cursor>`, so
  * on every (re)open the desktop first replays what this phone missed as

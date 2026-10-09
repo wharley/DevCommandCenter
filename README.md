@@ -36,7 +36,7 @@ persistence in one Tauri application.
 - **Git and delivery workflows**: inspect live changes, commit and push, create or update change requests, recover delivery failures, and resolve merge conflicts without leaving the workbench.
 - **Managed MCP integrations**: connect trusted local or remote tools with scoped bindings, OS-backed credential storage, runtime status, and per-tool Ask/Allow/Deny policies.
 - **Usage and skills**: compare real provider activity, inspect token and model usage, and manage project skills from a provider-neutral source.
-- **Mobile companion pairing**: pair a phone with the desktop app through QR code + PIN and use companion workflows on the same trusted network or through Tailscale. See [Mobile web companion](docs/MOBILE_WEB.md).
+- **Mobile app**: follow agents and answer what needs you from the native phone app (`apps/mobile`). It reaches the desktop from any network through an end-to-end encrypted relay: pair once with a QR code and approve the phone on the desktop. See [DCC on your phone](docs/MOBILE_COMPANION.md).
 - **Provider-neutral workflows**: use Claude, Gemini, Codex, Cursor, and other provider integrations from the same workbench surface.
 - **Rich text composer**: format text, edit links, and create bullet or numbered lists while typing. Drafts preserve the structure and prompts are sent as Markdown. See [Composer](docs/COMPOSER.md).
 - **Model favorites**: save provider, model, and effort combinations from the composer picker. Use **Edit favorites** to add, remove, change effort, or drag combinations into your preferred order (arrow controls are also available). Favorites are saved on this device across projects; changing the conversation's effort leaves the saved favorite unchanged. **All models** keeps the full catalog accessible.
@@ -64,7 +64,7 @@ persistence in one Tauri application.
 - Manage project skills from a provider-neutral source and compile them into agent-native targets such as `.claude/skills/`, `AGENTS.md`, `GEMINI.md`, and `.cursor/rules/`.
 - Connect DCC-managed MCP servers to compatible providers without editing provider-owned configuration.
 - Compare provider, model, token, cache, reasoning, and cost activity recorded by DCC.
-- Use optional mobile pairing and local HTTP access for companion workflows on the same trusted network.
+- Follow and answer agents from your phone through the end-to-end encrypted relay, and script DCC through the loopback-only local HTTP API.
 
 ## Product shape
 
@@ -238,7 +238,7 @@ Before starting your first agent session, complete [Provider setup](#provider-se
 - [Guarded Undo engineering contract](docs/GUARDED_UNDO_DESIGN.md)
 - [DCC agents](docs/DCC_AGENTS.md)
 - [Delegation agents](docs/DELEGATION_AGENTS.md)
-- [Mobile web companion](docs/MOBILE_WEB.md)
+- [DCC on your phone](docs/MOBILE_COMPANION.md)
 - [Mobile pairing security model](docs/SECURITY_MOBILE_PAIRING.md)
 - [MCP trust model](docs/MCP_TRUST_MODEL.md)
 - [CodeRabbit integration](docs/CODERABBIT.md)

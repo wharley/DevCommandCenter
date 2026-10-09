@@ -45,7 +45,6 @@ Run the smallest checks that prove your change:
 
 ```bash
 yarn workspace @dcc/desktop test
-yarn workspace @dcc/mobile-web build
 cargo check
 ```
 

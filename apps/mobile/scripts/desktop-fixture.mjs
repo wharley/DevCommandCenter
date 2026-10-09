@@ -106,7 +106,6 @@ const desktop = spawn(binary, [], {
 		DCC_HTTP_DB_PATH: db,
 		DCC_HTTP_PORT: String(httpPort),
 		DCC_HTTP_API_KEY: apiKey,
-		DCC_HTTP_LAN: "0",
 		DCC_RELAY_URL: `ws://127.0.0.1:${relayPort}`,
 	},
 	stdio: ["ignore", "pipe", "pipe"],

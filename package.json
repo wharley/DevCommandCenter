@@ -23,7 +23,6 @@
     "build:sidecars": "node scripts/build-sidecars.mjs",
     "oj:dev": "node scripts/ensure-oj.mjs && oj dev --port 5173",
     "oj:build": "node scripts/ensure-oj.mjs && oj build --emptyOutDir",
-    "oj:build:mobile": "yarn workspace @dcc/mobile-web build",
     "test:mcp:release-local": "bash scripts/validate-mcp-release-local.sh",
     "test:remote:e2e": "node scripts/e2e-remote.mjs",
     "lint": "eslint .",

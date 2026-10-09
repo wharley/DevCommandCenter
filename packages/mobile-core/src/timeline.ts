@@ -1,6 +1,5 @@
 /**
- * Presentation rules for a thread's folded messages, shared by the PWA and
- * the native app.
+ * Presentation rules for a thread's folded messages in the phone app.
  *
  * The raw stream interleaves conversation (user/assistant) with machinery
  * (reasoning, tool calls, resolved permissions). Rendering the machinery at

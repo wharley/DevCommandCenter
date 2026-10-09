@@ -21,7 +21,6 @@ win.__TAURI_INTERNALS__ = {
 		if (command === "plugin:event|listen") return 1;
 		if (command === "plugin:event|unlisten") return;
 		if (command === "pair_list_devices") return { devices: [] };
-		if (command === "pair_get_endpoints") return { endpoints: [] };
 		if (command === "list_mcp_integrations") return { integrations: [] };
 		if (
 			[

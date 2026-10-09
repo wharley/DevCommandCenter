@@ -22,7 +22,7 @@ const pinned = Object.fromEntries(
 const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 config.resolver.blockList = [
 	...[].concat(config.resolver.blockList ?? []),
-	new RegExp(`^${escape(workspaceRoot)}/(target|src-tauri|crates|apps/desktop|apps/mobile-web|apps/relay)/.*`),
+	new RegExp(`^${escape(workspaceRoot)}/(target|src-tauri|crates|apps/desktop|apps/relay)/.*`),
 	new RegExp(`^${escape(projectRoot)}/(ios|android)/.*`),
 ];
 

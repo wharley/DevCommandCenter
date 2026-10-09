@@ -1,7 +1,7 @@
 /**
- * "Mission control" tokens, the same palette as apps/mobile-web/src/index.css:
- * cool ink panels, phosphor green only for what is live or actionable, amber
- * for "needs you", red for failures, monospace as the instrument voice.
+ * "Mission control" tokens: cool ink panels, phosphor green only for what is
+ * live or actionable, amber for "needs you", red for failures, monospace as
+ * the instrument voice.
  */
 import { Platform } from "react-native";
 

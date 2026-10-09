@@ -2374,67 +2374,6 @@ fn daemon_tick_internal(app: &AppHandle, state: &AppState) -> Result<(), String>
     Ok(())
 }
 
-/// Polls `pair_audit_log` and emits a Tauri event for each new entry so the
-/// desktop UI can show a toast / notification. Polling avoids needing
-/// dccd-http to push events back into the Tauri process.
-fn start_pair_audit_watcher(app: AppHandle, db_path: PathBuf) {
-    thread::spawn(move || {
-        // Establish the high-water mark we have already seen — we never replay
-        // historical entries on startup, only new ones.
-        let mut last_id: i64 = match Connection::open(&db_path) {
-            Ok(conn) => conn
-                .query_row("SELECT IFNULL(MAX(id), 0) FROM pair_audit_log", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap_or(0),
-            Err(_) => 0,
-        };
-
-        loop {
-            thread::sleep(Duration::from_secs(3));
-            let Ok(conn) = Connection::open(&db_path) else {
-                continue;
-            };
-
-            let mut stmt = match conn.prepare(
-                "SELECT id, event, device_id, ip, user_agent, details_json, created_at
-                 FROM pair_audit_log
-                 WHERE id > ?1
-                 ORDER BY id ASC",
-            ) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
-            let mut highest = last_id;
-            let rows = stmt.query_map(rusqlite::params![last_id], |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, i64>(0)?,
-                    "event": row.get::<_, String>(1)?,
-                    "deviceId": row.get::<_, Option<String>>(2)?,
-                    "ip": row.get::<_, Option<String>>(3)?,
-                    "userAgent": row.get::<_, Option<String>>(4)?,
-                    "detailsJson": row.get::<_, Option<String>>(5)?,
-                    "createdAt": row.get::<_, String>(6)?,
-                }))
-            });
-
-            if let Ok(iter) = rows {
-                for entry in iter.flatten() {
-                    if let Some(id) = entry.get("id").and_then(|v| v.as_i64()) {
-                        if id > highest {
-                            highest = id;
-                        }
-                    }
-                    let _ = app.emit("pair-audit-event", entry);
-                }
-            }
-
-            last_id = highest;
-        }
-    });
-}
-
 fn start_daemon_worker(app: AppHandle, state: AppState) {
     state.daemon.running.store(true, Ordering::Relaxed);
     thread::spawn(move || {
@@ -3812,7 +3751,7 @@ fn shell_open_terminal_at_path(
 }
 
 // =============================================================================
-// Mobile pairing Tauri commands (ECDSA P-256 signed-request auth)
+// Paired devices Tauri commands (phones paired through the relay)
 // =============================================================================
 
 fn pairing_db_path(app: &AppHandle) -> Result<PathBuf, ApiError> {
@@ -3949,7 +3888,6 @@ fn start_embedded_http_server(
         }
     };
     config.db_path = db_path.clone();
-    let lan = config.lan;
     let backend = match HttpBackend::embedded(session_state) {
         Ok(backend) => backend,
         Err(error) => {
@@ -3958,19 +3896,16 @@ fn start_embedded_http_server(
         }
     };
     let server = Arc::new(EmbeddedHttpServer::new(config, backend));
-    app.manage(EmbeddedHttpServerState(server.clone()));
     start_remote_connector(app, &server, db_path);
     tauri::async_runtime::spawn(async move {
         let port = server.port();
         let _ = tauri::async_runtime::spawn_blocking(move || stop_stale_http_sidecar(port)).await;
-        match server.ensure_listening(lan).await {
+        match server.listen().await {
             Ok(addr) => eprintln!("[DCC HTTP] listening on http://{addr}"),
-            Err(error) => eprintln!("[DCC HTTP] WARN: {error}; mobile access unavailable"),
+            Err(error) => eprintln!("[DCC HTTP] WARN: {error}; local HTTP API unavailable"),
         }
     });
 }
-
-struct EmbeddedHttpServerState(Arc<EmbeddedHttpServer>);
 
 struct RemoteHubState(Arc<RemoteHub>);
 
@@ -4046,38 +3981,8 @@ async fn remote_access_respond(
     Ok(serde_json::json!({ "delivered": delivered }))
 }
 
-/// Opening mobile pairing is the explicit opt-in to listen on the LAN.
-async fn ensure_lan_http_server(app: &AppHandle) -> Result<u16, ApiError> {
-    let server = app
-        .try_state::<EmbeddedHttpServerState>()
-        .map(|state| state.0.clone())
-        .ok_or_else(|| db_error("the mobile HTTP API is not available".to_string()))?;
-    server
-        .ensure_listening(true)
-        .await
-        .map_err(|error| db_error(format!("mobile HTTP API unavailable: {error}")))?;
-    Ok(server.port())
-}
-
 fn pairing_error_to_api(err: dev_command_center_tauri::pairing::PairingError) -> ApiError {
     db_error(err.to_string())
-}
-
-#[tauri::command]
-async fn pair_init(app: AppHandle) -> ApiResult<Value> {
-    ensure_lan_http_server(&app).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_pairing_conn(&app)?;
-        let challenge = dev_command_center_tauri::pairing::create_pairing_nonce(&conn)
-            .map_err(pairing_error_to_api)?;
-        Ok(serde_json::json!({
-            "nonce": challenge.nonce,
-            "pin": challenge.pin,
-            "expiresAt": challenge.expires_at,
-        }))
-    })
-    .await
-    .map_err(|e| db_error(format!("pair_init task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -4152,46 +4057,6 @@ async fn pair_audit_log(app: AppHandle, limit: Option<i64>) -> ApiResult<Value> 
     })
     .await
     .map_err(|e| db_error(format!("pair_audit_log task failed: {e}")))?
-}
-
-#[tauri::command]
-async fn pair_purge_expired(app: AppHandle) -> ApiResult<Value> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_pairing_conn(&app)?;
-        let n = dev_command_center_tauri::pairing::purge_expired_nonces(&conn)
-            .map_err(pairing_error_to_api)?;
-        Ok(serde_json::json!({ "purged": n }))
-    })
-    .await
-    .map_err(|e| db_error(format!("pair_purge_expired task failed: {e}")))?
-}
-
-/// Discovers the LAN URL the mobile companion should connect to.
-///
-/// The QR code embeds this URL so the phone reaches dccd-http over the same
-/// WiFi as the desktop (no public internet exposure required). Returns
-/// `ip: null` when no usable interface is up — the UI uses that to show
-/// "no LAN detected" rather than rendering a broken QR.
-#[tauri::command]
-async fn pair_get_lan_url(app: AppHandle) -> ApiResult<Value> {
-    let port = ensure_lan_http_server(&app).await?;
-    let endpoint = dev_command_center_tauri::net_info::lan_endpoint(port);
-    Ok(serde_json::to_value(endpoint).map_err(|e| db_error(e.to_string()))?)
-}
-
-/// Lists every base URL the mobile companion could use to reach the backend:
-/// Tailscale IPs (and MagicDNS HTTPS when configured), LAN IPv4, and loopback.
-/// Detection runs synchronously inside a spawn_blocking so the (short) shell-out
-/// to `tailscale status` does not block the Tauri runtime.
-#[tauri::command]
-async fn pair_get_endpoints(app: AppHandle) -> ApiResult<Value> {
-    let port = ensure_lan_http_server(&app).await?;
-    let endpoints = tauri::async_runtime::spawn_blocking(move || {
-        dev_command_center_tauri::net_info::discover_endpoints(port)
-    })
-    .await
-    .map_err(|e| db_error(format!("pair_get_endpoints task failed: {e}")))?;
-    Ok(serde_json::json!({ "endpoints": endpoints }))
 }
 
 #[tauri::command]
@@ -7152,13 +7017,9 @@ pub fn run() {
             browser_commands::browser_set_bounds,
             browser_commands::browser_set_occluded,
             browser_commands::browser_hide,
-            pair_init,
             pair_list_devices,
             pair_revoke_device,
             pair_audit_log,
-            pair_purge_expired,
-            pair_get_lan_url,
-            pair_get_endpoints,
             remote_access_status,
             remote_access_set_relay,
             remote_access_create_offer,
@@ -7537,7 +7398,6 @@ pub fn run() {
                     start_daemon_worker(app_handle, state_for_daemon);
                 }
             }
-            let audit_db_path = db_path.clone();
             app.manage(state);
             app.manage(browser_state);
             app.manage(browser_agent_requests);
@@ -7546,7 +7406,6 @@ pub fn run() {
             if let Some(browser_mcp_bridge) = browser_mcp_bridge {
                 app.manage(browser_mcp_bridge);
             }
-            start_pair_audit_watcher(app.handle().clone(), audit_db_path);
             // Warm the hidden panel during normal app startup, before a global
             // shortcut can accidentally activate the main window while building it.
             if let Err(error) = menu_bar::setup(app.handle()) {

@@ -7,7 +7,6 @@
 
 - [ ] `yarn workspace @dcc/desktop test`
 - [ ] `yarn workspace @dcc/desktop build`
-- [ ] `yarn workspace @dcc/mobile-web build`
 - [ ] `cargo check`
 
 ## Risks

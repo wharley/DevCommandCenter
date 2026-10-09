@@ -5,7 +5,7 @@
   "identifier": "com.devcommandcenter.app",
   "build": {
     "beforeDevCommand": "node scripts/build-sidecars.mjs --dev && node scripts/ensure-node.mjs && yarn oj:dev",
-    "beforeBuildCommand": "node scripts/ensure-node.mjs && yarn workspace @dcc/mobile-web build && node scripts/build-sidecars.mjs && yarn oj:build",
+    "beforeBuildCommand": "node scripts/ensure-node.mjs && node scripts/build-sidecars.mjs && yarn oj:build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
@@ -44,9 +44,6 @@
       "target/release/ai-memory",
       "../sidecar/dist/dcc-claude-sidecar"
     ],
-    "resources": {
-      "../apps/mobile-web/dist/": "mobile-web"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

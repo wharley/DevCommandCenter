@@ -3246,16 +3246,16 @@
       "mobile": {
         "label": "Pair your phone",
         "summary": "Follow agents and pending items from your phone.",
-        "whatIs": "Mobile access shows running tasks and what needs you on your phone. Pairing uses a QR code and a PIN, on the same network or via Tailscale, with no external server in between.",
+        "whatIs": "The DCC phone app shows running tasks and what needs you. It reaches this desktop from any network through a relay, end-to-end encrypted: the relay only forwards bytes.",
         "whenToUse": "When you left agents running and stepped away from the computer.",
         "steps": [
           "Open Settings and the [Connections] section.",
-          "Click [Pair new device] and choose between local network and Tailscale.",
-          "Scan the QR code with your phone and enter the PIN before it expires.",
-          "To remove a device, use the device list in the same section."
+          "Click [Pair via relay] and scan the QR code with the DCC phone app before it expires.",
+          "Approve the request on the desktop only if the code shown matches the one on the phone.",
+          "To remove a device, use the device list in the same section. Revoking drops its connection right away."
         ],
-        "tip": "Avoid public Wi-Fi for pairing. Away from home, Tailscale keeps desktop and phone on the same private network.",
-        "keywords": "phone mobile pair pairing qr pin tailscale notification remote"
+        "tip": "The QR code works once, for 5 minutes. If the code in the request differs from the one on the phone, deny it.",
+        "keywords": "phone mobile pair pairing qr relay app remote"
       },
       "pullRequests": {
         "label": "Pull Requests",

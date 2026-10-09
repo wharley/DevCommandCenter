@@ -1,68 +1,57 @@
 # DCC pelo celular
 
-O companion em `/m/` permite iniciar tarefas, acompanhar conversas, responder a decisões do agente e revisar alterações. O computador continua executando os agentes e precisa estar acordado, com o app desktop aberto (ou o `dccd-http`, sem o app).
+O app nativo do DCC (`apps/mobile`, Expo) mostra os agentes que estão rodando e o que precisa de você, abre a conversa de cada um ao vivo e deixa responder pelo telefone. O computador continua executando os agentes e precisa estar acordado, com o app desktop aberto (ou o `dccd-http`, sem o app).
 
-## Funcionalidades
+## O que dá para fazer
 
-- **Nova tarefa:** descrição, título opcional, agente/modelo do catálogo configurado e opção de planejar antes de implementar. Escolha um workspace pronto ou crie uma branch/worktree a partir de um repositório cadastrado. Alterações não commitadas ficam no checkout original.
-- **Criação recuperável:** a solicitação fica identificada no celular e no SQLite. Se a resposta se perder, “Verificar criação” recupera o mesmo pedido. Um reinício do serviço registra falha e preserva os IDs já criados para inspeção; não repete automaticamente a criação.
-- **Reconexão:** heartbeat, tentativas com intervalo crescente, recuperação ao voltar ao aplicativo/trocar de rede e atualização pelo histórico persistido. Eventos do processo desktop também aparecem por consultas periódicas.
-- **Rascunhos e leitura offline:** mensagens em edição, respostas às perguntas e snapshots de conversas visitadas ficam no armazenamento local, separados por computador/dispositivo. Snapshots têm limite de tamanho e dependem do espaço disponível no navegador. Desconectar remove os dados locais do companion.
-- **Revisão:** toque em um arquivo para abrir o patch, incluindo arquivos novos e removidos. A resposta tem limite de 512 KB e indica truncamento.
-- **PWA:** ícone, modo independente, atalhos e shell offline. Atualizações são aplicadas pelo botão nas configurações, preservando rascunhos. O service worker armazena apenas assets públicos; APIs e respostas de autenticação não entram no Cache Storage.
+- **Agentes:** triagem de todos os projetos — o que precisa de você, o que está rodando e o que terminou há pouco.
+- **Workspaces:** os workspaces agrupados por projeto.
+- **Conversa:** histórico e eventos ao vivo, envio de mensagem, interromper o turno, responder permissões e perguntas do agente. Com o app desktop aberto, as sessões são as mesmas do desktop: a primeira resposta vale e uma segunda (do desktop ou do celular) recebe 409 com o desfecho. O `dccd-http` sozinho só controla as sessões que ele mesmo iniciou.
+- **Demonstração:** sem desktop, "Explorar demonstração" na tela de pareamento abre projetos fictícios dentro do app.
 
-## Instalar com HTTPS e Tailscale
+## Como o celular chega ao desktop
 
-O acesso HTTP existente continua disponível no navegador. Instalação com suporte offline requer contexto seguro. Para usar o endereço privado HTTPS do Tailscale, configure **Tailscale Serve** no computador para encaminhar a origem inteira ao DCC (incluindo `/m`, `/api` e `/auth`). Exemplo para a porta padrão, após conferir a configuração Serve existente:
+O celular nunca abre conexão com o computador. O desktop faz uma conexão de saída (WebSocket) para um relay e o celular entra na mesma sala; o relay só repassa bytes. Celular e desktop fazem um handshake Noise entre si, então o relay não vê requisições, respostas nem eventos — só o id da sala, endereços IP, horários e tamanhos de frame.
 
-```sh
-tailscale serve status
-tailscale serve --bg http://127.0.0.1:9876
-```
+- **Relay padrão:** `wss://relay.devcommandcenter.com`, mantido pelo projeto. Dá para usar outro (o código está em `apps/relay`, ver [README do relay](../apps/relay/README.md)) em **Configurações → Conexões → Endereço do relay**, ou com `DCC_RELAY_URL`. Apagar o endereço e salvar desliga o acesso remoto.
+- **Conexão sob demanda:** o desktop só fica conectado ao relay enquanto houver celular pareado ou um QR aberto, e reconecta sozinho com backoff.
+- **API local:** a API HTTP do app desktop escuta só em `127.0.0.1`. Requisições do celular são decifradas pelo conector e rodam nesse mesmo roteador dentro do processo, sem passar por socket.
 
-Use a URL HTTPS exibida pelo comando. Serve disponibiliza o serviço dentro da tailnet e pode solicitar habilitação de HTTPS. Veja a [documentação oficial de Serve](https://tailscale.com/docs/reference/tailscale-cli/serve). Esta mudança no código não executa nem altera a configuração do Tailscale.
+Detalhes de segurança em [SECURITY_MOBILE_PAIRING.md](SECURITY_MOBILE_PAIRING.md).
 
-1. No DCC desktop, abra **Settings → Conexões → Parear novo dispositivo**.
-2. Preencha **Endereço HTTPS para instalar no celular** com a origem configurada. O QR e o link passam a usar essa origem. Deixe vazio para usar LAN/Tailscale HTTP como antes.
-3. Abra o QR no celular, conectado à mesma tailnet, e confirme o PIN.
-4. No iPhone, use **Compartilhar → Adicionar à Tela de Início**. No Android, use a opção de instalação do navegador ou o botão nas configurações do DCC.
-5. Se o aplicativo instalado abrir sem o pareamento do navegador, gere outro link HTTPS e cole-o na tela inicial do aplicativo. Confirme o novo PIN.
+## Parear
 
-Mudar entre HTTP e HTTPS muda a origem do armazenamento: será necessário parear nessa origem. Não reutilize links expirados. O pareamento mantém as regras existentes de validade/revogação do DCC.
+1. No desktop, abra **Configurações → Conexões** e clique em **Parear pelo relay**.
+2. Escaneie o QR com o app DCC. O QR vale uma vez, por 5 minutos.
+3. O desktop pede aprovação mostrando o código (fingerprint) do celular. Aprove só se for o mesmo que o celular mostra.
 
-## Limites atuais
+Depois disso o celular reconecta sozinho, de qualquer rede. Até 10 aparelhos ativos por desktop; para parear outro, revogue um na lista **Dispositivos pareados** da mesma seção. Revogar derruba a conexão do aparelho na hora.
 
-- Web Push foi removido na 0.1.66. Não há avisos com o companion fechado; acompanhe tarefas e decisões com a página aberta. Notificações nativas do desktop continuam disponíveis.
+## Servidor sem o app (`dccd-http`)
 
-- PWA e reconexão não mantêm o Mac acordado nem executam os agentes sem o computador. O cache permite consultar snapshots e escrever rascunhos; enviar ações exige acesso ao host.
-- Com o app desktop aberto, a API do companion roda dentro dele, sobre as mesmas sessões: perguntas e aprovações de qualquer agente do desktop aparecem e podem ser respondidas pelo celular, e tarefas criadas no celular rodam no desktop. A primeira resposta vale; uma segunda (do desktop ou do celular) recebe 409 com o desfecho. O `dccd-http` sozinho só controla as sessões que ele mesmo iniciou.
-- A criação tem idempotência persistida. Envio de mensagens e respostas usam os endpoints existentes: após resultado de rede ambíguo, confira o histórico antes de repetir. Não há fila automática de ações offline.
-
-## Desenvolvimento e validação
-
-Use Node 22 compatível com o Vite do workspace:
-
-```sh
-yarn workspace @dcc/mobile-web typecheck
-yarn workspace @dcc/mobile-web test
-yarn workspace @dcc/mobile-web build
-cargo check -p dev-command-center-tauri --lib --bin dccd-http
-cargo test -p dev-command-center-tauri --lib
-```
-
-Em checkout sem os sidecars empacotados, as verificações Rust podem usar `TAURI_CONFIG='{"bundle":{"externalBin":[],"resources":[]}}'` apenas no ambiente do comando. Um build distribuível ainda precisa do fluxo normal de empacotamento do projeto.
-
-`apps/mobile-web/scripts/smoke.mjs` testa o build em Chromium com viewport de celular e servidor simulado em `127.0.0.1:5199`, sem acessar dados reais ou iniciar agentes. Requer Playwright e Chromium instalados; aceita `DCC_PLAYWRIGHT_MODULE` (caminho do módulo), `DCC_CHROMIUM_EXECUTABLE` e `DCC_SMOKE_ARTIFACTS`. Execute com `node apps/mobile-web/scripts/smoke.mjs`. Cobre pareamento, rascunho após reload, perda da resposta de criação, recuperação sem duplicação, shell/histórico offline, mensagens durante desconexão, perguntas do agente, diff e ausência de APIs no cache público.
-
-Os testes Rust cobrem o journal de criação, recuperação após reinício, diff com Git real, isolamento de caminhos/symlinks e autenticação/pareamento. Os testes do mobile cobrem reconexão, stream silencioso, revogação e repetição da mesma solicitação.
-
-## Endpoints adicionados
-
-Todos usam a autenticação HTTP existente.
+O `dccd-http` serve a mesma API sem o app desktop e também se conecta ao relay. Por padrão escuta só em loopback com `X-API-Key` (gerada em `~/.dcc/http-config.json`, permissão `0600`). Sem interface gráfica, o operador pareia e revoga pela API, com a API key:
 
 | Método e caminho | Uso |
 | --- | --- |
-| `GET /api/v1/mobile/catalog` | Repositórios, workspaces e catálogo real de agentes/modelos |
-| `POST /api/v1/mobile/tasks` | Reserva/cria tarefa com `requestId` UUID e corpo imutável nas repetições |
-| `GET /api/v1/mobile/tasks/:request_id` | Resultado `creating`, `started` ou `failed`, com IDs parciais disponíveis |
-| `GET /api/v1/mobile/workspaces/:workspace_id/patch?path=…` | Patch limitado a arquivo dentro do workspace |
+| `GET /api/v1/remote/status` | Relay, conexão e fingerprint deste servidor |
+| `POST /api/v1/remote/pairing/offers` | Gera o link `dcc://pair#…` (conteúdo do QR) |
+| `GET /api/v1/remote/pairing/approvals` | Pedidos de pareamento aguardando aprovação |
+| `POST /api/v1/remote/pairing/approvals/:approval_id` | `{"approve": true}` ou `false` |
+| `GET /auth/devices` | Aparelhos pareados (`?includeRevoked=true` inclui revogados) |
+| `DELETE /auth/devices/:device_id` | Revoga e derruba a conexão do aparelho |
+
+Um `DCC_HTTP_HOST` fora de loopback expõe a API na rede; nesse caso o modo de autenticação passa a remoto e exige o bearer do operador (`DCC_HTTP_BEARER_TOKEN`, rotacionável em `POST /api/v1/auth/bearer/rotate`). O celular não usa esse caminho: ele entra sempre pelo relay.
+
+## Desenvolvimento e validação
+
+Use Node 22 (o teste ponta a ponta pede 22.18+).
+
+```sh
+yarn workspace @dcc/mobile typecheck
+yarn workspace @dcc/mobile test
+yarn workspace @dcc/mobile-core test
+yarn test:remote:e2e
+cargo test -p dev-command-center-tauri --lib
+```
+
+`yarn test:remote:e2e` sobe o relay com `wrangler dev` (sem conta Cloudflare), serve a API como o desktop num banco temporário e conduz um celular simulado em Node, e confere pareamento, reconexão, streams, rotas proibidas e revogação, além de verificar que o relay só viu bytes cifrados. Para testar o app num simulador contra um desktop descartável, veja `apps/mobile/scripts/desktop-fixture.mjs` no [README do app](../apps/mobile/README.md).

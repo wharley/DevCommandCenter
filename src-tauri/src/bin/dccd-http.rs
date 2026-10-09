@@ -48,21 +48,16 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // Loopback only unless the operator opted in with `DCC_HTTP_LAN=1` (the
-    // desktop does so when it starts this server for mobile pairing). With
-    // the opt-in we bind 0.0.0.0, which also covers loopback, and the config
-    // forces remote auth so only paired devices get past the pairing routes.
-    let primary_addr = match config.host.parse::<IpAddr>() {
+    // Loopback unless the operator set a non-loopback `DCC_HTTP_HOST` (or
+    // `host` in http-config.json); the config then forces remote auth, so the
+    // network needs the operator bearer. Phones never come in this way: they
+    // reach the API through the relay connector below.
+    let bind_addr = match config.host.parse::<IpAddr>() {
         Ok(ip) => SocketAddr::from((ip, config.port)),
         Err(error) => {
             eprintln!("[DCC HTTP] Invalid host address: {error}");
             std::process::exit(1);
         }
-    };
-    let bind_addr = if config.lan && primary_addr.ip().is_loopback() {
-        SocketAddr::from(([0, 0, 0, 0], config.port))
-    } else {
-        primary_addr
     };
 
     println!("[DCC HTTP] Auth mode: {:?}", config.effective_auth_mode());
@@ -70,7 +65,6 @@ async fn main() {
         println!("[DCC HTTP] Bearer token expires at: {expires_at}");
     }
 
-    let network_exposed = config.is_network_exposed();
     let backend = Arc::new(HttpBackend::headless(
         config.db_path.clone(),
         default_app_data_dir(),
@@ -93,15 +87,6 @@ async fn main() {
     }
 
     println!("[DCC HTTP] Listening on http://{bind_addr}");
-    if network_exposed && bind_addr.ip().is_unspecified() {
-        match dev_command_center_tauri::net_info::detect_lan_ip() {
-            Some(ip) => println!(
-                "[DCC HTTP] LAN reachable at:  http://{ip}:{}  (mobile clients connect here)",
-                bind_addr.port()
-            ),
-            None => println!("[DCC HTTP] LAN listener ready but no LAN IPv4 detected yet."),
-        }
-    }
     println!("[DCC HTTP] Endpoints:");
     println!("[DCC HTTP]   GET  /             - Server info");
     println!("[DCC HTTP]   GET  /health       - Health check");
@@ -142,6 +127,8 @@ async fn main() {
     println!("[DCC HTTP]   POST /api/v1/remote/pairing/offers");
     println!("[DCC HTTP]   GET  /api/v1/remote/pairing/approvals");
     println!("[DCC HTTP]   POST /api/v1/remote/pairing/approvals/:approval_id");
+    println!("[DCC HTTP]   GET  /auth/devices");
+    println!("[DCC HTTP]   DELETE /auth/devices/:device_id");
 
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
         Ok(listener) => listener,
@@ -158,8 +145,8 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // ConnectInfo gives handlers the socket peer, which rate limiting and the
-    // pairing audit trust over any client-supplied header.
+    // ConnectInfo gives handlers the socket peer, which the pairing audit
+    // trusts over any client-supplied header.
     if let Err(error) = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),

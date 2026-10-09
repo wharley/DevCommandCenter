@@ -1,7 +1,6 @@
 /**
- * Mission-control primitives, the native counterpart of
- * apps/mobile-web/src/components/ui.tsx: monospace for identity/labels, a
- * state-coded node per agent, quiet panels so the one live thing is loud.
+ * Mission-control primitives: monospace for identity/labels, a state-coded
+ * node per agent, quiet panels so the one live thing is loud.
  */
 import { useEffect, useRef, type ReactNode } from "react";
 import {

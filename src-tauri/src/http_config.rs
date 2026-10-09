@@ -52,12 +52,6 @@ pub struct HttpConfig {
     pub bearer_token_previous_expires_at: Option<DateTime<Utc>>,
     pub db_path: PathBuf,
     pub cors_origins: Vec<String>,
-    /// Explicit opt-in (`DCC_HTTP_LAN=1`) to also listen on every interface so
-    /// a phone on the same network can pair. Env-only on purpose: it is never
-    /// written to http-config.json, so one pairing session does not leave the
-    /// next run exposed.
-    #[serde(skip)]
-    pub lan: bool,
 }
 
 impl Default for HttpConfig {
@@ -78,7 +72,6 @@ impl Default for HttpConfig {
                 "http://localhost:3000".to_string(),
                 "http://localhost:5173".to_string(),
             ],
-            lan: false,
         }
     }
 }
@@ -163,10 +156,6 @@ impl HttpConfig {
                 .collect();
         }
 
-        if let Ok(val) = std::env::var("DCC_HTTP_LAN") {
-            config.lan = matches!(val.to_lowercase().as_str(), "1" | "true");
-        }
-
         config.normalize_auth_mode();
         config.normalize_bearer_token_state()?;
 
@@ -181,13 +170,12 @@ impl HttpConfig {
         }
 
         // An operator who asked for remote/mixed auth must provide the shared
-        // bearer. The LAN opt-in only forces remote so that paired devices are
-        // the sole credential accepted from the network; it needs no bearer.
+        // bearer.
         let remote_requested = matches!(
             config.auth_mode,
             Some(HttpAuthMode::Remote) | Some(HttpAuthMode::Mixed)
         );
-        if remote_requested && !config.lan && config.bearer_token.is_none() {
+        if remote_requested && config.bearer_token.is_none() {
             return Err(
                 "Remote or mixed HTTP auth requires DCC_HTTP_BEARER_TOKEN or bearerToken in http-config.json"
                     .to_string(),
@@ -223,9 +211,10 @@ impl HttpConfig {
         Ok(config)
     }
 
-    /// True when some listener accepts connections from other machines.
+    /// True when the listener accepts connections from other machines, which
+    /// only an explicit non-loopback `host` (a headless `dccd-http`) does.
     pub fn is_network_exposed(&self) -> bool {
-        self.lan || !is_loopback_host(&self.host)
+        !is_loopback_host(&self.host)
     }
 
     pub fn effective_auth_mode(&self) -> HttpAuthMode {
@@ -493,23 +482,13 @@ mod tests {
     }
 
     #[test]
-    fn lan_opt_in_forces_remote_auth() {
-        let config = HttpConfig {
-            auth_mode: Some(HttpAuthMode::Local),
-            lan: true,
-            ..HttpConfig::default()
-        };
-        assert!(config.is_network_exposed());
-        assert_eq!(config.effective_auth_mode(), HttpAuthMode::Remote);
-    }
-
-    #[test]
     fn non_loopback_host_never_runs_in_local_mode() {
         let config = HttpConfig {
             host: "0.0.0.0".to_string(),
             auth_mode: Some(HttpAuthMode::Local),
             ..HttpConfig::default()
         };
+        assert!(config.is_network_exposed());
         assert_eq!(config.effective_auth_mode(), HttpAuthMode::Remote);
 
         let mixed = HttpConfig {
@@ -518,17 +497,6 @@ mod tests {
             ..HttpConfig::default()
         };
         assert_eq!(mixed.effective_auth_mode(), HttpAuthMode::Mixed);
-    }
-
-    #[test]
-    fn lan_flag_is_never_persisted() {
-        let config = HttpConfig {
-            lan: true,
-            api_key: "k".to_string(),
-            ..HttpConfig::default()
-        };
-        let json = serde_json::to_string(&config).unwrap();
-        assert!(!json.contains("\"lan\""));
     }
 
     #[test]

@@ -53,7 +53,6 @@ use tokio_stream::{
     StreamExt,
 };
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
-use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
@@ -67,9 +66,7 @@ use crate::daemon_client::rpc_with_db_path_timeout;
 use crate::http_auth::{auth_middleware, PairedDeviceIdentity};
 use crate::http_config::{HttpAuthMode, HttpConfig};
 use crate::http_rpc_handler::handle_rpc as handle_json_rpc;
-use crate::pairing::{
-    self, PairedDeviceSummary, PairingChallenge, PairingError, SignedRequestHeaders,
-};
+use crate::pairing::{self, PairedDeviceSummary, PairingError};
 use crate::remote_connector::RemoteHub;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -538,7 +535,6 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/remote/pairing/approvals/:approval_id",
             post(remote_respond_approval_handler),
         )
-        .route("/auth/pair-init", post(pair_init_handler))
         .route("/auth/devices", get(list_paired_devices_handler))
         .route(
             "/auth/devices/:device_id",
@@ -554,79 +550,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         auth_middleware,
     ));
 
-    let mobile_spa = mobile_spa_service();
-
     Router::new()
         .route("/", get(root_handler))
         .route("/health", get(health_handler))
         .route("/openapi.json", get(openapi_handler))
-        .route("/auth/pair", post(complete_pairing_handler))
-        .nest_service("/m", mobile_spa)
         .merge(protected_routes)
         .layer(build_cors_layer(&cors_config))
         .layer(TraceLayer::new_for_http())
         .with_state(HttpState { config, backend })
-}
-
-/// Serves the Vite-built mobile SPA from `apps/mobile-web/dist/` with an
-/// `index.html` fallback so client-side routes (TanStack Router) resolve when
-/// reloaded directly from the phone. Resolution order:
-///   1. `DCC_MOBILE_WEB_DIST` env var
-///   2. `<repo>/apps/mobile-web/dist` (dev: works when running from source)
-///   3. `<exe_dir>/mobile-web` (release layouts that bundle next to the binary)
-///   4. `<exe_dir>/resources/mobile-web` (Linux package layouts)
-///   5. `<app>/Contents/Resources/mobile-web` (macOS Tauri app bundle)
-fn mobile_spa_dist_candidates() -> Vec<PathBuf> {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(PathBuf::from));
-
-    [
-        std::env::var("DCC_MOBILE_WEB_DIST").ok().map(PathBuf::from),
-        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../apps/mobile-web/dist")),
-        exe_dir.as_ref().map(|p| p.join("mobile-web")),
-        exe_dir.as_ref().map(|p| p.join("resources/mobile-web")),
-        exe_dir.as_ref().and_then(|p| {
-            p.parent()
-                .map(|contents| contents.join("Resources/mobile-web"))
-        }),
-        exe_dir
-            .as_ref()
-            .and_then(|p| p.parent().map(|parent| parent.join("resources/mobile-web"))),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
-}
-
-fn mobile_spa_dist_path() -> PathBuf {
-    let candidates = mobile_spa_dist_candidates();
-
-    candidates
-        .iter()
-        .find(|p| p.join("index.html").is_file())
-        .cloned()
-        .unwrap_or_else(|| {
-            candidates
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| PathBuf::from("."))
-        })
-}
-
-fn mobile_spa_diagnostics() -> Value {
-    let dist = mobile_spa_dist_path();
-    json!({
-        "available": dist.join("index.html").is_file(),
-        "distPath": dist.to_string_lossy(),
-    })
-}
-
-fn mobile_spa_service() -> ServeDir<ServeFile> {
-    let dist = mobile_spa_dist_path();
-
-    let fallback = ServeFile::new(dist.join("index.html"));
-    ServeDir::new(dist).fallback(fallback)
 }
 
 pub fn build_cors_layer(config: &HttpConfig) -> CorsLayer {
@@ -1315,13 +1246,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
 }
 
 async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Response {
-    let (database, network_exposed) = {
-        let config = config.read().await;
-        (
-            config.db_path.to_string_lossy().to_string(),
-            config.is_network_exposed(),
-        )
-    };
+    let database = config.read().await.db_path.to_string_lossy().to_string();
 
     match rpc_value(config.clone(), "daemon.health", Value::Null, HEALTH_TIMEOUT).await {
         Ok(payload) => (
@@ -1333,11 +1258,7 @@ async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Respon
                     "name": "DCC HTTP API",
                     "version": env!("CARGO_PKG_VERSION"),
                     "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
-                    // The desktop only reuses a running server for pairing when
-                    // it is reachable from the LAN.
-                    "lanListener": network_exposed,
                 },
-                "mobileWeb": mobile_spa_diagnostics(),
                 "database": database,
                 "daemonHealth": payload,
             })),
@@ -1352,9 +1273,7 @@ async fn health_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Respon
                     "name": "DCC HTTP API",
                     "version": env!("CARGO_PKG_VERSION"),
                     "protocolVersion": DCC_HTTP_PROTOCOL_VERSION,
-                    "lanListener": network_exposed,
                 },
-                "mobileWeb": mobile_spa_diagnostics(),
                 "database": database,
                 "error": {
                     "code": error.code(),
@@ -2447,43 +2366,8 @@ fn authentication_descriptor(config: &HttpConfig) -> Value {
 }
 
 // =============================================================================
-// Mobile pairing handlers (ECDSA P-256 signed-request auth)
+// Paired devices (phones pair through the relay; see `remote_connector`)
 // =============================================================================
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CompletePairingRequest {
-    nonce: String,
-    pin: String,
-    /// SPKI-encoded ECDSA P-256 pubkey for native clients that can sign each
-    /// request. Omit to fall back to bearer-token auth — required for browser
-    /// clients reaching the backend over `http://<lan-ip>:...` where
-    /// `crypto.subtle` is unavailable.
-    #[serde(default)]
-    public_key_spki: Option<String>,
-    device_name: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CompletePairingResponse {
-    ok: bool,
-    device_id: String,
-    /// Issued exactly once when `public_key_spki` was not provided. The client
-    /// stores it and sends `Authorization: Bearer <token>` on every subsequent
-    /// request. Only the SHA-256 of this value is persisted server-side.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    session_token: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PairInitResponse {
-    ok: bool,
-    nonce: String,
-    pin: String,
-    expires_at: String,
-}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2519,24 +2403,11 @@ impl From<PairedDeviceSummary> for PairedDeviceJson {
 }
 
 fn pairing_error_to_http(err: PairingError) -> HttpApiError {
-    use PairingError as P;
     match err {
-        P::InvalidNonce | P::InvalidPin => HttpApiError::bad_request("invalid pairing credentials"),
-        P::Expired => HttpApiError::bad_request("pairing expired"),
-        P::AlreadyConsumed => HttpApiError::bad_request("pairing already used"),
-        P::NonceLocked => HttpApiError::bad_request("too many invalid PIN attempts"),
-        P::DeviceLimitReached => {
+        PairingError::DeviceLimitReached => {
             HttpApiError::bad_request("device limit reached; revoke an existing device first")
         }
-        P::SessionExpired => HttpApiError::bad_request("device session expired"),
-        P::InvalidPublicKey => HttpApiError::bad_request("invalid public key"),
-        P::InvalidSignature => HttpApiError::bad_request("invalid signature"),
-        P::SignatureMismatch => HttpApiError::bad_request("signature verification failed"),
-        P::UnknownDevice => HttpApiError::not_found("device not found"),
-        P::DeviceRevoked => HttpApiError::bad_request("device revoked"),
-        P::TimestampOutOfWindow => HttpApiError::bad_request("timestamp outside replay window"),
-        P::InvalidTimestamp => HttpApiError::bad_request("invalid timestamp"),
-        P::Database(message) => HttpApiError::internal(message),
+        PairingError::Database(message) => HttpApiError::internal(message),
     }
 }
 
@@ -2560,110 +2431,10 @@ where
     .map_err(pairing_error_to_http)
 }
 
-async fn pair_init_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
-) -> Result<Json<PairInitResponse>, HttpApiError> {
-    let challenge: PairingChallenge =
-        with_pairing_db(config, |conn| pairing::create_pairing_nonce(conn)).await?;
-
-    Ok(Json(PairInitResponse {
-        ok: true,
-        nonce: challenge.nonce,
-        pin: challenge.pin,
-        expires_at: challenge.expires_at,
-    }))
-}
-
-// --- per-IP rate limit on /auth/pair (anti brute force) ---
-
-const PAIR_RATE_WINDOW_SECS: u64 = 60;
-const PAIR_RATE_MAX_PER_WINDOW: usize = 20;
-
-static PAIR_RATE_LIMITER: OnceLock<Mutex<HashMap<String, VecDeque<std::time::Instant>>>> =
-    OnceLock::new();
-
-fn pair_rate_limit_check(client_ip: &str) -> bool {
-    let store = PAIR_RATE_LIMITER.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = match store.lock() {
-        Ok(g) => g,
-        Err(_) => return true, // never reject because a lock got poisoned
-    };
-    let now = std::time::Instant::now();
-    let window = Duration::from_secs(PAIR_RATE_WINDOW_SECS);
-    let entry = guard.entry(client_ip.to_string()).or_default();
-    while let Some(front) = entry.front() {
-        if now.duration_since(*front) > window {
-            entry.pop_front();
-        } else {
-            break;
-        }
-    }
-    if entry.len() >= PAIR_RATE_MAX_PER_WINDOW {
-        return false;
-    }
-    entry.push_back(now);
-    // opportunistic shrink to keep the map small
-    if guard.len() > 1024 {
-        guard.retain(|_, q| !q.is_empty());
-    }
-    true
-}
-
-async fn complete_pairing_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
-    headers: axum::http::HeaderMap,
-    extensions: axum::http::Extensions,
-    Json(body): Json<CompletePairingRequest>,
-) -> Result<Json<CompletePairingResponse>, HttpApiError> {
-    let user_agent = headers
-        .get(axum::http::header::USER_AGENT)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    let client_ip = crate::http_auth::client_ip(&headers, &extensions);
-
-    let rate_key = client_ip.clone().unwrap_or_else(|| "unknown".to_string());
-    if !pair_rate_limit_check(&rate_key) {
-        return Err(HttpApiError::bad_request(
-            "rate limit exceeded for /auth/pair",
-        ));
-    }
-
-    let (device_id, session_token) = if let Some(pubkey) = body.public_key_spki.clone() {
-        let device_id = with_pairing_db(config, move |conn| {
-            pairing::complete_pairing(
-                conn,
-                &body.nonce,
-                &body.pin,
-                &pubkey,
-                &body.device_name,
-                user_agent.as_deref(),
-                client_ip.as_deref(),
-            )
-        })
-        .await?;
-        (device_id, None)
-    } else {
-        let (device_id, token) = with_pairing_db(config, move |conn| {
-            pairing::complete_pairing_bearer(
-                conn,
-                &body.nonce,
-                &body.pin,
-                &body.device_name,
-                user_agent.as_deref(),
-                client_ip.as_deref(),
-            )
-        })
-        .await?;
-        (device_id, Some(token))
-    };
-
-    Ok(Json(CompletePairingResponse {
-        ok: true,
-        device_id,
-        session_token,
-    }))
-}
-
+/// `/auth/devices`: how the operator of a headless `dccd-http`, which pairs
+/// phones through `/api/v1/remote/pairing/*`, lists and revokes them. The
+/// desktop app does the same through its own Tauri commands, and the relay
+/// connector never forwards these routes to a phone.
 async fn list_paired_devices_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     Query(query): Query<HashMap<String, String>>,
@@ -2775,35 +2546,6 @@ async fn remote_respond_approval_handler(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// Validates a signed mobile request. To be wired in as a tower middleware in a follow-up step.
-#[allow(dead_code)]
-async fn verify_signed_request_for_path(
-    config: Arc<RwLock<HttpConfig>>,
-    method: String,
-    path: String,
-    body: Vec<u8>,
-    device_id: String,
-    timestamp: String,
-    signature_b64: String,
-    client_ip: Option<String>,
-) -> Result<PairedDeviceSummary, HttpApiError> {
-    with_pairing_db(config, move |conn| {
-        pairing::verify_signed_request(
-            conn,
-            SignedRequestHeaders {
-                device_id: &device_id,
-                timestamp: &timestamp,
-                signature_b64: &signature_b64,
-            },
-            &method,
-            &path,
-            &body,
-            client_ip.as_deref(),
-        )
-    })
-    .await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2835,17 +2577,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pair_rate_limit_keys_on_the_socket_peer_not_forwarded_for() {
-        use axum::extract::ConnectInfo;
+    async fn lan_pairing_routes_are_gone_and_devices_stay_for_the_operator() {
         use tower::util::ServiceExt;
 
         let root = tempfile::tempdir().unwrap();
         let root_path = std::fs::canonicalize(root.path()).unwrap();
         let db_path = root_path.join("state.sqlite");
-        rusqlite::Connection::open(&db_path)
-            .unwrap()
-            .execute_batch(include_str!("../sql/schema.sql"))
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(include_str!("../sql/schema.sql"))
             .unwrap();
+        pairing::ensure_pairing_schema(&conn).unwrap();
         let config = Arc::new(RwLock::new(HttpConfig {
             db_path: db_path.clone(),
             api_key: "k".to_string(),
@@ -2853,30 +2594,32 @@ mod tests {
         }));
         let backend = Arc::new(HttpBackend::headless(db_path, root_path.join("app-data")));
         let app = build_router(config, backend);
-        // Unique to this test: the limiter is process-wide.
-        let peer: std::net::SocketAddr = "203.0.113.77:40000".parse().unwrap();
-
-        let mut last_body = String::new();
-        for attempt in 0..=PAIR_RATE_MAX_PER_WINDOW {
-            let mut request = axum::http::Request::builder()
-                .method("POST")
-                .uri("/auth/pair")
+        let call = |method: &str, uri: &str| {
+            axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("X-API-Key", "k")
                 .header("content-type", "application/json")
-                // A fresh spoofed address each time must not buy a fresh bucket.
-                .header("x-forwarded-for", format!("10.0.0.{attempt}"))
-                .body(axum::body::Body::from(
-                    r#"{"nonce":"nope","pin":"000000","deviceName":"x"}"#,
-                ))
-                .unwrap();
-            request.extensions_mut().insert(ConnectInfo(peer));
-            let response = app.clone().oneshot(request).await.unwrap();
-            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-                .await
-                .unwrap();
-            last_body = String::from_utf8_lossy(&bytes).to_string();
+                .body(axum::body::Body::from("{}"))
+                .unwrap()
+        };
+
+        for (method, uri) in [
+            ("POST", "/auth/pair"),
+            ("POST", "/auth/pair-init"),
+            ("GET", "/m/"),
+            ("GET", "/m/pair"),
+        ] {
+            let response = app.clone().oneshot(call(method, uri)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {uri}");
         }
 
-        assert!(last_body.contains("rate limit"), "{last_body}");
+        let devices = app
+            .clone()
+            .oneshot(call("GET", "/auth/devices"))
+            .await
+            .unwrap();
+        assert_eq!(devices.status(), StatusCode::OK);
     }
 
     #[test]

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Transport-agnostic logic shared by the phone clients (PWA and native): thread folding, cursor sync, timeline grouping and triage.",
+  "description": "Transport-agnostic logic for the phone app (apps/mobile): thread folding, cursor sync, timeline grouping and triage.",
   "type": "module",
   "exports": {
     ".": {

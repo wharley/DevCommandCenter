@@ -1,7 +1,7 @@
 /**
  * Just enough markdown for agent answers on a phone: fenced code blocks,
  * inline code, headings, bullets and bold. Full markdown (tables, diff) is a
- * follow-up — the plan is to try Expo DOM components with the PWA's renderer.
+ * follow-up — the plan is to try Expo DOM components with a web renderer.
  */
 import { Fragment } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";

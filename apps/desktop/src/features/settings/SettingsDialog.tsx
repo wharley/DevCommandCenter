@@ -1975,7 +1975,7 @@ export function SettingsDialog({
 							) : null}
 
 							{activeSection === "connections" ? (
-								<PairedDevicesPanel defaultBackendUrl="http://127.0.0.1:9876" />
+								<PairedDevicesPanel />
 							) : null}
 
 							{activeSection === "shortcuts" ? (

@@ -1,7 +1,7 @@
 /**
  * The home screen's triage: which agents need the person, which are running
- * and which are just recent. Transport-agnostic — the PWA passes its bearer
- * fetch, the native app the encrypted relay channel.
+ * and which are just recent. Transport-agnostic — the native app passes the
+ * encrypted relay channel.
  */
 import { pendingQuestions } from "./questions.ts";
 import { permissionQuestion, type RawSessionEvent } from "./threadEvents.ts";

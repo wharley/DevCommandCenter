@@ -1,7 +1,7 @@
 /**
  * State behind both tabs: the triage scan (`@dcc/mobile-core`), the
  * workspaces, and permission answers. Refreshes when the stream (re)opens and
- * when a lifecycle event arrives, the same triggers as the PWA home.
+ * when a lifecycle event arrives.
  */
 import {
 	incomingEventKindType,

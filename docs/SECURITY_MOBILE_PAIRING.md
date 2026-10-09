@@ -1,223 +1,221 @@
 # Mobile Pairing — Threat Model & Security Architecture
 
-Status: implementado · 2026-05-16
-Escopo: pareamento celular ↔ desktop DCC via QR code + PIN com chaves
-ECDSA P-256 não-extraíveis.
+Status: implementado · 2026-10-09
+Escopo: pareamento e acesso do app nativo (`apps/mobile`) ao desktop DCC
+pelo relay, com Noise de ponta a ponta. Código: `crates/dcc-remote` (Rust),
+`packages/remote-protocol` (TypeScript), `src-tauri/src/remote_connector.rs`
+(conector do desktop), `src-tauri/src/pairing.rs` (aparelhos e auditoria) e
+`apps/relay` (o relay).
 
 ## 1. Objetivo
 
-Permitir que um celular do mesmo usuário autentique requisições HTTP ao
-backend `dccd-http` que roda no desktop, com segurança equivalente a SSH
-mas sem exigir uma conexão SSH no celular.
+Permitir que o celular do mesmo usuário acompanhe e responda sessões do
+desktop de qualquer rede, sem abrir porta no computador, sem VPN e sem conta,
+e sem que o relay no meio consiga ler ou alterar o conteúdo.
 
 Não objetivos:
 
-- Compartilhamento de acesso entre usuários distintos (cada device parea
+- Compartilhamento de acesso entre usuários distintos (cada aparelho pareia
   com um desktop específico).
-- Autenticação entre desktops (já coberto por bearer token / API key /
-  túnel SSH).
-- Confidencialidade automática do conteúdo das requisições — isso é
-  responsabilidade da camada de transporte (LAN HTTPS via Tailscale, etc).
+- Esconder do relay os metadados de tráfego (ver §5).
+- Autenticação entre desktops ou de scripts locais — isso é a API HTTP local
+  (§4.7).
 
 ## 2. Ativos a proteger
 
 | Ativo | Por que importa |
 |-------|-----------------|
-| Chave privada do device | Único material que prova posse do device |
-| Banco de sessions/workspaces | Contém prompts, código, chaves de API de terceiros |
-| Capacidade de executar comandos | Endpoints como `POST /api/v1/terminals/spawn` abrem PTYs reais |
-| PIN exibido no pareamento | Permite ao atacante completar um pareamento se vazado durante a janela |
+| Chave estática Noise do celular | Única prova de que um aparelho foi aprovado |
+| Chave estática Noise do desktop | Identifica o desktop no QR e em toda reconexão |
+| Segredo do QR (`otp`) | Durante 5 minutos, permite pedir um pareamento |
+| Banco de sessões/workspaces | Contém prompts, código e saídas dos agentes |
+| Capacidade de agir nas sessões | Mensagens, interrupções e respostas a permissões |
 
 ## 3. Modelo de adversário
 
 Considera-se um adversário que **pode**:
 
-- Sniffar tráfego HTTP na mesma rede WiFi (café, hotel, escola).
-- Realizar ARP spoofing / MITM em redes locais.
-- Fotografar/screenshot o QR exibido no desktop antes do pareamento ser
-  concluído.
-- Tentar acessar `/auth/pair` direto da rede (sem o QR).
-- Postar variations bruteforce de PIN em volume razoável.
-- Roubar uma única bearer-token ou X-API-Key vazada em logs.
-- Ler o conteúdo de cookies / localStorage do browser do celular.
+- Operar ou comprometer o relay, ou observar a rede entre as pontas.
+- Gravar, reordenar, descartar ou injetar frames no relay.
+- Conectar-se à sala do desktop como se fosse um celular.
+- Fotografar o QR exibido no desktop.
+- Roubar a API key ou o bearer de um servidor `dccd-http`.
 
 Não considera:
 
-- Atacante com root no dispositivo do usuário (impossível defender via
-  software).
-- Atacante com acesso físico ao desktop pareado (idem).
-- Quebra criptográfica de ECDSA P-256 ou SHA-256.
-- Compromisso da máquina do usuário rodando o `dccd` daemon.
+- Atacante com root no celular ou no desktop.
+- Atacante com acesso físico ao desktop desbloqueado.
+- Quebra de X25519, ChaCha20-Poly1305 ou SHA-256.
 
-## 4. Defesas em profundidade
+## 4. Defesas
 
-### 4.1 Pareamento efêmero
+### 4.1 Nada escuta na rede
 
-- O QR code carrega um `nonce` de 256 bits (URL-safe base64) e o backend
-  exibe um PIN de 6 dígitos numéricos.
-- O par `(nonce, pin)` vive **60 segundos** e é **single-use** (linha
-  `consumed_at` na tabela `pairing_nonces`).
-- O hash do PIN é `SHA-256("dcc-pair-pin\0" || nonce || "\0" || pin)` —
-  domain-separated com o nonce, então rainbow tables pré-computadas não
-  ajudam de uma sessão para outra.
-- Tentativas de PIN incorreto são contadas em `failed_attempts`. Após
-  **5 erros**, o nonce é travado (`locked_at`) e nem o PIN correto
-  consegue resgatá-lo.
+O desktop abre uma conexão de **saída** (WebSocket) para o relay, padrão
+`wss://relay.devcommandcenter.com`, e só enquanto houver celular pareado ou
+um QR aberto. O celular entra na mesma sala. A API HTTP do app desktop escuta
+só em `127.0.0.1`; as requisições do celular são decifradas pelo conector e
+rodam no mesmo roteador dentro do processo, nunca por socket.
 
-Resultado: mesmo que o atacante fotografe o QR, o pareamento só funciona
-dentro da janela com o PIN correto. A probabilidade teórica de adivinhar
-o PIN é no máximo `5 / 10⁶ ≈ 0,0005 %`.
+O relay pode ser outro: o código está em `apps/relay` e o endereço é
+configurável em Configurações → Conexões ou por `DCC_RELAY_URL`. Só `wss://`
+é aceito (`ws://` apenas para localhost).
 
-### 4.2 Chaves device-bound não-extraíveis
-
-- O cliente mobile gera a keypair via `crypto.subtle.generateKey` com
-  `extractable: false` — nem mesmo o JavaScript que rodou a geração
-  consegue ler os bytes da chave privada.
-- A chave é persistida no IndexedDB via structured-clone, mantendo o
-  handle opaco entre reloads.
-- Um atacante que comprometa a página/JS pode usar a chave para assinar
-  requisições enquanto a sessão estiver aberta, mas não pode exfiltrar
-  a chave para reutilização posterior.
-
-### 4.3 Assinatura por request (replay-proof)
-
-Cada chamada autenticada inclui três headers:
+### 4.2 QR de uso único
 
 ```
-X-Device-Id: <uuid>
-X-Timestamp: <RFC 3339>
-X-Signature: <base64(ECDSA-DER)>
+dcc://pair#v=1&relay=<wss url>&room=<sala>&pk=<chave do desktop>&otp=<segredo>
 ```
 
-A assinatura cobre o **payload canônico** abaixo, em UTF-8:
+- Tudo fica no fragmento (`#`), que nenhum servidor recebe.
+- `room` é o id da sala (128 bits aleatórios); `pk` é a chave estática Noise
+  do desktop; `otp` são 128 bits aleatórios.
+- O `otp` vale **5 minutos** e **uma vez**, e nunca atravessa o relay: o
+  celular prova que o conhece pela PSK derivada dele (HKDF-SHA256,
+  `dcc-remote/v1`). O handshake identifica a oferta por um `pair_id` também
+  derivado, que não revela o segredo.
+- As ofertas vivem só na memória do processo do desktop.
 
-```
-METHOD\n
-PATH\n
-TIMESTAMP\n
-SHA256_HEX(body)
-```
+### 4.3 Pareamento: `Noise_IKpsk2` + aprovação humana
 
-- Mudar o método, o path, o timestamp ou um único byte do body invalida
-  a assinatura.
-- Timestamp fora de uma janela de **60 segundos** é rejeitado (`AuthError::SignedRequestStaleTimestamp`).
-- Bodies maiores que **32 MiB** são rejeitados antes da verificação para
-  evitar OOM (`AuthError::SignedRequestBodyTooLarge`).
+`Noise_IKpsk2_25519_ChaChaPoly_SHA256`, com prólogo `dcc-remote/v1`. O
+celular é sempre o iniciador (conhece a chave do desktop pelo QR):
 
-### 4.4 Revogação granular
+1. O celular envia a mensagem 1, com sua chave estática e o `pair_id`.
+2. O desktop só responde se a oferta existir, não estiver usada nem expirada,
+   e mistura a PSK na mensagem 2: só quem tem o mesmo `otp` lê a resposta.
+3. O primeiro frame cifrado do celular prova a posse do segredo; só então a
+   oferta é consumida.
+4. O desktop mostra um pedido de aprovação com o nome do aparelho e o
+   **fingerprint** da chave do celular (6 bytes do SHA-256, ex.
+   `3F9A-0C12-B7E4`). O celular mostra o mesmo código; a pessoa aprova só se
+   os dois baterem. Sem resposta em 2 minutos, o pedido cai.
+5. Aprovado, a chave pública Noise do celular é fixada em
+   `paired_devices.noise_public_key`.
 
-- A coluna `revoked_at` é checada em toda verificação. Revogar um device
-  tem efeito imediato — a próxima request retorna `403 Forbidden`.
-- O usuário vê a lista completa em Settings → Connections → Dispositivos
-  pareados, com botão "Revogar" por linha.
+Quem fotografa o QR ainda precisa ser aprovado no desktop, com um
+fingerprint que não é o do celular da pessoa.
 
-### 4.5 Fail-closed no middleware
+### 4.4 Reconexão: `Noise_IK` com chave fixada
 
-Quando os três headers `X-Device-Id / X-Timestamp / X-Signature` estão
-presentes, o middleware se compromete a verificar a assinatura. Se a
-verificação falha, retorna 4xx sem cair para `X-API-Key` ou bearer
-token. Isso bloqueia o ataque onde alguém envia signed-headers inválidos
-junto com uma API key roubada esperando que o middleware "tente o
-próximo método".
+`Noise_IK_25519_ChaChaPoly_SHA256`: o desktop lê a chave estática do celular
+na mensagem 1 e só responde se ela pertencer a um aparelho aprovado e não
+revogado. Qualquer outra chave é recusada (close `4401`) e registrada como
+`relay_refused`. Não há senha, token ou sessão para vazar: a credencial é a
+chave privada, que fica no Keychain (iOS) / Keystore (Android) do celular. O
+build web do app é só para demonstração e testes; nele a chave fica em
+`localStorage`.
 
-### 4.6 Rate limit no `/auth/pair`
+Depois do handshake, tudo segue cifrado de ponta a ponta (ChaCha20-Poly1305),
+com fragmentação para mensagens grandes.
 
-In-memory sliding window por IP: **20 tentativas / 60 s**. Combinado com
-o lockout de 5 PIN errados por nonce, um atacante consegue no máximo 100
-tentativas/min por IP — abaixo do limite onde brute force de PIN se
-torna viável dentro da janela de 60 s.
+### 4.5 O que um aparelho pareado alcança
 
-O IP é o do socket (`ConnectInfo`). `X-Forwarded-For` só vale quando o
-peer é loopback, ou seja, um proxy nesta máquina (Tailscale serve,
-cloudflared); vindo da rede ele é falsificável e é ignorado.
+O conector só repassa caminhos em `/api/v1/` e recusa `/api/v1/auth/`,
+`/api/v1/remote/` e `/api/v1/terminals/`, além de `/rpc` e `/auth/`. Um
+celular não pode aprovar outros celulares, gerar QR, rotacionar credenciais
+nem abrir terminais. Cabeçalhos de credencial (`Authorization`, `X-API-Key`)
+vindos do celular são descartados; a identidade do aparelho entra só como
+extensão interna da requisição, que a rede não consegue forjar.
 
-### 4.7 Garbage collection
+### 4.6 Revogação e limite de aparelhos
 
-`create_pairing_nonce` deleta linhas com `created_at` mais antigo que
-**10 min**. Mantém a tabela enxuta sem precisar de um worker em
-background.
+- **Revogar** (Configurações → Conexões → Dispositivos pareados, ou
+  `DELETE /auth/devices/:id` num `dccd-http`) marca `revoked_at` e derruba na
+  hora a conexão aberta daquele aparelho (close `4499`). Conexões abertas
+  também revalidam o aparelho a cada 15 s, o que cobre uma revogação feita
+  por outro processo no mesmo banco. A chave revogada não reconecta; voltar
+  exige um novo pareamento, com QR e aprovação.
+- No máximo **10** aparelhos ativos por desktop; acima disso o pareamento é
+  recusado (close `4429`) até que um seja revogado.
+- Aparelhos do pareamento antigo pela rede local (sem chave Noise) são
+  revogados automaticamente na atualização (`legacy_device_retired`) e não
+  ocupam vagas.
 
-### 4.8 Audit log
+### 4.7 API HTTP local
 
-Cada `pair`, `revoke`, `pin_failure` e `pin_locked` é registrado em
-`pair_audit_log` com `device_id`, IP, user-agent e detalhes. O painel
-de Settings exibe os 50 mais recentes com ícones distintos.
+- O app desktop serve a API só em `127.0.0.1`, protegida por `X-API-Key`.
+- A API key é aleatória por instalação (256 bits), gravada em
+  `~/.dcc/http-config.json` com permissão `0600`. O servidor se recusa a
+  subir com a antiga chave padrão pública.
+- O `dccd-http` (servidor sem interface) também escuta em loopback por
+  padrão. Só um `DCC_HTTP_HOST` explícito fora de loopback o expõe na rede;
+  aí a API key deixa de bastar e é exigido o bearer do operador
+  (`DCC_HTTP_BEARER_TOKEN`, com expiração e rotação em
+  `POST /api/v1/auth/bearer/rotate`). O celular não usa esse caminho.
 
-## 5. Camada de transporte
+### 4.8 Relay
 
-A arquitetura de aplicação acima fornece **integridade** (anti-replay,
-anti-tamper) e **autenticação** (per-device key) mas **não cifragem do
-conteúdo**. Para confidencialidade o usuário escolhe o transporte:
+- O desktop prova ao relay que é dono da sala com um segredo próprio
+  (`x-dcc-room-secret`); o relay guarda só o SHA-256 dele. O celular não tem
+  credencial no relay: quem o autentica é o desktop, via Noise.
+- O relay aceita só frames binários de até 65 537 bytes, limita cada celular
+  a 100 frames/s (rajada de 300) e a 8 celulares por sala, e não registra
+  nada sobre o conteúdo.
 
-| Opção | Confidencialidade | Setup |
-|-------|-------------------|-------|
-| LAN HTTP direto | ❌ — qualquer um no mesmo WiFi vê os payloads | nenhum |
-| LAN HTTPS self-signed | ✅ mas com prompt no browser | manual |
-| Tailscale Serve (free) | ✅ via WireGuard E2E | instalar tailscale |
-| Cloudflare Tunnel | ✅ via TLS público | requer domínio |
-| SSH reverse tunnel | ✅ | precisa de servidor SSH alcançável |
+## 5. O que o relay vê
 
-A solução **default** assume LAN HTTP (cenário típico de uso doméstico).
-Para cenários onde o conteúdo precisa ser confidencial em redes
-hostis, Tailscale Serve é a recomendação por ser o de menor atrito.
+| Vê | Não vê |
+|----|--------|
+| Id da sala | Requisições, respostas e eventos |
+| Endereços IP do desktop e do celular | Prompts, código, saídas dos agentes |
+| Horários e tamanhos dos frames | O segredo do QR e as chaves privadas |
 
-A página da landing `/m/pair` detecta o caso "HTTPS landing → HTTP
-backend" (mixed content) e exibe o link LAN direto que o usuário deve
-abrir manualmente, em vez de tentar uma chamada que o browser vai
-bloquear silenciosamente.
+Um relay malicioso pode derrubar ou atrasar a conexão (negação de serviço),
+mas não ler, alterar sem ser detectado nem se passar por uma das pontas.
 
 ## 6. Limites conhecidos
 
-1. **PIN brute force dentro da janela**: 5 tentativas em 60s significa
-   probabilidade ≤ 5/10⁶. Aceitável para uso doméstico mas não para
-   ambientes com adversários muito determinados. Mitigação possível:
-   PIN de 8 dígitos ou alfanumérico.
-2. **Sem confidencialidade default**: se a rede não é confiável, o
-   usuário precisa escolher um transporte cifrado. O app não força.
-3. **Sem cap de devices por instalação**: implementado em fase
-   posterior (ver `Phase 5+`).
-4. **Sem expiração automática**: devices ficam pareados indefinidamente
-   até serem revogados. Implementado em fase posterior.
-5. **Rate limit é in-memory**: reset ao reiniciar o `dccd-http`. Em
-   produção real deveria ser persistido.
+1. **Metadados visíveis ao relay** (§5). Quem precisa escondê-los pode
+   hospedar o próprio relay (`apps/relay`).
+2. **Chave do desktop em disco**: a chave privada estática do desktop e o
+   segredo da sala ficam no banco local (tabela `remote_relay`). Quem lê esse
+   arquivo pode se passar pelo desktop.
+3. **Sem expiração automática**: um aparelho fica pareado até ser revogado.
+4. **Aprovação depende da pessoa**: aprovar sem comparar o fingerprint anula
+   a proteção contra QR fotografado.
 
 ## 7. Auditoria
 
-Trilha persistente em `pair_audit_log`:
+Trilha persistente em `pair_audit_log`, visível em Configurações →
+Conexões → log de auditoria:
 
 ```
-event           | quando dispara
-----------------|---------------------------------
-pair            | device novo registrado com sucesso
-revoke          | usuário revogou um device
-pin_failure     | PIN incorreto submetido para um nonce
-pin_locked      | nonce travado após N PINs incorretos
+event                  | quando dispara
+-----------------------|-----------------------------------------------
+relay_offer            | um QR de pareamento foi gerado
+relay_offer_invalid    | pedido com QR desconhecido, usado ou expirado
+relay_pair_denied      | a pessoa recusou o pareamento
+pair                   | aparelho aprovado e fixado
+relay_refused          | chave não aprovada (ou revogada) tentou reconectar
+limit_reached          | pareamento recusado pelo limite de aparelhos
+revoke                 | aparelho revogado
+legacy_device_retired  | aparelho do pareamento antigo pela rede local revogado
 ```
 
-A trilha é local — não é exfiltrada para nenhum serviço externo.
+A trilha é local — não é enviada para nenhum serviço externo.
 
 ## 8. Resumo rápido
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ 1. Transporte (escolha do usuário)                             │
-│    LAN HTTP / HTTPS / Tailscale / Cloudflare / SSH tunnel      │
+│ 1. Transporte                                                  │
+│    conexão de saída ao relay · API local só em 127.0.0.1       │
 ├────────────────────────────────────────────────────────────────┤
-│ 2. Pareamento efêmero                                          │
-│    nonce 256-bit + PIN 6-dígitos · 60s TTL · single-use ·      │
-│    lock após 5 PIN errados · rate-limit 20/min por IP          │
+│ 2. Pareamento                                                  │
+│    QR com otp de 128 bits · 5 min · uso único ·                │
+│    Noise_IKpsk2 · aprovação no desktop com fingerprint         │
 ├────────────────────────────────────────────────────────────────┤
-│ 3. Autenticação                                                │
-│    ECDSA P-256 · chave privada non-extractable no WebCrypto ·  │
-│    sig cobre METHOD/PATH/TIMESTAMP/SHA256(body)                │
+│ 3. Reconexão                                                   │
+│    Noise_IK · só chaves fixadas e não revogadas                │
 ├────────────────────────────────────────────────────────────────┤
-│ 4. Confirmação                                                 │
-│    PIN exibido no desktop (out-of-band do QR)                  │
+│ 4. Cifragem                                                    │
+│    ChaCha20-Poly1305 de ponta a ponta · relay só vê bytes      │
 ├────────────────────────────────────────────────────────────────┤
 │ 5. Revogação                                                   │
-│    Soft-delete imediata · per-device · UI em Settings          │
+│    imediata · derruba a conexão aberta · até 10 aparelhos      │
 ├────────────────────────────────────────────────────────────────┤
-│ 6. Audit                                                       │
-│    pair_audit_log persistente com IP, UA, detalhes             │
+│ 6. Auditoria                                                   │
+│    pair_audit_log local                                        │
 └────────────────────────────────────────────────────────────────┘
 ```

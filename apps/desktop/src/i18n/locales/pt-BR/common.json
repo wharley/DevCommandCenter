@@ -3246,16 +3246,16 @@
       "mobile": {
         "label": "Parear celular",
         "summary": "Acompanhe agentes e pendências pelo telefone.",
-        "whatIs": "O acesso móvel mostra, no celular, as tarefas em execução e o que precisa de você. O pareamento usa QR e PIN, na mesma rede ou via Tailscale, sem passar por servidor externo.",
+        "whatIs": "O app DCC no celular mostra as tarefas em execução e o que precisa de você. Ele chega a este desktop de qualquer rede por um relay, cifrado de ponta a ponta: o relay só repassa bytes.",
         "whenToUse": "Quando deixou agentes rodando e saiu da frente do computador.",
         "steps": [
           "Abra Configurações e a seção [Conexões].",
-          "Clique em [Parear novo dispositivo] e escolha entre rede local e Tailscale.",
-          "Escaneie o QR com o celular e digite o PIN antes de expirar.",
-          "Para remover um aparelho, use a lista de dispositivos na mesma seção."
+          "Clique em [Parear pelo relay] e escaneie o QR com o app DCC no celular antes de expirar.",
+          "Aprove o pedido no desktop só se o código mostrado for o mesmo do celular.",
+          "Para remover um aparelho, use a lista de dispositivos na mesma seção. Revogar derruba a conexão na hora."
         ],
-        "tip": "Evite Wi-Fi público para parear. Fora de casa, Tailscale mantém desktop e celular na mesma rede privada.",
-        "keywords": "celular mobile parear pareamento qr pin tailscale telefone notificação remoto"
+        "tip": "O QR vale uma vez, por 5 minutos. Se o código do pedido for diferente do que o celular mostra, recuse.",
+        "keywords": "celular mobile parear pareamento qr relay app telefone remoto"
       },
       "pullRequests": {
         "label": "Pull Requests",
