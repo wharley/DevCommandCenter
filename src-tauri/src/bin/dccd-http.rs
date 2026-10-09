@@ -127,8 +127,6 @@ async fn main() {
     println!("[DCC HTTP]   POST /api/v1/remote/pairing/offers");
     println!("[DCC HTTP]   GET  /api/v1/remote/pairing/approvals");
     println!("[DCC HTTP]   POST /api/v1/remote/pairing/approvals/:approval_id");
-    println!("[DCC HTTP]   GET  /auth/devices");
-    println!("[DCC HTTP]   DELETE /auth/devices/:device_id");
 
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
         Ok(listener) => listener,

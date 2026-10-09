@@ -29,7 +29,7 @@ Depois disso o celular reconecta sozinho, de qualquer rede. Até 10 aparelhos at
 
 ## Servidor sem o app (`dccd-http`)
 
-O `dccd-http` serve a mesma API sem o app desktop e também se conecta ao relay. Por padrão escuta só em loopback com `X-API-Key` (gerada em `~/.dcc/http-config.json`, permissão `0600`). Sem interface gráfica, o operador pareia e revoga pela API, com a API key:
+O `dccd-http` serve a mesma API sem o app desktop e também se conecta ao relay. Por padrão escuta só em loopback com `X-API-Key` (gerada em `~/.dcc/http-config.json`, permissão `0600`). Sem interface gráfica, o operador pareia pela API, com a API key:
 
 | Método e caminho | Uso |
 | --- | --- |
@@ -37,8 +37,8 @@ O `dccd-http` serve a mesma API sem o app desktop e também se conecta ao relay.
 | `POST /api/v1/remote/pairing/offers` | Gera o link `dcc://pair#…` (conteúdo do QR) |
 | `GET /api/v1/remote/pairing/approvals` | Pedidos de pareamento aguardando aprovação |
 | `POST /api/v1/remote/pairing/approvals/:approval_id` | `{"approve": true}` ou `false` |
-| `GET /auth/devices` | Aparelhos pareados (`?includeRevoked=true` inclui revogados) |
-| `DELETE /auth/devices/:device_id` | Revoga e derruba a conexão do aparelho |
+
+Revogar um aparelho é feito no app desktop (Configurações → Conexões → Dispositivos pareados); um `dccd-http` no mesmo banco percebe a revogação na revalidação de 15 s e derruba a conexão.
 
 Um `DCC_HTTP_HOST` fora de loopback expõe a API na rede; nesse caso o modo de autenticação passa a remoto e exige o bearer do operador (`DCC_HTTP_BEARER_TOKEN`, rotacionável em `POST /api/v1/auth/bearer/rotate`). O celular não usa esse caminho: ele entra sempre pelo relay.
 

@@ -66,7 +66,6 @@ use crate::daemon_client::rpc_with_db_path_timeout;
 use crate::http_auth::{auth_middleware, PairedDeviceIdentity};
 use crate::http_config::{HttpAuthMode, HttpConfig};
 use crate::http_rpc_handler::handle_rpc as handle_json_rpc;
-use crate::pairing::{self, PairedDeviceSummary, PairingError};
 use crate::remote_connector::RemoteHub;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -534,11 +533,6 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/remote/pairing/approvals/:approval_id",
             post(remote_respond_approval_handler),
-        )
-        .route("/auth/devices", get(list_paired_devices_handler))
-        .route(
-            "/auth/devices/:device_id",
-            axum::routing::delete(revoke_device_handler),
         );
     let protected_routes = if backend.terminals {
         protected_routes.merge(terminal_routes)
@@ -2365,123 +2359,6 @@ fn authentication_descriptor(config: &HttpConfig) -> Value {
     })
 }
 
-// =============================================================================
-// Paired devices (phones pair through the relay; see `remote_connector`)
-// =============================================================================
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ListDevicesResponse {
-    ok: bool,
-    devices: Vec<PairedDeviceJson>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PairedDeviceJson {
-    device_id: String,
-    device_name: String,
-    user_agent: Option<String>,
-    created_at: String,
-    last_used_at: Option<String>,
-    last_ip: Option<String>,
-    revoked: bool,
-}
-
-impl From<PairedDeviceSummary> for PairedDeviceJson {
-    fn from(summary: PairedDeviceSummary) -> Self {
-        Self {
-            device_id: summary.device_id,
-            device_name: summary.device_name,
-            user_agent: summary.user_agent,
-            created_at: summary.created_at,
-            last_used_at: summary.last_used_at,
-            last_ip: summary.last_ip,
-            revoked: summary.revoked,
-        }
-    }
-}
-
-fn pairing_error_to_http(err: PairingError) -> HttpApiError {
-    match err {
-        PairingError::DeviceLimitReached => {
-            HttpApiError::bad_request("device limit reached; revoke an existing device first")
-        }
-        PairingError::Database(message) => HttpApiError::internal(message),
-    }
-}
-
-async fn with_pairing_db<T, F>(config: Arc<RwLock<HttpConfig>>, op: F) -> Result<T, HttpApiError>
-where
-    T: Send + 'static,
-    F: FnOnce(&rusqlite::Connection) -> Result<T, PairingError> + Send + 'static,
-{
-    let db_path = {
-        let config = config.read().await;
-        config.db_path.clone()
-    };
-
-    tokio::task::spawn_blocking(move || {
-        let conn = rusqlite::Connection::open(&db_path)
-            .map_err(|e| PairingError::Database(e.to_string()))?;
-        op(&conn)
-    })
-    .await
-    .map_err(|e| HttpApiError::internal(format!("pairing worker join failed: {e}")))?
-    .map_err(pairing_error_to_http)
-}
-
-/// `/auth/devices`: how the operator of a headless `dccd-http`, which pairs
-/// phones through `/api/v1/remote/pairing/*`, lists and revokes them. The
-/// desktop app does the same through its own Tauri commands, and the relay
-/// connector never forwards these routes to a phone.
-async fn list_paired_devices_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<ListDevicesResponse>, HttpApiError> {
-    let include_revoked = query
-        .get("includeRevoked")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
-
-    let devices = with_pairing_db(config, move |conn| {
-        pairing::list_paired_devices(conn, include_revoked)
-    })
-    .await?;
-
-    Ok(Json(ListDevicesResponse {
-        ok: true,
-        devices: devices.into_iter().map(PairedDeviceJson::from).collect(),
-    }))
-}
-
-async fn revoke_device_handler(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
-    State(backend): State<Arc<HttpBackend>>,
-    headers: axum::http::HeaderMap,
-    extensions: axum::http::Extensions,
-    Path(device_id): Path<String>,
-) -> Result<Json<Value>, HttpApiError> {
-    let ip = crate::http_auth::client_ip(&headers, &extensions);
-
-    let target = device_id.clone();
-    let revoked = with_pairing_db(config, move |conn| {
-        pairing::revoke_device(conn, &target, ip.as_deref())
-    })
-    .await?;
-
-    if !revoked {
-        return Err(HttpApiError::not_found(
-            "device not found or already revoked",
-        ));
-    }
-    if let Some(remote) = backend.remote() {
-        remote.device_revoked(&device_id);
-    }
-
-    Ok(Json(json!({ "ok": true })))
-}
-
 /// Relay administration is for the operator on this machine (API key), never
 /// for a paired device: a phone must not approve phones or mint QR codes.
 fn operator_remote(
@@ -2577,7 +2454,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lan_pairing_routes_are_gone_and_devices_stay_for_the_operator() {
+    async fn lan_pairing_and_device_routes_are_gone() {
         use tower::util::ServiceExt;
 
         let root = tempfile::tempdir().unwrap();
@@ -2586,7 +2463,7 @@ mod tests {
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         conn.execute_batch(include_str!("../sql/schema.sql"))
             .unwrap();
-        pairing::ensure_pairing_schema(&conn).unwrap();
+        crate::pairing::ensure_pairing_schema(&conn).unwrap();
         let config = Arc::new(RwLock::new(HttpConfig {
             db_path: db_path.clone(),
             api_key: "k".to_string(),
@@ -2609,17 +2486,12 @@ mod tests {
             ("POST", "/auth/pair-init"),
             ("GET", "/m/"),
             ("GET", "/m/pair"),
+            ("GET", "/auth/devices"),
+            ("DELETE", "/auth/devices/some-device"),
         ] {
             let response = app.clone().oneshot(call(method, uri)).await.unwrap();
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {uri}");
         }
-
-        let devices = app
-            .clone()
-            .oneshot(call("GET", "/auth/devices"))
-            .await
-            .unwrap();
-        assert_eq!(devices.status(), StatusCode::OK);
     }
 
     #[test]

@@ -120,8 +120,8 @@ extensão interna da requisição, que a rede não consegue forjar.
 
 ### 4.6 Revogação e limite de aparelhos
 
-- **Revogar** (Configurações → Conexões → Dispositivos pareados, ou
-  `DELETE /auth/devices/:id` num `dccd-http`) marca `revoked_at` e derruba na
+- **Revogar** (Configurações → Conexões → Dispositivos pareados) marca
+  `revoked_at` e derruba na
   hora a conexão aberta daquele aparelho (close `4499`). Conexões abertas
   também revalidam o aparelho a cada 15 s, o que cobre uma revogação feita
   por outro processo no mesmo banco. A chave revogada não reconecta; voltar

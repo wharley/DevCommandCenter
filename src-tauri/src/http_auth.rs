@@ -1,13 +1,12 @@
 use axum::{
     body::Body,
-    extract::{ConnectInfo, State},
-    http::{header::AUTHORIZATION, Extensions, HeaderMap, Request, StatusCode},
+    extract::State,
+    http::{header::AUTHORIZATION, HeaderMap, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
 use serde_json::json;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -42,32 +41,6 @@ pub async fn auth_middleware(
         validate_auth(&config, request.headers())?;
     }
     Ok(next.run(request).await)
-}
-
-/// Address of the client, for the pairing audit trail.
-///
-/// The socket peer is the source of truth. `X-Forwarded-For` is only honoured
-/// when the peer is loopback, i.e. a proxy on this machine (Tailscale serve,
-/// cloudflared) forwarded the request; from anywhere else it is spoofable.
-/// `None` when the server was not started with connect info (tests).
-pub fn client_ip(headers: &HeaderMap, extensions: &Extensions) -> Option<String> {
-    let peer = extensions.get::<ConnectInfo<SocketAddr>>()?.0.ip();
-    if peer.is_loopback() {
-        if let Some(forwarded) = header_str(headers, "x-forwarded-for")
-            .and_then(|v| v.split(',').next().map(|s| s.trim().to_string()))
-            .filter(|s| !s.is_empty())
-        {
-            return Some(forwarded);
-        }
-    }
-    Some(peer.to_string())
-}
-
-fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
 }
 
 /// Validates either API key or bearer token, depending on the active auth mode.
@@ -254,46 +227,6 @@ mod tests {
         headers.insert("X-API-Key", HeaderValue::from_static("test-key"));
 
         assert!(validate_auth(&config, &headers).is_err());
-    }
-
-    fn extensions_from(peer: &str) -> Extensions {
-        let mut extensions = Extensions::new();
-        extensions.insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
-        extensions
-    }
-
-    #[test]
-    fn client_ip_ignores_forwarded_for_from_the_network() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-for", HeaderValue::from_static("10.9.9.9"));
-
-        assert_eq!(
-            client_ip(&headers, &extensions_from("192.168.1.50:51000")).as_deref(),
-            Some("192.168.1.50")
-        );
-    }
-
-    #[test]
-    fn client_ip_trusts_forwarded_for_from_a_local_proxy() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-forwarded-for",
-            HeaderValue::from_static("100.64.0.7, 127.0.0.1"),
-        );
-
-        assert_eq!(
-            client_ip(&headers, &extensions_from("127.0.0.1:51000")).as_deref(),
-            Some("100.64.0.7")
-        );
-        assert_eq!(
-            client_ip(&HeaderMap::new(), &extensions_from("127.0.0.1:51000")).as_deref(),
-            Some("127.0.0.1")
-        );
-    }
-
-    #[test]
-    fn client_ip_is_unknown_without_connect_info() {
-        assert_eq!(client_ip(&HeaderMap::new(), &Extensions::new()), None);
     }
 
     // ----- middleware (end-to-end through an axum router) -----
