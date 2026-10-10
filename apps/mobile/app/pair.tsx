@@ -10,15 +10,13 @@ import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	ActivityIndicator,
-	KeyboardAvoidingView,
-	Platform,
 	Pressable,
-	ScrollView,
 	StyleSheet,
 	Text,
 	TextInput,
 	View,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Phase =
@@ -84,89 +82,89 @@ export default function PairScreen() {
 	};
 
 	return (
-		<KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-			<ScrollView
-				contentContainerStyle={[styles.content, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]}
-				keyboardShouldPersistTaps="handled"
-			>
-				<View style={styles.header}>
-					<Wordmark />
-					{session.status === "demo" || session.status === "remote" ? (
-						<Pressable onPress={() => router.back()} hitSlop={10}>
-							<Text style={styles.close}>Fechar</Text>
-						</Pressable>
+		<KeyboardAwareScrollView
+			style={styles.root}
+			contentContainerStyle={[styles.content, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]}
+			keyboardShouldPersistTaps="handled"
+			bottomOffset={24}
+		>
+			<View style={styles.header}>
+				<Wordmark />
+				{session.status === "demo" || session.status === "remote" ? (
+					<Pressable onPress={() => router.back()} hitSlop={10}>
+						<Text style={styles.close}>Fechar</Text>
+					</Pressable>
+				) : null}
+			</View>
+
+			{phase.kind === "scan" ? (
+				<Scanner onLink={(url) => void pair(url)} onCancel={() => setPhase({ kind: "choose" })} />
+			) : phase.kind === "working" ? (
+				<Working progress={phase.progress} onCancel={cancel} />
+			) : (
+				<>
+					<Text style={styles.title}>Conecte seu computador</Text>
+					<Text style={styles.body}>
+						No DCC do computador, abra Configurações → Dispositivos → Celular de qualquer rede e
+						escaneie o QR. A conexão é cifrada de ponta a ponta: o relay só repassa bytes.
+					</Text>
+
+					{phase.kind === "error" ? (
+						<Panel tone="danger" style={{ marginTop: 16 }}>
+							<Text style={styles.error}>{phase.message}</Text>
+						</Panel>
 					) : null}
-				</View>
 
-				{phase.kind === "scan" ? (
-					<Scanner onLink={(url) => void pair(url)} onCancel={() => setPhase({ kind: "choose" })} />
-				) : phase.kind === "working" ? (
-					<Working progress={phase.progress} onCancel={cancel} />
-				) : (
-					<>
-						<Text style={styles.title}>Conecte seu computador</Text>
-						<Text style={styles.body}>
-							No DCC do computador, abra Configurações → Dispositivos → Celular de qualquer rede e
-							escaneie o QR. A conexão é cifrada de ponta a ponta: o relay só repassa bytes.
-						</Text>
+					<Button label="Escanear QR" onPress={() => setPhase({ kind: "scan" })} style={{ marginTop: 20 }} />
 
-						{phase.kind === "error" ? (
-							<Panel tone="danger" style={{ marginTop: 16 }}>
-								<Text style={styles.error}>{phase.message}</Text>
-							</Panel>
-						) : null}
-
-						<Button label="Escanear QR" onPress={() => setPhase({ kind: "scan" })} style={{ marginTop: 20 }} />
-
-						<Mono style={styles.eyebrow}>ou cole o link</Mono>
-						<TextInput
-							value={link}
-							onChangeText={setLink}
-							placeholder="dcc://pair#v=1&…"
-							placeholderTextColor={color.faint}
-							autoCapitalize="none"
-							autoCorrect={false}
-							style={styles.input}
-							accessibilityLabel="Link de pareamento"
+					<Mono style={styles.eyebrow}>ou cole o link</Mono>
+					<TextInput
+						value={link}
+						onChangeText={setLink}
+						placeholder="dcc://pair#v=1&…"
+						placeholderTextColor={color.faint}
+						autoCapitalize="none"
+						autoCorrect={false}
+						style={styles.input}
+						accessibilityLabel="Link de pareamento"
+					/>
+					<View style={styles.row}>
+						<Button
+							label="Colar"
+							variant="ghost"
+							style={{ flex: 1 }}
+							onPress={() => {
+								void Clipboard.getStringAsync().then((text) => setLink(text.trim()));
+							}}
 						/>
-						<View style={styles.row}>
+						<Button
+							label="Parear"
+							variant="ghost"
+							style={{ flex: 1 }}
+							disabled={!link.trim()}
+							onPress={() => void pair(link)}
+						/>
+					</View>
+
+					{session.status !== "demo" ? (
+						<Panel style={{ marginTop: 28 }}>
+							<Text style={styles.demoTitle}>Sem computador por perto?</Text>
+							<Text style={styles.body}>
+								Explore o app com projetos e agentes fictícios. Nada sai do celular.
+							</Text>
 							<Button
-								label="Colar"
+								label="Explorar demonstração"
 								variant="ghost"
-								style={{ flex: 1 }}
+								style={{ marginTop: 12 }}
 								onPress={() => {
-									void Clipboard.getStringAsync().then((text) => setLink(text.trim()));
+									void startDemo().then(() => router.replace("/"));
 								}}
 							/>
-							<Button
-								label="Parear"
-								variant="ghost"
-								style={{ flex: 1 }}
-								disabled={!link.trim()}
-								onPress={() => void pair(link)}
-							/>
-						</View>
-
-						{session.status !== "demo" ? (
-							<Panel style={{ marginTop: 28 }}>
-								<Text style={styles.demoTitle}>Sem computador por perto?</Text>
-								<Text style={styles.body}>
-									Explore o app com projetos e agentes fictícios. Nada sai do celular.
-								</Text>
-								<Button
-									label="Explorar demonstração"
-									variant="ghost"
-									style={{ marginTop: 12 }}
-									onPress={() => {
-										void startDemo().then(() => router.replace("/"));
-									}}
-								/>
-							</Panel>
-						) : null}
-					</>
-				)}
-			</ScrollView>
-		</KeyboardAvoidingView>
+						</Panel>
+					) : null}
+				</>
+			)}
+		</KeyboardAwareScrollView>
 	);
 }
 

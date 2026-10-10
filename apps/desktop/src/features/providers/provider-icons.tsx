@@ -2,6 +2,7 @@ import type { ReactElement, SVGProps } from "react";
 import { Orbit, Sparkles } from "lucide-react";
 import { CursorEditorIcon } from "@/components/editor-brand-icons";
 import { cn } from "@/lib/utils";
+import { agentBrandKey, type AgentBrandKey } from "@dcc/mascots";
 
 /**
  * Real brand marks for the agent providers we ship today. Each logo keeps its
@@ -13,25 +14,10 @@ import { cn } from "@/lib/utils";
  * Update here, not inline in menus — `ProviderIcon` is the single source.
  */
 
-type IconKey = "claude" | "codex" | "gemini" | "cursor" | "droid" | "grok";
+type IconKey = AgentBrandKey;
 
 /** Maps a provider id/label to its brand mark, tolerant of catalog variants. */
-function resolveIconKey(provider: string | null | undefined): IconKey | null {
-	if (!provider) return null;
-	const value = provider.toLowerCase();
-	if (value.includes("claude") || value.includes("anthropic")) return "claude";
-	if (value.includes("codex") || value.includes("openai")) return "codex";
-	if (
-		value.includes("gemini") ||
-		value.includes("google") ||
-		value.includes("antigravity")
-	)
-		return "gemini";
-	if (value.includes("grok") || value.includes("xai")) return "grok";
-	if (value.includes("cursor")) return "cursor";
-	if (value.includes("droid") || value.includes("factory")) return "droid";
-	return null;
-}
+const resolveIconKey = agentBrandKey;
 
 function ClaudeMark(props: SVGProps<SVGSVGElement>) {
 	return (

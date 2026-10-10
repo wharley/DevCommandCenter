@@ -1,18 +1,22 @@
 /**
  * State behind both tabs: the triage scan (`@dcc/mobile-core`), the
- * workspaces, and permission answers. Refreshes when the stream (re)opens and
- * when a lifecycle event arrives.
+ * workspaces, the desktop's catalog (projects, agents) and permission
+ * answers. The scan refreshes when the stream (re)opens and when a lifecycle
+ * event arrives; the catalog — which asks each agent runtime for its models —
+ * only on open, reconnect, foreground and pull-to-refresh.
  */
 import {
 	incomingEventKindType,
 	runScan,
 	withoutPending,
 	type Comb,
+	type MobileCatalog,
 	type PendingItem,
 	type Scan,
 } from "@dcc/mobile-core";
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
+import { cachedCatalog, fetchCatalog } from "../backend/catalogCache";
 import { useBackend } from "../backend/session";
 import { errorMessage, isAlreadyResolved } from "../backend/types";
 
@@ -32,6 +36,8 @@ const LIFECYCLE = new Set([
 type HomeData = {
 	scan: Scan | null;
 	combs: Comb[] | null;
+	/** Null until loaded, or when this desktop has no catalog route. */
+	catalog: MobileCatalog | null;
 	error: string | null;
 	notice: string | null;
 	refreshing: boolean;
@@ -52,6 +58,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 	const backend = useBackend();
 	const [scan, setScan] = useState<Scan | null>(null);
 	const [combs, setCombs] = useState<Comb[] | null>(null);
+	const [catalog, setCatalog] = useState<MobileCatalog | null>(() => cachedCatalog(backend));
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
@@ -84,6 +91,18 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 		}
 	}, [backend]);
 
+	const loadCatalog = useCallback(async () => {
+		try {
+			setCatalog(await fetchCatalog(backend));
+		} catch {
+			// Older desktops: the tab falls back to the projects seen through workspaces.
+		}
+	}, [backend]);
+
+	const refreshAll = useCallback(async () => {
+		await Promise.all([refresh(), loadCatalog()]);
+	}, [refresh, loadCatalog]);
+
 	useEffect(() => {
 		let timer: ReturnType<typeof setTimeout> | null = null;
 		const soon = () => {
@@ -94,9 +113,13 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 			}, 400);
 		};
 		void refresh();
+		void loadCatalog();
 		const stop = backend.subscribe(() => "/api/v1/events/stream", {
 			onOpen: (reopened) => {
-				if (reopened) soon();
+				if (reopened) {
+					soon();
+					void loadCatalog();
+				}
 			},
 			onEvent: (event) => {
 				if (event.event === "resync") return soon();
@@ -105,14 +128,17 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 			},
 		});
 		const appState = AppState.addEventListener("change", (state) => {
-			if (state === "active") soon();
+			if (state === "active") {
+				soon();
+				void loadCatalog();
+			}
 		});
 		return () => {
 			stop();
 			appState.remove();
 			if (timer) clearTimeout(timer);
 		};
-	}, [backend, refresh]);
+	}, [backend, refresh, loadCatalog]);
 
 	const respond = useCallback(
 		async (item: PendingItem, choice: string) => {
@@ -147,16 +173,17 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 		() => ({
 			scan,
 			combs,
+			catalog,
 			error,
 			notice,
 			refreshing,
 			lastSynced,
 			resolving,
-			refresh,
+			refresh: refreshAll,
 			respond,
 			dismissNotice: () => setNotice(null),
 		}),
-		[scan, combs, error, notice, refreshing, lastSynced, resolving, refresh, respond],
+		[scan, combs, catalog, error, notice, refreshing, lastSynced, resolving, refreshAll, respond],
 	);
 	return <HomeDataContext value={value}>{children}</HomeDataContext>;
 }

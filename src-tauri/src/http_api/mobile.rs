@@ -1,7 +1,9 @@
 //! Mobile operations reuse the same domain use cases and provider authority as desktop.
 use super::*;
 use dcc_core::{
-    application::{create_workspace_for_repo, CreateWorkspaceForRepoInput},
+    application::{
+        create_workspace_for_repo, CreateWorkspaceForRepoInput, WorkspaceIsolationMode,
+    },
     domain::{provider::ProviderApprovalPolicy, workspace::WorkspaceState},
     ports::{RepositoryRepo, WorkspaceRepo},
 };
@@ -41,6 +43,10 @@ pub(super) struct CreateTask {
     model: Option<String>,
     #[serde(default)]
     plan_mode: bool,
+    /// The phone's "Worktree" checkbox (checked by default, like the desktop).
+    /// Omitted by older apps: protected worktree, the core's default.
+    #[serde(default)]
+    isolation_mode: Option<WorkspaceIsolationMode>,
 }
 
 fn validate_task(input: &CreateTask) -> Result<(), HttpApiError> {
@@ -218,7 +224,7 @@ async fn execute_task(
                 workspace_root: repository.root_path,
                 base_branch: repository.base_branch,
                 name: Some(input.title.trim().to_owned()),
-                isolation_mode: None,
+                isolation_mode: input.isolation_mode.clone(),
             },
         )
         .await
@@ -498,6 +504,24 @@ mod tests {
             assert!(workspace_patch(root, "escape/secret").await.is_err());
             assert!(workspace_patch(root, "escape/deleted").await.is_err());
         }
+    }
+
+    #[test]
+    fn task_input_carries_the_worktree_choice() {
+        let base = json!({
+            "requestId": "8f0d2f4e-8a59-4f0e-9a43-0d1f6f3f2b11", "repositoryId": "repo",
+            "title": "t", "prompt": "p", "providerId": "claude",
+        });
+        let mut direct = base.clone();
+        direct["isolationMode"] = json!("localDirect");
+        let input: CreateTask = serde_json::from_value(direct).unwrap();
+        assert!(matches!(
+            input.isolation_mode,
+            Some(WorkspaceIsolationMode::LocalDirect)
+        ));
+        // Older apps omit it: the core falls back to a protected worktree.
+        let input: CreateTask = serde_json::from_value(base).unwrap();
+        assert!(input.isolation_mode.is_none());
     }
 
     #[test]

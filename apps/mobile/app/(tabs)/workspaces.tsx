@@ -1,31 +1,36 @@
-import { combsByProject, latestSessionByWorkspace, sortCombs, type Comb } from "@dcc/mobile-core";
+import { latestSessionByWorkspace, projectGroups, type Comb } from "@dcc/mobile-core";
 import { HomeHeader } from "@/screens/HomeHeader";
 import { useHomeData } from "@/screens/homeData";
-import { openThread } from "@/screens/rows";
+import { openNewTask, openThread } from "@/screens/rows";
 import { color, radius } from "@/theme";
 import { EmptyState, Loading, Mono, StateDot } from "@/ui/primitives";
+import { ProjectGlyph } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
 import { useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-/** Workspaces: worktrees grouped by project, the desktop's mental model. */
+/**
+ * Workspaces: every project on the desktop, with its worktrees — the
+ * desktop's mental model. A project with no workspace yet (just added, or
+ * every task archived) still shows, with a way to start its first task.
+ */
 export default function WorkspacesScreen() {
 	const insets = useSafeAreaInsets();
-	const { scan, combs, refreshing, refresh } = useHomeData();
+	const { scan, combs, catalog, refreshing, refresh } = useHomeData();
 	const [search, setSearch] = useState("");
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 	const sessions = useMemo(() => scan?.sessions ?? [], [scan]);
 	const latest = useMemo(() => latestSessionByWorkspace(sessions), [sessions]);
 	const projects = useMemo(
-		() => (combs ? combsByProject(sortCombs(combs, sessions, search)) : null),
-		[combs, sessions, search],
+		() => (combs ? projectGroups(catalog?.repositories ?? [], combs, sessions, search) : null),
+		[catalog, combs, sessions, search],
 	);
-	const toggle = (name: string) =>
+	const toggle = (key: string) =>
 		setCollapsed((prev) => {
 			const next = new Set(prev);
-			if (next.has(name)) next.delete(name);
-			else next.add(name);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
 			return next;
 		});
 
@@ -42,29 +47,38 @@ export default function WorkspacesScreen() {
 			keyboardShouldPersistTaps="handled"
 			refreshControl={<RefreshControl refreshing={refreshing && !!combs} onRefresh={() => void refresh()} tintColor={color.mute} />}
 		>
-			<HomeHeader search={search} onSearch={setSearch} placeholder="Buscar workspaces…" />
+			<HomeHeader search={search} onSearch={setSearch} placeholder="Buscar projetos e workspaces…" />
 			{!projects ? (
 				<Loading />
 			) : projects.length === 0 ? (
-				<EmptyState title="Nenhum workspace">Crie um pelo app do computador.</EmptyState>
+				search.trim() ? (
+					<EmptyState title="Nenhum resultado">Tente outro termo.</EmptyState>
+				) : (
+					<EmptyState title="Nenhum projeto">Adicione um projeto pelo app do computador.</EmptyState>
+				)
 			) : (
 				<View style={{ gap: 18 }}>
-					{projects.map(([project, projectCombs]) => {
-						const closed = collapsed.has(project);
-						const active = projectCombs.some(isRunning);
+					{projects.map((project) => {
+						const closed = collapsed.has(project.key);
+						const active = project.combs.some(isRunning);
 						return (
-							<View key={project}>
-								<Pressable onPress={() => toggle(project)} style={styles.projectHead} accessibilityRole="button">
+							<View key={project.key}>
+								<Pressable
+									onPress={() => toggle(project.key)}
+									style={styles.projectHead}
+									accessibilityRole="button"
+									accessibilityState={{ expanded: !closed }}
+								>
 									<Feather name={closed ? "chevron-right" : "chevron-down"} size={14} color={color.faint} />
-									<StateDot state={active ? "live" : "idle"} />
+									<ProjectGlyph icon={project.icon} color={project.color} seed={project.rootPath} active={active} size={26} />
 									<Text style={styles.project} numberOfLines={1}>
-										{project}
+										{project.name}
 									</Text>
-									<Mono style={styles.count}>{projectCombs.length}</Mono>
+									<Mono style={styles.count}>{project.combs.length}</Mono>
 								</Pressable>
 								{closed ? null : (
 									<View style={styles.list}>
-										{projectCombs.map((comb) => {
+										{project.combs.map((comb) => {
 											const session = latest.get(comb.id);
 											const state = needsYou.has(comb.id) ? "wait" : isRunning(comb) ? "live" : "idle";
 											return (
@@ -93,6 +107,19 @@ export default function WorkspacesScreen() {
 												</Pressable>
 											);
 										})}
+										{project.repositoryId ? (
+											<Pressable
+												onPress={() => openNewTask(project.repositoryId)}
+												style={({ pressed }) => [styles.newTask, pressed && { backgroundColor: color.elevated }]}
+												accessibilityRole="button"
+												accessibilityLabel={`Nova tarefa em ${project.name}`}
+											>
+												<Feather name="plus" size={14} color={color.mute} />
+												<Text style={styles.newTaskText}>
+													{project.combs.length === 0 ? "Nenhum workspace ainda · Nova tarefa" : "Nova tarefa"}
+												</Text>
+											</Pressable>
+										) : null}
 									</View>
 								)}
 							</View>
@@ -125,4 +152,16 @@ const styles = StyleSheet.create({
 	combName: { color: color.fg, fontSize: 14, fontWeight: "500" },
 	branch: { color: color.info, fontSize: 11 },
 	sessionLine: { color: color.mute, fontSize: 12 },
+	newTask: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		paddingHorizontal: 14,
+		paddingVertical: 11,
+		borderRadius: radius.md,
+		borderWidth: 1,
+		borderStyle: "dashed",
+		borderColor: color.border,
+	},
+	newTaskText: { color: color.mute, fontSize: 13 },
 });

@@ -1,7 +1,9 @@
 import {
+	agentTurnHeads,
 	createThreadState,
 	groupMessages,
 	isThreadRunning,
+	normalizeProvider,
 	threadTitle,
 	workspaceLabel,
 	type RenderItem,
@@ -14,6 +16,7 @@ import { ThreadSync, type ThreadSnapshot } from "@/screens/threadSync";
 import { alpha, color, radius } from "@/theme";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { Loading, Mono, StateDot } from "@/ui/primitives";
+import { AgentMascot } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,8 +24,6 @@ import {
 	ActivityIndicator,
 	AppState,
 	FlatList,
-	KeyboardAvoidingView,
-	Platform,
 	Pressable,
 	StyleSheet,
 	Text,
@@ -31,6 +32,7 @@ import {
 	type NativeScrollEvent,
 	type NativeSyntheticEvent,
 } from "react-native";
+import { KeyboardAvoidingView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function ThreadScreen() {
@@ -89,6 +91,15 @@ export default function ThreadScreen() {
 	const title = useMemo(() => meta?.threadTitle?.trim() || threadTitle(state.messages) || "Sessão", [meta, state.messages]);
 	const place = meta ? workspaceLabel(meta) : "";
 	const waitingOnYou = questions.length > 0 || state.messages.some((m) => m.kind === "permission" && !m.resolved);
+	const keyboardOpen = useKeyboardState((keyboard) => keyboard.isVisible);
+	const heads = useMemo(() => agentTurnHeads(items), [items]);
+	// Only the latest turn moves; finished replies stand still, as on the desktop.
+	const lastItem = items.at(-1);
+	const awaitingFirstOutput =
+		running && lastItem?.type === "single" && lastItem.message.kind === "user";
+	const liveHead = (running || waitingOnYou) && !awaitingFirstOutput ? heads.at(-1) : undefined;
+	const mascotState = waitingOnYou ? "waiting" : "working";
+	const agentLabel = meta?.model || (meta?.providerId ? normalizeProvider(meta.providerId) : null);
 
 	const withBusy = useCallback(async (key: string, run: () => Promise<void>) => {
 		setBusy((prev) => new Set(prev).add(key));
@@ -177,6 +188,16 @@ export default function ThreadScreen() {
 	};
 
 	const renderItem = ({ item }: { item: RenderItem }) => {
+		if (!heads.includes(item.key)) return renderBody(item);
+		return (
+			<View style={{ gap: 8 }}>
+				<AgentHeader meta={meta} label={agentLabel} state={item.key === liveHead ? mascotState : "idle"} />
+				{renderBody(item)}
+			</View>
+		);
+	};
+
+	const renderBody = (item: RenderItem) => {
 		if (item.type === "trace") return <TraceBlock steps={item.steps} />;
 		const message = item.message;
 		switch (message.kind) {
@@ -200,7 +221,7 @@ export default function ThreadScreen() {
 	};
 
 	return (
-		<KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+		<KeyboardAvoidingView style={styles.root} behavior="padding">
 			<View style={[styles.header, { paddingTop: insets.top + 6 }]}>
 				<Pressable
 					// Opened from a notification on a cold start, the thread is the only screen.
@@ -241,6 +262,7 @@ export default function ThreadScreen() {
 					data={items}
 					keyExtractor={(item) => item.key}
 					renderItem={renderItem}
+					extraData={`${liveHead}/${mascotState}/${agentLabel}`}
 					contentContainerStyle={styles.listContent}
 					ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
 					onScroll={onScroll}
@@ -250,8 +272,9 @@ export default function ThreadScreen() {
 					onLayout={followEnd}
 					keyboardShouldPersistTaps="handled"
 					ListFooterComponent={
-						questions.length > 0 ? (
+						awaitingFirstOutput || questions.length > 0 ? (
 							<View style={{ gap: 12, marginTop: 12 }}>
+								{awaitingFirstOutput ? <AgentHeader meta={meta} label={agentLabel} state={mascotState} /> : null}
 								{questions.map((request) => (
 									<QuestionCard
 										key={request.requestId}
@@ -265,7 +288,8 @@ export default function ThreadScreen() {
 					}
 				/>
 			)}
-			<View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+			{/* With the keyboard up it already covers the home indicator / nav bar. */}
+			<View style={[styles.composer, { paddingBottom: keyboardOpen ? 10 : Math.max(insets.bottom, 10) }]}>
 				<TextInput
 					value={composer}
 					onChangeText={setComposer}
@@ -303,6 +327,28 @@ export default function ThreadScreen() {
 	);
 }
 
+/** The robot and model label over each agent reply, like the desktop's assistant header. */
+function AgentHeader({
+	meta,
+	label,
+	state,
+}: {
+	meta: SessionSearchResult | null;
+	label: string | null;
+	state: "idle" | "working" | "waiting";
+}) {
+	return (
+		<View style={styles.agentHeader}>
+			<AgentMascot provider={meta?.providerId} model={meta?.model} state={state} size={24} />
+			{label ? (
+				<Mono style={styles.agentLabel} numberOfLines={1}>
+					{label}
+				</Mono>
+			) : null}
+		</View>
+	);
+}
+
 const styles = StyleSheet.create({
 	root: { flex: 1, backgroundColor: color.bg },
 	header: {
@@ -322,6 +368,8 @@ const styles = StyleSheet.create({
 	error: { color: color.danger, fontSize: 12, marginBottom: 8 },
 	notice: { color: color.mute, fontSize: 12, marginBottom: 8 },
 	listContent: { paddingHorizontal: 16, paddingBottom: 20, paddingTop: 4 },
+	agentHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+	agentLabel: { fontSize: 11, color: color.mute, flexShrink: 1 },
 	composer: {
 		flexDirection: "row",
 		alignItems: "flex-end",

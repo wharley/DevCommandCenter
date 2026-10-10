@@ -4,7 +4,15 @@
  * does, with fictional projects, and plays an agent that streams, asks for a
  * permission and finishes — so every screen works exactly as when paired.
  */
-import type { Comb, RawSessionEvent, SessionSearchResult } from "@dcc/mobile-core";
+import {
+	taskTitle,
+	type CatalogRepository,
+	type Comb,
+	type MobileCatalog,
+	type RawSessionEvent,
+	type SessionSearchResult,
+	type TaskProgress,
+} from "@dcc/mobile-core";
 import { ApiError, type Backend, type ConnectionState, type StreamHandlers } from "./types";
 
 type DemoSession = SessionSearchResult & { events: RawSessionEvent[] };
@@ -31,6 +39,9 @@ export class DemoBackend implements Backend {
 	readonly mode = "demo" as const;
 	private readonly sessions: DemoSession[];
 	private readonly combs: Comb[];
+	private readonly repositories: CatalogRepository[];
+	/** Task creations by request id, as the desktop journals them. */
+	private readonly tasks = new Map<string, { input: string; result: TaskProgress }>();
 	private readonly subs = new Set<{ path: () => string; handlers: StreamHandlers }>();
 	private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 	/** Steps that resume once a permission is answered, by request id. */
@@ -41,6 +52,7 @@ export class DemoBackend implements Backend {
 		const fixture = demoFixture(now);
 		this.sessions = fixture.sessions;
 		this.combs = fixture.combs;
+		this.repositories = fixture.repositories;
 		this.eventCounter = 1000;
 		// The checkout session starts blocked on a permission; allowing it
 		// finishes the turn like a live agent would.
@@ -102,6 +114,14 @@ export class DemoBackend implements Backend {
 			return { running: true, cpuPercent: 7, memoryMb: 412 };
 		}
 		if (method === "GET" && path === "/api/v1/combs") return this.combs;
+		if (method === "GET" && path === "/api/v1/mobile/catalog") return this.catalog();
+		if (method === "POST" && path === "/api/v1/mobile/tasks") return this.createTask(body);
+		const task = /^\/api\/v1\/mobile\/tasks\/([^/]+)$/.exec(path);
+		if (method === "GET" && task) {
+			const entry = this.tasks.get(decodeURIComponent(task[1]!));
+			if (!entry) throw new ApiError(404, "Criação não encontrada.");
+			return entry.result;
+		}
 		if (method === "GET" && path === "/api/v1/sessions/search") {
 			return [...this.sessions]
 				.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -188,6 +208,81 @@ export class DemoBackend implements Backend {
 			return { ok: true };
 		}
 		throw new ApiError(404, "Não existe no modo demonstração.");
+	}
+
+	private catalog(): MobileCatalog {
+		return {
+			providers: DEMO_PROVIDERS,
+			repositories: this.repositories,
+			workspaces: this.combs.map((c) => ({
+				id: c.id,
+				projectId: c.projectId ?? "",
+				name: c.name,
+				rootPath: c.projectPath ?? "",
+				baseBranch: c.branch ?? "main",
+				worktreePath: c.worktreePath,
+				state: c.status ?? "ready",
+				updatedAt: c.lastOpenedAt ?? undefined,
+			})),
+		};
+	}
+
+	/** Same contract as the desktop: idempotent by `requestId`, a new workspace per task. */
+	private createTask(body: unknown): TaskProgress {
+		const input = (body ?? {}) as Record<string, unknown>;
+		const requestId = String(input.requestId ?? "");
+		const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+		const encoded = JSON.stringify(input);
+		const known = this.tasks.get(requestId);
+		if (known) {
+			if (known.input !== encoded) throw new ApiError(400, "Esta criação já foi usada com outra descrição.");
+			return known.result;
+		}
+		if (!requestId || !prompt) throw new ApiError(400, "Descreva a tarefa.");
+		const repo = this.repositories.find((r) => r.id === input.repositoryId);
+		if (!repo) throw new ApiError(404, "Repositório não encontrado no DCC.");
+		const provider = DEMO_PROVIDERS.find((p) => p.id === input.providerId);
+		if (!provider) throw new ApiError(400, "Agente desconhecido.");
+		const title = typeof input.title === "string" && input.title.trim() ? input.title.trim() : taskTitle(prompt);
+		const worktree = input.isolationMode !== "localDirect";
+		const slug = title.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "tarefa";
+		const now = new Date().toISOString();
+		const comb: Comb = {
+			id: `demo-w${++this.eventCounter}`,
+			name: title,
+			branch: worktree ? `dcc/${slug}` : repo.baseBranch,
+			projectId: repo.projectId,
+			projectName: repo.name,
+			projectPath: repo.rootPath,
+			projectColor: repo.color ?? null,
+			worktreePath: worktree ? `${repo.rootPath}/.worktrees/${slug}` : repo.rootPath,
+			status: "ready",
+			lastOpenedAt: now,
+		};
+		this.combs.unshift(comb);
+		const session: DemoSession = {
+			sessionId: `demo-s${++this.eventCounter}`,
+			threadTitle: title,
+			snippet: null,
+			providerId: provider.id,
+			model: typeof input.model === "string" ? input.model : null,
+			workspaceName: comb.name,
+			workspaceBranch: comb.branch,
+			workspaceId: comb.id,
+			projectId: repo.name,
+			updatedAt: now,
+			archivedAt: null,
+			events: [],
+		};
+		this.sessions.push(session);
+		this.append(session, { type: "session_started" });
+		this.play(session, prompt);
+		this.tasks.set(requestId, {
+			input: encoded,
+			result: { state: "started", workspaceId: comb.id, sessionId: session.sessionId },
+		});
+		// Like the desktop, the first answer only acknowledges; the poll brings the outcome.
+		return { state: "creating" };
 	}
 
 	/** A short scripted turn: think, read, ask to run the tests, answer. */
@@ -304,13 +399,52 @@ function streamText(turnId: string, text: string): Step[] {
 	return steps;
 }
 
-function demoFixture(now: number): { sessions: DemoSession[]; combs: Comb[] } {
+const DEMO_PROVIDERS: MobileCatalog["providers"] = [
+	{
+		id: "claude",
+		label: "Claude",
+		health: "Healthy",
+		stable: true,
+		models: [
+			{ id: "claude-opus-5-5", label: "Opus 5.5", recommended: true },
+			{ id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
+		],
+	},
+	{
+		id: "codex",
+		label: "Codex",
+		health: "Healthy",
+		stable: true,
+		models: [{ id: "gpt-5.5-codex", label: "GPT-5.5 Codex", recommended: true }],
+	},
+	{ id: "gemini", label: "Gemini", health: "Healthy", stable: false, models: [{ id: "gemini-3-pro", label: "Gemini 3 Pro" }] },
+	{ id: "cursor", label: "Cursor", health: { Unhealthy: { reason: "Faça login no Cursor" } }, stable: false, models: [] },
+];
+
+function demoFixture(now: number): { sessions: DemoSession[]; combs: Comb[]; repositories: CatalogRepository[] } {
 	const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
 	const combs: Comb[] = [
-		{ id: "demo-w1", name: "checkout-v2", branch: "feat/checkout-v2", projectId: "loja", projectName: "loja-online", projectPath: "/demo/loja-online", projectColor: "verde", worktreePath: "/demo/loja-online/.worktrees/checkout-v2", status: "ready", lastOpenedAt: ago(3) },
-		{ id: "demo-w2", name: "main", branch: "main", projectId: "loja", projectName: "loja-online", projectPath: "/demo/loja-online", projectColor: "verde", worktreePath: "/demo/loja-online", status: "ready", lastOpenedAt: ago(90) },
-		{ id: "demo-w3", name: "fix-login", branch: "fix/login-timeout", projectId: "api", projectName: "api-pagamentos", projectPath: "/demo/api-pagamentos", projectColor: "azul", worktreePath: "/demo/api-pagamentos/.worktrees/fix-login", status: "ready", lastOpenedAt: ago(25) },
-		{ id: "demo-w4", name: "docs", branch: "docs/onboarding", projectId: "site", projectName: "site-institucional", projectPath: "/demo/site", projectColor: "roxo", worktreePath: "/demo/site", status: "ready", lastOpenedAt: ago(600) },
+		{ id: "demo-w1", name: "checkout-v2", branch: "feat/checkout-v2", projectId: "loja", projectName: "loja-online", projectPath: "/demo/loja-online", projectColor: "emerald", worktreePath: "/demo/loja-online/.worktrees/checkout-v2", status: "ready", lastOpenedAt: ago(3) },
+		{ id: "demo-w2", name: "main", branch: "main", projectId: "loja", projectName: "loja-online", projectPath: "/demo/loja-online", projectColor: "emerald", worktreePath: "/demo/loja-online", status: "ready", lastOpenedAt: ago(90) },
+		{ id: "demo-w3", name: "fix-login", branch: "fix/login-timeout", projectId: "api", projectName: "api-pagamentos", projectPath: "/demo/api-pagamentos", projectColor: "sky", worktreePath: "/demo/api-pagamentos/.worktrees/fix-login", status: "ready", lastOpenedAt: ago(25) },
+		{ id: "demo-w4", name: "docs", branch: "docs/onboarding", projectId: "site", projectName: "site-institucional", projectPath: "/demo/site", projectColor: "violet", worktreePath: "/demo/site", status: "ready", lastOpenedAt: ago(600) },
+	];
+	const repo = (id: string, name: string, rootPath: string, color: string | null, icon: string | null = null): CatalogRepository => ({
+		id,
+		projectId: id,
+		name,
+		displayName: null,
+		icon,
+		color,
+		rootPath,
+		baseBranch: "main",
+	});
+	// The mobile app has no workspace yet: it shows up in Workspaces anyway.
+	const repositories = [
+		repo("loja", "loja-online", "/demo/loja-online", "emerald"),
+		repo("api", "api-pagamentos", "/demo/api-pagamentos", "sky"),
+		repo("site", "site-institucional", "/demo/site", "violet"),
+		repo("app", "app-mobile", "/demo/app-mobile", "orange", "tucano"),
 	];
 	const row = (id: string, comb: Comb, title: string, provider: string, minutes: number): DemoSession => ({
 		sessionId: id,
@@ -398,5 +532,5 @@ function demoFixture(now: number): { sessions: DemoSession[]; combs: Comb[] } {
 		{ type: "turn_delta", turnId: "f1", content: "Comecei pela lista de pacotes desatualizados…" },
 		{ type: "turn_aborted", turnId: "f1", reason: "user" },
 	], 1505);
-	return { sessions: [blocked, running, asking, done, failed], combs };
+	return { sessions: [blocked, running, asking, done, failed], combs, repositories };
 }

@@ -69,6 +69,29 @@ export function groupMessages(messages: ChatMessage[]): RenderItem[] {
 	return items;
 }
 
+/**
+ * Items that open an agent's reply — the first non-user item after each
+ * prompt. The thread puts the agent's robot and model label on them, like
+ * the desktop's assistant header.
+ */
+export function agentTurnHeads(items: RenderItem[]): string[] {
+	const heads: string[] = [];
+	let open = true;
+	for (const item of items) {
+		const kind = item.type === "single" ? item.message.kind : "trace";
+		if (kind === "user") {
+			open = true;
+			continue;
+		}
+		if (kind === "system") continue;
+		if (open) {
+			heads.push(item.key);
+			open = false;
+		}
+	}
+	return heads;
+}
+
 export function stepIsLive(step: TraceStep): boolean {
 	if (step.kind === "reasoning") return !step.completed;
 	if (step.kind === "tool") return step.status === "running";

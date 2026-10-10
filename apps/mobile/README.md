@@ -22,11 +22,18 @@ yarn ios                              # or build DCC.xcworkspace in Xcode
 `yarn start` runs Metro on its own; `yarn web` serves the web build (demo and
 testing only: on the web the device key sits in `localStorage`).
 
+Android: the Android SDK with an emulator image, and a JDK (the Gradle 9
+wrapper ran on Temurin 23 here). Prebuild with `--platform android`, then
+`yarn android`, or `cd android && ./gradlew :app:assembleDebug` and
+`adb install`. With Metro running, `adb reverse tcp:8081 tcp:8081` lets the
+emulator load the bundle.
+
 ## A desktop to pair with
 
 `scripts/desktop-fixture.mjs` starts a throwaway desktop on this machine: the
 relay with `wrangler dev`, `dccd-http` on port 9877 with a temporary database,
-app-data dir and HOME, and a disposable git repository as project/workspace.
+app-data dir and HOME, a disposable git repository as project/workspace, and a
+second project with no workspace yet (Workspaces lists it with "Nova tarefa").
 
 ```bash
 cargo build --bin dccd-http
@@ -35,8 +42,9 @@ node apps/mobile/scripts/desktop-fixture.mjs --open   # from the repo root
 
 It also stands in for Expo's push service (see "Push notifications").
 It prints a `dcc://pair#…` link (`--open` opens it in the booted simulator;
-otherwise `xcrun simctl openurl booted '<link>'`) and approves the phone when
-it asks, after printing its fingerprint (`--manual` waits for `approve`/`deny`).
+otherwise `xcrun simctl openurl booted '<link>'`; `--android` forwards the
+relay port into the running emulator with `adb reverse` and opens it there)
+and approves the phone when it asks, after printing its fingerprint (`--manual` waits for `approve`/`deny`).
 Type `agent` to start a Claude session in the workspace (uses your `claude`
 login) with a prompt that needs a permission.
 

@@ -1,3 +1,4 @@
+export * from "./catalog.ts";
 export * from "./questions.ts";
 export * from "./threadEvents.ts";
 export * from "./threadSync.ts";

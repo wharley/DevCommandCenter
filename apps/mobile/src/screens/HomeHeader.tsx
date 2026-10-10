@@ -6,6 +6,7 @@ import { color, radius } from "../theme";
 import { ConnectionBanner } from "../ui/ConnectionBanner";
 import { Panel, Wordmark } from "../ui/primitives";
 import { useHomeData } from "./homeData";
+import { openNewTask } from "./rows";
 
 /** Wordmark, settings, connection state, errors and the search field. */
 export function HomeHeader({
@@ -24,15 +25,27 @@ export function HomeHeader({
 		<View>
 			<View style={styles.top}>
 				<Wordmark online={state.kind === "online"} />
-				<Pressable
-					onPress={() => router.push("/settings")}
-					hitSlop={10}
-					accessibilityRole="button"
-					accessibilityLabel="Configurações"
-					style={styles.icon}
-				>
-					<Feather name="settings" size={18} color={color.mute} />
-				</Pressable>
+				<View style={styles.actions}>
+					<Pressable
+						onPress={() => openNewTask()}
+						hitSlop={6}
+						accessibilityRole="button"
+						accessibilityLabel="Nova tarefa"
+						style={({ pressed }) => [styles.newTask, pressed && { opacity: 0.8 }]}
+					>
+						<Feather name="plus" size={15} color={color.accentInk} />
+						<Text style={styles.newTaskText}>Nova tarefa</Text>
+					</Pressable>
+					<Pressable
+						onPress={() => router.push("/settings")}
+						hitSlop={10}
+						accessibilityRole="button"
+						accessibilityLabel="Configurações"
+						style={styles.icon}
+					>
+						<Feather name="settings" size={18} color={color.mute} />
+					</Pressable>
+				</View>
 			</View>
 			<ConnectionBanner backend={backend} />
 			{error ? (
@@ -67,6 +80,17 @@ export function HomeHeader({
 const styles = StyleSheet.create({
 	top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingBottom: 16 },
 	icon: { padding: 6 },
+	actions: { flexDirection: "row", alignItems: "center", gap: 10 },
+	newTask: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 4,
+		backgroundColor: color.accent,
+		borderRadius: 999,
+		paddingHorizontal: 12,
+		paddingVertical: 6,
+	},
+	newTaskText: { color: color.accentInk, fontSize: 13, fontWeight: "600" },
 	message: { marginBottom: 12, paddingVertical: 10 },
 	errorText: { color: color.danger, fontSize: 12, lineHeight: 17 },
 	noticeText: { color: color.mute, fontSize: 12, lineHeight: 17 },

@@ -1,4 +1,4 @@
-import { runScan, triageGroups } from "@dcc/mobile-core";
+import { projectGroups, runScan, taskRequestBody, triageGroups, type MobileCatalog, type TaskProgress } from "@dcc/mobile-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DemoBackend } from "../src/backend/demo";
 import { ApiError } from "../src/backend/types";
@@ -62,6 +62,39 @@ describe("demo mode", () => {
 		const answer = snapshot!.state.messages.find((m) => m.kind === "assistant");
 		expect(answer?.kind === "assistant" && answer.aborted).toBe(true);
 		sync.stop();
+		demo.dispose();
+	});
+
+	it("lists a project with no workspace and creates a task in it", async () => {
+		const demo = new DemoBackend();
+		const read = <T,>(method: string, path: string, body?: unknown) => {
+			const reply = demo.request<T>(method, path, body);
+			reply.catch(() => {}); // Observed below; keeps the fake timers from reporting it unhandled.
+			return vi.advanceTimersByTimeAsync(500).then(() => reply);
+		};
+		const catalog = await read<MobileCatalog>("GET", "/api/v1/mobile/catalog");
+		const empty = projectGroups(catalog.repositories, (await read("GET", "/api/v1/combs")) as never, []).find((g) => g.combs.length === 0);
+		expect(empty?.name).toBe("app-mobile");
+
+		const body = taskRequestBody({
+			requestId: "00000000-0000-4000-8000-000000000001",
+			repositoryId: empty!.repositoryId!,
+			prompt: "Crie a tela de login",
+			providerId: "codex",
+			model: "gpt-5.5-codex",
+			worktree: false,
+		});
+		expect((await read<TaskProgress>("POST", "/api/v1/mobile/tasks", body)).state).toBe("creating");
+		const done = await read<TaskProgress>("GET", `/api/v1/mobile/tasks/${body.requestId}`);
+		expect(done).toMatchObject({ state: "started" });
+		// Retrying the same creation answers the same outcome; a changed draft is refused.
+		expect(await read<TaskProgress>("POST", "/api/v1/mobile/tasks", body)).toEqual(done);
+		await expect(read("POST", "/api/v1/mobile/tasks", { ...body, prompt: "outra" })).rejects.toBeInstanceOf(ApiError);
+
+		const sessions = await read<Array<{ sessionId: string; providerId: string; workspaceBranch: string }>>("GET", "/api/v1/sessions/search");
+		expect(sessions[0]).toMatchObject({ sessionId: done.sessionId, providerId: "codex", workspaceBranch: "main" });
+		const after = projectGroups(catalog.repositories, (await read("GET", "/api/v1/combs")) as never, []);
+		expect(after.find((g) => g.name === "app-mobile")?.combs).toHaveLength(1);
 		demo.dispose();
 	});
 });

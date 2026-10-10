@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// A throwaway "desktop" for trying the app in the iOS Simulator, all on this
-// machine and never on the real DCC data:
+// A throwaway "desktop" for trying the app in the iOS Simulator or the Android
+// emulator, all on this machine and never on the real DCC data:
 //
 //   - the relay with `wrangler dev` (local, nothing deployed);
 //   - `dccd-http` (build it first: cargo build --bin dccd-http) on port 9877
 //     with a temporary database, app-data dir and HOME, pointed at that relay;
-//   - one project + workspace on a temporary git repo;
+//   - one project + workspace on a temporary git repo, and a second project
+//     with no workspace yet (as the desktop has right after adding one);
 //   - a pairing offer: prints the `dcc://pair` link and, with --open, opens it
-//     in the booted simulator (`xcrun simctl openurl`);
+//     in the booted simulator (`xcrun simctl openurl`); with --android it
+//     forwards the relay port into the running emulator (`adb reverse`, the
+//     emulator's 127.0.0.1 is itself) and opens the link there;
 //   - approves the phone when it asks (the "Aprovar <aparelho>?" click of the
 //     desktop), after printing its fingerprint; with --manual it waits for
 //     `approve` or `deny` typed in the terminal instead;
@@ -25,7 +28,8 @@
 //   approve | deny   answer the pending pairing (with --manual)
 //   quit
 //
-//   node apps/mobile/scripts/desktop-fixture.mjs --open
+//   node apps/mobile/scripts/desktop-fixture.mjs --open      (iOS Simulator)
+//   node apps/mobile/scripts/desktop-fixture.mjs --android   (Android emulator)
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
@@ -39,6 +43,8 @@ import { randomBytes } from "node:crypto";
 const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const open = process.argv.includes("--open");
 const manual = process.argv.includes("--manual");
+const android = process.argv.includes("--android");
+const adb = join(process.env.ANDROID_HOME ?? join(homedir(), "Library/Android/sdk"), "platform-tools/adb");
 const httpPort = Number(process.env.DCC_FIXTURE_PORT ?? 9877);
 const bundleId = "com.devcommandcenter.mobile";
 const apiKey = randomBytes(24).toString("hex");
@@ -79,6 +85,7 @@ const tmp = realpathSync(mkdtempSync(join(tmpdir(), "dcc-mobile-fixture-")));
 const home = join(tmp, "home");
 const appData = join(tmp, "app");
 const repo = join(tmp, "loja-demo");
+const secondRepo = join(tmp, "site-demo");
 mkdirSync(home, { recursive: true });
 mkdirSync(appData, { recursive: true });
 // The agent CLI reads its login from the real HOME (config plus the Keychain
@@ -94,6 +101,11 @@ writeFileSync(join(repo, "package.json"), '{ "name": "loja-demo", "scripts": { "
 execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
 execFileSync("git", ["add", "."], { cwd: repo });
 execFileSync("git", ["-c", "user.name=DCC", "-c", "user.email=dcc@example.invalid", "commit", "-qm", "init"], { cwd: repo });
+mkdirSync(secondRepo);
+writeFileSync(join(secondRepo, "index.html"), "<h1>site-demo</h1>\n");
+execFileSync("git", ["init", "-q", "-b", "main"], { cwd: secondRepo });
+execFileSync("git", ["add", "."], { cwd: secondRepo });
+execFileSync("git", ["-c", "user.name=DCC", "-c", "user.email=dcc@example.invalid", "commit", "-qm", "init"], { cwd: secondRepo });
 
 // What Expo hands APNs for a message of `/send`: the alert in `aps`, the
 // message's `data` under `body` (expo-notifications reads it from there).
@@ -225,6 +237,8 @@ CREATE TABLE IF NOT EXISTS dcc_repositories (
 );
 INSERT OR IGNORE INTO dcc_repositories (id, project_id, name, display_name, root_path, base_branch, created_at, updated_at)
 VALUES ('fixture-repo', '${project}', 'loja-demo', 'loja-demo', '${repo}', 'main', '${now}', '${now}');
+INSERT OR IGNORE INTO dcc_repositories (id, project_id, name, display_name, icon, color, root_path, base_branch, created_at, updated_at)
+VALUES ('fixture-repo-2', 'fixture-project-2', 'site-demo', 'site-demo', 'tucano', 'orange', '${secondRepo}', 'main', '${now}', '${now}');
 INSERT OR IGNORE INTO dcc_workspaces (id, project_id, name, root_path, base_branch, worktree_path, state, created_at, updated_at)
 VALUES ('${workspace}', '${project}', 'main', '${repo}', 'main', '${repo}', 'ready', '${now}', '${now}');
 `;
@@ -264,6 +278,16 @@ async function offer() {
 			console.log("(aberto no simulador)");
 		} catch (error) {
 			console.error(`simctl openurl failed: ${error.message}`);
+		}
+	}
+	if (android) {
+		try {
+			execFileSync(adb, ["reverse", `tcp:${relayPort}`, `tcp:${relayPort}`]);
+			// `am start` goes through the device shell: quote the link for it.
+			execFileSync(adb, ["shell", `am start -a android.intent.action.VIEW -d '${created.url}'`]);
+			console.log("(aberto no emulador)");
+		} catch (error) {
+			console.error(`adb failed: ${error.message}`);
 		}
 	}
 }

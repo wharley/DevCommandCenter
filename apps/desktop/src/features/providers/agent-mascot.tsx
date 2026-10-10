@@ -1,7 +1,11 @@
-import { agentMascotPaths, type AgentMascotKey, type AgentMascotState } from "@dcc/mascots";
+import {
+	agentMascotPaths,
+	resolveAgentMascotKey,
+	type AgentMascotKey,
+	type AgentMascotState,
+} from "@dcc/mascots";
 import { PixelSprite } from "@/components/pixel-sprite";
 import { cn } from "@/lib/utils";
-import { resolveIconKey } from "./provider-icons";
 
 /**
  * Tile per provider: brand color where the brand has one (Claude clay, Codex
@@ -45,7 +49,7 @@ export function AgentMascot({
 	className?: string;
 	title?: string;
 }) {
-	const key: AgentMascotKey = resolveIconKey(provider) ?? resolveIconKey(model) ?? "generic";
+	const key = resolveAgentMascotKey(provider, model);
 
 	return (
 		<span

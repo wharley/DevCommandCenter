@@ -12,13 +12,8 @@ import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { alpha, color, radius } from "../theme";
-import { Button, Mono, StateDot, type AgentState } from "../ui/primitives";
-
-const DOT_FOR_STATUS: Record<LiveStatus, AgentState> = {
-	running: "live",
-	completed: "idle",
-	aborted: "fail",
-};
+import { Button, Mono } from "../ui/primitives";
+import { AgentMascot } from "../ui/sprites";
 
 const STATUS_TEXT: Record<LiveStatus, { text: string; tint: string }> = {
 	running: { text: "rodando", tint: color.accent },
@@ -28,6 +23,11 @@ const STATUS_TEXT: Record<LiveStatus, { text: string; tint: string }> = {
 
 export function openThread(sessionId: string) {
 	router.push({ pathname: "/thread/[id]", params: { id: sessionId } });
+}
+
+/** "Nova tarefa", optionally with the project already picked. */
+export function openNewTask(repositoryId?: string | null) {
+	router.push(repositoryId ? { pathname: "/new-task", params: { repositoryId } } : "/new-task");
 }
 
 export function SessionRow({ session, status }: { session: SessionSearchResult; status?: LiveStatus }) {
@@ -40,9 +40,7 @@ export function SessionRow({ session, status }: { session: SessionSearchResult; 
 			accessibilityRole="button"
 			accessibilityLabel={`${sessionTitle(session)}${label ? `, ${label.text}` : ""}`}
 		>
-			<View style={styles.dot}>
-				<StateDot state={status ? DOT_FOR_STATUS[status] : "idle"} />
-			</View>
+			<AgentMascot provider={session.providerId} model={session.model} state={status === "running" ? "working" : "idle"} size={28} />
 			<View style={{ flex: 1, minWidth: 0, gap: 3 }}>
 				<View style={styles.titleLine}>
 					<Text style={styles.title} numberOfLines={1}>
@@ -86,7 +84,7 @@ export function NeedsYouCard({
 	return (
 		<View style={styles.card}>
 			<Pressable onPress={() => openThread(item.thread.sessionId)} style={styles.cardHead} accessibilityRole="button">
-				<StateDot state="wait" />
+				<AgentMascot provider={item.thread.providerId} model={item.thread.model} state="waiting" size={28} />
 				<View style={{ flex: 1, minWidth: 0 }}>
 					<Text style={styles.title} numberOfLines={1}>
 						{sessionTitle(item.thread)}
@@ -135,7 +133,6 @@ const styles = StyleSheet.create({
 		borderColor: color.border,
 		backgroundColor: color.panel,
 	},
-	dot: { width: 10, alignItems: "center" },
 	titleLine: { flexDirection: "row", alignItems: "center", gap: 6 },
 	title: { color: color.fg, fontSize: 14, fontWeight: "500", flexShrink: 1 },
 	place: { color: color.faint, fontSize: 11 },

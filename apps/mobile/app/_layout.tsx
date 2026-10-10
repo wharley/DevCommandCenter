@@ -8,6 +8,7 @@ import { router, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef } from "react";
 import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 configureNotificationDisplay();
@@ -15,15 +16,20 @@ configureNotificationDisplay();
 export default function RootLayout() {
 	return (
 		<SafeAreaProvider>
-			<SessionProvider>
-				<StatusBar style="light" />
-				<View style={{ flex: 1, backgroundColor: color.bg }}>
-					<PairingLinks />
-					<NotificationTaps />
-					<OfferNotifications />
-					<Routes />
-				</View>
-			</SessionProvider>
+			{/* SDK 55 draws Android edge-to-edge: the window no longer resizes for
+			    the keyboard, so screens follow its frames from here (as Paseo,
+			    Happy and t3code do). */}
+			<KeyboardProvider>
+				<SessionProvider>
+					<StatusBar style="light" />
+					<View style={{ flex: 1, backgroundColor: color.bg }}>
+						<PairingLinks />
+						<NotificationTaps />
+						<OfferNotifications />
+						<Routes />
+					</View>
+				</SessionProvider>
+			</KeyboardProvider>
 		</SafeAreaProvider>
 	);
 }
@@ -104,6 +110,7 @@ function Routes() {
 				<Stack.Screen name="thread/[id]" />
 				<Stack.Screen name="settings" options={{ presentation: "modal" }} />
 				<Stack.Screen name="notifications" options={{ presentation: "modal" }} />
+				<Stack.Screen name="new-task" options={{ presentation: "modal" }} />
 			</Stack.Protected>
 			<Stack.Screen name="pair" options={{ presentation: ready ? "modal" : "card", gestureEnabled: ready }} />
 		</Stack>

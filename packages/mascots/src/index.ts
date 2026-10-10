@@ -543,6 +543,30 @@ export function isAgentMascotKey(value: string | null | undefined): value is Age
 	return typeof value === "string" && (AGENT_MASCOT_KEYS as readonly string[]).includes(value);
 }
 
+export type AgentBrandKey = Exclude<AgentMascotKey, "generic">;
+
+/** The brand behind a provider id or label, tolerant of catalog variants. */
+export function agentBrandKey(provider: string | null | undefined): AgentBrandKey | null {
+	if (!provider) return null;
+	const value = provider.toLowerCase();
+	if (value.includes("claude") || value.includes("anthropic")) return "claude";
+	if (value.includes("codex") || value.includes("openai")) return "codex";
+	if (value.includes("gemini") || value.includes("google") || value.includes("antigravity"))
+		return "gemini";
+	if (value.includes("grok") || value.includes("xai")) return "grok";
+	if (value.includes("cursor")) return "cursor";
+	if (value.includes("droid") || value.includes("factory")) return "droid";
+	return null;
+}
+
+/** Which robot an agent gets: the provider wins, then the model, else `generic`. */
+export function resolveAgentMascotKey(
+	provider: string | null | undefined,
+	model?: string | null,
+): AgentMascotKey {
+	return agentBrandKey(provider) ?? agentBrandKey(model) ?? "generic";
+}
+
 const agentPathCache = new Map<string, MascotPaths>();
 
 /** Two frames for the robot in `state`; `idle` repeats the same pose. */
