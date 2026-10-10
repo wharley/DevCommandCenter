@@ -8,3 +8,6 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# Firebase config for Android push: EAS builds get it from the
+# GOOGLE_SERVICES_JSON file variable (see app.config.js).
+google-services.json

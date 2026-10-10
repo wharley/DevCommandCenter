@@ -79,13 +79,18 @@ the app reads `extra.eas.projectId` from `app.json` (or `Constants.easConfig`).
    (or upload an existing `.p8`). EAS keeps the key; it never goes into this
    repository.
 3. **Android (FCM V1).** In the Firebase console create a project with an
-   Android app `com.devcommandcenter.mobile`. Project settings → Service
-   accounts → generate a private key (JSON, keep it out of git) and upload it:
-   `npx eas-cli credentials` → Android → production → Google Service Account →
-   Manage your Google Service Account Key for Push Notifications (FCM V1) →
-   Set up → Upload a new service account key. Download `google-services.json`,
-   put it in `apps/mobile/` and set `"android": { "googleServicesFile":
-   "./google-services.json" }` in `app.json` (this file can be committed).
+   Android app `com.devcommandcenter.mobile`.
+   - Download `google-services.json`. It stays out of git (`.gitignore`):
+     put it in `apps/mobile/` for local builds, and give it to EAS as a file
+     variable for cloud builds — `app.config.js` picks whichever exists:
+     ```bash
+     npx eas-cli env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --visibility secret --environment preview --environment production
+     ```
+   - Project settings → Service accounts → generate a private key (JSON, keep
+     it out of git) and upload it: `npx eas-cli credentials` → Android →
+     production → Google Service Account → Manage your Google Service Account
+     Key for Push Notifications (FCM V1) → Set up → Upload a new service
+     account key.
 4. **Build for a real iPhone.** (Expo says simulators on Xcode 14+ can get
    tokens too, but the phone is the test that counts: lock screen, background.)
    ```bash
