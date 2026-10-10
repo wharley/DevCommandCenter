@@ -71,7 +71,7 @@ the app reads `extra.eas.projectId` from `app.json` (or `Constants.easConfig`).
    `eas init` creates the project and writes `extra.eas.projectId` (and
    `owner`) into `app.json`. Commit that change — the id is not a secret.
 2. **iOS (APNs).** Needs the paid Apple Developer account. Register the
-   iPhone for development builds (`npx eas-cli device:create`, open the link on
+   iPhone for internal builds (`npx eas-cli device:create`, open the link on
    the phone), then either let the first `eas build` set it up (answer yes to
    "Setup Push Notifications for your project" and "Generating a new Apple Push
    Notifications service key") or run `npx eas-cli credentials` → iOS →
@@ -89,8 +89,12 @@ the app reads `extra.eas.projectId` from `app.json` (or `Constants.easConfig`).
 4. **Build for a real iPhone.** (Expo says simulators on Xcode 14+ can get
    tokens too, but the phone is the test that counts: lock screen, background.)
    ```bash
-   npx eas-cli build --profile development --platform ios   # or: npx expo run:ios --device
+   npx eas-cli build --profile preview --platform ios   # or: npx expo run:ios --device
    ```
+   `preview` (in `eas.json`) is a standalone build for internal distribution:
+   it installs from the link EAS prints, on the iPhones registered with
+   `device:create`, and needs no Metro server. `production` is the App Store
+   build (`eas submit` sends it to TestFlight).
    Install it, pair with the desktop, accept "Avisar quando um agente precisar
    de você?". Settings → "Notificações deste aparelho" should say "Ligadas".
 5. **Check it.** Put the app in the background (or lock the phone), step away

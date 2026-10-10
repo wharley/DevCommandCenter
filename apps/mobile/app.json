@@ -11,14 +11,19 @@
     "ios": {
       "bundleIdentifier": "com.devcommandcenter.mobile",
       "supportsTablet": true,
-      "config": { "usesNonExemptEncryption": false }
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.devcommandcenter.mobile",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a0b0d"
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -40,6 +45,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "17422e03-d30d-40ca-9e2f-8896c07246f0"
+      }
+    },
+    "owner": "wharleyornelasjs"
   }
 }
