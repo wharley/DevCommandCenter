@@ -1,5 +1,7 @@
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +24,50 @@ function findInstalledAiMemory() {
   }
   return null;
 }
+
+// Tailwind 4 needs postcss 8 at the repository root. A reshuffled install once
+// left react-scripts' postcss 7 there (via file-extension-icon-js), and the
+// dev server answered every stylesheet with "plugin is not a function".
+function assertRootPostcss() {
+  const manifest = join(repoRoot, 'node_modules', 'postcss', 'package.json');
+  if (!existsSync(manifest)) return;
+  const { version } = JSON.parse(readFileSync(manifest, 'utf8'));
+  if (Number.parseInt(version, 10) >= 8) return;
+  console.error(
+    `[dev] node_modules/postcss é ${version}; o Tailwind precisa do 8. Rode \`yarn install --force\` e tente de novo.`,
+  );
+  process.exit(1);
+}
+
+// The dev server sends its prebundled dependencies as immutable for a year, so
+// after an install changes them the dev window keeps stale copies and lazy
+// imports fail ("Importing a module script failed"). Drop the dev window's
+// HTTP cache whenever yarn.lock changes; storage and the database are untouched.
+function clearDevWebviewCacheIfLockChanged() {
+  if (process.platform !== 'darwin') return;
+  const lockfile = join(repoRoot, 'yarn.lock');
+  if (!existsSync(lockfile)) return;
+  const digest = createHash('sha256').update(readFileSync(lockfile)).digest('hex');
+  const stampDir = join(repoRoot, 'node_modules', '.cache');
+  const stamp = join(stampDir, 'dcc-dev-webview-yarn-lock');
+  if (existsSync(stamp) && readFileSync(stamp, 'utf8') === digest) return;
+  const cache = join(homedir(), 'Library', 'Caches', 'dev-command-center-tauri', 'WebKit', 'NetworkCache');
+  if (existsSync(cache)) {
+    try {
+      rmSync(cache, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+      console.log('[dev] yarn.lock mudou: cache de rede da janela dev limpo.');
+    } catch (error) {
+      // Another dev window is still writing to it; try again next start.
+      console.warn(`[dev] não deu para limpar o cache da janela dev (${error.code}); feche a outra janela dev.`);
+      return;
+    }
+  }
+  mkdirSync(stampDir, { recursive: true });
+  writeFileSync(stamp, digest);
+}
+
+assertRootPostcss();
+clearDevWebviewCacheIfLockChanged();
 
 const env = { ...process.env };
 if (!env.DCC_AI_MEMORY_URL && !env.DCC_AI_MEMORY_DISABLE) {

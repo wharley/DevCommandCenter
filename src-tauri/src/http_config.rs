@@ -162,12 +162,9 @@ impl HttpConfig {
         // Validation
         validate_api_key_strength(&config.api_key)?;
 
-        if !config.db_path.exists() {
-            eprintln!(
-                "[DCC HTTP] WARNING: Database path does not exist: {:?}",
-                config.db_path
-            );
-        }
+        // No check on `db_path` here: the desktop swaps in its own database
+        // and `dccd-http` resolves the default afterwards, so the path is not
+        // final yet.
 
         // An operator who asked for remote/mixed auth must provide the shared
         // bearer.
