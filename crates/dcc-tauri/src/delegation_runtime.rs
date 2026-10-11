@@ -655,7 +655,8 @@ async fn git_context_lines(workspace: &WorkspaceCommandState, path: &str) -> Vec
 // Permission ceiling
 // ---------------------------------------------------------------------------
 
-fn provider_approval_policies(provider_id: &str) -> Vec<ProviderApprovalPolicy> {
+/// Levels the provider enforces natively; empty when it takes none or is unknown.
+pub fn provider_approval_policies(provider_id: &str) -> Vec<ProviderApprovalPolicy> {
     dcc_providers::provider_registration(provider_id)
         .map(|registration| registration.capabilities.approval_policies)
         .unwrap_or_default()

@@ -8,6 +8,7 @@ use dcc_core::{
     ports::{RepositoryRepo, WorkspaceRepo},
 };
 use dcc_infra::{db::SqliteWorkspaceRepo, git::CommandGitOps};
+pub(super) use dcc_tauri::delegation_runtime::provider_approval_policies;
 use rusqlite::OptionalExtension;
 
 pub(super) async fn catalog(
@@ -47,6 +48,10 @@ pub(super) struct CreateTask {
     /// Omitted by older apps: protected worktree, the core's default.
     #[serde(default)]
     isolation_mode: Option<WorkspaceIsolationMode>,
+    /// The phone's access selector. Omitted by older apps, which always asked.
+    /// Skipped when absent so journaled requests from those apps still match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    approval_policy: Option<ProviderApprovalPolicy>,
 }
 
 fn validate_task(input: &CreateTask) -> Result<(), HttpApiError> {
@@ -68,6 +73,89 @@ fn validate_task(input: &CreateTask) -> Result<(), HttpApiError> {
             "Descreva a tarefa (até 100 mil caracteres) e use um título curto.".into(),
         ));
     }
+    task_approval_policy(input)?;
+    Ok(())
+}
+
+/// The level a phone turn runs with. A choice must be one the provider
+/// enforces; without one the session keeps its latest turn's level (what the
+/// desktop or the phone last chose), so a continuation neither drops back to
+/// asking nor rises above it. Delegated children cap themselves at that same
+/// recorded level (`delegation_runtime::child_approval_policy`).
+pub(super) fn turn_approval_policy(
+    supported: &[ProviderApprovalPolicy],
+    chosen: Option<ProviderApprovalPolicy>,
+    latest: Option<ProviderApprovalPolicy>,
+) -> Result<Option<ProviderApprovalPolicy>, HttpApiError> {
+    match chosen {
+        Some(policy) if supported.contains(&policy) => Ok(Some(policy)),
+        Some(_) => Err(HttpApiError::BadRequest(
+            "Este agente não oferece esse nível de acesso.".into(),
+        )),
+        None => Ok(latest.filter(|policy| supported.contains(policy))),
+    }
+}
+
+/// A new task has no earlier turn: older apps (no choice) keep asking.
+fn task_approval_policy(
+    input: &CreateTask,
+) -> Result<Option<ProviderApprovalPolicy>, HttpApiError> {
+    let supported = provider_approval_policies(&input.provider_id);
+    let legacy = supported
+        .contains(&ProviderApprovalPolicy::Ask)
+        .then_some(ProviderApprovalPolicy::Ask);
+    Ok(turn_approval_policy(&supported, input.approval_policy, None)?.or(legacy))
+}
+
+/// The level recorded on the session's newest turn that has one.
+fn latest_session_approval_policy(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<Option<ProviderApprovalPolicy>, String> {
+    let policy = conn
+        .query_row(
+            "SELECT json_extract(kind_json, '$.approvalPolicy') FROM dcc_session_events
+             WHERE session_id = ?1 AND json_extract(kind_json, '$.type') = 'turn_started'
+               AND json_extract(kind_json, '$.approvalPolicy') IS NOT NULL
+             ORDER BY sequence DESC LIMIT 1",
+            [session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(policy.and_then(|policy| serde_json::from_value(Value::String(policy)).ok()))
+}
+
+/// Fills in (or checks) the level of a turn sent over HTTP. Unknown sessions
+/// fall through to the send pipeline, which reports them.
+pub(super) async fn resolve_turn_approval_policy(
+    config: Arc<RwLock<HttpConfig>>,
+    backend: &HttpBackend,
+    input: &mut SendTurnInput,
+) -> Result<(), HttpApiError> {
+    let Some(session) = backend
+        .sessions
+        .peek_session(&input.session_id)
+        .await
+        .map_err(core_error)?
+    else {
+        return Ok(());
+    };
+    let provider_id = input.provider_id.clone().unwrap_or(session.provider_id);
+    let latest = if input.approval_policy.is_none() {
+        let id = input.session_id.0.clone();
+        db_read(config, move |conn| {
+            latest_session_approval_policy(conn, &id)
+        })
+        .await?
+    } else {
+        None
+    };
+    input.approval_policy = turn_approval_policy(
+        &provider_approval_policies(&provider_id),
+        input.approval_policy,
+        latest,
+    )?;
     Ok(())
 }
 
@@ -244,10 +332,16 @@ async fn execute_task(
     save_result(config.clone(), input.request_id.clone(), result.clone()).await?;
     let turn: SendTurnInput = serde_json::from_value(json!({
         "sessionId":session_id, "prompt":input.prompt.trim(), "planMode":input.plan_mode,
-        "approvalPolicy": ProviderApprovalPolicy::Ask,
+        "approvalPolicy": task_approval_policy(input)?,
     }))
     .map_err(|e| HttpApiError::BadRequest(e.to_string()))?;
-    let _ = send_turn_handler(State(backend.clone()), Path(session_id), Json(turn)).await?;
+    let _ = send_turn_handler(
+        State(config.clone()),
+        State(backend.clone()),
+        Path(session_id),
+        Json(turn),
+    )
+    .await?;
     result["state"] = json!("started");
     Ok(())
 }
@@ -411,6 +505,142 @@ async fn workspace_patch(root: &FsPath, path: &str) -> Result<Value, HttpApiErro
     Ok(json!({ "path":path, "patch":text, "truncated":truncated }))
 }
 
+/// Same cap as the desktop's `@` menu (`file-mention-plugin.tsx`).
+const MAX_FILE_RESULTS: usize = 50;
+const MAX_FILE_QUERY: usize = 200;
+/// The phone asks on every keystroke; `git ls-files` runs at most this often per tree.
+const TRACKED_FILES_TTL: Duration = Duration::from_secs(30);
+
+#[derive(Deserialize)]
+pub(super) struct FilesQuery {
+    #[serde(default)]
+    q: String,
+    limit: Option<usize>,
+}
+
+/// `@` in the phone's composer: tracked files of a workspace, found by id only.
+pub(super) async fn workspace_files(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(id): Path<String>,
+    Query(query): Query<FilesQuery>,
+) -> Result<Json<Value>, HttpApiError> {
+    let repo = SqliteWorkspaceRepo::open(&config.read().await.db_path).map_err(core_error)?;
+    let workspace = repo
+        .get_workspace(&WorkspaceId(id))
+        .await
+        .map_err(core_error)?
+        .ok_or_else(|| HttpApiError::NotFound("Workspace não encontrado.".into()))?;
+    let root = workspace.worktree_path.unwrap_or(workspace.root_path);
+    tracked_files_matching(PathBuf::from(root), query)
+        .await
+        .map(Json)
+}
+
+/// `@` in "Nova tarefa": the project's checkout, before its worktree exists.
+pub(super) async fn repository_files(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(id): Path<String>,
+    Query(query): Query<FilesQuery>,
+) -> Result<Json<Value>, HttpApiError> {
+    let repo = SqliteWorkspaceRepo::open(&config.read().await.db_path).map_err(core_error)?;
+    let repository = repo
+        .list_repositories()
+        .await
+        .map_err(core_error)?
+        .into_iter()
+        .find(|r| r.id.0 == id)
+        .ok_or_else(|| HttpApiError::NotFound("Repositório não encontrado no DCC.".into()))?;
+    tracked_files_matching(PathBuf::from(repository.root_path), query)
+        .await
+        .map(Json)
+}
+
+async fn tracked_files_matching(root: PathBuf, query: FilesQuery) -> Result<Value, HttpApiError> {
+    if query.q.chars().count() > MAX_FILE_QUERY || query.q.contains('\0') {
+        return Err(HttpApiError::BadRequest(
+            "Busca de arquivo inválida.".into(),
+        ));
+    }
+    let root = tokio::fs::canonicalize(&root)
+        .await
+        .map_err(|_| HttpApiError::NotFound("A pasta do workspace não existe mais.".into()))?;
+    let paths = tracked_files(root).await?;
+    let limit = query
+        .limit
+        .unwrap_or(MAX_FILE_RESULTS)
+        .clamp(1, MAX_FILE_RESULTS);
+    let files: Vec<Value> = filter_tracked_files(&paths, &query.q, limit)
+        .into_iter()
+        .map(|path| json!({ "path": path }))
+        .collect();
+    Ok(json!({ "files": files, "total": paths.len() }))
+}
+
+async fn tracked_files(root: PathBuf) -> Result<Arc<Vec<String>>, HttpApiError> {
+    type Cache = std::sync::Mutex<HashMap<PathBuf, (std::time::Instant, Arc<Vec<String>>)>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((at, paths)) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&root) {
+        if at.elapsed() < TRACKED_FILES_TTL {
+            return Ok(paths.clone());
+        }
+    }
+    let dir = root.to_string_lossy().into_owned();
+    let paths = tokio::task::spawn_blocking(move || {
+        dcc_tauri::commands::workspace_commands::git_tracked_files(&dir)
+    })
+    .await
+    .map_err(|e| HttpApiError::internal(e.to_string()))?
+    .map_err(HttpApiError::internal)?;
+    let paths = Arc::new(paths);
+    let mut entries = cache.lock().unwrap_or_else(|e| e.into_inner());
+    entries.retain(|_, (at, _)| at.elapsed() < TRACKED_FILES_TTL);
+    entries.insert(root, (std::time::Instant::now(), paths.clone()));
+    Ok(paths)
+}
+
+/// The desktop's `@` ranking (`rankFile`/`filterFiles` in `file-mention-plugin.tsx`):
+/// an exact name or path wins alone; then path suffix, name prefix, name
+/// substring, path substring — case-insensitive, stable within a rank.
+fn filter_tracked_files<'a>(paths: &'a [String], query: &str, limit: usize) -> Vec<&'a str> {
+    if query.is_empty() {
+        return paths.iter().take(limit).map(String::as_str).collect();
+    }
+    let q = query.to_lowercase();
+    let suffix = format!("/{q}");
+    let rank = |path: &str| -> u8 {
+        let path = path.to_lowercase();
+        let name = path.rsplit('/').next().unwrap_or(&path);
+        if name == q || path == q {
+            5
+        } else if path.ends_with(&suffix) {
+            4
+        } else if name.starts_with(&q) {
+            3
+        } else if name.contains(&q) {
+            2
+        } else if path.contains(&q) {
+            1
+        } else {
+            0
+        }
+    };
+    let mut ranked: Vec<(u8, &str)> = paths
+        .iter()
+        .map(|path| (rank(path), path.as_str()))
+        .filter(|(score, _)| *score > 0)
+        .collect();
+    if ranked.iter().any(|(score, _)| *score == 5) {
+        ranked.retain(|(score, _)| *score == 5);
+    }
+    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(_, path)| path)
+        .collect()
+}
+
 /// Called once at HTTP process startup. An interrupted mutation is never silently replayed.
 pub(super) fn recover_interrupted_tasks(db_path: &FsPath) -> Result<(), String> {
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -522,6 +752,96 @@ mod tests {
         // Older apps omit it: the core falls back to a protected worktree.
         let input: CreateTask = serde_json::from_value(base).unwrap();
         assert!(input.isolation_mode.is_none());
+    }
+
+    #[test]
+    fn access_level_is_chosen_inherited_or_refused() {
+        use ProviderApprovalPolicy::*;
+        let all = [ReadOnly, Ask, Auto, FullAccess];
+        assert_eq!(
+            turn_approval_policy(&all, Some(FullAccess), Some(Ask)).unwrap(),
+            Some(FullAccess)
+        );
+        assert_eq!(
+            turn_approval_policy(&all, None, Some(FullAccess)).unwrap(),
+            Some(FullAccess)
+        );
+        assert_eq!(turn_approval_policy(&all, None, None).unwrap(), None);
+        assert!(turn_approval_policy(&[Ask, Auto], Some(FullAccess), None).is_err());
+        assert!(turn_approval_policy(&[], Some(Ask), None).is_err());
+        // An inherited level the provider can't enforce is dropped, never widened.
+        assert_eq!(
+            turn_approval_policy(&[Ask], None, Some(FullAccess)).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn task_input_carries_the_access_level_without_changing_old_requests() {
+        let base = json!({
+            "requestId": "8f0d2f4e-8a59-4f0e-9a43-0d1f6f3f2b11", "repositoryId": "repo",
+            "title": "t", "prompt": "p", "providerId": "codex",
+        });
+        let old: CreateTask = serde_json::from_value(base.clone()).unwrap();
+        assert!(!serde_json::to_string(&old)
+            .unwrap()
+            .contains("approvalPolicy"));
+        assert_eq!(
+            task_approval_policy(&old).unwrap(),
+            Some(ProviderApprovalPolicy::Ask)
+        );
+        let mut chosen = base.clone();
+        chosen["approvalPolicy"] = json!("full_access");
+        let chosen: CreateTask = serde_json::from_value(chosen).unwrap();
+        assert!(validate_task(&chosen).is_ok());
+        assert_eq!(
+            task_approval_policy(&chosen).unwrap(),
+            Some(ProviderApprovalPolicy::FullAccess)
+        );
+        let mut unknown = base;
+        unknown["providerId"] = json!("no-such-provider");
+        unknown["approvalPolicy"] = json!("auto");
+        let unknown: CreateTask = serde_json::from_value(unknown).unwrap();
+        assert!(validate_task(&unknown).is_err());
+    }
+
+    #[test]
+    fn file_search_ranks_like_the_desktop_mention_menu() {
+        let paths: Vec<String> = [
+            "README.md",
+            "src/app/payment.ts",
+            "src/app/paymentPix.ts",
+            "src/lib/redis.ts",
+            "docs/payment-flow.md",
+            "src/PayButton.tsx",
+        ]
+        .map(String::from)
+        .to_vec();
+        // A complete file name stands alone.
+        assert_eq!(
+            filter_tracked_files(&paths, "payment.ts", 50),
+            ["src/app/payment.ts"]
+        );
+        // Name prefix before name substring before path substring.
+        assert_eq!(
+            filter_tracked_files(&paths, "PAY", 50),
+            [
+                "src/app/payment.ts",
+                "src/app/paymentPix.ts",
+                "docs/payment-flow.md",
+                "src/PayButton.tsx"
+            ]
+        );
+        assert_eq!(
+            filter_tracked_files(&paths, "app/", 50),
+            ["src/app/payment.ts", "src/app/paymentPix.ts"]
+        );
+        assert_eq!(
+            filter_tracked_files(&paths, "", 2),
+            ["README.md", "src/app/payment.ts"]
+        );
+        assert_eq!(filter_tracked_files(&paths, "pay", 1).len(), 1);
+        assert!(filter_tracked_files(&paths, "zzz", 50).is_empty());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyEvents, createThreadState, type RawSessionEvent } from "./threadEvents.ts";
-import { agentTurnHeads, groupMessages, isThreadRunning, threadTitle } from "./timeline.ts";
+import { agentTurnHeads, groupMessages, isThreadRunning, stepLabel, threadApprovalPolicy, threadTitle, traceTitle, type TraceStep } from "./timeline.ts";
 
 let seq = 0;
 function ev(type: string, extra: Record<string, unknown> = {}): RawSessionEvent {
@@ -52,5 +52,51 @@ describe("timeline", () => {
 		// A prompt still waiting for output has no head yet.
 		const pending = applyEvents(state, [ev("turn_completed", { turnId: "b" }), ev("turn_started", { turnId: "c", prompt: "três" })]);
 		expect(agentTurnHeads(groupMessages(pending.messages))).toHaveLength(2);
+	});
+
+	it("labels trace steps in Portuguese, from live and stored events alike", () => {
+		const state = applyEvents(createThreadState(), [
+			ev("turn_started", { turnId: "t", prompt: "rode os testes" }),
+			ev("turn_reasoning_started", { turnId: "t", reasoningId: "r", label: "Thinking" }),
+			// Stored events keep the target beside the action.
+			ev("turn_tool_call_started", { turnId: "t", toolCallId: "a", action: "Bash", command: "yarn test", file: null }),
+			// Live ones carry it nested, under the provider's tool name.
+			ev("turn_tool_call_started", { turnId: "t", toolCallId: "b", toolName: "Edit", toolInput: { file: "/r/src/app.ts" } }),
+			ev("turn_tool_call_failed", { turnId: "t", toolCallId: "b" }),
+		]);
+		const steps = state.messages.filter((m): m is TraceStep => m.kind !== "user");
+		expect(steps.map(stepLabel)).toEqual(["Pensando", "Rodando yarn test", "Editou src/app.ts"]);
+		expect(traceTitle(steps)).toBe("Trabalhando");
+		const tool = steps[2];
+		expect(tool?.kind === "tool" && tool.error).toBe("A execução falhou");
+		const done = applyEvents(state, [
+			ev("turn_reasoning_completed", { turnId: "t", reasoningId: "r" }),
+			ev("turn_tool_call_completed", { turnId: "t", toolCallId: "a" }),
+		]);
+		const finished = done.messages.filter((m): m is TraceStep => m.kind !== "user");
+		expect(finished.map(stepLabel).slice(0, 2)).toEqual(["Pensou", "Rodou yarn test"]);
+		expect(traceTitle(finished)).toBe("Trabalho do agente");
+	});
+
+	it("remembers the access level of the latest turn that recorded one", () => {
+		const state = applyEvents(createThreadState(), [
+			ev("turn_started", { turnId: "a", prompt: "um", approvalPolicy: "full_access" }),
+			ev("turn_completed", { turnId: "a" }),
+			ev("turn_started", { turnId: "b", prompt: "dois" }),
+		]);
+		expect(threadApprovalPolicy(state.messages)).toBe("full_access");
+		expect(threadApprovalPolicy(createThreadState().messages)).toBeNull();
+	});
+
+	it("takes the command a tool call names after it started", () => {
+		const state = applyEvents(createThreadState(), [
+			ev("turn_started", { turnId: "t", prompt: "p" }),
+			ev("turn_tool_call_started", { turnId: "t", toolCallId: "c", action: "Bash", command: null, file: null }),
+			ev("turn_tool_call_updated", { turnId: "t", toolCallId: "c", detail: { command: "touch a.txt && ls", file: null } }),
+			ev("turn_tool_call_completed", { turnId: "t", toolCallId: "c", detail: { command: null, output: "a.txt" } }),
+		]);
+		const step = state.messages[1] as TraceStep;
+		expect(stepLabel(step)).toBe("Rodou touch a.txt && ls");
+		expect(step.kind === "tool" && step.output).toBe("a.txt");
 	});
 });

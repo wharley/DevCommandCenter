@@ -5,6 +5,7 @@
  * tab, which must show every project — not only the ones that already have a
  * workspace (a project added on the desktop has none until its first task).
  */
+import { t } from "./labels.ts";
 import type { Comb, SessionSearchResult } from "./triage.ts";
 
 export type CatalogModel = {
@@ -23,6 +24,8 @@ export type CatalogProvider = {
 	health?: unknown;
 	enabled?: boolean;
 	stable?: boolean;
+	/** `approvalPolicies`: the access levels the agent enforces itself. */
+	capabilities?: { approvalPolicies?: string[] };
 };
 
 export type CatalogRepository = {
@@ -97,6 +100,45 @@ export function taskTitle(prompt: string, max = 60): string {
 	return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
+/**
+ * The access levels a person picks, in the desktop's order
+ * (`ComposerApprovalPolicyMenu`). `read_only` stays internal: DCC uses it for
+ * delegated reviews.
+ */
+export const ACCESS_POLICIES = ["ask", "auto", "full_access"] as const;
+export type AccessPolicy = (typeof ACCESS_POLICIES)[number];
+
+export function isAccessPolicy(value: unknown): value is AccessPolicy {
+	return (ACCESS_POLICIES as readonly unknown[]).includes(value);
+}
+
+/** What this agent lets the person choose; empty when it manages access itself. */
+export function accessPolicies(provider: CatalogProvider | null | undefined): AccessPolicy[] {
+	const supported = provider?.capabilities?.approvalPolicies ?? [];
+	return ACCESS_POLICIES.filter((policy) => supported.includes(policy));
+}
+
+/**
+ * The desktop's pick (`loadApprovalPolicy`): the preferred level when the agent
+ * offers it, else "Aprovar por mim", else the first offered; null when none.
+ */
+export function pickAccessPolicy(
+	available: readonly AccessPolicy[],
+	...preferred: Array<AccessPolicy | null | undefined>
+): AccessPolicy | null {
+	for (const policy of preferred) if (policy && available.includes(policy)) return policy;
+	if (available.includes("auto")) return "auto";
+	return available[0] ?? null;
+}
+
+export function accessLabel(policy: AccessPolicy): string {
+	return t(`composer.approval.options.${policy}.label`);
+}
+
+export function accessDescription(policy: AccessPolicy): string {
+	return t(`composer.approval.options.${policy}.description`);
+}
+
 export type TaskDraft = {
 	requestId: string;
 	repositoryId: string;
@@ -105,6 +147,8 @@ export type TaskDraft = {
 	model: string | null;
 	/** Checked by default, like the desktop: the task gets its own worktree. */
 	worktree: boolean;
+	/** Null when the agent manages access itself. */
+	access?: AccessPolicy | null;
 };
 
 /** Body of `POST /api/v1/mobile/tasks`. Every task gets a new workspace, as on the desktop. */
@@ -117,6 +161,7 @@ export function taskRequestBody(draft: TaskDraft) {
 		providerId: draft.providerId,
 		model: draft.model,
 		isolationMode: draft.worktree ? "protectedWorktree" : "localDirect",
+		...(draft.access ? { approvalPolicy: draft.access } : {}),
 	} as const;
 }
 

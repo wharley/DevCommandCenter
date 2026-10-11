@@ -2,6 +2,9 @@
 import {
 	stepIsLive,
 	stepLabel,
+	stepParts,
+	t,
+	traceTitle,
 	type ChatMessage,
 	type QuestionRequest,
 	type TraceStep,
@@ -54,8 +57,8 @@ export function TraceBlock({ steps }: { steps: TraceStep[] }) {
 		<View style={styles.trace}>
 			<Pressable onPress={() => setOpen((v) => !v)} style={styles.traceHead} accessibilityRole="button" accessibilityState={{ expanded: open }}>
 				<Feather name={open ? "chevron-down" : "chevron-right"} size={13} color={color.faint} />
-				<Mono style={styles.traceLabel}>trace</Mono>
-				<View style={styles.traceCount}>
+				<Mono style={styles.traceLabel}>{traceTitle(steps)}</Mono>
+				<View style={styles.traceCount} accessibilityLabel={t("conversation.activity.turn.steps", { count: steps.length })}>
 					<Mono style={styles.traceCountText}>{steps.length}</Mono>
 				</View>
 				{current ? (
@@ -68,7 +71,12 @@ export function TraceBlock({ steps }: { steps: TraceStep[] }) {
 				) : (
 					<View style={{ flex: 1 }} />
 				)}
-				{failed > 0 ? <Mono style={styles.traceFailed}>{failed} falha{failed > 1 ? "s" : ""}</Mono> : null}
+				{failed > 0 ? (
+					<View style={styles.traceFailedWrap} accessibilityLabel={`${t("conversation.activity.timeline.filters.failures")}: ${failed}`}>
+						<Feather name="x" size={11} color={color.danger} />
+						<Mono style={styles.traceFailed}>{failed}</Mono>
+					</View>
+				) : null}
 			</Pressable>
 			{open ? (
 				<View style={styles.traceBody}>
@@ -85,6 +93,7 @@ function StepRow({ step }: { step: TraceStep }) {
 	const [open, setOpen] = useState(false);
 	const live = stepIsLive(step);
 	const failed = step.kind === "tool" && step.status === "failed";
+	const { verb, target } = stepParts(step);
 	// A permission's first line is already its label; the rest is the detail.
 	const detail =
 		step.kind === "tool"
@@ -100,14 +109,16 @@ function StepRow({ step }: { step: TraceStep }) {
 				) : (
 					<Feather name={failed ? "x" : "check"} size={12} color={failed ? color.danger : color.faint} style={{ width: 14 }} />
 				)}
-				<Mono style={styles.stepLabel} numberOfLines={1}>
-					{stepLabel(step)}
-				</Mono>
-				{detail && !open ? (
+				<Text style={[styles.stepLabel, failed && { color: color.danger }]} numberOfLines={1}>
+					{verb}
+				</Text>
+				{target || (detail && !open) ? (
 					<Text style={styles.stepPreview} numberOfLines={1}>
-						{detail.split("\n", 1)[0]}
+						{target ?? detail.split("\n", 1)[0]}
 					</Text>
-				) : null}
+				) : (
+					<View style={{ flex: 1 }} />
+				)}
 			</Pressable>
 			{open ? (
 				<View style={styles.stepDetail}>
@@ -131,6 +142,7 @@ function detailText(input: unknown): string {
 		const command = typeof record.command === "string" ? record.command : null;
 		const file = typeof record.file === "string" ? record.file : null;
 		if (command || file) return [command, file].filter(Boolean).join("\n");
+		if (Object.values(record).every((value) => value === undefined || value === null)) return "";
 		try {
 			return JSON.stringify(input, null, 2);
 		} catch {
@@ -255,10 +267,11 @@ const styles = StyleSheet.create({
 	traceCount: { minWidth: 17, height: 17, borderRadius: 9, backgroundColor: color.elevated, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
 	traceCountText: { fontSize: 10, fontWeight: "700", color: color.mute },
 	traceCurrent: { flex: 1, fontSize: 11, color: color.accent },
+	traceFailedWrap: { flexDirection: "row", alignItems: "center", gap: 2 },
 	traceFailed: { fontSize: 10, color: color.danger },
 	traceBody: { borderTopWidth: 1, borderTopColor: color.border, paddingHorizontal: 6, paddingVertical: 6 },
 	stepRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 6, paddingVertical: 6 },
-	stepLabel: { fontSize: 12, color: color.fg, flexShrink: 0, maxWidth: "45%" },
+	stepLabel: { fontSize: 13, color: color.fg, flexShrink: 0, maxWidth: "50%" },
 	stepPreview: { flex: 1, fontSize: 12, color: color.faint, fontFamily: font.mono },
 	stepDetail: { marginLeft: 28, marginBottom: 6, marginRight: 6, gap: 6 },
 	snippet: { fontFamily: font.mono, fontSize: 11, color: color.fg, backgroundColor: color.bg, borderRadius: 6, padding: 8 },

@@ -237,15 +237,15 @@ export class RemoteBackend implements Backend {
 
 	private lost(code: number | null, message: string) {
 		if (this.disposed) return;
+		const error = connectionErrorMessage(code, message);
 		if (code !== null && UNPAIRED_CODES.has(code)) {
-			this.setState({ kind: "unpaired", error: message });
+			this.setState({ kind: "unpaired", error });
 			this.releaseWaiters();
 			return;
 		}
 		const { baseMs, maxMs } = this.options.backoff;
 		const exp = Math.min(maxMs, baseMs * 2 ** Math.max(0, this.attempt - 1));
 		const delay = Math.round(exp / 2 + this.options.random() * (exp / 2));
-		const error = code === RELAY_NO_DESKTOP ? "O computador está offline ou com o DCC fechado." : message;
 		this.setState({ kind: "offline", error, retryAt: this.options.now() + delay });
 		this.releaseWaiters();
 		this.clearTimer();
@@ -264,6 +264,27 @@ export class RemoteBackend implements Backend {
 		this.current = state;
 		for (const listener of [...this.listeners]) listener(state);
 	}
+}
+
+/**
+ * The channel's errors come in English from `@dcc/remote-protocol` and the
+ * platform's WebSocket; the banner says what happened in Portuguese.
+ */
+export function connectionErrorMessage(code: number | null, message: string): string {
+	switch (code) {
+		case RELAY_NO_DESKTOP:
+			return "O computador está offline ou com o DCC fechado.";
+		case CloseCode.UNKNOWN_DEVICE:
+			return "Este aparelho não está mais pareado com o computador. Pareie de novo.";
+		case CloseCode.REVOKED:
+			return "Este aparelho foi removido no computador. Pareie de novo.";
+		case CloseCode.PROTOCOL:
+			return "O computador recusou a conexão (versão incompatível).";
+		default:
+			break;
+	}
+	if (/timed out connecting/.test(message)) return "O computador demorou para responder pelo relay.";
+	return code !== null && code !== 1000 ? `Sem conexão com o relay (código ${code}).` : "Sem conexão com o relay.";
 }
 
 function offlineMessage(state: ConnectionState): string {

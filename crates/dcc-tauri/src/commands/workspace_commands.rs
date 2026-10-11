@@ -8172,15 +8172,24 @@ pub async fn list_git_tracked_files(
 ) -> Result<ListGitTrackedFilesOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
 
-    let root = input.workspace_root.trim();
+    Ok(ListGitTrackedFilesOutput {
+        paths: git_tracked_files(&input.workspace_root)?,
+    })
+}
+
+/// `git ls-files` of a worktree: sorted, repo-relative forward slashes. Empty
+/// when the root is blank, not a git worktree, or git fails. Shared by the
+/// desktop's `@` mention and the phone's file search.
+pub fn git_tracked_files(workspace_root: &str) -> Result<Vec<String>, String> {
+    let root = workspace_root.trim();
     if root.is_empty() {
-        return Ok(ListGitTrackedFilesOutput { paths: Vec::new() });
+        return Ok(Vec::new());
     }
 
     let output = run_git_output(root, &["ls-files", "-z"])?;
 
     if !output.status.success() {
-        return Ok(ListGitTrackedFilesOutput { paths: Vec::new() });
+        return Ok(Vec::new());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -8191,8 +8200,7 @@ pub async fn list_git_tracked_files(
         .collect();
     paths.sort();
     paths.dedup();
-
-    Ok(ListGitTrackedFilesOutput { paths })
+    Ok(paths)
 }
 
 /// Reads the current working-tree body of an arbitrary worktree file. The path is

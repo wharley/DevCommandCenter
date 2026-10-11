@@ -469,6 +469,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/mobile/workspaces/:workspace_id/patch",
             get(mobile::patch),
         )
+        .route(
+            "/api/v1/mobile/workspaces/:workspace_id/files",
+            get(mobile::workspace_files),
+        )
+        .route(
+            "/api/v1/mobile/repositories/:repository_id/files",
+            get(mobile::repository_files),
+        )
         .route("/api/v1/mobile/tasks", post(mobile::create_task))
         .route("/api/v1/mobile/tasks/:request_id", get(mobile::task_status))
         .route("/rpc", post(handle_json_rpc))
@@ -2133,11 +2141,13 @@ async fn search_sessions_handler(
 }
 
 async fn send_turn_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
     State(backend): State<Arc<HttpBackend>>,
     Path(session_id): Path<String>,
     Json(mut input): Json<SendTurnInput>,
 ) -> Result<Json<Value>, HttpApiError> {
     input.session_id = SessionId(session_id);
+    mobile::resolve_turn_approval_policy(config, &backend, &mut input).await?;
     let output = send_turn_with_state(&backend.sessions, input)
         .await
         .map_err(classify_session_error)?;
@@ -2444,6 +2454,7 @@ mod tests {
     use dcc_core::{
         domain::{
             project::ProjectId,
+            provider::ProviderApprovalPolicy,
             session::{Session, SessionState},
             workspace::WorkspaceId,
         },
@@ -2993,5 +3004,243 @@ mod tests {
                 .expect("HTTP session events")
                 .is_empty()
         );
+    }
+
+    fn http_turn(
+        session_id: &SessionId,
+        provider_id: Option<&str>,
+        approval_policy: Option<ProviderApprovalPolicy>,
+    ) -> SendTurnInput {
+        SendTurnInput {
+            session_id: session_id.clone(),
+            prompt: "continue".to_string(),
+            tool_instructions: None,
+            provider_id: provider_id.map(str::to_string),
+            model: None,
+            provider_runtime: None,
+            plan_mode: None,
+            effort: None,
+            fast_mode: None,
+            approval_policy,
+            evidence: None,
+            retry_of_turn_id: None,
+            decision_provider_model_route: None,
+        }
+    }
+
+    async fn append_turn_started(
+        fixture: &HttpFixture,
+        turn: &str,
+        policy: Option<ProviderApprovalPolicy>,
+    ) {
+        use dcc_core::domain::session::{SessionEventKind, SessionEventRecord, TurnId};
+        SessionEventRepo::append_event(
+            &fixture.state,
+            &SessionEventRecord {
+                event_id: Uuid::new_v4().to_string(),
+                session_id: fixture.session_id.clone(),
+                sequence: 0,
+                occurred_at: "2026-10-10T00:00:00Z".to_string(),
+                kind: SessionEventKind::TurnStarted {
+                    turn_id: TurnId(turn.to_string()),
+                    prompt: "p".to_string(),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                    approval_policy: policy,
+                },
+            },
+        )
+        .await
+        .expect("append turn");
+    }
+
+    fn fixture_config(fixture: &HttpFixture) -> Arc<RwLock<HttpConfig>> {
+        let db_path = std::fs::canonicalize(fixture._root.path())
+            .expect("physical root")
+            .join("state.sqlite");
+        Arc::new(RwLock::new(HttpConfig {
+            db_path,
+            ..HttpConfig::default()
+        }))
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn phone_turns_keep_the_session_access_level() {
+        use ProviderApprovalPolicy::*;
+        let fixture = embedded_fixture().await;
+        let config = fixture_config(&fixture);
+
+        // Nothing recorded yet: the provider's own default, as before.
+        let mut input = http_turn(&fixture.session_id, None, None);
+        mobile::resolve_turn_approval_policy(config.clone(), &fixture.backend, &mut input)
+            .await
+            .unwrap();
+        assert_eq!(input.approval_policy, None);
+
+        // The desktop chose full access; a later turn without a level skipped
+        // recording one. A continuation from the phone keeps full access.
+        append_turn_started(&fixture, "t1", Some(FullAccess)).await;
+        append_turn_started(&fixture, "t2", None).await;
+        let mut input = http_turn(&fixture.session_id, None, None);
+        mobile::resolve_turn_approval_policy(config.clone(), &fixture.backend, &mut input)
+            .await
+            .unwrap();
+        assert_eq!(input.approval_policy, Some(FullAccess));
+
+        // An explicit choice wins over the session's level.
+        let mut input = http_turn(&fixture.session_id, None, Some(Ask));
+        mobile::resolve_turn_approval_policy(config.clone(), &fixture.backend, &mut input)
+            .await
+            .unwrap();
+        assert_eq!(input.approval_policy, Some(Ask));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn phone_turns_refuse_a_level_the_provider_does_not_enforce() {
+        let fixture = embedded_fixture().await;
+        let lacking = dcc_providers::PROVIDER_IDS
+            .into_iter()
+            .find(|id| {
+                !mobile::provider_approval_policies(id)
+                    .contains(&ProviderApprovalPolicy::FullAccess)
+            })
+            .expect("a provider without full access");
+        let (status, body) = post_json(
+            &fixture.app,
+            &format!("/api/v1/sessions/{}/turns", fixture.session_id.0),
+            json!({
+                "sessionId": fixture.session_id.0, "prompt": "go",
+                "providerId": lacking, "approvalPolicy": "full_access",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(
+            SessionEventRepo::list_events_by_session(&fixture.state, &fixture.session_id)
+                .await
+                .expect("events")
+                .is_empty(),
+            "a refused level must not start a turn"
+        );
+
+        // An inherited level the new provider can't enforce is dropped, not widened.
+        append_turn_started(&fixture, "t1", Some(ProviderApprovalPolicy::FullAccess)).await;
+        let mut input = http_turn(&fixture.session_id, Some(lacking), None);
+        mobile::resolve_turn_approval_policy(
+            fixture_config(&fixture),
+            &fixture.backend,
+            &mut input,
+        )
+        .await
+        .unwrap();
+        assert_ne!(
+            input.approval_policy,
+            Some(ProviderApprovalPolicy::FullAccess)
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn phone_file_search_resolves_workspaces_by_id_only() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        use dcc_core::ports::WorkspaceRepo;
+        let fixture = embedded_fixture().await;
+        let tree = tempfile::tempdir().unwrap();
+        let tree_path = std::fs::canonicalize(tree.path()).unwrap();
+        for args in [vec!["init", "-q"], vec!["add", "."]] {
+            if args[0] == "add" {
+                std::fs::create_dir_all(tree_path.join("src/ui")).unwrap();
+                for file in [
+                    "README.md",
+                    "src/main.rs",
+                    "src/ui/Button.tsx",
+                    "src/ui/button.css",
+                ] {
+                    std::fs::write(tree_path.join(file), "x").unwrap();
+                }
+                std::fs::write(tree_path.join("untracked.txt"), "x").unwrap();
+                let status = std::process::Command::new("git")
+                    .args(["add", "README.md", "src"])
+                    .current_dir(&tree_path)
+                    .status()
+                    .unwrap();
+                assert!(status.success());
+                continue;
+            }
+            assert!(std::process::Command::new("git")
+                .args(&args)
+                .current_dir(&tree_path)
+                .status()
+                .unwrap()
+                .success());
+        }
+        let db_path = std::fs::canonicalize(fixture._root.path())
+            .unwrap()
+            .join("state.sqlite");
+        let repo = dcc_infra::db::SqliteWorkspaceRepo::open(&db_path).unwrap();
+        repo.save_workspace(&Workspace {
+            id: WorkspaceId("ws-files".to_string()),
+            project_id: ProjectId("project".to_string()),
+            name: None,
+            root_path: tree_path.to_string_lossy().into_owned(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            snoozed_until: None,
+            created_at: "2026-10-10T00:00:00Z".to_string(),
+            updated_at: "2026-10-10T00:00:00Z".to_string(),
+        })
+        .await
+        .unwrap();
+
+        let (status, body) = get_json(
+            &fixture.app,
+            "/api/v1/mobile/workspaces/ws-files/files?q=BUTTON",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let paths: Vec<&str> = body["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["src/ui/Button.tsx", "src/ui/button.css"]);
+        let (_, body) = get_json(
+            &fixture.app,
+            "/api/v1/mobile/workspaces/ws-files/files?q=untracked",
+        )
+        .await;
+        assert!(
+            body["files"].as_array().unwrap().is_empty(),
+            "only tracked files: {body}"
+        );
+        let (_, body) = get_json(
+            &fixture.app,
+            "/api/v1/mobile/workspaces/ws-files/files?limit=2",
+        )
+        .await;
+        assert_eq!(body["files"].as_array().unwrap().len(), 2);
+        assert_eq!(body["total"], 4);
+
+        for uri in [
+            "/api/v1/mobile/workspaces/missing/files?q=a",
+            "/api/v1/mobile/workspaces/..%2F..%2Fetc/files?q=passwd",
+            "/api/v1/mobile/workspaces/%2Fetc/files",
+            "/api/v1/mobile/repositories/missing/files",
+        ] {
+            let (status, _) = get_json(&fixture.app, uri).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+        }
+        let (status, _) = get_json(
+            &fixture.app,
+            "/api/v1/mobile/workspaces/ws-files/files?q=a%00b",
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }

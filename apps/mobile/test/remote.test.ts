@@ -95,7 +95,7 @@ describe("RemoteBackend", () => {
 		cursor = 9;
 		fail = 2;
 		clients[0]!.drop(1006, "network lost");
-		expect(backend.state()).toMatchObject({ kind: "offline", error: "network lost" });
+		expect(backend.state()).toMatchObject({ kind: "offline", error: "Sem conexão com o relay (código 1006)." });
 		await vi.advanceTimersByTimeAsync(1_000); // attempt 1 fails
 		await vi.advanceTimersByTimeAsync(2_000); // attempt 2 fails
 		expect(clients).toHaveLength(1);

@@ -1729,6 +1729,9 @@ mod tests {
         assert!(remote_path_allowed("/api/v1/sessions"));
         assert!(remote_path_allowed("/api/v1/sessions/abc/events?after=3"));
         assert!(remote_path_allowed("/api/v1/events/stream?sessionId=x"));
+        // `@` in the composer: files found by workspace or repository id.
+        assert!(remote_path_allowed("/api/v1/mobile/workspaces/w/files?q=a"));
+        assert!(remote_path_allowed("/api/v1/mobile/repositories/r/files"));
         assert!(!remote_path_allowed("/auth/devices"));
         assert!(!remote_path_allowed("/auth/pair-init"));
         assert!(!remote_path_allowed("/api/v1/auth/bearer/rotate"));

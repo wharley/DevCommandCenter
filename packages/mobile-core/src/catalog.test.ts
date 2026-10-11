@@ -4,6 +4,9 @@ import {
 	defaultProviderId,
 	projectGroups,
 	providerUnavailableReason,
+	accessLabel,
+	accessPolicies,
+	pickAccessPolicy,
 	taskRequestBody,
 	taskTitle,
 	type CatalogProvider,
@@ -77,6 +80,22 @@ describe("catalog", () => {
 			isolationMode: "protectedWorktree",
 		});
 		expect(taskRequestBody({ ...base, worktree: false }).isolationMode).toBe("localDirect");
+		expect(taskRequestBody({ ...base, worktree: true, access: "full_access" })).toMatchObject({
+			approvalPolicy: "full_access",
+		});
+		expect(taskRequestBody({ ...base, worktree: true, access: null })).not.toHaveProperty("approvalPolicy");
+	});
+
+	it("offers only the access levels the agent enforces, picked like the desktop", () => {
+		const all = provider("codex", { capabilities: { approvalPolicies: ["read_only", "ask", "auto", "full_access"] } });
+		expect(accessPolicies(all)).toEqual(["ask", "auto", "full_access"]);
+		expect(accessPolicies(provider("cursor"))).toEqual([]);
+		const askOnly = provider("x", { capabilities: { approvalPolicies: ["ask"] } });
+		expect(pickAccessPolicy(accessPolicies(all))).toBe("auto");
+		expect(pickAccessPolicy(accessPolicies(all), null, "full_access")).toBe("full_access");
+		expect(pickAccessPolicy(accessPolicies(askOnly), "full_access")).toBe("ask");
+		expect(pickAccessPolicy([])).toBeNull();
+		expect(accessLabel("full_access")).toBe("Acesso completo");
 	});
 
 	it("lists every project, including ones without a workspace yet", () => {

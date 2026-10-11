@@ -119,7 +119,7 @@ export function Wordmark({ online }: { online?: boolean }) {
 		<View style={styles.wordmark}>
 			<StateDot state={online ? "live" : "idle"} />
 			<Mono style={styles.wordmarkText}>DCC</Mono>
-			<Mono style={styles.wordmarkSub}>mission control</Mono>
+			<Mono style={styles.wordmarkSub}>central de comando</Mono>
 		</View>
 	);
 }

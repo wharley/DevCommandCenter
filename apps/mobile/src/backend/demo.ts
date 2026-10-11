@@ -5,6 +5,7 @@
  * permission and finishes — so every screen works exactly as when paired.
  */
 import {
+	filterTrackedFiles,
 	taskTitle,
 	type CatalogRepository,
 	type Comb,
@@ -116,6 +117,8 @@ export class DemoBackend implements Backend {
 		if (method === "GET" && path === "/api/v1/combs") return this.combs;
 		if (method === "GET" && path === "/api/v1/mobile/catalog") return this.catalog();
 		if (method === "POST" && path === "/api/v1/mobile/tasks") return this.createTask(body);
+		const files = /^\/api\/v1\/mobile\/(workspaces|repositories)\/([^/]+)\/files$/.exec(path);
+		if (method === "GET" && files) return this.files(files[1]!, decodeURIComponent(files[2]!), url.searchParams.get("q") ?? "");
 		const task = /^\/api\/v1\/mobile\/tasks\/([^/]+)$/.exec(path);
 		if (method === "GET" && task) {
 			const entry = this.tasks.get(decodeURIComponent(task[1]!));
@@ -148,7 +151,8 @@ export class DemoBackend implements Backend {
 		}
 		if (method === "POST" && action === "turns") {
 			const prompt = typeof input.prompt === "string" ? input.prompt : "";
-			this.play(session, prompt);
+			// Like the desktop: without a pick, the session keeps its latest level.
+			this.play(session, prompt, policyOf(input.approvalPolicy) ?? latestPolicy(session));
 			return { turn: { content: prompt } };
 		}
 		if (method === "POST" && action === "abort") {
@@ -227,6 +231,17 @@ export class DemoBackend implements Backend {
 		};
 	}
 
+	/** Fictional tracked files of a project, filtered like the desktop does. */
+	private files(scope: string, id: string, query: string) {
+		const rootPath =
+			scope === "workspaces"
+				? this.combs.find((c) => c.id === id)?.projectPath
+				: this.repositories.find((r) => r.id === id)?.rootPath;
+		if (!rootPath) throw new ApiError(404, scope === "workspaces" ? "Workspace não encontrado." : "Repositório não encontrado no DCC.");
+		const paths = demoFiles(rootPath);
+		return { files: filterTrackedFiles(paths, query).map((path) => ({ path })), total: paths.length };
+	}
+
 	/** Same contract as the desktop: idempotent by `requestId`, a new workspace per task. */
 	private createTask(body: unknown): TaskProgress {
 		const input = (body ?? {}) as Record<string, unknown>;
@@ -276,7 +291,7 @@ export class DemoBackend implements Backend {
 		};
 		this.sessions.push(session);
 		this.append(session, { type: "session_started" });
-		this.play(session, prompt);
+		this.play(session, prompt, policyOf(input.approvalPolicy) ?? "ask");
 		this.tasks.set(requestId, {
 			input: encoded,
 			result: { state: "started", workspaceId: comb.id, sessionId: session.sessionId },
@@ -285,16 +300,33 @@ export class DemoBackend implements Backend {
 		return { state: "creating" };
 	}
 
-	/** A short scripted turn: think, read, ask to run the tests, answer. */
-	private play(session: DemoSession, prompt: string) {
+	/**
+	 * A short scripted turn: think, read, run the tests, answer. Asking for
+	 * approval ("Solicitar aprovação", or no level) parks the run on a
+	 * permission; the other levels run the tests straight away.
+	 */
+	private play(session: DemoSession, prompt: string, policy: string | null) {
 		const turnId = `demo-turn-${++this.eventCounter}`;
 		const requestId = `demo-perm-${this.eventCounter}`;
-		this.append(session, { type: "turn_started", turnId, prompt });
-		this.schedule(session, [
+		this.append(session, { type: "turn_started", turnId, prompt, ...(policy ? { approvalPolicy: policy } : {}) });
+		const finish: Step[] = [
+			{ delayMs: 200, kind: { type: "turn_tool_call_started", turnId, toolCallId: `${turnId}-t2`, toolName: "Bash", toolInput: { command: "yarn test" } } },
+			{ delayMs: 1400, kind: { type: "turn_tool_call_completed", turnId, toolCallId: `${turnId}-t2` } },
+			...streamText(turnId, "Pronto: os 42 testes passaram. Fiz a mudança em `src/app.ts` e deixei o diff no workspace para você revisar."),
+			{ delayMs: 300, kind: { type: "turn_completed", turnId } },
+		];
+		const start: Step[] = [
 			{ delayMs: 500, kind: { type: "turn_reasoning_started", turnId, reasoningId: `${turnId}-r`, label: "Pensando" } },
 			{ delayMs: 900, kind: { type: "turn_reasoning_completed", turnId, reasoningId: `${turnId}-r` } },
 			{ delayMs: 200, kind: { type: "turn_tool_call_started", turnId, toolCallId: `${turnId}-t1`, toolName: "Read", toolInput: { file: "src/app.ts" } } },
 			{ delayMs: 700, kind: { type: "turn_tool_call_completed", turnId, toolCallId: `${turnId}-t1` } },
+		];
+		if (policy && policy !== "ask") {
+			this.schedule(session, [...start, ...finish]);
+			return;
+		}
+		this.schedule(session, [
+			...start,
 			{
 				delayMs: 400,
 				kind: {
@@ -309,16 +341,7 @@ export class DemoBackend implements Backend {
 				},
 			},
 		]);
-		this.parked.set(requestId, {
-			sessionId: session.sessionId,
-			turnId,
-			steps: [
-				{ delayMs: 200, kind: { type: "turn_tool_call_started", turnId, toolCallId: `${turnId}-t2`, toolName: "Bash", toolInput: { command: "yarn test" } } },
-				{ delayMs: 1400, kind: { type: "turn_tool_call_completed", turnId, toolCallId: `${turnId}-t2` } },
-				...streamText(turnId, "Pronto: os 42 testes passaram. Fiz a mudança em `src/app.ts` e deixei o diff no workspace para você revisar."),
-				{ delayMs: 300, kind: { type: "turn_completed", turnId } },
-			],
-		});
+		this.parked.set(requestId, { sessionId: session.sessionId, turnId, steps: finish });
 	}
 
 	private schedule(session: DemoSession, steps: Step[]) {
@@ -390,6 +413,30 @@ export class DemoBackend implements Backend {
 	}
 }
 
+function policyOf(value: unknown): string | null {
+	return typeof value === "string" && value ? value : null;
+}
+
+function latestPolicy(session: DemoSession): string | null {
+	for (let i = session.events.length - 1; i >= 0; i--) {
+		const kind = session.events[i]!.kind;
+		if (kind.type === "turn_started" && typeof kind.approvalPolicy === "string") return kind.approvalPolicy;
+	}
+	return null;
+}
+
+/** A plausible tree per demo project, for `@`. */
+function demoFiles(rootPath: string): string[] {
+	const common = ["README.md", "package.json", "tsconfig.json", ".github/workflows/ci.yml", "src/app.ts", "src/config.ts"];
+	const byProject: Record<string, string[]> = {
+		"/demo/loja-online": ["src/checkout/gateway.ts", "src/checkout/gateway.test.ts", "src/checkout/cart.tsx", "src/vitrine/cache.ts", "src/vitrine/VitrinePage.tsx"],
+		"/demo/api-pagamentos": ["src/auth/login.ts", "src/auth/login.test.ts", "src/http/client.ts", "src/pix/qrcode.ts"],
+		"/demo/site": ["docs/onboarding.md", "docs/instalacao.md", "src/pages/index.tsx", "src/pages/contato.tsx"],
+		"/demo/app-mobile": ["app/index.tsx", "app/thread/[id].tsx", "src/ui/Button.tsx", "src/theme.ts"],
+	};
+	return [...common, ...(byProject[rootPath] ?? [])].sort();
+}
+
 function streamText(turnId: string, text: string): Step[] {
 	const chunks = text.match(/\s*\S+/g) ?? [text];
 	const steps: Step[] = [];
@@ -405,6 +452,7 @@ const DEMO_PROVIDERS: MobileCatalog["providers"] = [
 		label: "Claude",
 		health: "Healthy",
 		stable: true,
+		capabilities: { approvalPolicies: ["read_only", "ask", "auto", "full_access"] },
 		models: [
 			{ id: "claude-opus-5-5", label: "Opus 5.5", recommended: true },
 			{ id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
@@ -415,9 +463,17 @@ const DEMO_PROVIDERS: MobileCatalog["providers"] = [
 		label: "Codex",
 		health: "Healthy",
 		stable: true,
+		capabilities: { approvalPolicies: ["read_only", "ask", "auto", "full_access"] },
 		models: [{ id: "gpt-5.5-codex", label: "GPT-5.5 Codex", recommended: true }],
 	},
-	{ id: "gemini", label: "Gemini", health: "Healthy", stable: false, models: [{ id: "gemini-3-pro", label: "Gemini 3 Pro" }] },
+	{
+		id: "gemini",
+		label: "Gemini",
+		health: "Healthy",
+		stable: false,
+		models: [{ id: "gemini-3-pro", label: "Gemini 3 Pro" }],
+		capabilities: { approvalPolicies: ["ask", "full_access"] },
+	},
 	{ id: "cursor", label: "Cursor", health: { Unhealthy: { reason: "Faça login no Cursor" } }, stable: false, models: [] },
 ];
 

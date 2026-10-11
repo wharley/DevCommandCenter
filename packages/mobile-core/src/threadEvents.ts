@@ -1,3 +1,5 @@
+import { t } from "./labels.ts";
+
 /**
  * Folds the raw `SessionEvent` stream into a flat list of "messages" that the
  * chat view can render in order. Each turn produces:
@@ -45,6 +47,8 @@ export type ChatMessage =
 			turnId: string;
 			text: string;
 			at: string;
+			/** The access level the turn ran with, when the record carries it. */
+			approvalPolicy?: string;
 	  }
 	| {
 			kind: "assistant";
@@ -282,7 +286,7 @@ function coreEventToRawSessionEvent(
 					type: "turn_reasoning_started",
 					turnId: stringField(body, "turn_id"),
 					reasoningId: stringField(body, "reasoning_id"),
-					label: stringField(body, "label") ?? "Thinking",
+					label: stringField(body, "label") ?? "",
 				},
 			};
 		case "sessionTurnReasoningCompleted":
@@ -308,6 +312,16 @@ function coreEventToRawSessionEvent(
 					},
 				},
 			};
+		case "sessionTurnToolCallUpdated":
+			return {
+				...base,
+				kind: {
+					type: "turn_tool_call_updated",
+					turnId: stringField(body, "turn_id"),
+					toolCallId: stringField(body, "tool_call_id"),
+					detail: body.detail,
+				},
+			};
 		case "sessionTurnToolCallCompleted":
 			return {
 				...base,
@@ -315,6 +329,7 @@ function coreEventToRawSessionEvent(
 					type: "turn_tool_call_completed",
 					turnId: stringField(body, "turn_id"),
 					toolCallId: stringField(body, "tool_call_id"),
+					detail: body.detail,
 				},
 			};
 		case "sessionTurnToolCallFailed":
@@ -324,7 +339,7 @@ function coreEventToRawSessionEvent(
 					type: "turn_tool_call_failed",
 					turnId: stringField(body, "turn_id"),
 					toolCallId: stringField(body, "tool_call_id"),
-					error: stringField(body, "reason") ?? "Tool call failed.",
+					error: stringField(body, "reason") ?? t("conversation.toolCall.failedFallback"),
 				},
 			};
 		case "sessionTurnPermissionRequested":
@@ -430,6 +445,7 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 				turnId,
 				text,
 				at: event.occurredAt,
+				...(typeof kind.approvalPolicy === "string" ? { approvalPolicy: kind.approvalPolicy } : {}),
 			});
 			refs.user = state.messages.length - 1;
 			state.byTurn.set(turnId, refs);
@@ -510,7 +526,7 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 				kind: "reasoning",
 				turnId,
 				id,
-				label: typeof kind.label === "string" ? kind.label : "Thinking",
+				label: typeof kind.label === "string" ? kind.label : "",
 				at: event.occurredAt,
 				completed: false,
 			});
@@ -545,13 +561,24 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 						: typeof kind.action === "string"
 							? kind.action
 							: "tool",
-				input: kind.toolInput,
+				// Live events nest the target; stored ones keep it beside the action.
+				input: kind.toolInput ?? { command: kind.command, file: kind.file },
 				output: null,
 				error: null,
 				status: "running",
 				at: event.occurredAt,
 			});
 			state.byTool.set(id, state.messages.length - 1);
+			break;
+		}
+
+		case "turn_tool_call_updated": {
+			// Claude names the command or file only after the call started.
+			const idx = state.byTool.get(typeof kind.toolCallId === "string" ? kind.toolCallId : "");
+			if (idx !== undefined) {
+				const msg = state.messages[idx] as Extract<ChatMessage, { kind: "tool" }>;
+				msg.input = withDetailTarget(msg.input, kind.detail);
+			}
 			break;
 		}
 
@@ -562,7 +589,9 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 			if (idx !== undefined) {
 				const msg = state.messages[idx] as Extract<ChatMessage, { kind: "tool" }>;
 				msg.status = "completed";
-				msg.output = kind.output ?? null;
+				const detail = kind.detail as { output?: unknown } | null | undefined;
+				msg.output = kind.output ?? detail?.output ?? null;
+				msg.input = withDetailTarget(msg.input, kind.detail);
 			}
 			break;
 		}
@@ -579,7 +608,7 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 						? kind.error
 						: typeof kind.reason === "string"
 							? kind.reason
-							: "Tool call failed.";
+							: t("conversation.toolCall.failedFallback");
 			}
 			break;
 		}
@@ -629,6 +658,17 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 			// kinds without breaking old clients).
 			break;
 	}
+}
+
+/** The call's input with the command/file a later `ToolCallDetail` filled in. */
+function withDetailTarget(input: unknown, detail: unknown): unknown {
+	if (!detail || typeof detail !== "object") return input;
+	const { command, file } = detail as { command?: unknown; file?: unknown };
+	const base = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+	const next = { ...base };
+	if (typeof command === "string" && command) next.command = command;
+	if (typeof file === "string" && file) next.file = file;
+	return next;
 }
 
 function pushSystem(

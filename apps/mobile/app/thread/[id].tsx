@@ -1,20 +1,32 @@
 import {
+	accessPolicies,
 	agentTurnHeads,
+	applyFileMention,
 	createThreadState,
+	findActiveFileMention,
 	groupMessages,
+	isAccessPolicy,
 	isThreadRunning,
 	normalizeProvider,
+	pickAccessPolicy,
+	threadApprovalPolicy,
 	threadTitle,
 	workspaceLabel,
+	type AccessPolicy,
+	type MobileCatalog,
 	type RenderItem,
 	type SessionSearchResult,
 } from "@dcc/mobile-core";
+import { loadProjectAccess, saveProjectAccess } from "@/backend/accessStore";
+import { cachedCatalog, fetchCatalog } from "@/backend/catalogCache";
 import { useBackend } from "@/backend/session";
 import { errorMessage, isAlreadyResolved } from "@/backend/types";
 import { AssistantBlock, PermissionCard, QuestionCard, SystemRow, TraceBlock, UserBubble } from "@/screens/ThreadParts";
 import { ThreadSync, type ThreadSnapshot } from "@/screens/threadSync";
 import { alpha, color, radius } from "@/theme";
+import { AccessPill } from "@/ui/AccessPicker";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
+import { FileMentionList } from "@/ui/FileMentionList";
 import { Loading, Mono, StateDot } from "@/ui/primitives";
 import { AgentMascot } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
@@ -53,6 +65,14 @@ export default function ThreadScreen() {
 	const [stopping, setStopping] = useState(false);
 	const [busy, setBusy] = useState<Set<string>>(() => new Set());
 	const [notice, setNotice] = useState<string | null>(null);
+	const [catalog, setCatalog] = useState<MobileCatalog | null>(() => cachedCatalog(backend));
+	/** Picked here; until then the session keeps the level of its latest turn. */
+	const [chosenAccess, setChosenAccess] = useState<AccessPolicy | null>(null);
+	const [rememberedAccess, setRememberedAccess] = useState<AccessPolicy | null>(null);
+	const [selection, setSelection] = useState({ start: 0, end: 0 });
+	const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number } | undefined>();
+	const [composerFocused, setComposerFocused] = useState(false);
+	const input = useRef<TextInput>(null);
 	const sync = useRef<ThreadSync | null>(null);
 	const list = useRef<FlatList<RenderItem>>(null);
 	const stick = useRef(true);
@@ -85,6 +105,31 @@ export default function ThreadScreen() {
 		};
 	}, [backend, threadId]);
 
+	// What the agent enforces (`capabilities.approvalPolicies`) comes with the catalog.
+	useEffect(() => {
+		let cancelled = false;
+		fetchCatalog(backend)
+			.then((next) => {
+				if (!cancelled) setCatalog(next);
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [backend]);
+
+	const projectKey = meta?.projectId ?? null;
+	useEffect(() => {
+		let cancelled = false;
+		if (!projectKey) return;
+		void loadProjectAccess(projectKey).then((policy) => {
+			if (!cancelled) setRememberedAccess(policy);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [projectKey]);
+
 	const { state, questions } = snapshot;
 	const items = useMemo(() => groupMessages(state.messages), [state.messages]);
 	const running = useMemo(() => isThreadRunning(state.messages), [state.messages]);
@@ -100,6 +145,26 @@ export default function ThreadScreen() {
 	const liveHead = (running || waitingOnYou) && !awaitingFirstOutput ? heads.at(-1) : undefined;
 	const mascotState = waitingOnYou ? "waiting" : "working";
 	const agentLabel = meta?.model || (meta?.providerId ? normalizeProvider(meta.providerId) : null);
+	const provider = catalog?.providers.find((p) => p.id === meta?.providerId) ?? null;
+	const availableAccess = useMemo(() => accessPolicies(provider), [provider]);
+	const recorded = threadApprovalPolicy(state.messages);
+	const sessionAccess = isAccessPolicy(recorded) && availableAccess.includes(recorded) ? recorded : null;
+	const access = provider ? pickAccessPolicy(availableAccess, chosenAccess, sessionAccess, rememberedAccess) : null;
+	const chooseAccess = (policy: AccessPolicy) => {
+		setChosenAccess(policy);
+		if (projectKey) saveProjectAccess(projectKey, policy);
+	};
+
+	const mention = composerFocused && meta?.workspaceId ? findActiveFileMention(composer, selection.end) : null;
+	const insertMention = (path: string) => {
+		if (!mention) return;
+		const next = applyFileMention(composer, mention, path);
+		setComposer(next.text);
+		setForcedSelection({ start: next.cursor, end: next.cursor });
+		setSelection({ start: next.cursor, end: next.cursor });
+		// Tapping the list takes focus away; keep typing where the mention ended.
+		input.current?.focus();
+	};
 
 	const withBusy = useCallback(async (key: string, run: () => Promise<void>) => {
 		setBusy((prev) => new Set(prev).add(key));
@@ -154,7 +219,14 @@ export default function ThreadScreen() {
 		setSending(true);
 		setNotice(null);
 		try {
-			await backend.request("POST", `/api/v1/sessions/${encodeURIComponent(threadId)}/turns`, { sessionId: threadId, prompt });
+			// Without a pick here the desktop keeps the session's latest level;
+			// a session with none recorded gets the level shown in the pill.
+			const approvalPolicy = chosenAccess ?? (sessionAccess ? undefined : (access ?? undefined));
+			await backend.request("POST", `/api/v1/sessions/${encodeURIComponent(threadId)}/turns`, {
+				sessionId: threadId,
+				prompt,
+				...(approvalPolicy ? { approvalPolicy } : {}),
+			});
 			setComposer("");
 			stick.current = true;
 			sync.current?.nudge();
@@ -290,38 +362,65 @@ export default function ThreadScreen() {
 			)}
 			{/* With the keyboard up it already covers the home indicator / nav bar. */}
 			<View style={[styles.composer, { paddingBottom: keyboardOpen ? 10 : Math.max(insets.bottom, 10) }]}>
-				<TextInput
-					value={composer}
-					onChangeText={setComposer}
-					placeholder={running ? "O agente está trabalhando…" : "Mensagem para o agente"}
-					placeholderTextColor={color.faint}
-					style={styles.input}
-					multiline
-					// Prompts carry identifiers and commands; autocorrect mangles them.
-					autoCorrect={false}
-					editable={!sending}
-					accessibilityLabel="Mensagem para o agente"
-				/>
-				{running ? (
-					<Pressable
-						onPress={() => void stop()}
-						style={[styles.sendButton, styles.stopButton]}
-						accessibilityRole="button"
-						accessibilityLabel="Parar o agente"
-					>
-						{stopping ? <ActivityIndicator size="small" color={color.danger} /> : <Feather name="square" size={16} color={color.danger} />}
-					</Pressable>
-				) : (
-					<Pressable
-						onPress={() => void send()}
-						disabled={!composer.trim() || sending}
-						style={[styles.sendButton, { opacity: !composer.trim() || sending ? 0.4 : 1 }]}
-						accessibilityRole="button"
-						accessibilityLabel="Enviar"
-					>
-						{sending ? <ActivityIndicator size="small" color={color.accentInk} /> : <Feather name="arrow-up" size={18} color={color.accentInk} />}
-					</Pressable>
-				)}
+				{mention && meta?.workspaceId ? (
+					<FileMentionList
+						backend={backend}
+						scope={{ workspaceId: meta.workspaceId }}
+						query={mention.query}
+						onPick={insertMention}
+					/>
+				) : null}
+				{provider ? (
+					<AccessPill
+						available={availableAccess}
+						value={access}
+						onChange={chooseAccess}
+						providerLabel={provider.label}
+						disabled={sending}
+					/>
+				) : null}
+				<View style={styles.composerRow}>
+					<TextInput
+						ref={input}
+						value={composer}
+						onChangeText={setComposer}
+						selection={forcedSelection}
+						onSelectionChange={(event) => {
+							setSelection(event.nativeEvent.selection);
+							setForcedSelection(undefined);
+						}}
+						onFocus={() => setComposerFocused(true)}
+						onBlur={() => setComposerFocused(false)}
+						placeholder={running ? "O agente está trabalhando…" : "Mensagem para o agente"}
+						placeholderTextColor={color.faint}
+						style={styles.input}
+						multiline
+						// Prompts carry identifiers and commands; autocorrect mangles them.
+						autoCorrect={false}
+						editable={!sending}
+						accessibilityLabel="Mensagem para o agente"
+					/>
+					{running ? (
+						<Pressable
+							onPress={() => void stop()}
+							style={[styles.sendButton, styles.stopButton]}
+							accessibilityRole="button"
+							accessibilityLabel="Parar o agente"
+						>
+							{stopping ? <ActivityIndicator size="small" color={color.danger} /> : <Feather name="square" size={16} color={color.danger} />}
+						</Pressable>
+					) : (
+						<Pressable
+							onPress={() => void send()}
+							disabled={!composer.trim() || sending}
+							style={[styles.sendButton, { opacity: !composer.trim() || sending ? 0.4 : 1 }]}
+							accessibilityRole="button"
+							accessibilityLabel="Enviar"
+						>
+							{sending ? <ActivityIndicator size="small" color={color.accentInk} /> : <Feather name="arrow-up" size={18} color={color.accentInk} />}
+						</Pressable>
+					)}
+				</View>
 			</View>
 		</KeyboardAvoidingView>
 	);
@@ -371,15 +470,14 @@ const styles = StyleSheet.create({
 	agentHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
 	agentLabel: { fontSize: 11, color: color.mute, flexShrink: 1 },
 	composer: {
-		flexDirection: "row",
-		alignItems: "flex-end",
 		gap: 8,
 		paddingHorizontal: 12,
-		paddingTop: 10,
+		paddingTop: 8,
 		borderTopWidth: 1,
 		borderTopColor: color.border,
 		backgroundColor: color.panel,
 	},
+	composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
 	input: {
 		flex: 1,
 		maxHeight: 140,

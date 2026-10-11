@@ -1,4 +1,13 @@
-import { projectGroups, runScan, taskRequestBody, triageGroups, type MobileCatalog, type TaskProgress } from "@dcc/mobile-core";
+import {
+	projectGroups,
+	runScan,
+	taskRequestBody,
+	threadApprovalPolicy,
+	triageGroups,
+	type FileSearchResult,
+	type MobileCatalog,
+	type TaskProgress,
+} from "@dcc/mobile-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DemoBackend } from "../src/backend/demo";
 import { ApiError } from "../src/backend/types";
@@ -95,6 +104,59 @@ describe("demo mode", () => {
 		expect(sessions[0]).toMatchObject({ sessionId: done.sessionId, providerId: "codex", workspaceBranch: "main" });
 		const after = projectGroups(catalog.repositories, (await read("GET", "/api/v1/combs")) as never, []);
 		expect(after.find((g) => g.name === "app-mobile")?.combs).toHaveLength(1);
+		demo.dispose();
+	});
+
+	it("runs a full-access task without asking, and its continuation keeps the level", async () => {
+		const demo = new DemoBackend();
+		const read = <T,>(method: string, path: string, body?: unknown) => {
+			const reply = demo.request<T>(method, path, body);
+			reply.catch(() => {});
+			return vi.advanceTimersByTimeAsync(500).then(() => reply);
+		};
+		const body = taskRequestBody({
+			requestId: "00000000-0000-4000-8000-000000000002",
+			repositoryId: "loja",
+			prompt: "Rode os testes",
+			providerId: "claude",
+			model: null,
+			worktree: true,
+			access: "full_access",
+		});
+		await read("POST", "/api/v1/mobile/tasks", body);
+		const done = await read<TaskProgress>("GET", `/api/v1/mobile/tasks/${body.requestId}`);
+		let snapshot: ThreadSnapshot | null = null;
+		const sync = new ThreadSync(demo, done.sessionId!, (next) => (snapshot = next));
+		sync.start();
+		await vi.advanceTimersByTimeAsync(8_000);
+		const messages = () => snapshot!.state.messages;
+		expect(messages().some((m) => m.kind === "permission")).toBe(false);
+		expect(threadApprovalPolicy(messages())).toBe("full_access");
+
+		// No level in the request: the session keeps full access.
+		await read("POST", `/api/v1/sessions/${done.sessionId}/turns`, { prompt: "de novo" });
+		await vi.advanceTimersByTimeAsync(8_000);
+		expect(messages().some((m) => m.kind === "permission")).toBe(false);
+		expect(messages().filter((m) => m.kind === "user").map((m) => m.kind === "user" && m.approvalPolicy)).toEqual([
+			"full_access",
+			"full_access",
+		]);
+		sync.stop();
+		demo.dispose();
+	});
+
+	it("lists fictional tracked files for @, by id", async () => {
+		const demo = new DemoBackend();
+		const read = <T,>(path: string) => {
+			const reply = demo.request<T>("GET", path);
+			reply.catch(() => {});
+			return vi.advanceTimersByTimeAsync(500).then(() => reply);
+		};
+		const byRepo = await read<FileSearchResult>("/api/v1/mobile/repositories/loja/files?q=gateway");
+		expect(byRepo.files.map((f) => f.path)).toEqual(["src/checkout/gateway.test.ts", "src/checkout/gateway.ts"]);
+		const byWorkspace = await read<FileSearchResult>("/api/v1/mobile/workspaces/demo-w3/files?q=login.ts");
+		expect(byWorkspace.files.map((f) => f.path)).toEqual(["src/auth/login.ts"]);
+		await expect(read("/api/v1/mobile/workspaces/..%2Fetc/files?q=")).rejects.toMatchObject({ status: 404 });
 		demo.dispose();
 	});
 });

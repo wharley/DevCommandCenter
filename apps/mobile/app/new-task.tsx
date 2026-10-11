@@ -5,20 +5,28 @@
  * its progress and opens the thread as soon as the session exists.
  */
 import {
+	accessPolicies,
+	applyFileMention,
 	defaultModelId,
 	defaultProviderId,
+	findActiveFileMention,
+	pickAccessPolicy,
 	providerUnavailableReason,
 	repositoryLabel,
 	taskRequestBody,
+	type AccessPolicy,
 	type CatalogProvider,
 	type MobileCatalog,
 	type TaskProgress,
 } from "@dcc/mobile-core";
+import { loadProjectAccess, saveProjectAccess } from "@/backend/accessStore";
 import { cachedCatalog, fetchCatalog } from "@/backend/catalogCache";
 import { useBackend } from "@/backend/session";
 import { errorMessage } from "@/backend/types";
 import { alpha, color, radius } from "@/theme";
+import { AccessChoices } from "@/ui/AccessPicker";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
+import { FileMentionList } from "@/ui/FileMentionList";
 import { Button, Loading, Mono, Panel } from "@/ui/primitives";
 import { AgentMascot, ProjectGlyph } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
@@ -52,6 +60,12 @@ export default function NewTaskScreen() {
 	const [providerId, setProviderId] = useState<string | null>(null);
 	const [model, setModel] = useState<string | null>(null);
 	const [worktree, setWorktree] = useState(true);
+	const [access, setAccess] = useState<AccessPolicy | null>(null);
+	const [selection, setSelection] = useState({ start: 0, end: 0 });
+	/** Set once after a mention is inserted, to move the cursor past it. */
+	const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number } | undefined>();
+	const [promptFocused, setPromptFocused] = useState(false);
+	const input = useRef<TextInput>(null);
 	const [phase, setPhase] = useState<Phase>({ kind: "editing" });
 	const alive = useRef(true);
 	const initialized = useRef(false);
@@ -95,12 +109,46 @@ export default function NewTaskScreen() {
 
 	useEffect(() => {
 		requestId.current = null;
-	}, [repositoryId, prompt, providerId, model, worktree]);
+	}, [repositoryId, prompt, providerId, model, worktree, access]);
 
 	const provider = useMemo(
 		() => catalog?.providers.find((p) => p.id === providerId) ?? null,
 		[catalog, providerId],
 	);
+	const repository = catalog?.repositories.find((r) => r.id === repositoryId) ?? null;
+	const projectKey = repository?.projectId ?? null;
+	const availableAccess = useMemo(() => accessPolicies(provider), [provider]);
+
+	// The level last picked for this project on this phone, if this agent offers it.
+	useEffect(() => {
+		let cancelled = false;
+		if (!projectKey) {
+			setAccess(pickAccessPolicy(availableAccess));
+			return;
+		}
+		void loadProjectAccess(projectKey).then((remembered) => {
+			if (!cancelled) setAccess(pickAccessPolicy(availableAccess, remembered));
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [projectKey, availableAccess]);
+
+	const chooseAccess = (policy: AccessPolicy) => {
+		setAccess(policy);
+		if (projectKey) saveProjectAccess(projectKey, policy);
+	};
+
+	const mention = promptFocused && repositoryId ? findActiveFileMention(prompt, selection.end) : null;
+	const insertMention = (path: string) => {
+		if (!mention) return;
+		const next = applyFileMention(prompt, mention, path);
+		setPrompt(next.text);
+		setForcedSelection({ start: next.cursor, end: next.cursor });
+		setSelection({ start: next.cursor, end: next.cursor });
+		// Tapping the list takes focus away; keep typing where the mention ended.
+		input.current?.focus();
+	};
 	const creating = phase.kind === "creating";
 	const ready = !!repositoryId && !!prompt.trim() && !!provider && providerUnavailableReason(provider) === null;
 
@@ -118,7 +166,7 @@ export default function NewTaskScreen() {
 			let progress = await backend.request<TaskProgress>(
 				"POST",
 				"/api/v1/mobile/tasks",
-				taskRequestBody({ requestId: id, repositoryId, prompt, providerId, model, worktree }),
+				taskRequestBody({ requestId: id, repositoryId, prompt, providerId, model, worktree, access }),
 			);
 			const deadline = Date.now() + GIVE_UP_MS;
 			while (alive.current && progress.state === "creating") {
@@ -210,8 +258,16 @@ export default function NewTaskScreen() {
 
 						<Section label="Pedido">
 							<TextInput
+								ref={input}
 								value={prompt}
 								onChangeText={setPrompt}
+								selection={forcedSelection}
+								onSelectionChange={(event) => {
+									setSelection(event.nativeEvent.selection);
+									setForcedSelection(undefined);
+								}}
+								onFocus={() => setPromptFocused(true)}
+								onBlur={() => setPromptFocused(false)}
 								placeholder="O que o agente deve fazer?"
 								placeholderTextColor={color.faint}
 								style={styles.prompt}
@@ -222,6 +278,16 @@ export default function NewTaskScreen() {
 								editable={!creating}
 								accessibilityLabel="Pedido para o agente"
 							/>
+							{mention && repositoryId ? (
+								<FileMentionList
+									backend={backend}
+									scope={{ repositoryId }}
+									query={mention.query}
+									onPick={insertMention}
+								/>
+							) : (
+								<Text style={styles.hint}>Digite @ para mencionar um arquivo do projeto.</Text>
+							)}
 						</Section>
 
 						<Section label="Agente">
@@ -276,6 +342,18 @@ export default function NewTaskScreen() {
 										);
 									})}
 								</View>
+							</Section>
+						) : null}
+
+						{provider ? (
+							<Section label="Acesso">
+								<AccessChoices
+									available={availableAccess}
+									value={access}
+									onChange={chooseAccess}
+									providerLabel={provider.label}
+									disabled={creating}
+								/>
 							</Section>
 						) : null}
 
