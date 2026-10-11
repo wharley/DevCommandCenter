@@ -3,6 +3,7 @@ import { isPairingLink, stashPairingLink } from "@/backend/offerLink";
 import { configureNotificationDisplay, onNotificationTap } from "@/notifications/native";
 import { sessionFromNotificationData } from "@/notifications/registration";
 import { color } from "@/theme";
+import { UpdateBanner } from "@/updates";
 import * as Linking from "expo-linking";
 import { router, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -27,6 +28,7 @@ export default function RootLayout() {
 						<NotificationTaps />
 						<OfferNotifications />
 						<Routes />
+						<UpdateBanner />
 					</View>
 				</SessionProvider>
 			</KeyboardProvider>

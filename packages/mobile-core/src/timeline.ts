@@ -8,6 +8,7 @@
  * "trace" capsule, and the chat reads user → trace → answer again.
  * Unresolved permissions stay standalone: they need the user's thumb.
  */
+import { pathBasename, splitPrompt } from "./attachments.ts";
 import { t, toolStepParts } from "./labels.ts";
 import type { ChatMessage } from "./threadEvents.ts";
 
@@ -160,7 +161,9 @@ export function threadTitle(messages: ChatMessage[], max = 52): string | null {
 		(m) => m.kind === "user" && m.text.trim().length > 0,
 	);
 	if (!firstUser || firstUser.kind !== "user") return null;
-	const t = firstUser.text.trim().replace(/\s+/g, " ");
+	// Attachments travel as `@/path`; the title is what the person wrote.
+	const prompt = splitPrompt(firstUser.text);
+	const t = (prompt.text || prompt.attachments.map(pathBasename).join(", ")).replace(/\s+/g, " ");
 	return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 

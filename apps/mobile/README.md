@@ -132,6 +132,68 @@ Pair, accept notifications, send the app to the background (Home), type
 tapping it opens the thread. `push <sessionId>` in the fixture delivers a
 sample notification without an agent.
 
+## Dictation and attachments
+
+The composer of a thread and the request in "Nova tarefa" have a microphone
+and a paperclip.
+
+- **Dictation** uses the phone's own recognizer (`expo-speech-recognition`:
+  SFSpeechRecognizer on iOS, SpeechRecognizer on Android) in pt-BR, on the
+  device when it can (iOS when the pt-BR model supports it; Android when
+  "Android System Intelligence" has pt-BR installed), otherwise the system's
+  regular recognizer (Apple's or Google's service). The audio never goes to the
+  desktop: the recognized text lands in the field after what was typed, and
+  nothing is sent until the person taps send. Microphone and speech
+  permissions are asked the first time only. Logic: `src/dictation/` and
+  `dictation.ts` in `packages/mobile-core`.
+- **Attachments**: photos (library or camera) are resized to 2048 px on the
+  longest edge and re-encoded as JPEG; other files go as they are. Each file is
+  limited to 10 MB. A picked file uploads right away over the encrypted channel
+  (`POST /api/v1/mobile/attachments`) and the desktop saves it where it keeps
+  pasted images (its temp dir); the message then carries `@/path`, the same
+  way the desktop composer serializes attachments, so the agent receives the
+  image natively. The thread shows images as thumbnails, fetched with
+  `GET /api/v1/mobile/sessions/:id/attachment`, which only serves paths that
+  session's own prompts attached.
+
+In the iOS Simulator, dictation uses the Mac's microphone (it may not
+recognize anything without one); `xcrun simctl addmedia booted <image>` puts
+a photo in the simulator's library.
+
+## Updates without a new build (EAS Update)
+
+The app ships with `expo-updates`: on launch it asks EAS Update
+(`updates.url` in `app.json`, the project's `u.expo.dev` URL) for a newer
+JavaScript bundle on its build's channel, downloads it in the background and
+runs it on the next start; coming back to the foreground checks again at most
+every 30 minutes, and a banner offers "Reiniciar" once a new version is
+waiting. Settings shows which code the phone runs (channel, embedded build or
+update id). Development builds never check.
+
+Channels follow the build profile in `eas.json`: `preview` builds listen on
+`preview`, `production` builds on `production`. To ship JavaScript-only changes
+(screens, texts, logic in `packages/mobile-core`) to the phones on a channel,
+from `apps/mobile`, logged into the Expo account that owns the project:
+
+```bash
+npx eas-cli@latest update --channel preview --message "o que mudou"
+```
+
+Anything native needs a new build instead (`eas build --profile preview`):
+adding or upgrading a library with native code, a config plugin, permissions
+or anything else in `app.json` that ends up in the iOS/Android project. The
+runtime version is the project's **fingerprint** (`runtimeVersion.policy`), so
+an update built from a tree whose native side differs from a build's is simply
+never offered to that build — it keeps running what it has instead of crashing
+— but it also means that build won't see the update until it is rebuilt.
+`preview` builds bump their build number by themselves (`autoIncrement`, with
+the version source kept on EAS).
+
+Whoever can publish to this EAS project controls the code running on every
+paired phone, which holds the key to the desktop. Keep publishing limited to
+the project owner's Expo account (no other members with publish rights, no
+`EXPO_TOKEN` in CI), and publish only from a reviewed, committed tree.
+
 ## Tests
 
 ```bash

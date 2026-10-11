@@ -641,6 +641,154 @@ fn filter_tracked_files<'a>(paths: &'a [String], query: &str, limit: usize) -> V
         .collect()
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct UploadAttachment {
+    /// The name the phone shows; kept for documents so the agent reads it.
+    name: String,
+    /// Base64 of the file, already compressed by the phone.
+    data: String,
+}
+
+/// Bytes of an upload within the phone limit (an image is sniffed by content).
+fn decode_attachment(input: &UploadAttachment) -> Result<Vec<u8>, HttpApiError> {
+    use base64::Engine as _;
+    let limit = crate::prompt_attachments::MAX_PHONE_ATTACHMENT_BYTES;
+    // Base64 is 4 chars per 3 bytes: refuse before decoding something huge.
+    if input.data.len() / 4 * 3 > limit + 3 {
+        return Err(attachment_too_large());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(input.data.trim())
+        .map_err(|_| HttpApiError::BadRequest("Anexo inválido.".into()))?;
+    if bytes.is_empty() {
+        return Err(HttpApiError::BadRequest("O anexo está vazio.".into()));
+    }
+    if bytes.len() > limit {
+        return Err(attachment_too_large());
+    }
+    Ok(bytes)
+}
+
+fn attachment_too_large() -> HttpApiError {
+    HttpApiError::BadRequest(format!(
+        "O anexo passa de {} MB.",
+        crate::prompt_attachments::MAX_PHONE_ATTACHMENT_BYTES / (1024 * 1024)
+    ))
+}
+
+/// Saves a photo or document from the phone where the desktop keeps pasted
+/// images. The phone then sends `@path` in the prompt, as the composer does,
+/// so turns and new tasks need nothing else.
+pub(super) async fn upload_attachment(
+    Json(input): Json<UploadAttachment>,
+) -> Result<Json<Value>, HttpApiError> {
+    let bytes = decode_attachment(&input)?;
+    let saved = tokio::task::spawn_blocking(move || {
+        let size = bytes.len();
+        let (kind, path) = match crate::prompt_attachments::sniff_image(&bytes) {
+            Some((_, extension)) => (
+                "image",
+                crate::prompt_attachments::save_temp_image(&bytes, extension),
+            ),
+            None => (
+                "file",
+                crate::prompt_attachments::save_temp_file(&bytes, &input.name),
+            ),
+        };
+        path.map(|path| (kind, path, size))
+    })
+    .await
+    .map_err(|e| HttpApiError::internal(e.to_string()))?
+    .map_err(|e| HttpApiError::internal(format!("Não foi possível guardar o anexo: {e}")))?;
+    let (kind, path, size) = saved;
+    Ok(Json(json!({
+        "kind": kind,
+        "path": path.to_string_lossy(),
+        "name": path.file_name().map(|name| name.to_string_lossy().to_string()),
+        "size": size,
+    })))
+}
+
+#[derive(Deserialize)]
+pub(super) struct AttachmentQuery {
+    path: String,
+}
+
+/// Largest image the phone pulls a thumbnail for over the relay.
+const PHONE_PREVIEW_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Whether one of the session's prompts attached `path` (`@path`).
+fn session_references_attachment(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    path: &str,
+) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM dcc_session_events
+         WHERE session_id = ?1 AND json_extract(kind_json, '$.type') = 'turn_started'
+           AND instr(json_extract(kind_json, '$.prompt'), '@' || ?2) > 0)",
+        rusqlite::params![session_id, path],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Thumbnail of an image a prompt of this session attached, like the
+/// desktop's `read_image_preview` — but only for paths the session's own
+/// prompts reference, so a phone cannot read arbitrary images off the Mac.
+pub(super) async fn attachment_preview(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(session_id): Path<String>,
+    Query(query): Query<AttachmentQuery>,
+) -> Result<Json<Value>, HttpApiError> {
+    let path = PathBuf::from(&query.path);
+    if !path.is_absolute()
+        || query.path.contains('\0')
+        || crate::prompt_attachments::image_media_type(&path).is_none()
+    {
+        return Err(HttpApiError::NotFound("Prévia indisponível.".into()));
+    }
+    let wanted = query.path.clone();
+    if !db_read(config, move |conn| {
+        session_references_attachment(conn, &session_id, &wanted)
+    })
+    .await?
+    {
+        return Err(HttpApiError::NotFound("Prévia indisponível.".into()));
+    }
+    let data_url = tokio::task::spawn_blocking(move || {
+        crate::prompt_attachments::read_image_data_url(&path, PHONE_PREVIEW_MAX_BYTES)
+    })
+    .await
+    .map_err(|e| HttpApiError::internal(e.to_string()))?
+    .ok_or_else(|| HttpApiError::NotFound("Prévia indisponível.".into()))?;
+    Ok(Json(json!({ "dataUrl": data_url })))
+}
+
+/// The branch checked out in a workspace's folder (its worktree when it has
+/// one), read from `HEAD` without spawning git: the list asks for every
+/// workspace at once. `None` while the worktree is still detached.
+pub(super) fn checked_out_branch(folder: &FsPath) -> Option<String> {
+    let dot_git = folder.join(".git");
+    let git_dir = if dot_git.is_file() {
+        let pointer = std::fs::read_to_string(&dot_git).ok()?;
+        let target = PathBuf::from(pointer.trim().strip_prefix("gitdir:")?.trim());
+        if target.is_absolute() {
+            target
+        } else {
+            folder.join(target)
+        }
+    } else {
+        dot_git
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    head.trim()
+        .strip_prefix("ref: refs/heads/")
+        .map(str::to_string)
+        .filter(|branch| !branch.is_empty())
+}
+
 /// Called once at HTTP process startup. An interrupted mutation is never silently replayed.
 pub(super) fn recover_interrupted_tasks(db_path: &FsPath) -> Result<(), String> {
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;

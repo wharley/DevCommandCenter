@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use axum::{
-    extract::{FromRef, Path, Query, State},
+    extract::{DefaultBodyLimit, FromRef, Path, Query, State},
     http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Method, StatusCode},
     middleware,
     response::{
@@ -477,6 +477,15 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/mobile/repositories/:repository_id/files",
             get(mobile::repository_files),
         )
+        .route(
+            "/api/v1/mobile/attachments",
+            // A 10 MB file is ~13.4 MB of base64; the 2 MB default would refuse it.
+            post(mobile::upload_attachment).layer(DefaultBodyLimit::max(16 * 1024 * 1024)),
+        )
+        .route(
+            "/api/v1/mobile/sessions/:session_id/attachment",
+            get(mobile::attachment_preview),
+        )
         .route("/api/v1/mobile/tasks", post(mobile::create_task))
         .route("/api/v1/mobile/tasks/:request_id", get(mobile::task_status))
         .route("/rpc", post(handle_json_rpc))
@@ -749,6 +758,13 @@ fn live_combs(conn: &rusqlite::Connection, project_id: Option<String>) -> Result
             .or_else(|| root_path_basename(root_path.as_deref()))
             .unwrap_or_else(|| row_project_id.clone());
         let base_branch: Option<String> = row.get(3).map_err(|e| e.to_string())?;
+        let worktree_path: Option<String> = row.get(4).map_err(|e| e.to_string())?;
+        // `base_branch` is what the task started from; a task's worktree has
+        // its own branch (none while it is still detached).
+        let branch = match worktree_path.as_deref().or(root_path.as_deref()) {
+            Some(folder) => mobile::checked_out_branch(FsPath::new(folder)),
+            None => base_branch.clone(),
+        };
         // A picked logo travels as the icon value itself (a PNG data URI).
         let icon: Option<String> = row.get(10).map_err(|e| e.to_string())?;
         let logo: Option<String> = row.get(12).map_err(|e| e.to_string())?;
@@ -763,8 +779,8 @@ fn live_combs(conn: &rusqlite::Connection, project_id: Option<String>) -> Result
             "name": row.get::<_, String>(2).map_err(|e| e.to_string())?,
             "description": Value::Null,
             "baseBranch": base_branch.clone(),
-            "branch": base_branch,
-            "worktreePath": row.get::<_, Option<String>>(4).map_err(|e| e.to_string())?,
+            "branch": branch,
+            "worktreePath": worktree_path,
             "reviewTargets": Value::Null,
             "forgeLink": Value::Null,
             "status": row.get::<_, String>(6).map_err(|e| e.to_string())?,
@@ -3139,6 +3155,162 @@ mod tests {
             input.approval_policy,
             Some(ProviderApprovalPolicy::FullAccess)
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn phone_attachments_travel_as_prompt_paths_and_preview_only_for_their_session() {
+        use base64::Engine as _;
+        use dcc_core::domain::session::{SessionEventKind, SessionEventRecord, TurnId};
+        let fixture = embedded_fixture().await;
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+
+        // A photo is stored like a pasted image, by its content (not its name).
+        let png = b"\x89PNG\r\n\x1a\nphone-photo";
+        let (status, photo) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/attachments",
+            json!({ "name": "IMG_0001.HEIC", "data": encode(png) }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{photo}");
+        assert_eq!(photo["kind"], "image");
+        let photo_path = photo["path"].as_str().unwrap().to_string();
+        assert!(photo_path.ends_with(".png"), "{photo_path}");
+        assert_eq!(std::fs::read(&photo_path).unwrap(), png);
+
+        // A document keeps a readable, single-segment name.
+        let (status, doc) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/attachments",
+            json!({ "name": "../Relatório final.pdf", "data": encode(b"%PDF-1.7") }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{doc}");
+        assert_eq!(doc["kind"], "file");
+        assert_eq!(doc["name"], "Relatório-final.pdf");
+
+        // Over the limit: refused with the limit in the message, before any file.
+        let big = vec![0u8; crate::prompt_attachments::MAX_PHONE_ATTACHMENT_BYTES + 1];
+        let (status, refused) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/attachments",
+            json!({ "name": "big.bin", "data": encode(&big) }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(refused["error"]["message"], "O anexo passa de 10 MB.");
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/attachments",
+            json!({ "name": "x.png", "data": "not base64!" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // The preview reads only what a prompt of this session attached.
+        let preview_uri = |path: &str| {
+            format!(
+                "/api/v1/mobile/sessions/http-respond/attachment?path={}",
+                url_encode(path)
+            )
+        };
+        let (status, _) = get_json(&fixture.app, &preview_uri(&photo_path)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "not referenced yet");
+        SessionEventRepo::append_event(
+            &fixture.state,
+            &SessionEventRecord {
+                event_id: Uuid::new_v4().to_string(),
+                session_id: fixture.session_id.clone(),
+                sequence: 0,
+                occurred_at: "2026-10-10T00:00:00Z".to_string(),
+                kind: SessionEventKind::TurnStarted {
+                    turn_id: TurnId("with-photo".to_string()),
+                    prompt: format!("o que tem aqui? @{photo_path}"),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                    approval_policy: None,
+                },
+            },
+        )
+        .await
+        .expect("append turn");
+        let (status, body) = get_json(&fixture.app, &preview_uri(&photo_path)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["dataUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
+        let other = crate::prompt_attachments::save_temp_image(png, "png").unwrap();
+        for path in [other.to_string_lossy().to_string(), "relative.png".into()] {
+            let (status, _) = get_json(&fixture.app, &preview_uri(&path)).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        }
+        let (status, _) = get_json(
+            &fixture.app,
+            "/api/v1/mobile/sessions/someone-else/attachment?path=%2Ftmp%2Fx.png",
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        for path in [photo_path, doc["path"].as_str().unwrap().to_string()] {
+            let _ = std::fs::remove_file(&path);
+        }
+        let _ = std::fs::remove_file(other);
+    }
+
+    fn url_encode(value: &str) -> String {
+        value
+            .bytes()
+            .map(|byte| match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
+                    (byte as char).to_string()
+                }
+                _ => format!("%{byte:02X}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn workspaces_report_the_branch_their_folder_has_checked_out() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str], dir: &FsPath| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q", "-b", "main"], repo.path());
+        git(
+            &["commit", "-q", "--allow-empty", "-m", "init"],
+            repo.path(),
+        );
+        assert_eq!(
+            mobile::checked_out_branch(repo.path()).as_deref(),
+            Some("main")
+        );
+        let worktree = repo.path().join("wt");
+        git(
+            &["worktree", "add", "-q", "--detach", "wt", "main"],
+            repo.path(),
+        );
+        assert_eq!(mobile::checked_out_branch(&worktree), None, "detached");
+        git(&["switch", "-q", "-c", "dcc/tarefa-1"], &worktree);
+        assert_eq!(
+            mobile::checked_out_branch(&worktree).as_deref(),
+            Some("dcc/tarefa-1")
+        );
+        assert_eq!(
+            mobile::checked_out_branch(repo.path()).as_deref(),
+            Some("main")
+        );
+        assert_eq!(mobile::checked_out_branch(&repo.path().join("nope")), None);
     }
 
     #[tokio::test(flavor = "current_thread")]

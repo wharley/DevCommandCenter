@@ -9,7 +9,7 @@ import { Button, Mono, Panel } from "@/ui/primitives";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function NotificationsOffer() {
@@ -32,7 +32,14 @@ export default function NotificationsOffer() {
 	};
 
 	return (
-		<ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
+		<ScrollView
+			style={styles.root}
+			// An iOS sheet already starts below the status bar; Android modals are full screen.
+			contentContainerStyle={[
+				styles.content,
+				{ paddingTop: Platform.OS === "ios" ? 40 : insets.top + 24, paddingBottom: insets.bottom + 24 },
+			]}
+		>
 			<View style={styles.icon}>
 				<Feather name="bell" size={28} color={color.wait} />
 			</View>
@@ -58,7 +65,7 @@ export default function NotificationsOffer() {
 
 const styles = StyleSheet.create({
 	root: { flex: 1, backgroundColor: color.bg },
-	content: { paddingHorizontal: 24, paddingTop: 40 },
+	content: { paddingHorizontal: 24 },
 	icon: {
 		width: 56,
 		height: 56,

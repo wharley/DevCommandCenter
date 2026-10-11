@@ -13,6 +13,7 @@ import {
 	pickAccessPolicy,
 	providerUnavailableReason,
 	repositoryLabel,
+	t,
 	taskRequestBody,
 	type AccessPolicy,
 	type CatalogProvider,
@@ -26,7 +27,9 @@ import { errorMessage } from "@/backend/types";
 import { alpha, color, radius } from "@/theme";
 import { AccessChoices } from "@/ui/AccessPicker";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
+import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { FileMentionList } from "@/ui/FileMentionList";
+import { useDictation } from "@/dictation/useDictation";
 import { Button, Loading, Mono, Panel } from "@/ui/primitives";
 import { AgentMascot, ProjectGlyph } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
@@ -107,9 +110,12 @@ export default function NewTaskScreen() {
 		};
 	}, [load]);
 
+	const attachments = useAttachments(backend);
+	const dictation = useDictation(prompt, setPrompt);
+	const attached = attachments.items.map((item) => item.path ?? item.id).join("|");
 	useEffect(() => {
 		requestId.current = null;
-	}, [repositoryId, prompt, providerId, model, worktree, access]);
+	}, [repositoryId, prompt, providerId, model, worktree, access, attached]);
 
 	const provider = useMemo(
 		() => catalog?.providers.find((p) => p.id === providerId) ?? null,
@@ -150,7 +156,16 @@ export default function NewTaskScreen() {
 		input.current?.focus();
 	};
 	const creating = phase.kind === "creating";
-	const ready = !!repositoryId && !!prompt.trim() && !!provider && providerUnavailableReason(provider) === null;
+	const uploading = attachments.items.some((item) => item.status === "uploading");
+	const hasReadyAttachment = attachments.items.some((item) => item.status === "ready");
+	const ready =
+		!!repositoryId &&
+		(!!prompt.trim() || hasReadyAttachment) &&
+		!uploading &&
+		!!provider &&
+		providerUnavailableReason(provider) === null;
+	const imagesUnsupported =
+		provider?.capabilities?.vision === false && attachments.items.some((item) => item.kind === "image");
 
 	const chooseProvider = (next: CatalogProvider) => {
 		setProviderId(next.id);
@@ -159,6 +174,8 @@ export default function NewTaskScreen() {
 
 	const create = async () => {
 		if (!ready || creating || !repositoryId || !providerId) return;
+		// Dictation never sends by itself; creating stops it with what was heard.
+		if (dictation.listening) dictation.stop();
 		const id = (requestId.current ??= Crypto.randomUUID());
 		rememberedPick = { providerId, model };
 		setPhase({ kind: "creating", step: "sending" });
@@ -166,7 +183,15 @@ export default function NewTaskScreen() {
 			let progress = await backend.request<TaskProgress>(
 				"POST",
 				"/api/v1/mobile/tasks",
-				taskRequestBody({ requestId: id, repositoryId, prompt, providerId, model, worktree, access }),
+				taskRequestBody({
+					requestId: id,
+					repositoryId,
+					prompt: attachments.queue.prompt(prompt),
+					providerId,
+					model,
+					worktree,
+					access,
+				}),
 			);
 			const deadline = Date.now() + GIVE_UP_MS;
 			while (alive.current && progress.state === "creating") {
@@ -275,9 +300,18 @@ export default function NewTaskScreen() {
 								textAlignVertical="top"
 								// Requests carry identifiers and commands; autocorrect mangles them.
 								autoCorrect={false}
-								editable={!creating}
+								editable={!creating && !dictation.listening}
 								accessibilityLabel="Pedido para o agente"
 							/>
+							<AttachmentTray attachments={attachments} />
+							{imagesUnsupported ? (
+								<Text style={styles.hint}>{t("composer.attachments.imagesUnsupported")}</Text>
+							) : null}
+							<DictationStatus dictation={dictation} />
+							<View style={styles.promptTools}>
+								<AttachButton attachments={attachments} disabled={creating} />
+								<MicButton dictation={dictation} disabled={creating} />
+							</View>
 							{mention && repositoryId ? (
 								<FileMentionList
 									backend={backend}
@@ -497,6 +531,7 @@ const styles = StyleSheet.create({
 	chipTextOn: { color: color.fg },
 	recommended: { fontSize: 9, color: color.accent },
 	hint: { color: color.faint, fontSize: 11, lineHeight: 16 },
+	promptTools: { flexDirection: "row", gap: 8 },
 	prompt: {
 		minHeight: 120,
 		maxHeight: 260,

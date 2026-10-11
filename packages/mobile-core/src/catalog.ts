@@ -5,6 +5,7 @@
  * tab, which must show every project — not only the ones that already have a
  * workspace (a project added on the desktop has none until its first task).
  */
+import { pathBasename, splitPrompt } from "./attachments.ts";
 import { t } from "./labels.ts";
 import type { Comb, SessionSearchResult } from "./triage.ts";
 
@@ -25,7 +26,8 @@ export type CatalogProvider = {
 	enabled?: boolean;
 	stable?: boolean;
 	/** `approvalPolicies`: the access levels the agent enforces itself. */
-	capabilities?: { approvalPolicies?: string[] };
+	/** `vision: false`: images go as plain file references (desktop rule). */
+	capabilities?: { approvalPolicies?: string[]; vision?: boolean };
 };
 
 export type CatalogRepository = {
@@ -152,11 +154,17 @@ export type TaskDraft = {
 };
 
 /** Body of `POST /api/v1/mobile/tasks`. Every task gets a new workspace, as on the desktop. */
+function titleSource(prompt: string): string {
+	const written = splitPrompt(prompt);
+	return written.text || written.attachments.map(pathBasename).join(", ");
+}
+
 export function taskRequestBody(draft: TaskDraft) {
 	return {
 		requestId: draft.requestId,
 		repositoryId: draft.repositoryId,
-		title: taskTitle(draft.prompt),
+		// `@/path` attachments are not part of the title.
+		title: taskTitle(titleSource(draft.prompt)),
 		prompt: draft.prompt.trim(),
 		providerId: draft.providerId,
 		model: draft.model,

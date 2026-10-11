@@ -4061,16 +4061,16 @@ async fn pair_audit_log(app: AppHandle, limit: Option<i64>) -> ApiResult<Value> 
 
 #[tauri::command]
 async fn terminal_save_temp_image(image_data: Vec<u8>, extension: String) -> ApiResult<Value> {
-    use uuid::Uuid;
-
-    let temp_dir = std::env::temp_dir();
-    let filename = format!("dcc_img_{}.{}", Uuid::new_v4(), extension);
-    let path = temp_dir.join(&filename);
-
-    std::fs::write(&path, image_data).map_err(|e| ApiError {
-        code: "FS_ERROR",
-        message: format!("Failed to save temp image: {}", e),
-    })?;
+    let path =
+        dev_command_center_tauri::prompt_attachments::save_temp_image(&image_data, &extension)
+            .map_err(|e| ApiError {
+                code: "FS_ERROR",
+                message: format!("Failed to save temp image: {}", e),
+            })?;
+    let filename = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
 
     Ok(serde_json::json!({
         "path": path.to_string_lossy().to_string(),
@@ -4078,52 +4078,27 @@ async fn terminal_save_temp_image(image_data: Vec<u8>, extension: String) -> Api
     }))
 }
 
-const IMAGE_PREVIEW_MAX_BYTES: u64 = 15 * 1024 * 1024;
-
-fn image_preview_media_type(path: &std::path::Path) -> Option<&'static str> {
-    match path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("png") => Some("image/png"),
-        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
-        Some("gif") => Some("image/gif"),
-        Some("webp") => Some("image/webp"),
-        _ => None,
-    }
-}
-
 /// Image a prompt referenced (`@/path.png`), as a data URL for the thumbnail
 /// in the person's message. Only absolute paths to image files within the
 /// size cap; a missing file (the OS cleans the temp dir) is a normal outcome.
 #[tauri::command]
 async fn read_image_preview(path: String) -> ApiResult<Value> {
-    use base64::Engine as _;
-
-    let not_found = || ApiError {
-        code: "IMAGE_PREVIEW_UNAVAILABLE",
-        message: "image preview unavailable".into(),
+    use dev_command_center_tauri::prompt_attachments::{
+        read_image_data_url, IMAGE_PREVIEW_MAX_BYTES,
     };
+
     let path = std::path::PathBuf::from(path);
-    if !path.is_absolute() {
-        return Err(not_found());
-    }
-    let media_type = image_preview_media_type(&path).ok_or_else(not_found)?;
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        let metadata = std::fs::metadata(&path).ok()?;
-        if !metadata.is_file() || metadata.len() > IMAGE_PREVIEW_MAX_BYTES {
-            return None;
-        }
-        std::fs::read(&path).ok()
+    let data_url = tauri::async_runtime::spawn_blocking(move || {
+        read_image_data_url(&path, IMAGE_PREVIEW_MAX_BYTES)
     })
     .await
     .ok()
     .flatten()
-    .ok_or_else(not_found)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(serde_json::json!({ "dataUrl": format!("data:{media_type};base64,{encoded}") }))
+    .ok_or_else(|| ApiError {
+        code: "IMAGE_PREVIEW_UNAVAILABLE",
+        message: "image preview unavailable".into(),
+    })?;
+    Ok(serde_json::json!({ "dataUrl": data_url }))
 }
 
 #[tauri::command]

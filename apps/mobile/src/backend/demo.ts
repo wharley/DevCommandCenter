@@ -5,7 +5,9 @@
  * permission and finishes — so every screen works exactly as when paired.
  */
 import {
+	base64Size,
 	filterTrackedFiles,
+	MAX_ATTACHMENT_BYTES,
 	taskTitle,
 	type CatalogRepository,
 	type Comb,
@@ -43,6 +45,9 @@ export class DemoBackend implements Backend {
 	private readonly repositories: CatalogRepository[];
 	/** Task creations by request id, as the desktop journals them. */
 	private readonly tasks = new Map<string, { input: string; result: TaskProgress }>();
+	/** Uploaded images by path (the desktop keeps them in its temp dir). */
+	private readonly attachments = new Map<string, string>();
+	private attachmentCount = 0;
 	private readonly subs = new Set<{ path: () => string; handlers: StreamHandlers }>();
 	private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 	/** Steps that resume once a permission is answered, by request id. */
@@ -109,6 +114,31 @@ export class DemoBackend implements Backend {
 		return this.route(method.toUpperCase(), new URL(path, "http://demo"), body) as T;
 	}
 
+	/** Like the desktop's route: images by content, a size limit, a path back. */
+	private saveAttachment(body: unknown) {
+		const input = (body ?? {}) as { name?: unknown; data?: unknown };
+		const data = typeof input.data === "string" ? input.data : "";
+		const size = base64Size(data);
+		if (size > MAX_ATTACHMENT_BYTES) throw new ApiError(400, "O anexo passa de 10 MB.");
+		if (size === 0) throw new ApiError(400, "O anexo está vazio.");
+		const id = ++this.attachmentCount;
+		const image = data.startsWith("/9j/") ? "jpg" : data.startsWith("iVBOR") ? "png" : null;
+		const name = String(input.name ?? "arquivo").replace(/[\s/\\<>]+/g, "-") || "arquivo.txt";
+		const path = image ? `/demo/tmp/dcc_img_${id}.${image}` : `/demo/tmp/dcc_file_${id}/${name}`;
+		if (image) this.attachments.set(path, `data:image/${image === "jpg" ? "jpeg" : "png"};base64,${data}`);
+		return { kind: image ? "image" : "file", path, name: path.split("/").pop(), size };
+	}
+
+	private attachmentPreview(sessionId: string, path: string) {
+		const session = this.find(sessionId);
+		const referenced = session?.events.some(
+			(e) => e.kind.type === "turn_started" && typeof e.kind.prompt === "string" && e.kind.prompt.includes(`@${path}`),
+		);
+		const dataUrl = referenced ? this.attachments.get(path) : undefined;
+		if (!dataUrl) throw new ApiError(404, "Prévia indisponível.");
+		return { dataUrl };
+	}
+
 	private route(method: string, url: URL, body: unknown): unknown {
 		const path = url.pathname;
 		if (method === "GET" && path === "/api/v1/status") {
@@ -117,6 +147,11 @@ export class DemoBackend implements Backend {
 		if (method === "GET" && path === "/api/v1/combs") return this.combs;
 		if (method === "GET" && path === "/api/v1/mobile/catalog") return this.catalog();
 		if (method === "POST" && path === "/api/v1/mobile/tasks") return this.createTask(body);
+		if (method === "POST" && path === "/api/v1/mobile/attachments") return this.saveAttachment(body);
+		const preview = /^\/api\/v1\/mobile\/sessions\/([^/]+)\/attachment$/.exec(path);
+		if (method === "GET" && preview) {
+			return this.attachmentPreview(decodeURIComponent(preview[1]!), url.searchParams.get("path") ?? "");
+		}
 		const files = /^\/api\/v1\/mobile\/(workspaces|repositories)\/([^/]+)\/files$/.exec(path);
 		if (method === "GET" && files) return this.files(files[1]!, decodeURIComponent(files[2]!), url.searchParams.get("q") ?? "");
 		const task = /^\/api\/v1\/mobile\/tasks\/([^/]+)$/.exec(path);

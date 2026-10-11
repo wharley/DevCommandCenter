@@ -125,3 +125,11 @@ describe("catalog", () => {
 		expect(projectGroups(repositories, combs, sessions, "nada")).toEqual([]);
 	});
 });
+
+describe("task titles with attachments", () => {
+	it("leave the `@/path` attachments out of the title", () => {
+		const base = { requestId: "r", repositoryId: "repo", providerId: "claude", model: null, worktree: true, access: null };
+		expect(taskRequestBody({ ...base, prompt: "Ajuste o layout @/tmp/dcc_img_1.jpg" }).title).toBe("Ajuste o layout");
+		expect(taskRequestBody({ ...base, prompt: "@/tmp/dcc_file_2/spec.pdf" }).title).toBe("spec.pdf");
+	});
+});

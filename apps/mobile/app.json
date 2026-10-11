@@ -38,10 +38,31 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "O DCC usa a câmera só para ler o QR de pareamento do seu computador.",
+          "cameraPermission": "O DCC usa a câmera para ler o QR de pareamento do seu computador e para tirar fotos que você anexa a uma mensagem.",
+          "microphonePermission": "O DCC usa o microfone só enquanto você dita uma mensagem. O áudio nunca vai para o seu computador.",
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O DCC abre suas fotos só para você escolher imagens para anexar a uma mensagem.",
+          "cameraPermission": "O DCC usa a câmera para ler o QR de pareamento do seu computador e para tirar fotos que você anexa a uma mensagem.",
+          "microphonePermission": "O DCC usa o microfone só enquanto você dita uma mensagem. O áudio nunca vai para o seu computador."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "O DCC usa o microfone só enquanto você dita uma mensagem. O áudio nunca vai para o seu computador.",
+          "speechRecognitionPermission": "O DCC transforma a sua fala em texto no campo da mensagem com o reconhecimento de voz do sistema, no próprio aparelho quando ele permite. Só o texto vai para o seu computador.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.as"
+          ]
+        }
+      ],
+      "expo-updates"
     ],
     "experiments": {
       "typedRoutes": true
@@ -52,6 +73,14 @@
         "projectId": "17422e03-d30d-40ca-9e2f-8896c07246f0"
       }
     },
-    "owner": "wharleyornelasjs"
+    "owner": "wharleyornelasjs",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/17422e03-d30d-40ca-9e2f-8896c07246f0",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    }
   }
 }

@@ -10,6 +10,7 @@ import {
 	normalizeProvider,
 	pickAccessPolicy,
 	threadApprovalPolicy,
+	t,
 	threadTitle,
 	workspaceLabel,
 	type AccessPolicy,
@@ -26,7 +27,9 @@ import { ThreadSync, type ThreadSnapshot } from "@/screens/threadSync";
 import { alpha, color, radius } from "@/theme";
 import { AccessPill } from "@/ui/AccessPicker";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
+import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { FileMentionList } from "@/ui/FileMentionList";
+import { useDictation } from "@/dictation/useDictation";
 import { Loading, Mono, StateDot } from "@/ui/primitives";
 import { AgentMascot } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
@@ -72,6 +75,8 @@ export default function ThreadScreen() {
 	const [selection, setSelection] = useState({ start: 0, end: 0 });
 	const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number } | undefined>();
 	const [composerFocused, setComposerFocused] = useState(false);
+	const attachments = useAttachments(backend);
+	const dictation = useDictation(composer, setComposer);
 	const input = useRef<TextInput>(null);
 	const sync = useRef<ThreadSync | null>(null);
 	const list = useRef<FlatList<RenderItem>>(null);
@@ -213,9 +218,18 @@ export default function ThreadScreen() {
 			}
 		});
 
+	const uploading = attachments.items.some((item) => item.status === "uploading");
+	const hasReadyAttachment = attachments.items.some((item) => item.status === "ready");
+	const canSend = (composer.trim().length > 0 || hasReadyAttachment) && !uploading && !sending;
+	const imagesUnsupported =
+		provider?.capabilities?.vision === false && attachments.items.some((item) => item.kind === "image");
+
 	const send = async () => {
-		const prompt = composer.trim();
-		if (!prompt || sending || running) return;
+		if (!canSend || running) return;
+		// Dictation never sends by itself; sending stops it with what was heard.
+		if (dictation.listening) dictation.stop();
+		const prompt = attachments.queue.prompt(composer);
+		if (!prompt) return;
 		setSending(true);
 		setNotice(null);
 		try {
@@ -228,6 +242,7 @@ export default function ThreadScreen() {
 				...(approvalPolicy ? { approvalPolicy } : {}),
 			});
 			setComposer("");
+			attachments.queue.clear();
 			stick.current = true;
 			sync.current?.nudge();
 		} catch (error) {
@@ -274,7 +289,7 @@ export default function ThreadScreen() {
 		const message = item.message;
 		switch (message.kind) {
 			case "user":
-				return <UserBubble text={message.text} />;
+				return <UserBubble text={message.text} backend={backend} sessionId={threadId} />;
 			case "assistant":
 				return <AssistantBlock message={message} />;
 			case "system":
@@ -379,7 +394,11 @@ export default function ThreadScreen() {
 						disabled={sending}
 					/>
 				) : null}
+				<AttachmentTray attachments={attachments} />
+				{imagesUnsupported ? <Text style={styles.notice}>{t("composer.attachments.imagesUnsupported")}</Text> : null}
+				<DictationStatus dictation={dictation} />
 				<View style={styles.composerRow}>
+					<AttachButton attachments={attachments} disabled={sending} />
 					<TextInput
 						ref={input}
 						value={composer}
@@ -397,9 +416,10 @@ export default function ThreadScreen() {
 						multiline
 						// Prompts carry identifiers and commands; autocorrect mangles them.
 						autoCorrect={false}
-						editable={!sending}
+						editable={!sending && !dictation.listening}
 						accessibilityLabel="Mensagem para o agente"
 					/>
+					<MicButton dictation={dictation} disabled={sending} />
 					{running ? (
 						<Pressable
 							onPress={() => void stop()}
@@ -412,8 +432,8 @@ export default function ThreadScreen() {
 					) : (
 						<Pressable
 							onPress={() => void send()}
-							disabled={!composer.trim() || sending}
-							style={[styles.sendButton, { opacity: !composer.trim() || sending ? 0.4 : 1 }]}
+							disabled={!canSend}
+							style={[styles.sendButton, { opacity: canSend ? 1 : 0.4 }]}
 							accessibilityRole="button"
 							accessibilityLabel="Enviar"
 						>

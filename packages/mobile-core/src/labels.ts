@@ -36,6 +36,10 @@ export const DESKTOP_PT_BR = {
 	"conversation.toolCall.verbs.other.live": "Usando",
 	"conversation.toolCall.verbs.other.done": "Usou",
 	"composer.fileMentions": "Arquivos",
+	"composer.attachments.add": "Anexar arquivo ou imagem",
+	"composer.attachments.imagesUnsupported":
+		"Este provider não suporta imagens; as imagens foram anexadas como referências de arquivo.",
+	"conversation.attachment.openImage": "Abrir imagem {{name}}",
 	"quickOpen.loading": "Listando arquivos…",
 	"quickOpen.empty": "Nenhum arquivo encontrado.",
 	"composer.approval.open": "Escolher como as ações devem ser aprovadas",

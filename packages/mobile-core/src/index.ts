@@ -1,4 +1,6 @@
+export * from "./attachments.ts";
 export * from "./catalog.ts";
+export * from "./dictation.ts";
 export * from "./labels.ts";
 export * from "./mentions.ts";
 export * from "./questions.ts";

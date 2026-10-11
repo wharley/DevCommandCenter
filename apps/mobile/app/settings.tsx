@@ -4,10 +4,12 @@ import type { Backend } from "@/backend/types";
 import type { PushRegistration } from "@/notifications/registration";
 import { pushStatusText, usePushStatus } from "@/notifications/usePush";
 import { color } from "@/theme";
+import { appVersionLine } from "@/updates";
 import { Button, Mono, Panel, StateDot } from "@/ui/primitives";
 import { router } from "expo-router";
 import { useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import Constants from "expo-constants";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function SettingsScreen() {
@@ -20,7 +22,14 @@ export default function SettingsScreen() {
 	};
 
 	return (
-		<ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
+		<ScrollView
+			style={styles.root}
+			// An iOS sheet already starts below the status bar; Android modals are full screen.
+			contentContainerStyle={[
+				styles.content,
+				{ paddingTop: Platform.OS === "ios" ? 20 : insets.top + 12, paddingBottom: insets.bottom + 24 },
+			]}
+		>
 			<View style={styles.header}>
 				<Text style={styles.title}>Configurações</Text>
 				<Pressable onPress={() => router.back()} hitSlop={10}>
@@ -62,6 +71,7 @@ export default function SettingsScreen() {
 					/>
 				</>
 			)}
+			<Mono style={styles.version}>DCC {appVersionLine(Constants.expoConfig?.version)}</Mono>
 		</ScrollView>
 	);
 }
@@ -136,7 +146,8 @@ function Field({ label, value, mono, accent }: { label: string; value: string; m
 
 const styles = StyleSheet.create({
 	root: { flex: 1, backgroundColor: color.bg },
-	content: { paddingHorizontal: 20, paddingTop: 20 },
+	content: { paddingHorizontal: 20 },
+	version: { color: color.faint, fontSize: 10, textAlign: "center", marginTop: 28 },
 	header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
 	title: { color: color.fg, fontSize: 20, fontWeight: "600" },
 	close: { color: color.mute, fontSize: 14 },

@@ -2,6 +2,7 @@
 import {
 	stepIsLive,
 	stepLabel,
+	splitPrompt,
 	stepParts,
 	t,
 	traceTitle,
@@ -12,18 +13,27 @@ import {
 import Feather from "@expo/vector-icons/Feather";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import type { Backend } from "../backend/types";
 import { alpha, color, font, radius } from "../theme";
+import { PromptAttachments } from "./PromptAttachments";
 import { RichText } from "../ui/RichText";
 import { Button, Mono, StateDot } from "../ui/primitives";
 
-export function UserBubble({ text }: { text: string }) {
+/** The person's message: attachments over the text, as on the desktop. */
+export function UserBubble({ text, backend, sessionId }: { text: string; backend: Backend; sessionId: string }) {
+	const prompt = splitPrompt(text);
 	return (
-		<View style={styles.userWrap}>
-			<View style={styles.userBubble}>
-				<Text style={styles.userText} selectable>
-					{text || "(vazio)"}
-				</Text>
-			</View>
+		<View style={[styles.userWrap, { gap: 6 }]}>
+			{prompt.attachments.length > 0 ? (
+				<PromptAttachments paths={prompt.attachments} backend={backend} sessionId={sessionId} />
+			) : null}
+			{prompt.text || prompt.attachments.length === 0 ? (
+				<View style={styles.userBubble}>
+					<Text style={styles.userText} selectable>
+						{prompt.text || "(vazio)"}
+					</Text>
+				</View>
+			) : null}
 		</View>
 	);
 }
