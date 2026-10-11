@@ -10,6 +10,7 @@
     "backgroundColor": "#0a0b0d",
     "ios": {
       "bundleIdentifier": "com.devcommandcenter.mobile",
+      "icon": "./assets/icon-ios.png",
       "supportsTablet": true,
       "config": {
         "usesNonExemptEncryption": false
