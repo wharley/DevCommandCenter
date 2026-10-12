@@ -63,7 +63,7 @@ fn preferred_change_request_title(
     })
 }
 
-async fn workspace_change_request_title(
+pub(crate) async fn workspace_change_request_title(
     state: &WorkspaceCommandState,
     root: &str,
 ) -> Result<Option<String>, String> {
@@ -990,6 +990,14 @@ pub async fn workspace_change_request_create(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceChangeRequestCreateInput,
 ) -> Result<(), String> {
+    workspace_change_request_create_with_state(&state, input).await
+}
+
+/// `workspace_change_request_create` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_change_request_create_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceChangeRequestCreateInput,
+) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -1055,6 +1063,14 @@ pub async fn workspace_change_request_create(
 #[tauri::command]
 pub async fn workspace_change_request_context(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceChangeRequestContextInput,
+) -> Result<WorkspaceChangeRequestContextOutput, String> {
+    workspace_change_request_context_with_state(&state, input).await
+}
+
+/// `workspace_change_request_context` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_change_request_context_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceChangeRequestContextInput,
 ) -> Result<WorkspaceChangeRequestContextOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -3514,6 +3530,14 @@ fn lookup_github_failed_checks(
 #[tauri::command]
 pub async fn workspace_pipeline_status(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspacePipelineStatusInput,
+) -> Result<WorkspacePipelineStatusOutput, String> {
+    workspace_pipeline_status_with_state(&state, input).await
+}
+
+/// `workspace_pipeline_status` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_pipeline_status_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspacePipelineStatusInput,
 ) -> Result<WorkspacePipelineStatusOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;

@@ -1,0 +1,75 @@
+{
+  "about": "Shared cases for the \"Precisa de você\" rule. The desktop (apps/desktop/src/features/workspaces/use-workspace-agent-states.ts, attentionWorkspaceItems) and the backend the phone reads (crates/dcc-tauri/src/commands/workspace_attention.rs, attention_items) both run them; change the rule in both or the tests fail. `unread` lists the workspaces whose finished result the person has not opened (the client's own seen store).",
+  "now": "2026-10-12T12:00:00Z",
+  "unread": ["w-done-unread", "w-aborted"],
+  "workspaces": [
+    { "id": "w-perm", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-input", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-run-blocked", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-blockers", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-conflict-old", "status": "ready", "updatedAt": "2026-10-12T07:00:00Z" },
+    { "id": "w-snoozed", "status": "ready", "snoozedUntil": "2026-10-13T09:00:00Z", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-woke", "status": "ready", "snoozedUntil": "2026-10-12T11:30:00Z", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-setup", "status": "setup_pending", "updatedAt": "2026-10-12T06:00:00Z", "createdAt": "2026-10-12T05:00:00Z" },
+    { "id": "w-done-unread", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-done-seen", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-aborted", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-archived", "status": "archived", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-review", "status": "ready", "updatedAt": "2026-10-12T08:30:00Z" },
+    { "id": "w-running", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" }
+  ],
+  "sessions": {
+    "w-perm": [
+      { "session": { "updatedAt": "2026-10-12T11:00:00Z" }, "projection": { "state": "active", "activeTurnId": "t1", "updatedAt": "2026-10-12T11:00:00Z", "turnCount": 1 }, "lastTurnState": "running", "lastTurnStartedAt": "2026-10-12T10:50:00Z", "lastTurnCompletedAt": null, "lastTurnAwaitingUser": "permission", "lastTurnAwaitingSince": "2026-10-12T11:10:00Z" }
+    ],
+    "w-input": [
+      { "session": { "updatedAt": "2026-10-12T11:00:00Z" }, "projection": { "state": "active", "activeTurnId": "t1", "updatedAt": "2026-10-12T11:00:00Z", "turnCount": 1 }, "lastTurnState": "running", "lastTurnStartedAt": "2026-10-12T10:40:00Z", "lastTurnCompletedAt": null, "lastTurnAwaitingUser": "input", "lastTurnAwaitingSince": null }
+    ],
+    "w-run-blocked": [
+      { "session": { "updatedAt": "2026-10-12T11:00:00Z" }, "projection": { "state": "active", "activeTurnId": "t1", "updatedAt": "2026-10-12T11:00:00Z", "turnCount": 1 }, "lastTurnState": "running", "lastTurnStartedAt": "2026-10-12T10:40:00Z", "lastTurnCompletedAt": null, "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null }
+    ],
+    "w-blockers": [
+      { "session": { "updatedAt": "2026-10-12T10:00:00Z" }, "projection": { "state": "completed", "activeTurnId": null, "updatedAt": "2026-10-12T10:00:00Z", "turnCount": 2 }, "lastTurnState": "completed", "lastTurnStartedAt": "2026-10-12T09:30:00Z", "lastTurnCompletedAt": "2026-10-12T10:00:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null }
+    ],
+    "w-snoozed": [
+      { "session": { "updatedAt": "2026-10-12T11:00:00Z" }, "projection": { "state": "active", "activeTurnId": "t1", "updatedAt": "2026-10-12T11:00:00Z", "turnCount": 1 }, "lastTurnState": "running", "lastTurnStartedAt": "2026-10-12T10:40:00Z", "lastTurnCompletedAt": null, "lastTurnAwaitingUser": "permission", "lastTurnAwaitingSince": "2026-10-12T10:45:00Z" }
+    ],
+    "w-woke": [
+      { "session": { "updatedAt": "2026-10-12T08:00:00Z" }, "projection": { "state": "completed", "activeTurnId": null, "updatedAt": "2026-10-12T08:00:00Z", "turnCount": 1 }, "lastTurnState": "completed", "lastTurnStartedAt": "2026-10-12T07:30:00Z", "lastTurnCompletedAt": "2026-10-12T08:00:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null }
+    ],
+    "w-done-unread": [
+      { "session": { "updatedAt": "2026-10-12T11:20:00Z" }, "projection": { "state": "completed", "activeTurnId": null, "updatedAt": "2026-10-12T11:20:00Z", "turnCount": 1 }, "lastTurnState": "completed", "lastTurnStartedAt": "2026-10-12T11:00:00Z", "lastTurnCompletedAt": "2026-10-12T11:20:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null }
+    ],
+    "w-done-seen": [
+      { "session": { "updatedAt": "2026-10-12T11:25:00Z" }, "projection": { "state": "completed", "activeTurnId": null, "updatedAt": "2026-10-12T11:25:00Z", "turnCount": 1 }, "lastTurnState": "completed", "lastTurnStartedAt": "2026-10-12T11:00:00Z", "lastTurnCompletedAt": "2026-10-12T11:25:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null }
+    ],
+    "w-aborted": [
+      { "session": { "updatedAt": "2026-10-12T10:30:00Z" }, "projection": { "state": "aborted", "activeTurnId": null, "updatedAt": "2026-10-12T10:31:00Z", "turnCount": 1 }, "lastTurnState": null, "lastTurnStartedAt": "2026-10-12T10:00:00Z", "lastTurnCompletedAt": "2026-10-12T10:30:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null }
+    ],
+    "w-archived": [
+      { "session": { "updatedAt": "2026-10-12T11:00:00Z" }, "projection": { "state": "active", "activeTurnId": "t1", "updatedAt": "2026-10-12T11:00:00Z", "turnCount": 1 }, "lastTurnState": "running", "lastTurnStartedAt": "2026-10-12T10:40:00Z", "lastTurnCompletedAt": null, "lastTurnAwaitingUser": "permission", "lastTurnAwaitingSince": "2026-10-12T10:45:00Z" }
+    ],
+    "w-running": [
+      { "session": { "updatedAt": "2026-10-12T11:00:00Z" }, "projection": { "state": "active", "activeTurnId": "t9", "updatedAt": "2026-10-12T11:00:00Z", "turnCount": 3 }, "lastTurnState": null, "lastTurnStartedAt": "2026-10-12T10:40:00Z", "lastTurnCompletedAt": null, "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null }
+    ]
+  },
+  "blockers": [
+    { "workspaceId": "w-input", "kind": "conflicts", "count": null, "since": "2026-10-12T11:40:00Z" },
+    { "workspaceId": "w-run-blocked", "kind": "checks_failing", "count": 7, "since": "2026-10-12T11:40:00Z" },
+    { "workspaceId": "w-blockers", "kind": "checks_failing", "count": 12, "since": "2026-10-12T10:20:00Z" },
+    { "workspaceId": "w-blockers", "kind": "pr_conflicts", "count": 12, "since": "2026-10-12T10:50:00Z" },
+    { "workspaceId": "w-conflict-old", "kind": "conflicts", "count": null, "since": null },
+    { "workspaceId": "w-review", "kind": "delegated_edits_review", "count": 2, "since": null }
+  ],
+  "expected": [
+    { "workspaceId": "w-woke", "reason": "woke", "count": null, "returnedAt": "2026-10-12T11:30:00Z" },
+    { "workspaceId": "w-done-unread", "reason": "completed", "count": null, "returnedAt": "2026-10-12T11:20:00Z" },
+    { "workspaceId": "w-perm", "reason": "permission", "count": null, "returnedAt": "2026-10-12T11:10:00Z" },
+    { "workspaceId": "w-blockers", "reason": "prConflicts", "count": 12, "returnedAt": "2026-10-12T10:50:00Z" },
+    { "workspaceId": "w-input", "reason": "input", "count": null, "returnedAt": "2026-10-12T10:40:00Z" },
+    { "workspaceId": "w-aborted", "reason": "aborted", "count": null, "returnedAt": "2026-10-12T10:30:00Z" },
+    { "workspaceId": "w-review", "reason": "delegatedReview", "count": 2, "returnedAt": "2026-10-12T08:30:00Z" },
+    { "workspaceId": "w-conflict-old", "reason": "conflicts", "count": null, "returnedAt": "2026-10-12T07:00:00Z" },
+    { "workspaceId": "w-setup", "reason": "setup", "count": null, "returnedAt": "2026-10-12T06:00:00Z" }
+  ]
+}

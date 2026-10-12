@@ -3,6 +3,7 @@
  * and which are just recent. Transport-agnostic — the native app passes the
  * encrypted relay channel.
  */
+import type { AttentionEntry } from "./attention.ts";
 import { pendingQuestions } from "./questions.ts";
 import { permissionQuestion, type RawSessionEvent } from "./threadEvents.ts";
 
@@ -334,4 +335,50 @@ export function formatRelative(iso: string, now = Date.now()): string {
 	const days = Math.floor(diffSec / 86400);
 	if (days < 30) return `${days} d atrás`;
 	return date.toLocaleDateString("pt-BR");
+}
+
+/** One row of "Precisa de você": the desktop's reason, plus the inline answer when the scan has it. */
+export type NeedsYouRow = {
+	entry: AttentionEntry;
+	thread: SessionSearchResult | null;
+	/** Permission or question found in the thread's history (answerable from the card). */
+	pending: PendingItem | null;
+};
+
+/**
+ * The home's groups with the desktop's attention list: "Precisa de você" in
+ * its order, and those tasks' threads left out of "Rodando" and "Recentes".
+ * `waitingSessions` are threads with a Browser/computer-use request open.
+ */
+export function triageWithAttention(
+	scan: Scan,
+	entries: AttentionEntry[],
+	waitingSessions: ReadonlySet<string> = new Set(),
+	workspaceFilter: string | null = null,
+): { needsYou: NeedsYouRow[]; running: SessionSearchResult[]; recent: SessionSearchResult[] } {
+	const visible = scan.sessions.filter((s) => !workspaceFilter || s.workspaceId === workspaceFilter);
+	const byId = new Map(scan.sessions.map((s) => [s.sessionId, s]));
+	const needsYou = entries
+		.filter((entry) => !workspaceFilter || entry.workspaceId === workspaceFilter)
+		.map((entry): NeedsYouRow => {
+			const pending =
+				entry.reason === "permission" || entry.reason === "input"
+					? (scan.needsYou.find(
+							(p) =>
+								p.thread.sessionId === entry.sessionId &&
+								(entry.reason === "permission" ? p.choices.length > 0 : p.choices.length === 0),
+						) ?? null)
+					: null;
+			return { entry, thread: entry.sessionId ? (byId.get(entry.sessionId) ?? null) : null, pending };
+		});
+	const listedWorkspaces = new Set(needsYou.map((row) => row.entry.workspaceId));
+	const listedSessions = new Set(needsYou.flatMap((row) => (row.entry.sessionId ? [row.entry.sessionId] : [])));
+	const away = (s: SessionSearchResult) =>
+		waitingSessions.has(s.sessionId) || listedSessions.has(s.sessionId) || (s.workspaceId !== null && listedWorkspaces.has(s.workspaceId));
+	const running = visible.filter((s) => scan.statuses.get(s.sessionId) === "running" && !away(s));
+	const runningIds = new Set(running.map((s) => s.sessionId));
+	const recent = visible
+		.filter((s) => !away(s) && !runningIds.has(s.sessionId))
+		.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+	return { needsYou, running, recent };
 }

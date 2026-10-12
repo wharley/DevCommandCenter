@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
  */
 export default function WorkspacesScreen() {
 	const insets = useSafeAreaInsets();
-	const { scan, combs, catalog, refreshing, refresh } = useHomeData();
+	const { scan, attention, combs, catalog, refreshing, refresh } = useHomeData();
 	const [search, setSearch] = useState("");
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 	const sessions = useMemo(() => scan?.sessions ?? [], [scan]);
@@ -38,7 +38,9 @@ export default function WorkspacesScreen() {
 		const session = latest.get(comb.id);
 		return session ? scan?.statuses.get(session.sessionId) === "running" : false;
 	};
-	const needsYou = new Set(scan?.needsYou.map((p) => p.thread.workspaceId) ?? []);
+	const needsYou = new Set(
+		attention ? attention.map((entry) => entry.workspaceId) : (scan?.needsYou.map((p) => p.thread.workspaceId) ?? []),
+	);
 
 	return (
 		<ScrollView

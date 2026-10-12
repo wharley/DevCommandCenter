@@ -69,6 +69,13 @@ async fn main() {
         config.db_path.clone(),
         default_app_data_dir(),
     ));
+    // The simulator fixture: Browser/computer-use requests the operator
+    // creates (`POST /api/v1/remote/fixture/agent-requests`), since a
+    // headless server has no Browser or screen to ask about.
+    if std::env::var("DCC_FIXTURE_AGENT_REQUESTS").as_deref() == Ok("1") {
+        backend.attach_fixture_agent_requests();
+        println!("[DCC HTTP] Fixture agent requests on");
+    }
     let db_path = config.db_path.clone();
     let config = Arc::new(RwLock::new(config));
     let app = build_router(config.clone(), backend.clone());

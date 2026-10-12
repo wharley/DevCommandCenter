@@ -258,6 +258,419 @@ pub async fn workspace_attention_blockers_with_state(
     Ok(WorkspaceAttentionBlockersOutput { blockers })
 }
 
+// ---------- "Precisa de você", for the phone ----------
+//
+// The desktop computes this list in its sidebar
+// (`apps/desktop/src/features/workspaces/use-workspace-agent-states.ts`,
+// `deriveAgentActivityFromSessions` + `attentionWorkspaceItems`). The phone
+// reads it from here (`GET /api/v1/mobile/attention`). Both run the cases in
+// `packages/contracts/fixtures/attention-vectors.json`, so a change to one
+// rule without the other fails a test. Whether a finished result was seen is
+// each client's own store, so `completed`/`aborted` come back always and the
+// client drops the ones it has opened.
+
+/// Why a task needs the person, best first (the desktop's `ATTENTION_ORDER`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum AttentionReason {
+    Permission,
+    Input,
+    Conflicts,
+    PrConflicts,
+    ChecksFailing,
+    DelegatedReview,
+    Woke,
+    Setup,
+    Aborted,
+    Completed,
+}
+
+impl AttentionReason {
+    fn from_blocker(kind: WorkspaceBlockerKind) -> Self {
+        match kind {
+            WorkspaceBlockerKind::Conflicts => Self::Conflicts,
+            WorkspaceBlockerKind::PrConflicts => Self::PrConflicts,
+            WorkspaceBlockerKind::ChecksFailing => Self::ChecksFailing,
+            WorkspaceBlockerKind::DelegatedEditsReview => Self::DelegatedReview,
+        }
+    }
+}
+
+/// What the rule reads from one of the task's sessions
+/// (`WorkspaceSessionSummary`), newest session first.
+#[derive(Clone, Debug, Default)]
+pub struct SessionActivityInput {
+    pub session_updated_at: String,
+    /// `SessionState` in snake_case: `active`, `completed`, `aborted`, `draft`.
+    pub projection_state: String,
+    pub active_turn_id: Option<String>,
+    pub projection_updated_at: Option<String>,
+    pub turn_count: u32,
+    pub last_turn_state: Option<String>,
+    pub last_turn_started_at: Option<String>,
+    pub last_turn_completed_at: Option<String>,
+    pub last_turn_awaiting_user: Option<String>,
+    pub last_turn_awaiting_since: Option<String>,
+}
+
+impl SessionActivityInput {
+    pub fn from_summary(summary: &dcc_core::domain::session::WorkspaceSessionSummary) -> Self {
+        let projection_state = serde_json::to_value(&summary.projection.state)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_default();
+        Self {
+            session_updated_at: summary.session.updated_at.clone(),
+            projection_state,
+            active_turn_id: summary.projection.active_turn_id.as_ref().map(|id| id.0.clone()),
+            projection_updated_at: Some(summary.projection.updated_at.clone()),
+            turn_count: summary.projection.turn_count,
+            last_turn_state: summary.last_turn_state.clone(),
+            last_turn_started_at: summary.last_turn_started_at.clone(),
+            last_turn_completed_at: summary.last_turn_completed_at.clone(),
+            last_turn_awaiting_user: summary.last_turn_awaiting_user.clone(),
+            last_turn_awaiting_since: summary.last_turn_awaiting_since.clone(),
+        }
+    }
+
+    fn is_running(&self) -> bool {
+        self.last_turn_state.as_deref() == Some("running")
+            || (self.projection_state == "active"
+                && self.active_turn_id.as_deref().is_some_and(|id| !id.is_empty()))
+    }
+
+    fn waiting_reason(&self) -> Option<AttentionReason> {
+        match self.last_turn_awaiting_user.as_deref() {
+            Some("permission") => Some(AttentionReason::Permission),
+            Some("input") => Some(AttentionReason::Input),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentActivityState {
+    Active,
+    Waiting(AttentionReason),
+    Completed,
+    Aborted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentActivity {
+    pub state: AgentActivityState,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub waiting_since: Option<String>,
+}
+
+impl AgentActivity {
+    fn turn_open(&self) -> bool {
+        matches!(self.state, AgentActivityState::Active | AgentActivityState::Waiting(_))
+    }
+}
+
+/// `deriveAgentActivityFromSessions`: the running (or waiting) session wins,
+/// else the newest session's last outcome.
+pub fn derive_agent_activity(sessions: &[SessionActivityInput]) -> Option<AgentActivity> {
+    let running: Vec<&SessionActivityInput> = sessions.iter().filter(|s| s.is_running()).collect();
+    let picked = running
+        .iter()
+        .find(|s| s.waiting_reason().is_some())
+        .or_else(|| running.first())
+        .copied();
+    if let Some(session) = picked {
+        let started_at = session
+            .last_turn_started_at
+            .clone()
+            .or_else(|| session.projection_updated_at.clone())
+            .or_else(|| Some(session.session_updated_at.clone()));
+        return Some(match session.waiting_reason() {
+            Some(reason) => AgentActivity {
+                state: AgentActivityState::Waiting(reason),
+                started_at,
+                completed_at: None,
+                waiting_since: session.last_turn_awaiting_since.clone(),
+            },
+            None => AgentActivity {
+                state: AgentActivityState::Active,
+                started_at,
+                completed_at: None,
+                waiting_since: None,
+            },
+        });
+    }
+    let latest = sessions.first()?;
+    let completed_at = latest
+        .last_turn_completed_at
+        .clone()
+        .or_else(|| latest.projection_updated_at.clone())
+        .or_else(|| Some(latest.session_updated_at.clone()));
+    if latest.last_turn_state.as_deref() == Some("aborted") || latest.projection_state == "aborted" {
+        return Some(AgentActivity {
+            state: AgentActivityState::Aborted,
+            started_at: latest.last_turn_started_at.clone(),
+            completed_at,
+            waiting_since: None,
+        });
+    }
+    if latest.last_turn_state.as_deref() == Some("completed")
+        || latest.projection_state == "completed"
+        || latest.turn_count > 0
+    {
+        return Some(AgentActivity {
+            state: AgentActivityState::Completed,
+            started_at: latest.last_turn_started_at.clone(),
+            completed_at,
+            waiting_since: None,
+        });
+    }
+    None
+}
+
+/// The task fields the rule reads (`WorkspaceSummary` on the desktop).
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttentionWorkspace {
+    pub id: String,
+    /// `ready`, `setup_pending`, `initializing`, `archived`, `completed`.
+    pub status: String,
+    #[serde(default)]
+    pub snoozed_until: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+impl AttentionWorkspace {
+    /// `workspaceToSummary`'s status: a `setup_pending` task only stays so
+    /// with a setup step that warned or failed (or a failed report with no
+    /// steps); older tasks persisted it for recommendations never required.
+    pub fn from_workspace(workspace: &dcc_core::domain::workspace::Workspace) -> Self {
+        use dcc_core::domain::workspace::WorkspaceSetupStatus;
+        let has_setup_problem = workspace.worktree_path.is_some()
+            && workspace.setup_report.as_ref().is_some_and(|report| {
+                report.steps.iter().any(|step| {
+                    step.command != "compile_mission_spec_context"
+                        && step.command != "refresh_repository_forge_metadata"
+                        && matches!(
+                            step.status,
+                            WorkspaceSetupStatus::Warning | WorkspaceSetupStatus::Failed
+                        )
+                }) || (matches!(report.status, WorkspaceSetupStatus::Failed)
+                    && report.steps.is_empty())
+            });
+        let status = match workspace.state {
+            WorkspaceState::Ready => "ready",
+            WorkspaceState::Archived => "archived",
+            WorkspaceState::Completed => "completed",
+            WorkspaceState::Initializing => "initializing",
+            WorkspaceState::SetupPending if has_setup_problem => "setup_pending",
+            WorkspaceState::SetupPending => "ready",
+        };
+        Self {
+            id: workspace.id.0.clone(),
+            status: status.to_string(),
+            snoozed_until: workspace.snoozed_until.clone(),
+            created_at: Some(workspace.created_at.clone()),
+            updated_at: Some(workspace.updated_at.clone()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AttentionItem {
+    pub workspace_id: String,
+    pub reason: AttentionReason,
+    /// PR number for PR blockers; count for delegated reviews.
+    pub count: Option<u64>,
+    /// When the task came back to the person for this reason; orders the list.
+    pub returned_at: Option<String>,
+    /// `completed`/`aborted`: when the result finished, for the client's seen store.
+    pub completed_at: Option<String>,
+}
+
+fn timestamp_ms(value: Option<&str>) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value?)
+        .ok()
+        .map(|time| time.timestamp_millis())
+}
+
+/// `attentionWorkspaceItems`, without the unread filter (see above). Newest
+/// return first, then workspace id.
+pub fn attention_items(
+    workspaces: &[AttentionWorkspace],
+    activities: &HashMap<String, AgentActivity>,
+    blockers: &[WorkspaceBlocker],
+    now_ms: i64,
+) -> Vec<AttentionItem> {
+    let mut items: Vec<AttentionItem> = workspaces
+        .iter()
+        .filter_map(|workspace| {
+            if workspace.status == "archived" || workspace.status == "completed" {
+                return None;
+            }
+            let snoozed = timestamp_ms(workspace.snoozed_until.as_deref());
+            if snoozed.is_some_and(|at| at > now_ms) {
+                return None;
+            }
+            let activity = activities.get(&workspace.id);
+            let item = |reason, count, returned_at: Option<String>, completed_at| AttentionItem {
+                workspace_id: workspace.id.clone(),
+                reason,
+                count,
+                returned_at,
+                completed_at,
+            };
+            if let Some(AgentActivity {
+                state: AgentActivityState::Waiting(reason),
+                started_at,
+                waiting_since,
+                ..
+            }) = activity
+            {
+                return Some(item(*reason, None, waiting_since.clone().or_else(|| started_at.clone()), None));
+            }
+            let turn_open = activity.is_some_and(AgentActivity::turn_open);
+            if !turn_open {
+                let blocker = blockers
+                    .iter()
+                    .filter(|blocker| blocker.workspace_id == workspace.id)
+                    .min_by_key(|blocker| AttentionReason::from_blocker(blocker.kind));
+                if let Some(blocker) = blocker {
+                    return Some(item(
+                        AttentionReason::from_blocker(blocker.kind),
+                        blocker.count,
+                        blocker.since.clone().or_else(|| workspace.updated_at.clone()),
+                        None,
+                    ));
+                }
+                if snoozed.is_some_and(|at| at <= now_ms) {
+                    return Some(item(AttentionReason::Woke, None, workspace.snoozed_until.clone(), None));
+                }
+                if workspace.status == "setup_pending" {
+                    return Some(item(
+                        AttentionReason::Setup,
+                        None,
+                        workspace.updated_at.clone().or_else(|| workspace.created_at.clone()),
+                        None,
+                    ));
+                }
+            }
+            match activity {
+                Some(AgentActivity { state: AgentActivityState::Aborted, completed_at, .. }) => Some(item(
+                    AttentionReason::Aborted,
+                    None,
+                    completed_at.clone(),
+                    completed_at.clone(),
+                )),
+                Some(AgentActivity { state: AgentActivityState::Completed, completed_at, .. }) => Some(item(
+                    AttentionReason::Completed,
+                    None,
+                    completed_at.clone(),
+                    completed_at.clone(),
+                )),
+                _ => None,
+            }
+        })
+        .collect();
+    items.sort_by(|left, right| {
+        let left_ms = timestamp_ms(left.returned_at.as_deref()).unwrap_or(0);
+        let right_ms = timestamp_ms(right.returned_at.as_deref()).unwrap_or(0);
+        right_ms
+            .cmp(&left_ms)
+            .then_with(|| left.workspace_id.cmp(&right.workspace_id))
+    });
+    items
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceAttentionEntry {
+    #[serde(flatten)]
+    pub item: AttentionItem,
+    /// The session to open: the one waiting or running, else the newest.
+    pub session_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceAttentionOutput {
+    pub items: Vec<WorkspaceAttentionEntry>,
+}
+
+fn blockers_cache() -> &'static Mutex<Option<(Instant, Vec<WorkspaceBlocker>)>> {
+    static CACHE: OnceLock<Mutex<Option<(Instant, Vec<WorkspaceBlocker>)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// The blockers, reused for `max_age` (they run git for every task).
+pub async fn recent_attention_blockers(
+    state: &WorkspaceCommandState,
+    max_age: Duration,
+) -> Result<Vec<WorkspaceBlocker>, String> {
+    if let Some((at, blockers)) = blockers_cache().lock().ok().and_then(|cache| cache.clone()) {
+        if at.elapsed() < max_age {
+            return Ok(blockers);
+        }
+    }
+    let blockers = workspace_attention_blockers_with_state(state).await?.blockers;
+    if let Ok(mut cache) = blockers_cache().lock() {
+        *cache = Some((Instant::now(), blockers.clone()));
+    }
+    Ok(blockers)
+}
+
+/// The phone's "Precisa de você": every active task's reason, newest return
+/// first. Blockers no older than `blockers_max_age`.
+pub async fn workspace_attention_with_state(
+    state: &WorkspaceCommandState,
+    blockers_max_age: Duration,
+) -> Result<WorkspaceAttentionOutput, String> {
+    let workspaces = SqliteWorkspaceRepo::open(&state.db_path)
+        .map_err(|error| error.to_string())?
+        .list_workspaces()
+        .await
+        .map_err(|error| error.to_string())?;
+    let repo = SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let mut tasks = Vec::new();
+    let mut activities = HashMap::new();
+    let mut sessions_to_open = HashMap::new();
+    for workspace in &workspaces {
+        if matches!(workspace.state, WorkspaceState::Archived | WorkspaceState::Completed) {
+            continue;
+        }
+        let summaries = repo
+            .list_workspace_sessions(&workspace.id)
+            .map_err(|error| error.to_string())?;
+        let inputs: Vec<SessionActivityInput> =
+            summaries.iter().map(SessionActivityInput::from_summary).collect();
+        let open = inputs
+            .iter()
+            .position(|input| input.is_running() && input.waiting_reason().is_some())
+            .or_else(|| inputs.iter().position(SessionActivityInput::is_running))
+            .unwrap_or(0);
+        if let Some(summary) = summaries.get(open) {
+            sessions_to_open.insert(workspace.id.0.clone(), summary.session.id.0.clone());
+        }
+        if let Some(activity) = derive_agent_activity(&inputs) {
+            activities.insert(workspace.id.0.clone(), activity);
+        }
+        tasks.push(AttentionWorkspace::from_workspace(workspace));
+    }
+    let blockers = recent_attention_blockers(state, blockers_max_age).await?;
+    let items = attention_items(&tasks, &activities, &blockers, chrono::Utc::now().timestamp_millis())
+        .into_iter()
+        .map(|item| WorkspaceAttentionEntry {
+            session_id: sessions_to_open.get(&item.workspace_id).cloned(),
+            item,
+        })
+        .collect();
+    Ok(WorkspaceAttentionOutput { items })
+}
+
 #[tauri::command]
 pub async fn workspace_attention_blockers(
     state: State<'_, WorkspaceCommandState>,
@@ -351,5 +764,87 @@ mod tests {
         other.head_branch = Some("older/merged".to_string());
         assert_eq!(classify_git_blockers(0, false, Some("feature"), Some(&other)), None);
         assert_eq!(classify_git_blockers(0, false, Some("feature"), None), None);
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct VectorSession {
+        session: VectorSessionRow,
+        projection: VectorProjection,
+        last_turn_state: Option<String>,
+        last_turn_started_at: Option<String>,
+        last_turn_completed_at: Option<String>,
+        last_turn_awaiting_user: Option<String>,
+        last_turn_awaiting_since: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct VectorSessionRow {
+        updated_at: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct VectorProjection {
+        state: String,
+        active_turn_id: Option<String>,
+        updated_at: Option<String>,
+        turn_count: u32,
+    }
+    #[derive(Deserialize)]
+    struct Vectors {
+        now: String,
+        unread: Vec<String>,
+        workspaces: Vec<AttentionWorkspace>,
+        sessions: HashMap<String, Vec<VectorSession>>,
+        blockers: Vec<WorkspaceBlocker>,
+        expected: Vec<serde_json::Value>,
+    }
+
+    #[test]
+    fn attention_matches_the_desktop_on_the_shared_vectors() {
+        let vectors: Vectors = serde_json::from_str(include_str!(
+            "../../../../packages/contracts/fixtures/attention-vectors.json"
+        ))
+        .expect("vectors");
+        let activities: HashMap<String, AgentActivity> = vectors
+            .sessions
+            .iter()
+            .filter_map(|(workspace_id, sessions)| {
+                let inputs: Vec<SessionActivityInput> = sessions
+                    .iter()
+                    .map(|s| SessionActivityInput {
+                        session_updated_at: s.session.updated_at.clone(),
+                        projection_state: s.projection.state.clone(),
+                        active_turn_id: s.projection.active_turn_id.clone(),
+                        projection_updated_at: s.projection.updated_at.clone(),
+                        turn_count: s.projection.turn_count,
+                        last_turn_state: s.last_turn_state.clone(),
+                        last_turn_started_at: s.last_turn_started_at.clone(),
+                        last_turn_completed_at: s.last_turn_completed_at.clone(),
+                        last_turn_awaiting_user: s.last_turn_awaiting_user.clone(),
+                        last_turn_awaiting_since: s.last_turn_awaiting_since.clone(),
+                    })
+                    .collect();
+                derive_agent_activity(&inputs).map(|activity| (workspace_id.clone(), activity))
+            })
+            .collect();
+        let now = chrono::DateTime::parse_from_rfc3339(&vectors.now).unwrap().timestamp_millis();
+        let items: Vec<serde_json::Value> = attention_items(&vectors.workspaces, &activities, &vectors.blockers, now)
+            .into_iter()
+            // The client's seen store, as on the desktop.
+            .filter(|item| {
+                !matches!(item.reason, AttentionReason::Completed | AttentionReason::Aborted)
+                    || vectors.unread.contains(&item.workspace_id)
+            })
+            .map(|item| {
+                serde_json::json!({
+                    "workspaceId": item.workspace_id,
+                    "reason": item.reason,
+                    "count": item.count,
+                    "returnedAt": item.returned_at,
+                })
+            })
+            .collect();
+        assert_eq!(items, vectors.expected);
     }
 }

@@ -245,6 +245,14 @@ export function importBrowserSession(input: BrowserSessionImportScope & {
 	return invoke<BrowserSessionImportResult>("browser_session_import", input);
 }
 
+/**
+ * Takes the request for this "Permitir" before the Browser opens, so a phone
+ * answering at the same moment loses (and the call rejects when it won).
+ */
+export function claimBrowserOpenRequest(input: { requestId: string; workspaceId: string; sessionId: string }) {
+	return invoke<BrowserOpenRequest>("browser_agent_claim", { input });
+}
+
 export function resolveBrowserOpenRequest(input: {
 	requestId: string; workspaceId: string; sessionId: string;
 	decision: "allow" | "deny"; lifecycleToken?: number;

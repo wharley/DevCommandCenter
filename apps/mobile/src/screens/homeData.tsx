@@ -7,8 +7,11 @@
  */
 import {
 	incomingEventKindType,
+	needsYouEntries,
+	parseAttention,
 	runScan,
 	withoutPending,
+	type AttentionEntry,
 	type Comb,
 	type MobileCatalog,
 	type PendingItem,
@@ -17,6 +20,7 @@ import {
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 import { cachedCatalog, fetchCatalog } from "../backend/catalogCache";
+import { loadSeenResults, onSeenResults } from "../backend/seenResults";
 import { useBackend } from "../backend/session";
 import { errorMessage, isAlreadyResolved } from "../backend/types";
 
@@ -35,6 +39,12 @@ const LIFECYCLE = new Set([
 
 type HomeData = {
 	scan: Scan | null;
+	/**
+	 * Every task's reason to be under "Precisa de você", the desktop's rule
+	 * and order, minus results already opened here. Null on a desktop
+	 * without the route (the scan's permissions/questions stand in).
+	 */
+	attention: AttentionEntry[] | null;
 	combs: Comb[] | null;
 	/** Null until loaded, or when this desktop has no catalog route. */
 	catalog: MobileCatalog | null;
@@ -45,6 +55,7 @@ type HomeData = {
 	resolving: Set<string>;
 	refresh(): Promise<void>;
 	respond(item: PendingItem, choice: string): Promise<void>;
+	showNotice(notice: string): void;
 	dismissNotice(): void;
 };
 
@@ -57,6 +68,8 @@ export function pendingKey(item: PendingItem): string {
 export function HomeDataProvider({ children }: { children: ReactNode }) {
 	const backend = useBackend();
 	const [scan, setScan] = useState<Scan | null>(null);
+	const [rawAttention, setRawAttention] = useState<AttentionEntry[] | null>(null);
+	const [seen, setSeen] = useState<Awaited<ReturnType<typeof loadSeenResults>> | null>(null);
 	const [combs, setCombs] = useState<Comb[] | null>(null);
 	const [catalog, setCatalog] = useState<MobileCatalog | null>(() => cachedCatalog(backend));
 	const [error, setError] = useState<string | null>(null);
@@ -77,8 +90,15 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 		try {
 			do {
 				again.current = false;
-				const result = await runScan((path) => backend.request("GET", path));
+				const [result, attention] = await Promise.all([
+					runScan((path) => backend.request("GET", path)),
+					backend
+						.request("GET", "/api/v1/mobile/attention")
+						.then(parseAttention)
+						.catch(() => null),
+				]);
 				setScan(result.scan);
+				setRawAttention(attention);
 				setCombs(result.combs);
 				setLastSynced(new Date());
 				setError(null);
@@ -102,6 +122,23 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 	const refreshAll = useCallback(async () => {
 		await Promise.all([refresh(), loadCatalog()]);
 	}, [refresh, loadCatalog]);
+
+	useEffect(() => {
+		let cancelled = false;
+		void loadSeenResults().then((value) => {
+			if (!cancelled) setSeen(value);
+		});
+		const stop = onSeenResults(setSeen);
+		return () => {
+			cancelled = true;
+			stop();
+		};
+	}, []);
+
+	const attention = useMemo(
+		() => (rawAttention && seen ? needsYouEntries(rawAttention, seen.seen, seen.baseline) : null),
+		[rawAttention, seen],
+	);
 
 	useEffect(() => {
 		let timer: ReturnType<typeof setTimeout> | null = null;
@@ -172,6 +209,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 	const value = useMemo<HomeData>(
 		() => ({
 			scan,
+			attention,
 			combs,
 			catalog,
 			error,
@@ -181,9 +219,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 			resolving,
 			refresh: refreshAll,
 			respond,
+			showNotice: setNotice,
 			dismissNotice: () => setNotice(null),
 		}),
-		[scan, combs, catalog, error, notice, refreshing, lastSynced, resolving, refreshAll, respond],
+		[scan, attention, combs, catalog, error, notice, refreshing, lastSynced, resolving, refreshAll, respond],
 	);
 	return <HomeDataContext value={value}>{children}</HomeDataContext>;
 }

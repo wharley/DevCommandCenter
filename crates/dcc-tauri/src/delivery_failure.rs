@@ -553,6 +553,14 @@ pub async fn workspace_delivery_failure_snapshot(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceDeliveryFailureInput,
 ) -> Result<WorkspaceDeliveryFailureOutput, String> {
+    workspace_delivery_failure_snapshot_with_state(&state, input).await
+}
+
+/// `workspace_delivery_failure_snapshot` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_delivery_failure_snapshot_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceDeliveryFailureInput,
+) -> Result<WorkspaceDeliveryFailureOutput, String> {
     let root = input.workspace_root.trim();
     if root.is_empty() || !Path::new(root).is_dir() || !state.has_delivery_failure(root) {
         return Ok(WorkspaceDeliveryFailureOutput { snapshot: None });

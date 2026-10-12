@@ -77,10 +77,9 @@ pub fn shutdown(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
-    use crate::browser_agent_requests::{
-        BrowserAgentRequestBroker, BrowserAgentRequestDecision, BrowserAgentResolveInput,
-    };
-    use crate::browser_commands::BrowserState;
+    use crate::browser_agent_requests::BrowserAgentRequestBroker;
+    use crate::desktop_agent_requests::DesktopAgentRequests;
+    use dev_command_center_tauri::agent_requests::AnswerOrigin;
     use std::{
         collections::HashSet,
         ffi::{c_char, CStr, CString},
@@ -90,7 +89,7 @@ mod macos {
         },
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
 
     static APP: OnceLock<AppHandle> = OnceLock::new();
     #[derive(Default)]
@@ -127,22 +126,14 @@ mod macos {
             return;
         };
         suppress(app, &id);
+        let requests = app.state::<DesktopAgentRequests>();
         if allowed {
             // Open only the integrated Browser. Preserve the main window's
             // hidden/minimized state and leave focus with the user's other app.
-            // The renderer rechecks the request and completes the lifecycle ACK.
-            let _ = app.emit_to("main", "browser-approval-panel-allow", &request.request_id);
+            // The claim asks the renderer to open it and complete the lifecycle ACK.
+            let _ = requests.allow_browser(&request.request_id, AnswerOrigin::Desktop, true);
         } else {
-            broker.resolve(
-                &app.state::<BrowserState>(),
-                BrowserAgentResolveInput {
-                    request_id: request.request_id,
-                    workspace_id: request.workspace_id,
-                    session_id: request.session_id,
-                    decision: BrowserAgentRequestDecision::Deny,
-                    lifecycle_token: None,
-                },
-            );
+            let _ = requests.deny_browser(&request.request_id, AnswerOrigin::Desktop);
         }
     }
     pub(super) fn setup(app: &AppHandle) {

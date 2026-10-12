@@ -1,3 +1,4 @@
+import { AgentRequestsProvider } from "@/backend/agentRequests";
 import { SessionProvider, useSession } from "@/backend/session";
 import { isPairingLink, stashPairingLink } from "@/backend/offerLink";
 import { configureNotificationDisplay, onNotificationTap } from "@/notifications/native";
@@ -27,7 +28,9 @@ export default function RootLayout() {
 						<PairingLinks />
 						<NotificationTaps />
 						<OfferNotifications />
-						<Routes />
+						<AgentRequestsProvider>
+							<Routes />
+						</AgentRequestsProvider>
 						<UpdateBanner />
 					</View>
 				</SessionProvider>
@@ -113,6 +116,7 @@ function Routes() {
 				<Stack.Screen name="settings" options={{ presentation: "modal" }} />
 				<Stack.Screen name="notifications" options={{ presentation: "modal" }} />
 				<Stack.Screen name="new-task" options={{ presentation: "modal" }} />
+				<Stack.Screen name="delivery/[id]" options={{ presentation: "modal" }} />
 			</Stack.Protected>
 			<Stack.Screen name="pair" options={{ presentation: ready ? "modal" : "card", gestureEnabled: ready }} />
 		</Stack>

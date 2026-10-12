@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import type { WorkspaceBlocker } from "@dcc/contracts";
 import { describe, expect, it } from "vitest";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import type { WorkspaceSummary } from "./types";
@@ -466,5 +469,50 @@ describe("attentionWorkspaceItems with snoozes", () => {
 			now,
 		);
 		expect(result.map((item) => [item.workspace.id, item.reason])).toEqual([["woken", "woke"]]);
+	});
+});
+
+// The backend the phone reads ports this rule to Rust
+// (crates/dcc-tauri/src/commands/workspace_attention.rs, `attention_items`);
+// both run these cases, so they cannot drift apart.
+
+type AttentionVectors = {
+	now: string;
+	unread: string[];
+	workspaces: WorkspaceSummary[];
+	sessions: Record<string, WorkspaceSessionSummary[]>;
+	blockers: WorkspaceBlocker[];
+	expected: Array<{ workspaceId: string; reason: string; count: number | null; returnedAt: string | null }>;
+};
+
+describe("attention vectors shared with the backend", () => {
+	it("gives the same reasons in the same order", () => {
+		const vectors = JSON.parse(
+			readFileSync(path.resolve(process.cwd(), "../../packages/contracts/fixtures/attention-vectors.json"), "utf8"),
+		) as AttentionVectors;
+		const activities: Record<string, WorkspaceAgentActivity> = {};
+		for (const [workspaceId, summaries] of Object.entries(vectors.sessions)) {
+			const activity = deriveAgentActivityFromSessions(summaries);
+			if (activity) activities[workspaceId] = activity;
+		}
+		const blockers = new Map<string, WorkspaceBlocker[]>();
+		for (const blocker of vectors.blockers) {
+			blockers.set(blocker.workspaceId, [...(blockers.get(blocker.workspaceId) ?? []), blocker]);
+		}
+		const items = attentionWorkspaceItems(
+			vectors.workspaces,
+			activities,
+			(workspaceId) => vectors.unread.includes(workspaceId),
+			blockers,
+			Date.parse(vectors.now),
+		);
+		expect(
+			items.map((item) => ({
+				workspaceId: item.workspace.id,
+				reason: item.reason,
+				count: item.count ?? null,
+				returnedAt: item.returnedAt,
+			})),
+		).toEqual(vectors.expected);
 	});
 });

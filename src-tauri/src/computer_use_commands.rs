@@ -1404,21 +1404,26 @@ pub fn computer_use_list_pending_requests(
 ) -> ComputerUsePendingRequestsOutput {
     state.pending_control_requests()
 }
+/// Answers through the shared ledger, so the desktop and a phone cannot both
+/// answer (`desktop_agent_requests`).
 #[tauri::command]
 pub async fn computer_use_respond_control_request(
-    app: tauri::AppHandle,
-    state: State<'_, ComputerUseState>,
+    requests: State<'_, crate::desktop_agent_requests::DesktopAgentRequests>,
     input: ComputerUseRespondControlRequestInput,
 ) -> Result<ComputerUseRespondControlRequestOutput, String> {
-    let output = state
-        .respond_control_request(&input.request_id, input.allowed, &input.allowed_bundle_ids)
-        .await?;
-    if input.allowed {
-        if let Some(session_id) = output.grant.session_id.as_deref() {
-            let _ = app.emit("computer-use-preview-cleared", session_id);
-        }
+    if input.request_id.len() != 32 || !input.request_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("desktop computer-use approval request is invalid".to_string());
     }
-    Ok(output)
+    requests
+        .respond_computer(
+            &input.request_id,
+            input.allowed,
+            &input.allowed_bundle_ids,
+            dev_command_center_tauri::agent_requests::AnswerOrigin::Desktop,
+        )
+        .await
+        .map(|(output, _)| output)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

@@ -63,7 +63,6 @@ use tower::ServiceExt;
 use crate::http_auth::PairedDeviceIdentity;
 use crate::pairing::{self, PairingError};
 use crate::remote_push::{self, PushConfig, PushNotifier, PushPresence};
-use dcc_core::ports::events::CoreEvent;
 
 const OFFER_TTL: Duration = Duration::from_secs(5 * 60);
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -288,7 +287,7 @@ pub struct RemoteHub {
     connected: AtomicBool,
     started: AtomicBool,
     /// Session events that may notify, handed over by the HTTP backend.
-    attention_events: StdMutex<Option<broadcast::Receiver<CoreEvent>>>,
+    attention_events: StdMutex<Option<broadcast::Receiver<remote_push::Attention>>>,
     push_config: StdMutex<PushConfig>,
     desktop_focused: AtomicBool,
 }
@@ -355,7 +354,7 @@ impl RemoteHub {
     }
 
     /// The session events push notifications come from; read from `start`.
-    pub fn attach_attention_events(&self, events: broadcast::Receiver<CoreEvent>) {
+    pub fn attach_attention_events(&self, events: broadcast::Receiver<remote_push::Attention>) {
         *lock(&self.attention_events) = Some(events);
     }
 

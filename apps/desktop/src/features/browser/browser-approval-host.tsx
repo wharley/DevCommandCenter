@@ -5,8 +5,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
-import { listAllBrowserOpenRequests, resolveBrowserOpenRequest, type BrowserOpenRequest } from "./browser-api";
-import { configureBrowserApprovalPanel, dismissBrowserApprovalPanel, onBrowserPanelAllow } from "./browser-approval-panel";
+import { claimBrowserOpenRequest, listAllBrowserOpenRequests, resolveBrowserOpenRequest, type BrowserOpenRequest } from "./browser-api";
+import { configureBrowserApprovalPanel, dismissBrowserApprovalPanel, onBrowserOpenApproved } from "./browser-approval-panel";
 
 export type BrowserOpenApproval = BrowserOpenRequest;
 
@@ -32,6 +32,7 @@ export function BrowserApprovalHost({ workspaceSessions, onApproved }: Props) {
 	const [busy, setBusy] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const deciding = useRef<string | null>(null);
+	const opened = useRef(new Set<string>());
 	useEffect(() => {
 		void configureBrowserApprovalPanel({
 			title: t("browser.approval.title"), description: t("browser.approval.description"),
@@ -66,6 +67,9 @@ export function BrowserApprovalHost({ workspaceSessions, onApproved }: Props) {
 		try {
 			void dismissBrowserApprovalPanel(id).catch((err) => console.warn("Could not hide Browser approval panel", err));
 			if (allowed) {
+				// Rejects when the phone answered first.
+				await claimBrowserOpenRequest({ requestId: id, workspaceId: target.workspaceId, sessionId: target.sessionId });
+				opened.current.add(id);
 				onApproved(target);
 				// Keep the request in an opening state until the native surface ACKs.
 				// The broker then removes it and the background poll closes the host.
@@ -84,19 +88,21 @@ export function BrowserApprovalHost({ workspaceSessions, onApproved }: Props) {
 			}
 		}
 	};
-	const decideRef = useRef(decide);
-	decideRef.current = decide;
+	const onApprovedRef = useRef(onApproved);
+	onApprovedRef.current = onApproved;
 	useEffect(() => {
 		let disposed = false;
-		const subscription = onBrowserPanelAllow((id) => {
-			// The main WebView may have been hidden. Refresh before accepting an
-			// external click, and never apply a late click to the next queued request.
-			void query.refetch().then((result) => {
-				const fresh = result.data?.requests.find((item) => item.requestId === id);
-				if (!disposed && !result.isError && fresh) void decideRef.current(true, fresh);
-			});
+		const subscription = onBrowserOpenApproved((approved) => {
+			// Claimed by the native panel or a phone; open it once.
+			if (disposed || opened.current.has(approved.requestId)) return;
+			opened.current.add(approved.requestId);
+			deciding.current = approved.requestId;
+			setBusy(approved.requestId);
+			void dismissBrowserApprovalPanel(approved.requestId).catch((err) => console.warn("Could not hide Browser approval panel", err));
+			onApprovedRef.current(approved);
+			void query.refetch();
 		});
-		void subscription.catch((err) => console.warn("Browser approval panel listener unavailable", err));
+		void subscription.catch((err) => console.warn("Browser approval listener unavailable", err));
 		return () => { disposed = true; void subscription.then((unlisten) => unlisten(), () => {}); };
 	}, [query.refetch]);
 	// Unmount the permission portal immediately once a decision starts. Waiting

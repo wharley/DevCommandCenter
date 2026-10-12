@@ -1916,6 +1916,14 @@ pub async fn workspace_project_automation_config(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitConflictStateInput,
 ) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
+    workspace_project_automation_config_with_state(&state, input).await
+}
+
+/// `workspace_project_automation_config` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_project_automation_config_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -2105,6 +2113,14 @@ fn resolve_task_execution_root(root: &str, task: &RepoAutomationTask) -> Result<
 #[tauri::command]
 pub async fn workspace_run_project_tasks(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRunProjectTasksInput,
+) -> Result<WorkspaceRunProjectTasksOutput, String> {
+    workspace_run_project_tasks_with_state(&state, input).await
+}
+
+/// `workspace_run_project_tasks` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_run_project_tasks_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceRunProjectTasksInput,
 ) -> Result<WorkspaceRunProjectTasksOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -3184,6 +3200,14 @@ pub async fn workspace_git_stage_all(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPathInput,
 ) -> Result<(), String> {
+    workspace_git_stage_all_with_state(&state, input).await
+}
+
+/// `workspace_git_stage_all` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_stage_all_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -3724,7 +3748,7 @@ fn sanitize_commit_body(value: Option<&str>) -> Option<String> {
     (!body.is_empty()).then_some(body)
 }
 
-fn derive_staged_commit_subject(staged: &[WorkspaceGitChangeEntry]) -> String {
+pub(crate) fn derive_staged_commit_subject(staged: &[WorkspaceGitChangeEntry]) -> String {
     if staged.is_empty() {
         return "chore: update project files".to_string();
     }
@@ -3817,6 +3841,15 @@ pub async fn workspace_git_commit_suggestion(
     session_state: State<'_, SessionCommandState>,
     input: WorkspaceGitCommitSuggestionInput,
 ) -> Result<WorkspaceGitCommitSuggestionOutput, String> {
+    workspace_git_commit_suggestion_with_state(&state, &session_state, input).await
+}
+
+/// `workspace_git_commit_suggestion` for callers without a Tauri `State`.
+pub async fn workspace_git_commit_suggestion_with_state(
+    state: &WorkspaceCommandState,
+    session_state: &SessionCommandState,
+    input: WorkspaceGitCommitSuggestionInput,
+) -> Result<WorkspaceGitCommitSuggestionOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -3877,6 +3910,14 @@ pub async fn workspace_git_commit(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitCommitInput,
 ) -> Result<(), String> {
+    workspace_git_commit_with_state(&state, input).await
+}
+
+/// `workspace_git_commit` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_commit_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitCommitInput,
+) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim().to_string();
     if root.is_empty() {
@@ -3900,6 +3941,14 @@ pub async fn workspace_git_commit(
 #[tauri::command]
 pub async fn workspace_git_commit_push(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitCommitPushInput,
+) -> Result<(), String> {
+    workspace_git_commit_push_with_state(&state, input).await
+}
+
+/// `workspace_git_commit_push` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_commit_push_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceGitCommitPushInput,
 ) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -3974,6 +4023,14 @@ enum CommitPushFailure {
 #[tauri::command]
 pub async fn workspace_git_push(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    workspace_git_push_with_state(&state, input).await
+}
+
+/// `workspace_git_push` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_push_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -4444,6 +4501,14 @@ pub async fn workspace_delivery_recovery_execute(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceDeliveryRecoveryInput,
 ) -> Result<WorkspaceDeliveryRecoveryOutput, String> {
+    workspace_delivery_recovery_execute_with_state(&state, input).await
+}
+
+/// `workspace_delivery_recovery_execute` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_delivery_recovery_execute_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceDeliveryRecoveryInput,
+) -> Result<WorkspaceDeliveryRecoveryOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let snapshot = validate_delivery_recovery_snapshot(
         &state,
@@ -4696,6 +4761,14 @@ pub(crate) fn workspace_git_status_inner(workspace_root: &str) -> Result<Workspa
 #[tauri::command]
 pub async fn workspace_git_status(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitStatusInput,
+) -> Result<WorkspaceGitStatusOutput, String> {
+    workspace_git_status_with_state(&state, input).await
+}
+
+/// `workspace_git_status` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_status_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceGitStatusInput,
 ) -> Result<WorkspaceGitStatusOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -12434,6 +12507,14 @@ pub async fn archive_workspace(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
+    archive_workspace_with_state(&state, input).await
+}
+
+/// `archive_workspace` for callers without a Tauri `State` (the HTTP API).
+pub async fn archive_workspace_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = WorkspaceId(input.workspace_id);
     ensure_workspace_is_not_a_bundle_member(&repo, &id, "archive").await?;
@@ -12570,6 +12651,14 @@ pub async fn complete_workspace(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
+    complete_workspace_with_state(&state, input).await
+}
+
+/// `complete_workspace` for callers without a Tauri `State` (the HTTP API).
+pub async fn complete_workspace_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceIdInput,
+) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = WorkspaceId(input.workspace_id);
     ensure_workspace_is_not_a_bundle_member(&repo, &id, "complete").await?;
@@ -12588,7 +12677,7 @@ pub async fn complete_workspace(
     // Completing a task is the normal happy-path checkpoint. Keep the UI
     // responsive and let the durable outbox retry if the sidecar is busy or
     // temporarily unavailable.
-    let memory_state = state.inner().clone();
+    let memory_state = state.clone();
     let workspace_id = workspace.id.clone();
     tokio::spawn(async move {
         if let Err(error) = memory_state

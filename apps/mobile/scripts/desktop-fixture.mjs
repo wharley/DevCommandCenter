@@ -25,6 +25,9 @@
 //                    that needs a permission (uses your claude CLI login)
 //   offer            a new pairing link
 //   push <sessionId> deliver a sample push for that thread to the simulator
+//   browser [url]    an agent asks to open the Browser (newest session)
+//   computer         an agent asks to drive Figma/Safari on the Mac
+//   edit             change a file in the task's repo (delivery screen)
 //   approve | deny   answer the pending pairing (with --manual)
 //   quit
 //
@@ -101,6 +104,11 @@ writeFileSync(join(repo, "package.json"), '{ "name": "loja-demo", "scripts": { "
 execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
 execFileSync("git", ["add", "."], { cwd: repo });
 execFileSync("git", ["-c", "user.name=DCC", "-c", "user.email=dcc@example.invalid", "commit", "-qm", "init"], { cwd: repo });
+// A local "origin" so pushes from the delivery screen go somewhere.
+const origin = join(tmp, "origin.git");
+execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
+execFileSync("git", ["remote", "add", "origin", origin], { cwd: repo });
+execFileSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: repo });
 mkdirSync(secondRepo);
 writeFileSync(join(secondRepo, "index.html"), "<h1>site-demo</h1>\n");
 execFileSync("git", ["init", "-q", "-b", "main"], { cwd: secondRepo });
@@ -168,6 +176,8 @@ const desktop = spawn(binary, [], {
 		DCC_HTTP_API_KEY: apiKey,
 		DCC_RELAY_URL: `ws://127.0.0.1:${relayPort}`,
 		DCC_PUSH_API_URL: `http://127.0.0.1:${pushPort}`,
+		// Browser/computer-use requests come from the `browser`/`computer` commands.
+		DCC_FIXTURE_AGENT_REQUESTS: "1",
 	},
 	stdio: ["ignore", "pipe", "pipe"],
 });
@@ -305,6 +315,45 @@ async function agent(prompt) {
 	console.log(`sessão ${sessionId} iniciada`);
 }
 
+/** A Browser or computer-use request from "the agent" of the newest session. */
+async function agentRequest(kind, url) {
+	const sessions = await api("GET", "/api/v1/sessions/search?limit=5");
+	const session = sessions[0];
+	if (!session) return console.log("crie uma sessão antes (agent)");
+	const requestId = `${kind === "browser" ? "bo" : "cu"}-${randomBytes(6).toString("hex")}`;
+	const common = {
+		requestId,
+		sessionId: session.sessionId,
+		workspaceId: session.workspaceId ?? workspace,
+		providerId: session.providerId ?? "claude_code",
+		expiresAtMs: Date.now() + 45_000,
+	};
+	await api(
+		"POST",
+		"/api/v1/remote/fixture/agent-requests",
+		kind === "browser"
+			? { ...common, kind: "browserOpen", url: url || "https://docs.github.com/pt/actions", reason: "Ler a documentação do GitHub Actions para configurar o CI" }
+			: {
+					...common,
+					kind: "computerControl",
+					reason: "Exportar o frame do Figma que a tarefa pede",
+					apps: [
+						{ bundleId: "com.figma.Desktop", name: "Figma" },
+						{ bundleId: "com.apple.Safari", name: "Safari" },
+					],
+					blocker: null,
+				},
+	);
+	console.log(`${kind === "browser" ? "navegador" : "computer use"} pedido (${requestId}), 45 s para responder`);
+}
+
+/** A change in the task's repo, for the delivery screen. */
+function edit() {
+	writeFileSync(join(repo, "NOTAS.md"), `Mudança do fixture em ${new Date().toISOString()}\n`);
+	execFileSync("git", ["switch", "-q", "-C", "dcc/fixture"], { cwd: repo });
+	console.log("NOTAS.md alterado no repositório da tarefa (branch dcc/fixture)");
+}
+
 console.log(`relay ws://127.0.0.1:${relayPort} · dccd-http ${base} · push falso http://127.0.0.1:${pushPort} · dados em ${tmp}`);
 await offer();
 const rl = createInterface({ input: process.stdin });
@@ -323,12 +372,16 @@ rl.on("line", (line) => {
 				? Promise.resolve(
 						deliverToSimulator({ title: "DCC", body: "loja-demo precisa de você", data: { sessionId: rest[0], kind: "permission" } }),
 					)
+			: command === "browser" || command === "computer"
+				? agentRequest(command, rest[0])
+			: command === "edit"
+				? Promise.resolve(edit())
 			: command === "agent"
 				? agent(rest.join(" ") || "Rode `yarn test` no terminal e me diga o resultado em uma frase.")
 				: command === "quit"
 					? (stop(), process.exit(0))
 					: Promise.resolve(
-							command ? console.log("comandos: agent [prompt] | offer | push <sessionId> | approve | deny | quit") : undefined,
+							command ? console.log("comandos: agent [prompt] | browser [url] | computer | edit | offer | push <sessionId> | approve | deny | quit") : undefined,
 						);
 	run.catch((error) => console.error(error.message));
 });

@@ -6,6 +6,7 @@
  */
 import {
 	base64Size,
+	classifySession,
 	filterTrackedFiles,
 	MAX_ATTACHMENT_BYTES,
 	taskTitle,
@@ -38,6 +39,15 @@ const CORE_NAMES: Record<string, string> = {
 
 type Step = { delayMs: number; kind: RawSessionEvent["kind"] };
 
+type DemoDelivery = {
+	changes: Array<{ path: string; status: string; insertions: number; deletions: number; staged: boolean }>;
+	branchChanges: Array<{ path: string; status: string; insertions: number; deletions: number; staged: boolean }>;
+	ahead: number;
+	version: number;
+	pr: Record<string, unknown> | null;
+	failedJobs: string[];
+};
+
 export class DemoBackend implements Backend {
 	readonly mode = "demo" as const;
 	private readonly sessions: DemoSession[];
@@ -53,6 +63,11 @@ export class DemoBackend implements Backend {
 	/** Steps that resume once a permission is answered, by request id. */
 	private readonly parked = new Map<string, { sessionId: string; turnId: string; steps: Step[] }>();
 	private eventCounter = 0;
+	/** Browser/computer-use requests (`agentRequests`), and who answered which. */
+	private readonly agentRequests: Array<Record<string, unknown>> = [];
+	private readonly agentAnswers = new Map<string, { requestId: string; decision: string; by: string; at: string }>();
+	/** Git state per workspace for the delivery screen. */
+	private readonly delivery = new Map<string, DemoDelivery>();
 
 	constructor(now = Date.now()) {
 		const fixture = demoFixture(now);
@@ -139,8 +154,48 @@ export class DemoBackend implements Backend {
 		return { dataUrl };
 	}
 
+	/** An agent asks to open the Browser or drive the Mac (tests, screenshots). */
+	openAgentRequest(request: Record<string, unknown>): void {
+		this.agentRequests.push(request);
+		for (const sub of this.subs) sub.handlers.onEvent({ event: "agent-requests", data: { requests: this.agentRequests } });
+	}
+
+	/** The desktop answered it in its own dialog. */
+	answerAgentRequestOnDesktop(requestId: string, allow: boolean): void {
+		this.answerAgentRequest(requestId, { allow }, "desktop");
+	}
+
+	private answerAgentRequest(requestId: string, body: unknown, by: "desktop" | "phone") {
+		const answered = this.agentAnswers.get(requestId);
+		if (answered) {
+			throw new ApiError(409, "Já foi respondido em outro lugar.", {
+				ok: false,
+				error: { code: "already_resolved", outcome: answered },
+			});
+		}
+		const index = this.agentRequests.findIndex((r) => r.requestId === requestId);
+		if (index < 0) throw new ApiError(404, "Esse pedido não está mais aberto.");
+		const input = (body ?? {}) as { allow?: unknown; allowedBundleIds?: unknown };
+		const request = this.agentRequests[index]!;
+		if (input.allow === true && request.kind === "computerControl") {
+			const picked = Array.isArray(input.allowedBundleIds) ? input.allowedBundleIds : [];
+			if (picked.length === 0) throw new ApiError(400, "Escolha pelo menos um app que o agente pode controlar.");
+		}
+		this.agentRequests.splice(index, 1);
+		const outcome = { requestId, decision: input.allow === true ? "allowed" : "denied", by, at: new Date().toISOString() };
+		this.agentAnswers.set(requestId, outcome);
+		for (const sub of this.subs) sub.handlers.onEvent({ event: "agent-requests", data: { requests: this.agentRequests } });
+		return { ok: true, outcome };
+	}
+
 	private route(method: string, url: URL, body: unknown): unknown {
 		const path = url.pathname;
+		if (method === "GET" && path === "/api/v1/mobile/agent-requests") return { requests: this.agentRequests };
+		if (method === "GET" && path === "/api/v1/mobile/attention") return { items: this.attention() };
+		const delivery = /^\/api\/v1\/mobile\/workspaces\/([^/]+)\/delivery(?:\/([a-z-]+))?$/.exec(path);
+		if (delivery) return this.deliveryRoute(method, decodeURIComponent(delivery[1]!), delivery[2] ?? null, body);
+		const agentAnswer = /^\/api\/v1\/mobile\/agent-requests\/([^/]+)\/respond$/.exec(path);
+		if (method === "POST" && agentAnswer) return this.answerAgentRequest(decodeURIComponent(agentAnswer[1]!), body, "phone");
 		if (method === "GET" && path === "/api/v1/status") {
 			return { running: true, cpuPercent: 7, memoryMb: 412 };
 		}
@@ -247,6 +302,123 @@ export class DemoBackend implements Backend {
 			return { ok: true };
 		}
 		throw new ApiError(404, "Não existe no modo demonstração.");
+	}
+
+	private deliveryState(workspaceId: string): DemoDelivery {
+		const comb = this.combs.find((c) => c.id === workspaceId);
+		if (!comb) throw new ApiError(404, "Workspace não encontrado.");
+		let state = this.delivery.get(workspaceId);
+		if (!state) {
+			state =
+				workspaceId === "demo-w4"
+					? { changes: [], branchChanges: [{ path: "docs/onboarding.md", status: "M", insertions: 42, deletions: 7, staged: false }], ahead: 0, version: 0, pr: { number: 18, state: "OPEN", isDraft: false, headBranch: comb.branch, mergeStateStatus: "UNSTABLE", url: "https://github.com/demo/site/pull/18", title: "Revisar o guia de onboarding" }, failedJobs: ["lint"] }
+					: {
+							changes: [
+								{ path: "src/checkout/gateway.ts", status: "M", insertions: 48, deletions: 12, staged: false },
+								{ path: "src/checkout/gateway.test.ts", status: "M", insertions: 30, deletions: 2, staged: false },
+								{ path: "src/checkout/legacy-flag.ts", status: "??", insertions: 0, deletions: 0, staged: false },
+							],
+							branchChanges: [],
+							ahead: 0,
+							version: 0,
+							pr: null,
+							failedJobs: [],
+						};
+			this.delivery.set(workspaceId, state);
+		}
+		return state;
+	}
+
+	private deliveryRoute(method: string, workspaceId: string, action: string | null, body: unknown): unknown {
+		const comb = this.combs.find((c) => c.id === workspaceId);
+		const state = this.deliveryState(workspaceId);
+		const token = `demo-${workspaceId}-${state.version}`;
+		const input = (body ?? {}) as Record<string, unknown>;
+		const title = this.sessions.find((s) => s.workspaceId === workspaceId)?.threadTitle ?? comb?.name ?? null;
+		if (method === "GET" && action === null) {
+			return {
+				workspaceId,
+				workspaceState: comb?.status ?? "ready",
+				branch: comb?.branch ?? null,
+				baseBranch: "main",
+				changes: state.changes,
+				stagedCount: 0,
+				branchChanges: state.branchChanges,
+				aheadOfRemoteCount: state.ahead,
+				behindOfRemoteCount: 0,
+				conflictCount: 0,
+				mergeInProgress: false,
+				changesToken: token,
+				commitMessage: state.changes.length > 0 ? "chore: update checkout files" : "chore: update project files",
+				beforePush: [],
+				pushFailure: null,
+			};
+		}
+		if (method === "GET" && action === "forge") {
+			return {
+				pullRequest: state.pr,
+				pipeline: state.pr ? { status: state.failedJobs.length > 0 ? "failed" : "success", webUrl: null, failedJobs: state.failedJobs } : null,
+				requestTitle: title,
+			};
+		}
+		if (method !== "POST") throw new ApiError(404, "Não existe no modo demonstração.");
+		const commit = (push: boolean) => {
+			if (state.changes.length === 0) throw new ApiError(400, "Não há mudanças para commitar.");
+			state.branchChanges = [...state.branchChanges, ...state.changes];
+			state.changes = [];
+			state.ahead = push ? 0 : state.ahead + 1;
+			state.version += 1;
+		};
+		switch (action) {
+			case "commit":
+				if (input.changesToken !== token) throw new ApiError(409, "As mudanças da tarefa mudaram desde que você abriu.", { ok: false, error: { code: "stale" } });
+				commit(input.push === true);
+				return { ok: true };
+			case "push":
+				state.ahead = 0;
+				return { ok: true };
+			case "request":
+				if (input.includeLocalChanges === true && state.changes.length > 0) commit(true);
+				state.pr = { number: 19, state: "OPEN", isDraft: input.draft === true, headBranch: comb?.branch ?? null, mergeStateStatus: "CLEAN", url: "https://github.com/demo/loja/pull/19", title: typeof input.title === "string" && input.title ? input.title : title };
+				return { ok: true };
+			case "complete":
+			case "archive":
+				if (comb) comb.status = action === "complete" ? "completed" : "archived";
+				return { ok: true };
+			default:
+				throw new ApiError(404, "Não existe no modo demonstração.");
+		}
+	}
+
+	/** The desktop's "Precisa de você", from the demo threads (and a red PR on the docs task). */
+	private attention() {
+		const items: Array<Record<string, unknown>> = [];
+		for (const comb of this.combs) {
+			if (comb.status === "archived" || comb.status === "completed") continue;
+			const threads = this.sessions
+				.filter((s) => s.workspaceId === comb.id)
+				.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+			const latest = threads[0];
+			if (!latest) continue;
+			const classified = threads.map((thread) => ({ thread, ...classifySession(thread, thread.events) }));
+			const waiting = classified.flatMap((c) => c.needsYou)[0];
+			const entry = { workspaceId: comb.id, count: null, completedAt: null };
+			if (waiting) {
+				items.push({ ...entry, reason: waiting.choices.length > 0 ? "permission" : "input", returnedAt: waiting.at, sessionId: waiting.thread.sessionId });
+				continue;
+			}
+			const status = classified[0]!.status;
+			if (status === "running") continue;
+			if (comb.id === "demo-w4") {
+				items.push({ ...entry, reason: "checksFailing", count: 18, returnedAt: latest.updatedAt, sessionId: latest.sessionId });
+				continue;
+			}
+			const at = latest.events.at(-1)?.occurredAt ?? latest.updatedAt;
+			if (status === "completed" || status === "aborted") {
+				items.push({ ...entry, reason: status, returnedAt: at, completedAt: at, sessionId: latest.sessionId });
+			}
+		}
+		return items.sort((a, b) => String(b.returnedAt).localeCompare(String(a.returnedAt)));
 	}
 
 	private catalog(): MobileCatalog {

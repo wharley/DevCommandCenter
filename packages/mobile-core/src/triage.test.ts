@@ -103,3 +103,33 @@ describe("triage", () => {
 		expect(groups.recent.map((s) => s.sessionId)).toEqual(["c"]);
 	});
 });
+
+describe("triage with the desktop's attention list", () => {
+	it("keeps the desktop's order, attaches inline answers and takes those tasks off the other groups", async () => {
+		const { triageWithAttention } = await import("./triage.ts");
+		const a = session("a", { workspaceId: "wa" });
+		const b = session("b", { workspaceId: "wb" });
+		const c = session("c", { workspaceId: "wc" });
+		const d = session("d", { workspaceId: "wd" });
+		const scan = {
+			sessions: [a, b, c, d],
+			statuses: new Map([
+				["a", "running" as const],
+				["c", "running" as const],
+				["d", "running" as const],
+			]),
+			needsYou: [{ thread: a, requestId: "p1", question: "rodar yarn test?", choices: [{ id: "allow", label: "Permitir" }], at: "x" }],
+		};
+		const entries = [
+			{ workspaceId: "wb", reason: "checksFailing" as const, count: 7, returnedAt: "2026-10-12T11:00:00Z", completedAt: null, sessionId: "b" },
+			{ workspaceId: "wa", reason: "permission" as const, count: null, returnedAt: "2026-10-12T10:00:00Z", completedAt: null, sessionId: "a" },
+		];
+		const groups = triageWithAttention(scan, entries, new Set(["d"]));
+		expect(groups.needsYou.map((row) => [row.entry.workspaceId, row.pending?.requestId ?? null])).toEqual([
+			["wb", null],
+			["wa", "p1"],
+		]);
+		expect(groups.running.map((s) => s.sessionId)).toEqual(["c"]);
+		expect(groups.recent.map((s) => s.sessionId)).toEqual([]);
+	});
+});

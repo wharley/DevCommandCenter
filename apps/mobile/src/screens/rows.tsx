@@ -1,16 +1,19 @@
 /** Rows shared by both tabs: an agent session and a "needs you" card. */
 import {
+	attentionLabel,
 	formatRelative,
 	normalizeProvider,
 	sessionTitle,
 	workspaceLabel,
 	type LiveStatus,
+	type NeedsYouRow,
 	type PendingItem,
 	type SessionSearchResult,
 } from "@dcc/mobile-core";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { markWorkspaceSeen } from "../backend/seenResults";
 import { alpha, color, radius } from "../theme";
 import { Button, Mono } from "../ui/primitives";
 import { AgentMascot } from "../ui/sprites";
@@ -121,6 +124,81 @@ export function NeedsYouCard({
 	);
 }
 
+const ATTENTION_ICON: Record<NeedsYouRow["entry"]["reason"], keyof typeof Feather.glyphMap> = {
+	permission: "shield",
+	input: "message-circle",
+	conflicts: "git-merge",
+	prConflicts: "git-pull-request",
+	checksFailing: "x-octagon",
+	delegatedReview: "users",
+	woke: "sun",
+	setup: "tool",
+	aborted: "slash",
+	completed: "check-circle",
+};
+
+/** A task under "Precisa de você" whose answer lives in its thread. */
+export function AttentionCard({ row }: { row: NeedsYouRow }) {
+	const { entry, thread } = row;
+	const urgent = entry.reason !== "completed" && entry.reason !== "woke";
+	const open = () => {
+		if (!entry.sessionId) return;
+		if (entry.workspaceId) markWorkspaceSeen(entry.workspaceId);
+		openThread(entry.sessionId);
+	};
+	const place = thread ? workspaceLabel(thread) : "";
+	return (
+		<Pressable
+			onPress={open}
+			disabled={!entry.sessionId}
+			style={({ pressed }) => [styles.row, urgent && styles.urgent, pressed && { backgroundColor: color.elevated }]}
+			accessibilityRole="button"
+			accessibilityLabel={`${thread ? sessionTitle(thread) : "Tarefa"}, ${attentionLabel(entry)}`}
+		>
+			<AgentMascot provider={thread?.providerId} model={thread?.model} state={urgent ? "waiting" : "idle"} size={28} />
+			<View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+				<Text style={styles.title} numberOfLines={1}>
+					{thread ? sessionTitle(thread) : "Tarefa"}
+				</Text>
+				{place ? (
+					<Mono style={styles.place} numberOfLines={1}>
+						{place}
+					</Mono>
+				) : null}
+				<View style={styles.reasonLine}>
+					<Feather name={ATTENTION_ICON[entry.reason]} size={12} color={urgent ? color.wait : color.mute} />
+					<Mono style={[styles.meta, { color: urgent ? color.wait : color.mute }]} numberOfLines={1}>
+						{attentionLabel(entry)}
+						{entry.returnedAt ? ` · ${formatRelative(entry.returnedAt)}` : ""}
+					</Mono>
+				</View>
+			</View>
+			<Feather name="chevron-right" size={16} color={color.faint} />
+		</Pressable>
+	);
+}
+
+/** The thread an agent request belongs to, atop its card on the home screen. */
+export function AgentRequestHeader({ sessionId, thread }: { sessionId: string; thread: SessionSearchResult | null }) {
+	const place = thread ? workspaceLabel(thread) : "";
+	return (
+		<Pressable onPress={() => openThread(sessionId)} style={styles.cardHead} accessibilityRole="button">
+			<AgentMascot provider={thread?.providerId} model={thread?.model} state="waiting" size={28} />
+			<View style={{ flex: 1, minWidth: 0 }}>
+				<Text style={styles.title} numberOfLines={1}>
+					{thread ? sessionTitle(thread) : "Sessão"}
+				</Text>
+				{place ? (
+					<Mono style={styles.place} numberOfLines={1}>
+						{place}
+					</Mono>
+				) : null}
+			</View>
+			<Feather name="chevron-right" size={16} color={color.faint} />
+		</Pressable>
+	);
+}
+
 const styles = StyleSheet.create({
 	row: {
 		flexDirection: "row",
@@ -150,4 +228,6 @@ const styles = StyleSheet.create({
 	cardHead: { flexDirection: "row", alignItems: "center", gap: 10 },
 	question: { color: color.fg, fontSize: 12, lineHeight: 18 },
 	choices: { flexDirection: "row", gap: 8 },
+	urgent: { borderColor: alpha(color.wait, 0.4) },
+	reasonLine: { flexDirection: "row", alignItems: "center", gap: 6 },
 });

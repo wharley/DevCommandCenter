@@ -10,9 +10,12 @@
 //! What notifies is what puts a task under "Precisa de você" on the desktop
 //! and has an event of its own: a permission request, a question from the
 //! agent, and a turn that finished or was interrupted (the sidebar's
-//! `permission`, `input`, `completed` and `aborted`). Git conflicts, a red
-//! CI and delegated edits to review come from polled blockers with no event,
-//! so they do not notify yet.
+//! `permission`, `input`, `completed` and `aborted`). Besides those, the
+//! HTTP backend's watcher (`http_api::attention`) hands over a Browser or
+//! computer-use request from an agent (`agent_requests`) and a task that
+//! newly has a git conflict (local or in its PR) or failing checks — each
+//! once per appearance. Delegated edits to review, a snooze that ended and a
+//! pending setup do not notify: they are not urgent.
 //!
 //! The text is generic on purpose — "DCC" and "<project> precisa de você" —
 //! because it travels in the clear through Expo, Apple and Google. Never the
@@ -122,13 +125,18 @@ pub fn valid_push_token(token: &str) -> bool {
         && inner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AttentionKind {
     Permission,
     Question,
     Completed,
     Interrupted,
+    /// `dcc_browser_open` or `dcc_computer_request_control` waiting.
+    AgentRequest,
+    /// Local merge conflicts, or the PR conflicts with its base.
+    Conflict,
+    ChecksFailing,
 }
 
 /// One "needs you" moment, from the event that starts it.
@@ -138,6 +146,16 @@ pub struct Attention {
     pub session_id: String,
     /// Same request or same turn → same key: notified once.
     pub key: String,
+}
+
+impl Attention {
+    pub fn agent_request(session_id: &str, request_id: &str) -> Self {
+        Self {
+            kind: AttentionKind::AgentRequest,
+            session_id: session_id.to_string(),
+            key: format!("agent:{request_id}"),
+        }
+    }
 }
 
 impl Attention {
@@ -193,12 +211,18 @@ impl Attention {
 pub fn notification_text(kind: AttentionKind, project: Option<&str>) -> (String, String) {
     let project = project.and_then(display_project);
     let body = match (kind, project) {
-        (AttentionKind::Permission | AttentionKind::Question, Some(project)) => {
-            format!("{project} precisa de você")
-        }
-        (AttentionKind::Permission | AttentionKind::Question, None) => {
-            "Uma tarefa precisa de você".to_string()
-        }
+        (
+            AttentionKind::Permission | AttentionKind::Question | AttentionKind::AgentRequest,
+            Some(project),
+        ) => format!("{project} precisa de você"),
+        (
+            AttentionKind::Permission | AttentionKind::Question | AttentionKind::AgentRequest,
+            None,
+        ) => "Uma tarefa precisa de você".to_string(),
+        (AttentionKind::Conflict, Some(project)) => format!("{project}: conflito para resolver"),
+        (AttentionKind::Conflict, None) => "Uma tarefa tem conflito para resolver".to_string(),
+        (AttentionKind::ChecksFailing, Some(project)) => format!("{project}: checks falharam"),
+        (AttentionKind::ChecksFailing, None) => "Os checks de uma tarefa falharam".to_string(),
         (AttentionKind::Completed, Some(project)) => format!("{project}: tarefa concluída"),
         (AttentionKind::Completed, None) => "Tarefa concluída".to_string(),
         (AttentionKind::Interrupted, Some(project)) => format!("{project}: tarefa interrompida"),
@@ -299,8 +323,8 @@ impl PushNotifier {
         })
     }
 
-    /// Follows the session events for as long as they flow.
-    pub async fn run(self: Arc<Self>, mut events: broadcast::Receiver<CoreEvent>) {
+    /// Follows the attention moments for as long as they flow.
+    pub async fn run(self: Arc<Self>, mut events: broadcast::Receiver<Attention>) {
         use broadcast::error::RecvError;
         loop {
             let first = match events.recv().await {
@@ -317,7 +341,7 @@ impl PushNotifier {
                     Ok(Err(RecvError::Closed)) | Err(_) => break,
                 }
             }
-            let messages = self.plan(&batch).await;
+            let messages = self.plan_attentions(batch).await;
             if !messages.is_empty() {
                 let notifier = self.clone();
                 tokio::spawn(async move {
@@ -330,9 +354,13 @@ impl PushNotifier {
     /// The messages these events call for, after dedupe, presence and the
     /// per-phone rate limit.
     pub async fn plan(&self, events: &[CoreEvent]) -> Vec<PushMessage> {
-        let attentions: Vec<Attention> = events
-            .iter()
-            .filter_map(Attention::from_event)
+        self.plan_attentions(events.iter().filter_map(Attention::from_event).collect())
+            .await
+    }
+
+    pub async fn plan_attentions(&self, attentions: Vec<Attention>) -> Vec<PushMessage> {
+        let attentions: Vec<Attention> = attentions
+            .into_iter()
             .filter(|attention| self.first_time(&attention.key))
             .collect();
         if attentions.is_empty() {
@@ -976,6 +1004,18 @@ mod tests {
             notification_text(AttentionKind::Permission, Some("~/work")).1,
             "Uma tarefa precisa de você"
         );
+        assert_eq!(
+            notification_text(AttentionKind::AgentRequest, project).1,
+            "api precisa de você"
+        );
+        assert_eq!(
+            notification_text(AttentionKind::Conflict, project).1,
+            "api: conflito para resolver"
+        );
+        assert_eq!(
+            notification_text(AttentionKind::ChecksFailing, None).1,
+            "Os checks de uma tarefa falharam"
+        );
         let long = "x".repeat(80);
         let body = notification_text(AttentionKind::Completed, Some(&long)).1;
         assert!(
@@ -1267,8 +1307,8 @@ mod tests {
         desk.phone(1, "ExponentPushToken[aaa]");
         let (events, receiver) = broadcast::channel(16);
         let task = tokio::spawn(desk.notifier.clone().run(receiver));
-        events.send(permission("s1", "r1")).unwrap();
-        events.send(completed("s2", "t1")).unwrap();
+        events.send(Attention::from_event(&permission("s1", "r1")).unwrap()).unwrap();
+        events.send(Attention::from_event(&completed("s2", "t1")).unwrap()).unwrap();
         for _ in 0..100 {
             if !desk.sent().is_empty() {
                 break;

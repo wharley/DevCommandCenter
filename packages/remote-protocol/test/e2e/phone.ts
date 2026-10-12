@@ -234,6 +234,48 @@ log("answered the live permission", { status: answer.status, body: answer.text()
 const outcome = await ask("permission-answered", { status: answer.status, body: answer.text() });
 check(outcome === "go", `desktop saw the answer: ${outcome}`);
 
+// 7b. A Browser request from an agent: it shows up live on the stream, the
+// phone approves it, and the desktop answering second gets a 409.
+const agentStart = events.length;
+await ask("agent-request");
+await until(
+	() => events.slice(agentStart).some((event) => event.event === "agent-requests" && JSON.stringify(event.data).includes("bo-e2e")),
+	"agent request on the stream",
+);
+const agentList = await client.request("GET", "/api/v1/mobile/agent-requests");
+const listed = agentList.json<{ requests: Array<{ requestId: string; kind: string; url: string }> }>().requests;
+check(listed.length === 1 && listed[0]!.kind === "browserOpen", `listed: ${agentList.text()}`);
+const allowed = await client.request("POST", "/api/v1/mobile/agent-requests/bo-e2e/respond", { body: { allow: true } });
+check(allowed.status === 200, `phone allowed: ${allowed.status} ${allowed.text()}`);
+const twice = await client.request("POST", "/api/v1/mobile/agent-requests/bo-e2e/respond", { body: { allow: false } });
+check(twice.status === 409, `a second answer is a conflict: ${twice.status}`);
+check(
+	twice.json<{ error: { outcome: { by: string; decision: string } } }>().error.outcome.by === "phone",
+	"the conflict says the phone won",
+);
+const agentOutcome = await ask("agent-request-answered");
+check(agentOutcome === "go", agentOutcome);
+log("Browser request approved from the phone");
+
+// 7c. Deliver from the phone: read the task's changes and the desktop's
+// default commit message, then commit with an edited one.
+await ask("delivery-setup");
+const deliveryPath = "/api/v1/mobile/workspaces/e2e-delivery/delivery";
+const summary = await client.request("GET", deliveryPath);
+check(summary.status === 200, `delivery summary: ${summary.status} ${summary.text()}`);
+const view = summary.json<{ changes: Array<{ path: string }>; changesToken: string; commitMessage: string; branch: string }>();
+check(view.branch === "dcc/e2e" && view.changes.some((c) => c.path === "notas.md"), `summary: ${summary.text()}`);
+check(view.commitMessage.length > 0, "a default commit message");
+const committed = await client.request("POST", `${deliveryPath}/commit`, {
+	body: { changesToken: view.changesToken, message: "docs: notas do celular" },
+});
+check(committed.status === 200, `commit from the phone: ${committed.status} ${committed.text()}`);
+const again = await client.request("POST", `${deliveryPath}/commit`, { body: { changesToken: view.changesToken } });
+check(again.status === 409, `a commit from an old view is refused: ${again.status} ${again.text()}`);
+const deliveryOutcome = await ask("delivery-committed");
+check(deliveryOutcome === "go", deliveryOutcome);
+log("committed from the phone", { default: view.commitMessage });
+
 // 8. Large request body (phone -> desktop fragmentation).
 const big = await client.request(
 	"POST",

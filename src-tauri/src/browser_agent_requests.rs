@@ -104,6 +104,9 @@ struct PendingRequest {
     scope: BrowserAgentRequestScope,
     view: BrowserAgentRequestView,
     completion: oneshot::Sender<BrowserAgentOpenResult>,
+    /// Allowed (on the desktop or a phone) and opening: no longer offered to
+    /// anyone, and only the native lifecycle ACK can complete it.
+    claimed: bool,
 }
 
 #[derive(Clone, Default)]
@@ -170,6 +173,7 @@ impl BrowserAgentRequestBroker {
                     scope,
                     view,
                     completion,
+                    claimed: false,
                 },
             );
         }
@@ -194,7 +198,8 @@ impl BrowserAgentRequestBroker {
                 pending
                     .values()
                     .filter(|request| {
-                        request.scope.workspace_id == input.workspace_id
+                        !request.claimed
+                            && request.scope.workspace_id == input.workspace_id
                             && request.scope.session_id == input.session_id
                     })
                     .map(|request| request.view.clone())
@@ -210,6 +215,7 @@ impl BrowserAgentRequestBroker {
             .map(|pending| {
                 pending
                     .values()
+                    .filter(|request| !request.claimed)
                     .map(|request| request.view.clone())
                     .collect()
             })
@@ -227,7 +233,17 @@ impl BrowserAgentRequestBroker {
         browser: &BrowserState,
         input: BrowserAgentResolveInput,
     ) -> BrowserAgentOpenResult {
-        let request = self.take_matching(&input.request_id, &input.workspace_id, &input.session_id);
+        // A deny cannot undo an allow that is already opening the Browser.
+        let request = match input.decision {
+            BrowserAgentRequestDecision::Deny => self.take_matching_unclaimed(
+                &input.request_id,
+                &input.workspace_id,
+                &input.session_id,
+            ),
+            BrowserAgentRequestDecision::Allow => {
+                self.take_matching(&input.request_id, &input.workspace_id, &input.session_id)
+            }
+        };
         let Some(request) = request else {
             return failed("browser open request is unavailable");
         };
@@ -289,6 +305,30 @@ impl BrowserAgentRequestBroker {
         };
         let _ = request.completion.send(result.clone());
         result
+    }
+
+    /// Marks an open request as allowed and opening, for whoever answered
+    /// first; `None` once it is taken, answered or gone. The renderer then
+    /// opens the native Browser and completes it with `resolve` (allow +
+    /// lifecycle token).
+    pub fn claim(&self, request_id: &str) -> Option<BrowserAgentRequestView> {
+        let mut pending = self.pending.lock().ok()?;
+        let request = pending.get_mut(request_id)?;
+        if request.claimed || request.view.expires_at_ms <= now_ms() {
+            return None;
+        }
+        request.claimed = true;
+        Some(request.view.clone())
+    }
+
+    /// The open request with this id, whoever it belongs to.
+    pub fn view(&self, request_id: &str) -> Option<BrowserAgentRequestView> {
+        self.pending
+            .lock()
+            .ok()?
+            .get(request_id)
+            .filter(|request| !request.claimed)
+            .map(|request| request.view.clone())
     }
 
     pub fn cancel_matching(&self, input: &BrowserAgentCancelInput) -> bool {
@@ -372,6 +412,23 @@ impl BrowserAgentRequestBroker {
         matches.then(|| pending.remove(request_id)).flatten()
     }
 
+    fn take_matching_unclaimed(
+        &self,
+        request_id: &str,
+        workspace_id: &str,
+        session_id: &str,
+    ) -> Option<PendingRequest> {
+        let Ok(mut pending) = self.pending.lock() else {
+            return None;
+        };
+        let matches = pending.get(request_id).is_some_and(|request| {
+            !request.claimed
+                && request.scope.workspace_id == workspace_id
+                && request.scope.session_id == session_id
+        });
+        matches.then(|| pending.remove(request_id)).flatten()
+    }
+
     fn complete_if_pending(&self, request_id: &str, result: BrowserAgentOpenResult) {
         if let Ok(mut pending) = self.pending.lock() {
             if let Some(request) = pending.remove(request_id) {
@@ -447,9 +504,36 @@ pub fn browser_agent_pending_all(
 pub fn browser_agent_resolve(
     broker: State<'_, BrowserAgentRequestBroker>,
     browser: State<'_, BrowserState>,
+    requests: State<'_, crate::desktop_agent_requests::DesktopAgentRequests>,
     input: BrowserAgentResolveInput,
 ) -> BrowserAgentOpenResult {
-    broker.resolve(&browser, input)
+    match input.decision {
+        // The lifecycle ACK of an allow already claimed through
+        // `browser_agent_claim` (or the panel, or a phone).
+        BrowserAgentRequestDecision::Allow => broker.resolve(&browser, input),
+        // A deny is an answer: first one wins, shared with the phone.
+        BrowserAgentRequestDecision::Deny => {
+            let scoped = broker.pending_for(&BrowserAgentPendingInput {
+                workspace_id: input.workspace_id.clone(),
+                session_id: input.session_id.clone(),
+            });
+            if !scoped.iter().any(|view| view.request_id == input.request_id) {
+                return failed("browser open request is unavailable");
+            }
+            match requests.deny_browser(
+                &input.request_id,
+                dev_command_center_tauri::agent_requests::AnswerOrigin::Desktop,
+            ) {
+                Ok(_) => BrowserAgentOpenResult {
+                    status: BrowserAgentOpenStatus::Denied,
+                    lifecycle_token: None,
+                    remaining_ms: 0,
+                    message: None,
+                },
+                Err(error) => failed(&error.to_string()),
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -470,6 +554,47 @@ mod tests {
             provider_id: "provider".into(),
             lease_id: lease.into(),
         }
+    }
+
+    #[test]
+    fn a_claimed_open_is_offered_to_no_one_and_cannot_be_denied() {
+        let broker = BrowserAgentRequestBroker::default();
+        let (completion, mut receiver) = oneshot::channel();
+        broker.pending.lock().unwrap().insert(
+            "bo-x".into(),
+            PendingRequest {
+                scope: scope("lease"),
+                view: BrowserAgentRequestView {
+                    request_id: "bo-x".into(),
+                    workspace_id: "workspace".into(),
+                    session_id: "session".into(),
+                    provider_id: "provider".into(),
+                    url: "https://example.com".into(),
+                    reason: "open".into(),
+                    expires_at_ms: now_ms() + 30_000,
+                },
+                completion,
+                claimed: false,
+            },
+        );
+        assert!(broker.view("bo-x").is_some());
+        assert_eq!(broker.claim("bo-x").unwrap().request_id, "bo-x");
+        assert!(broker.claim("bo-x").is_none(), "only one answer claims it");
+        assert!(broker.pending_all().is_empty());
+        assert!(broker.view("bo-x").is_none());
+        let denied = broker.resolve(
+            &BrowserState::default(),
+            BrowserAgentResolveInput {
+                request_id: "bo-x".into(),
+                workspace_id: "workspace".into(),
+                session_id: "session".into(),
+                decision: BrowserAgentRequestDecision::Deny,
+                lifecycle_token: None,
+            },
+        );
+        assert_eq!(denied.status, BrowserAgentOpenStatus::Failed);
+        assert!(receiver.try_recv().is_err(), "the agent still waits for the ACK");
+        assert_eq!(broker.pending.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -600,6 +725,7 @@ mod tests {
                     expires_at_ms: 0,
                 },
                 completion,
+                claimed: false,
             },
         );
         let result = broker.resolve(

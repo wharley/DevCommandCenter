@@ -115,11 +115,11 @@ export class RemoteBackend implements Backend {
 		if (!alive && this.client === client) client.close();
 	}
 
-	async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+	async request<T>(method: string, path: string, body?: unknown, options?: { timeoutMs?: number }): Promise<T> {
 		const client = await this.online();
 		const response = await withTimeout(
 			client.request(method, path, body === undefined ? {} : { body }),
-			this.options.requestTimeoutMs,
+			options?.timeoutMs ?? this.options.requestTimeoutMs,
 			"O computador demorou para responder. Uma ação enviada pode ainda estar em andamento.",
 		);
 		return parseResponse<T>(response);

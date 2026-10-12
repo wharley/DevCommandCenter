@@ -18,7 +18,9 @@ import {
 	type RenderItem,
 	type SessionSearchResult,
 } from "@dcc/mobile-core";
+import { useAgentRequests } from "@/backend/agentRequests";
 import { loadProjectAccess, saveProjectAccess } from "@/backend/accessStore";
+import { markWorkspaceSeen } from "@/backend/seenResults";
 import { cachedCatalog, fetchCatalog } from "@/backend/catalogCache";
 import { useBackend } from "@/backend/session";
 import { errorMessage, isAlreadyResolved } from "@/backend/types";
@@ -26,6 +28,7 @@ import { AssistantBlock, PermissionCard, QuestionCard, SystemRow, TraceBlock, Us
 import { ThreadSync, type ThreadSnapshot } from "@/screens/threadSync";
 import { alpha, color, radius } from "@/theme";
 import { AccessPill } from "@/ui/AccessPicker";
+import { AgentRequestCard } from "@/ui/AgentRequestCard";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { FileMentionList } from "@/ui/FileMentionList";
@@ -123,6 +126,13 @@ export default function ThreadScreen() {
 		};
 	}, [backend]);
 
+	// Opening the thread reads the task's latest result ("Resultado novo" goes away).
+	const seenWorkspace = meta?.workspaceId ?? null;
+	const finished = !isThreadRunning(snapshot.state.messages) && !snapshot.loading;
+	useEffect(() => {
+		if (seenWorkspace && finished) markWorkspaceSeen(seenWorkspace);
+	}, [seenWorkspace, finished]);
+
 	const projectKey = meta?.projectId ?? null;
 	useEffect(() => {
 		let cancelled = false;
@@ -135,12 +145,20 @@ export default function ThreadScreen() {
 		};
 	}, [projectKey]);
 
+	const agentRequests = useAgentRequests();
+	const threadRequests = useMemo(
+		() => agentRequests.requests.filter((request) => request.sessionId === threadId),
+		[agentRequests.requests, threadId],
+	);
 	const { state, questions } = snapshot;
 	const items = useMemo(() => groupMessages(state.messages), [state.messages]);
 	const running = useMemo(() => isThreadRunning(state.messages), [state.messages]);
 	const title = useMemo(() => meta?.threadTitle?.trim() || threadTitle(state.messages) || "Sessão", [meta, state.messages]);
 	const place = meta ? workspaceLabel(meta) : "";
-	const waitingOnYou = questions.length > 0 || state.messages.some((m) => m.kind === "permission" && !m.resolved);
+	const waitingOnYou =
+		questions.length > 0 ||
+		threadRequests.length > 0 ||
+		state.messages.some((m) => m.kind === "permission" && !m.resolved);
 	const keyboardOpen = useKeyboardState((keyboard) => keyboard.isVisible);
 	const heads = useMemo(() => agentTurnHeads(items), [items]);
 	// Only the latest turn moves; finished replies stand still, as on the desktop.
@@ -331,6 +349,17 @@ export default function ThreadScreen() {
 						</Mono>
 					</View>
 				</View>
+				{meta?.workspaceId ? (
+					<Pressable
+						onPress={() => router.push({ pathname: "/delivery/[id]", params: { id: meta.workspaceId! } })}
+						hitSlop={10}
+						accessibilityRole="button"
+						accessibilityLabel="Entrega: commit, envio e PR"
+						style={styles.deliver}
+					>
+						<Feather name="git-pull-request" size={18} color={color.mute} />
+					</Pressable>
+				) : null}
 			</View>
 			<View style={styles.banner}>
 				<ConnectionBanner backend={backend} />
@@ -359,9 +388,22 @@ export default function ThreadScreen() {
 					onLayout={followEnd}
 					keyboardShouldPersistTaps="handled"
 					ListFooterComponent={
-						awaitingFirstOutput || questions.length > 0 ? (
+						awaitingFirstOutput || questions.length > 0 || threadRequests.length > 0 ? (
 							<View style={{ gap: 12, marginTop: 12 }}>
 								{awaitingFirstOutput ? <AgentHeader meta={meta} label={agentLabel} state={mascotState} /> : null}
+								{threadRequests.map((request) => (
+									<AgentRequestCard
+										key={request.requestId}
+										request={request}
+										busy={agentRequests.answering.has(request.requestId)}
+										onRespond={(answer) =>
+											void agentRequests.respond(request, answer).then((text) => {
+												if (text) setNotice(text);
+												sync.current?.nudge();
+											})
+										}
+									/>
+								))}
 								{questions.map((request) => (
 									<QuestionCard
 										key={request.requestId}
@@ -480,6 +522,7 @@ const styles = StyleSheet.create({
 		borderBottomColor: color.border,
 	},
 	back: { padding: 6 },
+	deliver: { padding: 6 },
 	title: { color: color.fg, fontSize: 15, fontWeight: "600" },
 	subtitle: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
 	subtitleText: { fontSize: 10, color: color.faint, letterSpacing: 0.6, flexShrink: 1 },

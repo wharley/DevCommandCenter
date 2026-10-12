@@ -27,6 +27,10 @@ use dcc_core::ports::events::CoreEvent;
 use dcc_core::ports::repository::{AppendEventOutcome, SessionEventRepo, SessionRepo, ThreadRepo};
 use dcc_core::ports::EventBus;
 use dcc_tauri::state::SessionCommandState;
+use dev_command_center_tauri::agent_requests::{
+    now_ms, AgentRequestAnswer, AgentRequestDecision, AgentRequestDetail, AgentRequestError,
+    AgentRequestSource, AnswerOrigin, InMemoryAgentRequests, PendingAgentRequest,
+};
 use dev_command_center_tauri::http_api::{build_router, HttpBackend};
 use dev_command_center_tauri::http_config::HttpConfig;
 use dev_command_center_tauri::pairing;
@@ -38,6 +42,20 @@ use tokio::sync::RwLock;
 const SESSION: &str = "remote-e2e-session";
 const WORKSPACE: &str = "remote-e2e-workspace";
 const REPLAY_AFTER: u64 = 2;
+
+fn run_git(dir: &std::path::Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "DCC E2E")
+        .env("GIT_AUTHOR_EMAIL", "e2e@example.com")
+        .env("GIT_COMMITTER_NAME", "DCC E2E")
+        .env("GIT_COMMITTER_EMAIL", "e2e@example.com")
+        .output()
+        .expect("git");
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -271,17 +289,17 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
     let db_path = physical.join("state.sqlite");
     let state = SessionCommandState::new_headless(db_path.clone(), physical.join("app-data"));
     seed(&state).await;
-    // The headless runtime does not create the repositories table (the
-    // desktop app does); the push names the project from it.
+    // The headless runtime does not create the workspace tables (the
+    // desktop app does); the push names the project from them, and the
+    // phone's delivery reads its task from them.
+    drop(dcc_infra::db::SqliteWorkspaceRepo::open(&db_path).expect("workspace schema"));
     rusqlite::Connection::open(&db_path)
         .unwrap()
         .execute_batch(
-            "CREATE TABLE IF NOT EXISTS dcc_repositories (id TEXT PRIMARY KEY NOT NULL,
-                 project_id TEXT NOT NULL, name TEXT NOT NULL, display_name TEXT NULL,
-                 root_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
-             INSERT INTO dcc_repositories (id, project_id, name, display_name, root_path, created_at)
-             VALUES ('repo', 'remote-e2e-project', 'e2e', 'Projeto E2E', '/tmp/e2e-repo',
-                 '2026-10-09T00:00:00Z');",
+            "INSERT INTO dcc_repositories (id, project_id, name, display_name, root_path, base_branch,
+                 created_at, updated_at)
+             VALUES ('repo', 'remote-e2e-project', 'e2e', 'Projeto E2E', '/tmp/e2e-repo', 'main',
+                 '2026-10-09T00:00:00Z', '2026-10-09T00:00:00Z');",
         )
         .expect("project row");
     let (push_api, pushes) = fake_expo().await;
@@ -291,6 +309,11 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
         ..HttpConfig::default()
     }));
     let backend = Arc::new(HttpBackend::embedded(state.clone()).expect("embedded backend"));
+    // The desktop's Browser/computer-use queues, without a Browser.
+    let agent_requests = InMemoryAgentRequests::new();
+    backend.attach_agent_requests(agent_requests.clone());
+    let mut agent_answer = None;
+    let mut delivery_repo: Option<PathBuf> = None;
     let router = build_router(config, backend.clone());
     let hub = RemoteHub::new(router, db_path.clone()).expect("remote hub");
     hub.configure_push(PushConfig {
@@ -436,6 +459,100 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
                 };
                 writeln!(stdin, "{reply}").unwrap();
             }
+            "agent-request" => {
+                // An agent asks to open the Browser while the phone is away.
+                agent_answer = Some(agent_requests.enqueue(PendingAgentRequest {
+                    request_id: "bo-e2e".to_string(),
+                    session_id: SESSION.to_string(),
+                    workspace_id: WORKSPACE.to_string(),
+                    provider_id: "codex".to_string(),
+                    reason: "Ler a documentação do gateway".to_string(),
+                    expires_at_ms: now_ms() + 45_000,
+                    detail: AgentRequestDetail::BrowserOpen {
+                        url: "https://docs.example.com/gateway".to_string(),
+                    },
+                }));
+                writeln!(stdin, "go").unwrap();
+            }
+            "agent-request-answered" => {
+                let outcome = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    agent_answer.take().expect("an agent request was opened"),
+                )
+                .await
+                .expect("the agent heard back in time")
+                .expect("an answer");
+                assert_eq!(outcome.decision, AgentRequestDecision::Allowed);
+                assert_eq!(outcome.by, AnswerOrigin::Phone);
+                // The desktop's dialog answering second loses.
+                let late = agent_requests
+                    .respond("bo-e2e", AgentRequestAnswer::default(), AnswerOrigin::Desktop)
+                    .await;
+                assert!(matches!(late, Err(AgentRequestError::AlreadyAnswered(_))), "{late:?}");
+                // A generic push went out for it (the phone is in the background).
+                let mut seen = Vec::new();
+                for _ in 0..100 {
+                    seen = pushes.lock().unwrap().clone();
+                    if seen.len() >= 2 {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                let push = seen.last().expect("push for the agent request");
+                assert_eq!(push["body"], "Projeto E2E precisa de você");
+                assert_eq!(push["data"], json!({ "sessionId": SESSION, "kind": "agentRequest" }));
+                assert!(!push.to_string().contains("docs.example.com"), "{push}");
+                println!("[desktop] Browser request answered by the phone, push: {push}");
+                writeln!(stdin, "go").unwrap();
+            }
+            "delivery-setup" => {
+                // A task with a change waiting to be committed.
+                let repo = physical.join("delivery-repo");
+                std::fs::create_dir_all(&repo).unwrap();
+                for args in [
+                    vec!["init", "-b", "main"],
+                    vec!["config", "user.name", "DCC E2E"],
+                    vec!["config", "user.email", "e2e@example.com"],
+                ] {
+                    run_git(&repo, &args);
+                }
+                std::fs::write(repo.join("README.md"), "oi\n").unwrap();
+                run_git(&repo, &["add", "-A"]);
+                run_git(&repo, &["commit", "-m", "init"]);
+                run_git(&repo, &["switch", "-c", "dcc/e2e"]);
+                std::fs::write(repo.join("notas.md"), "do celular\n").unwrap();
+                let workspaces = dcc_infra::db::SqliteWorkspaceRepo::open(&db_path).unwrap();
+                dcc_core::ports::WorkspaceRepo::save_workspace(
+                    &workspaces,
+                    &dcc_core::domain::workspace::Workspace {
+                        id: WorkspaceId("e2e-delivery".to_string()),
+                        project_id: ProjectId("remote-e2e-project".to_string()),
+                        name: Some("Notas".to_string()),
+                        root_path: repo.to_string_lossy().to_string(),
+                        base_branch: "main".to_string(),
+                        worktree_path: None,
+                        source: None,
+                        state: dcc_core::domain::workspace::WorkspaceState::Ready,
+                        setup_report: None,
+                        pinned_at: None,
+                        snoozed_until: None,
+                        created_at: "2026-10-12T00:00:00Z".to_string(),
+                        updated_at: "2026-10-12T00:00:00Z".to_string(),
+                    },
+                )
+                .await
+                .unwrap();
+                delivery_repo = Some(repo);
+                writeln!(stdin, "go").unwrap();
+            }
+            "delivery-committed" => {
+                let repo = delivery_repo.as_ref().expect("delivery repo");
+                let subject = run_git(repo, &["log", "-1", "--format=%s"]);
+                assert_eq!(subject, "docs: notas do celular");
+                assert_eq!(run_git(repo, &["status", "--porcelain"]), "");
+                println!("[desktop] commit from the phone: {subject}");
+                writeln!(stdin, "go").unwrap();
+            }
             "revoke" => {
                 let device_id = payload["deviceId"].as_str().expect("device id").to_string();
                 // A QR left open keeps the connector on the relay after the
@@ -536,6 +653,10 @@ async fn phone_pairs_reconnects_streams_and_answers_through_the_relay() {
         "requestId",
         "PushToken",
         "presence",
+        "docs.example.com",
+        "bo-e2e",
+        "notas do celular",
+        "e2e-delivery",
         approve.url.split("otp=").nth(1).unwrap(),
     ];
     let mut bytes_seen = 0usize;

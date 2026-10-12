@@ -15,6 +15,7 @@ mod browser_sessions;
 mod coderabbit_commands;
 mod computer_use_commands;
 mod delegation_commands;
+mod desktop_agent_requests;
 mod feedback_commands;
 mod forge_commands;
 mod git_support;
@@ -3874,7 +3875,9 @@ fn stop_stale_http_sidecar(port: u16) {
 fn start_embedded_http_server(
     app: &tauri::App,
     session_state: SessionCommandState,
+    workspace_state: WorkspaceCommandState,
     db_path: PathBuf,
+    agent_requests: desktop_agent_requests::DesktopAgentRequests,
 ) {
     let mut config = match HttpConfig::load() {
         Ok(config) if config.enabled => config,
@@ -3889,12 +3892,13 @@ fn start_embedded_http_server(
     };
     config.db_path = db_path.clone();
     let backend = match HttpBackend::embedded(session_state) {
-        Ok(backend) => backend,
+        Ok(backend) => backend.with_workspace_state(workspace_state),
         Err(error) => {
             eprintln!("[DCC HTTP] not started: {error}");
             return;
         }
     };
+    backend.attach_agent_requests(Arc::new(agent_requests));
     let server = Arc::new(EmbeddedHttpServer::new(config, backend));
     start_remote_connector(app, &server, db_path);
     tauri::async_runtime::spawn(async move {
@@ -6968,6 +6972,7 @@ pub fn run() {
             browser_agent_requests::browser_agent_pending,
             browser_agent_requests::browser_agent_pending_all,
             browser_agent_requests::browser_agent_resolve,
+            desktop_agent_requests::browser_agent_claim,
             browser_agent_requests::browser_agent_cancel,
             browser_approval_panel::browser_approval_panel_configure,
             browser_approval_panel::browser_approval_panel_dismiss,
@@ -7312,10 +7317,24 @@ pub fn run() {
                     eprintln!("[DCC][delegation-recovery] journal unavailable: {error}");
                 }
             }
+            let http_workspace_state = workspace_command_state.clone();
             app.manage(workspace_command_state);
             app.manage(ai_memory_sidecar);
             app.manage(CodeRabbitReviewJobsState::default());
-            start_embedded_http_server(app, session_command_state.clone(), db_path.clone());
+            let desktop_agent_requests = desktop_agent_requests::DesktopAgentRequests::new(
+                app.handle().clone(),
+                browser_agent_requests.clone(),
+                browser_state.clone(),
+                computer_use_state.clone(),
+            );
+            app.manage(desktop_agent_requests.clone());
+            start_embedded_http_server(
+                app,
+                session_command_state.clone(),
+                http_workspace_state,
+                db_path.clone(),
+                desktop_agent_requests,
+            );
             app.manage(session_command_state);
             let ai_memory_retry_state = app
                 .try_state::<SessionCommandState>()

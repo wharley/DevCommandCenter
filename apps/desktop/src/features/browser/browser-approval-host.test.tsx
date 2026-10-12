@@ -5,15 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSessionSummary } from "@dcc/contracts";
 import { BrowserApprovalHost } from "./browser-approval-host";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), resolve: vi.fn(), configure: vi.fn(), dismiss: vi.fn(), listen: vi.fn(), unlisten: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), resolve: vi.fn(), claim: vi.fn(), configure: vi.fn(), dismiss: vi.fn(), listen: vi.fn(), unlisten: vi.fn() }));
 vi.mock("./browser-api", () => ({
 	listAllBrowserOpenRequests: mocks.list,
 	resolveBrowserOpenRequest: mocks.resolve,
+	claimBrowserOpenRequest: mocks.claim,
 }));
 vi.mock("./browser-approval-panel", () => ({
 	configureBrowserApprovalPanel: mocks.configure,
 	dismissBrowserApprovalPanel: mocks.dismiss,
-	onBrowserPanelAllow: mocks.listen,
+	onBrowserOpenApproved: mocks.listen,
 }));
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({ t: (key: string, values?: { time?: string }) => values?.time ? `${key}:${values.time}` : key }),
@@ -32,6 +33,7 @@ beforeEach(() => {
 	vi.setSystemTime(9_999_999_000);
 	mocks.list.mockResolvedValue([request]);
 	mocks.resolve.mockResolvedValue({ status: "denied", remainingMs: 0 });
+	mocks.claim.mockImplementation(async () => request);
 	mocks.configure.mockResolvedValue(undefined);
 	mocks.dismiss.mockResolvedValue(undefined);
 	mocks.listen.mockResolvedValue(mocks.unlisten);
@@ -91,58 +93,48 @@ describe("Browser approval host", () => {
 		expect(button("browser.approval.allow").disabled).toBe(false);
 	});
 
-	it("refreshes an external approval and opens the exact request only once", async () => {
+	it("claims before opening, so an answer from the phone wins", async () => {
 		await render([]);
-		const externalAllow = mocks.listen.mock.calls[0][0];
-		await act(async () => { externalAllow(request.requestId); externalAllow(request.requestId); });
+		mocks.claim.mockRejectedValueOnce(new Error("Esse pedido já foi negado pelo celular."));
+		await act(async () => button("browser.approval.allow").click());
+		expect(mocks.claim).toHaveBeenCalledWith({ requestId: request.requestId, workspaceId: request.workspaceId, sessionId: request.sessionId });
+		expect(onApproved).not.toHaveBeenCalled();
+		expect(document.body.textContent).toContain("Esse pedido já foi negado pelo celular.");
+	});
+
+	it("opens a request the panel or a phone approved, exactly once", async () => {
+		await render([]);
+		const approved = mocks.listen.mock.calls[0][0];
+		await act(async () => { approved(request); approved(request); });
 		expect(onApproved).toHaveBeenCalledExactlyOnceWith(request);
 		expect(mocks.dismiss).toHaveBeenCalledExactlyOnceWith(request.requestId);
+		expect(mocks.claim).not.toHaveBeenCalled();
 		expect(mocks.resolve).not.toHaveBeenCalled();
 		// An exit animation must not leave a portal hiding the native Browser
 		// when the main window is minimized and no animation frames run.
 		expect(document.querySelector("[data-dcc-browser-occluder]")).toBeNull();
 	});
 
-	it("does not approve a replacement request from a stale external click", async () => {
-		await render([]);
-		mocks.list.mockResolvedValue([{ ...request, requestId: "bo-next" }]);
-		await act(async () => mocks.listen.mock.calls[0][0](request.requestId));
-		expect(onApproved).not.toHaveBeenCalled();
-	});
-
-	it("does not approve an expired external request or use cached data after a refresh failure", async () => {
-		await render([]);
-		mocks.list.mockRejectedValueOnce(new Error("offline"));
-		await act(async () => mocks.listen.mock.calls[0][0](request.requestId));
-		expect(onApproved).not.toHaveBeenCalled();
-		mocks.list.mockResolvedValue([{ ...request, expiresAtMs: Date.now() - 1 }]);
-		await act(async () => mocks.listen.mock.calls[0][0](request.requestId));
-		expect(onApproved).not.toHaveBeenCalled();
-	});
-
-	it("ignores an external click after the modal already started opening", async () => {
+	it("ignores an outside approval of a request the modal already opened", async () => {
 		await render([]);
 		await act(async () => button("browser.approval.allow").click());
-		await act(async () => mocks.listen.mock.calls[0][0](request.requestId));
+		await act(async () => mocks.listen.mock.calls[0][0](request));
 		expect(onApproved).toHaveBeenCalledExactlyOnceWith(request);
 	});
 
-	it("can approve when the hidden main window had not discovered the request yet", async () => {
+	it("opens an outside approval even when the hidden main window had not listed it", async () => {
 		mocks.list.mockResolvedValue([]);
 		await act(async () => root.render(<QueryClientProvider client={client}><BrowserApprovalHost workspaceSessions={[]} onApproved={onApproved} /></QueryClientProvider>));
 		await act(async () => { await vi.advanceTimersByTimeAsync(10); });
-		mocks.list.mockResolvedValue([request]);
-		await act(async () => mocks.listen.mock.calls[0][0](request.requestId));
-		await act(async () => { await vi.advanceTimersByTimeAsync(10); });
-		await act(async () => mocks.listen.mock.calls[0][0](request.requestId));
+		await act(async () => mocks.listen.mock.calls[0][0](request));
 		expect(onApproved).toHaveBeenCalledExactlyOnceWith(request);
 	});
 
-	it("does not approve from an external event after the host is unmounted", async () => {
+	it("does not open from an outside approval after the host is unmounted", async () => {
 		await render([]);
-		const externalAllow = mocks.listen.mock.calls[0][0];
+		const approved = mocks.listen.mock.calls[0][0];
 		await act(async () => root.render(null));
-		await act(async () => externalAllow(request.requestId));
+		await act(async () => approved(request));
 		expect(onApproved).not.toHaveBeenCalled();
 		expect(mocks.unlisten).toHaveBeenCalledOnce();
 	});

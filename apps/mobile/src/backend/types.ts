@@ -26,7 +26,8 @@ export type StreamHandlers = {
 
 export interface Backend {
 	readonly mode: "remote" | "demo";
-	request<T = unknown>(method: string, path: string, body?: unknown): Promise<T>;
+	/** `timeoutMs`: for actions that take long on the computer (push, PR). */
+	request<T = unknown>(method: string, path: string, body?: unknown, options?: { timeoutMs?: number }): Promise<T>;
 	/**
 	 * Keeps an SSE path of the desktop API open across reconnects. `path` is
 	 * read on every (re)open so a thread can resume from its latest cursor.

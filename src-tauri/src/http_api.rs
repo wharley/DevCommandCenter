@@ -56,6 +56,8 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+mod attention;
+mod delivery;
 mod mobile;
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
@@ -137,8 +139,26 @@ fn default_session_search_limit() -> usize {
 /// when it has one.
 #[derive(Clone, Debug)]
 struct HttpStreamItem {
-    event: CoreEvent,
+    payload: HttpStreamPayload,
     durable: Option<SessionLiveDurableIdentity>,
+}
+
+#[derive(Clone, Debug)]
+enum HttpStreamPayload {
+    /// `event: core-event`.
+    Core(CoreEvent),
+    /// `event: agent-requests`: the open Browser/computer-use requests
+    /// changed (see `attention`); the data is the new list.
+    AgentRequests(Value),
+}
+
+impl HttpStreamItem {
+    fn core(event: CoreEvent, durable: Option<SessionLiveDurableIdentity>) -> Self {
+        Self {
+            payload: HttpStreamPayload::Core(event),
+            durable,
+        }
+    }
 }
 
 /// Feeds `/api/v1/events/stream`. Publishing only hands the event to a
@@ -148,7 +168,7 @@ struct HttpEventBus {
     sender: tokio::sync::broadcast::Sender<HttpStreamItem>,
     /// Only the events that may notify a phone (`remote_push`), apart from
     /// the stream so a burst of deltas never pushes them out.
-    attention: tokio::sync::broadcast::Sender<CoreEvent>,
+    attention: tokio::sync::broadcast::Sender<crate::remote_push::Attention>,
 }
 
 #[async_trait]
@@ -157,10 +177,7 @@ impl EventBus for HttpEventBus {
         // The runtime follows every session event with its live envelope,
         // which carries the durable sequence; send those from there.
         if event.session_id().is_none() {
-            let _ = self.sender.send(HttpStreamItem {
-                event,
-                durable: None,
-            });
+            let _ = self.sender.send(HttpStreamItem::core(event, None));
         }
         Ok(())
     }
@@ -169,13 +186,12 @@ impl EventBus for HttpEventBus {
         &self,
         envelope: SessionLiveEventEnvelope,
     ) -> dcc_core::Result<()> {
-        if crate::remote_push::Attention::from_event(&envelope.event).is_some() {
-            let _ = self.attention.send(envelope.event.clone());
+        if let Some(attention) = crate::remote_push::Attention::from_event(&envelope.event) {
+            let _ = self.attention.send(attention);
         }
-        let _ = self.sender.send(HttpStreamItem {
-            event: envelope.event,
-            durable: envelope.durable,
-        });
+        let _ = self
+            .sender
+            .send(HttpStreamItem::core(envelope.event, envelope.durable));
         Ok(())
     }
 }
@@ -185,8 +201,14 @@ impl EventBus for HttpEventBus {
 /// desktop runs; `dccd-http` builds a headless one of its own.
 pub struct HttpBackend {
     sessions: SessionCommandState,
+    /// Git and delivery for the phone; the desktop hands over its own so
+    /// both share one delivery-failure store (`with_workspace_state`).
+    workspace: dcc_tauri::state::WorkspaceCommandState,
     events: tokio::sync::broadcast::Sender<HttpStreamItem>,
-    attention: tokio::sync::broadcast::Sender<CoreEvent>,
+    attention: tokio::sync::broadcast::Sender<crate::remote_push::Attention>,
+    /// Browser and computer-use requests from agents (`agent_requests`).
+    agent_requests: OnceLock<Arc<dyn crate::agent_requests::AgentRequestSource>>,
+    fixture_agent_requests: OnceLock<Arc<crate::agent_requests::InMemoryAgentRequests>>,
     // The runtime keeps only a weak reference to its buses.
     _bus: Arc<dyn EventBus>,
     terminals: bool,
@@ -209,12 +231,15 @@ impl HttpBackend {
             .register_event_bus(&bus)
             .map_err(|error| error.to_string())?;
         Ok(Self {
+            workspace: dcc_tauri::state::WorkspaceCommandState::from_session(&sessions),
             sessions,
             events,
             attention,
             _bus: bus,
             terminals: false,
             remote: OnceLock::new(),
+            agent_requests: OnceLock::new(),
+            fixture_agent_requests: OnceLock::new(),
         })
     }
 
@@ -228,19 +253,34 @@ impl HttpBackend {
         });
         let sessions = SessionCommandState::new_with_event_bus(db_path, app_data_dir, bus.clone());
         Self {
+            workspace: dcc_tauri::state::WorkspaceCommandState::from_session(&sessions),
             sessions,
             events,
             attention,
             _bus: bus,
             terminals: true,
             remote: OnceLock::new(),
+            agent_requests: OnceLock::new(),
+            fixture_agent_requests: OnceLock::new(),
         }
     }
 
-    /// Also hands the hub the events that notify phones.
+    /// Shares the desktop's workspace state (same delivery-failure store).
+    pub fn with_workspace_state(mut self, workspace: dcc_tauri::state::WorkspaceCommandState) -> Self {
+        self.workspace = workspace;
+        self
+    }
+
+    /// Also hands the hub the events that notify phones, and starts
+    /// watching git blockers for the ones that notify (`attention`).
     pub fn attach_remote(&self, hub: &Arc<RemoteHub>) {
         let _ = self.remote.set(Arc::downgrade(hub));
         hub.attach_attention_events(self.attention.subscribe());
+        attention::watch_blockers(
+            self.workspace.clone(),
+            self.attention.clone(),
+            Arc::downgrade(hub),
+        );
     }
 
     fn remote(&self) -> Option<Arc<RemoteHub>> {
@@ -351,6 +391,9 @@ enum HttpApiError {
     NotFound(String),
     /// The request was already answered; carries the answer that won.
     Conflict(String, Value),
+    /// 409 with its own code: the action cannot run in the current state
+    /// (stale view, push behind the remote…); `Value` says more.
+    Refused(&'static str, String, Value),
     ServiceUnavailable(String),
     GatewayTimeout(String),
     BadGateway(String),
@@ -387,7 +430,7 @@ impl HttpApiError {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
-            Self::Conflict(..) => StatusCode::CONFLICT,
+            Self::Conflict(..) | Self::Refused(..) => StatusCode::CONFLICT,
             Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::GatewayTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
             Self::BadGateway(_) => StatusCode::BAD_GATEWAY,
@@ -401,6 +444,7 @@ impl HttpApiError {
             Self::Forbidden(_) => "forbidden",
             Self::NotFound(_) => "not_found",
             Self::Conflict(..) => "already_resolved",
+            Self::Refused(code, ..) => code,
             Self::ServiceUnavailable(_) => "service_unavailable",
             Self::GatewayTimeout(_) => "gateway_timeout",
             Self::BadGateway(_) => "bad_gateway",
@@ -414,6 +458,7 @@ impl HttpApiError {
             | Self::Forbidden(message)
             | Self::NotFound(message)
             | Self::Conflict(message, _)
+            | Self::Refused(_, message, _)
             | Self::ServiceUnavailable(message)
             | Self::GatewayTimeout(message)
             | Self::BadGateway(message)
@@ -429,7 +474,7 @@ impl IntoResponse for HttpApiError {
             "code": self.code(),
             "message": self.message(),
         });
-        if let Self::Conflict(_, outcome) = &self {
+        if let Self::Conflict(_, outcome) | Self::Refused(_, _, outcome) = &self {
             error["outcome"] = outcome.clone();
         }
         (status, Json(json!({ "ok": false, "error": error }))).into_response()
@@ -485,6 +530,31 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/mobile/sessions/:session_id/attachment",
             get(mobile::attachment_preview),
+        )
+        .route(
+            "/api/v1/mobile/agent-requests",
+            get(attention::list_agent_requests),
+        )
+        .route("/api/v1/mobile/attention", get(attention::workspace_attention))
+        .route(
+            "/api/v1/mobile/workspaces/:workspace_id/delivery",
+            get(delivery::summary),
+        )
+        .route(
+            "/api/v1/mobile/workspaces/:workspace_id/delivery/forge",
+            get(delivery::forge),
+        )
+        .route(
+            "/api/v1/mobile/workspaces/:workspace_id/delivery/:action",
+            post(delivery::act),
+        )
+        .route(
+            "/api/v1/mobile/agent-requests/:request_id/respond",
+            post(attention::respond_agent_request),
+        )
+        .route(
+            "/api/v1/remote/fixture/agent-requests",
+            post(attention::enqueue_fixture_agent_request),
         )
         .route("/api/v1/mobile/tasks", post(mobile::create_task))
         .route("/api/v1/mobile/tasks/:request_id", get(mobile::task_status))
@@ -1345,10 +1415,21 @@ fn events_stream_frame(
 ) -> Option<Event> {
     match message {
         Ok(item) => {
-            if session_filter.is_some() && item.event.session_id() != session_filter {
+            let event = match &item.payload {
+                HttpStreamPayload::Core(event) => event,
+                // Few and small; a thread picks its own session's out.
+                HttpStreamPayload::AgentRequests(requests) => {
+                    return Some(
+                        Event::default()
+                            .event("agent-requests")
+                            .data(requests.to_string()),
+                    )
+                }
+            };
+            if session_filter.is_some() && event.session_id() != session_filter {
                 return None;
             }
-            let payload = serde_json::to_string(&item.event).ok()?;
+            let payload = serde_json::to_string(event).ok()?;
             let frame = Event::default().event("core-event").data(payload);
             Some(match item.durable {
                 Some(durable) => frame.id(durable.sequence.to_string()),
@@ -2746,7 +2827,7 @@ mod tests {
         assert!(matches!(
             receiver.try_recv(),
             Ok(HttpStreamItem {
-                event: CoreEvent::SessionResumed { .. },
+                payload: HttpStreamPayload::Core(CoreEvent::SessionResumed { .. }),
                 durable: None,
             })
         ));
@@ -2904,9 +2985,9 @@ mod tests {
 
     fn stream_item(session_id: &str, sequence: Option<u64>) -> HttpStreamItem {
         HttpStreamItem {
-            event: CoreEvent::SessionResumed {
+            payload: HttpStreamPayload::Core(CoreEvent::SessionResumed {
                 session_id: session_id.to_string(),
-            },
+            }),
             durable: sequence.map(|sequence| SessionLiveDurableIdentity {
                 session_id: session_id.to_string(),
                 event_id: format!("evt-{sequence}"),
@@ -3414,5 +3495,495 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// A request as the relay connector runs it for a paired phone (or with
+    /// no credentials at all when `device` is `None` and `api_key` false).
+    async fn call(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+        device: Option<&str>,
+        api_key: bool,
+    ) -> (StatusCode, Value) {
+        use tower::util::ServiceExt;
+        let mut builder = axum::http::Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json");
+        if api_key {
+            builder = builder.header("X-API-Key", "k");
+        }
+        let mut request = builder
+            .body(axum::body::Body::from(
+                body.map(|body| body.to_string()).unwrap_or_default(),
+            ))
+            .unwrap();
+        if let Some(device) = device {
+            request
+                .extensions_mut()
+                .insert(PairedDeviceIdentity(device.to_string()));
+        }
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    fn agent_request(id: &str, detail: crate::agent_requests::AgentRequestDetail) -> crate::agent_requests::PendingAgentRequest {
+        crate::agent_requests::PendingAgentRequest {
+            request_id: id.to_string(),
+            session_id: "http-respond".to_string(),
+            workspace_id: "workspace".to_string(),
+            provider_id: "claude".to_string(),
+            reason: "Abrir a documentação".to_string(),
+            expires_at_ms: crate::agent_requests::now_ms() + 45_000,
+            detail,
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_phone_answers_a_browser_request_once_and_the_desktop_gets_409() {
+        use crate::agent_requests::{AgentRequestDecision, AgentRequestDetail, AnswerOrigin};
+        let fixture = embedded_fixture().await;
+        let queue = crate::agent_requests::InMemoryAgentRequests::new();
+        fixture.backend.attach_agent_requests(queue.clone());
+        let waiting = queue.enqueue(agent_request(
+            "bo-1",
+            AgentRequestDetail::BrowserOpen { url: "https://docs.example.com".into() },
+        ));
+
+        let (status, listed) =
+            call(&fixture.app, "GET", "/api/v1/mobile/agent-requests", None, Some("phone-1"), false).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["requests"][0]["kind"], "browserOpen");
+        assert_eq!(listed["requests"][0]["url"], "https://docs.example.com");
+
+        let (status, answered) = call(
+            &fixture.app,
+            "POST",
+            "/api/v1/mobile/agent-requests/bo-1/respond",
+            Some(json!({ "allow": true })),
+            Some("phone-1"),
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{answered}");
+        assert_eq!(answered["outcome"]["by"], "phone");
+        let outcome = waiting.await.expect("the agent hears the answer");
+        assert_eq!(outcome.decision, AgentRequestDecision::Allowed);
+        assert_eq!(outcome.by, AnswerOrigin::Phone);
+
+        // The desktop (API key) answering second learns who won.
+        let (status, conflict) = call(
+            &fixture.app,
+            "POST",
+            "/api/v1/mobile/agent-requests/bo-1/respond",
+            Some(json!({ "allow": false })),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(conflict["error"]["code"], "already_resolved");
+        assert_eq!(conflict["error"]["outcome"]["decision"], "allowed");
+        assert_eq!(conflict["error"]["outcome"]["by"], "phone");
+        assert_eq!(conflict["error"]["message"], "Esse pedido já foi aprovado pelo celular.");
+
+        let (status, _) = call(
+            &fixture.app,
+            "POST",
+            "/api/v1/mobile/agent-requests/bo-unknown/respond",
+            Some(json!({ "allow": true })),
+            Some("phone-1"),
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn agent_request_routes_need_a_paired_phone_or_the_api_key() {
+        let fixture = embedded_fixture().await;
+        let queue = crate::agent_requests::InMemoryAgentRequests::new();
+        fixture.backend.attach_agent_requests(queue.clone());
+        let _waiting = queue.enqueue(agent_request(
+            "bo-2",
+            crate::agent_requests::AgentRequestDetail::BrowserOpen { url: "https://a.example".into() },
+        ));
+        let (status, _) =
+            call(&fixture.app, "GET", "/api/v1/mobile/agent-requests", None, None, false).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(
+            &fixture.app,
+            "POST",
+            "/api/v1/mobile/agent-requests/bo-2/respond",
+            Some(json!({ "allow": true })),
+            None,
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        use crate::agent_requests::AgentRequestSource;
+        assert_eq!(queue.pending().len(), 1, "nothing answered without credentials");
+        // Unknown fields (a path, say) are refused, not ignored.
+        let (status, _) = call(
+            &fixture.app,
+            "POST",
+            "/api/v1/mobile/agent-requests/bo-2/respond",
+            Some(json!({ "allow": true, "path": "/etc" })),
+            Some("phone-1"),
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        // A phone can never fill the fixture queue.
+        fixture.backend.attach_fixture_agent_requests();
+        let (status, _) = call(
+            &fixture.app,
+            "POST",
+            "/api/v1/remote/fixture/agent-requests",
+            Some(serde_json::to_value(agent_request(
+                "bo-3",
+                crate::agent_requests::AgentRequestDetail::BrowserOpen { url: "https://a.example".into() },
+            ))
+            .unwrap()),
+            Some("phone-1"),
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn computer_use_from_the_phone_needs_apps_from_the_list() {
+        use crate::agent_requests::{AgentRequestApp, AgentRequestDetail};
+        let fixture = embedded_fixture().await;
+        let queue = crate::agent_requests::InMemoryAgentRequests::new();
+        fixture.backend.attach_agent_requests(queue.clone());
+        let waiting = queue.enqueue(agent_request(
+            "cu-1",
+            AgentRequestDetail::ComputerControl {
+                apps: vec![AgentRequestApp { bundle_id: "com.apple.Safari".into(), name: "Safari".into() }],
+                blocker: None,
+            },
+        ));
+        let respond = |body: Value| call(&fixture.app, "POST", "/api/v1/mobile/agent-requests/cu-1/respond", Some(body), Some("phone-1"), false);
+        let (status, error) = respond(json!({ "allow": true })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(error["error"]["message"], "Escolha pelo menos um app que o agente pode controlar.");
+        let (status, _) = respond(json!({ "allow": true, "allowedBundleIds": ["com.apple.Terminal"] })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = respond(json!({ "allow": true, "allowedBundleIds": ["com.apple.Safari"] })).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(waiting.await.is_ok());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn open_agent_requests_reach_the_stream_and_the_push_channel() {
+        let fixture = embedded_fixture().await;
+        let mut attention = fixture.backend.attention.subscribe();
+        let mut body = open_stream(&fixture.app, "/api/v1/events/stream?sessionId=other").await;
+        let queue = crate::agent_requests::InMemoryAgentRequests::new();
+        fixture.backend.attach_agent_requests(queue.clone());
+        let _waiting = queue.enqueue(agent_request(
+            "bo-9",
+            crate::agent_requests::AgentRequestDetail::BrowserOpen { url: "https://b.example".into() },
+        ));
+        let seen = read_until(&mut body, "bo-9").await;
+        assert!(seen.contains("event: agent-requests"), "{seen}");
+        let pushed = tokio::time::timeout(Duration::from_secs(3), attention.recv())
+            .await
+            .expect("push in time")
+            .expect("attention");
+        assert_eq!(pushed.kind, crate::remote_push::AttentionKind::AgentRequest);
+        assert_eq!(pushed.session_id, "http-respond");
+        queue.cancel("bo-9");
+        let seen = read_until(&mut body, "\"requests\":[]").await;
+        assert!(seen.contains("agent-requests"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_phone_reads_why_each_task_needs_the_person() {
+        use dcc_core::domain::session::{SessionEventKind, SessionEventRecord, TurnId};
+        use dcc_core::domain::thread::{Thread, ThreadId};
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        use dcc_core::ports::ThreadRepo;
+        let fixture = embedded_fixture().await;
+        let db_path = fixture.backend.workspace.db_path.clone();
+        let workspaces = dcc_infra::db::SqliteWorkspaceRepo::open(&db_path).expect("workspace repo");
+        for (id, state) in [("workspace", WorkspaceState::Ready), ("archived", WorkspaceState::Archived)] {
+            dcc_core::ports::WorkspaceRepo::save_workspace(
+                &workspaces,
+                &Workspace {
+                    id: WorkspaceId(id.to_string()),
+                    project_id: ProjectId("project".to_string()),
+                    name: Some(id.to_string()),
+                    // Not a folder: no git blockers, only the session rule.
+                    root_path: format!("/nonexistent/{id}"),
+                    base_branch: "main".to_string(),
+                    worktree_path: None,
+                    source: None,
+                    state,
+                    setup_report: None,
+                    pinned_at: None,
+                    snoozed_until: None,
+                    created_at: "2026-10-08T00:00:00Z".to_string(),
+                    updated_at: "2026-10-08T00:00:00Z".to_string(),
+                },
+            )
+            .await
+            .expect("save workspace");
+        }
+        ThreadRepo::save_thread(
+            &fixture.state,
+            &Thread {
+                id: ThreadId("thread".to_string()),
+                project_id: ProjectId("project".to_string()),
+                session_id: Some(fixture.session_id.clone()),
+                title: "Tarefa".to_string(),
+                archived_at: None,
+            },
+        )
+        .await
+        .expect("thread");
+        for kind in [
+            SessionEventKind::TurnStarted {
+                turn_id: TurnId("t1".to_string()),
+                prompt: "oi".to_string(),
+                plan_mode: None,
+                model: None,
+                evidence: None,
+                retry_of_turn_id: None,
+                approval_policy: None,
+            },
+            SessionEventKind::TurnPermissionRequested {
+                turn_id: TurnId("t1".to_string()),
+                request_id: "p1".to_string(),
+                tool_name: "Bash".to_string(),
+                title: None,
+                description: None,
+                command: Some("yarn test".to_string()),
+                file: None,
+            },
+        ] {
+            SessionEventRepo::append_event(
+                &fixture.state,
+                &SessionEventRecord {
+                    event_id: uuid::Uuid::new_v4().to_string(),
+                    session_id: fixture.session_id.clone(),
+                    sequence: 0,
+                    occurred_at: "2026-10-12T10:00:00Z".to_string(),
+                    kind,
+                },
+            )
+            .await
+            .expect("append");
+        }
+        let (status, body) =
+            call(&fixture.app, "GET", "/api/v1/mobile/attention", None, Some("phone-1"), false).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let items = body["items"].as_array().expect("items");
+        assert_eq!(items.len(), 1, "the archived task is left out: {body}");
+        assert_eq!(items[0]["workspaceId"], "workspace");
+        assert_eq!(items[0]["reason"], "permission");
+        assert_eq!(items[0]["sessionId"], fixture.session_id.0);
+        assert_eq!(items[0]["returnedAt"], "2026-10-12T10:00:00Z");
+        let (status, _) =
+            call(&fixture.app, "GET", "/api/v1/mobile/attention", None, None, false).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn conflicts_and_red_checks_notify_once_per_appearance() {
+        use crate::remote_push::AttentionKind;
+        use dcc_tauri::commands::workspace_attention::{WorkspaceBlocker, WorkspaceBlockerKind};
+        let blocker = |workspace: &str, kind| WorkspaceBlocker {
+            workspace_id: workspace.to_string(),
+            kind,
+            count: None,
+            since: None,
+        };
+        let mut news = attention::BlockerNews::default();
+        // Already there when the watcher starts: old news.
+        assert!(news.next(&[blocker("a", WorkspaceBlockerKind::Conflicts)]).is_empty());
+        let fresh = news.next(&[
+            blocker("a", WorkspaceBlockerKind::Conflicts),
+            blocker("b", WorkspaceBlockerKind::ChecksFailing),
+            blocker("c", WorkspaceBlockerKind::DelegatedEditsReview),
+            blocker("d", WorkspaceBlockerKind::PrConflicts),
+        ]);
+        let mut kinds: Vec<_> = fresh.iter().map(|(w, k, _)| (w.as_str(), *k)).collect();
+        kinds.sort_by_key(|(w, _)| *w);
+        assert_eq!(kinds, [("b", AttentionKind::ChecksFailing), ("d", AttentionKind::Conflict)]);
+        // Still red: nothing new.
+        assert!(news
+            .next(&[blocker("b", WorkspaceBlockerKind::ChecksFailing)])
+            .is_empty());
+        // Green, then red again: a new key, so it notifies again.
+        news.next(&[]);
+        let again = news.next(&[blocker("b", WorkspaceBlockerKind::ChecksFailing)]);
+        assert_eq!(again.len(), 1);
+        assert_ne!(again[0].2, fresh.iter().find(|(w, _, _)| w == "b").unwrap().2);
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "DCC Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "DCC Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .output()
+            .expect("git");
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_phone_commits_pushes_updates_and_archives_a_task() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let base = tempfile::tempdir().expect("git dirs");
+        let base = std::fs::canonicalize(base.path()).unwrap().to_path_buf();
+        let remote = base.join("remote.git");
+        let repo = base.join("repo");
+        let other = base.join("other");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&base, &["init", "--bare", "-b", "main", remote.to_str().unwrap()]);
+        git(&repo, &["init", "-b", "main"]);
+        git(&repo, &["config", "user.name", "DCC Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        std::fs::write(repo.join("README.md"), "oi\n").unwrap();
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-m", "init"]);
+        git(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(&repo, &["push", "-u", "origin", "main"]);
+        git(&repo, &["switch", "-c", "dcc/tarefa"]);
+        git(&repo, &["push", "-u", "origin", "dcc/tarefa"]);
+        let workspaces = dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-git".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: Some("Ajustar o guia".to_string()),
+                root_path: repo.to_string_lossy().to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-12T00:00:00Z".to_string(),
+                updated_at: "2026-10-12T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        std::fs::write(repo.join("docs/guia.md"), "um\ndois\n").unwrap();
+
+        let phone = |method: &'static str, uri: String, body: Option<Value>| {
+            let app = fixture.app.clone();
+            async move { call(&app, method, &uri, body, Some("phone-1"), false).await }
+        };
+        let (status, summary) = phone("GET", "/api/v1/mobile/workspaces/w-git/delivery".into(), None).await;
+        assert_eq!(status, StatusCode::OK, "{summary}");
+        assert_eq!(summary["branch"], "dcc/tarefa");
+        assert_eq!(summary["changes"][0]["path"], "docs/guia.md");
+        let message = summary["commitMessage"].as_str().unwrap().to_string();
+        assert!(!message.is_empty());
+        let token = summary["changesToken"].as_str().unwrap().to_string();
+
+        // Without auth, nothing; a path from the phone is refused.
+        let (status, _) = call(&fixture.app, "GET", "/api/v1/mobile/workspaces/w-git/delivery", None, None, false).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = phone(
+            "POST",
+            "/api/v1/mobile/workspaces/w-git/delivery/commit".into(),
+            Some(json!({ "changesToken": token, "workspaceRoot": "/etc" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = phone("GET", "/api/v1/mobile/workspaces/..%2F..%2Fetc/delivery".into(), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // The files moved after the phone looked: refused.
+        std::fs::write(repo.join("docs/guia.md"), "um\ndois\ntrês\n").unwrap();
+        let (status, stale) = phone(
+            "POST",
+            "/api/v1/mobile/workspaces/w-git/delivery/commit".into(),
+            Some(json!({ "changesToken": token })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(stale["error"]["code"], "stale");
+
+        let (_, summary) = phone("GET", "/api/v1/mobile/workspaces/w-git/delivery".into(), None).await;
+        let token = summary["changesToken"].as_str().unwrap().to_string();
+        let (status, body) = phone(
+            "POST",
+            "/api/v1/mobile/workspaces/w-git/delivery/commit".into(),
+            Some(json!({ "changesToken": token, "message": "docs: ajustar o guia", "push": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(git(&repo, &["log", "-1", "--format=%s"]), "docs: ajustar o guia");
+        assert_eq!(
+            git(&remote, &["rev-parse", "dcc/tarefa"]),
+            git(&repo, &["rev-parse", "HEAD"]),
+            "pushed"
+        );
+
+        // Someone else pushed to the branch: the phone's push is refused, then
+        // "Atualizar e enviar" brings it in and pushes.
+        git(&base, &["clone", "-b", "dcc/tarefa", remote.to_str().unwrap(), other.to_str().unwrap()]);
+        std::fs::write(other.join("CHANGELOG.md"), "outro\n").unwrap();
+        git(&other, &["add", "-A"]);
+        git(&other, &["-c", "user.name=O", "-c", "user.email=o@example.com", "commit", "-m", "outro"]);
+        git(&other, &["push"]);
+        std::fs::write(repo.join("docs/guia.md"), "um\ndois\ntrês\nquatro\n").unwrap();
+        let (_, summary) = phone("GET", "/api/v1/mobile/workspaces/w-git/delivery".into(), None).await;
+        let token = summary["changesToken"].as_str().unwrap().to_string();
+        let (status, behind) = phone(
+            "POST",
+            "/api/v1/mobile/workspaces/w-git/delivery/commit".into(),
+            Some(json!({ "changesToken": token, "push": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{behind}");
+        assert_eq!(behind["error"]["code"], "behind_remote");
+        assert_eq!(behind["error"]["outcome"]["target"], "origin/dcc/tarefa");
+        let (_, summary) = phone("GET", "/api/v1/mobile/workspaces/w-git/delivery".into(), None).await;
+        assert_eq!(summary["pushFailure"]["canSync"], true, "{summary}");
+        assert_eq!(summary["aheadOfRemoteCount"], 1);
+        let (status, body) =
+            phone("POST", "/api/v1/mobile/workspaces/w-git/delivery/sync-and-push".into(), None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            git(&remote, &["rev-parse", "dcc/tarefa"]),
+            git(&repo, &["rev-parse", "HEAD"]),
+        );
+        assert!(repo.join("CHANGELOG.md").exists(), "the other commit came in");
+
+        let (status, _) = phone("POST", "/api/v1/mobile/workspaces/w-git/delivery/archive".into(), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let archived = dcc_core::ports::WorkspaceRepo::get_workspace(&workspaces, &WorkspaceId("w-git".into()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(archived.state, WorkspaceState::Archived);
+        let (status, _) = phone("POST", "/api/v1/mobile/workspaces/w-git/delivery/reset-hard".into(), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }
