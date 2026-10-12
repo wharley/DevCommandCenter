@@ -2669,7 +2669,7 @@
         "stopWhenActive": "Disponível durante execução"
       },
       "activeTitle": "Computer Use ativo nesta conversa",
-      "activeHint": "O acesso está ativo por {{time}} e será revogado automaticamente quando o tempo terminar.",
+      "activeHint": "O acesso termina em {{time}} se o agente parar de usá-lo, e no máximo 1 hora após a autorização.",
       "activeAppsCount": "{{count}} aplicativo(s) autorizado(s)",
       "disable": "Desativar agora",
       "approval": {
@@ -2682,6 +2682,7 @@
         "remaining": "O pedido expira em {{time}}",
         "appsTitle": "Aplicativos para autorizar",
         "appsHint": "Escolha os aplicativos em execução para este pedido. Nada é selecionado por padrão.",
+        "inputHint": "Para clicar, rolar e arrastar, o DCC traz o aplicativo para a frente e move o ponteiro do mouse. O acesso termina após 10 minutos sem uso pelo agente e, no máximo, em 1 hora.",
         "appsEmpty": "Nenhum aplicativo em execução está disponível.",
         "permissions": "Conceda as duas permissões do macOS antes de permitir o controle.",
         "openAccessibility": "Abrir ajustes de Acessibilidade",
@@ -2691,7 +2692,7 @@
         "unsupported": "O Computer Use está indisponível neste dispositivo.",
         "conversationNotReady": "Esta conversa ainda não está pronta para controlar aplicativos.",
         "expired": "O pedido expirou. Peça ao agente para solicitar o acesso novamente.",
-        "allow": "Permitir por 10 minutos",
+        "allow": "Permitir",
         "deny": "Negar",
         "unknownConversation": "Conversa desconhecida ({{id}})",
         "unknownWorkspace": "Workspace desconhecido ({{id}})"
@@ -2726,6 +2727,8 @@
           "observing": "Observando a janela",
           "clicking": "Clicando",
           "scrolling": "Rolando a janela",
+          "dragging": "Arrastando",
+          "settingValue": "Preenchendo campo",
           "typing": "Digitando",
           "key": "Usando teclado",
           "working": "Usando o computador"

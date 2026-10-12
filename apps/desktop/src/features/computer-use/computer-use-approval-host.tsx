@@ -255,6 +255,7 @@ export function ComputerUseApprovalHost({
 							<div>
 								<div className="text-sm font-medium">{t("settings.computerUse.approval.appsTitle")}</div>
 								<div className="text-xs text-muted-foreground">{t("settings.computerUse.approval.appsHint")}</div>
+								<div className="mt-1 text-xs text-muted-foreground">{t("settings.computerUse.approval.inputHint")}</div>
 							</div>
 							{targets.length > 0 ? (
 								<div className="space-y-1">

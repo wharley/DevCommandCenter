@@ -1821,6 +1821,8 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_computer_capture"
                 | "dcc_computer_click"
                 | "dcc_computer_scroll"
+                | "dcc_computer_drag"
+                | "dcc_computer_set_value"
                 | "dcc_computer_type"
                 | "dcc_computer_key"
                 | "dcc_delegate_task"

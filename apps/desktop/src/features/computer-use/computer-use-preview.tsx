@@ -20,6 +20,10 @@ function activityLabelKey(tool: string): string {
 		case "dcc_computer_capture": return "observing";
 		case "dcc_computer_click": return "clicking";
 		case "dcc_computer_scroll": return "scrolling";
+		case "dcc_computer_drag": return "dragging";
+		case "dcc_computer_set_value": return "settingValue";
+		case "dcc_computer_drag": return "dragging";
+		case "dcc_computer_set_value": return "settingValue";
 		case "dcc_computer_type": return "typing";
 		case "dcc_computer_key": return "key";
 		default: return "working";

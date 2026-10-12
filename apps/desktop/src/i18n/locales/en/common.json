@@ -2669,7 +2669,7 @@
         "stopWhenActive": "Available during a run"
       },
       "activeTitle": "Computer Use active in this conversation",
-      "activeHint": "Access is enabled for {{time}} and is revoked automatically when the timer ends.",
+      "activeHint": "Access ends in {{time}} if the agent stops using it, and 1 hour after approval at most.",
       "activeAppsCount": "{{count}} app(s) authorized",
       "disable": "Disable now",
       "approval": {
@@ -2682,6 +2682,7 @@
         "remaining": "Request expires in {{time}}",
         "appsTitle": "Apps to authorize",
         "appsHint": "Choose the running apps for this request. Nothing is selected by default.",
+        "inputHint": "To click, scroll and drag, DCC brings the app to the front and moves the mouse pointer. Access ends after 10 minutes without use by the agent, and after 1 hour at most.",
         "appsEmpty": "No running apps are available.",
         "permissions": "Grant both macOS permissions before allowing control.",
         "openAccessibility": "Open Accessibility settings",
@@ -2691,7 +2692,7 @@
         "unsupported": "Computer Use is unavailable on this device.",
         "conversationNotReady": "This conversation is not ready to control apps.",
         "expired": "The request expired. Ask the agent to request access again.",
-        "allow": "Allow for 10 minutes",
+        "allow": "Allow",
         "deny": "Deny",
         "unknownConversation": "Unknown conversation ({{id}})",
         "unknownWorkspace": "Unknown workspace ({{id}})"
@@ -2726,6 +2727,8 @@
           "observing": "Observing window",
           "clicking": "Clicking",
           "scrolling": "Scrolling window",
+          "dragging": "Dragging",
+          "settingValue": "Filling a field",
           "typing": "Typing",
           "key": "Using keyboard",
           "working": "Using computer"

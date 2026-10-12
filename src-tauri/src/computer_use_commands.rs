@@ -6,6 +6,7 @@
 //! in-memory allowlist of bundle identifiers.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -17,12 +18,28 @@ use tauri::{Emitter, State};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
-const GRANT_TTL: Duration = Duration::from_secs(10 * 60);
+/// A grant ends after this long without a capture or action...
+const GRANT_IDLE_TTL: Duration = Duration::from_secs(10 * 60);
+/// ...and never outlives this, however active the agent is.
+const GRANT_MAX_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ALLOWED_APPS: usize = 16;
 const MAX_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_PREVIEW_SESSIONS: usize = 8;
 const MAX_TYPE_CHARS: usize = 2_000;
-const MAX_SCROLL_DELTA: i32 = 1_000;
+/// Scroll deltas are pixels of content movement.
+pub(crate) const MAX_SCROLL_DELTA: i32 = 5_000;
+/// Mirrors the native element-map bound (`DCCTreeMaxRefs`).
+pub(crate) const MAX_ELEMENT_REFS: usize = 800;
+/// After an action the UI needs a moment to react before it is observed;
+/// web content that reports itself busy gets more, up to the cap.
+const ACTION_SETTLE: Duration = Duration::from_millis(350);
+const ACTION_SETTLE_POLL: Duration = Duration::from_millis(400);
+const ACTION_SETTLE_MAX: Duration = Duration::from_secs(3);
+/// Chromium/Electron populate web content asynchronously after its
+/// accessibility is first enabled.
+const WEB_ACCESSIBILITY_WARMUP_POLL: Duration = Duration::from_millis(200);
+const WEB_ACCESSIBILITY_WARMUP_ATTEMPTS: usize = 6;
+const WEB_ACCESSIBILITY_RECONCILE_INTERVAL: Duration = Duration::from_secs(15);
 const CONTROL_REQUEST_TTL: Duration = Duration::from_secs(45);
 /// The MCP listener permits eight requests total. Four long-lived consent
 /// waits leave capacity for normal Browser and Computer tools.
@@ -85,12 +102,64 @@ pub struct ComputerGrantStatus {
     pub allowed_bundle_ids: Vec<String>,
 }
 
+/// Accessibility elements observed in the captured window. `text` lists one
+/// element per line, `e<ref> role "name" … @x,y wxh`, in the screenshot's
+/// window-local pixels. Refs are valid only with this capture's generation.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerElements {
+    pub available: bool,
+    pub count: usize,
+    pub truncated: bool,
+    pub loading: bool,
+    #[serde(skip)]
+    pub text: String,
+}
+
+impl ComputerElements {
+    fn unavailable() -> Self {
+        Self {
+            available: false,
+            count: 0,
+            truncated: false,
+            loading: false,
+            text: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComputerCapture {
     pub target: ComputerTargetSnapshot,
     pub mime_type: &'static str,
     pub image_base64: String,
+    pub elements: ComputerElements,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PointerButton {
+    #[default]
+    Left,
+    Right,
+}
+
+/// Where a pointer action lands: an element observed by the capture, or a
+/// window-local point in the screenshot.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComputerActionTarget {
+    Element(String),
+    Point { x: f64, y: f64 },
+}
+
+/// How an action reached the app, reported so the agent knows whether the
+/// app was brought forward and the pointer moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ComputerInputMethod {
+    Accessibility,
+    Pointer,
 }
 
 /// Latest locally captured frame for an explicitly authorized provider
@@ -220,18 +289,52 @@ pub struct ComputerUsePreviewFrameInput {
     pub session_id: String,
 }
 
+/// Owns one native element map. The map is released when the last snapshot
+/// referring to it is consumed, replaced, or dropped with its grant.
+struct ElementMap {
+    native: Arc<dyn ComputerNative>,
+    handle: u64,
+    count: usize,
+}
+
+impl std::fmt::Debug for ElementMap {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ElementMap")
+            .field("handle", &self.handle)
+            .field("count", &self.count)
+            .finish()
+    }
+}
+
+impl Drop for ElementMap {
+    fn drop(&mut self) {
+        self.native.release_tree(self.handle);
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CapturedSnapshot {
     visible: ComputerTargetSnapshot,
     identity: String,
+    elements: Option<Arc<ElementMap>>,
 }
 #[derive(Debug, Clone)]
 struct ComputerGrant {
     allowed_bundle_ids: HashSet<String>,
+    granted_at: Instant,
     expires_at: Instant,
     lease_id: String,
     nonce: String,
     snapshots: HashMap<u32, CapturedSnapshot>,
+}
+
+impl ComputerGrant {
+    /// Activity keeps a grant alive up to its hard limit; an idle agent
+    /// loses it after `GRANT_IDLE_TTL`.
+    fn touch(&mut self, now: Instant) {
+        self.expires_at = (now + GRANT_IDLE_TTL).min(self.granted_at + GRANT_MAX_TTL);
+    }
 }
 
 struct PendingControlRequest {
@@ -295,23 +398,127 @@ struct NativeStatus {
     major_version: u8,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+struct NativeTree {
+    available: bool,
+    handle: u64,
+    count: usize,
+    text: String,
+    truncated: bool,
+    busy: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WebAccessibility {
+    Unsupported,
+    AlreadyEnabled,
+    Changed,
+}
+
+/// A resolved pointer location for the native bridge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum NativeAt {
+    Point { x: f64, y: f64 },
+    Element { handle: u64, index: u32 },
+}
+
+/// Native effect failures, mirroring `DCC_COMPUTER_ERR_*` in the bridge header.
+/// Every variant tells the agent what to do next instead of a bare failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NativeEffectError {
+    Permission,
+    Invalid,
+    TargetUnavailable,
+    Focus,
+    Occluded(Option<String>),
+    OutsideTarget,
+    ElementStale,
+    ElementOutside,
+    Unsupported,
+    Event,
+    Other(String),
+}
+
+impl NativeEffectError {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn from_code(code: i32, detail: Option<String>) -> Self {
+        match code {
+            1 => Self::Permission,
+            2 => Self::Invalid,
+            3 => Self::TargetUnavailable,
+            4 => Self::Focus,
+            5 => Self::Occluded(detail.filter(|name| !name.trim().is_empty())),
+            6 => Self::OutsideTarget,
+            7 => Self::ElementStale,
+            8 => Self::ElementOutside,
+            9 => Self::Unsupported,
+            10 => Self::Event,
+            _ => Self::Other(format!("desktop input failed with native status {code}")),
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            Self::Permission => "DCC lacks the macOS Accessibility permission; ask the user to enable it in System Settings > Privacy & Security > Accessibility".to_string(),
+            Self::Invalid => "the native input bridge rejected these arguments".to_string(),
+            Self::TargetUnavailable => "the target window moved, resized, or closed; capture it again".to_string(),
+            Self::Focus => "macOS did not bring the target window to the front with keyboard focus; a modal dialog, a locked screen, or a full-screen app may be in the way, so tell the user what you need".to_string(),
+            Self::Occluded(owner) => format!(
+                "{} covers that point of the target window; pick a visible point or ask the user to move it",
+                owner.as_deref().unwrap_or("another window")
+            ),
+            Self::OutsideTarget => "that point is outside the target window".to_string(),
+            Self::ElementStale => "that element no longer exists; use a ref from the latest capture".to_string(),
+            Self::ElementOutside => "that element is not visible inside the target window; scroll it into view first".to_string(),
+            Self::Unsupported => "that element does not accept this action; click it and type instead".to_string(),
+            Self::Event => "macOS rejected the synthesized input event".to_string(),
+            Self::Other(message) => message.clone(),
+        }
+    }
+}
+
 trait ComputerNative: Send + Sync {
     fn status(&self) -> NativeStatus;
     fn request_access(&self, kind: ComputerAccessKind) -> bool;
     fn targets(&self) -> Result<Vec<ComputerTarget>, String>;
     fn capture(&self, target: &ComputerTarget) -> Result<Vec<u8>, String>;
-    fn click(&self, target: &ComputerTarget, x: f64, y: f64, click_count: u8)
-        -> Result<(), String>;
+    fn accessibility_tree(&self, target: &ComputerTarget) -> Result<NativeTree, String>;
+    fn release_tree(&self, handle: u64);
+    fn set_web_accessibility(&self, pid: i32, enabled: bool) -> WebAccessibility;
+    fn click(
+        &self,
+        target: &ComputerTarget,
+        at: NativeAt,
+        button: PointerButton,
+        click_count: u8,
+    ) -> Result<ComputerInputMethod, NativeEffectError>;
     fn scroll(
         &self,
         target: &ComputerTarget,
-        x: f64,
-        y: f64,
+        at: NativeAt,
         delta_x: i32,
         delta_y: i32,
-    ) -> Result<(), String>;
-    fn type_text(&self, target: &ComputerTarget, text: &str) -> Result<(), String>;
-    fn key(&self, target: &ComputerTarget, key_code: u16, flags: u64) -> Result<(), String>;
+    ) -> Result<(), NativeEffectError>;
+    fn drag(
+        &self,
+        target: &ComputerTarget,
+        from: (f64, f64),
+        to: (f64, f64),
+    ) -> Result<(), NativeEffectError>;
+    fn set_value(
+        &self,
+        target: &ComputerTarget,
+        handle: u64,
+        index: u32,
+        value: &str,
+    ) -> Result<(), NativeEffectError>;
+    fn type_text(&self, target: &ComputerTarget, text: &str) -> Result<(), NativeEffectError>;
+    fn key(
+        &self,
+        target: &ComputerTarget,
+        key_code: u16,
+        flags: u64,
+    ) -> Result<(), NativeEffectError>;
 }
 
 #[derive(Clone)]
@@ -322,6 +529,10 @@ pub struct ComputerUseState {
     pending_control_requests: Arc<Mutex<HashMap<String, PendingControlRequest>>>,
     preview_frames: Arc<Mutex<HashMap<String, StoredPreviewFrame>>>,
     preview_refreshing: Arc<Mutex<HashSet<String>>>,
+    /// Processes whose web accessibility DCC switched on, by bundle id. It is
+    /// switched off again once no live grant allows that bundle.
+    web_accessibility: Arc<Mutex<HashMap<i32, WebAccessibilityEntry>>>,
+    web_accessibility_watcher: Arc<AtomicBool>,
 }
 
 impl Default for ComputerUseState {
@@ -339,6 +550,8 @@ impl ComputerUseState {
             pending_control_requests: Arc::new(Mutex::new(HashMap::new())),
             preview_frames: Arc::new(Mutex::new(HashMap::new())),
             preview_refreshing: Arc::new(Mutex::new(HashSet::new())),
+            web_accessibility: Arc::new(Mutex::new(HashMap::new())),
+            web_accessibility_watcher: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -358,6 +571,7 @@ impl ComputerUseState {
         }
         self.clear_preview_frame(session_id);
         self.cancel_control_requests_for_session(session_id, None);
+        self.reconcile_web_accessibility();
     }
     pub(crate) fn revoke_projection(&self, session_id: &str, lease_id: &str) {
         let revoked = self.projected_sessions.lock().is_ok_and(|mut sessions| {
@@ -377,6 +591,7 @@ impl ComputerUseState {
             }
             self.cancel_control_requests_for_session(session_id, Some(lease_id));
             self.clear_preview_frame(session_id);
+            self.reconcile_web_accessibility();
         }
     }
     pub(crate) fn revoke_all(&self) {
@@ -392,6 +607,7 @@ impl ComputerUseState {
         if let Ok(mut frames) = self.preview_frames.lock() {
             frames.clear();
         }
+        self.reconcile_web_accessibility();
     }
     fn is_projected(&self, session_id: &str) -> bool {
         self.projected_sessions
@@ -685,11 +901,13 @@ impl ComputerUseState {
         if !self.lease_matches(session_id, expected_lease_id) {
             return Err("desktop computer use provider session changed while enabling".to_string());
         }
+        let now = Instant::now();
         grants.insert(
             session_id.to_string(),
             ComputerGrant {
                 allowed_bundle_ids: allowed,
-                expires_at: Instant::now() + GRANT_TTL,
+                granted_at: now,
+                expires_at: now + GRANT_IDLE_TTL,
                 lease_id: expected_lease_id.to_string(),
                 nonce: random_token(),
                 snapshots: HashMap::new(),
@@ -697,6 +915,7 @@ impl ComputerUseState {
         );
         drop(grants);
         self.clear_preview_frame(session_id);
+        self.reconcile_web_accessibility();
         Ok(self.grant_status(Some(session_id)))
     }
     pub(crate) fn disarm(&self, session_id: &str) -> ComputerGrantStatus {
@@ -704,6 +923,7 @@ impl ComputerUseState {
             grants.remove(session_id);
         }
         self.clear_preview_frame(session_id);
+        self.reconcile_web_accessibility();
         self.grant_status(Some(session_id))
     }
     pub(crate) fn request_access(
@@ -935,13 +1155,18 @@ impl ComputerUseState {
                 grants.remove(session_id);
             }
         }
+        self.reconcile_web_accessibility();
     }
+
+    /// Consumes the one-shot snapshot an action names and proves the window
+    /// still has the captured identity. The returned element map stays alive
+    /// until the action finishes.
     fn require_target(
         &self,
         session_id: &str,
         expected_lease_id: &str,
         target: &ComputerTargetSnapshot,
-    ) -> Result<ComputerTarget, String> {
+    ) -> Result<(ComputerTarget, Option<Arc<ElementMap>>), String> {
         if !self.supported() {
             return Err(
                 "desktop computer use is unsupported on this platform or macOS version".to_string(),
@@ -955,21 +1180,31 @@ impl ComputerUseState {
             .find(|item| item.window_id == target.window_id && item.bundle_id == target.bundle_id)
             .ok_or_else(|| "target window is no longer available".to_string())?;
         if target_identity(&current) != expected.identity {
-            return Err("target window changed; capture it again before acting".to_string());
+            return Err(
+                "target window moved, resized, or was replaced; capture it again before acting"
+                    .to_string(),
+            );
         }
         // Do not hold the grant lock while enumerating windows. This second
         // read closes disarm/re-arm races before the native driver receives
         // an event; the native bridge performs one final target check too.
+        let mut elements = None;
         let valid = self.grants.lock().is_ok_and(|mut grants| {
             prune_expired(&mut grants);
             grants.get_mut(session_id).is_some_and(|grant| {
-                grant.nonce == nonce
-                    && grant.lease_id == expected_lease_id
-                    && self.projection_lease(session_id).as_deref() == Some(expected_lease_id)
-                    && grant
-                        .snapshots
-                        .remove(&target.window_id)
-                        .is_some_and(|snapshot| snapshot.visible.generation == target.generation)
+                if grant.nonce != nonce
+                    || grant.lease_id != expected_lease_id
+                    || self.projection_lease(session_id).as_deref() != Some(expected_lease_id)
+                {
+                    return false;
+                }
+                match grant.snapshots.remove(&target.window_id) {
+                    Some(snapshot) if snapshot.visible.generation == target.generation => {
+                        elements = snapshot.elements;
+                        true
+                    }
+                    _ => false,
+                }
             })
         });
         if !valid {
@@ -977,8 +1212,9 @@ impl ComputerUseState {
                 "desktop computer use grant changed; capture again before acting".to_string(),
             );
         }
-        Ok(current)
+        Ok((current, elements))
     }
+
     pub(crate) fn capture(
         &self,
         session_id: &str,
@@ -1002,6 +1238,9 @@ impl ComputerUseState {
         if bytes.len() > MAX_CAPTURE_BYTES {
             return Err("captured image exceeds the desktop computer-use size limit".to_string());
         }
+        // Observe elements right after the pixels so refs and screenshot
+        // describe the same moment.
+        let (elements, element_map) = self.observe_elements(&target);
         let snapshot = ComputerTargetSnapshot {
             bundle_id: target.bundle_id.clone(),
             name: target.name.clone(),
@@ -1028,8 +1267,10 @@ impl ComputerUseState {
                 CapturedSnapshot {
                     visible: snapshot.clone(),
                     identity: target_identity(&target),
+                    elements: element_map,
                 },
             );
+            grant.touch(Instant::now());
             true
         });
         if !accepted {
@@ -1074,80 +1315,319 @@ impl ComputerUseState {
             target: snapshot,
             mime_type: "image/png",
             image_base64,
+            elements,
         })
     }
+
+    /// Observes the acted-on window again, so the agent sees the effect and
+    /// gets a fresh generation in the same round trip. Web content that
+    /// reports itself busy is given a bounded extra moment to settle.
+    pub(crate) fn observe_after_action(
+        &self,
+        session_id: &str,
+        expected_lease_id: &str,
+        bundle_id: &str,
+        window_id: u32,
+    ) -> Result<ComputerCapture, String> {
+        std::thread::sleep(ACTION_SETTLE);
+        let started = Instant::now();
+        loop {
+            let capture = self.capture(session_id, expected_lease_id, bundle_id, window_id)?;
+            if !capture.elements.loading || started.elapsed() + ACTION_SETTLE_POLL > ACTION_SETTLE_MAX
+            {
+                return Ok(capture);
+            }
+            std::thread::sleep(ACTION_SETTLE_POLL);
+        }
+    }
+
+    /// A failed tree read never fails the capture: the screenshot alone still
+    /// supports pointer actions by coordinates.
+    fn observe_elements(
+        &self,
+        target: &ComputerTarget,
+    ) -> (ComputerElements, Option<Arc<ElementMap>>) {
+        let warming_up = self.enable_web_accessibility(target);
+        let Ok(mut tree) = self.native.accessibility_tree(target) else {
+            return (ComputerElements::unavailable(), None);
+        };
+        let mut map = self.element_map(&tree);
+        if warming_up {
+            for _ in 0..WEB_ACCESSIBILITY_WARMUP_ATTEMPTS {
+                std::thread::sleep(WEB_ACCESSIBILITY_WARMUP_POLL);
+                let Ok(next) = self.native.accessibility_tree(target) else {
+                    break;
+                };
+                let grew = next.count > tree.count;
+                map = self.element_map(&next);
+                tree = next;
+                if !grew && tree.count > 0 {
+                    break;
+                }
+            }
+        }
+        (
+            ComputerElements {
+                available: tree.available,
+                count: map.as_ref().map_or(0, |map| map.count),
+                truncated: tree.truncated,
+                loading: tree.busy,
+                text: tree.text,
+            },
+            map,
+        )
+    }
+
+    /// Takes ownership of the tree's native handle; an empty map is released
+    /// at once, so refs only ever exist for listed elements.
+    fn element_map(&self, tree: &NativeTree) -> Option<Arc<ElementMap>> {
+        if tree.handle == 0 {
+            return None;
+        }
+        let map = Arc::new(ElementMap {
+            native: Arc::clone(&self.native),
+            handle: tree.handle,
+            count: tree.count.min(MAX_ELEMENT_REFS),
+        });
+        (map.count > 0).then_some(map)
+    }
+
+    /// Returns true only the first time DCC switches a process's web
+    /// accessibility on, when its tree still needs to populate.
+    fn enable_web_accessibility(&self, target: &ComputerTarget) -> bool {
+        let Ok(mut entries) = self.web_accessibility.lock() else {
+            return false;
+        };
+        if entries
+            .get(&target.pid)
+            .is_some_and(|entry| entry.bundle_id == target.bundle_id)
+        {
+            return false;
+        }
+        let owned = self.native.set_web_accessibility(target.pid, true) == WebAccessibility::Changed;
+        entries.insert(
+            target.pid,
+            WebAccessibilityEntry {
+                bundle_id: target.bundle_id.clone(),
+                owned,
+            },
+        );
+        drop(entries);
+        if owned {
+            self.start_web_accessibility_watcher();
+        }
+        owned
+    }
+
+    /// Switches web accessibility back off for every process DCC switched on
+    /// whose bundle no live grant allows any more.
+    fn reconcile_web_accessibility(&self) {
+        let live = self
+            .grants
+            .lock()
+            .map(|mut grants| {
+                prune_expired(&mut grants);
+                grants
+                    .values()
+                    .flat_map(|grant| grant.allowed_bundle_ids.iter().cloned())
+                    .collect::<HashSet<_>>()
+            })
+            .unwrap_or_default();
+        let mut released = Vec::new();
+        if let Ok(mut entries) = self.web_accessibility.lock() {
+            entries.retain(|pid, entry| {
+                let keep = live.contains(&entry.bundle_id);
+                if !keep && entry.owned {
+                    released.push(*pid);
+                }
+                keep
+            });
+        }
+        for pid in released {
+            let _ = self.native.set_web_accessibility(pid, false);
+        }
+    }
+
+    fn owns_web_accessibility(&self) -> bool {
+        self.web_accessibility
+            .lock()
+            .is_ok_and(|entries| entries.values().any(|entry| entry.owned))
+    }
+
+    /// Grants also end by expiry, which nothing else observes. One background
+    /// thread reconciles while DCC owns any process's web accessibility.
+    fn start_web_accessibility_watcher(&self) {
+        if self.web_accessibility_watcher.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let state = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("dcc-computer-use-accessibility".to_string())
+            .spawn(move || loop {
+                std::thread::sleep(WEB_ACCESSIBILITY_RECONCILE_INTERVAL);
+                state.reconcile_web_accessibility();
+                if state.owns_web_accessibility() {
+                    continue;
+                }
+                state
+                    .web_accessibility_watcher
+                    .store(false, Ordering::Release);
+                // An entry added between the check and the store must not be
+                // left without a watcher.
+                if !state.owns_web_accessibility()
+                    || state.web_accessibility_watcher.swap(true, Ordering::AcqRel)
+                {
+                    break;
+                }
+            });
+        if spawned.is_err() {
+            self.web_accessibility_watcher
+                .store(false, Ordering::Release);
+        }
+    }
+
+    fn touch_grant(&self, session_id: &str, expected_lease_id: &str) {
+        if let Ok(mut grants) = self.grants.lock() {
+            prune_expired(&mut grants);
+            if let Some(grant) = grants
+                .get_mut(session_id)
+                .filter(|grant| grant.lease_id == expected_lease_id)
+            {
+                grant.touch(Instant::now());
+            }
+        }
+    }
+
     pub(crate) fn click(
         &self,
         session_id: &str,
         expected_lease_id: &str,
         target: &ComputerTargetSnapshot,
-        x: f64,
-        y: f64,
+        at: &ComputerActionTarget,
+        button: PointerButton,
         click_count: u8,
-    ) -> Result<(), String> {
-        let current = self.require_target(session_id, expected_lease_id, target)?;
-        if !x.is_finite()
-            || !y.is_finite()
-            || x < 0.0
-            || y < 0.0
-            || x >= current.width
-            || y >= current.height
-        {
-            return Err("click coordinates are outside the captured target window".to_string());
+    ) -> Result<ComputerInputMethod, ComputerActionError> {
+        if !(1..=2).contains(&click_count) {
+            return Err(ComputerActionError::Rejected(
+                "click count must be 1 or 2".to_string(),
+            ));
         }
-        // The native accessibility implementation performs one AXPress. It
-        // does not emulate a dependable double-click, so accepting `2` would
-        // report a stronger action than the platform actually performed.
-        if click_count != 1 {
-            return Err("click count must be one".to_string());
-        }
-        self.native.click(&current, x, y, click_count)
+        validate_action_target(target, at)?;
+        let (current, elements) = self
+            .require_target(session_id, expected_lease_id, target)
+            .map_err(ComputerActionError::Rejected)?;
+        let at = resolve_action_target(at, elements.as_deref())?;
+        let method = self
+            .native
+            .click(&current, at, button, click_count)
+            .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.touch_grant(session_id, expected_lease_id);
+        Ok(method)
     }
+
     pub(crate) fn scroll(
         &self,
         session_id: &str,
         expected_lease_id: &str,
         target: &ComputerTargetSnapshot,
-        x: f64,
-        y: f64,
+        at: &ComputerActionTarget,
         delta_x: i32,
         delta_y: i32,
-    ) -> Result<(), String> {
-        let current = self.require_target(session_id, expected_lease_id, target)?;
-        if !x.is_finite()
-            || !y.is_finite()
-            || x < 0.0
-            || y < 0.0
-            || x >= current.width
-            || y >= current.height
-        {
-            return Err("scroll coordinates are outside the captured target window".to_string());
-        }
+    ) -> Result<(), ComputerActionError> {
         if (delta_x == 0 && delta_y == 0)
             || delta_x.unsigned_abs() > MAX_SCROLL_DELTA as u32
             || delta_y.unsigned_abs() > MAX_SCROLL_DELTA as u32
         {
-            return Err("scroll delta is invalid".to_string());
+            return Err(ComputerActionError::Rejected(
+                "scroll delta is invalid".to_string(),
+            ));
         }
-        self.native.scroll(&current, x, y, delta_x, delta_y)
+        validate_action_target(target, at)?;
+        let (current, elements) = self
+            .require_target(session_id, expected_lease_id, target)
+            .map_err(ComputerActionError::Rejected)?;
+        let at = resolve_action_target(at, elements.as_deref())?;
+        self.native
+            .scroll(&current, at, delta_x, delta_y)
+            .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.touch_grant(session_id, expected_lease_id);
+        Ok(())
     }
+
+    pub(crate) fn drag(
+        &self,
+        session_id: &str,
+        expected_lease_id: &str,
+        target: &ComputerTargetSnapshot,
+        from: (f64, f64),
+        to: (f64, f64),
+    ) -> Result<(), ComputerActionError> {
+        if !point_is_inside(target, from.0, from.1) || !point_is_inside(target, to.0, to.1) {
+            return Err(ComputerActionError::Rejected(
+                "drag points must be inside the captured target window".to_string(),
+            ));
+        }
+        let (current, _) = self
+            .require_target(session_id, expected_lease_id, target)
+            .map_err(ComputerActionError::Rejected)?;
+        self.native
+            .drag(&current, from, to)
+            .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.touch_grant(session_id, expected_lease_id);
+        Ok(())
+    }
+
+    pub(crate) fn set_value(
+        &self,
+        session_id: &str,
+        expected_lease_id: &str,
+        target: &ComputerTargetSnapshot,
+        reference: &str,
+        value: &str,
+    ) -> Result<(), ComputerActionError> {
+        if !valid_input_text(value) {
+            return Err(ComputerActionError::Rejected(
+                "desktop text input is invalid".to_string(),
+            ));
+        }
+        let at = ComputerActionTarget::Element(reference.to_string());
+        validate_action_target(target, &at)?;
+        let (current, elements) = self
+            .require_target(session_id, expected_lease_id, target)
+            .map_err(ComputerActionError::Rejected)?;
+        let NativeAt::Element { handle, index } = resolve_action_target(&at, elements.as_deref())?
+        else {
+            unreachable!("an element ref resolves to an element");
+        };
+        self.native
+            .set_value(&current, handle, index, value)
+            .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.touch_grant(session_id, expected_lease_id);
+        Ok(())
+    }
+
     pub(crate) fn type_text(
         &self,
         session_id: &str,
         expected_lease_id: &str,
         target: &ComputerTargetSnapshot,
         text: &str,
-    ) -> Result<(), String> {
-        if text.chars().count() > MAX_TYPE_CHARS
-            || text
-                .chars()
-                .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
-        {
-            return Err("desktop text input is invalid".to_string());
+    ) -> Result<(), ComputerActionError> {
+        if text.is_empty() || !valid_input_text(text) {
+            return Err(ComputerActionError::Rejected(
+                "desktop text input is invalid".to_string(),
+            ));
         }
-        let current = self.require_target(session_id, expected_lease_id, target)?;
-        self.native.type_text(&current, text)
+        let (current, _) = self
+            .require_target(session_id, expected_lease_id, target)
+            .map_err(ComputerActionError::Rejected)?;
+        self.native
+            .type_text(&current, text)
+            .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.touch_grant(session_id, expected_lease_id);
+        Ok(())
     }
+
     pub(crate) fn key(
         &self,
         session_id: &str,
@@ -1155,11 +1635,115 @@ impl ComputerUseState {
         target: &ComputerTargetSnapshot,
         key: &str,
         modifiers: &[String],
-    ) -> Result<(), String> {
-        let current = self.require_target(session_id, expected_lease_id, target)?;
-        let code = key_code(key).ok_or_else(|| "desktop key is unsupported".to_string())?;
-        let flags = modifier_flags(modifiers)?;
-        self.native.key(&current, code, flags)
+    ) -> Result<(), ComputerActionError> {
+        let code = key_code(key)
+            .ok_or_else(|| ComputerActionError::Rejected("desktop key is unsupported".to_string()))?;
+        let flags = modifier_flags(modifiers).map_err(ComputerActionError::Rejected)?;
+        let (current, _) = self
+            .require_target(session_id, expected_lease_id, target)
+            .map_err(ComputerActionError::Rejected)?;
+        self.native
+            .key(&current, code, flags)
+            .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.touch_grant(session_id, expected_lease_id);
+        Ok(())
+    }
+}
+
+/// Why an action did not happen. `Rejected` never reached the window: the
+/// capture the agent holds is still the latest one it was given. `Failed`
+/// consumed that capture at the window, which may have changed, so the
+/// caller observes it again before reporting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ComputerActionError {
+    Rejected(String),
+    Failed(String),
+}
+
+impl ComputerActionError {
+    #[cfg(test)]
+    fn message(&self) -> &str {
+        match self {
+            Self::Rejected(message) | Self::Failed(message) => message,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WebAccessibilityEntry {
+    bundle_id: String,
+    /// DCC switched it on and must switch it off again.
+    owned: bool,
+}
+
+fn point_is_inside(target: &ComputerTargetSnapshot, x: f64, y: f64) -> bool {
+    x.is_finite() && y.is_finite() && x >= 0.0 && y >= 0.0 && x < target.width && y < target.height
+}
+
+fn valid_input_text(text: &str) -> bool {
+    text.chars().count() <= MAX_TYPE_CHARS
+        && !text
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+}
+
+/// Element refs are `e1`…`e800`, one-based, as printed by the capture.
+pub(crate) fn parse_element_ref(reference: &str) -> Option<usize> {
+    let digits = reference.strip_prefix('e')?;
+    if digits.is_empty() || digits.starts_with('0') || !digits.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let number = digits.parse::<usize>().ok()?;
+    (1..=MAX_ELEMENT_REFS).contains(&number).then(|| number - 1)
+}
+
+/// Checks what can be checked before the one-shot capture is consumed.
+fn validate_action_target(
+    target: &ComputerTargetSnapshot,
+    at: &ComputerActionTarget,
+) -> Result<(), ComputerActionError> {
+    match at {
+        ComputerActionTarget::Point { x, y } if !point_is_inside(target, *x, *y) => Err(
+            ComputerActionError::Rejected(
+                "coordinates are outside the captured target window".to_string(),
+            ),
+        ),
+        ComputerActionTarget::Element(reference) if parse_element_ref(reference).is_none() => {
+            Err(ComputerActionError::Rejected(
+                "element refs look like e12, as listed by the capture".to_string(),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn resolve_action_target(
+    at: &ComputerActionTarget,
+    elements: Option<&ElementMap>,
+) -> Result<NativeAt, ComputerActionError> {
+    match at {
+        ComputerActionTarget::Point { x, y } => Ok(NativeAt::Point { x: *x, y: *y }),
+        ComputerActionTarget::Element(reference) => {
+            let index = parse_element_ref(reference).ok_or_else(|| {
+                ComputerActionError::Failed("element refs look like e12".to_string())
+            })?;
+            let map = elements.ok_or_else(|| {
+                ComputerActionError::Failed(
+                    "that capture listed no elements; use x/y from its screenshot".to_string(),
+                )
+            })?;
+            if index >= map.count {
+                return Err(ComputerActionError::Failed(format!(
+                    "{reference} is not in that capture, which listed e1-e{}",
+                    map.count
+                )));
+            }
+            Ok(NativeAt::Element {
+                handle: map.handle,
+                index: index as u32,
+            })
+        }
     }
 }
 
@@ -1226,7 +1810,7 @@ impl ComputerUseState {
                     && snapshot.visible.bundle_id == target.bundle_id
             })
             .cloned()
-            .ok_or_else(|| "capture the target window before acting".to_string())?;
+            .ok_or_else(|| "use the generation from the latest capture or action result; capture the target window if you have none".to_string())?;
         Ok((grant.nonce.clone(), snapshot))
     }
 }
@@ -1256,13 +1840,16 @@ fn normalized_control_reason(value: &str) -> Result<String, String> {
     }
     Ok(value.to_string())
 }
+/// The window a capture was taken of: process, window-server id and
+/// geometry. The title is deliberately excluded: a browser retitles its
+/// window on every navigation, which is the window's content changing, not
+/// the window being replaced. Coordinates stay valid while geometry holds.
 fn target_identity(target: &ComputerTarget) -> String {
     let material = format!(
-        "{}\x1f{}\x1f{}\x1f{}\x1f{}\x1f{}\x1f{}\x1f{}",
+        "{}\x1f{}\x1f{}\x1f{}\x1f{}\x1f{}\x1f{}",
         target.bundle_id,
         target.pid,
         target.window_id,
-        target.title,
         target.x,
         target.y,
         target.width,
@@ -1301,6 +1888,10 @@ fn key_code(key: &str) -> Option<u16> {
         "ARROW_RIGHT" => Some(124),
         "BACKSPACE" => Some(51),
         "DELETE" => Some(117),
+        "HOME" => Some(115),
+        "END" => Some(119),
+        "PAGE_UP" => Some(116),
+        "PAGE_DOWN" => Some(121),
         "A" => Some(0),
         "B" => Some(11),
         "C" => Some(8),
@@ -1571,17 +2162,10 @@ impl ComputerNative for PlatformComputerNative {
             Ok(output)
         }
     }
-    fn click(
-        &self,
-        target: &ComputerTarget,
-        x: f64,
-        y: f64,
-        click_count: u8,
-    ) -> Result<(), String> {
-        let bundle = std::ffi::CString::new(target.bundle_id.as_str())
-            .map_err(|_| "target application is invalid".to_string())?;
-        unsafe {
-            dcc_computer_click(
+    fn accessibility_tree(&self, target: &ComputerTarget) -> Result<NativeTree, String> {
+        let bundle = bundle_cstring(target).map_err(|error| error.message())?;
+        let raw = unsafe {
+            take_string(dcc_computer_ax_tree_json(
                 bundle.as_ptr(),
                 target.pid,
                 target.window_id,
@@ -1589,26 +2173,160 @@ impl ComputerNative for PlatformComputerNative {
                 target.y,
                 target.width,
                 target.height,
-                x,
-                y,
-                click_count,
-            )
-            .then_some(())
-            .ok_or_else(|| "target click failed; capture again before retrying".to_string())
+            ))
+        };
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|_| "the accessibility tree is unavailable".to_string())?;
+        let status = value
+            .get("status")
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|status| i32::try_from(status).ok())
+            .unwrap_or(-1);
+        if status != 0 {
+            return Err(NativeEffectError::from_code(status, None).message());
         }
+        let flag = |key: &str| {
+            value
+                .get(key)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        Ok(NativeTree {
+            available: flag("available"),
+            handle: value
+                .get("handle")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            count: value
+                .get("count")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|count| usize::try_from(count).ok())
+                .unwrap_or(0),
+            text: value
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            truncated: flag("truncated"),
+            busy: flag("busy"),
+        })
+    }
+    fn release_tree(&self, handle: u64) {
+        if handle != 0 {
+            unsafe { dcc_computer_ax_tree_release(handle) }
+        }
+    }
+    fn set_web_accessibility(&self, pid: i32, enabled: bool) -> WebAccessibility {
+        match unsafe { dcc_computer_web_accessibility(pid, enabled) } {
+            2 => WebAccessibility::Changed,
+            1 => WebAccessibility::AlreadyEnabled,
+            _ => WebAccessibility::Unsupported,
+        }
+    }
+    fn click(
+        &self,
+        target: &ComputerTarget,
+        at: NativeAt,
+        button: PointerButton,
+        click_count: u8,
+    ) -> Result<ComputerInputMethod, NativeEffectError> {
+        let bundle = bundle_cstring(target)?;
+        let button = pointer_button_code(button);
+        let mut detail = std::ptr::null_mut();
+        let mut method = NATIVE_METHOD_POINTER;
+        let status = unsafe {
+            match at {
+                NativeAt::Point { x, y } => dcc_computer_click_point(
+                    bundle.as_ptr(),
+                    target.pid,
+                    target.window_id,
+                    target.x,
+                    target.y,
+                    target.width,
+                    target.height,
+                    x,
+                    y,
+                    button,
+                    click_count,
+                    &mut detail,
+                ),
+                NativeAt::Element { handle, index } => dcc_computer_click_element(
+                    bundle.as_ptr(),
+                    target.pid,
+                    target.window_id,
+                    target.x,
+                    target.y,
+                    target.width,
+                    target.height,
+                    handle,
+                    index,
+                    button,
+                    click_count,
+                    &mut method,
+                    &mut detail,
+                ),
+            }
+        };
+        effect_result(status, detail)?;
+        Ok(if method == NATIVE_METHOD_ACCESSIBILITY {
+            ComputerInputMethod::Accessibility
+        } else {
+            ComputerInputMethod::Pointer
+        })
     }
     fn scroll(
         &self,
         target: &ComputerTarget,
-        x: f64,
-        y: f64,
+        at: NativeAt,
         delta_x: i32,
         delta_y: i32,
-    ) -> Result<(), String> {
-        let bundle = std::ffi::CString::new(target.bundle_id.as_str())
-            .map_err(|_| "target application is invalid".to_string())?;
-        unsafe {
-            dcc_computer_scroll(
+    ) -> Result<(), NativeEffectError> {
+        let bundle = bundle_cstring(target)?;
+        let mut detail = std::ptr::null_mut();
+        let status = unsafe {
+            match at {
+                NativeAt::Point { x, y } => dcc_computer_scroll_point(
+                    bundle.as_ptr(),
+                    target.pid,
+                    target.window_id,
+                    target.x,
+                    target.y,
+                    target.width,
+                    target.height,
+                    x,
+                    y,
+                    delta_x,
+                    delta_y,
+                    &mut detail,
+                ),
+                NativeAt::Element { handle, index } => dcc_computer_scroll_element(
+                    bundle.as_ptr(),
+                    target.pid,
+                    target.window_id,
+                    target.x,
+                    target.y,
+                    target.width,
+                    target.height,
+                    handle,
+                    index,
+                    delta_x,
+                    delta_y,
+                    &mut detail,
+                ),
+            }
+        };
+        effect_result(status, detail)
+    }
+    fn drag(
+        &self,
+        target: &ComputerTarget,
+        from: (f64, f64),
+        to: (f64, f64),
+    ) -> Result<(), NativeEffectError> {
+        let bundle = bundle_cstring(target)?;
+        let mut detail = std::ptr::null_mut();
+        let status = unsafe {
+            dcc_computer_drag(
                 bundle.as_ptr(),
                 target.pid,
                 target.window_id,
@@ -1616,21 +2334,46 @@ impl ComputerNative for PlatformComputerNative {
                 target.y,
                 target.width,
                 target.height,
-                x,
-                y,
-                delta_x,
-                delta_y,
+                from.0,
+                from.1,
+                to.0,
+                to.1,
+                &mut detail,
             )
-            .then_some(())
-            .ok_or_else(|| "target scroll failed; capture again before retrying".to_string())
-        }
+        };
+        effect_result(status, detail)
     }
-    fn type_text(&self, target: &ComputerTarget, text: &str) -> Result<(), String> {
-        let bundle = std::ffi::CString::new(target.bundle_id.as_str())
-            .map_err(|_| "target application is invalid".to_string())?;
-        let text = std::ffi::CString::new(text)
-            .map_err(|_| "desktop text input is invalid".to_string())?;
-        unsafe {
+    fn set_value(
+        &self,
+        target: &ComputerTarget,
+        handle: u64,
+        index: u32,
+        value: &str,
+    ) -> Result<(), NativeEffectError> {
+        let bundle = bundle_cstring(target)?;
+        let value = std::ffi::CString::new(value).map_err(|_| NativeEffectError::Invalid)?;
+        let mut detail = std::ptr::null_mut();
+        let status = unsafe {
+            dcc_computer_set_value(
+                bundle.as_ptr(),
+                target.pid,
+                target.window_id,
+                target.x,
+                target.y,
+                target.width,
+                target.height,
+                handle,
+                index,
+                value.as_ptr(),
+                &mut detail,
+            )
+        };
+        effect_result(status, detail)
+    }
+    fn type_text(&self, target: &ComputerTarget, text: &str) -> Result<(), NativeEffectError> {
+        let bundle = bundle_cstring(target)?;
+        let text = std::ffi::CString::new(text).map_err(|_| NativeEffectError::Invalid)?;
+        let status = unsafe {
             dcc_computer_type(
                 bundle.as_ptr(),
                 target.pid,
@@ -1641,16 +2384,17 @@ impl ComputerNative for PlatformComputerNative {
                 target.height,
                 text.as_ptr(),
             )
-            .then_some(())
-            .ok_or_else(|| {
-                "target keyboard input failed; capture again before retrying".to_string()
-            })
-        }
+        };
+        effect_result(status, std::ptr::null_mut())
     }
-    fn key(&self, target: &ComputerTarget, key_code: u16, flags: u64) -> Result<(), String> {
-        let bundle = std::ffi::CString::new(target.bundle_id.as_str())
-            .map_err(|_| "target application is invalid".to_string())?;
-        unsafe {
+    fn key(
+        &self,
+        target: &ComputerTarget,
+        key_code: u16,
+        flags: u64,
+    ) -> Result<(), NativeEffectError> {
+        let bundle = bundle_cstring(target)?;
+        let status = unsafe {
             dcc_computer_key(
                 bundle.as_ptr(),
                 target.pid,
@@ -1662,11 +2406,37 @@ impl ComputerNative for PlatformComputerNative {
                 key_code,
                 flags,
             )
-            .then_some(())
-            .ok_or_else(|| {
-                "target keyboard input failed; capture again before retrying".to_string()
-            })
-        }
+        };
+        effect_result(status, std::ptr::null_mut())
+    }
+}
+
+#[cfg(target_os = "macos")]
+const NATIVE_METHOD_ACCESSIBILITY: i32 = 1;
+#[cfg(target_os = "macos")]
+const NATIVE_METHOD_POINTER: i32 = 2;
+
+#[cfg(target_os = "macos")]
+fn bundle_cstring(target: &ComputerTarget) -> Result<std::ffi::CString, NativeEffectError> {
+    std::ffi::CString::new(target.bundle_id.as_str()).map_err(|_| NativeEffectError::Invalid)
+}
+
+#[cfg(target_os = "macos")]
+fn pointer_button_code(button: PointerButton) -> i32 {
+    match button {
+        PointerButton::Left => 0,
+        PointerButton::Right => 1,
+    }
+}
+
+/// Takes ownership of the bridge-allocated detail string, if any.
+#[cfg(target_os = "macos")]
+fn effect_result(status: i32, detail: *mut std::ffi::c_char) -> Result<(), NativeEffectError> {
+    let detail = (!detail.is_null()).then(|| unsafe { take_string(detail) });
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(NativeEffectError::from_code(status, detail))
     }
 }
 
@@ -1682,6 +2452,14 @@ mod tests {
         after_targets: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
         status: Mutex<NativeStatus>,
         request_result: Mutex<bool>,
+        tree_counts: Mutex<Vec<usize>>,
+        tree_busy: Mutex<bool>,
+        next_handle: Mutex<u64>,
+        released: Mutex<Vec<u64>>,
+        web_accessibility: Mutex<WebAccessibility>,
+        web_calls: Mutex<Vec<(i32, bool)>>,
+        last_at: Mutex<Option<NativeAt>>,
+        effect_error: Mutex<Option<NativeEffectError>>,
     }
     impl FakeNative {
         fn with_target() -> Self {
@@ -1707,7 +2485,28 @@ mod tests {
                     major_version: 14,
                 }),
                 request_result: Mutex::new(true),
+                tree_counts: Mutex::new(vec![3]),
+                tree_busy: Mutex::new(false),
+                next_handle: Mutex::new(0),
+                released: Mutex::new(Vec::new()),
+                web_accessibility: Mutex::new(WebAccessibility::Unsupported),
+                web_calls: Mutex::new(Vec::new()),
+                last_at: Mutex::new(None),
+                effect_error: Mutex::new(None),
             }
+        }
+        fn effect(&self) -> Result<(), NativeEffectError> {
+            if let Some(error) = self.effect_error.lock().unwrap().clone() {
+                return Err(error);
+            }
+            *self.effects.lock().unwrap() += 1;
+            Ok(())
+        }
+        fn live_handles(&self) -> Vec<u64> {
+            let released = self.released.lock().unwrap();
+            (1..=*self.next_handle.lock().unwrap())
+                .filter(|handle| !released.contains(handle))
+                .collect()
         }
     }
     impl ComputerNative for FakeNative {
@@ -1728,22 +2527,64 @@ mod tests {
             *self.captures.lock().unwrap() += 1;
             Ok(vec![0; *self.capture_bytes.lock().unwrap()])
         }
-        fn click(&self, _: &ComputerTarget, _: f64, _: f64, _: u8) -> Result<(), String> {
-            *self.effects.lock().unwrap() += 1;
-            Ok(())
+        fn accessibility_tree(&self, _: &ComputerTarget) -> Result<NativeTree, String> {
+            let mut counts = self.tree_counts.lock().unwrap();
+            let count = if counts.len() > 1 { counts.remove(0) } else { counts[0] };
+            let mut next = self.next_handle.lock().unwrap();
+            *next += 1;
+            Ok(NativeTree {
+                available: true,
+                handle: *next,
+                count,
+                text: (1..=count).map(|n| format!("e{n} button\n")).collect(),
+                truncated: false,
+                busy: *self.tree_busy.lock().unwrap(),
+            })
         }
-        fn scroll(&self, _: &ComputerTarget, _: f64, _: f64, _: i32, _: i32) -> Result<(), String> {
-            *self.effects.lock().unwrap() += 1;
-            Ok(())
+        fn release_tree(&self, handle: u64) {
+            self.released.lock().unwrap().push(handle);
         }
-        fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), String> {
-            *self.effects.lock().unwrap() += 1;
-            Ok(())
+        fn set_web_accessibility(&self, pid: i32, enabled: bool) -> WebAccessibility {
+            self.web_calls.lock().unwrap().push((pid, enabled));
+            *self.web_accessibility.lock().unwrap()
         }
-        fn key(&self, _: &ComputerTarget, _: u16, _: u64) -> Result<(), String> {
-            *self.effects.lock().unwrap() += 1;
-            Ok(())
+        fn click(
+            &self,
+            _: &ComputerTarget,
+            at: NativeAt,
+            _: PointerButton,
+            _: u8,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
+            *self.last_at.lock().unwrap() = Some(at);
+            self.effect()?;
+            Ok(match at {
+                NativeAt::Element { .. } => ComputerInputMethod::Accessibility,
+                NativeAt::Point { .. } => ComputerInputMethod::Pointer,
+            })
         }
+        fn scroll(&self, _: &ComputerTarget, at: NativeAt, _: i32, _: i32) -> Result<(), NativeEffectError> {
+            *self.last_at.lock().unwrap() = Some(at);
+            self.effect()
+        }
+        fn drag(&self, _: &ComputerTarget, _: (f64, f64), _: (f64, f64)) -> Result<(), NativeEffectError> {
+            self.effect()
+        }
+        fn set_value(&self, _: &ComputerTarget, handle: u64, index: u32, _: &str) -> Result<(), NativeEffectError> {
+            *self.last_at.lock().unwrap() = Some(NativeAt::Element { handle, index });
+            self.effect()
+        }
+        fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), NativeEffectError> {
+            self.effect()
+        }
+        fn key(&self, _: &ComputerTarget, _: u16, _: u64) -> Result<(), NativeEffectError> {
+            self.effect()
+        }
+    }
+    fn point(x: f64, y: f64) -> ComputerActionTarget {
+        ComputerActionTarget::Point { x, y }
+    }
+    fn element(reference: &str) -> ComputerActionTarget {
+        ComputerActionTarget::Element(reference.to_string())
     }
     fn armed() -> (ComputerUseState, Arc<FakeNative>) {
         let native = Arc::new(FakeNative::with_target());
@@ -1924,10 +2765,10 @@ mod tests {
             .capture("session", "lease", "com.example.Editor", 7)
             .unwrap();
         state
-            .click("session", "lease", &capture.target, 20.0, 20.0, 1)
+            .click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1)
             .unwrap();
         assert!(state
-            .click("session", "lease", &capture.target, 20.0, 20.0, 1)
+            .click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1)
             .is_err());
         assert_eq!(*native.effects.lock().unwrap(), 1);
     }
@@ -1939,7 +2780,7 @@ mod tests {
             .capture("session", "lease", "com.example.Editor", 7)
             .unwrap();
         state
-            .scroll("session", "lease", &capture.target, 20.0, 20.0, 0, -120)
+            .scroll("session", "lease", &capture.target, &point(20.0, 20.0), 0, -120)
             .unwrap();
         assert_eq!(*native.effects.lock().unwrap(), 1);
 
@@ -1947,7 +2788,7 @@ mod tests {
             .capture("session", "lease", "com.example.Editor", 7)
             .unwrap();
         assert!(state
-            .scroll("session", "lease", &capture.target, 20.0, 20.0, 0, 0)
+            .scroll("session", "lease", &capture.target, &point(20.0, 20.0), 0, 0)
             .is_err());
         assert_eq!(*native.effects.lock().unwrap(), 1);
 
@@ -1955,7 +2796,7 @@ mod tests {
             .capture("session", "lease", "com.example.Editor", 7)
             .unwrap();
         assert!(state
-            .click("session", "lease", &capture.target, 20.0, 20.0, 3)
+            .click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 3)
             .is_err());
         assert_eq!(*native.effects.lock().unwrap(), 1);
     }
@@ -1968,7 +2809,7 @@ mod tests {
             .unwrap();
         native.targets.lock().unwrap()[0].width = 801.0;
         assert!(state
-            .click("session", "lease", &capture.target, 20.0, 20.0, 1)
+            .click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1)
             .is_err());
         let capture = state
             .capture("session", "lease", "com.example.Editor", 7)
@@ -1977,7 +2818,7 @@ mod tests {
             .arm("session", &["com.example.Editor".to_string()])
             .unwrap();
         assert!(state
-            .click("session", "lease", &capture.target, 20.0, 20.0, 1)
+            .click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1)
             .is_err());
     }
 
@@ -2107,6 +2948,225 @@ mod tests {
             .capture("session", "lease-two", "com.example.Editor", 7)
             .is_err());
     }
+
+    #[test]
+    fn element_refs_resolve_against_the_capture_that_listed_them() {
+        let (state, native) = armed();
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        assert!(capture.elements.available);
+        assert_eq!(capture.elements.count, 3);
+        let method = state
+            .click("session", "lease", &capture.target, &element("e2"), PointerButton::Left, 1)
+            .unwrap();
+        assert_eq!(method, ComputerInputMethod::Accessibility);
+        assert_eq!(
+            *native.last_at.lock().unwrap(),
+            Some(NativeAt::Element { handle: 1, index: 1 })
+        );
+        // The action consumed the capture and released its element map.
+        assert_eq!(*native.released.lock().unwrap(), vec![1]);
+    }
+
+    #[test]
+    fn unknown_or_malformed_refs_never_reach_the_driver() {
+        let (state, native) = armed();
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        // Malformed refs are rejected before the capture is consumed...
+        for reference in ["2", "e0", "e02", "e801", "ex"] {
+            assert!(matches!(
+                state.click("session", "lease", &capture.target, &element(reference), PointerButton::Left, 1),
+                Err(ComputerActionError::Rejected(_))
+            ));
+        }
+        // ...so the same capture still works, while a ref it did not list
+        // consumes it and asks for the fresh observation.
+        assert!(matches!(
+            state.click("session", "lease", &capture.target, &element("e4"), PointerButton::Left, 1),
+            Err(ComputerActionError::Failed(message)) if message.contains("e1-e3")
+        ));
+        assert_eq!(*native.effects.lock().unwrap(), 0);
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        state
+            .set_value("session", "lease", &capture.target, "e3", "hello")
+            .unwrap();
+        assert_eq!(
+            *native.last_at.lock().unwrap(),
+            Some(NativeAt::Element { handle: 2, index: 2 })
+        );
+    }
+
+    #[test]
+    fn a_capture_without_elements_still_supports_coordinates() {
+        let (state, native) = armed();
+        *native.tree_counts.lock().unwrap() = vec![0];
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        assert_eq!(capture.elements.count, 0);
+        assert!(state
+            .click("session", "lease", &capture.target, &element("e1"), PointerButton::Left, 1)
+            .unwrap_err()
+            .message()
+            .contains("use x/y"));
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        assert_eq!(
+            state
+                .click("session", "lease", &capture.target, &point(10.0, 10.0), PointerButton::Right, 2)
+                .unwrap(),
+            ComputerInputMethod::Pointer
+        );
+    }
+
+    #[test]
+    fn a_new_title_does_not_invalidate_the_window_but_new_geometry_does() {
+        let (state, native) = armed();
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        native.targets.lock().unwrap()[0].title = "another page".to_string();
+        state
+            .click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1)
+            .unwrap();
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        native.targets.lock().unwrap()[0].x = 40.0;
+        assert!(matches!(
+            state.click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1),
+            Err(ComputerActionError::Rejected(message)) if message.contains("capture it again")
+        ));
+    }
+
+    #[test]
+    fn replacing_consuming_or_ending_a_capture_releases_its_element_map() {
+        let (state, native) = armed();
+        state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        assert_eq!(native.live_handles(), vec![2]);
+        state.disarm("session");
+        assert!(native.live_handles().is_empty());
+    }
+
+    #[test]
+    fn activity_extends_the_grant_but_never_past_its_hard_limit() {
+        let (state, _) = armed();
+        let now = Instant::now();
+        {
+            let mut grants = state.grants.lock().unwrap();
+            let grant = grants.get_mut("session").unwrap();
+            grant.granted_at = now - GRANT_MAX_TTL + Duration::from_secs(60);
+            grant.expires_at = now + Duration::from_secs(5);
+        }
+        state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        let expires_at = state.grants.lock().unwrap()["session"].expires_at;
+        assert!(expires_at > now + Duration::from_secs(30));
+        assert!(expires_at <= now + Duration::from_secs(60));
+
+        let mut fresh = state.grants.lock().unwrap()["session"].clone();
+        fresh.granted_at = now;
+        fresh.touch(now + Duration::from_secs(120));
+        assert_eq!(fresh.expires_at, now + Duration::from_secs(120) + GRANT_IDLE_TTL);
+    }
+
+    #[test]
+    fn web_accessibility_is_switched_on_once_and_off_when_no_grant_allows_the_app() {
+        let (state, native) = armed();
+        *native.web_accessibility.lock().unwrap() = WebAccessibility::Changed;
+        *native.tree_counts.lock().unwrap() = vec![2, 9, 9];
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        // The first capture waits for the web tree to stop growing.
+        assert_eq!(capture.elements.count, 9);
+        state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        assert_eq!(*native.web_calls.lock().unwrap(), vec![(42, true)]);
+        state.disarm("session");
+        assert_eq!(*native.web_calls.lock().unwrap(), vec![(42, true), (42, false)]);
+    }
+
+    #[test]
+    fn web_accessibility_dcc_did_not_switch_on_is_left_alone() {
+        let (state, native) = armed();
+        *native.web_accessibility.lock().unwrap() = WebAccessibility::AlreadyEnabled;
+        state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        state.disarm("session");
+        assert_eq!(*native.web_calls.lock().unwrap(), vec![(42, true)]);
+    }
+
+    #[test]
+    fn native_failures_consume_the_capture_and_say_what_to_do() {
+        let (state, native) = armed();
+        *native.effect_error.lock().unwrap() =
+            Some(NativeEffectError::Occluded(Some("Slack".to_string())));
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        let error = state
+            .click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1)
+            .unwrap_err();
+        assert!(matches!(error, ComputerActionError::Failed(_)));
+        assert!(error.message().starts_with("Slack covers that point"));
+        assert!(state
+            .click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1)
+            .is_err());
+        for code in 1..=10 {
+            assert!(!NativeEffectError::from_code(code, None).message().is_empty());
+        }
+        assert_eq!(
+            NativeEffectError::from_code(5, Some("  ".to_string())),
+            NativeEffectError::Occluded(None)
+        );
+    }
+
+    #[test]
+    fn drag_and_scroll_bounds_are_checked_before_consuming_the_capture() {
+        let (state, native) = armed();
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        assert!(matches!(
+            state.drag("session", "lease", &capture.target, (10.0, 10.0), (800.0, 10.0)),
+            Err(ComputerActionError::Rejected(_))
+        ));
+        assert!(matches!(
+            state.scroll("session", "lease", &capture.target, &point(10.0, 10.0), 0, MAX_SCROLL_DELTA + 1),
+            Err(ComputerActionError::Rejected(_))
+        ));
+        state
+            .drag("session", "lease", &capture.target, (10.0, 10.0), (799.0, 599.0))
+            .unwrap();
+        assert_eq!(*native.effects.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn element_refs_are_one_based_and_bounded() {
+        assert_eq!(parse_element_ref("e1"), Some(0));
+        assert_eq!(parse_element_ref("e800"), Some(799));
+        for invalid in ["", "e", "e0", "e01", "e801", "E1", "e1x", "1"] {
+            assert_eq!(parse_element_ref(invalid), None, "{invalid}");
+        }
+    }
 }
 #[cfg(target_os = "macos")]
 unsafe fn take_string(raw: *mut std::ffi::c_char) -> String {
@@ -2133,7 +3193,18 @@ extern "C" {
         bytes: *mut *mut u8,
         length: *mut usize,
     ) -> bool;
-    fn dcc_computer_click(
+    fn dcc_computer_ax_tree_json(
+        bundle_id: *const std::ffi::c_char,
+        pid: i32,
+        window_id: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> *mut std::ffi::c_char;
+    fn dcc_computer_ax_tree_release(handle: u64);
+    fn dcc_computer_web_accessibility(pid: i32, enabled: bool) -> i32;
+    fn dcc_computer_click_point(
         bundle_id: *const std::ffi::c_char,
         pid: i32,
         window_id: u32,
@@ -2143,9 +3214,26 @@ extern "C" {
         height: f64,
         click_x: f64,
         click_y: f64,
+        button: i32,
         click_count: u8,
-    ) -> bool;
-    fn dcc_computer_scroll(
+        detail: *mut *mut std::ffi::c_char,
+    ) -> i32;
+    fn dcc_computer_click_element(
+        bundle_id: *const std::ffi::c_char,
+        pid: i32,
+        window_id: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        handle: u64,
+        index: u32,
+        button: i32,
+        click_count: u8,
+        method: *mut i32,
+        detail: *mut *mut std::ffi::c_char,
+    ) -> i32;
+    fn dcc_computer_scroll_point(
         bundle_id: *const std::ffi::c_char,
         pid: i32,
         window_id: u32,
@@ -2157,7 +3245,49 @@ extern "C" {
         scroll_y: f64,
         delta_x: i32,
         delta_y: i32,
-    ) -> bool;
+        detail: *mut *mut std::ffi::c_char,
+    ) -> i32;
+    fn dcc_computer_scroll_element(
+        bundle_id: *const std::ffi::c_char,
+        pid: i32,
+        window_id: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        handle: u64,
+        index: u32,
+        delta_x: i32,
+        delta_y: i32,
+        detail: *mut *mut std::ffi::c_char,
+    ) -> i32;
+    fn dcc_computer_drag(
+        bundle_id: *const std::ffi::c_char,
+        pid: i32,
+        window_id: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        from_x: f64,
+        from_y: f64,
+        to_x: f64,
+        to_y: f64,
+        detail: *mut *mut std::ffi::c_char,
+    ) -> i32;
+    fn dcc_computer_set_value(
+        bundle_id: *const std::ffi::c_char,
+        pid: i32,
+        window_id: u32,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        handle: u64,
+        index: u32,
+        value: *const std::ffi::c_char,
+        detail: *mut *mut std::ffi::c_char,
+    ) -> i32;
     fn dcc_computer_type(
         bundle_id: *const std::ffi::c_char,
         pid: i32,
@@ -2167,7 +3297,7 @@ extern "C" {
         width: f64,
         height: f64,
         text: *const std::ffi::c_char,
-    ) -> bool;
+    ) -> i32;
     fn dcc_computer_key(
         bundle_id: *const std::ffi::c_char,
         pid: i32,
@@ -2178,10 +3308,50 @@ extern "C" {
         height: f64,
         key_code: u16,
         flags: u64,
-    ) -> bool;
+    ) -> i32;
     fn dcc_computer_free_string(value: *mut std::ffi::c_char);
     fn dcc_computer_free_bytes(value: *mut u8);
 }
+
+/// Stand-in for platforms without desktop computer use, and for tests that
+/// need a supported platform which never touches the desktop.
+#[cfg(any(test, not(target_os = "macos")))]
+macro_rules! inert_effects {
+    ($message:expr) => {
+        fn accessibility_tree(&self, _: &ComputerTarget) -> Result<NativeTree, String> {
+            Err($message.to_string())
+        }
+        fn release_tree(&self, _: u64) {}
+        fn set_web_accessibility(&self, _: i32, _: bool) -> WebAccessibility {
+            WebAccessibility::Unsupported
+        }
+        fn click(
+            &self,
+            _: &ComputerTarget,
+            _: NativeAt,
+            _: PointerButton,
+            _: u8,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
+            Err(NativeEffectError::Other($message.to_string()))
+        }
+        fn scroll(&self, _: &ComputerTarget, _: NativeAt, _: i32, _: i32) -> Result<(), NativeEffectError> {
+            Err(NativeEffectError::Other($message.to_string()))
+        }
+        fn drag(&self, _: &ComputerTarget, _: (f64, f64), _: (f64, f64)) -> Result<(), NativeEffectError> {
+            Err(NativeEffectError::Other($message.to_string()))
+        }
+        fn set_value(&self, _: &ComputerTarget, _: u64, _: u32, _: &str) -> Result<(), NativeEffectError> {
+            Err(NativeEffectError::Other($message.to_string()))
+        }
+        fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), NativeEffectError> {
+            Err(NativeEffectError::Other($message.to_string()))
+        }
+        fn key(&self, _: &ComputerTarget, _: u16, _: u64) -> Result<(), NativeEffectError> {
+            Err(NativeEffectError::Other($message.to_string()))
+        }
+    };
+}
+
 #[cfg(not(target_os = "macos"))]
 impl ComputerNative for PlatformComputerNative {
     fn status(&self) -> NativeStatus {
@@ -2200,18 +3370,7 @@ impl ComputerNative for PlatformComputerNative {
     fn capture(&self, _: &ComputerTarget) -> Result<Vec<u8>, String> {
         Err("desktop computer use is unsupported on this platform".to_string())
     }
-    fn click(&self, _: &ComputerTarget, _: f64, _: f64, _: u8) -> Result<(), String> {
-        Err("desktop computer use is unsupported on this platform".to_string())
-    }
-    fn scroll(&self, _: &ComputerTarget, _: f64, _: f64, _: i32, _: i32) -> Result<(), String> {
-        Err("desktop computer use is unsupported on this platform".to_string())
-    }
-    fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), String> {
-        Err("desktop computer use is unsupported on this platform".to_string())
-    }
-    fn key(&self, _: &ComputerTarget, _: u16, _: u64) -> Result<(), String> {
-        Err("desktop computer use is unsupported on this platform".to_string())
-    }
+    inert_effects!("desktop computer use is unsupported on this platform");
 }
 
 #[cfg(test)]
@@ -2234,16 +3393,5 @@ impl ComputerNative for SupportedTestNative {
     fn capture(&self, _: &ComputerTarget) -> Result<Vec<u8>, String> {
         Err("test native does not capture".to_string())
     }
-    fn click(&self, _: &ComputerTarget, _: f64, _: f64, _: u8) -> Result<(), String> {
-        Err("test native does not click".to_string())
-    }
-    fn scroll(&self, _: &ComputerTarget, _: f64, _: f64, _: i32, _: i32) -> Result<(), String> {
-        Err("test native does not scroll".to_string())
-    }
-    fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), String> {
-        Err("test native does not type".to_string())
-    }
-    fn key(&self, _: &ComputerTarget, _: u16, _: u64) -> Result<(), String> {
-        Err("test native does not type".to_string())
-    }
+    inert_effects!("test native does not act");
 }

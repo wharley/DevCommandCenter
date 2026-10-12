@@ -14,7 +14,7 @@ Sources: [Synara implementation notes](https://github.com/Emanuele-web04/synara/
 
 - DCC already has macOS 14+ exact-window capture and an allowlist tied to the provider session lease. The UI already shows the most recent explicit MCP capture and activity events.
 - The preview now refreshes the same authorized PID/window while its conversation turn is active and visible. It stops pulling when hidden, when the turn ends, when the grant expires, or when the target disappears. A window move or title change can be followed because the native capture validates the current geometry.
-- Refresh is a renderer-only read. It never creates a new action generation, never alters the provider's captured action target, and never sends its frame to the model. The explicit `dcc_computer_capture` remains the only way to ground agent coordinates.
+- Refresh is a renderer-only read. It never creates a new action generation, never alters the provider's captured action target, and never sends its frame to the model. Agent coordinates are grounded only by observations the agent itself receives: `dcc_computer_capture` and the observation every action returns (see [COMPUTER_USE.md](COMPUTER_USE.md)).
 - The transport is a bounded one-second still refresh in the local Tauri UI. It is not Synara's 15 fps native helper or a general video stream. DCC's existing four-megabyte/window capture limit still applies.
 
 ## Remaining completion gates
