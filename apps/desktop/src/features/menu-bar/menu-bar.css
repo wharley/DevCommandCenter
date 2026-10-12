@@ -39,3 +39,5 @@
 .menu-bar-footer-links button { display: inline-flex; align-items: center; gap: 5px; color: var(--muted-foreground); font-size: 10px; padding: 3px; }
 .menu-bar-footer-links button:hover { color: var(--foreground); }
 .menu-bar-error { padding: 8px 18px; font-size: 10px; color: #c78b33; background: #c78b3310; }
+.menu-bar-keep-awake { display: flex; align-items: center; gap: 6px; padding: 8px 18px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted-foreground); }
+.menu-bar-keep-awake svg { flex-shrink: 0; color: var(--foreground); }

@@ -2338,7 +2338,31 @@
       "upToDate": "Up to date",
       "updateAvailable": "Update available: v{{version}}",
       "installUpdate": "Install update",
-      "updateCheckFailed": "Could not check for updates: {{message}}"
+      "updateCheckFailed": "Could not check for updates: {{message}}",
+      "keepAwake": {
+        "title": "Keep the Mac awake",
+        "body": "Stops the Mac from sleeping when idle, so agents keep working and your phone stays connected. The display can still turn off.",
+        "modes": {
+          "off": "Off",
+          "always": "Always",
+          "duringAgents": "While agents work"
+        },
+        "modeHints": {
+          "off": "The Mac sleeps as usual.",
+          "always": "Holds while DCC is open.",
+          "duringAgents": "Holds while an agent is working or waiting for your reply, and for 2 minutes after the last turn."
+        },
+        "activeNow": "Keeping awake now: {{reason}}",
+        "idle": "No agent working right now: the Mac may sleep.",
+        "lid": "With the lid closed macOS sleeps anyway, on battery or plugged in. The exception is Apple's closed-display mode (plugged in, with an external display, keyboard and mouse). To run overnight, leave the lid open and the Mac plugged in.",
+        "saveFailed": "Could not save: {{message}}",
+        "reasons": {
+          "appOpen": "DCC open",
+          "agentsWorking_one": "{{count}} agent working",
+          "agentsWorking_other": "{{count}} agents working",
+          "agentJustFinished": "an agent just finished"
+        }
+      }
     },
     "appearance": {
       "theme": "Theme",
@@ -3256,6 +3280,20 @@
         ],
         "tip": "The QR code works once, for 5 minutes. If the code in the request differs from the one on the phone, deny it.",
         "keywords": "phone mobile pair pairing qr relay app remote"
+      },
+      "keepAwake": {
+        "label": "Mac awake",
+        "summary": "Agents keep working when you step away.",
+        "whatIs": "A preference that stops the Mac from sleeping when idle while DCC has work to do. Agents keep running and the paired phone stays connected; the display can turn off as usual. While it is on, a ☕ shows next to the DCC icon in the menu bar.",
+        "whenToUse": "Before leaving a plan running overnight or following agents from your phone, away from the computer.",
+        "steps": [
+          "Open Settings, the [General] section, and find [Keep the Mac awake].",
+          "Choose [While agents work] to hold only while an agent works or waits for your reply, or [Always] to hold while DCC is open.",
+          "Hover the ☕ in the menu bar to see why, for example \"2 agents working\".",
+          "Go back to [Off] when you no longer need it."
+        ],
+        "tip": "With the lid closed macOS sleeps anyway, on battery or plugged in; the exception is Apple's closed-display mode, with an external display, keyboard and mouse. To run overnight, leave the lid open and the Mac plugged in.",
+        "keywords": "mac awake sleep idle caffeinate power battery plugged lid overnight keep awake"
       },
       "pullRequests": {
         "label": "Pull Requests",
@@ -4998,6 +5036,7 @@
     "saveFailed": "Could not save your preferences."
   },
   "menuBar": {
+    "keepAwake": "Mac awake · {{reason}}",
     "title": "Activity",
     "refresh": "Refresh activity",
     "running": "{{count}} running",

@@ -17,6 +17,7 @@ mod computer_use_commands;
 mod delegation_commands;
 mod desktop_agent_requests;
 mod feedback_commands;
+mod keep_awake_commands;
 mod forge_commands;
 mod git_support;
 mod mcp_commands;
@@ -7014,6 +7015,8 @@ pub fn run() {
             menu_bar::menu_bar_compose,
             menu_bar::menu_bar_open_main,
             menu_bar::menu_bar_quit,
+            keep_awake_commands::keep_awake_status,
+            keep_awake_commands::keep_awake_set_mode,
             quick_composer::quick_composer_status,
             quick_composer::quick_composer_set_shortcut,
             quick_composer::quick_composer_toggle,
@@ -7335,6 +7338,11 @@ pub fn run() {
                 db_path.clone(),
                 desktop_agent_requests,
             );
+            app.manage(keep_awake_commands::start(
+                app.handle(),
+                &session_command_state,
+                &app_data_dir,
+            ));
             app.manage(session_command_state);
             let ai_memory_retry_state = app
                 .try_state::<SessionCommandState>()

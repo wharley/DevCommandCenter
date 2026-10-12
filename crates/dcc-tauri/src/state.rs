@@ -1945,6 +1945,27 @@ impl SessionCommandState {
         self.runtime.register_event_bus(bus)
     }
 
+    /// Sessions whose provider binding has a turn in flight, with that turn's
+    /// id. Read-only runtime truth, for observers that follow the turn events
+    /// and need to correct a missed one (the keep-awake counter).
+    pub async fn active_turns(&self) -> Result<Vec<(String, String)>> {
+        let bindings = {
+            let store = self.lock_store()?;
+            store
+                .provider_sessions
+                .iter()
+                .map(|(id, binding)| (id.0.clone(), binding.current_turn_id.clone()))
+                .collect::<Vec<_>>()
+        };
+        let mut active = Vec::new();
+        for (session_id, turn) in bindings {
+            if let Some(turn_id) = turn.lock().await.clone() {
+                active.push((session_id, turn_id));
+            }
+        }
+        Ok(active)
+    }
+
     fn provider_binding(&self, session_id: &SessionId) -> Result<Option<ProviderSessionBinding>> {
         let store = self.lock_store()?;
         Ok(store.provider_sessions.get(session_id).cloned())

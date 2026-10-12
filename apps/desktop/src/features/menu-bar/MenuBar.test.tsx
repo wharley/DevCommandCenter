@@ -91,3 +91,10 @@ it("discards an in-flight snapshot after hide/reopen and never overlaps reads", 
 	expect(api.readMenuBar).toHaveBeenCalledTimes(2);
 	expect(host.textContent).toContain("Fix the build");
 });
+it("says why the Mac is being kept awake, only while it is", async () => {
+	await mount();
+	expect(host.querySelector(".menu-bar-keep-awake")).toBeNull();
+	vi.mocked(api.readMenuBar).mockResolvedValue({ ...snapshot, keepAwake: { reason: { kind: "agentsWorking", count: 2 }, label: "2 agentes trabalhando" } });
+	await act(async () => vi.advanceTimersByTimeAsync(3000));
+	expect(host.querySelector(".menu-bar-keep-awake")?.textContent).toBe("Mac awake · 2 agents working");
+});

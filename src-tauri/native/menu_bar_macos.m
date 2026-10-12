@@ -36,6 +36,26 @@ static WKWebView *menuBarWebView(NSView *view) {
 }
 @end
 static DCCMenuBarController *controller;
+static NSString *keepAwakeTooltip;
+
+// ☕ beside the icon while DCC keeps the Mac awake; the tooltip says why.
+static void applyKeepAwake(void) {
+    if (!statusItem) return;
+    NSStatusBarButton *button = statusItem.button;
+    if (keepAwakeTooltip) {
+        statusItem.length = NSVariableStatusItemLength;
+        button.title = @"\u2615";
+        button.imagePosition = NSImageLeading;
+        button.toolTip = keepAwakeTooltip;
+        [button setAccessibilityLabel:[@"DCC. " stringByAppendingString:keepAwakeTooltip]];
+    } else {
+        statusItem.length = NSSquareStatusItemLength;
+        button.title = @"";
+        button.imagePosition = NSImageOnly;
+        button.toolTip = @"Dev Command Center";
+        [button setAccessibilityLabel:@"DCC"];
+    }
+}
 
 // Monochrome version of the four flows in icons/app-icon.svg. Template rendering
 // gives the symbol native contrast in both menu-bar appearances.
@@ -92,7 +112,13 @@ bool dcc_menu_bar_create(void *window, void (*callback)(bool)) {
     [statusItem.button setAccessibilityLabel:@"DCC"];
     statusItem.button.target = controller;
     statusItem.button.action = @selector(toggle:);
+    applyKeepAwake();
     return true;
+}
+
+void dcc_menu_bar_set_keep_awake(const char *tooltip) {
+    keepAwakeTooltip = tooltip ? [NSString stringWithUTF8String:tooltip] : nil;
+    applyKeepAwake();
 }
 
 bool dcc_menu_bar_visible(void) { return popover.shown; }

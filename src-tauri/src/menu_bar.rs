@@ -43,6 +43,7 @@ pub struct Task {
 pub struct Snapshot {
     tasks: Vec<Task>,
     metrics: Option<Metrics>,
+    keep_awake: Option<dev_command_center_tauri::keep_awake::KeepAwakeHold>,
 }
 
 fn trusted(window: &Webview) -> Result<(), String> {
@@ -269,7 +270,14 @@ pub async fn menu_bar_snapshot(window: Webview, app: AppHandle) -> Result<Snapsh
             .lock()
             .ok()
             .map(|mut sampler| sampler.sample(&roots));
-        Ok(Snapshot { tasks, metrics })
+        let keep_awake = app
+            .try_state::<crate::keep_awake_commands::KeepAwakeState>()
+            .and_then(|state| state.controller.status().active);
+        Ok(Snapshot {
+            tasks,
+            metrics,
+            keep_awake,
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -389,6 +397,24 @@ extern "C" fn visibility_changed(visible: bool) {
         let _ = app.emit_to(LABEL, "menu-bar-visibility", visible);
     }
 }
+/// The ☕ next to the menu bar icon while DCC keeps the Mac awake; the
+/// tooltip says why. Safe before `setup`: the native side applies it when
+/// the item is created.
+pub fn set_keep_awake(app: &AppHandle, reason: Option<String>) {
+    #[cfg(target_os = "macos")]
+    {
+        let tooltip = reason.and_then(|reason| {
+            std::ffi::CString::new(format!("Dev Command Center · Mac acordado: {reason}")).ok()
+        });
+        let _ = app.run_on_main_thread(move || unsafe {
+            native::dcc_menu_bar_set_keep_awake(
+                tooltip.as_ref().map_or(std::ptr::null(), |tooltip| tooltip.as_ptr()),
+            );
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, reason);
+}
 pub fn shutdown(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     unsafe {
@@ -408,6 +434,7 @@ mod native {
         pub fn dcc_menu_bar_visible() -> bool;
         pub fn dcc_menu_bar_hide();
         pub fn dcc_menu_bar_destroy();
+        pub fn dcc_menu_bar_set_keep_awake(tooltip: *const std::ffi::c_char);
     }
 }
 

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-import { ArrowUpRight, Check, CirclePause, Cpu, LoaderCircle, MessageCircle, Plus, Power, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, Check, CirclePause, Coffee, Cpu, LoaderCircle, MessageCircle, Plus, Power, RefreshCw, ShieldCheck } from "lucide-react";
 import { LOCALE_STORAGE_KEY } from "@/i18n/config";
+import { keepAwakeReasonKey } from "@/lib/keep-awake-api";
 import { composeFromMenuBar, hideMenuBar, isMenuBarVisible, openFromMenuBar, quitFromMenuBar, readMenuBar, type MenuBarSnapshot, type MenuBarTask } from "./api";
 import "./menu-bar.css";
 
@@ -94,6 +95,10 @@ export function MenuBar() {
 		<div className="menu-bar-summary" aria-live="polite">
 			{snapshot ? <><span><i className="menu-bar-dot" />{t("menuBar.running", { count: running })}</span><span className={waiting ? "menu-bar-attention" : ""}>{t("menuBar.waiting", { count: waiting })}</span></> : <span>{t(error ? "menuBar.unavailable" : "menuBar.loading")}</span>}
 		</div>
+		{snapshot?.keepAwake && (() => {
+			const reason = keepAwakeReasonKey(snapshot.keepAwake.reason);
+			return <div className="menu-bar-keep-awake"><Coffee size={13} aria-hidden /><span>{t("menuBar.keepAwake", { reason: t(reason.key, { count: reason.count }) })}</span></div>;
+		})()}
 		{(error || actionError) && <div role="alert" className="menu-bar-error">{t(actionError ? "menuBar.actionError" : "menuBar.stale")}</div>}
 		<section className="menu-bar-tasks" aria-label={t("menuBar.tasks")}>
 			{!snapshot && !error && <div className="menu-bar-empty"><LoaderCircle size={22} className="animate-spin" /><p>{t("menuBar.loading")}</p></div>}

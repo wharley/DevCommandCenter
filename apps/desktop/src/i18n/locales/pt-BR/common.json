@@ -2338,7 +2338,31 @@
       "upToDate": "Atualizado",
       "updateAvailable": "Atualização disponível: v{{version}}",
       "installUpdate": "Instalar atualização",
-      "updateCheckFailed": "Não foi possível verificar atualizações: {{message}}"
+      "updateCheckFailed": "Não foi possível verificar atualizações: {{message}}",
+      "keepAwake": {
+        "title": "Manter o Mac acordado",
+        "body": "Impede que o Mac durma por inatividade, para os agentes seguirem trabalhando e o celular continuar conectado. A tela ainda pode apagar.",
+        "modes": {
+          "off": "Desligado",
+          "always": "Sempre",
+          "duringAgents": "Durante agentes"
+        },
+        "modeHints": {
+          "off": "O Mac dorme como de costume.",
+          "always": "Segura enquanto o DCC estiver aberto.",
+          "duringAgents": "Segura enquanto algum agente estiver trabalhando ou esperando sua resposta, e por 2 minutos depois do último turno."
+        },
+        "activeNow": "Mantendo acordado agora: {{reason}}",
+        "idle": "Nenhum agente trabalhando agora: o Mac pode dormir.",
+        "lid": "Com a tampa fechada o macOS dorme mesmo assim, na bateria ou na tomada. A exceção é o modo de tela fechada da Apple (na tomada, com monitor externo, teclado e mouse). Para rodar à noite, deixe a tampa aberta e o Mac na tomada.",
+        "saveFailed": "Não foi possível salvar: {{message}}",
+        "reasons": {
+          "appOpen": "DCC aberto",
+          "agentsWorking_one": "{{count}} agente trabalhando",
+          "agentsWorking_other": "{{count}} agentes trabalhando",
+          "agentJustFinished": "agente acabou de terminar"
+        }
+      }
     },
     "appearance": {
       "theme": "Tema",
@@ -3256,6 +3280,20 @@
         ],
         "tip": "O QR vale uma vez, por 5 minutos. Se o código do pedido for diferente do que o celular mostra, recuse.",
         "keywords": "celular mobile parear pareamento qr relay app telefone remoto"
+      },
+      "keepAwake": {
+        "label": "Mac acordado",
+        "summary": "Os agentes seguem trabalhando quando você sai de perto.",
+        "whatIs": "Uma preferência que impede o Mac de dormir por inatividade enquanto o DCC tem trabalho. Os agentes continuam rodando e o celular pareado continua conectado; a tela pode apagar normalmente. Enquanto está ativo, aparece um ☕ ao lado do ícone do DCC na barra de menus.",
+        "whenToUse": "Antes de deixar um plano rodando à noite ou de acompanhar os agentes pelo celular, longe do computador.",
+        "steps": [
+          "Abra Configurações, seção [Geral], e encontre [Manter o Mac acordado].",
+          "Escolha [Durante agentes] para segurar só enquanto algum agente trabalha ou espera sua resposta, ou [Sempre] para segurar enquanto o DCC estiver aberto.",
+          "Passe o mouse no ☕ da barra de menus para ver o motivo, por exemplo \"2 agentes trabalhando\".",
+          "Volte para [Desligado] quando não precisar mais."
+        ],
+        "tip": "Com a tampa fechada o macOS dorme mesmo assim, na bateria ou na tomada; a exceção é o modo de tela fechada da Apple, com monitor externo, teclado e mouse. Para rodar à noite, deixe a tampa aberta e o Mac na tomada.",
+        "keywords": "mac acordado dormir sono repouso suspensão caffeinate energia bateria tomada tampa noite keep awake"
       },
       "pullRequests": {
         "label": "Pull Requests",
@@ -4998,6 +5036,7 @@
     "saveFailed": "Não foi possível salvar suas preferências."
   },
   "menuBar": {
+    "keepAwake": "Mac acordado · {{reason}}",
     "title": "Atividade",
     "refresh": "Atualizar atividade",
     "running": "{{count}} executando",

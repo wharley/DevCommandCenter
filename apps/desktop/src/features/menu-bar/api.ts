@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { KeepAwakeReason } from "@/lib/keep-awake-api";
 export type MenuBarTask = {
 	workspaceId: string;
 	sessionId: string;
@@ -10,6 +11,8 @@ export type MenuBarTask = {
 export type MenuBarSnapshot = {
 	tasks: MenuBarTask[];
 	metrics: { cpuPercent: number | null; memoryBytes: number; processCount: number } | null;
+	/** Set while DCC keeps the Mac awake (Settings → General). */
+	keepAwake?: { reason: KeepAwakeReason; label: string } | null;
 };
 export const readMenuBar = () => invoke<MenuBarSnapshot>("menu_bar_snapshot");
 export const isMenuBarVisible = () => invoke<boolean>("menu_bar_visible");
