@@ -21,7 +21,10 @@ use dcc_core::{
 };
 use dcc_infra::credential_store::SystemCredentialStore;
 
-const DEFAULT_PORT: u16 = 49_374;
+/// Development builds listen on their own port: an installed DCC and the dev
+/// build each find their own sidecar, and an orphan from one is never taken
+/// for a shared server by the other.
+const DEFAULT_PORT: u16 = if cfg!(debug_assertions) { 49_375 } else { 49_374 };
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(350);
 const SETTINGS_FILE_NAME: &str = "ai-memory-settings.json";
@@ -109,7 +112,8 @@ pub struct AiMemorySidecar {
     version: Option<String>,
     startup_error: Option<String>,
     /// A server this instance did not start was already answering on the
-    /// port, so the DCC uses it as is (its version and settings are unknown).
+    /// port, so the DCC uses it as is (its settings are unknown; the version
+    /// is what the server reports on MCP `initialize`).
     shared: bool,
 }
 
@@ -258,12 +262,13 @@ impl AiMemorySidecar {
                         "[DCC][ai-memory] server already reachable at {base_url}; reusing it without spawning a child"
                     );
                     std::env::set_var("DCC_AI_MEMORY_URL", &base_url);
+                    let version = probe_server_version(&base_url);
                     return Ok(Self {
                         child: Mutex::new(None),
+                        version,
                         base_url: Some(base_url),
                         data_dir: None,
                         binary_path: None,
-                        version: None,
                         startup_error: None,
                         shared: true,
                     });
@@ -772,6 +777,50 @@ fn wait_until_healthy(base_url: &str) -> bool {
     false
 }
 
+/// The version a running ai-memory reports in its MCP `initialize` reply.
+fn probe_server_version(base_url: &str) -> Option<String> {
+    let body = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .ok()?
+        .post(format!("{base_url}/mcp"))
+        .header("accept", "application/json, text/event-stream")
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "dcc", "version": env!("CARGO_PKG_VERSION") },
+            },
+        }))
+        .send()
+        .ok()?
+        .text()
+        .ok()?;
+    server_version_from_initialize(&body)
+}
+
+/// Reads `serverInfo.version` from an `initialize` reply sent as plain JSON
+/// or as a single server-sent event.
+fn server_version_from_initialize(body: &str) -> Option<String> {
+    let parse = |text: &str| {
+        serde_json::from_str::<serde_json::Value>(text.trim())
+            .ok()?
+            .pointer("/result/serverInfo/version")?
+            .as_str()
+            .map(str::trim)
+            .filter(|version| !version.is_empty())
+            .map(|version| format!("ai-memory {version}"))
+    };
+    parse(body).or_else(|| {
+        body.lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .find_map(parse)
+    })
+}
+
 fn is_healthy_once(base_url: &str) -> bool {
     reqwest::blocking::Client::builder()
         .timeout(HEALTH_TIMEOUT)
@@ -870,6 +919,21 @@ mod tests {
         assert!(!first.exists());
         assert!(data_dir.join("backups/before-ai-memory-2.7.0").is_dir());
         let _ = fs::remove_dir_all(&data_dir);
+    }
+
+    #[test]
+    fn shared_server_version_comes_from_initialize_in_json_or_sse() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"ai-memory","version":"2.6.1"}}}"#;
+        assert_eq!(
+            server_version_from_initialize(json).as_deref(),
+            Some("ai-memory 2.6.1")
+        );
+        let sse = format!("event: message\ndata: {json}\n\n");
+        assert_eq!(
+            server_version_from_initialize(&sse).as_deref(),
+            Some("ai-memory 2.6.1")
+        );
+        assert_eq!(server_version_from_initialize("not json"), None);
     }
 
     #[test]
