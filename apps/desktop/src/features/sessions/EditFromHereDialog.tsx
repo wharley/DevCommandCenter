@@ -93,6 +93,9 @@ export function EditFromHereDialog({
 							) : files.kind === "blocked" ? (
 								<p className="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5 text-amber-800 dark:text-amber-300">
 									<AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+									{files.project
+										? `${t("conversation.editFromHere.inProject", { project: files.project })} `
+										: null}
 									{t("conversation.editFromHere.filesBlocked", {
 										reason: t(files.reasonKey),
 									})}
@@ -106,7 +109,13 @@ export function EditFromHereDialog({
 									</p>
 									<ul className="space-y-0.5 font-mono text-[11px] text-muted-foreground">
 										{previews.slice(0, VISIBLE_FILES).map((file) => (
-											<li key={`${file.turnId}:${file.displayPath}`} className="truncate">
+											<li
+												key={`${file.turnId}:${file.project ?? ""}:${file.displayPath}`}
+												className="truncate"
+											>
+												{file.project ? (
+													<span className="font-sans text-foreground/80">{file.project} · </span>
+												) : null}
 												{file.displayPath}
 											</li>
 										))}
@@ -138,6 +147,9 @@ export function EditFromHereDialog({
 								data-testid="edit-from-here-stopped"
 							>
 								<p className="font-medium">{t("conversation.editFromHere.stoppedTitle")}</p>
+								{stopped.project ? (
+									<p>{t("conversation.editFromHere.inProject", { project: stopped.project })}</p>
+								) : null}
 								<p>{t(stopped.resultKey)}</p>
 								{stopped.reasonKey ? <p>{t(stopped.reasonKey)}</p> : null}
 								{stopped.restoredTurnCount > 0 ? (

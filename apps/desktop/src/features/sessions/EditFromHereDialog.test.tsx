@@ -24,8 +24,8 @@ function plan(overrides: Partial<EditFromHerePlan> = {}): EditFromHerePlan {
 			turnCount: 2,
 			fileCount: 2,
 			files: [
-				{ turnId: "t3", displayPath: "src/b.ts", binary: false, preview: null },
-				{ turnId: "t2", displayPath: "src/a.ts", binary: false, preview: null },
+				{ turnId: "t3", project: null, displayPath: "src/b.ts", binary: false, preview: null },
+				{ turnId: "t2", project: null, displayPath: "src/a.ts", binary: false, preview: null },
 			],
 		},
 		...overrides,
@@ -98,6 +98,7 @@ describe("EditFromHereDialog", () => {
 						files: {
 							status: "not_restorable",
 							turnId: "t2",
+							project: null,
 							stage: "prepare",
 							reasonCode: "target_result_mismatch",
 						},
@@ -126,6 +127,7 @@ describe("EditFromHereDialog", () => {
 					stopped={{
 						kind: "files_stopped",
 						restoredTurnCount: 1,
+						project: null,
 						resultKey: "turnReview.guardedUndo.results.blocked",
 						reasonKey: "turnReview.guardedUndo.failureReasons.changed",
 					}}

@@ -1,4 +1,5 @@
 import type {
+	WorkspaceBundleIsolation,
 	WorkspaceRemoteBranchDeletionTarget,
 	WorkspaceSetupReport,
 } from "@dcc/contracts";
@@ -28,6 +29,7 @@ export interface WorkspaceSummary {
 	createdAt?: string;
 	updatedAt?: string;
 	bundleId?: string | null;
+	bundleIsolation?: WorkspaceBundleIsolation | null;
 	additionalWorkspaceIds?: string[];
 	memberWorkspaceIds?: string[];
 	memberNames?: string[];

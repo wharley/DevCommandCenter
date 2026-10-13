@@ -152,6 +152,7 @@ describe("edit from here dialog", () => {
 			files: {
 				status: "not_restorable",
 				turnId: "t2",
+				project: null,
 				stage: "prepare",
 				reasonCode: "target_result_mismatch",
 			},
@@ -159,6 +160,7 @@ describe("edit from here dialog", () => {
 		expect(editFromHereActions(conflict)).toEqual(["keep"]);
 		expect(editFromHereFiles(conflict)).toEqual({
 			kind: "blocked",
+			project: null,
 			reasonKey: "turnReview.guardedUndo.failureReasons.changed",
 		});
 		// Even a stale request to restore cannot restore here.
@@ -168,12 +170,14 @@ describe("edit from here dialog", () => {
 			files: {
 				status: "not_restorable",
 				turnId: "t3",
+				project: null,
 				stage: "capture",
 				reasonCode: "untracked_path",
 			},
 		});
 		expect(editFromHereFiles(untracked)).toEqual({
 			kind: "blocked",
+			project: null,
 			reasonKey: "turnReview.guardedUndo.reasons.untracked_path",
 		});
 		expect(editFromHereFiles(plan({ files: { status: "nothing_to_restore" } }))).toEqual({
@@ -225,6 +229,7 @@ describe("edit from here dialog", () => {
 				stopped: {
 					restoredTurnIds: ["t3"],
 					turnId: "t2",
+					project: null,
 					outcome: "blocked",
 					reasonCode: "target_result_mismatch",
 				},
@@ -232,6 +237,7 @@ describe("edit from here dialog", () => {
 		).toEqual({
 			kind: "files_stopped",
 			restoredTurnCount: 1,
+			project: null,
 			resultKey: "turnReview.guardedUndo.results.blocked",
 			reasonKey: "turnReview.guardedUndo.failureReasons.changed",
 		});

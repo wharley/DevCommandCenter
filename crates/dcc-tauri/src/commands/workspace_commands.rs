@@ -7548,6 +7548,15 @@ fn validate_bundle_projects(
     if input.projects.len() < 2 {
         return Err("workspace bundle requires at least two projects".to_string());
     }
+    let is_local = |project: &CreateWorkspaceForRepoInput| {
+        matches!(
+            project.isolation_mode,
+            Some(dcc_core::application::WorkspaceIsolationMode::LocalDirect)
+        )
+    };
+    if input.projects.iter().any(is_local) && !input.projects.iter().all(is_local) {
+        return Err("workspace bundle cannot mix worktree and local projects".to_string());
+    }
 
     let mut roots = BTreeSet::new();
     for project in &input.projects {
@@ -8133,7 +8142,12 @@ pub async fn delete_workspace_bundle(
 
     if input.delete_remote_branches {
         let mut targets = Vec::new();
-        for workspace in &created_workspaces {
+        // Local members work on the person's own branch, which DCC never
+        // created, so deleting the task must never reach their remote branch.
+        for workspace in created_workspaces
+            .iter()
+            .filter(|workspace| workspace.worktree_path.is_some())
+        {
             if let Some(target) = workspace_remote_branch_deletion_target(workspace)? {
                 targets.push((workspace, target));
             }
@@ -8839,6 +8853,7 @@ mod editor_workspace_file_tests {
                 name: "Old task".to_string(),
                 primary_workspace_id: primary.id.clone(),
                 state: WorkspaceBundleState::Ready,
+                isolation: dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Worktree,
                 created_at: "2026-08-01T00:00:00Z".to_string(),
                 updated_at: "2026-08-01T00:00:00Z".to_string(),
             },
@@ -10206,6 +10221,37 @@ mod editor_workspace_file_tests {
         assert!(validate_bundle_projects(&repositories, &duplicate)
             .expect_err("duplicate project must fail")
             .contains("duplicate"));
+    }
+
+    #[test]
+    fn bundle_validation_accepts_all_local_and_rejects_mixed_isolation() {
+        let repositories = vec![
+            registered_repository("backend", "/tmp/backend"),
+            registered_repository("frontend", "/tmp/frontend"),
+        ];
+        let local = |project_id: &str, root: &str| CreateWorkspaceForRepoInput {
+            isolation_mode: Some(dcc_core::application::WorkspaceIsolationMode::LocalDirect),
+            ..bundle_project(project_id, root)
+        };
+        let all_local = CreateWorkspaceBundleForReposInput {
+            name: "Checkout".to_string(),
+            projects: vec![
+                local("backend", "/tmp/backend"),
+                local("frontend", "/tmp/frontend"),
+            ],
+        };
+        validate_bundle_projects(&repositories, &all_local).expect("all-local bundle is valid");
+
+        let mixed = CreateWorkspaceBundleForReposInput {
+            name: "Checkout".to_string(),
+            projects: vec![
+                local("backend", "/tmp/backend"),
+                bundle_project("frontend", "/tmp/frontend"),
+            ],
+        };
+        assert!(validate_bundle_projects(&repositories, &mixed)
+            .expect_err("mixed isolation must fail")
+            .contains("cannot mix"));
     }
 
     #[test]

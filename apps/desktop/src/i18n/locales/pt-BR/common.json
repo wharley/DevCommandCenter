@@ -575,8 +575,11 @@
       "base": "base · {{branch}}",
       "protectedWorktree": "Worktree protegido",
       "coordinatedProjects_one": "{{count}} projeto coordenado · {{projects}}",
-      "coordinatedProjects_other": "{{count}} projetos coordenados · {{projects}}"
+      "coordinatedProjects_other": "{{count}} projetos coordenados · {{projects}}",
+      "localCheckout": "Direto no checkout"
     },
+    "bundleMembers_one": "{{count}} projeto nesta tarefa",
+    "bundleMembers_other": "{{count}} projetos nesta tarefa",
     "cancel": "Cancelar",
     "settings": "Configurações",
     "settingsShort": "Configurações",
@@ -950,6 +953,14 @@
     "protectionPreview_one": "{{count}} worktree protegido será criado",
     "protectionPreview_other": "{{count}} worktrees protegidos serão criados",
     "protectionPending": "Selecione pelo menos dois projetos",
+    "primary": "Principal",
+    "makePrimary": "Tornar principal",
+    "primaryHint": "A tarefa fica neste projeto, o agente começa nele e lê as instruções dele. Ele ainda pode alterar todos os projetos selecionados.",
+    "localPreview_one": "{{count}} projeto vai trabalhar direto no checkout",
+    "localPreview_other": "{{count}} projetos vão trabalhar direto no checkout",
+    "localDescription": "Sem worktree: o agente edita seus checkouts atuais. Entregue cada projeto pelo Inspector.",
+    "multiLocalToastDescription_one": "{{count}} projeto pronto para um único chat, direto no checkout.",
+    "multiLocalToastDescription_other": "{{count}} projetos prontos para um único chat, direto no checkout.",
     "protectionDescription": "Cada tarefa trabalha isoladamente. Seus checkouts originais permanecem intactos.",
     "pickFolderClone": "Escolher pasta de destino",
     "pickFolderRepo": "Escolher pasta do repositório",
@@ -967,11 +978,15 @@
     "toastCreateError": "Falha ao criar tarefa"
   },
   "workspaceScope": {
-    "projects": "Projeto em revisão",
+    "projects": "Mostrando",
+    "localBadge_one": "{{count}} projeto · local",
+    "localBadge_other": "{{count}} projetos · local",
+    "localHint": "Sem worktree: o agente edita os checkouts destes projetos. Entregue cada projeto pelo Inspector; Desfazer ainda não cobre esta tarefa.",
     "authorizedCount": "{{count}} autorizados",
     "providerUnsupported": "{{provider}} ainda não oferece isolamento multi-workspace no DCC. Escolha Codex, Claude, Cursor ou Gemini.",
     "delivery": {
-      "action": "Entregar {{count}}",
+      "action_one": "Entregar em {{count}} projeto",
+      "action_other": "Entregar em {{count}} projetos",
       "complete": "Entregue",
       "checking": "Verificando",
       "title": "Entregar projetos alterados",
@@ -3834,6 +3849,7 @@
       "done": "Conversa de volta a antes da mensagem. Edite e envie quando quiser.",
       "doneRestored_one": "Conversa de volta a antes da mensagem; arquivos de {{count}} turno restaurados.",
       "doneRestored_other": "Conversa de volta a antes da mensagem; arquivos de {{count}} turnos restaurados.",
+      "inProject": "Em {{project}}:",
       "stoppedTitle": "A restauração parou e a conversa não mudou",
       "stoppedRestored_one": "Os arquivos de {{count}} turno mais recente já foram restaurados e continuam assim.",
       "stoppedRestored_other": "Os arquivos dos {{count}} turnos mais recentes já foram restaurados e continuam assim.",
@@ -4719,6 +4735,25 @@
       "matches_result": "Workspace corresponde ao snapshot",
       "diverged": "Workspace mudou depois",
       "unavailable": "Estado atual indisponível"
+    },
+    "turnUndo": {
+      "action_one": "Desfazer o turno · {{count}} projeto",
+      "action_other": "Desfazer o turno · {{count}} projetos",
+      "blocked": "Nada foi desfeito: {{project}} não pode ser restaurado agora.",
+      "confirmTitle": "Desfazer o turno em todos os projetos",
+      "confirmSummary": "Revise os {{count}} arquivos de {{projects}} projetos antes de restaurar.",
+      "orderWarning": "Todos os projetos foram verificados. A restauração é feita um projeto por vez: cada projeto volta por inteiro ou não volta. Se um deles parar no meio, os anteriores continuam restaurados e os seguintes não são tocados — o resultado de cada um aparece abaixo.",
+      "uncovered": "Sem Undo neste turno (revise e desfaça pelo Git): {{projects}}.",
+      "results": {
+        "completed": "Restaurado",
+        "blocked": "Bloqueado",
+        "rolled_back": "Revertido com segurança",
+        "recovery_required": "Precisa de recuperação",
+        "failed": "Falhou",
+        "not_attempted": "Não tocado"
+      },
+      "confirmAction_one": "Restaurar {{count}} projeto",
+      "confirmAction_other": "Restaurar {{count}} projetos"
     },
     "guardedUndo": {
       "states": {

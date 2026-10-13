@@ -42,8 +42,11 @@ export function editFromHereContinuation(plan: EditFromHerePlan): EditFromHereCo
 export type EditFromHereFiles =
 	| { kind: "none" }
 	| { kind: "restorable"; fileCount: number; turnCount: number }
-	/** `reasonKey` reuses the Guarded Undo explanations. */
-	| { kind: "blocked"; reasonKey: string };
+	/**
+	 * `reasonKey` reuses the Guarded Undo explanations; `project` names the
+	 * project that blocks in a multi-project task.
+	 */
+	| { kind: "blocked"; reasonKey: string; project: string | null };
 
 export function editFromHereFiles(plan: EditFromHerePlan): EditFromHereFiles {
 	const files = plan.files;
@@ -55,6 +58,7 @@ export function editFromHereFiles(plan: EditFromHerePlan): EditFromHereFiles {
 		case "not_restorable":
 			return {
 				kind: "blocked",
+				project: files.project,
 				reasonKey:
 					files.stage === "capture"
 						? `turnReview.guardedUndo.reasons.${
@@ -111,6 +115,8 @@ export type EditFromHereOutcome =
 			restoredTurnCount: number;
 			resultKey: string;
 			reasonKey: string | null;
+			/** The project that stopped, in a multi-project task. */
+			project: string | null;
 	  }
 	| { kind: "refused"; reason: string };
 
@@ -139,6 +145,7 @@ export function interpretConversationRewind(
 			return {
 				kind: "files_stopped",
 				restoredTurnCount: stopped.restoredTurnIds.length,
+				project: stopped.project,
 				resultKey: `turnReview.guardedUndo.results.${outcome}`,
 				reasonKey: stopped.reasonCode
 					? `turnReview.guardedUndo.failureReasons.${resolveGuardedUndoFailureReason(

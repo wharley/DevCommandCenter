@@ -7,8 +7,8 @@ use crate::{
     domain::{
         workspace::Workspace,
         workspace_bundle::{
-            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
-            WorkspaceBundleSummary,
+            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleIsolation, WorkspaceBundleMember,
+            WorkspaceBundleState, WorkspaceBundleSummary,
         },
     },
     ports::WorkspaceBundleRepo,
@@ -52,12 +52,29 @@ where
         }
     }
 
+    let has_worktree = |workspace: &Workspace| {
+        workspace
+            .worktree_path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty())
+    };
+    let isolation = if workspaces.iter().all(has_worktree) {
+        WorkspaceBundleIsolation::Worktree
+    } else if !workspaces.iter().any(has_worktree) {
+        WorkspaceBundleIsolation::Local
+    } else {
+        return Err(CoreError::InvalidInput(
+            "workspace bundle cannot mix worktree and local projects".to_string(),
+        ));
+    };
+
     let now = Utc::now().to_rfc3339();
     let bundle = WorkspaceBundle {
         id: WorkspaceBundleId(Uuid::new_v4().to_string()),
         name: name.to_string(),
         primary_workspace_id: workspaces[0].id.clone(),
         state: WorkspaceBundleState::Ready,
+        isolation,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -176,6 +193,47 @@ mod tests {
         assert_eq!(result.bundle.name, "Checkout");
         assert_eq!(result.members.len(), 2);
         assert_eq!(result.bundle.primary_workspace_id.0, "backend");
+        assert_eq!(result.bundle.isolation, WorkspaceBundleIsolation::Worktree);
+    }
+
+    fn local_workspace(id: &str, root: &str) -> Workspace {
+        Workspace {
+            worktree_path: None,
+            ..workspace(id, root)
+        }
+    }
+
+    #[test]
+    fn creates_local_bundle_when_no_member_has_a_worktree() {
+        let repo = FakeRepo::default();
+        let result = futures::executor::block_on(create_workspace_bundle(
+            &repo,
+            "Checkout",
+            &[
+                local_workspace("backend", "/tmp/backend"),
+                local_workspace("frontend", "/tmp/frontend"),
+            ],
+        ))
+        .expect("create local bundle");
+
+        assert_eq!(result.bundle.isolation, WorkspaceBundleIsolation::Local);
+    }
+
+    #[test]
+    fn rejects_bundle_that_mixes_worktree_and_local_members() {
+        let repo = FakeRepo::default();
+        let error = futures::executor::block_on(create_workspace_bundle(
+            &repo,
+            "Mixed",
+            &[
+                workspace("backend", "/tmp/backend"),
+                local_workspace("frontend", "/tmp/frontend"),
+            ],
+        ))
+        .expect_err("mixed bundle must fail");
+
+        assert!(error.to_string().contains("cannot mix"));
+        assert!(repo.saved.lock().expect("saved lock").is_empty());
     }
 
     #[test]

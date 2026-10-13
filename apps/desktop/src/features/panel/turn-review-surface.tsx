@@ -29,6 +29,10 @@ import {
 } from "@/components/ui/dialog";
 import { TurnReviewFilePreview } from "./turn-review-file-preview";
 import {
+	TurnUndoAcrossProjects,
+	type TurnUndoWorkspace,
+} from "./turn-undo-across-projects";
+import {
 	executeGuardedUndo,
 	loadLastTurnReview,
 	prepareGuardedUndo,
@@ -159,11 +163,14 @@ export function TurnReviewSurface({
 	workspaceId,
 	turnId,
 	selectedFilePath,
+	turnWorkspaces = [],
 }: {
 	sessionId: string;
 	workspaceId: string;
 	turnId?: string;
 	selectedFilePath?: string;
+	/** Every project of a multi-project task; Undo then covers the whole turn. */
+	turnWorkspaces?: TurnUndoWorkspace[];
 }) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -440,7 +447,13 @@ export function TurnReviewSurface({
 							</div>
 						)}
 					</div>
-					{undoAvailable ? (
+					{turnWorkspaces.length > 1 ? (
+						<TurnUndoAcrossProjects
+							sessionId={sessionId}
+							turnId={review.turnId}
+							workspaces={turnWorkspaces}
+						/>
+					) : undoAvailable ? (
 						<div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
 							<div className="pointer-events-auto flex items-center rounded-full border border-border/70 bg-background/95 p-1 shadow-lg backdrop-blur">
 								<Button

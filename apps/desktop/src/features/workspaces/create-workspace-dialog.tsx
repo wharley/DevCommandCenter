@@ -31,6 +31,7 @@ import type {
 	CreateWorkspaceFromSourceUrlInput,
 	CreateWorkspaceFromUrlInput,
 	Repository,
+	WorkspaceIsolationMode,
 	WorkspaceSourceUrlResolution,
 } from "@dcc/contracts";
 import type {
@@ -44,6 +45,8 @@ import {
 	initialWorkspaceStart,
 	isBranchWorkspaceSource,
 	normalizeWorkspaceRoot,
+	orderMultiProjectSelection,
+	promoteMultiProjectPrimary,
 	readLastTaskRepositoryRoot,
 	rememberLastTaskRepositoryRoot,
 	repositoryNameFromWorkspaceRoot,
@@ -87,6 +90,8 @@ type CreateWorkspaceDialogProps = {
 	open: boolean;
 	mode: WorkspaceCreationMode;
 	initialCreationScope?: "single" | "multi";
+	/** Carries the *Worktree* choice from New task into a multi-project task. */
+	initialIsolationMode?: WorkspaceIsolationMode;
 	repositoryContext?: ExistingRepositoryContext | null;
 	onOpenChange: (open: boolean) => void;
 	onCreateWorkspace: (
@@ -191,6 +196,7 @@ export function CreateWorkspaceDialog({
 	open,
 	mode,
 	initialCreationScope = "single",
+	initialIsolationMode = "protectedWorktree",
 	repositoryContext = null,
 	onOpenChange,
 	onCreateWorkspace,
@@ -207,6 +213,7 @@ export function CreateWorkspaceDialog({
 	const [creationScope, setCreationScope] = useState<"single" | "multi">(
 		"single",
 	);
+	const [multiUsesWorktree, setMultiUsesWorktree] = useState(true);
 	const [workspaceStart, setWorkspaceStart] = useState<WorkspaceStart>("new");
 	const [sourceUrl, setSourceUrl] = useState("");
 	const [validatedSourceUrl, setValidatedSourceUrl] = useState("");
@@ -252,6 +259,7 @@ export function CreateWorkspaceDialog({
 			setAvailableBranches([]);
 			setIsLoadingBranches(false);
 			setCreationScope(mode === "open" ? initialCreationScope : "single");
+			setMultiUsesWorktree(initialIsolationMode !== "localDirect");
 			setWorkspaceStart(initialWorkspaceStart(repositoryContext !== null));
 			setSourceUrl("");
 			setValidatedSourceUrl("");
@@ -264,7 +272,7 @@ export function CreateWorkspaceDialog({
 				void loadBranchesForWorkspaceRoot(initialForm.workspaceRoot);
 			}
 		}
-	}, [initialCreationScope, mode, open, repositoryContext]);
+	}, [initialCreationScope, initialIsolationMode, mode, open, repositoryContext]);
 
 	function selectSingleRepository(repository: RepositoryOption) {
 		rememberLastTaskRepositoryRoot(repository.rootPath);
@@ -499,6 +507,7 @@ export function CreateWorkspaceDialog({
 	]);
 	const protectedWorktreeCount =
 		creationScope === "multi" ? selectedRepositoryIds.length : 1;
+	const multiLocal = creationScope === "multi" && !multiUsesWorktree;
 	const protectionBranch = isSourceWorkspace
 		? (sourceResolution?.baseBranch ?? null)
 		: form.baseBranch.trim() || null;
@@ -515,8 +524,10 @@ export function CreateWorkspaceDialog({
 		suppressCloseAutoFocusRef.current = true;
 		try {
 			if (mode === "open" && creationScope === "multi") {
-				const selectedRepositories = repositories.filter((repository) =>
-					selectedRepositoryIds.includes(repository.id),
+				// The first picked project is the primary (see the "Primary" chip).
+				const selectedRepositories = orderMultiProjectSelection(
+					repositories,
+					selectedRepositoryIds,
 				);
 				const result = await onCreateWorkspaceBundle({
 					name: form.name.trim(),
@@ -525,13 +536,16 @@ export function CreateWorkspaceDialog({
 						workspaceRoot: repository.rootPath,
 						baseBranch: repository.baseBranch,
 						name: repositoryDisplayName(repository),
-						isolationMode: null,
+						isolationMode: multiUsesWorktree ? null : "localDirect",
 					})),
 				});
 				toast.success(t("workspaceDialog.multiToastSuccess"), {
-					description: t("workspaceDialog.multiToastDescription", {
-						count: result.workspaces.length,
-					}),
+					description: t(
+						multiUsesWorktree
+							? "workspaceDialog.multiToastDescription"
+							: "workspaceDialog.multiLocalToastDescription",
+						{ count: result.workspaces.length },
+					),
 				});
 			} else if (mode === "clone") {
 				const result = await onCloneWorkspace({
@@ -843,6 +857,8 @@ export function CreateWorkspaceDialog({
 										const checked = selectedRepositoryIds.includes(
 											repository.id,
 										);
+										const primary =
+											checked && selectedRepositoryIds[0] === repository.id;
 										return (
 											<label
 												key={repository.id}
@@ -882,7 +898,7 @@ export function CreateWorkspaceDialog({
 													seed={repository.rootPath}
 													size="sm"
 												/>
-												<span className="min-w-0">
+												<span className="min-w-0 flex-1">
 													<span className="block truncate text-[12px] font-medium">
 														{repositoryDisplayName(repository)}
 													</span>
@@ -901,6 +917,31 @@ export function CreateWorkspaceDialog({
 														</span>
 													</span>
 												</span>
+												{primary ? (
+													<span
+														className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300"
+														title={t("workspaceDialog.primaryHint")}
+													>
+														{t("workspaceDialog.primary")}
+													</span>
+												) : checked ? (
+													<button
+														type="button"
+														disabled={isSubmitting}
+														className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+														title={t("workspaceDialog.primaryHint")}
+														onClick={(event) => {
+															// Inside the label: keep the click from toggling the checkbox.
+															event.preventDefault();
+															event.stopPropagation();
+															setSelectedRepositoryIds((current) =>
+																promoteMultiProjectPrimary(current, repository.id),
+															);
+														}}
+													>
+														{t("workspaceDialog.makePrimary")}
+													</button>
+												) : null}
 											</label>
 										);
 									})}
@@ -1271,20 +1312,54 @@ export function CreateWorkspaceDialog({
 						</div>
 						{mode === "open" ? (
 							<div className="workspace-dialog-protection">
-								<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-600 dark:text-emerald-400">
-									<ShieldCheck className="size-[18px]" strokeWidth={1.9} />
-								</span>
+								{multiLocal ? (
+									<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-amber-500/12 text-amber-600 dark:text-amber-400">
+										<FolderOpen className="size-[18px]" strokeWidth={1.9} />
+									</span>
+								) : (
+									<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-600 dark:text-emerald-400">
+										<ShieldCheck className="size-[18px]" strokeWidth={1.9} />
+									</span>
+								)}
 								<div className="min-w-0 flex-1">
 									<p className="text-[12px] font-medium text-foreground">
 										{creationScope === "multi" && protectedWorktreeCount < 2
 											? t("workspaceDialog.protectionPending")
-											: t("workspaceDialog.protectionPreview", {
-													count: protectedWorktreeCount,
-												})}
+											: multiLocal
+												? t("workspaceDialog.localPreview", {
+														count: protectedWorktreeCount,
+													})
+												: t("workspaceDialog.protectionPreview", {
+														count: protectedWorktreeCount,
+													})}
 									</p>
 									<p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">
-										{t("workspaceDialog.protectionDescription")}
+										{multiLocal
+											? t("workspaceDialog.localDescription")
+											: t("workspaceDialog.protectionDescription")}
 									</p>
+									{creationScope === "multi" ? (
+										<label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-[11.5px] text-muted-foreground has-[:disabled]:cursor-progress has-[:disabled]:opacity-60">
+											<input
+												type="checkbox"
+												checked={multiUsesWorktree}
+												disabled={isSubmitting}
+												onChange={(event) => setMultiUsesWorktree(event.target.checked)}
+												className="size-3.5 accent-primary"
+											/>
+											<span className="font-medium text-foreground">
+												{t("newTask.execution.worktree")}
+											</span>
+											<span aria-hidden>·</span>
+											<span>
+												{t(
+													multiUsesWorktree
+														? "newTask.execution.protectedDescription"
+														: "newTask.execution.localDescription",
+												)}
+											</span>
+										</label>
+									) : null}
 								</div>
 								{creationScope === "single" && protectionBranch ? (
 									<span

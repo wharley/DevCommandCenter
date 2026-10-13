@@ -64,6 +64,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useCodeRabbitIntegrationEnabled } from "@/features/settings/coderabbit-preferences";
 import { TurnReviewSurface } from "@/features/panel/turn-review-surface";
+import type { TurnUndoWorkspace } from "@/features/panel/turn-undo-across-projects";
 import { useCachedTurnReviewSummary } from "@/features/panel/turn-review-query";
 import { CodeRabbitReviewSection } from "./coderabbit-review-section";
 import { useWorkspaceGitStatus, WORKSPACE_GIT_STATUS_QUERY_KEY } from "./use-workspace-git-status";
@@ -1038,6 +1039,13 @@ type InspectorChangesSectionProps = {
 	onOpenExpandedPreview?: (selection?: WorkspaceGitPreviewSelection) => void;
 	/** A commit/push/PR action is reconciling the Git state shown below. */
 	isGitActionInProgress?: boolean;
+	/** Every project of a multi-project task, for Undo across the turn. */
+	turnWorkspaces?: TurnUndoWorkspace[];
+	/**
+	 * The project whose turn review is shown: in a multi-project task, the one
+	 * selected in "Showing" rather than the session's primary workspace.
+	 */
+	turnReviewWorkspaceId?: string | null;
 };
 
 export function InspectorChangesSection({
@@ -1053,6 +1061,8 @@ export function InspectorChangesSection({
 	targetSessionId = null,
 	onOpenExpandedPreview,
 	isGitActionInProgress = false,
+	turnWorkspaces,
+	turnReviewWorkspaceId = null,
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -1067,7 +1077,10 @@ export function InspectorChangesSection({
 	const [gitBusy, setGitBusy] = useState(false);
 	const [discardAllDialogOpen, setDiscardAllDialogOpen] = useState(false);
 	const codeRabbitEnabled = useCodeRabbitIntegrationEnabled();
-	const lastTurnReview = useCachedTurnReviewSummary(sessionId, workspaceId);
+	// Diff annotations keep targeting the session's workspace (its composer);
+	// only the turn review follows the project being shown.
+	const reviewWorkspaceId = turnReviewWorkspaceId ?? workspaceId;
+	const lastTurnReview = useCachedTurnReviewSummary(sessionId, reviewWorkspaceId);
 
 	const root = workspaceRoot?.trim() ?? "";
 
@@ -1244,9 +1257,10 @@ export function InspectorChangesSection({
 				<TurnReviewSurface
 					key={`${turnReviewRequest.sessionId}:${turnReviewRequest.turnId}:${turnReviewRequest.nonce}`}
 					sessionId={turnReviewRequest.sessionId}
-					workspaceId={turnReviewRequest.workspaceId}
+					workspaceId={reviewWorkspaceId ?? turnReviewRequest.workspaceId}
 					turnId={turnReviewRequest.turnId}
 					selectedFilePath={turnReviewRequest.filePath}
+					turnWorkspaces={turnWorkspaces}
 				/>
 			</div>
 		);
@@ -1406,8 +1420,12 @@ export function InspectorChangesSection({
 					</div>
 				)}
 			</div>
-			{activeScope === "last-turn" && sessionId && workspaceId ? (
-				<TurnReviewSurface sessionId={sessionId} workspaceId={workspaceId} />
+			{activeScope === "last-turn" && sessionId && reviewWorkspaceId ? (
+				<TurnReviewSurface
+					sessionId={sessionId}
+					workspaceId={reviewWorkspaceId}
+					turnWorkspaces={turnWorkspaces}
+				/>
 			) : (
 				<ScrollArea
 					viewportProps={{ "data-inspector-scroll-key": "git-changes" }}

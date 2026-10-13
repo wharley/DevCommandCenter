@@ -1087,7 +1087,7 @@ pub enum ExecuteConversationRewindOutput {
     Refused { reason: String },
 }
 
-fn rewind_file_facts(
+async fn rewind_file_facts(
     state: &SessionCommandState,
     session: &dcc_core::domain::session::Session,
     turn_ids: &[TurnId],
@@ -1097,11 +1097,30 @@ fn rewind_file_facts(
         .map_err(|error| error.to_string())?;
     let guarded_repo =
         SqliteSessionRepo::open_read_only(state.db_path()).map_err(|error| error.to_string())?;
-    turn_ids
-        .iter()
-        .map(|turn_id| {
+    // A multi-project task restores every project the removed turns changed;
+    // each project is named so the person sees where a file belongs.
+    let mut workspaces = vec![(session.workspace_id.clone(), None)];
+    if !session.additional_workspace_ids.is_empty() {
+        let workspace_repo =
+            SqliteWorkspaceRepo::open(state.db_path()).map_err(|error| error.to_string())?;
+        workspaces.clear();
+        for workspace_id in
+            std::iter::once(&session.workspace_id).chain(&session.additional_workspace_ids)
+        {
+            let project = workspace_repo
+                .get_workspace(workspace_id)
+                .await
+                .map_err(|error| error.to_string())?
+                .and_then(|workspace| workspace.name)
+                .unwrap_or_else(|| workspace_id.0.clone());
+            workspaces.push((workspace_id.clone(), Some(project)));
+        }
+    }
+    let mut facts = Vec::with_capacity(turn_ids.len() * workspaces.len());
+    for turn_id in turn_ids {
+        for (workspace_id, project) in &workspaces {
             let change_set = change_sets.iter().find(|change_set| {
-                change_set.turn_id == *turn_id && change_set.workspace_id == session.workspace_id
+                change_set.turn_id == *turn_id && change_set.workspace_id == *workspace_id
             });
             let capture = match change_set {
                 Some(change_set) => guarded_repo
@@ -1109,15 +1128,18 @@ fn rewind_file_facts(
                     .map_err(|error| error.to_string())?,
                 None => None,
             };
-            Ok(TurnFileFacts {
+            facts.push(TurnFileFacts {
                 turn_id: turn_id.clone(),
+                workspace_id: workspace_id.0.clone(),
+                project: project.clone(),
                 snapshot_id: change_set.map(|change_set| change_set.snapshot_id.clone()),
                 changed_file_count: change_set.map(|change_set| change_set.files.len()),
                 capture_state: capture.as_ref().map(|capture| capture.state.clone()),
                 capture_reason: capture.and_then(|capture| capture.reason_code),
-            })
-        })
-        .collect()
+            });
+        }
+    }
+    Ok(facts)
 }
 
 struct GuardedUndoRewindRestorer<'a>(&'a SessionCommandState);
@@ -1186,7 +1208,7 @@ pub async fn prepare_conversation_rewind(
         Err(reason) => return Ok(PrepareConversationRewindOutput::Blocked { reason }),
     };
     let (provider, _) = state.plan_rewind_provider_context(&session, &plan);
-    let facts = rewind_file_facts(&state, &session, &plan.removed_turn_ids)?;
+    let facts = rewind_file_facts(&state, &session, &plan.removed_turn_ids).await?;
     let files = plan_files(&GuardedUndoRewindRestorer(&state), &facts).await;
     Ok(PrepareConversationRewindOutput::Ready {
         anchor_turn_id: plan.anchor_turn_id.0,
@@ -1238,7 +1260,7 @@ pub async fn execute_conversation_rewind(
     }
 
     let restored = if input.restore_files {
-        let facts = rewind_file_facts(&state, &session, &plan.removed_turn_ids)?;
+        let facts = rewind_file_facts(&state, &session, &plan.removed_turn_ids).await?;
         match restore_files(&GuardedUndoRewindRestorer(&state), &facts).await {
             Ok(restored) => restored,
             Err(stopped) => return Ok(ExecuteConversationRewindOutput::FilesStopped { stopped }),

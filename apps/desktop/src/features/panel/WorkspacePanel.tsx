@@ -220,6 +220,11 @@ type WorkspacePanelProps = {
 		color?: string | null;
 		seed?: string | null;
 	}>;
+	/**
+	 * False when a multi-project task works in the projects' own checkouts:
+	 * the composer then delivers the selected project like a single task.
+	 */
+	multiProjectDelivery?: boolean;
 	sessionQueryScope?: string;
 	selectedProviderId: string | null;
 	selectedModelId: string | null;
@@ -331,6 +336,7 @@ export function WorkspacePanel({
 	projectSeed = null,
 	isIsolatedWorkspace = true,
 	workspaceContextProjects = [],
+	multiProjectDelivery = true,
 	sessionQueryScope = "local",
 	selectedProviderId,
 	selectedModelId,
@@ -1107,6 +1113,11 @@ export function WorkspacePanel({
 				? "error"
 				: "ready";
 	const hasLocalChanges = (gitChangeSummary?.files ?? 0) > 0;
+	// One flag drives both the Dock label and what its click does, so a local
+	// multi-project task never shows a single-project action that opens the
+	// batch delivery.
+	const deliversAllProjects =
+		multiProjectDelivery && workspaceContextProjects.length > 1;
 	const delivery = useWorkspaceDelivery({
 		workspaceRoot: workspacePath,
 		forgeLogin,
@@ -1114,7 +1125,7 @@ export function WorkspacePanel({
 		requestLabel: forgeRequestLabel,
 		stagedCount: gitStatusQuery.data?.staged.length ?? 0,
 		hasLocalChanges,
-		multiProject: workspaceContextProjects.length > 1,
+		multiProject: deliversAllProjects,
 		onReview: onReviewChanges ?? onToggleInspector ?? (() => undefined),
 		onRequestSyncBase: () => setSyncBaseConfirmationOpen(true),
 		onRequestMerge: () => setMergeConfirmationOpen(true),
@@ -1637,7 +1648,9 @@ export function WorkspacePanel({
 							commitMode={commitMode}
 							forgeRequestLabel={forgeRequestLabel}
 							deliveryBusy={delivery.busy || commitPreparationBusy}
-							multiProjectCount={workspaceContextProjects.length}
+							multiProjectCount={
+								deliversAllProjects ? workspaceContextProjects.length : 1
+							}
 							onReviewChanges={onReviewChanges ?? onToggleInspector}
 							onRunDeliveryAction={runDeliveryAction}
 							onCreateChangeRequest={(draft) => setCreateRequestDraft(draft)}

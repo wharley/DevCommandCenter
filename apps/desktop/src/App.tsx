@@ -725,10 +725,21 @@ export default function App() {
 				const deletableMemberWorkspaceIds = bundle.members
 					.filter((member) => member.createdForBundle)
 					.map((member) => member.workspaceId);
+				// Local members run on the person's own branch; deleting the task
+				// never offers to delete that remote branch (the backend refuses it).
+				const remoteDeletableMemberWorkspaceIds = deletableMemberWorkspaceIds.filter(
+					(workspaceId) =>
+						Boolean(
+							workspacesFromBackend
+								.find((candidate) => candidate.id === workspaceId)
+								?.worktreePath?.trim(),
+						),
+				);
 				return {
 					...workspace,
 					name: bundle.bundle.name,
 					bundleId: bundle.bundle.id,
+					bundleIsolation: bundle.bundle.isolation,
 					additionalWorkspaceIds: memberWorkspaceIds.filter(
 						(workspaceId) => workspaceId !== workspace.id,
 					),
@@ -755,7 +766,7 @@ export default function App() {
 							);
 						})
 						.filter((name): name is string => Boolean(name)),
-					remoteDeletionTargets: deletableMemberWorkspaceIds.flatMap(
+					remoteDeletionTargets: remoteDeletableMemberWorkspaceIds.flatMap(
 						(workspaceId) =>
 							workspacesFromBackend.find(
 								(candidate) => candidate.id === workspaceId,
@@ -834,6 +845,8 @@ export default function App() {
 	const [workspaceCreationScope, setWorkspaceCreationScope] = useState<
 		"single" | "multi"
 	>("single");
+	const [workspaceCreationIsolation, setWorkspaceCreationIsolation] =
+		useState<WorkspaceIsolationMode>("protectedWorktree");
 	const [workspaceRepositoryContext, setWorkspaceRepositoryContext] =
 		useState<ExistingRepositoryContext | null>(null);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -1156,6 +1169,19 @@ export default function App() {
 				)
 				.filter((workspace): workspace is NonNullable<typeof workspace> => Boolean(workspace)),
 		[selectedWorkspace?.memberWorkspaceIds, workspacesFromBackend],
+	);
+	const turnUndoWorkspaces = useMemo(
+		() =>
+			selectedBundleMembers.map((workspace) => {
+				const repository = repositoriesFromBackend.find(
+					(candidate) => candidate.rootPath === workspace.rootPath,
+				);
+				return {
+					id: workspace.id,
+					name: repository ? repositoryDisplayName(repository) : workspace.name,
+				};
+			}),
+		[repositoriesFromBackend, selectedBundleMembers],
 	);
 	const bundleMemberChangeQueries = useQueries({
 		queries: selectedBundleMembers.map((workspace) => {
@@ -4689,6 +4715,7 @@ export default function App() {
 			mode: "open" | "clone",
 			repositoryContext: ExistingRepositoryContext | null = null,
 			creationScope: "single" | "multi" = "single",
+			isolationMode: WorkspaceIsolationMode = "protectedWorktree",
 		) => {
 			if (isRemoteBackend) {
 				showRemoteUnsupported("workspaces");
@@ -4696,6 +4723,7 @@ export default function App() {
 			}
 			setWorkspaceCreationMode(mode);
 			setWorkspaceCreationScope(mode === "open" ? creationScope : "single");
+			setWorkspaceCreationIsolation(isolationMode);
 			setWorkspaceRepositoryContext(mode === "open" ? repositoryContext : null);
 			setIsCreateWorkspaceOpen(true);
 		},
@@ -5351,6 +5379,7 @@ export default function App() {
 								open={isCreateWorkspaceOpen}
 								mode={workspaceCreationMode}
 								initialCreationScope={workspaceCreationScope}
+								initialIsolationMode={workspaceCreationIsolation}
 								repositoryContext={workspaceRepositoryContext}
 								onOpenChange={handleWorkspaceDialogOpenChange}
 								onCreateWorkspace={async (input) => {
@@ -5429,9 +5458,9 @@ export default function App() {
 											isolationMode,
 										});
 									}}
-									onSelectMultiple={() => {
+									onSelectMultiple={(isolationMode) => {
 										setGlobalSurface(null);
-										openWorkspaceDialog("open", null, "multi");
+										openWorkspaceDialog("open", null, "multi", isolationMode);
 									}}
 									onOpenProject={() => {
 										setGlobalSurface(null);
@@ -5487,6 +5516,7 @@ export default function App() {
 									})}
 									selectedWorkspaceScopeId={activeWorkspace?.id ?? selectedWorkspace.id}
 									onSelectWorkspaceScope={setSelectedBundleMemberId}
+									workspaceScopeLocal={selectedWorkspace.bundleIsolation === "local"}
 									onDeliverWorkspaceScope={
 										isRemoteBackend ? undefined : handleDeliverWorkspaceScope
 									}
@@ -5631,6 +5661,8 @@ export default function App() {
 									sessionWorkspacePath={selectedSessionWorkspacePath}
 									workspaceStatus={selectedWorkspace?.status ?? null}
 									workspaceHasOwnWorktree={Boolean(selectedWorkspace?.worktreePath)}
+									turnWorkspaces={turnUndoWorkspaces}
+									turnReviewWorkspaceId={activeWorkspace?.id ?? null}
 									selectedProviderLabel={selectedProvider?.label ?? null}
 									selectedModelLabel={selectedModel?.label ?? null}
 									sessionState={selectedSessionSnapshot?.state ?? "idle"}

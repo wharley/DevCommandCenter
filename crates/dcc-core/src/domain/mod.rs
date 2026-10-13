@@ -80,6 +80,6 @@ pub use usage::{
 };
 pub use workspace::{Workspace, WorkspaceId, WorkspaceState};
 pub use workspace_bundle::{
-    WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
-    WorkspaceBundleSummary,
+    WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleIsolation, WorkspaceBundleMember,
+    WorkspaceBundleState, WorkspaceBundleSummary,
 };

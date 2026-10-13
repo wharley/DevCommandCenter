@@ -575,8 +575,11 @@
       "base": "base · {{branch}}",
       "protectedWorktree": "Protected worktree",
       "coordinatedProjects_one": "{{count}} coordinated project · {{projects}}",
-      "coordinatedProjects_other": "{{count}} coordinated projects · {{projects}}"
+      "coordinatedProjects_other": "{{count}} coordinated projects · {{projects}}",
+      "localCheckout": "Directly in the checkout"
     },
+    "bundleMembers_one": "{{count}} project in this task",
+    "bundleMembers_other": "{{count}} projects in this task",
     "cancel": "Cancel",
     "settings": "Settings",
     "settingsShort": "Settings",
@@ -950,6 +953,14 @@
     "protectionPreview_one": "{{count}} protected worktree will be created",
     "protectionPreview_other": "{{count}} protected worktrees will be created",
     "protectionPending": "Select at least two projects",
+    "primary": "Primary",
+    "makePrimary": "Make primary",
+    "primaryHint": "The task lives in this project, the agent starts here and reads its instructions. It can still change every selected project.",
+    "localPreview_one": "{{count}} project will work directly in its checkout",
+    "localPreview_other": "{{count}} projects will work directly in their checkouts",
+    "localDescription": "No worktree: the agent edits your current checkouts. Deliver each project from the Inspector.",
+    "multiLocalToastDescription_one": "{{count}} project ready for one chat, directly in its checkout.",
+    "multiLocalToastDescription_other": "{{count}} projects ready for one chat, directly in their checkouts.",
     "protectionDescription": "Each task works in isolation. Your original checkouts remain intact.",
     "pickFolderClone": "Choose a destination folder",
     "pickFolderRepo": "Choose a repository folder",
@@ -967,11 +978,15 @@
     "toastCreateError": "Failed to create task"
   },
   "workspaceScope": {
-    "projects": "Project under review",
+    "projects": "Showing",
+    "localBadge_one": "{{count}} project · local",
+    "localBadge_other": "{{count}} projects · local",
+    "localHint": "No worktree: the agent edits these projects' checkouts. Deliver each project from the Inspector; Undo does not cover this task yet.",
     "authorizedCount": "{{count}} authorized",
     "providerUnsupported": "{{provider}} does not offer isolated multi-workspace support in DCC yet. Choose Codex, Claude, Cursor, or Gemini.",
     "delivery": {
-      "action": "Deliver {{count}}",
+      "action_one": "Deliver in {{count}} project",
+      "action_other": "Deliver in {{count}} projects",
       "complete": "Delivered",
       "checking": "Checking",
       "title": "Deliver changed projects",
@@ -3834,6 +3849,7 @@
       "done": "The conversation is back to before the message. Edit and send when ready.",
       "doneRestored_one": "The conversation is back to before the message; files from {{count}} turn restored.",
       "doneRestored_other": "The conversation is back to before the message; files from {{count}} turns restored.",
+      "inProject": "In {{project}}:",
       "stoppedTitle": "Restoring stopped and the conversation did not change",
       "stoppedRestored_one": "Files from the most recent {{count}} turn were already restored and stay that way.",
       "stoppedRestored_other": "Files from the {{count}} most recent turns were already restored and stay that way.",
@@ -4719,6 +4735,25 @@
       "matches_result": "Workspace matches snapshot",
       "diverged": "Workspace changed later",
       "unavailable": "Current state unavailable"
+    },
+    "turnUndo": {
+      "action_one": "Undo turn · {{count}} project",
+      "action_other": "Undo turn · {{count}} projects",
+      "blocked": "Nothing was undone: {{project}} cannot be restored right now.",
+      "confirmTitle": "Undo the turn in every project",
+      "confirmSummary": "Review the {{count}} files across {{projects}} projects before restoring.",
+      "orderWarning": "Every project was checked. Restoring happens one project at a time: each project comes back whole or not at all. If one stops midway, the earlier ones stay restored and the later ones are left untouched — each project's result appears below.",
+      "uncovered": "No Undo for this turn (review and revert with Git): {{projects}}.",
+      "results": {
+        "completed": "Restored",
+        "blocked": "Blocked",
+        "rolled_back": "Safely rolled back",
+        "recovery_required": "Needs recovery",
+        "failed": "Failed",
+        "not_attempted": "Not touched"
+      },
+      "confirmAction_one": "Restore {{count}} project",
+      "confirmAction_other": "Restore {{count}} projects"
     },
     "guardedUndo": {
       "states": {

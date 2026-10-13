@@ -45,9 +45,10 @@ use dcc_infra::guarded_undo::{
 use crate::terminal_arbiter::TerminalKey;
 
 const MAX_TRACKED_TURNS: usize = 1_024;
-// Capture v2/M4 v1 is deliberately single-root. Multi-root turns require a
-// separate attribution and lock-ordering design extension.
-const MAX_CAPTURE_ROOTS_PER_TURN: usize = 1;
+// A multi-project turn captures one root per project, each with its own
+// snapshot and lease. The caller orders roots by path and keeps at most one
+// root per Git common directory, so leases never compete for one directory.
+const MAX_CAPTURE_ROOTS_PER_TURN: usize = 16;
 // Startup recovery is global to the app-data store, not a single provider
 // turn. Keep its bounded admission independent from the stricter per-turn
 // capture fan-out limit.

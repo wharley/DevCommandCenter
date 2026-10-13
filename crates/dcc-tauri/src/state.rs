@@ -3088,8 +3088,7 @@ impl SessionCommandState {
         turn_id: &TurnId,
         baseline: M3BaselineCapture,
     ) -> CaptureV2StartReport {
-        const MAX_CAPTURE_ROOTS: usize = 1;
-        if baseline.snapshots.len() != MAX_CAPTURE_ROOTS {
+        if baseline.snapshots.is_empty() {
             return CaptureV2StartReport::skipped();
         }
 
@@ -3111,9 +3110,9 @@ impl SessionCommandState {
             }
         }
 
-        if baseline.root_bindings.len() != baseline.snapshots.len() {
-            return CaptureV2StartReport::skipped();
-        }
+        // Every root of the turn gets its own capture. A root without a
+        // binding (not Git, or its baseline failed) simply stays out of Undo;
+        // it no longer takes the other roots of a multi-project turn down.
         let mut bindings_by_workspace = HashMap::with_capacity(baseline.root_bindings.len());
         for binding in &baseline.root_bindings {
             if bindings_by_workspace
@@ -3135,16 +3134,7 @@ impl SessionCommandState {
             {
                 return CaptureV2StartReport::skipped();
             }
-            let Some(root) = roots_by_workspace.get(&snapshot.workspace_id) else {
-                return CaptureV2StartReport::skipped();
-            };
-            if !bindings_by_workspace.contains_key(&snapshot.workspace_id) {
-                return CaptureV2StartReport::skipped();
-            }
-            if roots_by_workspace
-                .values()
-                .any(|other| other != root && (other.starts_with(root) || root.starts_with(other)))
-            {
+            if !roots_by_workspace.contains_key(&snapshot.workspace_id) {
                 return CaptureV2StartReport::skipped();
             }
         }
@@ -3152,7 +3142,59 @@ impl SessionCommandState {
             return CaptureV2StartReport::skipped();
         }
 
-        let references = baseline.snapshots.clone();
+        // A root nested in another root would see its files captured twice.
+        let mut eligible = baseline
+            .snapshots
+            .iter()
+            .filter(|snapshot| bindings_by_workspace.contains_key(&snapshot.workspace_id))
+            .filter(|snapshot| {
+                let root = &roots_by_workspace[&snapshot.workspace_id];
+                !roots_by_workspace.values().any(|other| {
+                    other != root && (other.starts_with(root) || root.starts_with(other))
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        // Begin captures in a stable order: by root path.
+        eligible.sort_by(|left, right| {
+            roots_by_workspace[&left.workspace_id].cmp(&roots_by_workspace[&right.workspace_id])
+        });
+        // Two roots of the same Git repository (a checkout and one of its
+        // linked worktrees) share the common directory, and the mutation
+        // coordinator admits one capture per directory and turn. The first
+        // root by path keeps Undo; the others stay out of it.
+        let eligible_roots = eligible
+            .iter()
+            .map(|snapshot| roots_by_workspace[&snapshot.workspace_id].clone())
+            .collect::<Vec<_>>();
+        let Ok(common_dirs) = tokio::task::spawn_blocking(move || {
+            eligible_roots
+                .iter()
+                .map(|root| {
+                    dcc_infra::guarded_undo::macos_git_bridge::MacGitMutationAuthority::open(root)
+                        .ok()
+                        .map(|authority| authority.common_dir_id())
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        else {
+            return CaptureV2StartReport::skipped();
+        };
+        let mut seen_common_dirs = HashSet::with_capacity(common_dirs.len());
+        let eligible = eligible
+            .into_iter()
+            .zip(common_dirs)
+            .filter_map(|(snapshot, common_dir)| {
+                let common_dir = common_dir?;
+                seen_common_dirs.insert(common_dir).then_some(snapshot)
+            })
+            .collect::<Vec<_>>();
+        if eligible.is_empty() {
+            return CaptureV2StartReport::skipped();
+        }
+
+        let references = eligible.clone();
         let session_id = session.id.clone();
         let expected_turn = turn_id.clone();
         let repo = self.session_repo.clone();
@@ -3209,23 +3251,20 @@ impl SessionCommandState {
         // Re-read the cooperative mapping immediately before handing the
         // immutable M3 binding to the blocking capture worker.
         let late_roots = match self.turn_review_roots(session).await {
-            Ok(roots) if roots.len() == bindings_by_workspace.len() => roots,
+            Ok(roots) if roots.len() == roots_by_workspace.len() => roots,
             _ => return CaptureV2StartReport::skipped(),
         };
         for (workspace_id, root) in late_roots {
             let Some(root) = Self::lexical_absolute_root(Path::new(&root)) else {
                 return CaptureV2StartReport::skipped();
             };
-            let Some(binding) = bindings_by_workspace.get(&workspace_id) else {
-                return CaptureV2StartReport::skipped();
-            };
-            if binding.workspace_absolute != root {
+            if roots_by_workspace.get(&workspace_id) != Some(&root) {
                 return CaptureV2StartReport::skipped();
             }
         }
 
-        let requests = baseline
-            .snapshots
+        let eligible_count = eligible.len();
+        let requests = eligible
             .into_iter()
             .filter_map(|snapshot| {
                 roots_by_workspace
@@ -3246,7 +3285,7 @@ impl SessionCommandState {
                     })
             })
             .collect::<Vec<_>>();
-        if requests.len() != requested_workspaces.len() {
+        if requests.len() != eligible_count {
             return CaptureV2StartReport::skipped();
         }
 
@@ -5941,6 +5980,8 @@ impl SessionCommandState {
             ));
         }
 
+        let local_bundle = bundle.bundle.isolation
+            == dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Local;
         let resolve_managed_root = |workspace: &Workspace| -> Result<String> {
             if !matches!(
                 workspace.state,
@@ -5952,23 +5993,44 @@ impl SessionCommandState {
                     workspace.id.0
                 )));
             }
-            let root = workspace
+            let worktree = workspace
                 .worktree_path
                 .as_deref()
                 .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
+                .filter(|value| !value.is_empty());
+            // A local bundle was created with *Worktree* unticked: every member
+            // works in its own checkout. A worktree bundle never falls back to
+            // the checkout, even when a member lost its worktree path.
+            let root = if local_bundle {
+                if worktree.is_some() {
+                    return Err(dcc_core::CoreError::InvalidInput(format!(
+                        "workspace {} has a worktree but belongs to a local bundle",
+                        workspace.id.0
+                    )));
+                }
+                let root = workspace.root_path.trim();
+                if !PathBuf::from(root).is_absolute() {
+                    return Err(dcc_core::CoreError::InvalidInput(format!(
+                        "workspace {} checkout path must be absolute",
+                        workspace.id.0
+                    )));
+                }
+                root
+            } else {
+                let root = worktree.ok_or_else(|| {
                     dcc_core::CoreError::InvalidInput(format!(
                         "workspace {} has no DCC-managed worktree",
                         workspace.id.0
                     ))
                 })?;
-            if !PathBuf::from(root).is_absolute() {
-                return Err(dcc_core::CoreError::InvalidInput(format!(
-                    "workspace {} worktree path must be absolute",
-                    workspace.id.0
-                )));
-            }
+                if !PathBuf::from(root).is_absolute() {
+                    return Err(dcc_core::CoreError::InvalidInput(format!(
+                        "workspace {} worktree path must be absolute",
+                        workspace.id.0
+                    )));
+                }
+                root
+            };
             Ok(root.to_string())
         };
 
@@ -7432,9 +7494,15 @@ impl SessionCommandState {
                     "multi-workspace session bundle is no longer available".to_string(),
                 )
             })?;
+        let local_bundle = bundle.bundle.isolation
+            == dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Local;
         let mut lines = vec![
             "DCC authorized multi-workspace scope:".to_string(),
-            "Use only the isolated worktree paths listed below for file reads and writes. Never edit the repositories' original checkouts or any unlisted local project. Decide which listed projects need changes, keep producer/consumer contracts consistent, and test the affected projects in the same task context.".to_string(),
+            if local_bundle {
+                "Work directly in the project checkouts listed below; they are the person's own working copies, not isolated worktrees. Use only these paths for file reads and writes and never touch any unlisted local project. Do not switch branches, reset, stash or rewrite history in them. Undo and delivery only cover the primary project. Decide which listed projects need changes, keep producer/consumer contracts consistent, and test what you changed.".to_string()
+            } else {
+                "Use only the isolated worktree paths listed below for file reads and writes. Never edit the repositories' original checkouts or any unlisted local project. Decide which listed projects need changes, keep producer/consumer contracts consistent, and test the affected projects in the same task context.".to_string()
+            },
         ];
         for member in &bundle.members {
             let workspace = workspace_repo
@@ -7446,24 +7514,29 @@ impl SessionCommandState {
                         member.workspace_id.0
                     ))
                 })?;
-            let root = workspace
-                .worktree_path
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    dcc_core::CoreError::InvalidInput(format!(
-                        "workspace {} has no isolated worktree",
-                        workspace.id.0
-                    ))
-                })?;
+            let (location, root) = if local_bundle {
+                ("checkout", workspace.root_path.trim())
+            } else {
+                let root = workspace
+                    .worktree_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        dcc_core::CoreError::InvalidInput(format!(
+                            "workspace {} has no isolated worktree",
+                            workspace.id.0
+                        ))
+                    })?;
+                ("worktree", root)
+            };
             let role = if workspace.id == session.workspace_id {
                 "primary"
             } else {
                 "additional"
             };
             lines.push(format!(
-                "- {role}: {} | project={} | base={} | worktree={root}",
+                "- {role}: {} | project={} | base={} | {location}={root}",
                 workspace.name.as_deref().unwrap_or(&workspace.id.0),
                 workspace.project_id.0,
                 workspace.base_branch,
@@ -10462,6 +10535,92 @@ mod tests {
     }
 
     #[test]
+    fn local_multi_workspace_scope_resolves_project_checkouts() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-local-scope-{}.sqlite", Uuid::new_v4())),
+        );
+        let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let mut primary = sample_workspace("primary", "unused");
+        primary.worktree_path = None;
+        let mut secondary = sample_workspace("secondary", "unused");
+        secondary.worktree_path = None;
+        futures::executor::block_on(repo.save_workspace(&primary)).expect("save primary");
+        futures::executor::block_on(repo.save_workspace(&secondary)).expect("save secondary");
+        let bundle_id = WorkspaceBundleId("bundle-local".to_string());
+        futures::executor::block_on(repo.save_workspace_bundle(
+            &WorkspaceBundle {
+                id: bundle_id.clone(),
+                name: "feature".to_string(),
+                primary_workspace_id: primary.id.clone(),
+                state: WorkspaceBundleState::Ready,
+                isolation: dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Local,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            &[
+                WorkspaceBundleMember {
+                    bundle_id: bundle_id.clone(),
+                    workspace_id: primary.id.clone(),
+                    created_for_bundle: true,
+                    position: 0,
+                },
+                WorkspaceBundleMember {
+                    bundle_id,
+                    workspace_id: secondary.id.clone(),
+                    created_for_bundle: true,
+                    position: 1,
+                },
+            ],
+        ))
+        .expect("save local bundle");
+
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
+        let session = Session {
+            id: SessionId("session-local".to_string()),
+            project_id: primary.project_id.clone(),
+            workspace_id: primary.id.clone(),
+            additional_workspace_ids: vec![secondary.id.clone()],
+            provider_id: "claude_code".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let (primary_root, additional_roots) =
+            futures::executor::block_on(state.resolve_session_working_directories(&session, true))
+                .expect("resolve local multi-root scope");
+        assert_eq!(primary_root, "/original/primary");
+        assert_eq!(additional_roots, vec!["/original/secondary"]);
+        let instructions =
+            futures::executor::block_on(state.multi_workspace_scope_instructions(&session))
+                .expect("build local scope instructions")
+                .expect("local scope instructions");
+        assert!(instructions.contains("checkout=/original/secondary"));
+        assert!(instructions.contains("Undo and delivery only cover the primary project"));
+
+        // A member that somehow carries a worktree breaks the local contract.
+        secondary.worktree_path = Some("/tmp/dcc-secondary-worktree".to_string());
+        futures::executor::block_on(repo.save_workspace(&secondary))
+            .expect("save secondary with worktree");
+        let mixed =
+            futures::executor::block_on(state.resolve_session_working_directories(&session, true))
+                .expect_err("a worktree member must not join a local bundle");
+        assert!(
+            matches!(mixed, dcc_core::CoreError::InvalidInput(message) if message.contains("belongs to a local bundle"))
+        );
+
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
     fn multi_workspace_scope_resolves_only_bundle_worktrees_and_gates_provider() {
         let db_path = physical_db_path(
             std::env::temp_dir().join(format!("dcc-scope-{}.sqlite", Uuid::new_v4())),
@@ -10479,6 +10638,7 @@ mod tests {
                 name: "feature".to_string(),
                 primary_workspace_id: primary.id.clone(),
                 state: WorkspaceBundleState::Ready,
+                isolation: dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Worktree,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
@@ -10611,6 +10771,7 @@ mod tests {
                 name: "baseline".to_string(),
                 primary_workspace_id: primary.id.clone(),
                 state: WorkspaceBundleState::Ready,
+                isolation: dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Worktree,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
@@ -10892,6 +11053,211 @@ mod tests {
 
         drop(repo);
         drop(state);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    fn init_capture_test_repo(root: &Path) {
+        for arguments in [
+            vec!["init", "-q"],
+            vec!["config", "user.name", "DCC Test"],
+            vec!["config", "user.email", "dcc@example.invalid"],
+        ] {
+            assert!(std::process::Command::new("/usr/bin/git")
+                .current_dir(root)
+                .args(arguments)
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(root.join("tracked.txt"), b"before\n").unwrap();
+        for arguments in [
+            vec!["add", "--", "tracked.txt"],
+            vec!["commit", "--no-gpg-sign", "--no-verify", "-qm", "initial"],
+        ] {
+            assert!(std::process::Command::new("/usr/bin/git")
+                .current_dir(root)
+                .args(arguments)
+                .status()
+                .unwrap()
+                .success());
+        }
+    }
+
+    /// Saves a local multi-project task over `roots` and returns its session.
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    fn save_local_bundle_session(
+        state: &SessionCommandState,
+        repo: &SqliteWorkspaceRepo,
+        name: &str,
+        roots: &[&Path],
+    ) -> Session {
+        let workspaces = roots
+            .iter()
+            .enumerate()
+            .map(|(index, root)| Workspace {
+                root_path: root.to_str().unwrap().to_owned(),
+                worktree_path: None,
+                ..sample_workspace(&format!("{name}-{index}"), "unused")
+            })
+            .collect::<Vec<_>>();
+        for workspace in &workspaces {
+            futures::executor::block_on(repo.save_workspace(workspace)).unwrap();
+        }
+        let bundle_id = WorkspaceBundleId(format!("{name}-bundle"));
+        futures::executor::block_on(
+            repo.save_workspace_bundle(
+                &WorkspaceBundle {
+                    id: bundle_id.clone(),
+                    name: name.to_owned(),
+                    primary_workspace_id: workspaces[0].id.clone(),
+                    state: WorkspaceBundleState::Ready,
+                    isolation: dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Local,
+                    created_at: "2026-01-01T00:00:00Z".to_owned(),
+                    updated_at: "2026-01-01T00:00:00Z".to_owned(),
+                },
+                &workspaces
+                    .iter()
+                    .enumerate()
+                    .map(|(position, workspace)| WorkspaceBundleMember {
+                        bundle_id: bundle_id.clone(),
+                        workspace_id: workspace.id.clone(),
+                        created_for_bundle: true,
+                        position: position as u32,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        )
+        .unwrap();
+        let session = Session {
+            id: SessionId(format!("{name}-session")),
+            project_id: workspaces[0].project_id.clone(),
+            workspace_id: workspaces[0].id.clone(),
+            additional_workspace_ids: workspaces[1..]
+                .iter()
+                .map(|workspace| workspace.id.clone())
+                .collect(),
+            provider_id: "claude_code".to_owned(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        };
+        futures::executor::block_on(SessionRepo::save_session(state, &session)).unwrap();
+        session
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn capture_v2_captures_every_git_root_of_a_multi_project_turn() {
+        let db_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let app_data = tempfile::tempdir_in("/private/tmp").unwrap();
+        let first_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let second_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let first = std::fs::canonicalize(first_root.path()).unwrap();
+        let second = std::fs::canonicalize(second_root.path()).unwrap();
+        init_capture_test_repo(&first);
+        init_capture_test_repo(&second);
+        let db_path = std::fs::canonicalize(db_root.path())
+            .unwrap()
+            .join("sessions.sqlite");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).unwrap(),
+        );
+        let repo = SqliteWorkspaceRepo::open(&db_path).unwrap();
+        let session = save_local_bundle_session(&state, &repo, "two-repos", &[&first, &second]);
+        let turn_id = TurnId("two-repos-turn".to_owned());
+
+        let baseline = state
+            .capture_turn_review_baseline(&session, &turn_id)
+            .await
+            .unwrap();
+        assert_eq!(baseline.snapshots.len(), 2);
+        assert_eq!(baseline.root_bindings.len(), 2);
+        let report = state
+            .begin_capture_v2_after_m3(&session, &turn_id, baseline)
+            .await;
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Started);
+        assert_eq!(report.active_captures, 2);
+        assert_eq!(report.failed_captures, 0);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn capture_v2_keeps_git_roots_when_another_root_is_not_git() {
+        let db_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let app_data = tempfile::tempdir_in("/private/tmp").unwrap();
+        let git_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let plain_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let git = std::fs::canonicalize(git_root.path()).unwrap();
+        let plain = std::fs::canonicalize(plain_root.path()).unwrap();
+        init_capture_test_repo(&git);
+        let db_path = std::fs::canonicalize(db_root.path())
+            .unwrap()
+            .join("sessions.sqlite");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).unwrap(),
+        );
+        let repo = SqliteWorkspaceRepo::open(&db_path).unwrap();
+        let session = save_local_bundle_session(&state, &repo, "git-and-plain", &[&plain, &git]);
+        let turn_id = TurnId("git-and-plain-turn".to_owned());
+
+        let baseline = state
+            .capture_turn_review_baseline(&session, &turn_id)
+            .await
+            .unwrap();
+        assert_eq!(baseline.snapshots.len(), 2);
+        assert_eq!(baseline.root_bindings.len(), 1);
+        let report = state
+            .begin_capture_v2_after_m3(&session, &turn_id, baseline)
+            .await;
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Started);
+        assert_eq!(report.active_captures, 1);
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn capture_v2_keeps_one_root_per_git_repository() {
+        let db_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let app_data = tempfile::tempdir_in("/private/tmp").unwrap();
+        let checkout_root = tempfile::tempdir_in("/private/tmp").unwrap();
+        let parent = tempfile::tempdir_in("/private/tmp").unwrap();
+        let checkout = std::fs::canonicalize(checkout_root.path()).unwrap();
+        init_capture_test_repo(&checkout);
+        let linked = std::fs::canonicalize(parent.path()).unwrap().join("linked");
+        assert!(std::process::Command::new("/usr/bin/git")
+            .current_dir(&checkout)
+            .args(["worktree", "add", "-q", "-b", "linked"])
+            .arg(&linked)
+            .status()
+            .unwrap()
+            .success());
+        let db_path = std::fs::canonicalize(db_root.path())
+            .unwrap()
+            .join("sessions.sqlite");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).unwrap(),
+        );
+        let repo = SqliteWorkspaceRepo::open(&db_path).unwrap();
+        let session = save_local_bundle_session(&state, &repo, "same-repo", &[&checkout, &linked]);
+        let turn_id = TurnId("same-repo-turn".to_owned());
+
+        let baseline = state
+            .capture_turn_review_baseline(&session, &turn_id)
+            .await
+            .unwrap();
+        assert_eq!(baseline.root_bindings.len(), 2);
+        let report = state
+            .begin_capture_v2_after_m3(&session, &turn_id, baseline)
+            .await;
+        // The shared common directory admits one capture: no failed lease.
+        assert_eq!(report.disposition, CaptureV2StartDisposition::Started);
+        assert_eq!(report.active_captures, 1);
+        assert_eq!(report.failed_captures, 0);
     }
 
     #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]

@@ -150,6 +150,8 @@ type SessionWorkbenchProps = {
 	}>;
 	selectedWorkspaceScopeId?: string | null;
 	onSelectWorkspaceScope?: (workspaceId: string) => void;
+	/** The multi-project task works directly in the projects' own checkouts. */
+	workspaceScopeLocal?: boolean;
 	onPrepareWorkspaceScopeDelivery?: () => Promise<MultiWorkspaceDeliveryPreview[]>;
 	onDeliverWorkspaceScope?: (
 		workspaceIds: string[],
@@ -268,6 +270,7 @@ export function SessionWorkbench({
 	workspaceScopeOptions = [],
 	selectedWorkspaceScopeId = null,
 	onSelectWorkspaceScope,
+	workspaceScopeLocal = false,
 	onPrepareWorkspaceScopeDelivery,
 	onDeliverWorkspaceScope,
 	sessionQueryScope = "local",
@@ -1116,12 +1119,23 @@ export function SessionWorkbench({
 									);
 								})}
 							</div>
-							<span className="ml-auto shrink-0 rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
-								{t("workspaceScope.authorizedCount", {
-									count: workspaceScopeOptions.length,
-								})}
-							</span>
-							{onDeliverWorkspaceScope ? (
+							{workspaceScopeLocal ? (
+								<span
+									className="ml-auto shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+									title={t("workspaceScope.localHint")}
+								>
+									{t("workspaceScope.localBadge", {
+										count: workspaceScopeOptions.length,
+									})}
+								</span>
+							) : (
+								<span className="ml-auto shrink-0 rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
+									{t("workspaceScope.authorizedCount", {
+										count: workspaceScopeOptions.length,
+									})}
+								</span>
+							)}
+							{onDeliverWorkspaceScope && !workspaceScopeLocal ? (
 								<Button
 									type="button"
 									variant="outline"
@@ -1158,6 +1172,7 @@ export function SessionWorkbench({
 						projectSeed={projectSeed}
 						isIsolatedWorkspace={Boolean(terminalWorktreePath)}
 						workspaceContextProjects={workspaceScopeOptions}
+						multiProjectDelivery={!workspaceScopeLocal}
 						sessionQueryScope={sessionQueryScope}
 						selectedProviderId={selectedProviderId}
 						selectedModelId={selectedModelId}

@@ -1,3 +1,4 @@
+import type { TurnUndoWorkspace } from "@/features/panel/turn-undo-across-projects";
 import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
@@ -193,6 +194,10 @@ type WorkspaceInspectorSidebarProps = {
 	workspaceStatus: WorkspaceStatus | null;
 	/** False for a task running directly in the project checkout (no worktree). */
 	workspaceHasOwnWorktree: boolean;
+	/** Every project of a multi-project task, for Undo across the turn. */
+	turnWorkspaces?: TurnUndoWorkspace[];
+	/** The project selected in "Showing"; its turn review is shown. */
+	turnReviewWorkspaceId?: string | null;
 	selectedProviderLabel: string | null;
 	selectedModelLabel: string | null;
 	sessionState: string;
@@ -1502,6 +1507,8 @@ function CodeTreeNodeList({
  */
 export function WorkspaceInspectorSidebar({
 	providerCatalog,
+	turnWorkspaces,
+	turnReviewWorkspaceId,
 	sessionSnapshot,
 	currentRepository,
 	workspaceId,
@@ -3541,6 +3548,8 @@ export function WorkspaceInspectorSidebar({
 										(isSessionWorktreeView ? sessionId : null)
 									}
 									onOpenExpandedPreview={onOpenExpandedPreview}
+									turnWorkspaces={turnWorkspaces}
+									turnReviewWorkspaceId={turnReviewWorkspaceId}
 								/>
 								</ReviewerFindingsProvider>
 							</div>

@@ -5,6 +5,7 @@ import {
 	CircleCheck,
 	CirclePause,
 	Folder,
+	FolderOpen,
 	GitBranch,
 	GitPullRequest,
 	Layers3,
@@ -302,10 +303,17 @@ function WorkspaceIdentityCard({
 						</span>
 					) : null}
 				</div>
-				<div className="flex min-w-0 items-center gap-2 text-emerald-600 dark:text-emerald-400">
-					<ShieldCheck className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
-					<span>{t("sidebar.workspaceIdentity.protectedWorktree")}</span>
-				</div>
+				{workspace.worktreePath?.trim() ? (
+					<div className="flex min-w-0 items-center gap-2 text-emerald-600 dark:text-emerald-400">
+						<ShieldCheck className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+						<span>{t("sidebar.workspaceIdentity.protectedWorktree")}</span>
+					</div>
+				) : (
+					<div className="flex min-w-0 items-center gap-2 text-amber-600 dark:text-amber-400">
+						<FolderOpen className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+						<span>{t("sidebar.workspaceIdentity.localCheckout")}</span>
+					</div>
+				)}
 				{memberProjects.length > 1 ? (
 					<div className="flex min-w-0 items-start gap-2 border-t border-border/60 pt-1.5 text-muted-foreground">
 						<Layers3 className="mt-px size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
@@ -622,7 +630,16 @@ export const WorkspaceRailRowItem = memo(
 								)}
 								{workspace.memberWorkspaceIds &&
 								workspace.memberWorkspaceIds.length > 1 ? (
-									<span className="shrink-0 rounded-full bg-foreground/[0.08] px-1.5 text-[9.5px] font-semibold tabular-nums text-muted-foreground">
+									<span
+										className="inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full bg-foreground/[0.08] px-1.5 text-[9.5px] font-semibold tabular-nums text-muted-foreground"
+										title={t("sidebar.bundleMembers", {
+											count: workspace.memberWorkspaceIds.length,
+										})}
+										aria-label={t("sidebar.bundleMembers", {
+											count: workspace.memberWorkspaceIds.length,
+										})}
+									>
+										<Layers3 className="size-2.5" strokeWidth={2} aria-hidden />
 										{workspace.memberWorkspaceIds.length}
 									</span>
 								) : null}

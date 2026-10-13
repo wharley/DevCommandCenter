@@ -56,8 +56,8 @@ use dcc_core::{
         },
         workspace::{Workspace, WorkspaceId, WorkspaceSource, WorkspaceState},
         workspace_bundle::{
-            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
-            WorkspaceBundleSummary,
+            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleIsolation, WorkspaceBundleMember,
+            WorkspaceBundleState, WorkspaceBundleSummary,
         },
     },
     ports::{
@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS dcc_workspace_bundles (
 	name TEXT NOT NULL,
 	primary_workspace_id TEXT NOT NULL,
 	state TEXT NOT NULL,
+	isolation TEXT NOT NULL DEFAULT 'worktree',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
 	FOREIGN KEY (primary_workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
@@ -946,6 +947,12 @@ impl SqliteWorkspaceRepo {
         Self::ensure_column(&conn, "dcc_workspaces", "snoozed_until", "TEXT NULL")?;
         Self::ensure_column(
             &conn,
+            "dcc_workspace_bundles",
+            "isolation",
+            "TEXT NOT NULL DEFAULT 'worktree'",
+        )?;
+        Self::ensure_column(
+            &conn,
             "dcc_workspace_bundle_members",
             "workspace_state_before_archive",
             "TEXT NULL",
@@ -1378,12 +1385,26 @@ impl SqliteWorkspaceRepo {
         }
     }
 
+    fn workspace_bundle_isolation_as_str(isolation: &WorkspaceBundleIsolation) -> &'static str {
+        match isolation {
+            WorkspaceBundleIsolation::Worktree => "worktree",
+            WorkspaceBundleIsolation::Local => "local",
+        }
+    }
+
     fn workspace_bundle_from_row(row: &Row<'_>) -> rusqlite::Result<WorkspaceBundle> {
+        // Anything but an explicit `local` keeps the isolated contract: a
+        // worktree bundle must never fall back to the original checkouts.
+        let isolation = match row.get::<_, String>(6)?.as_str() {
+            "local" => WorkspaceBundleIsolation::Local,
+            _ => WorkspaceBundleIsolation::Worktree,
+        };
         Ok(WorkspaceBundle {
             id: WorkspaceBundleId(row.get::<_, String>(0)?),
             name: row.get::<_, String>(1)?,
             primary_workspace_id: WorkspaceId(row.get::<_, String>(2)?),
             state: Self::workspace_bundle_state_from_str(&row.get::<_, String>(3)?, 3)?,
+            isolation,
             created_at: row.get::<_, String>(4)?,
             updated_at: row.get::<_, String>(5)?,
         })
@@ -5976,12 +5997,13 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
         tx.execute(
             r#"
 			INSERT INTO dcc_workspace_bundles (
-				id, name, primary_workspace_id, state, created_at, updated_at
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+				id, name, primary_workspace_id, state, created_at, updated_at, isolation
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
 			ON CONFLICT(id) DO UPDATE SET
 				name = excluded.name,
 				primary_workspace_id = excluded.primary_workspace_id,
 				state = excluded.state,
+				isolation = excluded.isolation,
 				created_at = excluded.created_at,
 				updated_at = excluded.updated_at
 			"#,
@@ -5992,6 +6014,7 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
                 Self::workspace_bundle_state_as_str(&bundle.state),
                 bundle.created_at.clone(),
                 bundle.updated_at.clone(),
+                Self::workspace_bundle_isolation_as_str(&bundle.isolation),
             ],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -6038,7 +6061,7 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
         let bundle = conn
             .query_row(
                 r#"
-				SELECT id, name, primary_workspace_id, state, created_at, updated_at
+				SELECT id, name, primary_workspace_id, state, created_at, updated_at, isolation
 				  FROM dcc_workspace_bundles
 				 WHERE id = ?1
 				"#,
@@ -6087,7 +6110,7 @@ impl WorkspaceBundleRepo for SqliteWorkspaceRepo {
             let mut stmt = conn
                 .prepare(
                     r#"
-					SELECT id, name, primary_workspace_id, state, created_at, updated_at
+					SELECT id, name, primary_workspace_id, state, created_at, updated_at, isolation
 					  FROM dcc_workspace_bundles
 					 ORDER BY updated_at DESC, created_at DESC
 					"#,
@@ -10183,7 +10206,8 @@ mod tests {
                 WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind, WorkspaceState,
             },
             workspace_bundle::{
-                WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleMember, WorkspaceBundleState,
+                WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleIsolation,
+                WorkspaceBundleMember, WorkspaceBundleState,
             },
         },
         ports::{
@@ -12886,6 +12910,7 @@ mod tests {
             name: "Checkout flow".to_string(),
             primary_workspace_id: workspaces[0].id.clone(),
             state: WorkspaceBundleState::Ready,
+            isolation: dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Worktree,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -12918,6 +12943,24 @@ mod tests {
         let listed = futures::executor::block_on(repo.list_workspace_bundles())
             .expect("list workspace bundles");
         assert_eq!(listed.len(), 1);
+        assert_eq!(
+            listed[0].bundle.isolation,
+            WorkspaceBundleIsolation::Worktree
+        );
+
+        let local = WorkspaceBundle {
+            isolation: WorkspaceBundleIsolation::Local,
+            ..bundle.clone()
+        };
+        futures::executor::block_on(repo.save_workspace_bundle(&local, &members))
+            .expect("save local workspace bundle");
+        let restored_local = futures::executor::block_on(repo.get_workspace_bundle(&bundle.id))
+            .expect("get local workspace bundle")
+            .expect("local workspace bundle exists");
+        assert_eq!(
+            restored_local.bundle.isolation,
+            WorkspaceBundleIsolation::Local
+        );
 
         let archived = futures::executor::block_on(repo.set_workspace_bundle_state(
             &bundle.id,

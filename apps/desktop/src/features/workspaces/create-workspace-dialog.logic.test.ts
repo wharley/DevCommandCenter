@@ -6,6 +6,8 @@ import {
 	initialWorkspaceStart,
 	isBranchWorkspaceSource,
 	LAST_TASK_REPOSITORY_ROOT_STORAGE_KEY,
+	orderMultiProjectSelection,
+	promoteMultiProjectPrimary,
 	readLastTaskRepositoryRoot,
 	rememberLastTaskRepositoryRoot,
 	repositoryNameFromWorkspaceRoot,
@@ -113,5 +115,41 @@ describe("branch workspace entry", () => {
 	it("keeps pull requests in the dedicated Pull Requests surface", () => {
 		expect(isBranchWorkspaceSource("branch")).toBe(true);
 		expect(isBranchWorkspaceSource("pull_request")).toBe(false);
+	});
+});
+
+describe("multi-project primary", () => {
+	const repositories = [
+		{ id: "dcc", name: "DevCommandCenter" },
+		{ id: "lp", name: "DCC LP" },
+		{ id: "api", name: "API" },
+	];
+
+	it("follows the order the person picked, not the project list", () => {
+		expect(
+			orderMultiProjectSelection(repositories, ["lp", "dcc"]).map(
+				(repository) => repository.id,
+			),
+		).toEqual(["lp", "dcc"]);
+	});
+
+	it("drops ids that are no longer projects", () => {
+		expect(
+			orderMultiProjectSelection(repositories, ["gone", "api"]).map(
+				(repository) => repository.id,
+			),
+		).toEqual(["api"]);
+	});
+
+	it("moves the chosen project to the front and keeps the rest in order", () => {
+		expect(promoteMultiProjectPrimary(["dcc", "lp", "api"], "api")).toEqual([
+			"api",
+			"dcc",
+			"lp",
+		]);
+	});
+
+	it("ignores a project that is not selected", () => {
+		expect(promoteMultiProjectPrimary(["dcc", "lp"], "api")).toEqual(["dcc", "lp"]);
 	});
 });

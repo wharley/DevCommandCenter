@@ -2096,6 +2096,8 @@ export type ResumeSessionOutput = {
 
 export type RewindFilePreview = {
 	turnId: string,
+	// The project the file belongs to, only for a multi-project task.
+	project: string | null,
 	displayPath: string,
 	binary: boolean,
 	preview: string | null,
@@ -2107,7 +2109,9 @@ export type RewindFilesPlan =
 // Every changed file can be restored; the person decides whether to.
 { status: "restorable"; turnCount: number; fileCount: number; files: RewindFilePreview[] } |
 // Files changed but cannot be restored safely; they stay as they are.
-{ status: "not_restorable"; turnId: string; stage: RewindFilesStage; reasonCode: string };
+{ status: "not_restorable"; turnId: string;
+// The project that blocks, only for a multi-project task.
+project: string | null; stage: RewindFilesStage; reasonCode: string };
 
 /**
  *  Why the removed turns' files cannot be restored. `stage` says whether the
@@ -2120,6 +2124,8 @@ export type RewindFilesStopped = {
 	// Turns whose files were restored before the stop, newest first.
 	restoredTurnIds: string[],
 	turnId: string,
+	// The project that stopped, only for a multi-project task.
+	project: string | null,
 	/**
 	 *  `blocked`, `rolled_back` or `recovery_required`, as Guarded Undo
 	 *  reported it for `turn_id`.
@@ -2861,6 +2867,7 @@ export type WorkspaceBundle = {
 	name: string,
 	primaryWorkspaceId: WorkspaceId,
 	state: WorkspaceBundleState,
+	isolation?: WorkspaceBundleIsolation,
 	createdAt: string,
 	updatedAt: string,
 };
@@ -2870,6 +2877,13 @@ export type WorkspaceBundleId = string;
 export type WorkspaceBundleIdInput = {
 	bundleId: WorkspaceBundleId,
 };
+
+/**
+ *  How every member of a bundle runs. A bundle never mixes modes: either each
+ *  project gets its own DCC worktree, or the session works directly in the
+ *  projects' own checkouts (the person unticked *Worktree*).
+ */
+export type WorkspaceBundleIsolation = "worktree" | "local";
 
 export type WorkspaceBundleMember = {
 	bundleId: WorkspaceBundleId,

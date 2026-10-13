@@ -118,3 +118,24 @@ function sanitizeProjectIdSegment(value: string): string {
 
 	return sanitized.length > 0 ? sanitized : "project";
 }
+
+/**
+ * Orders the projects of a multi-project task the way the person picked them.
+ * The first one is the primary: where the task lives in the sidebar, where the
+ * agent starts and whose project instructions it loads. The agent can still
+ * change any of the selected projects.
+ */
+export function orderMultiProjectSelection<Repository extends { id: string }>(
+	repositories: Repository[],
+	selectedIds: string[],
+): Repository[] {
+	return selectedIds.flatMap((id) => {
+		const repository = repositories.find((candidate) => candidate.id === id);
+		return repository ? [repository] : [];
+	});
+}
+
+export function promoteMultiProjectPrimary(selectedIds: string[], id: string): string[] {
+	if (!selectedIds.includes(id)) return selectedIds;
+	return [id, ...selectedIds.filter((candidate) => candidate !== id)];
+}

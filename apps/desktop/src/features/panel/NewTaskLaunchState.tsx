@@ -28,7 +28,7 @@ type NewTaskLaunchStateProps = {
 		repository: Repository,
 		isolationMode: WorkspaceIsolationMode,
 	) => Promise<void>;
-	onSelectMultiple: () => void;
+	onSelectMultiple: (isolationMode: WorkspaceIsolationMode) => void;
 	onOpenProject: () => void;
 };
 
@@ -126,7 +126,7 @@ export function NewTaskLaunchState({
 							<DropdownMenuSeparator />
 							<DropdownMenuItem
 								disabled={busy || repositories.length < 2}
-								onSelect={onSelectMultiple}
+								onSelect={() => onSelectMultiple(isolationMode)}
 								className="gap-2.5 py-2"
 							>
 								<Boxes className="size-4 text-cyan-500" />
