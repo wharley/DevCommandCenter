@@ -1131,6 +1131,36 @@ describe("projectWorkspaceMessages", () => {
 		});
 	});
 
+	it("marks a turn the usage limit stopped as a wait, not an error", () => {
+		const limit: SessionEventRecord = {
+			eventId: "evt-limit",
+			sessionId: "session-a",
+			sequence: 2,
+			occurredAt: "2026-05-01T12:00:04Z",
+			kind: {
+				type: "usage_limit_reached",
+				turnId: "turn-1",
+				resetsAt: "2026-05-01T15:40:00Z",
+				autoResume: true,
+				paused: false,
+			},
+		};
+		const messages = projectWorkspaceMessages(
+			[
+				sessionTurnStarted("session-a", "turn-1", "Alpha"),
+				limit,
+				{ ...sessionTurnAborted("session-a", "turn-1", "You've hit your usage limit."), sequence: 3 },
+			],
+			[],
+			"session-a",
+		);
+		expect(messages[1]?.status).toEqual({
+			type: "incomplete",
+			reason: "You've hit your usage limit.",
+			usageLimited: true,
+		});
+	});
+
 	it("marks aborted assistant messages as incomplete", () => {
 		expect(
 			projectWorkspaceMessages(

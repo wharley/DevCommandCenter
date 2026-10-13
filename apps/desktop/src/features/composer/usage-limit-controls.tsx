@@ -114,12 +114,13 @@ export function UsageLimitStrip({
 	const status = usageLimitStatus(limit, now);
 	const time = formatLimitReset(limit.resetsAt, now);
 	const resetPassed = limit.resetsAt ? Date.parse(limit.resetsAt) <= now : false;
-	const when = resetPassed || !time ? t("usageLimit.whenSoon") : t("usageLimit.whenAt", { time });
+	// The title already says the time; the body says what happens then.
+	const when = resetPassed ? t("usageLimit.whenSoon") : t("usageLimit.whenBack");
 	const waiting = status.phase === "waiting";
 	const body = waiting
 		? limit.autoResume
 			? t("usageLimit.waitingAuto", { when })
-			: t("usageLimit.waitingManual", { when: t("usageLimit.freesAt", { time: time ?? "" }) })
+			: t("usageLimit.waitingManual")
 		: status.pauseReason === "reset_passed"
 			? t("usageLimit.reasonResetPassed")
 			: status.pauseReason === "attempts_exhausted"

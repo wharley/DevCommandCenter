@@ -13,6 +13,8 @@ import { parsePlanContent, type ParsedPlanContent } from "@/features/panel/plan-
 export type SessionMessageStatus = {
 	type: "incomplete";
 	reason?: string;
+	/** The plan's usage limit stopped the turn: a wait, not an error. */
+	usageLimited?: boolean;
 };
 
 export type WorkspaceMessageRole = "user" | "assistant" | "system";
@@ -1376,6 +1378,8 @@ export function projectWorkspaceMessages(
 	const delegationBuckets = new Map<string, WorkspaceMessage>();
 	const completedTurns = new Set<string>();
 	const abortedTurns = new Map<string, string>();
+	// Recorded just before the turn's abort (`usage_limit_reached`).
+	const usageLimitedTurns = new Set<string>();
 	const turnStartedAtByTurnId = new Map<string, string>();
 	const turnEndedAtByTurnId = new Map<string, string>();
 	const turnModelByTurnId = new Map<string, string | null>();
@@ -1446,6 +1450,7 @@ export function projectWorkspaceMessages(
 				message.status = {
 					type: "incomplete",
 					reason: abortedReason,
+					...(usageLimitedTurns.has(key) ? { usageLimited: true } : {}),
 				};
 			}
 			continue;
@@ -1883,6 +1888,11 @@ export function projectWorkspaceMessages(
 			continue;
 		}
 
+		if ("sessionUsageLimitReached" in event && event.sessionUsageLimitReached) {
+			usageLimitedTurns.add(event.sessionUsageLimitReached.turn_id);
+			continue;
+		}
+
 		if ("sessionTurnAborted" in event && event.sessionTurnAborted) {
 			const key = event.sessionTurnAborted.turn_id;
 			abortedTurns.set(key, event.sessionTurnAborted.reason ?? "Turn aborted");
@@ -1908,6 +1918,7 @@ export function projectWorkspaceMessages(
 				existing.status = {
 					type: "incomplete",
 					reason: event.sessionTurnAborted.reason ?? "Turn aborted",
+					...(usageLimitedTurns.has(key) ? { usageLimited: true } : {}),
 				};
 				for (const annotation of existing.annotations ?? []) {
 					annotation.streaming = false;

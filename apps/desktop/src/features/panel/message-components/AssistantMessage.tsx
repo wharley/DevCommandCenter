@@ -6,6 +6,7 @@ import {
 } from "react";
 import {
 	AlertCircle,
+	Hourglass,
 	Copy,
 	GitBranch,
 	GitFork,
@@ -67,6 +68,7 @@ import {
 type AssistantStatus = {
 	type: "incomplete";
 	reason?: string;
+	usageLimited?: boolean;
 };
 
 type NativeSubagentSupervision = {
@@ -736,7 +738,24 @@ export const AssistantMessage = memo(function AssistantMessage({
 					turnEndedAt={turnEndedAt}
 					streaming={streaming}
 				/>
-				{status?.type === "incomplete" ? (
+				{status?.type === "incomplete" && status.usageLimited ? (
+					// A wait, not an error: the strip above the composer says when
+					// it comes back and offers to continue.
+					<div
+						className="mt-2 flex max-w-2xl items-start gap-2.5 rounded-lg border border-violet-500/25 bg-violet-500/[0.05] px-3 py-2.5"
+						data-testid="usage-limit-notice"
+					>
+						<Hourglass className="mt-0.5 size-4 shrink-0 text-violet-600 dark:text-violet-300" aria-hidden />
+						<div className="min-w-0 flex-1">
+							<div className="text-[12px] font-medium text-foreground">
+								{t("usageLimit.timelinePaused")}
+							</div>
+							{status.reason ? (
+								<p className="mt-0.5 text-[12px] text-muted-foreground">{status.reason}</p>
+							) : null}
+						</div>
+					</div>
+				) : status?.type === "incomplete" ? (
 					<div className="mt-2 flex max-w-2xl flex-wrap items-start gap-2.5 rounded-lg border border-destructive/20 bg-destructive/[0.045] px-3 py-2.5">
 						<AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
 						<div className="min-w-0 flex-1 basis-56">
