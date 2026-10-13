@@ -37,7 +37,7 @@ import {
 	runTurnWithNativeResume,
 } from "./native-resume.mjs";
 
-const SIDECAR_VERSION = "0.1.93";
+const SIDECAR_VERSION = "0.1.94";
 
 function emit(value) {
 	process.stdout.write(`${JSON.stringify(value)}\n`);
