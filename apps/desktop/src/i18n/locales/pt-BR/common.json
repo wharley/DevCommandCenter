@@ -416,6 +416,7 @@
         "delegatedReview_other": "{{count}} mudanças delegadas para revisar",
         "permission": "Aguardando aprovação",
         "input": "Aguardando você",
+        "usageLimit": "Pausado por limite",
         "setup": "Setup pendente",
         "aborted": "Interrompido",
         "completed": "Resultado novo"
@@ -586,6 +587,9 @@
       "completed": "Concluído",
       "aborted": "Interrompido",
       "completedUnseen": "Resultado novo",
+      "limited": "Limite de uso",
+      "limitWaiting": "Aguardando limite",
+      "limitPaused": "Pausado por limite",
       "reviewPending": "Aguardando sua revisão"
     },
     "workspaceState": {
@@ -2360,8 +2364,18 @@
           "appOpen": "DCC aberto",
           "agentsWorking_one": "{{count}} agente trabalhando",
           "agentsWorking_other": "{{count}} agentes trabalhando",
-          "agentJustFinished": "agente acabou de terminar"
+          "agentJustFinished": "agente acabou de terminar",
+          "waitingForLimit": "aguardando limite até {{time}}"
         }
+      },
+      "usageLimit": {
+        "title": "Continuar sozinho se o limite acabar",
+        "body": "Quando o limite de uso do plano acabar no meio de uma tarefa, o DCC espera o limite voltar e manda \"Continue de onde parou.\" sozinho, com o mesmo acesso da tarefa. Depois a fila segue normalmente. No máximo 3 retomadas por tarefa a cada 12 horas; créditos pagos de reset nunca são usados.",
+        "toggle": "Ligado por padrão nas tarefas novas",
+        "hint": "Cada tarefa pode mudar isso no composer.",
+        "keepAwakeWarning": "Seu Mac pode dormir antes do limite voltar, e aí nada retoma.",
+        "enableKeepAwake": "Ativar \"Durante agentes\"",
+        "saveFailed": "Não foi possível salvar: {{message}}"
       }
     },
     "appearance": {
@@ -3297,6 +3311,20 @@
         ],
         "tip": "Com a tampa fechada o macOS dorme mesmo assim, na bateria ou na tomada; a exceção é o modo de tela fechada da Apple, com monitor externo, teclado e mouse. Para rodar à noite, deixe a tampa aberta e o Mac na tomada.",
         "keywords": "mac acordado dormir sono repouso suspensão caffeinate energia bateria tomada tampa noite keep awake"
+      },
+      "usageLimit": {
+        "label": "Limite de uso",
+        "summary": "Quando o plano do agente acaba no meio da tarefa, ela espera em vez de quebrar.",
+        "whatIs": "Quando o limite de uso do plano (Claude ou Codex) acaba no meio de um turno, a tarefa não vira erro: fica [Aguardando limite] com o horário em que o limite volta, sem entrar em \"Precisa de você\", e a fila de mensagens espera junto. Se o provedor não diz quando o limite volta, ou se a tarefa já retomou sozinha 3 vezes em 12 horas, ela fica [Pausado por limite] e aí sim precisa de você, no desktop e no celular, com um aviso no celular.",
+        "whenToUse": "Antes de deixar um plano rodando à noite: ligue a retomada automática e o DCC continua sozinho quando o limite voltar, depois segue com a fila.",
+        "steps": [
+          "Em Configurações, seção [Geral], ligue [Continuar sozinho se o limite acabar] para valer nas tarefas novas.",
+          "Em uma tarefa, use o botão de ampulheta do composer para ligar ou desligar só nela.",
+          "Quando o limite acabar, a faixa acima do composer mostra o horário; use [Continuar agora] se quiser tentar antes.",
+          "Em [Pausado por limite], use [Continuar] ou [Tentar de novo] quando puder."
+        ],
+        "tip": "A retomada só acontece com o Mac acordado: escolha [Durante agentes] em [Manter o Mac acordado]. O DCC manda sempre o mesmo texto, \"Continue de onde parou.\", com o mesmo acesso da tarefa, e nunca usa créditos pagos de reset do Codex.",
+        "keywords": "limite uso plano cota quota rate limit reset retomar continuar sozinho noite fila aguardando pausado claude codex"
       },
       "pullRequests": {
         "label": "Pull Requests",
@@ -5066,5 +5094,35 @@
       "completed": "Concluída",
       "aborted": "Interrompida"
     }
+  },
+  "usageLimit": {
+    "backAt": "volta às {{time}}",
+    "freesAt": "libera às {{time}}",
+    "resumingSoon": "retomando em instantes",
+    "reasonResetPassed": "O limite já voltou.",
+    "reasonAttemptsExhausted": "Já retomou sozinho 3 vezes nas últimas 12 horas.",
+    "reasonUnknownReset": "O provedor não informou quando o limite volta.",
+    "waitingTitle": "Aguardando limite",
+    "pausedTitle": "Pausado por limite",
+    "waitingAuto": "O limite de uso do plano acabou. A tarefa continua sozinha {{when}}.",
+    "waitingManual": "O limite de uso do plano acabou e {{when}}. Depois disso, é só continuar.",
+    "whenAt": "às {{time}}",
+    "whenSoon": "em instantes",
+    "queued_one": "{{count}} mensagem na fila segue depois.",
+    "queued_other": "{{count}} mensagens na fila seguem depois.",
+    "continueNow": "Continuar agora",
+    "continue": "Continuar",
+    "retry": "Tentar de novo",
+    "resumeFailed": "Não foi possível retomar: {{message}}",
+    "toggleLabel": "Continuar sozinho se o limite acabar",
+    "toggleOn": "Ligado: se o limite acabar, a tarefa continua sozinha quando ele voltar.",
+    "toggleOff": "Desligado: se o limite acabar, a tarefa espera você.",
+    "toggleFailed": "Não foi possível mudar: {{message}}",
+    "keepAwakeWarning": "O Mac pode dormir antes do limite voltar.",
+    "enableKeepAwake": "Ativar \"Durante agentes\"",
+    "timelineWaiting": "Limite de uso atingido · volta às {{time}}",
+    "timelinePaused": "Limite de uso atingido",
+    "timelineResumedAuto": "Retomado sozinho depois do limite",
+    "timelineResumedManual": "Retomado depois do limite"
   }
 }

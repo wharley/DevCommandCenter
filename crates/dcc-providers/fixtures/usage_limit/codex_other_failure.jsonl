@@ -1,0 +1,2 @@
+{"method":"turn/completed","params":{"threadId":"019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b","turn":{"id":"019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a8e","items":[],"status":"failed","error":{"message":"Codex ran out of room in the model's context window.","codexErrorInfo":"contextWindowExceeded"}}}}
+{"method":"error","params":{"threadId":"019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b","turnId":"019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a8e","willRetry":false,"error":{"message":"stream disconnected","codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":502}}}}}

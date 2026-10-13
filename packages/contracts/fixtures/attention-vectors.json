@@ -1,7 +1,7 @@
 {
-  "about": "Shared cases for the \"Precisa de você\" rule. The desktop (apps/desktop/src/features/workspaces/use-workspace-agent-states.ts, attentionWorkspaceItems) and the backend the phone reads (crates/dcc-tauri/src/commands/workspace_attention.rs, attention_items) both run them; change the rule in both or the tests fail. `unread` lists the workspaces whose finished result the person has not opened (the client's own seen store).",
+  "about": "Shared cases for the \"Precisa de você\" rule. The desktop (apps/desktop/src/features/workspaces/use-workspace-agent-states.ts, attentionWorkspaceItems) and the backend the phone reads (crates/dcc-tauri/src/commands/workspace_attention.rs, attention_items) both run them; change the rule in both or the tests fail. `unread` lists the workspaces whose finished result the person has not opened (the client's own seen store). `usageLimit` on a session is the limit that stopped its latest turn (WorkspaceSessionSummary.usageLimit): waiting for its reset is not \"needs you\" (and not an interrupted result either); with no known reset, no automatic resumes left, or a reopened window and automatic resume off, it is `usageLimit`.",
   "now": "2026-10-12T12:00:00Z",
-  "unread": ["w-done-unread", "w-aborted"],
+  "unread": ["w-done-unread", "w-aborted", "w-limit-wait"],
   "workspaces": [
     { "id": "w-perm", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
     { "id": "w-input", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
@@ -16,7 +16,11 @@
     { "id": "w-aborted", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
     { "id": "w-archived", "status": "archived", "updatedAt": "2026-10-12T09:00:00Z" },
     { "id": "w-review", "status": "ready", "updatedAt": "2026-10-12T08:30:00Z" },
-    { "id": "w-running", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" }
+    { "id": "w-running", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-limit-wait", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-limit-paused", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-limit-reset", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" },
+    { "id": "w-limit-spent", "status": "ready", "updatedAt": "2026-10-12T09:00:00Z" }
   ],
   "sessions": {
     "w-perm": [
@@ -51,6 +55,18 @@
     ],
     "w-running": [
       { "session": { "updatedAt": "2026-10-12T11:00:00Z" }, "projection": { "state": "active", "activeTurnId": "t9", "updatedAt": "2026-10-12T11:00:00Z", "turnCount": 3 }, "lastTurnState": null, "lastTurnStartedAt": "2026-10-12T10:40:00Z", "lastTurnCompletedAt": null, "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null }
+    ],
+    "w-limit-wait": [
+      { "session": { "updatedAt": "2026-10-12T11:50:00Z" }, "projection": { "state": "active", "activeTurnId": null, "updatedAt": "2026-10-12T11:50:00Z", "turnCount": 1 }, "lastTurnState": "aborted", "lastTurnStartedAt": "2026-10-12T08:00:00Z", "lastTurnCompletedAt": "2026-10-12T11:50:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null, "usageLimit": { "turnId": "t1", "hitAt": "2026-10-12T11:50:00Z", "resetsAt": "2026-10-12T13:00:00Z", "autoResume": false, "autoResumesUsed": 0 } }
+    ],
+    "w-limit-paused": [
+      { "session": { "updatedAt": "2026-10-12T10:10:00Z" }, "projection": { "state": "active", "activeTurnId": null, "updatedAt": "2026-10-12T10:10:00Z", "turnCount": 1 }, "lastTurnState": "aborted", "lastTurnStartedAt": "2026-10-12T08:00:00Z", "lastTurnCompletedAt": "2026-10-12T10:10:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null, "usageLimit": { "turnId": "t1", "hitAt": "2026-10-12T10:10:00Z", "resetsAt": null, "autoResume": true, "autoResumesUsed": 0 } }
+    ],
+    "w-limit-reset": [
+      { "session": { "updatedAt": "2026-10-12T07:30:00Z" }, "projection": { "state": "active", "activeTurnId": null, "updatedAt": "2026-10-12T07:30:00Z", "turnCount": 1 }, "lastTurnState": "aborted", "lastTurnStartedAt": "2026-10-12T08:00:00Z", "lastTurnCompletedAt": "2026-10-12T07:30:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null, "usageLimit": { "turnId": "t1", "hitAt": "2026-10-12T07:30:00Z", "resetsAt": "2026-10-12T11:45:00Z", "autoResume": false, "autoResumesUsed": 0 } }
+    ],
+    "w-limit-spent": [
+      { "session": { "updatedAt": "2026-10-12T09:50:00Z" }, "projection": { "state": "active", "activeTurnId": null, "updatedAt": "2026-10-12T09:50:00Z", "turnCount": 1 }, "lastTurnState": "aborted", "lastTurnStartedAt": "2026-10-12T08:00:00Z", "lastTurnCompletedAt": "2026-10-12T09:50:00Z", "lastTurnAwaitingUser": null, "lastTurnAwaitingSince": null, "usageLimit": { "turnId": "t1", "hitAt": "2026-10-12T09:50:00Z", "resetsAt": "2026-10-12T14:00:00Z", "autoResume": true, "autoResumesUsed": 3 } }
     ]
   },
   "blockers": [
@@ -59,15 +75,19 @@
     { "workspaceId": "w-blockers", "kind": "checks_failing", "count": 12, "since": "2026-10-12T10:20:00Z" },
     { "workspaceId": "w-blockers", "kind": "pr_conflicts", "count": 12, "since": "2026-10-12T10:50:00Z" },
     { "workspaceId": "w-conflict-old", "kind": "conflicts", "count": null, "since": null },
-    { "workspaceId": "w-review", "kind": "delegated_edits_review", "count": 2, "since": null }
+    { "workspaceId": "w-review", "kind": "delegated_edits_review", "count": 2, "since": null },
+    { "workspaceId": "w-limit-wait", "kind": "checks_failing", "count": 3, "since": "2026-10-12T11:55:00Z" }
   ],
   "expected": [
+    { "workspaceId": "w-limit-reset", "reason": "usageLimit", "count": null, "returnedAt": "2026-10-12T11:45:00Z" },
     { "workspaceId": "w-woke", "reason": "woke", "count": null, "returnedAt": "2026-10-12T11:30:00Z" },
     { "workspaceId": "w-done-unread", "reason": "completed", "count": null, "returnedAt": "2026-10-12T11:20:00Z" },
     { "workspaceId": "w-perm", "reason": "permission", "count": null, "returnedAt": "2026-10-12T11:10:00Z" },
     { "workspaceId": "w-blockers", "reason": "prConflicts", "count": 12, "returnedAt": "2026-10-12T10:50:00Z" },
     { "workspaceId": "w-input", "reason": "input", "count": null, "returnedAt": "2026-10-12T10:40:00Z" },
     { "workspaceId": "w-aborted", "reason": "aborted", "count": null, "returnedAt": "2026-10-12T10:30:00Z" },
+    { "workspaceId": "w-limit-paused", "reason": "usageLimit", "count": null, "returnedAt": "2026-10-12T10:10:00Z" },
+    { "workspaceId": "w-limit-spent", "reason": "usageLimit", "count": null, "returnedAt": "2026-10-12T09:50:00Z" },
     { "workspaceId": "w-review", "reason": "delegatedReview", "count": 2, "returnedAt": "2026-10-12T08:30:00Z" },
     { "workspaceId": "w-conflict-old", "reason": "conflicts", "count": null, "returnedAt": "2026-10-12T07:00:00Z" },
     { "workspaceId": "w-setup", "reason": "setup", "count": null, "returnedAt": "2026-10-12T06:00:00Z" }

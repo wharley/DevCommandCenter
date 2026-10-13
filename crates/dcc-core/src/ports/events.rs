@@ -48,6 +48,23 @@ pub enum CoreEvent {
         consecutive_failures: u32,
         turns_used: u32,
     },
+    SessionUsageLimitReached {
+        session_id: String,
+        turn_id: String,
+        resets_at: Option<String>,
+        auto_resume: bool,
+        #[serde(default)]
+        paused: bool,
+    },
+    SessionUsageLimitResumed {
+        session_id: String,
+        automatic: bool,
+        turn_id: Option<String>,
+    },
+    SessionUsageLimitAutoResumeChanged {
+        session_id: String,
+        enabled: bool,
+    },
     SessionConversationRewound {
         session_id: String,
         anchor_turn_id: String,
@@ -296,6 +313,9 @@ impl CoreEvent {
             | Self::SessionAborted { session_id, .. }
             | Self::SessionResumed { session_id }
             | Self::SessionObjectivePaused { session_id, .. }
+            | Self::SessionUsageLimitReached { session_id, .. }
+            | Self::SessionUsageLimitResumed { session_id, .. }
+            | Self::SessionUsageLimitAutoResumeChanged { session_id, .. }
             | Self::SessionConversationRewound { session_id, .. }
             | Self::SessionMcpRuntimeStatusChanged { session_id, .. }
             | Self::SessionTurnStarted { session_id, .. }
@@ -955,6 +975,44 @@ impl CoreEvent {
                     && consecutive_failures == actual_failures
                     && turns_used == actual_turns
             }
+            (
+                SessionEventKind::UsageLimitReached {
+                    turn_id,
+                    resets_at,
+                    auto_resume,
+                    paused,
+                },
+                Self::SessionUsageLimitReached {
+                    turn_id: actual_turn_id,
+                    resets_at: actual_resets_at,
+                    auto_resume: actual_auto_resume,
+                    paused: actual_paused,
+                    ..
+                },
+            ) => {
+                turn_id.0 == *actual_turn_id
+                    && resets_at == actual_resets_at
+                    && auto_resume == actual_auto_resume
+                    && paused == actual_paused
+            }
+            (
+                SessionEventKind::UsageLimitResumed { automatic, turn_id },
+                Self::SessionUsageLimitResumed {
+                    automatic: actual_automatic,
+                    turn_id: actual_turn_id,
+                    ..
+                },
+            ) => {
+                automatic == actual_automatic
+                    && turn_id.as_ref().map(|id| &id.0) == actual_turn_id.as_ref()
+            }
+            (
+                SessionEventKind::UsageLimitAutoResumeChanged { enabled },
+                Self::SessionUsageLimitAutoResumeChanged {
+                    enabled: actual_enabled,
+                    ..
+                },
+            ) => enabled == actual_enabled,
             (
                 SessionEventKind::ConversationRewound {
                     anchor_turn_id,

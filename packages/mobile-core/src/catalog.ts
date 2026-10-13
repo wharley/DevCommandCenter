@@ -151,6 +151,8 @@ export type TaskDraft = {
 	worktree: boolean;
 	/** Null when the agent manages access itself. */
 	access?: AccessPolicy | null;
+	/** "Continuar sozinho se o limite acabar"; absent: the desktop's default. */
+	autoResume?: boolean | null;
 };
 
 /** Body of `POST /api/v1/mobile/tasks`. Every task gets a new workspace, as on the desktop. */
@@ -170,6 +172,7 @@ export function taskRequestBody(draft: TaskDraft) {
 		model: draft.model,
 		isolationMode: draft.worktree ? "protectedWorktree" : "localDirect",
 		...(draft.access ? { approvalPolicy: draft.access } : {}),
+		...(typeof draft.autoResume === "boolean" ? { autoResume: draft.autoResume } : {}),
 	} as const;
 }
 

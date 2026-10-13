@@ -62,6 +62,7 @@ import {
 import { ForgeConnectDialog } from "@/features/settings/forge-connect-dialog";
 import { PairedDevicesPanel } from "@/features/settings/paired-devices";
 import { KeepAwakePreference } from "@/features/settings/keep-awake-preference";
+import { UsageLimitPreference } from "./usage-limit-preference";
 import type { AppUpdateInfo } from "@/features/updater";
 import {
 	getCommandPaletteShortcutKeys,
@@ -1220,6 +1221,7 @@ export function SettingsDialog({
 									</div>
 
 									<KeepAwakePreference />
+									<UsageLimitPreference />
 									<div className="rounded-xl border border-border/60 bg-muted/15 p-4">
 										<div className="flex items-start justify-between gap-6">
 											<div className="min-w-0">

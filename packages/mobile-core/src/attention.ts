@@ -12,6 +12,7 @@ import { t } from "./labels.ts";
 export type AttentionReason =
 	| "permission"
 	| "input"
+	| "usageLimit"
 	| "conflicts"
 	| "prConflicts"
 	| "checksFailing"
@@ -24,6 +25,7 @@ export type AttentionReason =
 const REASONS = new Set<AttentionReason>([
 	"permission",
 	"input",
+	"usageLimit",
 	"conflicts",
 	"prConflicts",
 	"checksFailing",

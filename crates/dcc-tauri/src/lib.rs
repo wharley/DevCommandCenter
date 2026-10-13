@@ -14,6 +14,7 @@ pub mod run;
 pub mod state;
 pub mod terminal_arbiter;
 pub mod turn_review;
+pub mod usage_limit_resume;
 pub mod workspace_setup;
 
 // Capture-v2 adapters are intentionally compile-time gated and are not part

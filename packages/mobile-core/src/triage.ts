@@ -44,8 +44,12 @@ export type PendingItem = {
 	at: string;
 };
 
-/** Per-session outcome derived from its event stream (recent threads only). */
-export type LiveStatus = "running" | "completed" | "aborted";
+/**
+ * Per-session outcome derived from its event stream (recent threads only).
+ * `limited`: the plan's usage limit stopped the latest turn — a wait, not an
+ * interruption (whether it needs the person is the attention list's call).
+ */
+export type LiveStatus = "running" | "completed" | "aborted" | "limited";
 
 export type Scan = {
 	sessions: SessionSearchResult[];
@@ -123,12 +127,17 @@ export function classifySession(
 	const requested = new Map<string, RawSessionEvent>();
 	const resolved = new Set<string>();
 	let live = false;
-	let lastEnd: "completed" | "aborted" | null = null;
+	let lastEnd: "completed" | "aborted" | "limited" | null = null;
+	let limitedTurn: unknown = null;
 	for (const event of events) {
 		const kind = event.kind;
 		switch (kind?.type) {
 			case "turn_started":
 				live = true;
+				limitedTurn = null;
+				break;
+			case "usage_limit_reached":
+				limitedTurn = kind.turnId;
 				break;
 			case "turn_completed":
 			case "session_completed":
@@ -136,6 +145,9 @@ export function classifySession(
 				lastEnd = "completed";
 				break;
 			case "turn_aborted":
+				live = false;
+				lastEnd = limitedTurn != null && kind.turnId === limitedTurn ? "limited" : "aborted";
+				break;
 			case "session_aborted":
 				live = false;
 				lastEnd = "aborted";

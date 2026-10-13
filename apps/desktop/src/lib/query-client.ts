@@ -309,6 +309,12 @@ export function coreEventRefreshPlan(event: CoreEvent): DccCoreEventRefreshPlan 
 			event.sessionTurnUserInputRequested) ||
 		("sessionTurnUserInputResolved" in event &&
 			event.sessionTurnUserInputResolved) ||
+		// A usage limit (or its late reset, or the task's resume choice)
+		// changes "Aguardando limite" / "Pausado por limite".
+		("sessionUsageLimitReached" in event && event.sessionUsageLimitReached) ||
+		("sessionUsageLimitResumed" in event && event.sessionUsageLimitResumed) ||
+		("sessionUsageLimitAutoResumeChanged" in event &&
+			event.sessionUsageLimitAutoResumeChanged) ||
 		null;
 	if (awaitingUser) {
 		return {

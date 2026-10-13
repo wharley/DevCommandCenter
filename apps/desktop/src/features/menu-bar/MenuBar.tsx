@@ -97,7 +97,7 @@ export function MenuBar() {
 		</div>
 		{snapshot?.keepAwake && (() => {
 			const reason = keepAwakeReasonKey(snapshot.keepAwake.reason);
-			return <div className="menu-bar-keep-awake"><Coffee size={13} aria-hidden /><span>{t("menuBar.keepAwake", { reason: t(reason.key, { count: reason.count }) })}</span></div>;
+			return <div className="menu-bar-keep-awake"><Coffee size={13} aria-hidden /><span>{t("menuBar.keepAwake", { reason: t(reason.key, { count: reason.count, time: reason.time }) })}</span></div>;
 		})()}
 		{(error || actionError) && <div role="alert" className="menu-bar-error">{t(actionError ? "menuBar.actionError" : "menuBar.stale")}</div>}
 		<section className="menu-bar-tasks" aria-label={t("menuBar.tasks")}>

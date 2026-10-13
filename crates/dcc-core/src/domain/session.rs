@@ -500,6 +500,33 @@ pub enum SessionEventKind {
         #[serde(rename = "turnsUsed")]
         turns_used: u32,
     },
+    /// The provider stopped the turn on the plan's usage limit. Recorded just
+    /// before the turn's `TurnAborted`, and again when the reset time arrives
+    /// after it. See `domain::usage_limit`.
+    UsageLimitReached {
+        #[serde(rename = "turnId")]
+        turn_id: TurnId,
+        #[serde(rename = "resetsAt", default)]
+        resets_at: Option<String>,
+        /// The session's automatic-resume choice at the hit.
+        #[serde(rename = "autoResume", default)]
+        auto_resume: bool,
+        /// Whether the stop needed the person when it was recorded (no known
+        /// reset, or no automatic resumes left). Drives the one push.
+        #[serde(default)]
+        paused: bool,
+    },
+    /// DCC sent the continuation turn after a usage limit, by itself
+    /// (`automatic`) or because the person asked.
+    UsageLimitResumed {
+        automatic: bool,
+        #[serde(rename = "turnId", default)]
+        turn_id: Option<TurnId>,
+    },
+    /// The person chose whether this task continues by itself after a limit.
+    UsageLimitAutoResumeChanged {
+        enabled: bool,
+    },
     /// "Edit from here": the conversation went back to just before
     /// `anchor_turn_id`. The anchor and every later turn leave the
     /// conversation. Their events stay durable for audit, but every
@@ -555,7 +582,8 @@ impl SessionEventKind {
             | Self::TurnNativeSubagentModelRequested { turn_id, .. }
             | Self::TurnModelEffective { turn_id, .. }
             | Self::TurnCompleted { turn_id }
-            | Self::TurnAborted { turn_id, .. } => Some(turn_id),
+            | Self::TurnAborted { turn_id, .. }
+            | Self::UsageLimitReached { turn_id, .. } => Some(turn_id),
             Self::SessionStarted { .. }
             | Self::TurnQueued { .. }
             | Self::QueuedTurnRemoved { .. }
@@ -573,6 +601,8 @@ impl SessionEventKind {
             | Self::SessionAborted { .. }
             | Self::SessionResumed
             | Self::ObjectivePaused { .. }
+            | Self::UsageLimitResumed { .. }
+            | Self::UsageLimitAutoResumeChanged { .. }
             | Self::ConversationRewound { .. } => None,
         }
     }
@@ -797,7 +827,10 @@ impl SessionProjection {
             SessionEventKind::SessionResumed => {
                 self.state = SessionState::Active;
             }
-            SessionEventKind::ObjectivePaused { .. } => {}
+            SessionEventKind::ObjectivePaused { .. }
+            | SessionEventKind::UsageLimitReached { .. }
+            | SessionEventKind::UsageLimitResumed { .. }
+            | SessionEventKind::UsageLimitAutoResumeChanged { .. } => {}
             SessionEventKind::ConversationRewound { .. } => {
                 self.active_turn_id = None;
             }
@@ -855,6 +888,9 @@ pub struct WorkspaceSessionSummary {
     /// When the latest turn started waiting on the user: the oldest request
     /// still open. Orders the sidebar's "Needs you" by when tasks came back.
     pub last_turn_awaiting_since: Option<String>,
+    /// The usage limit that stopped the latest turn, while it stands.
+    #[serde(default)]
+    pub usage_limit: Option<super::usage_limit::SessionUsageLimit>,
 }
 
 /// What the latest turn is waiting on the user for, if anything. Requests are

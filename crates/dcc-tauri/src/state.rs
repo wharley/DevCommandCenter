@@ -1233,6 +1233,17 @@ struct ProviderSessionBinding {
     /// projections are tracked by their opaque lease instead.
     projected_mcp_definition_ids: Arc<HashSet<McpDefinitionId>>,
     ephemeral_mcp_lease_id: Option<String>,
+    /// What the provider said about the plan's usage limit (see
+    /// `ProviderEvent::UsageLimitReached`).
+    usage_limit: Arc<AsyncMutex<UsageLimitTracker>>,
+}
+
+/// A usage limit the provider reported for the turn in flight, and the last
+/// turn that stopped on one (for a reset time reported after the stop).
+#[derive(Debug, Default)]
+struct UsageLimitTracker {
+    pending: Option<(String, Option<String>)>,
+    stopped_turn: Option<(String, Option<String>)>,
 }
 
 #[derive(Clone, Debug)]
@@ -1249,6 +1260,9 @@ enum TerminalSource {
     ProviderFailed,
     Quiesce,
     Cancel,
+    /// The provider stopped the turn on the plan's usage limit: captured like
+    /// a provider failure, but not counted against the objective's failures.
+    UsageLimit,
     /// A TurnStarted whose provider binding was never installed. This path
     /// intentionally has no M4 capture to finalize.
     Unbound,
@@ -3715,9 +3729,11 @@ impl SessionCommandState {
             // Completion is fully represented by the canonical durable event,
             // so a retry can safely finish M4 even when it did not insert it.
             (TerminalIntent::Completed, _, _) => CaptureTerminalMode::Completed,
-            (TerminalIntent::Aborted, true, Some(TerminalSource::ProviderFailed)) => {
-                CaptureTerminalMode::ProviderFailed
-            }
+            (
+                TerminalIntent::Aborted,
+                true,
+                Some(TerminalSource::ProviderFailed | TerminalSource::UsageLimit),
+            ) => CaptureTerminalMode::ProviderFailed,
             // An aborted event does not durably encode whether the original
             // source was cancellation or provider failure. Existing/opposite
             // outcomes therefore use the conservative interrupted mode.
@@ -4130,6 +4146,283 @@ impl SessionCommandState {
         Ok(())
     }
 
+    // ---- Usage limit ("Aguardando limite") ---------------------------------
+
+    pub fn usage_limit_settings(&self) -> crate::usage_limit_resume::UsageLimitSettings {
+        crate::usage_limit_resume::load_settings(&self.app_data_dir)
+    }
+
+    pub fn set_usage_limit_settings(
+        &self,
+        settings: crate::usage_limit_resume::UsageLimitSettings,
+    ) -> Result<crate::usage_limit_resume::UsageLimitSettings> {
+        crate::usage_limit_resume::save_settings(&self.app_data_dir, settings)
+            .map_err(dcc_core::CoreError::Repository)?;
+        Ok(settings)
+    }
+
+    /// The task's own choice, else the global preference.
+    fn auto_resume_for_events(&self, events: &[SessionEventRecord]) -> bool {
+        dcc_core::domain::usage_limit::session_auto_resume_choice(events)
+            .unwrap_or_else(|| self.usage_limit_settings().auto_resume)
+    }
+
+    pub fn session_auto_resume_enabled(&self, session_id: &SessionId) -> Result<bool> {
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        Ok(self.auto_resume_for_events(&events))
+    }
+
+    pub async fn set_session_auto_resume(
+        &self,
+        session_id: &SessionId,
+        enabled: bool,
+    ) -> Result<()> {
+        self.append_and_publish_session_event(
+            session_id,
+            SessionEventKind::UsageLimitAutoResumeChanged { enabled },
+            dcc_core::ports::events::CoreEvent::SessionUsageLimitAutoResumeChanged {
+                session_id: session_id.0.clone(),
+                enabled,
+            },
+        )
+        .await
+    }
+
+    /// The limit that stopped the session's latest turn, while it stands.
+    pub fn session_usage_limit(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<dcc_core::domain::usage_limit::SessionUsageLimit>> {
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        Ok(dcc_core::domain::usage_limit::session_usage_limit(&events))
+    }
+
+    pub fn sessions_with_usage_limit(&self) -> Result<Vec<SessionId>> {
+        self.session_repo.list_session_ids_with_usage_limit_sync()
+    }
+
+    /// Sends the fixed continuation turn of a session stopped by a usage
+    /// limit, with the access level and plan mode of the turn that stopped.
+    /// `automatic` is the scheduler's resume: it only runs while the limit
+    /// is still waiting to resume by itself and the reset has passed. The
+    /// queue dispatches after the continuation completes, as after any turn.
+    pub async fn resume_after_usage_limit(
+        &self,
+        session_id: &SessionId,
+        automatic: bool,
+    ) -> Result<TurnId> {
+        use dcc_core::domain::usage_limit::{
+            continuation_prompt, session_usage_limit, usage_limit_phase, UsageLimitPhase,
+        };
+        static IN_FLIGHT: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
+        let in_flight = IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()));
+        if !in_flight
+            .lock()
+            .map_err(|_| dcc_core::CoreError::Repository("resume lock unavailable".to_string()))?
+            .insert(session_id.0.clone())
+        {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "A retomada desta tarefa já está em andamento.".to_string(),
+            ));
+        }
+        struct Release<'a>(&'a Mutex<HashSet<String>>, String);
+        impl Drop for Release<'_> {
+            fn drop(&mut self) {
+                if let Ok(mut set) = self.0.lock() {
+                    set.remove(&self.1);
+                }
+            }
+        }
+        let _release = Release(in_flight, session_id.0.clone());
+
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        let limit = session_usage_limit(&events).ok_or_else(|| {
+            dcc_core::CoreError::InvalidInput(
+                "Esta tarefa não está parada por limite de uso.".to_string(),
+            )
+        })?;
+        if automatic {
+            let now = Utc::now();
+            let reset_passed = limit
+                .resets_at
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .is_some_and(|reset| reset <= now);
+            if !limit.auto_resume
+                || !reset_passed
+                || usage_limit_phase(&limit, now).phase != UsageLimitPhase::Waiting
+            {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "automatic resume is not due".to_string(),
+                ));
+            }
+        }
+        if let Some(binding) = self.provider_binding(session_id)? {
+            if binding.current_turn_id.lock().await.is_some() {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "A tarefa já tem um turno em andamento.".to_string(),
+                ));
+            }
+        }
+        let (plan_mode, approval_policy) = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                SessionEventKind::TurnStarted {
+                    turn_id,
+                    plan_mode,
+                    approval_policy,
+                    ..
+                } if *turn_id == limit.turn_id => Some((*plan_mode, *approval_policy)),
+                _ => None,
+            })
+            .unwrap_or((None, None));
+        let input = SendTurnInput {
+            session_id: session_id.clone(),
+            // Fixed text; the last finished plan step joins it once sessions
+            // keep a plan snapshot (B3).
+            prompt: continuation_prompt(None),
+            tool_instructions: None,
+            provider_id: None,
+            model: None,
+            provider_runtime: None,
+            plan_mode,
+            effort: None,
+            fast_mode: None,
+            approval_policy,
+            evidence: None,
+            retry_of_turn_id: None,
+            decision_provider_model_route: None,
+        };
+        let output = crate::commands::session_commands::send_turn_with_state(self, input)
+            .await
+            .map_err(dcc_core::CoreError::Provider)?;
+        let turn_id = output.turn.id.clone();
+        if let Err(error) = self
+            .append_and_publish_session_event(
+                session_id,
+                SessionEventKind::UsageLimitResumed {
+                    automatic,
+                    turn_id: Some(turn_id.clone()),
+                },
+                dcc_core::ports::events::CoreEvent::SessionUsageLimitResumed {
+                    session_id: session_id.0.clone(),
+                    automatic,
+                    turn_id: Some(turn_id.0.clone()),
+                },
+            )
+            .await
+        {
+            eprintln!("[DCC] usage limit resume record failed: {error}");
+        }
+        Ok(turn_id)
+    }
+
+    /// Ends the turn as stopped by the plan's usage limit: records the limit
+    /// (with the session's automatic-resume choice at this moment), then the
+    /// turn's abort, which keeps the provider text as its reason. The limit
+    /// is a wait, so the objective does not count it as a failure.
+    pub async fn emit_turn_usage_limited(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        resets_at: Option<String>,
+        reason: String,
+    ) -> Result<()> {
+        if let Some(binding) = self.provider_binding(session_id)? {
+            let current_turn_id = binding.current_turn_id.lock().await.clone();
+            if current_turn_id
+                .as_deref()
+                .is_some_and(|current| current != turn_id.0.as_str())
+            {
+                return Ok(());
+            }
+        }
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        let auto_resume = self.auto_resume_for_events(&events);
+        let paused = dcc_core::domain::usage_limit::paused_at_hit(
+            &events,
+            resets_at.as_deref(),
+            auto_resume,
+            Utc::now(),
+        );
+        if let Err(error) = self
+            .append_usage_limit_reached(session_id, turn_id, resets_at, auto_resume, paused)
+            .await
+        {
+            eprintln!("[DCC] usage limit record failed: {error}");
+        }
+        let result = self
+            .terminalize_turn(
+                session_id,
+                turn_id,
+                TerminalRequest::Aborted {
+                    reason: Some(reason),
+                    source: TerminalSource::UsageLimit,
+                },
+            )
+            .await?;
+        let _canonical_outcome = result.outcome;
+        Ok(())
+    }
+
+    /// A reset time the provider reported after the turn already stopped
+    /// (Codex sends its rate-limit snapshot late sometimes).
+    pub async fn record_late_usage_limit_reset(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        resets_at: String,
+    ) -> Result<()> {
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        let Some(limit) = dcc_core::domain::usage_limit::session_usage_limit(&events) else {
+            return Ok(());
+        };
+        if limit.turn_id != *turn_id || limit.resets_at.is_some() {
+            return Ok(());
+        }
+        let paused = dcc_core::domain::usage_limit::paused_at_hit(
+            &events,
+            Some(&resets_at),
+            limit.auto_resume,
+            Utc::now(),
+        );
+        self.append_usage_limit_reached(
+            session_id,
+            turn_id,
+            Some(resets_at),
+            limit.auto_resume,
+            paused,
+        )
+        .await
+    }
+
+    async fn append_usage_limit_reached(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        resets_at: Option<String>,
+        auto_resume: bool,
+        paused: bool,
+    ) -> Result<()> {
+        self.append_and_publish_session_event(
+            session_id,
+            SessionEventKind::UsageLimitReached {
+                turn_id: turn_id.clone(),
+                resets_at: resets_at.clone(),
+                auto_resume,
+                paused,
+            },
+            dcc_core::ports::events::CoreEvent::SessionUsageLimitReached {
+                session_id: session_id.0.clone(),
+                turn_id: turn_id.0.clone(),
+                resets_at,
+                auto_resume,
+                paused,
+            },
+        )
+        .await
+    }
+
     /// Finalizes a just-recorded TurnStarted when binding the new turn failed.
     /// This deliberately never inspects, cancels, or clears the binding for a
     /// still-running older turn in the same session.
@@ -4354,6 +4647,7 @@ impl SessionCommandState {
                 projected_definition_ids.iter().cloned().collect(),
             ),
             ephemeral_mcp_lease_id: ephemeral_lease_id.clone(),
+            usage_limit: Default::default(),
         };
 
         // A disable can begin while `prepare_session` awaits. Recheck the
@@ -6399,6 +6693,7 @@ impl SessionCommandState {
                         }
                     }
                     Ok(ProviderEvent::Completed { .. }) => {
+                        binding.usage_limit.lock().await.pending = None;
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         let mut completed = false;
                         let mut completed_turn_id = None;
@@ -6437,13 +6732,85 @@ impl SessionCommandState {
                             }
                         }
                     }
+                    Ok(ProviderEvent::UsageLimitReached { resets_at, .. }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone();
+                        let mut tracker = binding.usage_limit.lock().await;
+                        match turn_id {
+                            Some(turn_id) => {
+                                // A later report without a reset keeps the known one.
+                                let known = tracker
+                                    .pending
+                                    .take()
+                                    .filter(|(pending, _)| *pending == turn_id)
+                                    .and_then(|(_, known)| known);
+                                tracker.pending = Some((turn_id, resets_at.or(known)));
+                            }
+                            None => {
+                                // The reset arrived after the turn stopped.
+                                let late = match (&tracker.stopped_turn, resets_at) {
+                                    (Some((turn, None)), Some(resets_at)) => {
+                                        Some((turn.clone(), resets_at))
+                                    }
+                                    _ => None,
+                                };
+                                if let Some((turn, resets_at)) = late {
+                                    tracker.stopped_turn =
+                                        Some((turn.clone(), Some(resets_at.clone())));
+                                    drop(tracker);
+                                    if let Err(error) = state
+                                        .record_late_usage_limit_reset(
+                                            &session_id,
+                                            &TurnId(turn),
+                                            resets_at,
+                                        )
+                                        .await
+                                    {
+                                        eprintln!("[DCC] usage limit reset update failed: {error}");
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Ok(ProviderEvent::Failed { message, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
                             binding.assistant_messages.lock().await.active.clear();
-                            let _ = state
-                                .emit_turn_aborted(&session_id, &TurnId(turn_id), Some(message))
-                                .await;
+                            let reported = binding
+                                .usage_limit
+                                .lock()
+                                .await
+                                .pending
+                                .take()
+                                .filter(|(pending, _)| *pending == turn_id)
+                                .map(|(_, resets_at)| resets_at);
+                            let limit = reported.or_else(|| {
+                                dcc_core::domain::usage_limit::usage_limit_from_failure_message(
+                                    &message,
+                                )
+                            });
+                            match limit {
+                                Some(resets_at) => {
+                                    binding.usage_limit.lock().await.stopped_turn =
+                                        Some((turn_id.clone(), resets_at.clone()));
+                                    let _ = state
+                                        .emit_turn_usage_limited(
+                                            &session_id,
+                                            &TurnId(turn_id),
+                                            resets_at,
+                                            message,
+                                        )
+                                        .await;
+                                }
+                                None => {
+                                    let _ = state
+                                        .emit_turn_aborted(
+                                            &session_id,
+                                            &TurnId(turn_id),
+                                            Some(message),
+                                        )
+                                        .await;
+                                }
+                            }
                         }
                     }
                     Err(error) => {
@@ -6548,6 +6915,7 @@ impl SessionCommandState {
             ));
         }
         *binding.assistant_messages.lock().await = AssistantMessageTracker::default();
+        *binding.usage_limit.lock().await = UsageLimitTracker::default();
         *binding.current_turn_id.lock().await = turn_id.clone();
         *binding.usage_turn_id.lock().await = turn_id;
         Ok(())
@@ -7804,6 +8172,7 @@ mod tests {
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
+            usage_limit: Default::default(),
         }
     }
 
@@ -8318,6 +8687,168 @@ mod tests {
                 .objective_tool_instructions(&session.id, Some("base".to_string()))
                 .unwrap(),
             Some("base".to_string())
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_usage_limit_is_a_wait_that_keeps_the_queue_and_the_objective() {
+        use dcc_core::domain::objective::ObjectiveStatus;
+        use dcc_core::domain::session::QueuedTurn;
+        use dcc_core::domain::usage_limit::{usage_limit_phase, UsageLimitPhase};
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("limit");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        state
+            .set_session_objective(
+                &session.id,
+                SessionObjectiveDraft {
+                    intent: "finish the plan".to_string(),
+                    done_when: String::new(),
+                    max_consecutive_failures: Some(1),
+                    max_turns: None,
+                },
+                None,
+            )
+            .await
+            .expect("objective");
+        let turn = TurnId("turn-limit".to_string());
+        state
+            .append_session_event(
+                &session.id,
+                SessionEventKind::TurnStarted {
+                    turn_id: turn.clone(),
+                    prompt: "implement the plan".to_string(),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                    approval_policy: Some(ProviderApprovalPolicy::Ask),
+                },
+            )
+            .await
+            .expect("turn started");
+        state
+            .append_session_event(
+                &session.id,
+                SessionEventKind::TurnQueued {
+                    queued_turn: QueuedTurn {
+                        id: "queued-1".to_string(),
+                        session_id: session.id.clone(),
+                        prompt: "then write the tests".to_string(),
+                        tool_instructions: None,
+                        plan_mode: None,
+                        effort: None,
+                        fast_mode: None,
+                        approval_policy: None,
+                        evidence: None,
+                        created_at: "2026-10-12T01:00:00Z".to_string(),
+                    },
+                },
+            )
+            .await
+            .expect("queued");
+
+        let resets_at = (Utc::now() + ChronoDuration::minutes(30)).to_rfc3339();
+        state
+            .emit_turn_usage_limited(
+                &session.id,
+                &turn,
+                Some(resets_at.clone()),
+                "You've hit your usage limit.".to_string(),
+            )
+            .await
+            .expect("limited");
+
+        let limit = state
+            .session_usage_limit(&session.id)
+            .unwrap()
+            .expect("limit stands");
+        assert_eq!(limit.turn_id, turn);
+        assert_eq!(limit.resets_at.as_deref(), Some(resets_at.as_str()));
+        // Off by default.
+        assert!(!limit.auto_resume);
+        assert_eq!(usage_limit_phase(&limit, Utc::now()).phase, UsageLimitPhase::Waiting);
+        // The turn ended (the queue is free to move once the task resumes)
+        // and the queued follow-up is still there.
+        let events = state
+            .session_repo
+            .list_events_by_session_sync(&session.id)
+            .unwrap();
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            SessionEventKind::TurnAborted { turn_id, .. } if *turn_id == turn
+        )));
+        assert_eq!(list_turn_queue(&state, &session.id).await.unwrap().len(), 1);
+        // A limit is not a failure: one failure would have paused this objective.
+        let objective = state.session_objective(&session.id).unwrap().unwrap();
+        assert_eq!(objective.status, ObjectiveStatus::Active);
+        assert_eq!(objective.consecutive_failures, 0);
+        // Automatic resume never runs before the reset or without the choice.
+        assert!(state.resume_after_usage_limit(&session.id, true).await.is_err());
+        state.set_session_auto_resume(&session.id, true).await.unwrap();
+        let limit = state.session_usage_limit(&session.id).unwrap().unwrap();
+        assert!(limit.auto_resume);
+        assert!(state.resume_after_usage_limit(&session.id, true).await.is_err());
+
+        // The global preference is what a task without its own choice uses.
+        let other = sample_session("limit-other");
+        SessionRepo::save_session(&state, &other).await.unwrap();
+        assert!(!state.session_auto_resume_enabled(&other.id).unwrap());
+        state
+            .set_usage_limit_settings(crate::usage_limit_resume::UsageLimitSettings {
+                auto_resume: true,
+            })
+            .unwrap();
+        assert!(state.session_auto_resume_enabled(&other.id).unwrap());
+        state.set_session_auto_resume(&other.id, false).await.unwrap();
+        assert!(!state.session_auto_resume_enabled(&other.id).unwrap());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_reset_learned_after_the_stop_fills_the_limit() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("late-reset");
+        SessionRepo::save_session(&state, &session).await.unwrap();
+        let turn = TurnId("turn-late".to_string());
+        state
+            .append_session_event(
+                &session.id,
+                SessionEventKind::TurnStarted {
+                    turn_id: turn.clone(),
+                    prompt: "p".to_string(),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                    approval_policy: None,
+                },
+            )
+            .await
+            .unwrap();
+        state
+            .emit_turn_usage_limited(&session.id, &turn, None, "limit".to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            state.session_usage_limit(&session.id).unwrap().unwrap().resets_at,
+            None
+        );
+        let resets_at = (Utc::now() + ChronoDuration::minutes(5)).to_rfc3339();
+        state
+            .record_late_usage_limit_reset(&session.id, &turn, resets_at.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            state.session_usage_limit(&session.id).unwrap().unwrap().resets_at,
+            Some(resets_at)
         );
     }
 
@@ -10570,6 +11101,7 @@ mod tests {
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: Some(winner.lease_id.clone()),
+            usage_limit: Default::default(),
         };
         state
             .store
@@ -10664,6 +11196,7 @@ mod tests {
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
+            usage_limit: Default::default(),
         };
         state
             .store
@@ -10724,6 +11257,7 @@ mod tests {
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
+            usage_limit: Default::default(),
         };
         binding
             .assistant_messages
@@ -10799,6 +11333,7 @@ mod tests {
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
+            usage_limit: Default::default(),
         };
         state
             .store
@@ -10867,6 +11402,7 @@ mod tests {
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
             projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
+            usage_limit: Default::default(),
         };
         state
             .store

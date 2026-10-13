@@ -181,6 +181,7 @@ const ATTENTION_PREVIEW_LIMIT = 5;
 const ATTENTION_DOT_CLASS: Record<AttentionReason, string> = {
 	permission: "bg-amber-500",
 	input: "bg-amber-500",
+	usageLimit: "bg-amber-500",
 	conflicts: "bg-amber-500",
 	prConflicts: "bg-amber-500",
 	checksFailing: "bg-destructive",
@@ -194,6 +195,7 @@ const ATTENTION_DOT_CLASS: Record<AttentionReason, string> = {
 const ATTENTION_TEXT_CLASS: Record<AttentionReason, string> = {
 	permission: "text-amber-700 dark:text-amber-300/90",
 	input: "text-amber-700 dark:text-amber-300/90",
+	usageLimit: "text-amber-700 dark:text-amber-300/90",
 	conflicts: "text-amber-700 dark:text-amber-300/90",
 	prConflicts: "text-amber-700 dark:text-amber-300/90",
 	checksFailing: "text-destructive/85",

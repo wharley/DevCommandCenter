@@ -137,6 +137,12 @@ pub(crate) struct ProviderStreamState {
     /// alongside its primary event (for example Agent activity plus the
     /// requested model from the same tool_use block).
     claude_pending_events: Vec<ProviderEvent>,
+    /// Subscription windows a `rate_limit_event` rejected during the current
+    /// turn, with the reset each one reported.
+    claude_rejected_limits: HashMap<String, Option<String>>,
+    /// The latest top-level assistant message was Claude Code's synthetic
+    /// "You've hit your limit" (`error: "rate_limit"`).
+    claude_assistant_rate_limited: bool,
     pub(crate) gemini_streamed_text_emitted: bool,
     pub(crate) gemini_active_message_id: Option<String>,
     /// Gemini `tool_use` name and parameters by tool id: `tool_result`
@@ -851,10 +857,18 @@ fn parse_claude_terminal_value(
         return Some(event);
     }
     match kind {
+        "rate_limit_event" => {
+            record_claude_rate_limit_event(value, state);
+            None
+        }
         "assistant" => {
+            let parent_tool = nonempty_json_string(value.get("parent_tool_use_id"));
+            if parent_tool.is_none() {
+                state.claude_assistant_rate_limited =
+                    value.get("error").and_then(Value::as_str) == Some("rate_limit");
+            }
             let message = value.get("message")?.as_object()?;
             let message_model = nonempty_json_string(message.get("model"));
-            let parent_tool = nonempty_json_string(value.get("parent_tool_use_id"));
             if let Some(parent_tool) = parent_tool {
                 return message_model.map(|model| ProviderEvent::NativeSubagentModelConfirmed {
                     correlation_id: parent_tool,
@@ -1063,11 +1077,14 @@ fn parse_claude_terminal_value(
                 })
         }
         "result" => {
-            let terminal_event = if value
+            let is_error = value
                 .get("is_error")
                 .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
+                .unwrap_or(false);
+            let usage_limit = claude_result_usage_limit(value, state, is_error);
+            state.claude_rejected_limits.clear();
+            state.claude_assistant_rate_limited = false;
+            let terminal_event = if is_error {
                 let message = value
                     .get("result")
                     .and_then(Value::as_str)
@@ -1082,15 +1099,110 @@ fn parse_claude_terminal_value(
                 ProviderEvent::Completed { at: at.clone() }
             };
             let models = parse_claude_result_usage(value);
-            if models.is_empty() {
-                Some(terminal_event)
-            } else {
-                state.claude_pending_events.push(terminal_event);
-                Some(ProviderEvent::TurnUsage { models, at })
+            let mut events = Vec::new();
+            if !models.is_empty() {
+                events.push(ProviderEvent::TurnUsage {
+                    models,
+                    at: at.clone(),
+                });
             }
+            if let Some(resets_at) = usage_limit {
+                events.push(ProviderEvent::UsageLimitReached { resets_at, at });
+            }
+            events.push(terminal_event);
+            let first = events.remove(0);
+            state.claude_pending_events.extend(events);
+            Some(first)
         }
         _ => None,
     }
+}
+
+/// Records a subscription window `rate_limit_event` rejected, or clears it
+/// when a later event allows it again. Overage that keeps the turn running
+/// is not a stop.
+fn record_claude_rate_limit_event(value: &Value, state: &mut ProviderStreamState) {
+    if value
+        .get("parent_tool_use_id")
+        .is_some_and(|parent| !parent.is_null())
+    {
+        return;
+    }
+    let Some(info) = value.get("rate_limit_info") else {
+        return;
+    };
+    let text = |key: &str| info.get(key).and_then(Value::as_str);
+    let limit_type = text("rateLimitType")
+        .or_else(|| text("rate_limit_type"))
+        .unwrap_or("unknown")
+        .to_string();
+    let overage_allowed = matches!(
+        text("overageStatus"),
+        Some("allowed" | "allowed_warning")
+    ) || info.get("isUsingOverage").and_then(Value::as_bool) == Some(true);
+    match text("status") {
+        Some("rejected") if !overage_allowed => {
+            let resets_at = info
+                .get("resetsAt")
+                .or_else(|| info.get("resets_at"))
+                .and_then(claude_epoch_to_rfc3339);
+            state.claude_rejected_limits.insert(limit_type, resets_at);
+        }
+        Some("allowed" | "allowed_warning") | Some("rejected") => {
+            state.claude_rejected_limits.remove(&limit_type);
+        }
+        _ => {}
+    }
+}
+
+fn claude_epoch_to_rfc3339(value: &Value) -> Option<String> {
+    let raw = value.as_i64().or_else(|| value.as_f64().map(|v| v as i64))?;
+    let seconds = if raw > 10_000_000_000 { raw / 1000 } else { raw };
+    (seconds > 0)
+        .then(|| chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0))
+        .flatten()
+        .map(|time| time.to_rfc3339())
+}
+
+/// Whether an erroring `result` is Claude's subscription limit, as the
+/// t3code adapter reads it: a window was rejected or the last assistant
+/// message was the synthetic limit notice, and the failure is the API error
+/// or blocking limit that follows (not, say, an auth error); or the turn
+/// ended on `blocking_limit` outright. The reset is the latest of the
+/// rejected windows, and only when every one of them reported its own.
+fn claude_result_usage_limit(
+    value: &Value,
+    state: &ProviderStreamState,
+    is_error: bool,
+) -> Option<Option<String>> {
+    if !is_error {
+        return None;
+    }
+    let subtype = value.get("subtype").and_then(Value::as_str);
+    let api_status = value.get("api_error_status").and_then(Value::as_u64);
+    let terminal_reason = value.get("terminal_reason").and_then(Value::as_str);
+    let signalled = !state.claude_rejected_limits.is_empty() || state.claude_assistant_rate_limited;
+    let compatible = (subtype != Some("success") || api_status.is_none() || api_status == Some(429))
+        && matches!(terminal_reason, None | Some("api_error" | "blocking_limit"));
+    if !(signalled && compatible) && terminal_reason != Some("blocking_limit") {
+        return None;
+    }
+    let resets = state.claude_rejected_limits.values().cloned().collect::<Vec<_>>();
+    let resets_at = if !resets.is_empty() && resets.iter().all(Option::is_some) {
+        resets.into_iter().flatten().max_by_key(|value| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .map(|time| time.timestamp())
+                .unwrap_or(0)
+        })
+    } else {
+        // Claude Code's older text carries the reset: "…limit reached|<epoch>".
+        value
+            .get("result")
+            .and_then(Value::as_str)
+            .and_then(dcc_core::domain::usage_limit::usage_limit_from_failure_message)
+            .flatten()
+    };
+    Some(resets_at)
 }
 
 fn json_u64(object: &serde_json::Map<String, Value>, key: &str) -> u64 {
@@ -2488,6 +2600,72 @@ pub fn local_workspace_id() -> WorkspaceId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn replay_claude(fixture: &str) -> Vec<ProviderEvent> {
+        let mut state = ProviderStreamState::default();
+        let mut events = Vec::new();
+        for line in fixture.lines() {
+            match parse_provider_stream_line(line, &mut state) {
+                ParsedProviderLine::Event(event) => events.push(event),
+                ParsedProviderLine::Events(more) => events.extend(more),
+                _ => {}
+            }
+        }
+        events
+    }
+
+    fn rfc3339(seconds: i64) -> String {
+        chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0)
+            .unwrap()
+            .to_rfc3339()
+    }
+
+    #[test]
+    fn claude_session_limit_is_reported_before_the_failure_with_its_reset() {
+        let events = replay_claude(include_str!("../fixtures/usage_limit/claude_session_limit.jsonl"));
+        let limit = events
+            .iter()
+            .position(|event| matches!(event, ProviderEvent::UsageLimitReached { .. }))
+            .expect("usage limit");
+        let failed = events
+            .iter()
+            .position(|event| matches!(event, ProviderEvent::Failed { .. }))
+            .expect("failure");
+        assert!(limit < failed);
+        assert!(matches!(
+            &events[limit],
+            ProviderEvent::UsageLimitReached { resets_at: Some(at), .. } if *at == rfc3339(1_760_247_600)
+        ));
+        assert!(matches!(
+            &events[failed],
+            ProviderEvent::Failed { message, .. } if message.starts_with("You've hit your session limit")
+        ));
+    }
+
+    #[test]
+    fn claude_overage_and_auth_errors_are_not_usage_limits() {
+        for fixture in [
+            include_str!("../fixtures/usage_limit/claude_overage_allowed.jsonl"),
+            include_str!("../fixtures/usage_limit/claude_auth_error.jsonl"),
+        ] {
+            let events = replay_claude(fixture);
+            assert!(!events
+                .iter()
+                .any(|event| matches!(event, ProviderEvent::UsageLimitReached { .. })));
+        }
+    }
+
+    #[test]
+    fn claude_limit_state_does_not_leak_into_the_next_turn() {
+        let mut fixture = include_str!("../fixtures/usage_limit/claude_session_limit.jsonl").to_string();
+        fixture.push_str(r#"{"type":"result","subtype":"success","is_error":true,"api_error_status":500,"result":"API Error: 500","terminal_reason":"api_error"}"#);
+        let events = replay_claude(&fixture);
+        let limits = events
+            .iter()
+            .filter(|event| matches!(event, ProviderEvent::UsageLimitReached { .. }))
+            .count();
+        assert_eq!(limits, 1);
+    }
 
     fn temp_path(prefix: &str) -> PathBuf {
         std::env::temp_dir().join(format!("{}-{}", prefix, Uuid::new_v4()))

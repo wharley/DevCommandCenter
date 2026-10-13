@@ -596,6 +596,18 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(send_turn_handler),
         )
         .route(
+            "/api/v1/usage-limit/settings",
+            get(usage_limit_settings_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/usage-limit/resume",
+            post(resume_after_usage_limit_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/usage-limit/auto-resume",
+            get(usage_limit_auto_resume_handler).put(set_usage_limit_auto_resume_handler),
+        )
+        .route(
             "/api/v1/sessions/:session_id/abort",
             post(abort_session_handler),
         )
@@ -2298,6 +2310,59 @@ async fn list_session_events_handler(
     })
     .await?;
     Ok(Json(payload))
+}
+
+/// The desktop's default for "Continuar sozinho se o limite acabar", so the
+/// phone's "Nova tarefa" starts from it.
+async fn usage_limit_settings_handler(
+    State(backend): State<Arc<HttpBackend>>,
+) -> Result<Json<Value>, HttpApiError> {
+    Ok(Json(json!(backend.sessions.usage_limit_settings())))
+}
+
+/// "Continuar" on a task stopped by its usage limit.
+async fn resume_after_usage_limit_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let turn_id = backend
+        .sessions
+        .resume_after_usage_limit(&SessionId(session_id), false)
+        .await
+        .map_err(|error| match error {
+            dcc_core::CoreError::InvalidInput(message) => HttpApiError::BadRequest(message),
+            error => classify_session_error(error.to_string()),
+        })?;
+    Ok(Json(json!({ "turnId": turn_id.0 })))
+}
+
+async fn usage_limit_auto_resume_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let enabled = backend
+        .sessions
+        .session_auto_resume_enabled(&SessionId(session_id))
+        .map_err(|error| classify_session_error(error.to_string()))?;
+    Ok(Json(json!({ "enabled": enabled })))
+}
+
+#[derive(Deserialize)]
+struct AutoResumeBody {
+    enabled: bool,
+}
+
+async fn set_usage_limit_auto_resume_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<AutoResumeBody>,
+) -> Result<Json<Value>, HttpApiError> {
+    backend
+        .sessions
+        .set_session_auto_resume(&SessionId(session_id), body.enabled)
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
+    Ok(Json(json!({ "enabled": body.enabled })))
 }
 
 async fn abort_session_handler(

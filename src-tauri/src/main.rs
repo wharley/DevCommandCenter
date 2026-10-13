@@ -18,6 +18,7 @@ mod delegation_commands;
 mod desktop_agent_requests;
 mod feedback_commands;
 mod keep_awake_commands;
+mod usage_limit_commands;
 mod forge_commands;
 mod git_support;
 mod mcp_commands;
@@ -7017,6 +7018,11 @@ pub fn run() {
             menu_bar::menu_bar_quit,
             keep_awake_commands::keep_awake_status,
             keep_awake_commands::keep_awake_set_mode,
+            usage_limit_commands::usage_limit_settings,
+            usage_limit_commands::usage_limit_set_settings,
+            usage_limit_commands::session_usage_limit_auto_resume,
+            usage_limit_commands::session_set_usage_limit_auto_resume,
+            usage_limit_commands::session_resume_after_usage_limit,
             quick_composer::quick_composer_status,
             quick_composer::quick_composer_set_shortcut,
             quick_composer::quick_composer_toggle,
@@ -7338,11 +7344,14 @@ pub fn run() {
                 db_path.clone(),
                 desktop_agent_requests,
             );
+            let usage_limit_state = usage_limit_commands::start(&session_command_state);
             app.manage(keep_awake_commands::start(
                 app.handle(),
                 &session_command_state,
+                usage_limit_state.scheduler.clone(),
                 &app_data_dir,
             ));
+            app.manage(usage_limit_state);
             app.manage(session_command_state);
             let ai_memory_retry_state = app
                 .try_state::<SessionCommandState>()

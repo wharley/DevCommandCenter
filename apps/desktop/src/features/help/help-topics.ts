@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+	Hourglass,
 	AppWindow,
 	ArrowLeftRight,
 	BadgeCheck,
@@ -66,6 +67,7 @@ export const HELP_TOPIC_IDS = [
 	"undo",
 	"mobile",
 	"keepAwake",
+	"usageLimit",
 	"pullRequests",
 	"spec",
 	"multiProject",
@@ -102,6 +104,7 @@ export const HELP_TOPIC_ICONS: Record<HelpTopicId, LucideIcon> = {
 	undo: Undo2,
 	mobile: Smartphone,
 	keepAwake: Coffee,
+	usageLimit: Hourglass,
 	pullRequests: GitPullRequest,
 	spec: FileText,
 	objective: Target,

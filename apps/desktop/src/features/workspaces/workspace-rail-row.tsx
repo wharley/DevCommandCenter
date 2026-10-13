@@ -38,6 +38,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { WorkspaceUsageLimitState } from "./usage-limit-state";
 import type { WorkspaceRecapTone } from "@/features/inspector/workspace-recap";
 import {
 	isAgentTurnOpen,
@@ -674,6 +675,11 @@ export const WorkspaceRailRowItem = memo(
 											{workspaceStatusMessage}
 										</span>
 									</div>
+								) : activity?.state === "limited" &&
+								  activity.usageLimit &&
+								  !hasPriorityWorkspaceStatus &&
+								  !compact ? (
+									<WorkspaceUsageLimitState limit={activity.usageLimit} />
 								) : activity && !hasPriorityWorkspaceStatus && !compact ? (
 									<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
 										<span
@@ -1024,6 +1030,10 @@ export const WorkspaceRailRowItem = memo(
 		previous.selected === next.selected &&
 		previous.activity?.state === next.activity?.state &&
 		previous.activity?.waitingFor === next.activity?.waitingFor &&
+		previous.activity?.usageLimit?.resetsAt === next.activity?.usageLimit?.resetsAt &&
+		previous.activity?.usageLimit?.autoResume === next.activity?.usageLimit?.autoResume &&
+		previous.activity?.usageLimit?.autoResumesUsed ===
+			next.activity?.usageLimit?.autoResumesUsed &&
 		previous.activity?.startedAt === next.activity?.startedAt &&
 		previous.activity?.completedAt === next.activity?.completedAt &&
 		previous.unseenResult === next.unseenResult &&

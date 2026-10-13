@@ -1,0 +1,3 @@
+{"method":"turn/completed","params":{"threadId":"019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b","turn":{"id":"019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a7d","items":[],"status":"failed","error":{"message":"Provider stopped this request.","codexErrorInfo":"usageLimitExceeded"}}}}
+{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"resetsAt":2000100000,"windowDurationMins":300}}}}
+{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"resetsAt":2000100000,"windowDurationMins":300}}}}

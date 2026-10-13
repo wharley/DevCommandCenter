@@ -23,6 +23,11 @@
 //! before the next turn starts. A queue left behind by a failed turn does not
 //! dispatch by itself, so it does not hold the Mac.
 //!
+//! A task stopped by its plan's usage limit that will continue by itself
+//! (`dcc_tauri::usage_limit_resume`) holds the Mac too, until the scheduler
+//! resumes it (reset plus slack): otherwise the Mac sleeps before the reset
+//! and the resume never runs. A limit that waits for the person does not.
+//!
 //! macOS: an IOKit `PreventUserIdleSystemSleep` assertion — the system stays
 //! awake, the display may still sleep. It does not survive closing the lid:
 //! macOS sleeps then, on battery or plugged in, except in Apple's
@@ -70,6 +75,10 @@ pub enum HoldReason {
     },
     /// The last turn just ended; waiting out `HAND_OFF_GRACE`.
     AgentJustFinished,
+    /// A task resumes by itself after its usage limit resets (RFC 3339).
+    WaitingForLimit {
+        until: String,
+    },
 }
 
 impl HoldReason {
@@ -80,6 +89,15 @@ impl HoldReason {
             Self::AgentsWorking { count: 1 } => "1 agente trabalhando".to_string(),
             Self::AgentsWorking { count } => format!("{count} agentes trabalhando"),
             Self::AgentJustFinished => "agente acabou de terminar".to_string(),
+            Self::WaitingForLimit { until } => {
+                match chrono::DateTime::parse_from_rfc3339(until) {
+                    Ok(until) => format!(
+                        "aguardando limite até {}",
+                        until.with_timezone(&chrono::Local).format("%H:%M")
+                    ),
+                    Err(_) => "aguardando limite".to_string(),
+                }
+            }
         }
     }
 }
@@ -180,26 +198,27 @@ impl ActiveTurns {
     }
 }
 
-/// What the preference asks for right now.
-///
-/// Extension point for B2 ("aguardando limite"): a session waiting for a
-/// usage-limit reset must hold the Mac in `DuringAgents` like a turn in
-/// flight — otherwise the Mac sleeps before the reset and the automatic
-/// resume never runs. It enters here as one more input, checked after the
-/// active turns, with a reason of its own (`WaitingForLimit { until }`).
+/// What the preference asks for right now. `limit_until` is the soonest
+/// automatic resume after a usage limit, if a task waits for one: in
+/// `DuringAgents` it holds the Mac like a turn in flight, checked after the
+/// active turns.
 pub fn decide(
     mode: KeepAwakeMode,
     turns: &ActiveTurns,
+    limit_until: Option<&chrono::DateTime<chrono::Utc>>,
     grace: Duration,
     now: Instant,
 ) -> Option<HoldReason> {
     match mode {
         KeepAwakeMode::Off => None,
         KeepAwakeMode::Always => Some(HoldReason::AppOpen),
-        KeepAwakeMode::DuringAgents => match turns.count() {
-            0 if turns.ended_within(grace, now) => Some(HoldReason::AgentJustFinished),
-            0 => None,
-            count => Some(HoldReason::AgentsWorking { count }),
+        KeepAwakeMode::DuringAgents => match (turns.count(), limit_until) {
+            (0, Some(until)) => Some(HoldReason::WaitingForLimit {
+                until: until.to_rfc3339(),
+            }),
+            (0, None) if turns.ended_within(grace, now) => Some(HoldReason::AgentJustFinished),
+            (0, None) => None,
+            (count, _) => Some(HoldReason::AgentsWorking { count }),
         },
     }
 }
@@ -215,6 +234,11 @@ pub trait PowerAssertions: Send + Sync {
 #[async_trait]
 pub trait TurnSource: Send + Sync {
     async fn active_turns(&self) -> Result<Vec<(String, String)>, String>;
+
+    /// When the tasks waiting on a usage limit resume by themselves.
+    async fn limit_waits(&self) -> Vec<chrono::DateTime<chrono::Utc>> {
+        Vec::new()
+    }
 }
 
 #[async_trait]
@@ -379,6 +403,7 @@ type ChangeListener = Box<dyn Fn(Option<&HoldReason>) + Send + Sync>;
 struct Inner {
     mode: KeepAwakeMode,
     turns: ActiveTurns,
+    limit_until: Option<chrono::DateTime<chrono::Utc>>,
     held: Option<(u32, HoldReason)>,
 }
 
@@ -402,6 +427,7 @@ impl KeepAwake {
             inner: Mutex::new(Inner {
                 mode,
                 turns: ActiveTurns::default(),
+                limit_until: None,
                 held: None,
             }),
             power,
@@ -455,6 +481,12 @@ impl KeepAwake {
         self.update(now, |inner| inner.turns.reconcile(truth, now));
     }
 
+    /// The automatic resumes tasks wait for; the soonest one is what holds.
+    pub fn set_limit_waits(&self, waits: &[chrono::DateTime<chrono::Utc>], now: Instant) {
+        let until = waits.iter().min().copied();
+        self.update(now, |inner| inner.limit_until = until);
+    }
+
     /// Re-evaluates without new input (grace expiry).
     pub fn tick(&self, now: Instant) {
         self.update(now, |_| {});
@@ -468,7 +500,13 @@ impl KeepAwake {
             let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             change(&mut inner);
             let wanted = if self.power.supported() {
-                decide(inner.mode, &inner.turns, self.grace, now)
+                decide(
+                    inner.mode,
+                    &inner.turns,
+                    inner.limit_until.as_ref(),
+                    self.grace,
+                    now,
+                )
             } else {
                 None
             };
@@ -529,6 +567,8 @@ impl KeepAwake {
         loop {
             let now = Instant::now();
             if now >= next_reconcile {
+                let waits = source.limit_waits().await;
+                self.set_limit_waits(&waits, Instant::now());
                 match source.active_turns().await {
                     Ok(truth) => self.reconcile(&truth, Instant::now()),
                     Err(error) => {
@@ -804,6 +844,59 @@ mod tests {
                 None,
             ]
         );
+    }
+
+    #[test]
+    fn a_task_waiting_for_its_limit_holds_the_mac_until_it_resumes() {
+        let t0 = Instant::now();
+        let (power, keep) = controller(KeepAwakeMode::DuringAgents);
+        keep.turn_started("s", "t", t0);
+        keep.turn_ended("s", "t", t0);
+        let until = chrono::DateTime::parse_from_rfc3339("2026-10-12T06:41:30Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        keep.set_limit_waits(&[until], t0);
+        // Long after the hand-off grace, the wait still holds.
+        keep.tick(t0 + GRACE * 10);
+        assert_eq!(power.held().len(), 1);
+        assert!(matches!(
+            keep.status().active.map(|hold| hold.reason),
+            Some(HoldReason::WaitingForLimit { .. })
+        ));
+        assert!(label(&keep).unwrap().starts_with("aguardando limite até "));
+        // The resume starts a turn: agents working wins.
+        keep.turn_started("s", "resume", t0 + GRACE * 10);
+        assert_eq!(label(&keep).as_deref(), Some("1 agente trabalhando"));
+        keep.set_limit_waits(&[], t0 + GRACE * 10);
+        keep.turn_ended("s", "resume", t0 + GRACE * 11);
+        keep.tick(t0 + GRACE * 13);
+        assert!(power.held().is_empty());
+    }
+
+    #[test]
+    fn a_limit_wait_does_not_hold_when_off() {
+        let t0 = Instant::now();
+        let (power, keep) = controller(KeepAwakeMode::Off);
+        keep.set_limit_waits(&[chrono::Utc::now()], t0);
+        assert!(power.held().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_reads_the_limit_waits_from_the_source() {
+        struct Waiting;
+        #[async_trait]
+        impl TurnSource for Waiting {
+            async fn active_turns(&self) -> Result<Vec<(String, String)>, String> {
+                Ok(Vec::new())
+            }
+            async fn limit_waits(&self) -> Vec<chrono::DateTime<chrono::Utc>> {
+                vec![chrono::Utc::now() + chrono::Duration::minutes(30)]
+            }
+        }
+        let (power, keep) = controller(KeepAwakeMode::DuringAgents);
+        tokio::spawn(keep.clone().run(Arc::new(Waiting)));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(power.held().len(), 1);
     }
 
     #[test]

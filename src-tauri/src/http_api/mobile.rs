@@ -52,6 +52,10 @@ pub(super) struct CreateTask {
     /// Skipped when absent so journaled requests from those apps still match.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     approval_policy: Option<ProviderApprovalPolicy>,
+    /// "Continuar sozinho se o limite acabar". Omitted: the desktop's global
+    /// preference. Skipped when absent, like `approval_policy`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    auto_resume: Option<bool>,
 }
 
 fn validate_task(input: &CreateTask) -> Result<(), HttpApiError> {
@@ -327,6 +331,12 @@ async fn execute_task(
     let output = start_thread(state, state, state, state, start)
         .await
         .map_err(core_error)?;
+    if let Some(enabled) = input.auto_resume {
+        state
+            .set_session_auto_resume(&output.session.id, enabled)
+            .await
+            .map_err(core_error)?;
+    }
     let session_id = output.session.id.0;
     result["sessionId"] = json!(session_id);
     save_result(config.clone(), input.request_id.clone(), result.clone()).await?;

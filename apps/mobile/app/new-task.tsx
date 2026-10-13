@@ -63,6 +63,8 @@ export default function NewTaskScreen() {
 	const [providerId, setProviderId] = useState<string | null>(null);
 	const [model, setModel] = useState<string | null>(null);
 	const [worktree, setWorktree] = useState(true);
+	/** Starts from the desktop's default; null until it is read. */
+	const [autoResume, setAutoResume] = useState<boolean | null>(null);
 	const [access, setAccess] = useState<AccessPolicy | null>(null);
 	const [selection, setSelection] = useState({ start: 0, end: 0 });
 	/** Set once after a mention is inserted, to move the cursor past it. */
@@ -110,12 +112,21 @@ export default function NewTaskScreen() {
 		};
 	}, [load]);
 
+	useEffect(() => {
+		backend
+			.request<{ autoResume?: boolean }>("GET", "/api/v1/usage-limit/settings")
+			.then((settings) => {
+				if (alive.current) setAutoResume((current) => current ?? settings.autoResume === true);
+			})
+			.catch(() => {});
+	}, [backend]);
+
 	const attachments = useAttachments(backend);
 	const dictation = useDictation(prompt, setPrompt);
 	const attached = attachments.items.map((item) => item.path ?? item.id).join("|");
 	useEffect(() => {
 		requestId.current = null;
-	}, [repositoryId, prompt, providerId, model, worktree, access, attached]);
+	}, [repositoryId, prompt, providerId, model, worktree, access, autoResume, attached]);
 
 	const provider = useMemo(
 		() => catalog?.providers.find((p) => p.id === providerId) ?? null,
@@ -191,6 +202,7 @@ export default function NewTaskScreen() {
 					model,
 					worktree,
 					access,
+					autoResume,
 				}),
 			);
 			const deadline = Date.now() + GIVE_UP_MS;
@@ -405,6 +417,22 @@ export default function NewTaskScreen() {
 							<Text style={styles.worktreeLabel}>Worktree</Text>
 							<Text style={styles.worktreeHint} numberOfLines={2}>
 								· {worktree ? "Isolado do checkout original" : "Usa o checkout atual"}
+							</Text>
+						</Pressable>
+
+						<Pressable
+							onPress={() => setAutoResume((value) => !value)}
+							disabled={creating}
+							style={styles.worktree}
+							accessibilityRole="checkbox"
+							accessibilityState={{ checked: autoResume === true, disabled: creating }}
+							accessibilityLabel="Continuar sozinho se o limite acabar"
+						>
+							<View style={[styles.box, autoResume === true && styles.boxOn]}>
+								{autoResume === true ? <Feather name="check" size={13} color={color.accentInk} /> : null}
+							</View>
+							<Text style={styles.worktreeLabel} numberOfLines={2}>
+								Continuar sozinho se o limite acabar
 							</Text>
 						</Pressable>
 

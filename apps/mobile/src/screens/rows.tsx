@@ -22,6 +22,8 @@ const STATUS_TEXT: Record<LiveStatus, { text: string; tint: string }> = {
 	running: { text: "rodando", tint: color.accent },
 	completed: { text: "concluído", tint: color.mute },
 	aborted: { text: "interrompido", tint: color.danger },
+	// A wait, not an error: "Precisa de você" says when it needs the person.
+	limited: { text: "parado no limite de uso", tint: color.mute },
 };
 
 export function openThread(sessionId: string) {
@@ -127,6 +129,7 @@ export function NeedsYouCard({
 const ATTENTION_ICON: Record<NeedsYouRow["entry"]["reason"], keyof typeof Feather.glyphMap> = {
 	permission: "shield",
 	input: "message-circle",
+	usageLimit: "clock",
 	conflicts: "git-merge",
 	prConflicts: "git-pull-request",
 	checksFailing: "x-octagon",

@@ -10,7 +10,10 @@
 //! What notifies is what puts a task under "Precisa de você" on the desktop
 //! and has an event of its own: a permission request, a question from the
 //! agent, and a turn that finished or was interrupted (the sidebar's
-//! `permission`, `input`, `completed` and `aborted`). Besides those, the
+//! `permission`, `input`, `completed` and `aborted`), and a task stopped by
+//! its plan's usage limit with nothing that resumes it by itself
+//! (`usageLimit`). A task that waits for its limit to reset and continues by
+//! itself does not notify — not even as "interrupted". Besides those, the
 //! HTTP backend's watcher (`http_api::attention`) hands over a Browser or
 //! computer-use request from an agent (`agent_requests`) and a task that
 //! newly has a git conflict (local or in its PR) or failing checks — each
@@ -137,6 +140,12 @@ pub enum AttentionKind {
     /// Local merge conflicts, or the PR conflicts with its base.
     Conflict,
     ChecksFailing,
+    /// Stopped by the usage limit, waiting for the person.
+    UsageLimit,
+    /// Stopped by the usage limit, continuing by itself after the reset.
+    /// Never sent: it only claims the turn's key so the "interrupted" push
+    /// for the same turn does not go out.
+    LimitWait,
 }
 
 /// One "needs you" moment, from the event that starts it.
@@ -196,6 +205,21 @@ impl Attention {
                 session_id,
                 format!("turn:{session_id}:{turn_id}"),
             ),
+            // Recorded just before the turn's abort, under the same key.
+            CoreEvent::SessionUsageLimitReached {
+                session_id,
+                turn_id,
+                paused,
+                ..
+            } => (
+                if *paused {
+                    AttentionKind::UsageLimit
+                } else {
+                    AttentionKind::LimitWait
+                },
+                session_id,
+                format!("turn:{session_id}:{turn_id}"),
+            ),
             _ => return None,
         };
         Some(Self {
@@ -227,6 +251,12 @@ pub fn notification_text(kind: AttentionKind, project: Option<&str>) -> (String,
         (AttentionKind::Completed, None) => "Tarefa concluída".to_string(),
         (AttentionKind::Interrupted, Some(project)) => format!("{project}: tarefa interrompida"),
         (AttentionKind::Interrupted, None) => "Tarefa interrompida".to_string(),
+        (AttentionKind::UsageLimit | AttentionKind::LimitWait, Some(project)) => {
+            format!("{project}: parou no limite de uso")
+        }
+        (AttentionKind::UsageLimit | AttentionKind::LimitWait, None) => {
+            "Uma tarefa parou no limite de uso".to_string()
+        }
     };
     (TITLE.to_string(), body)
 }
@@ -362,6 +392,7 @@ impl PushNotifier {
         let attentions: Vec<Attention> = attentions
             .into_iter()
             .filter(|attention| self.first_time(&attention.key))
+            .filter(|attention| attention.kind != AttentionKind::LimitWait)
             .collect();
         if attentions.is_empty() {
             return Vec::new();
@@ -960,6 +991,44 @@ mod tests {
         ] {
             assert!(!wire.contains(secret), "push carried {secret:?}: {wire}");
         }
+    }
+
+    fn limited(session: &str, turn: &str, paused: bool) -> Vec<CoreEvent> {
+        vec![
+            CoreEvent::SessionUsageLimitReached {
+                session_id: session.to_string(),
+                turn_id: turn.to_string(),
+                resets_at: None,
+                auto_resume: true,
+                paused,
+            },
+            CoreEvent::SessionTurnAborted {
+                session_id: session.to_string(),
+                turn_id: turn.to_string(),
+                reason: Some("You've hit your usage limit".to_string()),
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn a_usage_limit_notifies_only_when_it_needs_the_person_and_once() {
+        let desk = desk().await;
+        desk.phone(1, "ExponentPushToken[aaa]");
+        // Waiting for the reset, continuing by itself: no push at all, not
+        // even "interrupted".
+        let delivery = notify(&desk, &limited("s1", "t1", false)).await;
+        assert_eq!(delivery.sent, 0);
+        assert!(desk.sent().is_empty());
+
+        // No known reset: one push, and the abort that follows adds none.
+        let delivery = notify(&desk, &limited("s1", "t2", true)).await;
+        assert_eq!(delivery.sent, 1);
+        let sent = desk.sent();
+        let message = &sent[0].as_array().unwrap()[0];
+        assert_eq!(message["body"], "Projeto Ácido: parou no limite de uso");
+        assert_eq!(message["data"], json!({ "sessionId": "s1", "kind": "usageLimit" }));
+        let again = notify(&desk, &limited("s1", "t2", true)).await;
+        assert_eq!(again.sent, 0);
     }
 
     #[tokio::test]

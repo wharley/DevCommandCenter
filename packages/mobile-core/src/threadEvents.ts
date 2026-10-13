@@ -371,6 +371,21 @@ function coreEventToRawSessionEvent(
 				...base,
 				kind: { type: "turn_completed", turnId: stringField(body, "turn_id") },
 			};
+		case "sessionUsageLimitReached":
+			return {
+				...base,
+				kind: {
+					type: "usage_limit_reached",
+					turnId: stringField(body, "turn_id"),
+					resetsAt: stringField(body, "resets_at") ?? null,
+					autoResume: booleanField(body, "auto_resume"),
+				},
+			};
+		case "sessionUsageLimitResumed":
+			return {
+				...base,
+				kind: { type: "usage_limit_resumed", automatic: booleanField(body, "automatic") },
+			};
 		case "sessionTurnAborted":
 			return {
 				...base,
@@ -432,6 +447,33 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 
 		case "session_aborted":
 			pushSystem(state, event.eventId, "Sessão abortada", event.occurredAt);
+			break;
+
+		case "usage_limit_reached": {
+			// One line per stop; a reset reported later updates it.
+			const id = `${USAGE_LIMIT_MESSAGE_PREFIX}${turnId}`;
+			const resetsAt = typeof kind.resetsAt === "string" ? kind.resetsAt : null;
+			const text = resetsAt
+				? t("usageLimit.timelineWaiting", { time: clockTime(resetsAt) })
+				: t("usageLimit.timelinePaused");
+			const existing = state.messages.findIndex((m) => m.kind === "system" && m.id === id);
+			if (existing >= 0) {
+				if (resetsAt) state.messages[existing] = { kind: "system", id, text, at: event.occurredAt };
+			} else {
+				pushSystem(state, id, text, event.occurredAt);
+			}
+			break;
+		}
+
+		case "usage_limit_resumed":
+			pushSystem(
+				state,
+				event.eventId,
+				kind.automatic === true
+					? t("usageLimit.timelineResumedAuto")
+					: t("usageLimit.timelineResumedManual"),
+				event.occurredAt,
+			);
 			break;
 
 		case "turn_started": {
@@ -669,6 +711,33 @@ function withDetailTarget(input: unknown, detail: unknown): unknown {
 	if (typeof command === "string" && command) next.command = command;
 	if (typeof file === "string" && file) next.file = file;
 	return next;
+}
+
+const USAGE_LIMIT_MESSAGE_PREFIX = "usage-limit:";
+
+function clockTime(iso: string): string {
+	const at = new Date(iso);
+	return Number.isNaN(at.getTime())
+		? iso
+		: at.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * The latest turn stopped on the plan's usage limit and nothing came after
+ * it: the thread offers "Continuar" (`POST …/usage-limit/resume`).
+ */
+export function stoppedByUsageLimit(messages: ChatMessage[]): boolean {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i];
+		if (!m) continue;
+		if (m.kind === "system") {
+			if (m.id.startsWith(USAGE_LIMIT_MESSAGE_PREFIX)) return true;
+			continue;
+		}
+		if (m.kind === "assistant" || m.kind === "tool" || m.kind === "reasoning") continue;
+		return false;
+	}
+	return false;
 }
 
 function pushSystem(

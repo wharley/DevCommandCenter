@@ -625,6 +625,14 @@ pub enum ProviderEvent {
         models: Vec<ModelTokenUsage>,
         at: String,
     },
+    /// The plan's usage limit stopped the current turn. Not terminal: the
+    /// turn's `Failed` follows, and DCC records it as a limit instead of an
+    /// error. One that arrives after the `Failed` carries a reset time the
+    /// provider reported late. `resets_at` is `None` when unknown.
+    UsageLimitReached {
+        resets_at: Option<String>,
+        at: String,
+    },
     Completed {
         at: String,
     },

@@ -11,6 +11,7 @@ import {
 	pickAccessPolicy,
 	threadApprovalPolicy,
 	t,
+	stoppedByUsageLimit,
 	threadTitle,
 	workspaceLabel,
 	type AccessPolicy,
@@ -33,7 +34,7 @@ import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { FileMentionList } from "@/ui/FileMentionList";
 import { useDictation } from "@/dictation/useDictation";
-import { Loading, Mono, StateDot } from "@/ui/primitives";
+import { Button, Loading, Mono, StateDot } from "@/ui/primitives";
 import { AgentMascot } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
 import { router, useLocalSearchParams } from "expo-router";
@@ -69,6 +70,7 @@ export default function ThreadScreen() {
 	const [composer, setComposer] = useState("");
 	const [sending, setSending] = useState(false);
 	const [stopping, setStopping] = useState(false);
+	const [resuming, setResuming] = useState(false);
 	const [busy, setBusy] = useState<Set<string>>(() => new Set());
 	const [notice, setNotice] = useState<string | null>(null);
 	const [catalog, setCatalog] = useState<MobileCatalog | null>(() => cachedCatalog(backend));
@@ -270,6 +272,21 @@ export default function ThreadScreen() {
 		}
 	};
 
+	/** "Continuar" after the plan's usage limit: the desktop sends its fixed continuation. */
+	const resumeAfterLimit = async () => {
+		if (resuming) return;
+		setResuming(true);
+		try {
+			await backend.request("POST", `/api/v1/sessions/${encodeURIComponent(threadId)}/usage-limit/resume`, {});
+			stick.current = true;
+			sync.current?.nudge();
+		} catch (error) {
+			setNotice(errorMessage(error, "Falha ao retomar."));
+		} finally {
+			setResuming(false);
+		}
+	};
+
 	const stop = async () => {
 		if (stopping) return;
 		setStopping(true);
@@ -425,6 +442,15 @@ export default function ThreadScreen() {
 						scope={{ workspaceId: meta.workspaceId }}
 						query={mention.query}
 						onPick={insertMention}
+					/>
+				) : null}
+				{!running && stoppedByUsageLimit(state.messages) ? (
+					<Button
+						label={t("usageLimit.continue")}
+						variant="ghost"
+						busy={resuming}
+						onPress={() => void resumeAfterLimit()}
+						accessibilityLabel={t("usageLimit.continue")}
 					/>
 				) : null}
 				{provider ? (

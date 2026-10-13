@@ -455,6 +455,16 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					turns_used: record.kind.turnsUsed,
 				},
 			};
+		case "usage_limit_reached":
+			return {
+				sessionUsageLimitReached: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId,
+					resets_at: record.kind.resetsAt ?? null,
+					auto_resume: record.kind.autoResume ?? false,
+					paused: record.kind.paused ?? false,
+				},
+			};
 		case "conversation_rewound":
 			return {
 				sessionConversationRewound: {
@@ -488,6 +498,9 @@ function getEventSessionId(event: CoreEvent): string | null {
 	}
 	if ("sessionConversationRewound" in event && event.sessionConversationRewound) {
 		return event.sessionConversationRewound.session_id;
+	}
+	if ("sessionUsageLimitReached" in event && event.sessionUsageLimitReached) {
+		return event.sessionUsageLimitReached.session_id;
 	}
 	if (
 		"sessionMcpRuntimeStatusChanged" in event &&
@@ -622,6 +635,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionResumed" in event) return "session.resumed";
 	if ("sessionObjectivePaused" in event) return "session.objective.paused";
 	if ("sessionConversationRewound" in event) return "session.conversation.rewound";
+	if ("sessionUsageLimitReached" in event) return "session.usage-limit.reached";
 	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnSteered" in event) return "session.turn.steered";

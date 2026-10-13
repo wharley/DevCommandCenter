@@ -66,6 +66,7 @@ import { getProviderUnhealthyReason } from "@/features/providers/provider-select
 import { ComposerApprovalPolicyMenu } from "./ComposerApprovalPolicyMenu";
 import { ComposerExecutionMenu } from "./ComposerExecutionMenu";
 import { ComposerButton } from "./ComposerButton";
+import { SessionAutoResumeToggle, UsageLimitStrip } from "./usage-limit-controls";
 import {
 	clampEffort,
 	DEFAULT_EFFORT_LEVELS,
@@ -815,6 +816,12 @@ export function WorkspaceComposer({
 					disabled={inputDisabled || isSubmitting}
 				/>
 			) : null}
+			<UsageLimitStrip
+				sessionId={sessionId}
+				workspaceId={sessionSnapshot?.workspaceId ?? null}
+				queuedCount={queuedTurns.length}
+				disabled={inputDisabled || hasActiveTurn}
+			/>
 			{queuedTurns.length > 0 ? (
 				<div className="mb-2 rounded-xl border border-border/45 bg-background/30 px-2.5 py-2">
 					<div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
@@ -1050,6 +1057,7 @@ export function WorkspaceComposer({
 						refreshKey={`${turnCount}:${sessionSnapshot?.state ?? "idle"}:${activeTurnId ?? ""}`}
 						disabled={inputDisabled}
 					/>
+					<SessionAutoResumeToggle sessionId={sessionId} disabled={inputDisabled} />
 				</div>
 
 				<div className="flex shrink-0 items-center gap-1.5">

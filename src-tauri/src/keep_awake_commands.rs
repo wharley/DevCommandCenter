@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use dcc_core::ports::EventBus;
 use dcc_tauri::state::SessionCommandState;
+use dcc_tauri::usage_limit_resume::UsageLimitScheduler;
 use dev_command_center_tauri::keep_awake::{
     self, HoldReason, KeepAwake, KeepAwakeMode, KeepAwakeStatus, TurnSource,
 };
@@ -19,9 +20,28 @@ pub struct KeepAwakeState {
     _bus: Arc<dyn EventBus>,
 }
 
+/// The turns in flight (provider bindings) and the automatic resumes the
+/// usage-limit scheduler waits for.
+struct AgentWork {
+    sessions: SessionCommandState,
+    limits: Arc<UsageLimitScheduler>,
+}
+
+#[async_trait::async_trait]
+impl TurnSource for AgentWork {
+    async fn active_turns(&self) -> Result<Vec<(String, String)>, String> {
+        TurnSource::active_turns(&self.sessions).await
+    }
+
+    async fn limit_waits(&self) -> Vec<chrono::DateTime<chrono::Utc>> {
+        self.limits.waits().into_iter().map(|(_, due)| due).collect()
+    }
+}
+
 pub fn start(
     app: &AppHandle,
     sessions: &SessionCommandState,
+    limits: Arc<UsageLimitScheduler>,
     app_data_dir: &Path,
 ) -> KeepAwakeState {
     let controller = KeepAwake::new(
@@ -39,7 +59,10 @@ pub fn start(
     if let Err(error) = sessions.register_event_bus(&bus) {
         eprintln!("[DCC][keep-awake] session events unavailable: {error}");
     }
-    let source: Arc<dyn TurnSource> = Arc::new(sessions.clone());
+    let source: Arc<dyn TurnSource> = Arc::new(AgentWork {
+        sessions: sessions.clone(),
+        limits,
+    });
     tauri::async_runtime::spawn(controller.clone().run(source));
     KeepAwakeState {
         controller,

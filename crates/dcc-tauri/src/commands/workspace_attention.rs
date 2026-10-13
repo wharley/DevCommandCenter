@@ -19,7 +19,13 @@ use specta::Type;
 use tauri::State;
 
 use dcc_core::{
-    domain::{delegation::DelegationStatus, workspace::WorkspaceState},
+    domain::{
+        delegation::DelegationStatus,
+        usage_limit::{
+            usage_limit_phase, SessionUsageLimit, UsageLimitPauseReason, UsageLimitPhase,
+        },
+        workspace::WorkspaceState,
+    },
     ports::{DelegationRepo, WorkspaceRepo},
 };
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
@@ -275,6 +281,9 @@ pub async fn workspace_attention_blockers_with_state(
 pub enum AttentionReason {
     Permission,
     Input,
+    /// Stopped by the plan's usage limit with nothing that resumes it by
+    /// itself ("Pausado por limite"). Waiting for a reset is not here.
+    UsageLimit,
     Conflicts,
     PrConflicts,
     ChecksFailing,
@@ -311,6 +320,7 @@ pub struct SessionActivityInput {
     pub last_turn_completed_at: Option<String>,
     pub last_turn_awaiting_user: Option<String>,
     pub last_turn_awaiting_since: Option<String>,
+    pub usage_limit: Option<SessionUsageLimit>,
 }
 
 impl SessionActivityInput {
@@ -330,6 +340,7 @@ impl SessionActivityInput {
             last_turn_completed_at: summary.last_turn_completed_at.clone(),
             last_turn_awaiting_user: summary.last_turn_awaiting_user.clone(),
             last_turn_awaiting_since: summary.last_turn_awaiting_since.clone(),
+            usage_limit: summary.usage_limit.clone(),
         }
     }
 
@@ -352,6 +363,9 @@ impl SessionActivityInput {
 pub enum AgentActivityState {
     Active,
     Waiting(AttentionReason),
+    /// The latest turn stopped on a usage limit; whether that waits for the
+    /// reset or for the person depends on the clock (`usage_limit_phase`).
+    UsageLimited,
     Completed,
     Aborted,
 }
@@ -362,11 +376,19 @@ pub struct AgentActivity {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub waiting_since: Option<String>,
+    pub usage_limit: Option<SessionUsageLimit>,
 }
 
 impl AgentActivity {
+    /// The agent is mid-task: running, waiting on the person, or stopped by
+    /// a usage limit it continues after.
     fn turn_open(&self) -> bool {
-        matches!(self.state, AgentActivityState::Active | AgentActivityState::Waiting(_))
+        matches!(
+            self.state,
+            AgentActivityState::Active
+                | AgentActivityState::Waiting(_)
+                | AgentActivityState::UsageLimited
+        )
     }
 }
 
@@ -391,12 +413,14 @@ pub fn derive_agent_activity(sessions: &[SessionActivityInput]) -> Option<AgentA
                 started_at,
                 completed_at: None,
                 waiting_since: session.last_turn_awaiting_since.clone(),
+                usage_limit: None,
             },
             None => AgentActivity {
                 state: AgentActivityState::Active,
                 started_at,
                 completed_at: None,
                 waiting_since: None,
+                usage_limit: None,
             },
         });
     }
@@ -406,12 +430,22 @@ pub fn derive_agent_activity(sessions: &[SessionActivityInput]) -> Option<AgentA
         .clone()
         .or_else(|| latest.projection_updated_at.clone())
         .or_else(|| Some(latest.session_updated_at.clone()));
+    if let Some(limit) = &latest.usage_limit {
+        return Some(AgentActivity {
+            state: AgentActivityState::UsageLimited,
+            started_at: latest.last_turn_started_at.clone(),
+            completed_at,
+            waiting_since: Some(limit.hit_at.clone()),
+            usage_limit: Some(limit.clone()),
+        });
+    }
     if latest.last_turn_state.as_deref() == Some("aborted") || latest.projection_state == "aborted" {
         return Some(AgentActivity {
             state: AgentActivityState::Aborted,
             started_at: latest.last_turn_started_at.clone(),
             completed_at,
             waiting_since: None,
+            usage_limit: None,
         });
     }
     if latest.last_turn_state.as_deref() == Some("completed")
@@ -423,6 +457,7 @@ pub fn derive_agent_activity(sessions: &[SessionActivityInput]) -> Option<AgentA
             started_at: latest.last_turn_started_at.clone(),
             completed_at,
             waiting_since: None,
+            usage_limit: None,
         });
     }
     None
@@ -532,6 +567,25 @@ pub fn attention_items(
             }) = activity
             {
                 return Some(item(*reason, None, waiting_since.clone().or_else(|| started_at.clone()), None));
+            }
+            if let Some(AgentActivity {
+                state: AgentActivityState::UsageLimited,
+                usage_limit: Some(limit),
+                ..
+            }) = activity
+            {
+                let now = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(now_ms)
+                    .unwrap_or_else(chrono::Utc::now);
+                let status = usage_limit_phase(limit, now);
+                if status.phase == UsageLimitPhase::Waiting {
+                    return None;
+                }
+                // A reopened window came back to the person at the reset.
+                let returned_at = match status.pause_reason {
+                    Some(UsageLimitPauseReason::ResetPassed) => limit.resets_at.clone(),
+                    _ => Some(limit.hit_at.clone()),
+                };
+                return Some(item(AttentionReason::UsageLimit, None, returned_at, None));
             }
             let turn_open = activity.is_some_and(AgentActivity::turn_open);
             if !turn_open {
@@ -776,6 +830,8 @@ mod tests {
         last_turn_completed_at: Option<String>,
         last_turn_awaiting_user: Option<String>,
         last_turn_awaiting_since: Option<String>,
+        #[serde(default)]
+        usage_limit: Option<SessionUsageLimit>,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -823,6 +879,7 @@ mod tests {
                         last_turn_completed_at: s.last_turn_completed_at.clone(),
                         last_turn_awaiting_user: s.last_turn_awaiting_user.clone(),
                         last_turn_awaiting_since: s.last_turn_awaiting_since.clone(),
+                        usage_limit: s.usage_limit.clone(),
                     })
                     .collect();
                 derive_agent_activity(&inputs).map(|activity| (workspace_id.clone(), activity))

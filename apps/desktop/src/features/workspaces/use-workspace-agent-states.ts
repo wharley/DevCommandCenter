@@ -1,12 +1,21 @@
 import { hasWoken, isSnoozed } from "./workspace-snooze";
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import type { WorkspaceBlocker, WorkspaceSessionSummary } from "@dcc/contracts";
+import type {
+	SessionUsageLimit,
+	WorkspaceBlocker,
+	WorkspaceSessionSummary,
+} from "@dcc/contracts";
+import { usageLimitStatus } from "./usage-limit";
 import { workspaceSessionsQueryOptions } from "@/features/sessions/workspace-sessions-query";
 import type { WorkspaceSummary } from "./types";
 
-/** `waiting` is a turn that is still open but blocked on the user. */
-export type AgentState = "active" | "waiting" | "completed" | "aborted";
+/**
+ * `waiting` is a turn that is still open but blocked on the user. `limited`
+ * is a turn the plan's usage limit stopped: it waits for the reset or for
+ * the person (`usageLimitStatus`), but it is not an interrupted result.
+ */
+export type AgentState = "active" | "waiting" | "limited" | "completed" | "aborted";
 
 export type AgentWaitingReason = "permission" | "input";
 
@@ -19,6 +28,8 @@ export type WorkspaceAgentActivity = {
 	waitingSince?: string | null;
 	/** See `lastInteractionAtFromSessions`; drives the rail's task order. */
 	lastInteractionAt?: string | null;
+	/** `limited`: the limit that stopped the latest turn. */
+	usageLimit?: SessionUsageLimit | null;
 };
 
 /** The turn has not finished yet, whether the agent is working or waiting. */
@@ -76,6 +87,7 @@ export function runningWorkspaceActivities(
 export type AttentionReason =
 	| "permission"
 	| "input"
+	| "usageLimit"
 	| "conflicts"
 	| "prConflicts"
 	| "checksFailing"
@@ -89,14 +101,15 @@ export type AttentionReason =
 const ATTENTION_ORDER: Record<AttentionReason, number> = {
 	permission: 0,
 	input: 1,
-	conflicts: 2,
-	prConflicts: 3,
-	checksFailing: 4,
-	delegatedReview: 5,
-	woke: 6,
-	setup: 7,
-	aborted: 8,
-	completed: 9,
+	usageLimit: 2,
+	conflicts: 3,
+	prConflicts: 4,
+	checksFailing: 5,
+	delegatedReview: 6,
+	woke: 7,
+	setup: 8,
+	aborted: 9,
+	completed: 10,
 };
 
 const BLOCKER_REASON: Record<WorkspaceBlocker["kind"], AttentionReason> = {
@@ -157,6 +170,14 @@ export function attentionWorkspaceItems(
 						returnedAt: activity.waitingSince ?? activity.startedAt,
 					},
 				];
+			}
+			// Stopped by the usage limit: waiting for the reset is not "needs
+			// you" (nor an interrupted result); waiting for the person is.
+			if (activity?.state === "limited" && activity.usageLimit) {
+				const status = usageLimitStatus(activity.usageLimit, now);
+				return status.phase === "paused"
+					? [{ workspace, activity, reason: "usageLimit", returnedAt: status.returnedAt }]
+					: [];
 			}
 			// Git and review blockers outrank setup and unread results; a
 			// running agent is left alone until it comes back.
@@ -246,6 +267,19 @@ export function deriveAgentActivityFromSessions(
 	const latest = summaries[0];
 	if (!latest) {
 		return null;
+	}
+
+	if (latest.usageLimit) {
+		return {
+			state: "limited",
+			startedAt: latest.lastTurnStartedAt,
+			completedAt:
+				latest.lastTurnCompletedAt ??
+				latest.projection.updatedAt ??
+				latest.session.updatedAt,
+			waitingSince: latest.usageLimit.hitAt,
+			usageLimit: latest.usageLimit,
+		};
 	}
 
 	if (latest.lastTurnState === "aborted" || latest.projection.state === "aborted") {

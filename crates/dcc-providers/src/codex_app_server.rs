@@ -1997,6 +1997,7 @@ struct SessionRuntime {
     next_id: AtomicU64,
     events_tx: broadcast::Sender<ProviderEvent>,
     last_retry_at: Mutex<Option<Instant>>,
+    usage_limits: Mutex<CodexUsageLimitTracker>,
     /// The thread continues one a previous runtime persisted.
     native_resumed: std::sync::atomic::AtomicBool,
     /// Thread id DCC has not been told about yet. Reported on the first
@@ -2864,6 +2865,7 @@ impl CodexAppServerAdapter {
             next_id: AtomicU64::new(1),
             events_tx: events_tx.clone(),
             last_retry_at: Mutex::new(None),
+            usage_limits: Mutex::new(CodexUsageLimitTracker::default()),
             native_resumed: std::sync::atomic::AtomicBool::new(false),
             unreported_native_thread: Mutex::new(None),
         });
@@ -3208,6 +3210,18 @@ impl CodexAppServerAdapter {
                     if method == "error" && should_suppress_codex_error(params, &runtime).await {
                         continue;
                     }
+                    let (limit_event, consumed) = runtime.usage_limits.lock().await.observe(
+                        method,
+                        params,
+                        belongs_to_root,
+                        now_iso(),
+                    );
+                    if let Some(event) = limit_event {
+                        let _ = runtime.events_tx.send(event);
+                    }
+                    if consumed {
+                        continue;
+                    }
                     if method == "rawResponseItem/completed" {
                         if let Some((call_id, model)) = codex_raw_spawn_model(params) {
                             let mut pending_models = runtime.pending_subagent_models.lock().await;
@@ -3330,6 +3344,131 @@ impl CodexAppServerAdapter {
             state.remove_runtime(&session_key, &runtime).await;
         });
     }
+}
+
+/// What the session knows about the plan's usage limit: the latest
+/// `account/rateLimits/updated` view of the main allowance, and whether the
+/// last stop is still waiting for its reset time.
+#[derive(Debug, Default)]
+struct CodexUsageLimitTracker {
+    snapshot: Option<Value>,
+    reset_unknown: bool,
+}
+
+impl CodexUsageLimitTracker {
+    /// Follows one notification. Returns the `UsageLimitReached` to emit
+    /// (before the failure the same notification projects, or late with a
+    /// reset learned after the stop) and whether the notification is fully
+    /// handled here.
+    fn observe(
+        &mut self,
+        method: &str,
+        params: &Value,
+        belongs_to_root: bool,
+        at: String,
+    ) -> (Option<ProviderEvent>, bool) {
+        if method == "account/rateLimits/updated" {
+            self.snapshot = merge_codex_rate_limits(
+                self.snapshot.take(),
+                params.get("rateLimits").unwrap_or(params),
+            );
+            let late = match codex_usage_limit_reset_at(self.snapshot.as_ref()) {
+                Some(resets_at) if self.reset_unknown => {
+                    self.reset_unknown = false;
+                    Some(ProviderEvent::UsageLimitReached {
+                        resets_at: Some(resets_at),
+                        at,
+                    })
+                }
+                _ => None,
+            };
+            return (late, true);
+        }
+        if belongs_to_root && codex_failure_is_usage_limit(method, params) {
+            let resets_at = codex_usage_limit_reset_at(self.snapshot.as_ref());
+            self.reset_unknown = resets_at.is_none();
+            return (Some(ProviderEvent::UsageLimitReached { resets_at, at }), false);
+        }
+        (None, false)
+    }
+}
+
+/// `codexErrorInfo` is a bare code or an object keyed by it
+/// (`{"httpConnectionFailed": {...}}`).
+fn codex_error_info_code(value: &Value) -> Option<&str> {
+    match value {
+        Value::String(code) => Some(code),
+        Value::Object(map) => map.keys().next().map(String::as_str),
+        _ => None,
+    }
+}
+
+/// A root `error` (not retried) or failed `turn/completed` whose code is
+/// the plan's usage limit. Codex's own classification; the message text is
+/// not read here.
+fn codex_failure_is_usage_limit(method: &str, params: &Value) -> bool {
+    let info = match method {
+        "error" => params.pointer("/error/codexErrorInfo"),
+        "turn/completed"
+            if params.pointer("/turn/status").and_then(Value::as_str) == Some("failed") =>
+        {
+            params.pointer("/turn/error/codexErrorInfo")
+        }
+        _ => None,
+    };
+    matches!(
+        info.and_then(codex_error_info_code),
+        Some("usageLimitExceeded" | "rateLimitExceeded")
+    )
+}
+
+/// `account/rateLimits/updated` sends a partial snapshot: a field it omits
+/// keeps the value seen before. Snapshots of another allowance (a model's
+/// own `limitId`) never replace the main one.
+fn merge_codex_rate_limits(previous: Option<Value>, update: &Value) -> Option<Value> {
+    if update
+        .get("limitId")
+        .and_then(Value::as_str)
+        .is_some_and(|id| id != "codex")
+    {
+        return previous;
+    }
+    let Some(Value::Object(mut merged)) = previous else {
+        return Some(update.clone());
+    };
+    if let Value::Object(fields) = update {
+        for key in ["limitId", "planType", "rateLimitReachedType", "primary", "secondary"] {
+            if let Some(value) = fields.get(key) {
+                merged.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    Some(Value::Object(merged))
+}
+
+/// When the exhausted windows all reopen: the latest of their resets, and
+/// only when every exhausted window says when. `None` means unknown.
+fn codex_usage_limit_reset_at(snapshot: Option<&Value>) -> Option<String> {
+    let snapshot = snapshot?;
+    let exhausted: Vec<&Value> = ["primary", "secondary"]
+        .iter()
+        .filter_map(|id| snapshot.get(id))
+        .filter(|window| {
+            window
+                .get("usedPercent")
+                .and_then(Value::as_f64)
+                .is_some_and(|used| used >= 100.0)
+        })
+        .collect();
+    if exhausted.is_empty() {
+        return None;
+    }
+    let mut latest: Option<i64> = None;
+    for window in exhausted {
+        let reset = window.get("resetsAt").and_then(Value::as_i64)?;
+        latest = Some(latest.map_or(reset, |current| current.max(reset)));
+    }
+    latest.and_then(|seconds| codex_reset_time(&Value::from(seconds)))
 }
 
 fn codex_error_message(params: &Value) -> String {
@@ -3854,6 +3993,76 @@ mod tests {
     }
 
     use super::*;
+
+    fn replay_codex_limits(fixture: &str) -> Vec<ProviderEvent> {
+        let mut tracker = CodexUsageLimitTracker::default();
+        let mut events = Vec::new();
+        for line in fixture.lines() {
+            let message: Value = serde_json::from_str(line).unwrap();
+            let method = message["method"].as_str().unwrap();
+            let (event, _) = tracker.observe(method, &message["params"], true, "now".to_string());
+            events.extend(event);
+        }
+        events
+    }
+
+    fn codex_rfc3339(seconds: i64) -> Option<String> {
+        Some(
+            chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0)
+                .unwrap()
+                .to_rfc3339(),
+        )
+    }
+
+    #[test]
+    fn codex_usage_limit_carries_the_main_allowance_reset() {
+        let events = replay_codex_limits(include_str!("../fixtures/usage_limit/codex_usage_limit.jsonl"));
+        // Both the `error` and the failed `turn/completed` name it; the
+        // session records the first and ignores the repeat.
+        assert_eq!(events.len(), 2);
+        for event in events {
+            assert!(matches!(
+                event,
+                ProviderEvent::UsageLimitReached { resets_at, .. } if resets_at == codex_rfc3339(2_000_100_000)
+            ));
+        }
+    }
+
+    #[test]
+    fn codex_reset_learned_after_the_stop_is_reported_once() {
+        let events = replay_codex_limits(include_str!("../fixtures/usage_limit/codex_late_reset.jsonl"));
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], ProviderEvent::UsageLimitReached { resets_at: None, .. }));
+        assert!(matches!(
+            &events[1],
+            ProviderEvent::UsageLimitReached { resets_at, .. } if *resets_at == codex_rfc3339(2_000_100_000)
+        ));
+    }
+
+    #[test]
+    fn codex_other_failures_and_subagents_are_not_usage_limits() {
+        assert!(replay_codex_limits(include_str!("../fixtures/usage_limit/codex_other_failure.jsonl")).is_empty());
+        let mut tracker = CodexUsageLimitTracker::default();
+        let line: Value = serde_json::from_str(
+            include_str!("../fixtures/usage_limit/codex_usage_limit.jsonl").lines().nth(3).unwrap(),
+        )
+        .unwrap();
+        let (event, _) = tracker.observe("error", &line["params"], false, "now".to_string());
+        assert!(event.is_none());
+    }
+
+    #[test]
+    fn codex_reset_needs_every_exhausted_window_and_waits_for_the_latest() {
+        let snapshot = json!({
+            "primary": { "usedPercent": 100, "resetsAt": 2_000_100_000 },
+            "secondary": { "usedPercent": 100, "resetsAt": 2_000_500_000 }
+        });
+        assert_eq!(codex_usage_limit_reset_at(Some(&snapshot)), codex_rfc3339(2_000_500_000));
+        let unknown = json!({ "primary": { "usedPercent": 100 } });
+        assert_eq!(codex_usage_limit_reset_at(Some(&unknown)), None);
+        let fine = json!({ "primary": { "usedPercent": 40, "resetsAt": 2_000_100_000 } });
+        assert_eq!(codex_usage_limit_reset_at(Some(&fine)), None);
+    }
 
     #[test]
     fn preserves_gpt_6_max_reasoning_effort_without_changing_existing_models() {

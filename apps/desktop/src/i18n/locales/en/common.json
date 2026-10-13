@@ -416,6 +416,7 @@
         "delegatedReview_other": "{{count}} delegated changes to review",
         "permission": "Awaiting approval",
         "input": "Waiting for you",
+        "usageLimit": "Paused by limit",
         "setup": "Setup pending",
         "aborted": "Interrupted",
         "completed": "New result"
@@ -586,6 +587,9 @@
       "completed": "Completed",
       "aborted": "Aborted",
       "completedUnseen": "New result",
+      "limited": "Usage limit",
+      "limitWaiting": "Waiting for limit",
+      "limitPaused": "Paused by limit",
       "reviewPending": "Awaiting your review"
     },
     "workspaceState": {
@@ -2360,8 +2364,18 @@
           "appOpen": "DCC open",
           "agentsWorking_one": "{{count}} agent working",
           "agentsWorking_other": "{{count}} agents working",
-          "agentJustFinished": "an agent just finished"
+          "agentJustFinished": "an agent just finished",
+          "waitingForLimit": "waiting for the limit until {{time}}"
         }
+      },
+      "usageLimit": {
+        "title": "Continue on its own when the limit runs out",
+        "body": "When the plan's usage limit runs out mid-task, DCC waits for the limit to come back and sends \"Continue de onde parou.\" on its own, with the task's same access. Then the queue moves on as usual. At most 3 resumes per task every 12 hours; paid reset credits are never used.",
+        "toggle": "On by default for new tasks",
+        "hint": "Each task can change this in the composer.",
+        "keepAwakeWarning": "Your Mac may sleep before the limit comes back, and then nothing resumes.",
+        "enableKeepAwake": "Turn on \"While agents work\"",
+        "saveFailed": "Could not save: {{message}}"
       }
     },
     "appearance": {
@@ -3297,6 +3311,20 @@
         ],
         "tip": "With the lid closed macOS sleeps anyway, on battery or plugged in; the exception is Apple's closed-display mode, with an external display, keyboard and mouse. To run overnight, leave the lid open and the Mac plugged in.",
         "keywords": "mac awake sleep idle caffeinate power battery plugged lid overnight keep awake"
+      },
+      "usageLimit": {
+        "label": "Usage limit",
+        "summary": "When the agent's plan runs out mid-task, the task waits instead of breaking.",
+        "whatIs": "When the plan's usage limit (Claude or Codex) runs out mid-turn, the task does not turn into an error: it shows [Waiting for limit] with the time the limit comes back, stays out of \"Needs you\", and the message queue waits with it. If the provider does not say when the limit comes back, or the task already resumed on its own 3 times in 12 hours, it shows [Paused by limit] and then it does need you, on the desktop and on the phone, with a phone notification.",
+        "whenToUse": "Before leaving a plan running overnight: turn on automatic resume and DCC continues on its own when the limit comes back, then moves on with the queue.",
+        "steps": [
+          "In Settings, the [General] section, turn on [Continue on its own when the limit runs out] for new tasks.",
+          "In a task, use the hourglass button in the composer to turn it on or off for that task only.",
+          "When the limit runs out, the strip above the composer shows the time; use [Continue now] to try sooner.",
+          "On [Paused by limit], use [Continue] or [Try again] when you can."
+        ],
+        "tip": "Resuming only happens while the Mac is awake: choose [While agents work] in [Keep the Mac awake]. DCC always sends the same text, \"Continue de onde parou.\", with the task's same access, and never spends paid Codex reset credits.",
+        "keywords": "usage limit plan quota rate limit reset resume continue overnight queue waiting paused claude codex"
       },
       "pullRequests": {
         "label": "Pull Requests",
@@ -5066,5 +5094,35 @@
       "completed": "Completed",
       "aborted": "Interrupted"
     }
+  },
+  "usageLimit": {
+    "backAt": "back at {{time}}",
+    "freesAt": "frees up at {{time}}",
+    "resumingSoon": "resuming shortly",
+    "reasonResetPassed": "The limit is back.",
+    "reasonAttemptsExhausted": "Already resumed on its own 3 times in the last 12 hours.",
+    "reasonUnknownReset": "The provider did not say when the limit comes back.",
+    "waitingTitle": "Waiting for limit",
+    "pausedTitle": "Paused by limit",
+    "waitingAuto": "The plan's usage limit ran out. The task continues on its own {{when}}.",
+    "waitingManual": "The plan's usage limit ran out and {{when}}. After that, just continue.",
+    "whenAt": "at {{time}}",
+    "whenSoon": "shortly",
+    "queued_one": "{{count}} queued message follows.",
+    "queued_other": "{{count}} queued messages follow.",
+    "continueNow": "Continue now",
+    "continue": "Continue",
+    "retry": "Try again",
+    "resumeFailed": "Could not resume: {{message}}",
+    "toggleLabel": "Continue on its own when the limit runs out",
+    "toggleOn": "On: if the limit runs out, the task continues on its own when it comes back.",
+    "toggleOff": "Off: if the limit runs out, the task waits for you.",
+    "toggleFailed": "Could not change it: {{message}}",
+    "keepAwakeWarning": "The Mac may sleep before the limit comes back.",
+    "enableKeepAwake": "Turn on \"While agents work\"",
+    "timelineWaiting": "Usage limit reached · back at {{time}}",
+    "timelinePaused": "Usage limit reached",
+    "timelineResumedAuto": "Resumed on its own after the limit",
+    "timelineResumedManual": "Resumed after the limit"
   }
 }

@@ -106,7 +106,7 @@ export function KeepAwakePreference() {
 						<>
 							<Coffee className="size-3.5 text-foreground" aria-hidden />
 							{t("settings.general.keepAwake.activeNow", {
-								reason: t(reason.key, { count: reason.count }),
+								reason: t(reason.key, { count: reason.count, time: reason.time }),
 							})}
 						</>
 					) : (

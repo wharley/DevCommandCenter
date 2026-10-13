@@ -6,7 +6,9 @@ export type KeepAwakeMode = "off" | "always" | "during_agents";
 export type KeepAwakeReason =
 	| { kind: "appOpen" }
 	| { kind: "agentsWorking"; count: number }
-	| { kind: "agentJustFinished" };
+	| { kind: "agentJustFinished" }
+	/** A task resumes by itself after its usage limit resets (RFC 3339). */
+	| { kind: "waitingForLimit"; until: string };
 
 export type KeepAwakeStatus = {
 	/** False off macOS: the setting is hidden. */
@@ -22,8 +24,17 @@ export const KEEP_AWAKE_CHANGED_EVENT = "keep-awake-changed";
 export function keepAwakeReasonKey(reason: KeepAwakeReason): {
 	key: string;
 	count?: number;
+	time?: string;
 } {
 	switch (reason.kind) {
+		case "waitingForLimit":
+			return {
+				key: "settings.general.keepAwake.reasons.waitingForLimit",
+				time: new Date(reason.until).toLocaleTimeString("pt-BR", {
+					hour: "2-digit",
+					minute: "2-digit",
+				}),
+			};
 		case "agentsWorking":
 			return { key: "settings.general.keepAwake.reasons.agentsWorking", count: reason.count };
 		case "agentJustFinished":

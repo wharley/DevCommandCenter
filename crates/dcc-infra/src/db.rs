@@ -5203,6 +5203,9 @@ impl SqliteSessionRepo {
                 | SessionEventKind::PlanApproved { .. }
                 | SessionEventKind::PlanHandedOff { .. }
                 | SessionEventKind::ObjectivePaused { .. }
+                | SessionEventKind::UsageLimitReached { .. }
+                | SessionEventKind::UsageLimitResumed { .. }
+                | SessionEventKind::UsageLimitAutoResumeChanged { .. }
                 | SessionEventKind::ConversationRewound { .. }
                 | SessionEventKind::SessionResumed => {}
             }
@@ -5493,6 +5496,37 @@ impl SqliteSessionRepo {
         Ok(events)
     }
 
+    /// Open sessions that ever stopped on a provider usage limit, for the
+    /// resume scheduler to reconcile at startup. Whether the limit still
+    /// stands is decided from each session's events.
+    pub fn list_session_ids_with_usage_limit_sync(&self) -> Result<Vec<SessionId>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                r#"SELECT DISTINCT e.session_id FROM dcc_session_events e
+                   JOIN dcc_sessions s ON s.id = e.session_id
+                   JOIN dcc_workspaces w ON w.id = s.workspace_id
+                   LEFT JOIN dcc_threads t ON t.session_id = s.id
+                   WHERE e.kind_json LIKE '%"type":"usage_limit_reached"%'
+                     AND w.state NOT IN ('archived', 'completed')
+                     AND t.archived_at IS NULL"#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(SessionId(
+                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
+            ));
+        }
+        Ok(ids)
+    }
+
     /// Highest durable sequence of the session, 0 when it has no events.
     pub fn last_event_sequence_sync(&self, session_id: &SessionId) -> Result<u64> {
         let conn = self
@@ -5568,6 +5602,7 @@ impl SqliteSessionRepo {
         let last_turn_awaiting_user = dcc_core::domain::session::last_turn_awaiting_user(&events);
         let last_turn_awaiting_since =
             dcc_core::domain::session::last_turn_awaiting_since(&events);
+        let usage_limit = dcc_core::domain::usage_limit::session_usage_limit(&events);
 
         Ok(WorkspaceSessionSummary {
             session,
@@ -5579,6 +5614,7 @@ impl SqliteSessionRepo {
             last_turn_completed_at,
             last_turn_awaiting_user,
             last_turn_awaiting_since,
+            usage_limit,
         })
     }
 
