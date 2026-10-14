@@ -10,6 +10,13 @@
 //!   `event: agent-requests` on `/api/v1/events/stream` and hands each new
 //!   request to `remote_push` (generic "<projeto> precisa de você").
 //!
+//! Task proposals (`dcc_propose_task`) wait as durable records, not as
+//! agent requests (those time out in minutes):
+//!
+//! - `GET /api/v1/mobile/task-proposals` lists the ones nobody started.
+//! - `POST /api/v1/mobile/task-proposals/:id/start` and `/:id/dismiss` answer
+//!   one; a proposal already started or dismissed answers 409.
+//!
 //! And every task's reason to be under "Precisa de você":
 //!
 //! - `GET /api/v1/mobile/attention` — the desktop sidebar's rule, ported to
@@ -147,6 +154,101 @@ pub(super) async fn respond_agent_request(
         Ok(outcome) => Ok(Json(json!({ "ok": true, "outcome": outcome }))),
         Err(error) => Err(classify_agent_request_error(error)),
     }
+}
+
+pub(super) async fn list_task_proposals(
+    State(backend): State<Arc<HttpBackend>>,
+) -> Result<Json<Value>, HttpApiError> {
+    use dcc_core::{
+        domain::delegation::{DelegationKind, DelegationMode, DelegationStatus},
+        ports::DelegationRepo,
+    };
+    let drafts =
+        DelegationRepo::list_delegations_by_status(&backend.sessions, DelegationStatus::Draft)
+            .await
+            .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    let proposals: Vec<Value> = drafts
+        .into_iter()
+        .filter(|proposal| proposal.kind == DelegationKind::Task)
+        .map(|proposal| {
+            json!({
+                "id": proposal.id.0,
+                "parentSessionId": proposal.parent_session_id.0,
+                "workspaceId": proposal.workspace_id.0,
+                "title": proposal.title,
+                "brief": proposal.instruction.unwrap_or(proposal.prompt),
+                "provider": dcc_tauri::delegation_runtime::provider_label(&proposal.target_provider_id.0),
+                "model": proposal.target_model_id,
+                "edits": matches!(proposal.mode, DelegationMode::Implement)
+                    || proposal.budget.allow_file_edits,
+                "createdAt": proposal.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "proposals": proposals })))
+}
+
+pub(super) async fn answer_task_proposal(
+    State(backend): State<Arc<HttpBackend>>,
+    Path((proposal_id, action)): Path<(String, String)>,
+) -> Result<Json<Value>, HttpApiError> {
+    use dcc_core::domain::delegation::DelegationId;
+    if !valid_request_id(&proposal_id) {
+        return Err(HttpApiError::not_found("Essa proposta não está mais aberta."));
+    }
+    let id = DelegationId(proposal_id);
+    let result = match action.as_str() {
+        "start" => dcc_tauri::delegation_runtime::start_task_proposal(&backend.sessions, &id, None)
+            .await
+            .map(|_| ()),
+        "dismiss" => dismiss_task_proposal(&backend.sessions, id).await,
+        _ => return Err(HttpApiError::not_found("unknown proposal action")),
+    };
+    match result {
+        Ok(()) => Ok(Json(json!({ "ok": true }))),
+        // Both mean someone answered first (the desktop, or another phone).
+        Err(error)
+            if error.contains("already started or dismissed")
+                || error.contains("already starting")
+                || error.contains(" is already ") =>
+        {
+            Err(HttpApiError::Conflict(
+                "Essa proposta já foi respondida.".to_string(),
+                Value::Null,
+            ))
+        }
+        Err(error) if error.contains("not found") => {
+            Err(HttpApiError::not_found("Essa proposta não está mais aberta."))
+        }
+        Err(error) => Err(HttpApiError::BadGateway(error)),
+    }
+}
+
+/// Only a waiting task proposal; this route never cancels running work.
+async fn dismiss_task_proposal(
+    sessions: &dcc_tauri::state::SessionCommandState,
+    id: dcc_core::domain::delegation::DelegationId,
+) -> Result<(), String> {
+    use dcc_core::{
+        domain::delegation::{DelegationKind, DelegationStatus},
+        ports::DelegationRepo,
+    };
+    let proposal = DelegationRepo::get_delegation(sessions, &id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("task proposal not found: {}", id.0))?;
+    if proposal.kind != DelegationKind::Task || proposal.status != DelegationStatus::Draft {
+        return Err("this task proposal was already started or dismissed".to_string());
+    }
+    dcc_tauri::commands::delegation_commands::cancel_delegation_with_state(
+        sessions,
+        dcc_tauri::commands::delegation_commands::CancelDelegationInput {
+            delegation_id: id,
+            reason: Some("Dismissed by the person.".to_string()),
+        },
+    )
+    .await
+    .map(|_| ())
 }
 
 fn classify_agent_request_error(error: AgentRequestError) -> HttpApiError {

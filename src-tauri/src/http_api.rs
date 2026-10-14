@@ -553,6 +553,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(attention::respond_agent_request),
         )
         .route(
+            "/api/v1/mobile/task-proposals",
+            get(attention::list_task_proposals),
+        )
+        .route(
+            "/api/v1/mobile/task-proposals/:proposal_id/:action",
+            post(attention::answer_task_proposal),
+        )
+        .route(
             "/api/v1/remote/fixture/agent-requests",
             post(attention::enqueue_fixture_agent_request),
         )
@@ -3608,6 +3616,79 @@ mod tests {
             expires_at_ms: crate::agent_requests::now_ms() + 45_000,
             detail,
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_phone_sees_a_task_proposal_and_dismisses_it_once() {
+        use dcc_core::domain::delegation::{DelegationBudget, DelegationMode, DelegationStatus};
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        use dcc_core::ports::WorkspaceRepo;
+        let fixture = embedded_fixture().await;
+        let db_path = std::fs::canonicalize(fixture._root.path())
+            .unwrap()
+            .join("state.sqlite");
+        dcc_infra::db::SqliteWorkspaceRepo::open(&db_path)
+            .unwrap()
+            .save_workspace(&Workspace {
+                id: WorkspaceId("workspace".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: "/workspace".to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-08T00:00:00Z".to_string(),
+                updated_at: "2026-10-08T00:00:00Z".to_string(),
+            })
+            .await
+            .unwrap();
+        let proposal = dcc_tauri::commands::delegation_commands::create_task_proposal_with_state(
+            &fixture.state,
+            dcc_tauri::commands::delegation_commands::CreateTaskProposalInput {
+                parent_session_id: fixture.session_id.clone(),
+                parent_turn_id: None,
+                workspace_id: WorkspaceId("workspace".to_string()),
+                target_provider_id: dcc_core::domain::provider::ProviderId("codex".to_string()),
+                target_model_id: None,
+                mode: DelegationMode::Implement,
+                title: "Fase 2: push".to_string(),
+                instruction: "Implement push notifications.".to_string(),
+                budget: DelegationBudget::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let (status, listed) =
+            call(&fixture.app, "GET", "/api/v1/mobile/task-proposals", None, Some("phone-1"), false).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["proposals"][0]["id"], proposal.id.0);
+        assert_eq!(listed["proposals"][0]["title"], "Fase 2: push");
+        assert_eq!(listed["proposals"][0]["brief"], "Implement push notifications.");
+        assert_eq!(listed["proposals"][0]["provider"], "Codex");
+        assert_eq!(listed["proposals"][0]["edits"], true);
+
+        let path = format!("/api/v1/mobile/task-proposals/{}/dismiss", proposal.id.0);
+        let (status, _) = call(&fixture.app, "POST", &path, None, Some("phone-1"), false).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = call(&fixture.app, "POST", &path, None, None, true).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        let start = format!("/api/v1/mobile/task-proposals/{}/start", proposal.id.0);
+        let (status, _) = call(&fixture.app, "POST", &start, None, Some("phone-1"), false).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        let stored = dcc_core::ports::DelegationRepo::get_delegation(&fixture.state, &proposal.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, DelegationStatus::Cancelled);
+        let (_, listed) =
+            call(&fixture.app, "GET", "/api/v1/mobile/task-proposals", None, Some("phone-1"), false).await;
+        assert_eq!(listed["proposals"], json!([]));
     }
 
     #[tokio::test(flavor = "current_thread")]

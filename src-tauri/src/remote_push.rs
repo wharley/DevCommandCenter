@@ -142,6 +142,8 @@ pub enum AttentionKind {
     ChecksFailing,
     /// Stopped by the usage limit, waiting for the person.
     UsageLimit,
+    /// An agent proposed a task (`dcc_propose_task`) for the person to start.
+    TaskProposed,
     /// Stopped by the usage limit, continuing by itself after the reset.
     /// Never sent: it only claims the turn's key so the "interrupted" push
     /// for the same turn does not go out.
@@ -220,6 +222,16 @@ impl Attention {
                 session_id,
                 format!("turn:{session_id}:{turn_id}"),
             ),
+            // Every delegation announces itself this way; only a waiting task
+            // proposal is kept, once the record is looked up.
+            CoreEvent::SessionDelegationRequested {
+                session_id,
+                delegation_id,
+            } => (
+                AttentionKind::TaskProposed,
+                session_id,
+                format!("{PROPOSAL_KEY_PREFIX}{delegation_id}"),
+            ),
             _ => return None,
         };
         Some(Self {
@@ -229,6 +241,8 @@ impl Attention {
         })
     }
 }
+
+const PROPOSAL_KEY_PREFIX: &str = "proposal:";
 
 /// Title and body. `project` is the project's display name; anything that
 /// looks like a path is dropped rather than sent.
@@ -257,6 +271,8 @@ pub fn notification_text(kind: AttentionKind, project: Option<&str>) -> (String,
         (AttentionKind::UsageLimit | AttentionKind::LimitWait, None) => {
             "Uma tarefa parou no limite de uso".to_string()
         }
+        (AttentionKind::TaskProposed, Some(project)) => format!("{project}: tarefa proposta"),
+        (AttentionKind::TaskProposed, None) => "Uma tarefa foi proposta".to_string(),
     };
     (TITLE.to_string(), body)
 }
@@ -406,9 +422,15 @@ impl PushNotifier {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
+        let proposals: Vec<String> = attentions
+            .iter()
+            .filter_map(|attention| attention.key.strip_prefix(PROPOSAL_KEY_PREFIX))
+            .map(str::to_string)
+            .collect();
         let db_path = self.db_path.clone();
-        let lookup = tokio::task::spawn_blocking(move || lookup(&db_path, &sessions)).await;
-        let (targets, sessions) = match lookup {
+        let lookup =
+            tokio::task::spawn_blocking(move || lookup(&db_path, &sessions, &proposals)).await;
+        let (targets, sessions, pending_proposals) = match lookup {
             Ok(Ok(found)) => found,
             Ok(Err(error)) => {
                 eprintln!("[DCC Push] could not read push targets: {error}");
@@ -425,6 +447,14 @@ impl PushNotifier {
 
         let mut messages = Vec::new();
         for attention in attentions {
+            if attention.kind == AttentionKind::TaskProposed
+                && !attention
+                    .key
+                    .strip_prefix(PROPOSAL_KEY_PREFIX)
+                    .is_some_and(|id| pending_proposals.contains(id))
+            {
+                continue;
+            }
             let info = sessions.get(&attention.session_id);
             let delegated = info.is_some_and(|info| info.delegated);
             // A delegated task's result goes back to the agent that asked
@@ -666,16 +696,25 @@ fn open(db_path: &std::path::Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
+type Lookup = (Vec<PushTarget>, HashMap<String, SessionInfo>, HashSet<String>);
+
 fn lookup(
     db_path: &std::path::Path,
     sessions: &[String],
-) -> Result<(Vec<PushTarget>, HashMap<String, SessionInfo>), String> {
+    proposals: &[String],
+) -> Result<Lookup, String> {
     let conn = open(db_path)?;
     let targets =
         pairing::push_targets(&conn, &lease_time(chrono::Utc::now())).map_err(|e| e.to_string())?;
     let mut info = HashMap::new();
+    let mut pending_proposals = HashSet::new();
     if targets.is_empty() {
-        return Ok((targets, info));
+        return Ok((targets, info, pending_proposals));
+    }
+    for proposal in proposals {
+        if is_pending_task_proposal(&conn, proposal) {
+            pending_proposals.insert(proposal.clone());
+        }
     }
     for session in sessions {
         info.insert(
@@ -686,7 +725,19 @@ fn lookup(
             },
         );
     }
-    Ok((targets, info))
+    Ok((targets, info, pending_proposals))
+}
+
+/// A plain delegation announces itself like a proposal; only a task still
+/// waiting for the person is worth a notification.
+fn is_pending_task_proposal(conn: &Connection, delegation_id: &str) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM dcc_delegations
+         WHERE id = ?1 AND kind = 'task' AND status = 'draft')",
+        params![delegation_id],
+        |row| row.get(0),
+    )
+    .unwrap_or(false)
 }
 
 /// The project's display name. A missing table (a bare `dccd-http`
@@ -861,12 +912,13 @@ mod tests {
             "CREATE TABLE dcc_sessions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL);
              CREATE TABLE dcc_repositories (id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
                  name TEXT NOT NULL, display_name TEXT, created_at TEXT);
-             CREATE TABLE dcc_delegations (id TEXT PRIMARY KEY, child_session_id TEXT);
+             CREATE TABLE dcc_delegations (id TEXT PRIMARY KEY, child_session_id TEXT,
+                 kind TEXT NOT NULL DEFAULT 'delegation', status TEXT NOT NULL DEFAULT 'running');
              INSERT INTO dcc_sessions VALUES ('s1', 'p1'), ('s2', 'p2'), ('child', 'p1');
              INSERT INTO dcc_repositories VALUES
                  ('r1', 'p1', 'acido', ' Projeto   Ácido ', '2026-01-01'),
                  ('r2', 'p2', '/Users/me/secret-repo', NULL, '2026-01-01');
-             INSERT INTO dcc_delegations VALUES ('d1', 'child');",
+             INSERT INTO dcc_delegations (id, child_session_id) VALUES ('d1', 'child');",
         )
         .unwrap();
         let mut config = config(base);
@@ -1031,6 +1083,43 @@ mod tests {
         assert_eq!(again.sent, 0);
     }
 
+    fn requested(session: &str, delegation: &str) -> CoreEvent {
+        CoreEvent::SessionDelegationRequested {
+            session_id: session.to_string(),
+            delegation_id: delegation.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_task_proposal_notifies_once_but_a_plain_delegation_does_not() {
+        let desk = desk().await;
+        desk.phone(1, "ExponentPushToken[aaa]");
+        desk.conn()
+            .execute_batch(
+                "INSERT INTO dcc_delegations (id, child_session_id, kind, status) VALUES
+                     ('proposal-1', NULL, 'task', 'draft'),
+                     ('started-1', 'child', 'task', 'running'),
+                     ('helper-1', NULL, 'delegation', 'draft');",
+            )
+            .unwrap();
+
+        let delivery = notify(
+            &desk,
+            &[
+                requested("s1", "proposal-1"),
+                requested("s1", "started-1"),
+                requested("s1", "helper-1"),
+            ],
+        )
+        .await;
+        assert_eq!(delivery.sent, 1);
+        let sent = desk.sent();
+        let message = &sent[0].as_array().unwrap()[0];
+        assert_eq!(message["body"], "Projeto Ácido: tarefa proposta");
+        assert_eq!(message["data"], json!({ "sessionId": "s1", "kind": "taskProposed" }));
+        assert_eq!(notify(&desk, &[requested("s1", "proposal-1")]).await.sent, 0);
+    }
+
     #[tokio::test]
     async fn a_project_name_that_looks_like_a_path_falls_back_to_generic_text() {
         let desk = desk().await;
@@ -1076,6 +1165,10 @@ mod tests {
         assert_eq!(
             notification_text(AttentionKind::AgentRequest, project).1,
             "api precisa de você"
+        );
+        assert_eq!(
+            notification_text(AttentionKind::TaskProposed, None).1,
+            "Uma tarefa foi proposta"
         );
         assert_eq!(
             notification_text(AttentionKind::Conflict, project).1,

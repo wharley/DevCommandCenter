@@ -9,6 +9,7 @@ import {
 	isThreadRunning,
 	normalizeProvider,
 	pickAccessPolicy,
+	proposalsForSession,
 	threadApprovalPolicy,
 	t,
 	stoppedByUsageLimit,
@@ -20,6 +21,7 @@ import {
 	type SessionSearchResult,
 } from "@dcc/mobile-core";
 import { useAgentRequests } from "@/backend/agentRequests";
+import { useTaskProposals } from "@/backend/taskProposals";
 import { loadProjectAccess, saveProjectAccess } from "@/backend/accessStore";
 import { markWorkspaceSeen } from "@/backend/seenResults";
 import { cachedCatalog, fetchCatalog } from "@/backend/catalogCache";
@@ -30,6 +32,7 @@ import { ThreadSync, type ThreadSnapshot } from "@/screens/threadSync";
 import { alpha, color, radius } from "@/theme";
 import { AccessPill } from "@/ui/AccessPicker";
 import { AgentRequestCard } from "@/ui/AgentRequestCard";
+import { TaskProposalCard } from "@/ui/TaskProposalCard";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { FileMentionList } from "@/ui/FileMentionList";
@@ -152,6 +155,11 @@ export default function ThreadScreen() {
 		() => agentRequests.requests.filter((request) => request.sessionId === threadId),
 		[agentRequests.requests, threadId],
 	);
+	const taskProposals = useTaskProposals();
+	const threadProposals = useMemo(
+		() => proposalsForSession(taskProposals.proposals, threadId),
+		[taskProposals.proposals, threadId],
+	);
 	const { state, questions } = snapshot;
 	const items = useMemo(() => groupMessages(state.messages), [state.messages]);
 	const running = useMemo(() => isThreadRunning(state.messages), [state.messages]);
@@ -160,6 +168,7 @@ export default function ThreadScreen() {
 	const waitingOnYou =
 		questions.length > 0 ||
 		threadRequests.length > 0 ||
+		threadProposals.length > 0 ||
 		state.messages.some((m) => m.kind === "permission" && !m.resolved);
 	const keyboardOpen = useKeyboardState((keyboard) => keyboard.isVisible);
 	const heads = useMemo(() => agentTurnHeads(items), [items]);
@@ -405,7 +414,10 @@ export default function ThreadScreen() {
 					onLayout={followEnd}
 					keyboardShouldPersistTaps="handled"
 					ListFooterComponent={
-						awaitingFirstOutput || questions.length > 0 || threadRequests.length > 0 ? (
+						awaitingFirstOutput ||
+						questions.length > 0 ||
+						threadRequests.length > 0 ||
+						threadProposals.length > 0 ? (
 							<View style={{ gap: 12, marginTop: 12 }}>
 								{awaitingFirstOutput ? <AgentHeader meta={meta} label={agentLabel} state={mascotState} /> : null}
 								{threadRequests.map((request) => (
@@ -415,6 +427,19 @@ export default function ThreadScreen() {
 										busy={agentRequests.answering.has(request.requestId)}
 										onRespond={(answer) =>
 											void agentRequests.respond(request, answer).then((text) => {
+												if (text) setNotice(text);
+												sync.current?.nudge();
+											})
+										}
+									/>
+								))}
+								{threadProposals.map((proposal) => (
+									<TaskProposalCard
+										key={proposal.id}
+										proposal={proposal}
+										busy={taskProposals.answering.has(proposal.id)}
+										onAnswer={(action) =>
+											void taskProposals.answer(proposal, action).then((text) => {
 												if (text) setNotice(text);
 												sync.current?.nudge();
 											})

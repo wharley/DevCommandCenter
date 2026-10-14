@@ -1,4 +1,5 @@
 import { AgentRequestsProvider } from "@/backend/agentRequests";
+import { TaskProposalsProvider } from "@/backend/taskProposals";
 import { SessionProvider, useSession } from "@/backend/session";
 import { isPairingLink, stashPairingLink } from "@/backend/offerLink";
 import { configureNotificationDisplay, onNotificationTap } from "@/notifications/native";
@@ -29,7 +30,9 @@ export default function RootLayout() {
 						<NotificationTaps />
 						<OfferNotifications />
 						<AgentRequestsProvider>
-							<Routes />
+							<TaskProposalsProvider>
+								<Routes />
+							</TaskProposalsProvider>
 						</AgentRequestsProvider>
 						<UpdateBanner />
 					</View>

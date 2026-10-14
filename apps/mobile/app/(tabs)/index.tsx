@@ -1,9 +1,11 @@
 import { searchSessions, triageGroups, triageWithAttention, type NeedsYouRow } from "@dcc/mobile-core";
 import { useAgentRequests } from "@/backend/agentRequests";
+import { useTaskProposals } from "@/backend/taskProposals";
 import { HomeHeader } from "@/screens/HomeHeader";
 import { pendingKey, useHomeData } from "@/screens/homeData";
 import { AgentRequestHeader, AttentionCard, NeedsYouCard, SessionRow } from "@/screens/rows";
 import { AgentRequestCard } from "@/ui/AgentRequestCard";
+import { TaskProposalCard } from "@/ui/TaskProposalCard";
 import { color } from "@/theme";
 import { EmptyState, Loading, SectionLabel } from "@/ui/primitives";
 import { useMemo, useState } from "react";
@@ -15,6 +17,7 @@ export default function AgentsScreen() {
 	const insets = useSafeAreaInsets();
 	const { scan, attention, refreshing, refresh, respond, resolving, showNotice } = useHomeData();
 	const agentRequests = useAgentRequests();
+	const taskProposals = useTaskProposals();
 	const [search, setSearch] = useState("");
 	const groups = useMemo(() => {
 		if (!scan) return null;
@@ -42,7 +45,8 @@ export default function AgentsScreen() {
 			recent: base.recent.filter((s) => !waiting.has(s.sessionId)),
 		};
 	}, [scan, attention, agentRequests.requests]);
-	const needsYouCount = (groups?.needsYou.length ?? 0) + agentRequests.requests.length;
+	const needsYouCount =
+		(groups?.needsYou.length ?? 0) + agentRequests.requests.length + taskProposals.proposals.length;
 	const results = useMemo(() => (scan ? searchSessions(scan.sessions, search) : null), [scan, search]);
 
 	return (
@@ -88,6 +92,22 @@ export default function AgentsScreen() {
 										}
 										onRespond={(answer) =>
 											void agentRequests.respond(request, answer).then((notice) => notice && showNotice(notice))
+										}
+									/>
+								))}
+								{taskProposals.proposals.map((proposal) => (
+									<TaskProposalCard
+										key={proposal.id}
+										proposal={proposal}
+										busy={taskProposals.answering.has(proposal.id)}
+										header={
+											<AgentRequestHeader
+												sessionId={proposal.parentSessionId}
+												thread={scan?.sessions.find((s) => s.sessionId === proposal.parentSessionId) ?? null}
+											/>
+										}
+										onAnswer={(action) =>
+											void taskProposals.answer(proposal, action).then((notice) => notice && showNotice(notice))
 										}
 									/>
 								))}

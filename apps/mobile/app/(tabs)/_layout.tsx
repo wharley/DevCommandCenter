@@ -1,4 +1,5 @@
 import { useAgentRequests } from "@/backend/agentRequests";
+import { useTaskProposals } from "@/backend/taskProposals";
 import { HomeDataProvider, useHomeData } from "@/screens/homeData";
 import { color, font } from "@/theme";
 import Feather from "@expo/vector-icons/Feather";
@@ -15,7 +16,8 @@ export default function TabsLayout() {
 function TabBar() {
 	const { scan, attention } = useHomeData();
 	const { requests } = useAgentRequests();
-	const needsYou = (attention?.length ?? scan?.needsYou.length ?? 0) + requests.length;
+	const { proposals } = useTaskProposals();
+	const needsYou = (attention?.length ?? scan?.needsYou.length ?? 0) + requests.length + proposals.length;
 	return (
 		<Tabs
 			screenOptions={{
