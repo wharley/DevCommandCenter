@@ -166,6 +166,38 @@ pub fn validate_provider_model(
 
 /// Runtime-config fields that an adapter would silently ignore are rejected
 /// here so a persisted preference never pretends to take effect.
+/// The folder holding a provider's system login, which DCC offers as the
+/// default account and never imports as a named one.
+pub fn provider_system_config_dir(provider_id: &str) -> Option<std::path::PathBuf> {
+    match provider_id {
+        "claude_code" => claude_code::claude_system_config_dir(),
+        "codex" => Some(common::codex_system_home()),
+        _ => None,
+    }
+}
+
+/// Prepares a folder DCC just created for a new account. Claude gets links to
+/// the person's shared config; Codex links its shared home at every launch.
+pub fn prepare_new_account_dir(provider_id: &str, dir: &std::path::Path) -> std::io::Result<()> {
+    match provider_id {
+        "claude_code" => claude_code::link_claude_shared_config(dir),
+        _ => Ok(()),
+    }
+}
+
+/// What the person can run in a terminal to sign an account in (`None` for
+/// the system login's own folder).
+pub fn account_login_command(provider_id: &str, config_dir: Option<&str>) -> Option<String> {
+    let quoted = |dir: &str| format!("'{}'", dir.replace('\'', r"'\''"));
+    match (provider_id, config_dir) {
+        ("claude_code", Some(dir)) => Some(claude_code::claude_account_login_command(dir)),
+        ("claude_code", None) => Some("claude auth login".to_string()),
+        ("codex", Some(dir)) => Some(format!("CODEX_HOME={} codex login", quoted(dir))),
+        ("codex", None) => Some("codex login".to_string()),
+        _ => None,
+    }
+}
+
 pub fn validate_provider_runtime_config(
     provider_id: &str,
     capabilities: &Capabilities,
@@ -326,10 +358,11 @@ mod tests {
     use dcc_core::domain::provider::{HealthStatus, McpOauthSupport, McpSupportLevel};
 
     use super::{
-        claude_code, codex, common::stable_cli_capabilities, droid, expose_runtime_mcp_bridge,
-        gemini, grok_acp, project_catalog_capabilities, provider_registration, provider_runtime,
-        supports_provider_approval_policy, supports_provider_capability, validate_provider_model,
-        validate_provider_runtime_config, ProviderCapability, MAX_MODEL_ID_CHARS, PROVIDER_IDS,
+        account_login_command, claude_code, codex, common::stable_cli_capabilities, droid,
+        expose_runtime_mcp_bridge, gemini, grok_acp, project_catalog_capabilities,
+        provider_registration, provider_runtime, supports_provider_approval_policy,
+        supports_provider_capability, validate_provider_model, validate_provider_runtime_config,
+        ProviderCapability, MAX_MODEL_ID_CHARS, PROVIDER_IDS,
     };
     use crate::cursor_mcp::CURSOR_MCP_RUNTIME_VERSION;
 
@@ -605,10 +638,26 @@ mod tests {
         )
         .is_err());
 
+        let codex = provider_registration("codex").expect("Codex provider");
+        assert!(validate_provider_runtime_config("codex", &codex.capabilities, &account).is_ok());
         let gemini = provider_registration("gemini").expect("Gemini provider");
         assert!(
             validate_provider_runtime_config("gemini", &gemini.capabilities, &account).is_err()
         );
+    }
+
+    #[test]
+    fn each_account_provider_has_its_own_login_command() {
+        assert_eq!(
+            account_login_command("codex", Some("/tmp/it's")).as_deref(),
+            Some(r"CODEX_HOME='/tmp/it'\''s' codex login")
+        );
+        assert_eq!(account_login_command("codex", None).as_deref(), Some("codex login"));
+        assert_eq!(
+            account_login_command("claude_code", None).as_deref(),
+            Some("claude auth login")
+        );
+        assert_eq!(account_login_command("gemini", None), None);
     }
 
     #[test]

@@ -243,11 +243,8 @@ pub async fn provider_account_status_for_state(
             }),
         )
         .map_err(|error| error.to_string())?;
-    let login_command = runtime
-        .config_dir
-        .as_deref()
-        .map(dcc_providers::claude_code::claude_account_login_command)
-        .or_else(|| Some("claude auth login".to_string()));
+    let login_command =
+        dcc_providers::account_login_command(provider_id, runtime.config_dir.as_deref());
     let status = registration
         .runtime
         .account_status(Some(&runtime))

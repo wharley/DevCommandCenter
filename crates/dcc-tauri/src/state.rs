@@ -2211,7 +2211,10 @@ impl SessionCommandState {
         }
         let id = unique_provider_account_id(provider_id, &label, &accounts);
         let (config_dir, managed) = match import_dir.map(str::trim).filter(|dir| !dir.is_empty()) {
-            Some(dir) => (self.importable_account_dir(dir, &accounts)?, false),
+            Some(dir) => (
+                self.importable_account_dir(provider_id, dir, &accounts)?,
+                false,
+            ),
             None => {
                 let dir = self.provider_accounts_root().join(provider_id).join(&id);
                 std::fs::create_dir_all(&dir).map_err(|error| {
@@ -2220,9 +2223,9 @@ impl SessionCommandState {
                         dir.display()
                     ))
                 })?;
-                dcc_providers::claude_code::link_claude_shared_config(&dir).map_err(|error| {
+                dcc_providers::prepare_new_account_dir(provider_id, &dir).map_err(|error| {
                     dcc_core::CoreError::Provider(format!(
-                        "could not share your Claude settings with the account: {error}"
+                        "could not share your settings with the account: {error}"
                     ))
                 })?;
                 (dir, true)
@@ -2240,7 +2243,12 @@ impl SessionCommandState {
         Ok(account)
     }
 
-    fn importable_account_dir(&self, dir: &str, accounts: &[ProviderAccount]) -> Result<PathBuf> {
+    fn importable_account_dir(
+        &self,
+        provider_id: &str,
+        dir: &str,
+        accounts: &[ProviderAccount],
+    ) -> Result<PathBuf> {
         let path = PathBuf::from(dir);
         if !path.is_absolute() || !path.is_dir() {
             return Err(dcc_core::CoreError::Provider(format!(
@@ -2249,7 +2257,7 @@ impl SessionCommandState {
         }
         let canonical = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let wanted = canonical(&path);
-        if dcc_providers::claude_code::claude_system_config_dir()
+        if dcc_providers::provider_system_config_dir(provider_id)
             .is_some_and(|system| canonical(&system) == wanted)
         {
             return Err(dcc_core::CoreError::Provider(
@@ -8366,6 +8374,35 @@ mod tests {
             .provider_runtime_config("claude_code", Some(&selected))
             .is_err());
         assert!(Path::new(&zedy.config_dir).is_dir());
+    }
+
+    #[test]
+    fn a_codex_account_gets_its_own_login_folder() {
+        let temp_root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(temp_root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+
+        let work = state
+            .create_provider_account("codex", "Work", None)
+            .expect("create codex account");
+
+        assert_eq!(work.id, "codex-work");
+        assert_eq!(
+            Path::new(&work.config_dir),
+            root.join("app-data/provider-accounts/codex/codex-work")
+        );
+        assert_eq!(std::fs::read_dir(&work.config_dir).unwrap().count(), 0);
+        let runtime = state
+            .provider_runtime_config(
+                "codex",
+                Some(&ProviderRuntimeConfig {
+                    account_id: Some(work.id.clone()),
+                    ..ProviderRuntimeConfig::default()
+                }),
+            )
+            .expect("codex account resolves");
+        assert_eq!(runtime.config_dir.as_deref(), Some(work.config_dir.as_str()));
     }
 
     #[test]

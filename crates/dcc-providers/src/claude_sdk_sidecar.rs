@@ -34,6 +34,7 @@ use crate::claude_mcp::{
 };
 use crate::common::{
     apply_claude_account_environment, apply_cli_spawn_environment, augmented_path, now_iso,
+    open_in_browser,
     parse_provider_stream_line, ParsedProviderLine, ProviderStreamState,
 };
 
@@ -571,23 +572,6 @@ fn is_claude_local_sign_in_link(link: &str) -> bool {
                     .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1"))
         });
     url.scheme() == "https" && claude_host && local_redirect
-}
-
-fn open_in_browser(url: &str) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    let status = std::process::Command::new("open").arg(url).status();
-    #[cfg(target_os = "linux")]
-    let status = std::process::Command::new("xdg-open").arg(url).status();
-    #[cfg(target_os = "windows")]
-    let status = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .status();
-    match status {
-        Ok(status) if status.success() => Ok(()),
-        _ => Err(CoreError::Provider(
-            "could not open the browser for Claude sign-in".to_string(),
-        )),
-    }
 }
 
 /// Reads `claude auth status` JSON. Anything unreadable counts as signed out,

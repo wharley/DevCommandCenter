@@ -347,13 +347,28 @@ fn resolve_home_path(path: &str, value: &str) -> PathBuf {
 }
 
 fn resolve_codex_home_layout(cfg: &SessionConfig) -> CodexHomeLayout {
-    let runtime_cfg = runtime_config(cfg);
+    codex_home_layout(runtime_config(cfg))
+}
+
+/// The system Codex home: `CODEX_HOME` when DCC inherited one, else `~/.codex`.
+pub fn codex_system_home() -> PathBuf {
+    std::env::var_os("CODEX_HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolve_home_path(".", "~/.codex"))
+}
+
+fn codex_home_layout(runtime_cfg: Option<&ProviderRuntimeConfig>) -> CodexHomeLayout {
     let shared_home_path = runtime_cfg
         .and_then(|config| config.home_path.as_deref())
         .and_then(|home_path| resolve_runtime_home_path(Some(home_path)))
-        .unwrap_or_else(|| resolve_home_path(".", "~/.codex"));
+        .unwrap_or_else(codex_system_home);
+    // An account keeps only its login apart: its folder is the shadow home
+    // over the shared CODEX_HOME, so accounts share sessions and settings and
+    // a conversation can continue under another account.
     let shadow_home_path = runtime_cfg
-        .and_then(|config| config.shadow_home_path.as_deref())
+        .and_then(|config| config.config_dir.as_deref())
+        .or_else(|| runtime_cfg.and_then(|config| config.shadow_home_path.as_deref()))
         .and_then(|home_path| resolve_runtime_home_path(Some(home_path)));
     let continuation_key = format!("codex:home:{}", shared_home_path.to_string_lossy());
 
@@ -465,6 +480,24 @@ fn create_symlink(target: &Path, link: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// `CODEX_HOME` for a Codex process, with an account's (or shadow home's)
+/// overlay in place first. `None` leaves the inherited `CODEX_HOME` alone.
+pub(crate) fn prepare_codex_home(
+    runtime: Option<&ProviderRuntimeConfig>,
+) -> Result<Option<PathBuf>> {
+    let configured = runtime.is_some_and(|config| {
+        config.home_path.is_some()
+            || config.shadow_home_path.is_some()
+            || config.config_dir.is_some()
+    });
+    if !configured {
+        return Ok(None);
+    }
+    let layout = codex_home_layout(runtime);
+    materialize_codex_shadow_home(&layout)?;
+    Ok(layout.effective_home_path)
 }
 
 fn materialize_codex_shadow_home(layout: &CodexHomeLayout) -> Result<()> {
@@ -2084,6 +2117,24 @@ pub(crate) fn apply_claude_account_environment(
     true
 }
 
+/// Opens a sign-in page in the person's default browser.
+pub(crate) fn open_in_browser(url: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(url).status();
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open").arg(url).status();
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        _ => Err(CoreError::Provider(
+            "could not open the browser for Claude sign-in".to_string(),
+        )),
+    }
+}
+
 /// Namespaced env for stdin-only CLI adapters (no undocumented vendor-specific vars).
 pub(crate) fn apply_cli_spawn_environment(
     command: &mut Command,
@@ -2770,6 +2821,44 @@ mod tests {
             layout.continuation_key,
             format!("codex:home:{}", layout.shared_home_path.to_string_lossy())
         );
+    }
+
+    #[test]
+    fn a_codex_account_overlays_its_login_on_the_shared_home() {
+        let shared_home = temp_path("dcc-codex-shared");
+        let account_home = temp_path("dcc-codex-account");
+        fs::create_dir_all(shared_home.join("sessions")).expect("create shared sessions");
+        write_text_file(&shared_home.join("config.toml"), "model = \"gpt-5.4\"\n");
+        write_text_file(&shared_home.join("auth.json"), "{\"personal\":true}\n");
+        let runtime = ProviderRuntimeConfig {
+            home_path: Some(shared_home.to_string_lossy().to_string()),
+            shadow_home_path: Some(temp_path("dcc-codex-ignored").to_string_lossy().to_string()),
+            account_id: Some("codex-zedy".to_string()),
+            config_dir: Some(account_home.to_string_lossy().to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+
+        let home = prepare_codex_home(Some(&runtime))
+            .expect("prepare account home")
+            .expect("account home");
+
+        assert_eq!(home, account_home);
+        assert_eq!(
+            fs::read_link(account_home.join("sessions")).expect("sessions symlink"),
+            shared_home.join("sessions")
+        );
+        assert_eq!(
+            fs::read_link(account_home.join("config.toml")).expect("config symlink"),
+            shared_home.join("config.toml")
+        );
+        assert!(!account_home.join("auth.json").exists());
+        assert_eq!(
+            codex_home_layout(Some(&runtime)).continuation_key,
+            format!("codex:home:{}", shared_home.to_string_lossy())
+        );
+        assert_eq!(prepare_codex_home(None).expect("system home"), None);
+        fs::remove_dir_all(shared_home).expect("cleanup shared");
+        fs::remove_dir_all(account_home).expect("cleanup account");
     }
 
     #[test]

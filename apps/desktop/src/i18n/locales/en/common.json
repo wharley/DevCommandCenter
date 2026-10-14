@@ -3292,15 +3292,15 @@
       "providerAccounts": {
         "label": "Multiple accounts",
         "summary": "Use more than one account of the same provider, such as personal and work.",
-        "whatIs": "Each account has its own sign-in, separate from the system login ([Default]). You pick the account in the composer when you start a task, and the conversation stays on the account it started with. It works with Claude today.",
+        "whatIs": "Each account has its own sign-in, separate from the system login ([Default]). You pick the account in the composer when you start a task, and the conversation stays on the account it started with. It works with Claude and Codex.",
         "whenToUse": "When you have a personal account and a work one, or when one account hit its usage limit and you want to run the next tasks on the other.",
         "steps": [
-          "Open Settings, section [Providers], and go to [Accounts] in the Claude card.",
+          "Open Settings, section [Providers], and go to [Accounts] in the Claude or Codex card.",
           "Type a name, such as Work, and click [Add account].",
-          "Click [Sign in]. The browser opens on Claude's page; sign in with the account and authorize. The row then shows the email and plan.",
+          "Click [Sign in]. The browser opens on the provider's sign-in page; sign in with the account and authorize. The row then shows the email and plan.",
           "In the composer, open [Select model] and pick the account in the [Account] row. Its name shows next to the model."
         ],
-        "tip": "A new account starts with your Claude skills, agents, commands and settings. Sign-in and conversation history stay separate per account.",
+        "tip": "On Claude, a new account starts with your skills, agents, commands and settings, and keeps its own history. On Codex, only the sign-in is separate: config, skills and conversations are those of your ~/.codex.",
         "keywords": "account accounts login claude personal work switch account limit multiple accounts config dir"
       },
       "memory": {

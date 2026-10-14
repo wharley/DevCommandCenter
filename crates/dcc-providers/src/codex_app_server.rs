@@ -37,8 +37,9 @@ use dcc_core::{
             McpToolPolicyDecision,
         },
         provider::{
-            Capabilities, HealthStatus, NativeSubagentStatus, ProviderAccountUsage,
-            ProviderAccountUsageState, ProviderApprovalPolicy, ProviderEvent, ProviderId,
+            Capabilities, HealthStatus, NativeSubagentStatus, ProviderAccountStatus,
+            ProviderAccountUsage, ProviderAccountUsageState, ProviderApprovalPolicy,
+            ProviderEvent, ProviderId,
             ProviderResetCredit, ProviderResetCredits, ProviderResetOutcome, ProviderUsageWindow,
             SessionHandle, ToolCallDetail,
         },
@@ -59,7 +60,9 @@ use crate::codex_mcp::{
     parse_codex_mcp_startup_status, parse_codex_mcp_status_snapshot, prepare_thread_resume_request,
     prepare_thread_start_request, CodexMcpDefinitionMap, CodexMcpToolPolicyMap,
 };
-use crate::common::{append_tool_instructions, augmented_path, codex_item_detail};
+use crate::common::{
+    append_tool_instructions, augmented_path, codex_item_detail, prepare_codex_home,
+};
 
 const CODEX_MULTI_AGENT_V2_FEATURE: &str = "multi_agent_v2";
 
@@ -770,64 +773,207 @@ where
     read_rpc_response_with_timeout(lines, expected_id, Duration::from_secs(15)).await
 }
 
+/// A short-lived `codex app-server` for account calls, under the account's
+/// `CODEX_HOME`.
+struct CodexAccountServer {
+    child: Child,
+    stdin: ChildStdin,
+    lines: Lines<BufReader<tokio::process::ChildStdout>>,
+    stderr_task: tokio::task::JoinHandle<()>,
+    next_id: u64,
+}
+
+impl CodexAccountServer {
+    async fn start(runtime_config: Option<&ProviderRuntimeConfig>) -> Result<Self> {
+        let mut command = Command::new("codex");
+        command
+            .arg("app-server")
+            .arg("-c")
+            .arg("notify=[]")
+            .kill_on_drop(true)
+            .env("PATH", augmented_path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(home) = prepare_codex_home(runtime_config)? {
+            command.env("CODEX_HOME", home);
+        }
+
+        let mut child = command.spawn().map_err(|error| {
+            CoreError::Provider(format!("failed to start codex for account usage: {error}"))
+        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| CoreError::Provider("codex app-server missing stdin".to_string()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| CoreError::Provider("codex app-server missing stdout".to_string()))?;
+        let stderr = child.stderr.take();
+        let stderr_task = tokio::spawn(async move {
+            if let Some(stderr) = stderr {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(_)) = lines.next_line().await {}
+            }
+        });
+        let mut server = Self {
+            child,
+            stdin,
+            lines: BufReader::new(stdout).lines(),
+            stderr_task,
+            next_id: 1,
+        };
+        server.call("initialize", initialize_params(false)).await?;
+        write_line(&mut server.stdin, &rpc_notification("initialized")).await?;
+        Ok(server)
+    }
+
+    async fn call(&mut self, method: &str, params: Value) -> Result<Value> {
+        let id = self.next_id;
+        self.next_id += 1;
+        write_line(&mut self.stdin, &rpc_request(id, method, params)).await?;
+        read_rpc_response(&mut self.lines, id).await
+    }
+
+    async fn shutdown(self) {
+        let Self {
+            mut child,
+            stdin,
+            stderr_task,
+            ..
+        } = self;
+        drop(stdin);
+        let _ = child.start_kill();
+        let _ = timeout(Duration::from_secs(2), child.wait()).await;
+        stderr_task.abort();
+        let _ = stderr_task.await;
+    }
+}
+
 async fn run_codex_account_rpc(
     runtime_config: Option<&ProviderRuntimeConfig>,
     method: &str,
     params: Value,
 ) -> Result<Value> {
-    let mut command = Command::new("codex");
-    command
-        .arg("app-server")
-        .arg("-c")
-        .arg("notify=[]")
-        .kill_on_drop(true)
-        .env("PATH", augmented_path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(home) = runtime_config.and_then(|config| config.home_path.as_deref()) {
-        command.env("CODEX_HOME", home);
-    }
+    let mut server = CodexAccountServer::start(runtime_config).await?;
+    let result = server.call(method, params).await;
+    server.shutdown().await;
+    result
+}
 
-    let mut child = command.spawn().map_err(|error| {
-        CoreError::Provider(format!("failed to start codex for account usage: {error}"))
-    })?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| CoreError::Provider("codex app-server missing stdin".to_string()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| CoreError::Provider("codex app-server missing stdout".to_string()))?;
-    let stderr = child.stderr.take();
-    let stderr_task = tokio::spawn(async move {
-        if let Some(stderr) = stderr {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(_)) = lines.next_line().await {}
-        }
-    });
-    let mut lines = BufReader::new(stdout).lines();
+/// How long the person has to authorize in the browser.
+const CODEX_SIGN_IN_WAIT: Duration = Duration::from_secs(600);
 
+/// Signs a Codex home in with ChatGPT: the app-server hands DCC the sign-in
+/// page (its documented `account/login/start`), DCC opens it, and the browser's
+/// answer returns to the app-server's localhost callback.
+async fn run_codex_browser_sign_in(
+    runtime_config: Option<&ProviderRuntimeConfig>,
+    open_link: impl Fn(&str) -> Result<()>,
+) -> Result<()> {
+    let mut server = CodexAccountServer::start(runtime_config).await?;
     let result = async {
-        write_line(
-            &mut stdin,
-            &rpc_request(1, "initialize", initialize_params(false)),
+        let login = server
+            .call("account/login/start", json!({ "type": "chatgpt" }))
+            .await?;
+        let auth_url = login
+            .get("authUrl")
+            .and_then(Value::as_str)
+            .ok_or_else(|| CoreError::Provider("Codex did not return a sign-in page".to_string()))?;
+        let login_id = login.get("loginId").and_then(Value::as_str).map(str::to_string);
+        if !is_codex_local_sign_in_link(auth_url) {
+            return Err(CoreError::Provider(
+                "Codex asked to open an unexpected sign-in page; sign in with the command instead"
+                    .to_string(),
+            ));
+        }
+        open_link(auth_url)?;
+        timeout(
+            CODEX_SIGN_IN_WAIT,
+            wait_codex_login_completed(&mut server.lines, login_id.as_deref()),
         )
-        .await?;
-        read_rpc_response(&mut lines, 1).await?;
-        write_line(&mut stdin, &rpc_notification("initialized")).await?;
-        write_line(&mut stdin, &rpc_request(2, method, params)).await?;
-        read_rpc_response(&mut lines, 2).await
+        .await
+        .map_err(|_| {
+            CoreError::Provider("Codex sign-in timed out waiting for the browser".to_string())
+        })?
     }
     .await;
-
-    drop(stdin);
-    let _ = child.start_kill();
-    let _ = timeout(Duration::from_secs(2), child.wait()).await;
-    stderr_task.abort();
-    let _ = stderr_task.await;
+    server.shutdown().await;
     result
+}
+
+async fn wait_codex_login_completed<R>(lines: &mut Lines<R>, login_id: Option<&str>) -> Result<()>
+where
+    R: AsyncBufRead + Unpin,
+{
+    loop {
+        let line = lines
+            .next_line()
+            .await
+            .map_err(|error| CoreError::Provider(format!("codex stdout read: {error}")))?
+            .ok_or_else(|| {
+                CoreError::Provider("Codex stopped before the sign-in finished".to_string())
+            })?;
+        let Ok(message) = serde_json::from_str::<Incoming>(&line) else {
+            continue;
+        };
+        if message.method.as_deref() != Some("account/login/completed") {
+            continue;
+        }
+        let params = message.params.unwrap_or(Value::Null);
+        let completed_id = params.get("loginId").and_then(Value::as_str);
+        if login_id.is_some() && completed_id.is_some() && completed_id != login_id {
+            continue;
+        }
+        if params.get("success").and_then(Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+        let reason = params
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("Codex sign-in did not finish");
+        return Err(CoreError::Provider(reason.to_string()));
+    }
+}
+
+/// OpenAI's sign-in page that answers on this computer's localhost callback.
+fn is_codex_local_sign_in_link(link: &str) -> bool {
+    let Ok(url) = Url::parse(link) else {
+        return false;
+    };
+    let local_redirect = url
+        .query_pairs()
+        .find(|(key, _)| key == "redirect_uri")
+        .and_then(|(_, value)| Url::parse(&value).ok())
+        .is_some_and(|redirect| {
+            redirect.scheme() == "http"
+                && redirect
+                    .host_str()
+                    .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1"))
+        });
+    url.scheme() == "https" && url.host_str() == Some("auth.openai.com") && local_redirect
+}
+
+/// Who `account/read` says the Codex home is signed in as.
+fn parse_codex_account_status(value: &Value) -> ProviderAccountStatus {
+    let Some(account) = value.get("account").filter(|account| account.is_object()) else {
+        return ProviderAccountStatus::default();
+    };
+    let text = |key: &str| {
+        account
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    ProviderAccountStatus {
+        logged_in: true,
+        email: text("email"),
+        organization: None,
+        plan: text("planType"),
+    }
 }
 
 async fn fetch_codex_account_usage(
@@ -2851,10 +2997,8 @@ impl CodexAppServerAdapter {
         if let Some(ref m) = cfg.model {
             cmd.env("DCC_MODEL", m);
         }
-        if let Some(ref rc) = cfg.provider_runtime {
-            if let Some(ref home) = rc.home_path {
-                cmd.env("CODEX_HOME", home);
-            }
+        if let Some(home) = prepare_codex_home(cfg.provider_runtime.as_ref())? {
+            cmd.env("CODEX_HOME", home);
         }
         if let Some(ref wd) = cfg.working_directory {
             if !wd.trim().is_empty() {
@@ -4010,6 +4154,23 @@ impl Provider for CodexAppServerAdapter {
         runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<Option<ProviderAccountUsage>> {
         fetch_codex_account_usage(runtime).await.map(Some)
+    }
+
+    async fn account_status(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<ProviderAccountStatus>> {
+        let response = run_codex_account_rpc(runtime, "account/read", json!({})).await?;
+        Ok(Some(parse_codex_account_status(&response)))
+    }
+
+    async fn account_sign_in(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+        _scratch_dir: &std::path::Path,
+    ) -> Result<ProviderAccountStatus> {
+        run_codex_browser_sign_in(runtime, crate::common::open_in_browser).await?;
+        Ok(self.account_status(runtime).await?.unwrap_or_default())
     }
 
     async fn consume_account_reset(
@@ -5652,6 +5813,58 @@ unified_exec                         stable             true
             .map(|credit| credit.id.as_str())
             .collect();
         assert_eq!(ids, ["sooner", "later"]);
+    }
+
+    #[test]
+    fn opens_only_openai_sign_in_pages_that_answer_on_localhost() {
+        assert!(is_codex_local_sign_in_link(
+            "https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"
+        ));
+        assert!(!is_codex_local_sign_in_link(
+            "https://evil.example/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"
+        ));
+        assert!(!is_codex_local_sign_in_link(
+            "https://auth.openai.com/oauth/authorize?redirect_uri=https%3A%2F%2Felsewhere.example%2Fcb"
+        ));
+    }
+
+    #[test]
+    fn reads_who_a_codex_home_is_signed_in_as() {
+        let status = parse_codex_account_status(&json!({
+            "account": { "type": "chatgpt", "email": "me@zedy.dev", "planType": "team" },
+            "requiresOpenaiAuth": true
+        }));
+        assert!(status.logged_in);
+        assert_eq!(status.email.as_deref(), Some("me@zedy.dev"));
+        assert_eq!(status.plan.as_deref(), Some("team"));
+        assert!(
+            !parse_codex_account_status(&json!({ "account": null, "requiresOpenaiAuth": true }))
+                .logged_in
+        );
+        assert!(parse_codex_account_status(&json!({ "account": { "type": "apiKey" } })).logged_in);
+    }
+
+    #[tokio::test]
+    async fn sign_in_finishes_on_its_own_completion_notice() {
+        let stream = concat!(
+            "{\"method\":\"account/updated\",\"params\":{}}\n",
+            "{\"method\":\"account/login/completed\",\"params\":{\"loginId\":\"other\",\"success\":false,\"error\":\"x\"}}\n",
+            "{\"method\":\"account/login/completed\",\"params\":{\"loginId\":\"mine\",\"success\":true}}\n",
+        );
+        let mut lines = BufReader::new(stream.as_bytes()).lines();
+        wait_codex_login_completed(&mut lines, Some("mine"))
+            .await
+            .expect("own login completed");
+
+        let failed = "{\"method\":\"account/login/completed\",\"params\":{\"loginId\":\"mine\",\"success\":false,\"error\":\"denied\"}}\n";
+        let mut lines = BufReader::new(failed.as_bytes()).lines();
+        let error = wait_codex_login_completed(&mut lines, Some("mine"))
+            .await
+            .expect_err("denied login");
+        assert!(error.to_string().contains("denied"));
+
+        let mut lines = BufReader::new(&b""[..]).lines();
+        assert!(wait_codex_login_completed(&mut lines, Some("mine")).await.is_err());
     }
 
     #[tokio::test]

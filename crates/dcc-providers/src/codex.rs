@@ -44,6 +44,7 @@ pub fn stable_codex_capabilities() -> Capabilities {
         ProviderApprovalPolicy::FullAccess,
     ];
     capabilities.supports_runtime_home = true;
+    capabilities.supports_accounts = true;
     capabilities.supports_shadow_home = true;
     capabilities.supports_subagent_concurrency = true;
     capabilities.supports_account_usage = true;
