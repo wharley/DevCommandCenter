@@ -79,3 +79,18 @@ pub async fn session_resume_after_usage_limit(
         .map(|turn_id| turn_id.0)
         .map_err(|error| error.to_string())
 }
+
+/// "Continuar com a conta …": moves the task to another account of its
+/// provider (`None` = system login) and sends the continuation turn.
+#[tauri::command]
+pub async fn session_resume_after_usage_limit_on_account(
+    state: State<'_, SessionCommandState>,
+    session_id: String,
+    account_id: Option<String>,
+) -> Result<String, String> {
+    state
+        .resume_after_usage_limit_on_account(&SessionId(session_id), account_id)
+        .await
+        .map(|turn_id| turn_id.0)
+        .map_err(|error| error.to_string())
+}

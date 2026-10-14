@@ -7024,6 +7024,7 @@ pub fn run() {
             usage_limit_commands::session_usage_limit_auto_resume,
             usage_limit_commands::session_set_usage_limit_auto_resume,
             usage_limit_commands::session_resume_after_usage_limit,
+            usage_limit_commands::session_resume_after_usage_limit_on_account,
             quick_composer::quick_composer_status,
             quick_composer::quick_composer_set_shortcut,
             quick_composer::quick_composer_toggle,

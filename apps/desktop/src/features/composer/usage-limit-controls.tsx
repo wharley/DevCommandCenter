@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Hourglass, LoaderCircle, Play } from "lucide-react";
+import { ArrowRightLeft, Hourglass, LoaderCircle, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -10,9 +10,17 @@ import { KeepAwakeForLimitWarning } from "@/features/settings/usage-limit-prefer
 import { formatLimitReset, usageLimitStatus } from "@/features/workspaces/usage-limit";
 import { useLimitClock } from "@/features/workspaces/usage-limit-state";
 import { dccQueryKeys } from "@/lib/query-client";
+import { getProviderAccountUsage } from "@/lib/provider-api";
+import { mostConstrainedUsageWindow } from "@/features/providers/provider-account-usage";
+import {
+	accountsOfProvider,
+	ProviderAccountsContext,
+	withProviderAccount,
+} from "@/features/providers/provider-accounts";
 import {
 	readSessionAutoResume,
 	resumeAfterUsageLimit,
+	resumeAfterUsageLimitOnAccount,
 	saveSessionAutoResume,
 	SESSION_AUTO_RESUME_QUERY_KEY,
 } from "@/lib/usage-limit-api";
@@ -106,8 +114,8 @@ export function UsageLimitStrip({
 	const queryClient = useQueryClient();
 	const [resuming, setResuming] = useState(false);
 	const sessions = useQuery(workspaceSessionsQueryOptions(workspaceId));
-	const limit =
-		sessions.data?.find((summary) => summary.session.id === sessionId)?.usageLimit ?? null;
+	const summary = sessions.data?.find((entry) => entry.session.id === sessionId) ?? null;
+	const limit = summary?.usageLimit ?? null;
 	const now = useLimitClock(Boolean(limit));
 	if (!sessionId || !limit) return null;
 
@@ -132,10 +140,14 @@ export function UsageLimitStrip({
 			? t("usageLimit.continue")
 			: t("usageLimit.retry");
 
-	const resume = async () => {
+	const resume = async (accountId?: string | null) => {
 		setResuming(true);
 		try {
-			await resumeAfterUsageLimit(sessionId);
+			if (accountId === undefined) {
+				await resumeAfterUsageLimit(sessionId);
+			} else {
+				await resumeAfterUsageLimitOnAccount(sessionId, accountId);
+			}
 			if (workspaceId) {
 				await queryClient.invalidateQueries({
 					queryKey: dccQueryKeys.workspaceSessions(workspaceId, "local"),
@@ -203,6 +215,14 @@ export function UsageLimitStrip({
 					{actionLabel}
 				</Button>
 			</div>
+			{summary ? (
+				<OtherAccountChoices
+					providerId={summary.session.providerId}
+					currentAccountId={summary.session.providerRuntime?.accountId ?? null}
+					disabled={disabled || resuming}
+					onChoose={(accountId) => void resume(accountId)}
+				/>
+			) : null}
 			{waiting && limit.autoResume ? (
 				<KeepAwakeForLimitWarning
 					message={t("usageLimit.keepAwakeWarning")}
@@ -210,5 +230,97 @@ export function UsageLimitStrip({
 				/>
 			) : null}
 		</div>
+	);
+}
+
+/**
+ * The provider's other accounts, each with how much of its plan is left, so
+ * a task stopped by one account's limit can go on under another right away.
+ */
+function OtherAccountChoices({
+	providerId,
+	currentAccountId,
+	disabled,
+	onChoose,
+}: {
+	providerId: string;
+	currentAccountId: string | null;
+	disabled: boolean;
+	onChoose: (accountId: string | null) => void;
+}) {
+	const { t } = useTranslation("common");
+	const { accounts } = useContext(ProviderAccountsContext);
+	const providerAccounts = accountsOfProvider(accounts, providerId);
+	if (providerAccounts.length === 0) return null;
+	const choices = [
+		{ id: null, label: t("usageLimit.defaultAccount") },
+		...providerAccounts.map((account) => ({ id: account.id, label: account.label })),
+	].filter((choice) => choice.id !== currentAccountId);
+
+	return (
+		<div className="mt-2 flex flex-wrap items-center gap-1.5">
+			<span className="text-[11px] text-muted-foreground">
+				{t("usageLimit.otherAccounts")}
+			</span>
+			{choices.map((choice) => (
+				<AccountChoice
+					key={choice.id ?? "default"}
+					providerId={providerId}
+					accountId={choice.id}
+					label={choice.label}
+					disabled={disabled}
+					onChoose={onChoose}
+				/>
+			))}
+		</div>
+	);
+}
+
+function AccountChoice({
+	providerId,
+	accountId,
+	label,
+	disabled,
+	onChoose,
+}: {
+	providerId: string;
+	accountId: string | null;
+	label: string;
+	disabled: boolean;
+	onChoose: (accountId: string | null) => void;
+}) {
+	const { t } = useTranslation("common");
+	const usage = useQuery({
+		queryKey: ["usage-limit-account-choice", providerId, accountId],
+		queryFn: async () =>
+			(await getProviderAccountUsage(providerId, withProviderAccount(null, accountId))).usage,
+		staleTime: 60_000,
+		retry: false,
+	});
+	const tightest = mostConstrainedUsageWindow(usage.data);
+	const left = tightest
+		? tightest.isExhausted
+			? t("usageLimit.accountExhausted")
+			: t("usageLimit.accountLeft", { percent: Math.round(tightest.remainingPercent) })
+		: null;
+
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
+					className="h-7 gap-1 px-2 text-[11px]"
+					disabled={disabled || tightest?.isExhausted === true}
+					onClick={() => onChoose(accountId)}
+				>
+					<ArrowRightLeft className="size-3" aria-hidden />
+					{t("usageLimit.continueOn", { name: label })}
+					{left ? <span className="text-muted-foreground">· {left}</span> : null}
+				</Button>
+			</TooltipTrigger>
+			<TooltipContent>{t("usageLimit.continueOnHint")}</TooltipContent>
+		</Tooltip>
 	);
 }

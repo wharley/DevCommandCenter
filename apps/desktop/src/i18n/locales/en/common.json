@@ -3298,7 +3298,8 @@
           "Open Settings, section [Providers], and go to [Accounts] in the Claude or Codex card.",
           "Type a name, such as Work, and click [Add account].",
           "Click [Sign in]. The browser opens on the provider's sign-in page; sign in with the account and authorize. The row then shows the email and plan.",
-          "In the composer, open [Select model] and pick the account in the [Account] row. Its name shows next to the model."
+          "In the composer, open [Select model] and pick the account in the [Account] row. Its name shows next to the model.",
+          "If the usage limit runs out mid-task, the notice above the composer offers to continue on another account and shows how much each has left. On Codex the conversation carries on as is; on Claude, the new account gets a summary of the work so far."
         ],
         "tip": "On Claude, a new account starts with your skills, agents, commands and settings, and keeps its own history. On Codex, only the sign-in is separate: config, skills and conversations are those of your ~/.codex.",
         "keywords": "account accounts login claude personal work switch account limit multiple accounts config dir"
@@ -5225,6 +5226,12 @@
     "timelineWaiting": "Usage limit reached · back at {{time}}",
     "timelinePaused": "Usage limit reached",
     "timelineResumedAuto": "Resumed on its own after the limit",
-    "timelineResumedManual": "Resumed after the limit"
+    "timelineResumedManual": "Resumed after the limit",
+    "otherAccounts": "Or continue on another account:",
+    "defaultAccount": "Default",
+    "continueOn": "Continue with {{name}}",
+    "continueOnHint": "The task moves to that account and continues where it stopped. Later messages stay on it.",
+    "accountLeft": "{{percent}}% left",
+    "accountExhausted": "no limit left"
   }
 }

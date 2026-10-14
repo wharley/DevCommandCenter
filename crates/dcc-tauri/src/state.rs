@@ -4405,6 +4405,62 @@ impl SessionCommandState {
     /// `automatic` is the scheduler's resume: it only runs while the limit
     /// is still waiting to resume by itself and the reset has passed. The
     /// queue dispatches after the continuation completes, as after any turn.
+    /// Points the session at another account of its provider and stops the
+    /// old account's process. The native conversation id survives only where
+    /// every account reaches the same native history.
+    pub(crate) async fn move_session_to_account(
+        &self,
+        session_id: &SessionId,
+        account_id: Option<String>,
+    ) -> Result<()> {
+        let transition = self.acquire_provider_transition(session_id).await?;
+        let mut session = self
+            .peek_session(session_id)
+            .await?
+            .ok_or_else(|| dcc_core::CoreError::Repository("session not found".to_string()))?;
+        let current = session
+            .provider_runtime
+            .as_ref()
+            .and_then(|runtime| runtime.account_id.clone());
+        if current == account_id {
+            return Ok(());
+        }
+        let mut runtime = session.provider_runtime.clone().unwrap_or_default();
+        runtime.account_id = account_id;
+        runtime.config_dir = None;
+        // Fails closed on a removed account or one of another provider.
+        self.provider_runtime_config(&session.provider_id, Some(&runtime))?;
+        self.cancel_provider_session_if_attached_under_transition(&transition, session_id)
+            .await?;
+        if !dcc_providers::native_resume_survives_account_switch(&session.provider_id) {
+            self.session_repo
+                .delete_provider_native_sessions(session_id, None)?;
+        }
+        session.provider_runtime = Some(runtime);
+        session.updated_at = Utc::now().to_rfc3339();
+        SessionRepo::save_session(self, &session).await
+    }
+
+    /// Continues a task stopped by its plan's usage limit under another
+    /// account of the same provider (`None` is the system login). The old
+    /// account's process stops; a provider whose accounts share their native
+    /// history (Codex) resumes the same conversation, the others start a new
+    /// one carrying a bounded snapshot of the task's history.
+    pub async fn resume_after_usage_limit_on_account(
+        &self,
+        session_id: &SessionId,
+        account_id: Option<String>,
+    ) -> Result<TurnId> {
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        if dcc_core::domain::usage_limit::session_usage_limit(&events).is_none() {
+            return Err(dcc_core::CoreError::InvalidInput(
+                "Esta tarefa não está parada por limite de uso.".to_string(),
+            ));
+        }
+        self.move_session_to_account(session_id, account_id).await?;
+        self.resume_after_usage_limit(session_id, false).await
+    }
+
     pub async fn resume_after_usage_limit(
         &self,
         session_id: &SessionId,
@@ -8374,6 +8430,74 @@ mod tests {
             .provider_runtime_config("claude_code", Some(&selected))
             .is_err());
         assert!(Path::new(&zedy.config_dir).is_dir());
+    }
+
+    #[tokio::test]
+    async fn moving_a_task_to_another_account_keeps_only_a_shared_history() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let codex_work = state
+            .create_provider_account("codex", "Work", None)
+            .expect("codex account");
+        let claude_work = state
+            .create_provider_account("claude_code", "Work", None)
+            .expect("claude account");
+
+        let codex = sample_session("codex-move");
+        SessionRepo::save_session(&state, &codex).await.unwrap();
+        state
+            .session_repo
+            .save_provider_native_session(&codex.id, "codex", "thread-1")
+            .unwrap();
+        state
+            .move_session_to_account(&codex.id, Some(codex_work.id.clone()))
+            .await
+            .expect("move codex");
+        let moved = state.peek_session(&codex.id).await.unwrap().unwrap();
+        assert_eq!(
+            moved.provider_runtime.and_then(|runtime| runtime.account_id),
+            Some(codex_work.id.clone())
+        );
+        assert_eq!(
+            state
+                .session_repo
+                .load_provider_native_session(&codex.id, "codex")
+                .unwrap()
+                .as_deref(),
+            Some("thread-1")
+        );
+
+        let mut claude = sample_session("claude-move");
+        claude.provider_id = "claude_code".to_string();
+        SessionRepo::save_session(&state, &claude).await.unwrap();
+        state
+            .session_repo
+            .save_provider_native_session(&claude.id, "claude_code", "conversation-1")
+            .unwrap();
+        state
+            .move_session_to_account(&claude.id, Some(claude_work.id.clone()))
+            .await
+            .expect("move claude");
+        assert_eq!(
+            state
+                .session_repo
+                .load_provider_native_session(&claude.id, "claude_code")
+                .unwrap(),
+            None
+        );
+        // Back to the system login, and never onto another provider's account.
+        state
+            .move_session_to_account(&claude.id, None)
+            .await
+            .expect("back to default");
+        assert!(state
+            .move_session_to_account(&claude.id, Some(codex_work.id.clone()))
+            .await
+            .is_err());
+        let back = state.peek_session(&claude.id).await.unwrap().unwrap();
+        assert_eq!(back.provider_runtime.and_then(|runtime| runtime.account_id), None);
     }
 
     #[test]

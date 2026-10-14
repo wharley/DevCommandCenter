@@ -198,6 +198,13 @@ pub fn account_login_command(provider_id: &str, config_dir: Option<&str>) -> Opt
     }
 }
 
+/// Whether a conversation's native history is reachable from every account
+/// of the provider. Codex accounts overlay one shared home (`sessions`
+/// included); each Claude account keeps its own history.
+pub fn native_resume_survives_account_switch(provider_id: &str) -> bool {
+    provider_id == "codex"
+}
+
 pub fn validate_provider_runtime_config(
     provider_id: &str,
     capabilities: &Capabilities,

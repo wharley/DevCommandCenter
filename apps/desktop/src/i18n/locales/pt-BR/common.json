@@ -3298,7 +3298,8 @@
           "Abra Configurações, seção [Provedores], e vá até [Contas] no card do Claude ou do Codex.",
           "Digite um nome, como Zedy, e clique em [Adicionar conta].",
           "Clique em [Entrar]. O navegador abre na página de login do provider; entre com a conta e autorize. A linha passa a mostrar o e-mail e o plano.",
-          "No composer, abra [Selecionar modelo] e escolha a conta na linha [Conta]. O nome aparece ao lado do modelo."
+          "No composer, abra [Selecionar modelo] e escolha a conta na linha [Conta]. O nome aparece ao lado do modelo.",
+          "Se o limite de uso acabar no meio de uma tarefa, o aviso acima do composer oferece continuar em outra conta e mostra quanto cada uma ainda tem livre. No Codex a conversa segue a mesma; no Claude, a nova conta recebe um resumo do que foi feito."
         ],
         "tip": "No Claude, a conta nova já vem com as suas skills, agents, comandos e settings, e o histórico fica separado por conta. No Codex, só o login é separado: config, skills e conversas são as mesmas do seu ~/.codex.",
         "keywords": "conta contas login claude pessoal empresa trabalho trocar conta limite várias contas config dir"
@@ -5225,6 +5226,12 @@
     "timelineWaiting": "Limite de uso atingido · volta às {{time}}",
     "timelinePaused": "Limite de uso atingido",
     "timelineResumedAuto": "Retomado sozinho depois do limite",
-    "timelineResumedManual": "Retomado depois do limite"
+    "timelineResumedManual": "Retomado depois do limite",
+    "otherAccounts": "Ou continue em outra conta:",
+    "defaultAccount": "Padrão",
+    "continueOn": "Continuar com {{name}}",
+    "continueOnHint": "A tarefa passa para essa conta e continua de onde parou. As próximas mensagens seguem nela.",
+    "accountLeft": "{{percent}}% livre",
+    "accountExhausted": "sem limite agora"
   }
 }

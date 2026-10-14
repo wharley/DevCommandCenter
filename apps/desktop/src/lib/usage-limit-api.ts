@@ -17,5 +17,9 @@ export const saveSessionAutoResume = (sessionId: string, enabled: boolean) =>
 export const resumeAfterUsageLimit = (sessionId: string) =>
 	invoke<string>("session_resume_after_usage_limit", { sessionId });
 
+/** "Continuar com a conta …": moves the task to that account (`null` = system login) and continues. */
+export const resumeAfterUsageLimitOnAccount = (sessionId: string, accountId: string | null) =>
+	invoke<string>("session_resume_after_usage_limit_on_account", { sessionId, accountId });
+
 export const SESSION_AUTO_RESUME_QUERY_KEY = "session-auto-resume";
 export const USAGE_LIMIT_SETTINGS_QUERY_KEY = "usage-limit-settings";
