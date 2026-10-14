@@ -2,10 +2,13 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { LoaderCircle, RefreshCcw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import type { ProviderCatalog, ProviderResetCredits, ProviderUsageWindow } from "@dcc/contracts";
-import { Badge } from "@/components/ui/badge";
+import type {
+	ProviderCatalog,
+	ProviderResetCredits,
+	ProviderRuntimeConfig,
+	ProviderUsageWindow,
+} from "@dcc/contracts";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Dialog,
 	DialogContent,
@@ -15,25 +18,13 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { ProviderIcon } from "./provider-icons";
-import {
-	draftToProviderRuntimeConfig,
-	getProviderRuntimeDraft,
-	type ProviderRuntimeSettings,
-} from "./provider-runtime-settings";
 import {
 	providerUsageSeverity,
 	formatProviderUsageReset,
 	supportsProviderAccountResets,
-	supportsProviderAccountUsage,
 	useProviderAccountReset,
 	useProviderAccountUsage,
 } from "./provider-account-usage";
-
-type ProviderAccountUsagePanelProps = {
-	providers: ProviderCatalog["providers"];
-	runtimeSettings: ProviderRuntimeSettings;
-};
 
 function windowLabel(
 	id: string,
@@ -229,18 +220,18 @@ function ResetCreditList({
 	);
 }
 
-function ProviderUsageCard({
+/**
+ * The plan's usage windows and reset credits of one sign-in of a provider
+ * (`runtime` carries the account; `null` is the system login).
+ */
+export function ProviderUsageDetails({
 	provider,
-	runtimeSettings,
+	runtime,
 }: {
 	provider: ProviderCatalog["providers"][number];
-	runtimeSettings: ProviderRuntimeSettings;
+	runtime: ProviderRuntimeConfig | null;
 }) {
 	const { t, i18n } = useTranslation("common");
-	const runtime = draftToProviderRuntimeConfig(
-		getProviderRuntimeDraft(runtimeSettings, provider.id),
-		provider.capabilities,
-	);
 	const usageQuery = useProviderAccountUsage(provider, runtime);
 	const resetMutation = useProviderAccountReset(provider.id, runtime);
 	const [confirmReset, setConfirmReset] = useState<RedeemableReset | null>(null);
@@ -286,34 +277,28 @@ function ProviderUsageCard({
 		: null;
 
 	return (
-		<Card className="rounded-2xl border-border/60 bg-muted/10 p-0 shadow-none">
-			<CardHeader className="flex-row items-center gap-3 border-b border-border/40 px-4 py-3">
-				<ProviderIcon provider={provider.id} className="size-4" />
-				<div className="min-w-0 flex-1">
-					<CardTitle className="text-[14px] font-medium">{provider.label}</CardTitle>
-					{updatedAt ? (
-						<p className="mt-0.5 text-[11px] text-muted-foreground">
-							{t("settings.model.usageUpdatedAt", { time: updatedAt })}
-						</p>
-					) : null}
-				</div>
+		<div className="space-y-3">
+			<div className="flex items-center justify-between gap-3">
+				<p className="text-[11px] text-muted-foreground">
+					{updatedAt ? t("settings.model.usageUpdatedAt", { time: updatedAt }) : null}
+				</p>
 				<Button
 					type="button"
 					variant="ghost"
-					size="icon"
-					className="size-8"
-					aria-label={t("settings.model.usageRefresh")}
+					size="sm"
+					className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground"
 					disabled={usageQuery.isFetching}
 					onClick={() => void usageQuery.refetch()}
 				>
 					{usageQuery.isFetching ? (
-						<LoaderCircle className="size-3.5 animate-spin" />
+						<LoaderCircle className="size-3 animate-spin" aria-hidden />
 					) : (
-						<RefreshCcw className="size-3.5" />
+						<RefreshCcw className="size-3" aria-hidden />
 					)}
+					{t("settings.model.usageRefresh")}
 				</Button>
-			</CardHeader>
-			<CardContent className="space-y-4 px-4 py-4">
+			</div>
+			<div className="space-y-3">
 				{resets.length > 0 ? (
 					<ResetCreditList
 						resets={resets}
@@ -342,7 +327,7 @@ function ProviderUsageCard({
 						{t("settings.model.usageUnavailable")}
 					</p>
 				)}
-			</CardContent>
+			</div>
 			<Dialog
 				open={confirmReset !== null}
 				onOpenChange={(open) => {
@@ -390,44 +375,6 @@ function ProviderUsageCard({
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
-		</Card>
-	);
-}
-
-export function ProviderAccountUsagePanel({
-	providers,
-	runtimeSettings,
-}: ProviderAccountUsagePanelProps) {
-	const { t } = useTranslation("common");
-	const supported = providers.filter((provider) =>
-		supportsProviderAccountUsage(provider),
-	);
-	if (supported.length === 0) return null;
-
-	return (
-		<div className="space-y-3 rounded-2xl border border-border/60 bg-background p-4">
-			<div className="flex items-start justify-between gap-4">
-				<div>
-					<p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-						{t("settings.model.usageTitle")}
-					</p>
-					<p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-						{t("settings.model.usageHint")}
-					</p>
-				</div>
-				<Badge variant="outline" className="h-8 px-3 text-[12px] font-normal">
-					{t("settings.model.usageBadge")}
-				</Badge>
-			</div>
-			<div className="grid gap-3 xl:grid-cols-2">
-				{supported.map((provider) => (
-					<ProviderUsageCard
-						key={provider.id}
-						provider={provider}
-						runtimeSettings={runtimeSettings}
-					/>
-				))}
-			</div>
 		</div>
 	);
 }

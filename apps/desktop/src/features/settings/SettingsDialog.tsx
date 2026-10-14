@@ -47,9 +47,6 @@ import type {
 	DccThemePreference,
 } from "@/components/theme-provider";
 import type { ProviderCatalog } from "@dcc/contracts";
-import { ProviderSelectionPanel } from "@/features/providers/provider-selection-panel";
-import { ProviderRuntimePanel } from "@/features/providers/provider-runtime-panel";
-import { ProviderAccountUsagePanel } from "@/features/providers/provider-account-usage-panel";
 import { CodeRabbitConnectDialog } from "@/features/settings/coderabbit-connect-dialog";
 import {
 	setCodeRabbitIntegrationEnabled,
@@ -100,12 +97,12 @@ import { McpIntegrationsPanel } from "@/features/settings/mcp-integrations-panel
 import { ComputerUsePanel } from "@/features/settings/computer-use-panel";
 import { QuickComposerShortcut } from "@/features/quick-composer/QuickComposerShortcut";
 import { AppshotsShortcut } from "@/features/settings/appshots-shortcut";
-import { ProviderAvailabilityPanel } from "@/features/providers/provider-availability-panel";
 import {
 	isProviderAvailabilityRequestCurrent,
 	persistProviderAvailability,
 } from "@/features/providers/provider-availability.logic";
 import { setProviderAvailability } from "@/lib/provider-api";
+import { ProvidersSettings } from "@/features/providers/providers-settings";
 import {
 	loadAiMemoryOutbox,
 	loadAiMemoryExportHistory,
@@ -1333,35 +1330,21 @@ export function SettingsDialog({
 							) : null}
 
 							{activeSection === "model" ? (
-								<section className="space-y-4">
-									<ProviderAvailabilityPanel
-										providers={providers}
-										pendingProviderIds={pendingAvailabilityProviderIds}
-										errors={availabilityErrors}
-										onChange={(providerId, enabled) => {
-											void handleProviderAvailabilityChange(providerId, enabled);
-										}}
-									/>
-									<ProviderAccountUsagePanel
-										providers={providers}
-										runtimeSettings={providerRuntimeSettings}
-									/>
-									<ProviderSelectionPanel
-										title={t("settings.model.providersTitle")}
-										description={t("settings.model.providersHint")}
-										providers={providers}
-										selectedProviderId={selectedProviderId}
-										selectedModelId={selectedModelId}
-										onSelectProvider={onSelectProvider}
-										onSelectModel={onSelectModel}
-									/>
-									<ProviderRuntimePanel
-										providers={providers}
-										runtimeSettings={providerRuntimeSettings}
-										onChangeRuntime={onChangeProviderRuntime}
-										onClearRuntime={onClearProviderRuntime}
-									/>
-								</section>
+								<ProvidersSettings
+									providers={providers}
+									pendingAvailabilityIds={pendingAvailabilityProviderIds}
+									availabilityErrors={availabilityErrors}
+									onChangeAvailability={(providerId, enabled) => {
+										void handleProviderAvailabilityChange(providerId, enabled);
+									}}
+									runtimeSettings={providerRuntimeSettings}
+									onChangeRuntime={onChangeProviderRuntime}
+									onClearRuntime={onClearProviderRuntime}
+									selectedProviderId={selectedProviderId}
+									selectedModelId={selectedModelId}
+									onSelectProvider={onSelectProvider}
+									onSelectModel={onSelectModel}
+								/>
 							) : null}
 
 							{activeSection === "decisionProvider" ? (
