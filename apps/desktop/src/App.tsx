@@ -233,10 +233,13 @@ import {
 	SELECTED_MODEL_STORAGE_KEY,
 	getProviderActionBlockReason,
 	getProviderUnhealthyReason,
+	getProjectComposerSelection,
 	getSessionComposerSelection,
 	isProviderEnabled,
 	resolveSelectedProviderId,
 	resolveSelectedModelId,
+	resolveProjectComposerSelection,
+	setProjectComposerSelection,
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
 import type {
@@ -2137,6 +2140,37 @@ export default function App() {
 			modelId: selectedModelId,
 		});
 	}, [selectedSessionSnapshot?.sessionId, selectedProviderId, selectedModelId]);
+
+	const selectedProjectKey = selectedWorkspace
+		? (selectedWorkspace.projectId ?? selectedWorkspace.id)
+		: null;
+	const hasSelectedSession = Boolean(selectedSessionSnapshot?.sessionId);
+
+	/** A new task starts on this project's last pick, not another project's. */
+	useEffect(() => {
+		if (providerChoices.length === 0 || !selectedProjectKey || hasSelectedSession) {
+			return;
+		}
+		const selection = resolveProjectComposerSelection(
+			providerChoices,
+			getProjectComposerSelection(selectedProjectKey),
+		);
+		if (!selection) {
+			return;
+		}
+		setSelectedProviderId(selection.providerId);
+		setSelectedModelId(selection.modelId);
+	}, [providerChoices, selectedProjectKey, hasSelectedSession]);
+
+	useEffect(() => {
+		if (!selectedProjectKey || !selectedProviderId || !selectedModelId) {
+			return;
+		}
+		setProjectComposerSelection(selectedProjectKey, {
+			providerId: selectedProviderId,
+			modelId: selectedModelId,
+		});
+	}, [selectedProjectKey, selectedProviderId, selectedModelId]);
 
 	useEffect(() => {
 		setSelectedSessionId(null);

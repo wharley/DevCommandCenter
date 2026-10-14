@@ -1,5 +1,5 @@
 import type { ReactElement, SVGProps } from "react";
-import { Orbit, Sparkles } from "lucide-react";
+import { Orbit, Rocket, Sparkles } from "lucide-react";
 import { CursorEditorIcon } from "@/components/editor-brand-icons";
 import { cn } from "@/lib/utils";
 import { agentBrandKey, type AgentBrandKey } from "@dcc/mascots";
@@ -75,6 +75,12 @@ function GrokMark(props: SVGProps<SVGSVGElement>) {
 	return <Orbit {...props} strokeWidth={1.7} aria-hidden />;
 }
 
+/** Antigravity shares Gemini's brand family, but not its mark: next to the
+ * Gemini star in the picker the two read as one provider. */
+function AntigravityMark(props: SVGProps<SVGSVGElement>) {
+	return <Rocket {...props} strokeWidth={1.7} className={cn("text-[#4285F4]", props.className)} aria-hidden />;
+}
+
 const MARKS: Record<
 	IconKey,
 	(props: SVGProps<SVGSVGElement>) => ReactElement
@@ -99,6 +105,9 @@ type ProviderIconProps = {
  * (e.g. `size-4`); the SVG fills its box and stays centered.
  */
 export function ProviderIcon({ provider, className }: ProviderIconProps) {
+	if (provider?.toLowerCase().includes("antigravity")) {
+		return <AntigravityMark className={cn("shrink-0", className)} />;
+	}
 	const key = resolveIconKey(provider);
 	if (!key) {
 		return (

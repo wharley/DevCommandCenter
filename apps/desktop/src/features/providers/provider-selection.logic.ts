@@ -13,6 +13,13 @@ export const SELECTED_MODEL_STORAGE_KEY = "dcc.selectedModelId";
  */
 export const SESSION_COMPOSER_MAP_KEY = "dcc.sessionComposerSelections";
 
+/**
+ * Last provider/model picked per project, so a new task in a project starts
+ * where that project's work left off rather than on whatever another project
+ * used last.
+ */
+export const PROJECT_COMPOSER_MAP_KEY = "dcc.projectComposerSelections";
+
 export type SessionComposerSelection = {
 	providerId: string;
 	modelId: string;
@@ -92,6 +99,79 @@ export function setSessionComposerSelection(
 	const map = readSessionComposerMap();
 	map[sessionId] = selection;
 	window.localStorage.setItem(SESSION_COMPOSER_MAP_KEY, JSON.stringify(map));
+}
+
+function readProjectComposerMap(): Record<string, SessionComposerSelection> {
+	if (typeof window === "undefined") {
+		return {};
+	}
+	try {
+		const parsed = JSON.parse(
+			window.localStorage.getItem(PROJECT_COMPOSER_MAP_KEY) ?? "{}",
+		) as unknown;
+		return parsed && typeof parsed === "object"
+			? (parsed as Record<string, SessionComposerSelection>)
+			: {};
+	} catch {
+		return {};
+	}
+}
+
+export function getProjectComposerSelection(
+	projectId: string,
+): SessionComposerSelection | null {
+	const entry = readProjectComposerMap()[projectId];
+	if (
+		!entry ||
+		typeof entry.providerId !== "string" ||
+		typeof entry.modelId !== "string"
+	) {
+		return null;
+	}
+	return entry;
+}
+
+export function setProjectComposerSelection(
+	projectId: string,
+	selection: SessionComposerSelection,
+) {
+	if (typeof window === "undefined") {
+		return;
+	}
+	const map = readProjectComposerMap();
+	const current = map[projectId];
+	if (
+		current?.providerId === selection.providerId &&
+		current?.modelId === selection.modelId
+	) {
+		return;
+	}
+	map[projectId] = selection;
+	try {
+		window.localStorage.setItem(PROJECT_COMPOSER_MAP_KEY, JSON.stringify(map));
+	} catch {
+		// A full or blocked storage only loses the per-project default.
+	}
+}
+
+/**
+ * The provider/model a new task in this project starts on: the project's last
+ * pick while that provider is ready and still has the model, else null so the
+ * global choice stands.
+ */
+export function resolveProjectComposerSelection(
+	providers: ProviderCatalog["providers"],
+	stored: SessionComposerSelection | null,
+): SessionComposerSelection | null {
+	if (!stored) {
+		return null;
+	}
+	const provider = providers.find((entry) => entry.id === stored.providerId);
+	if (!provider || !isProviderReady(provider)) {
+		return null;
+	}
+	const modelId = resolveSelectedModelId(provider, stored.modelId);
+	return modelId ? { providerId: provider.id, modelId } : null;
 }
 
 export function resolveSelectedProviderId(

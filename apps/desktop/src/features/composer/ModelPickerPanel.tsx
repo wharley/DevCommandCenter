@@ -12,7 +12,10 @@ import { useTranslation } from "react-i18next";
 import { Check, Plus, RotateCcw, Search, Sparkles, Star, Zap } from "lucide-react";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderIcon } from "@/features/providers/provider-icons";
-import { ProviderAccountStrip } from "@/features/providers/provider-account-strip";
+import {
+	ProviderAccountStrip,
+	useHasProviderAccountStrip,
+} from "@/features/providers/provider-account-strip";
 import { getProviderSetupReason } from "@/features/providers/provider-selection.logic";
 import { localizedProviderSetupReason } from "@/features/providers/provider-setup-message";
 import { openSettingsSection } from "@/features/settings/settings-navigation";
@@ -125,6 +128,9 @@ export function ModelPickerPanel({
 		[visibleProviders],
 	);
 	const activeProvider = visibleProviders.find((provider) => provider.id === activeTab) ?? null;
+	// The popover opens upward, so any height change moves the tab row under
+	// the pointer. The list takes up whatever the account strip does not.
+	const hasAccountStrip = useHasProviderAccountStrip(activeProvider);
 	const rawSetupReason = activeProvider ? getProviderSetupReason(activeProvider) : null;
 	const setupReason = rawSetupReason
 		? (localizedProviderSetupReason(rawSetupReason, t) ?? rawSetupReason)
@@ -281,6 +287,11 @@ export function ModelPickerPanel({
 									/>
 								)}
 								{selected ? (
+									<span className="ml-1.5 max-w-[9rem] truncate text-[12px] font-medium">
+										{provider ? provider.label : t("composer.favorites.title")}
+									</span>
+								) : null}
+								{selected ? (
 									<span
 										aria-hidden
 										className={cn(
@@ -333,7 +344,10 @@ export function ModelPickerPanel({
 				id="dcc-model-picker-list"
 				role="listbox"
 				aria-label={t("composer.model.select")}
-				className="max-h-[min(15rem,38vh)] min-h-24 overflow-y-auto overscroll-contain p-1"
+				className={cn(
+					"overflow-y-auto overscroll-contain p-1",
+					hasAccountStrip ? "h-[calc(min(15rem,38vh)-2.25rem)]" : "h-[min(15rem,38vh)]",
+				)}
 			>
 				{setupReason && !query ? (
 					<div className="flex flex-col items-start gap-2 px-2.5 py-3">

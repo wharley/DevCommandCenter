@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
 	getProviderActionBlockReason,
 	getProviderSetupReason,
+	getProjectComposerSelection,
 	getProviderUnhealthyReason,
 	isProviderEnabled,
 	isProviderReady,
+	resolveProjectComposerSelection,
+	setProjectComposerSelection,
 	resolveSelectedModelId,
 	resolveSelectedProviderId,
 } from "./provider-selection.logic";
@@ -248,5 +251,29 @@ describe("getProviderUnhealthyReason", () => {
 				health: { Unhealthy: { reason: "Cursor Agent is not authenticated." } },
 			}),
 		).toBe("Cursor Agent is not authenticated.");
+	});
+});
+
+describe("project composer selection", () => {
+	it("remembers the last pick per project", () => {
+		window.localStorage.removeItem("dcc.projectComposerSelections");
+		setProjectComposerSelection("site", { providerId: "codex", modelId: "gpt" });
+		setProjectComposerSelection("api", { providerId: "claude", modelId: "sonnet" });
+		expect(getProjectComposerSelection("site")).toEqual({ providerId: "codex", modelId: "gpt" });
+		expect(getProjectComposerSelection("api")).toEqual({ providerId: "claude", modelId: "sonnet" });
+		expect(getProjectComposerSelection("other")).toBeNull();
+	});
+
+	it("only restores a pick whose provider is ready and still has a model", () => {
+		const ready = makeProvider("alpha", true);
+		const loggedOut = { ...makeProvider("beta", true), health: { Unhealthy: { reason: "x" } } };
+		expect(resolveProjectComposerSelection([ready], { providerId: "alpha", modelId: "alpha-default" }))
+			.toEqual({ providerId: "alpha", modelId: "alpha-default" });
+		expect(resolveProjectComposerSelection([ready], { providerId: "alpha", modelId: "gone" }))
+			.toEqual({ providerId: "alpha", modelId: "alpha-default" });
+		expect(resolveProjectComposerSelection([loggedOut], { providerId: "beta", modelId: "beta-default" }))
+			.toBeNull();
+		expect(resolveProjectComposerSelection([ready], { providerId: "missing", modelId: "m" })).toBeNull();
+		expect(resolveProjectComposerSelection([ready], null)).toBeNull();
 	});
 });

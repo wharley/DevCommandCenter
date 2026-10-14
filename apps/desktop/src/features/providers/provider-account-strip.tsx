@@ -15,6 +15,17 @@ import {
  * provider has accounts besides the system login. An open conversation keeps
  * its account, so the other choices only apply to new conversations.
  */
+/** Whether the strip shows for this provider; the picker sizes around it. */
+export function useHasProviderAccountStrip(
+	provider: ProviderCatalog["providers"][number] | null,
+) {
+	const { accounts } = useContext(ProviderAccountsContext);
+	return Boolean(
+		provider?.capabilities.supportsAccounts &&
+			accountsOfProvider(accounts, provider.id).length > 0,
+	);
+}
+
 export function ProviderAccountStrip({
 	provider,
 	disabled = false,
