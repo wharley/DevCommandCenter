@@ -115,6 +115,16 @@ export function NewTaskLaunchState({
 							align="center"
 							className="max-h-[24rem] w-80 overflow-y-auto"
 						>
+							{/* First, not after a scrolling list: a first-time project is the
+							    one case where none of the recent ones is the answer. */}
+							<DropdownMenuItem
+								onSelect={onOpenProject}
+								className="gap-2.5 py-2"
+							>
+								<FolderGit2 className="size-4 text-muted-foreground" />
+								{t("newTask.openAnotherProject")}
+							</DropdownMenuItem>
+							<DropdownMenuSeparator />
 							<DropdownMenuLabel>{t("newTask.projects")}</DropdownMenuLabel>
 							{repositories.map((repository) => (
 								<DropdownMenuItem
@@ -159,13 +169,6 @@ export function NewTaskLaunchState({
 										{t("newTask.multipleProjectsDescription")}
 									</small>
 								</span>
-							</DropdownMenuItem>
-							<DropdownMenuItem
-								onSelect={onOpenProject}
-								className="gap-2.5 py-2"
-							>
-								<FolderGit2 className="size-4 text-muted-foreground" />
-								{t("newTask.openAnotherProject")}
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>

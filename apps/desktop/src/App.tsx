@@ -882,6 +882,7 @@ export default function App() {
 	const [workspaceCreationScope, setWorkspaceCreationScope] = useState<
 		"single" | "multi"
 	>("single");
+	const [workspaceDialogPickFolder, setWorkspaceDialogPickFolder] = useState(false);
 	const [workspaceCreationIsolation, setWorkspaceCreationIsolation] =
 		useState<WorkspaceIsolationMode>("protectedWorktree");
 	const [workspaceRepositoryContext, setWorkspaceRepositoryContext] =
@@ -4853,11 +4854,13 @@ export default function App() {
 			repositoryContext: ExistingRepositoryContext | null = null,
 			creationScope: "single" | "multi" = "single",
 			isolationMode: WorkspaceIsolationMode = "protectedWorktree",
+			pickFolder = false,
 		) => {
 			if (isRemoteBackend) {
 				showRemoteUnsupported("workspaces");
 				return;
 			}
+			setWorkspaceDialogPickFolder(pickFolder);
 			setWorkspaceCreationMode(mode);
 			setWorkspaceCreationScope(mode === "open" ? creationScope : "single");
 			setWorkspaceCreationIsolation(isolationMode);
@@ -4949,6 +4952,7 @@ export default function App() {
 		setIsCreateWorkspaceOpen(open);
 		if (!open) {
 			setWorkspaceRepositoryContext(null);
+			setWorkspaceDialogPickFolder(false);
 		}
 	}, []);
 	const handleCreateTaskFromNote = useCallback(async (note: ProjectNote) => {
@@ -5571,6 +5575,7 @@ export default function App() {
 								mode={workspaceCreationMode}
 								initialCreationScope={workspaceCreationScope}
 								initialIsolationMode={workspaceCreationIsolation}
+								startWithFolderPicker={workspaceDialogPickFolder}
 								linkedFoldersByRepositoryId={linkedFoldersByRepositoryId}
 								contextPathsByRepositoryId={linkedFolders.contextPaths}
 								onSaveLinkedFolders={handleSaveLinkedFolders}
@@ -5668,7 +5673,7 @@ export default function App() {
 									}}
 									onOpenProject={() => {
 										setGlobalSurface(null);
-										openWorkspaceDialog("open");
+										openWorkspaceDialog("open", null, "single", "protectedWorktree", true);
 									}}
 								/>
 							) : hasWorkspace && selectedWorkspace ? (

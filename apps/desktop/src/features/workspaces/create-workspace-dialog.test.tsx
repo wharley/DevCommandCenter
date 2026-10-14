@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Repository } from "@dcc/contracts";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { CreateWorkspaceDialog } from "./create-workspace-dialog";
 
 vi.mock("react-i18next", () => ({
@@ -157,4 +158,27 @@ it("stays a single-project task with its context when the other project is remov
 			contextFolders: ["/docs/specs"],
 		}),
 	);
+});
+
+it("opens another project at the folder picker, with no recent project preselected", async () => {
+	vi.mocked(openDialog).mockResolvedValueOnce(null);
+	await act(async () =>
+		root.render(
+			<CreateWorkspaceDialog
+				open
+				mode="open"
+				startWithFolderPicker
+				onOpenChange={() => {}}
+				onCreateWorkspace={onCreateWorkspace as never}
+				onCreateWorkspaceFromSourceUrl={vi.fn() as never}
+				onCreateWorkspaceBundle={onCreateWorkspaceBundle as never}
+				onCloneWorkspace={vi.fn() as never}
+				repositories={[dcc, lp]}
+				isSubmitting={false}
+			/>,
+		),
+	);
+	expect(openDialog).toHaveBeenCalledTimes(1);
+	await submit();
+	expect(onCreateWorkspace).not.toHaveBeenCalled();
 });

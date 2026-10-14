@@ -96,6 +96,11 @@ type CreateWorkspaceDialogProps = {
 	mode: WorkspaceCreationMode;
 	initialCreationScope?: "single" | "multi";
 	/** Carries the *Worktree* choice from New task into a multi-project task. */
+	/**
+	 * "Open another project": the project is not among the recent ones, so
+	 * nothing is preselected and the folder picker opens straight away.
+	 */
+	startWithFolderPicker?: boolean;
 	initialIsolationMode?: WorkspaceIsolationMode;
 	/** Each project's linked folders, by repository id. */
 	linkedFoldersByRepositoryId?: Record<string, string[]>;
@@ -207,6 +212,7 @@ export function CreateWorkspaceDialog({
 	mode,
 	initialCreationScope = "single",
 	initialIsolationMode = "protectedWorktree",
+	startWithFolderPicker = false,
 	linkedFoldersByRepositoryId = EMPTY_LINKED_FOLDERS,
 	contextPathsByRepositoryId = EMPTY_LINKED_FOLDERS,
 	onSaveLinkedFolders,
@@ -312,7 +318,7 @@ export function CreateWorkspaceDialog({
 			branchLoadSequenceRef.current += 1;
 			suppressCloseAutoFocusRef.current = false;
 			const initialRepository =
-				mode === "open"
+				mode === "open" && !startWithFolderPicker
 					? initialTaskRepository(
 							repositories,
 							repositoryContext?.workspaceRoot,
@@ -344,8 +350,11 @@ export function CreateWorkspaceDialog({
 			if (mode === "open" && initialForm.workspaceRoot.trim().length > 0) {
 				void loadBranchesForWorkspaceRoot(initialForm.workspaceRoot);
 			}
+			if (mode === "open" && startWithFolderPicker) {
+				void handlePickWorkspaceRoot();
+			}
 		}
-	}, [initialCreationScope, initialIsolationMode, mode, open, repositoryContext]);
+	}, [initialCreationScope, initialIsolationMode, mode, open, repositoryContext, startWithFolderPicker]);
 
 	function selectSingleRepository(repository: RepositoryOption) {
 		rememberLastTaskRepositoryRoot(repository.rootPath);
