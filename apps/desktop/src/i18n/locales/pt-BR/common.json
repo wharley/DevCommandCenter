@@ -670,7 +670,8 @@
     },
     "useRepositoryName": "Usar nome original",
     "linkedFoldersLabel": "Pastas vinculadas",
-    "linkedFoldersHint": "Toda nova tarefa neste projeto já traz estas pastas (repositórios Git). O agente pode ler e alterar todas.",
+    "linkedFoldersHint": "Toda nova tarefa neste projeto já traz estas pastas. Repositórios Git entram como projetos da tarefa; pastas sem Git entram como contexto: o agente lê e altera, mas sem diff e sem Undo.",
+    "contextOnly": "sem Git · só contexto",
     "addLinkedFolder": "Adicionar pasta",
     "removeLinkedFolder": "Remover {{folder}}",
     "technicalIdentity": "Identidade técnica",
@@ -3402,7 +3403,7 @@
         "whatIs": "Uma tarefa multi-projeto junta dois ou mais repositórios num único chat. Com [Worktree] marcado, cada projeto ganha um worktree protegido; desmarcado, o agente trabalha direto nos checkouts. O agente decide a cada pedido em quais projetos mexer, e o Undo do turno e Editar a partir daqui cobrem todos os projetos.",
         "whenToUse": "Quando a mudança atravessa repositórios (API e front, biblioteca e consumidor) ou quando você quer consultar um projeto para alterar outro.",
         "steps": [
-          "Para trazer sempre as mesmas pastas, abra [Editar projeto] e adicione-as em [Pastas vinculadas]. Toda [Nova tarefa] nesse projeto já vem com elas; desmarque [Pastas vinculadas] para pular desta vez.",
+          "Para trazer sempre as mesmas pastas, abra [Editar projeto] e adicione-as em [Pastas vinculadas]. Repositórios Git viram projetos da tarefa; pastas sem Git (docs, specs) entram só como contexto, sem diff e sem Undo. Toda [Nova tarefa] nesse projeto já vem com elas; desmarque [Pastas vinculadas] para pular desta vez.",
           "Para uma tarefa avulsa, escolha [Vários projetos], marque os projetos e dê um [Nome da tarefa]. O primeiro marcado é o [Principal]; use [Tornar principal] para trocar.",
           "Clique em [Criar tarefa multi-projeto]. Em [Mostrando], troque o projeto que o Inspector, o terminal e a entrega exibem.",
           "Para desfazer um turno, use o Undo do turno: ele verifica todos os projetos antes e restaura um por vez, mostrando o resultado de cada um."

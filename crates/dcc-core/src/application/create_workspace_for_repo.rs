@@ -30,6 +30,11 @@ pub struct CreateWorkspaceForRepoInput {
     /// Omitted by older clients and internal flows; protected worktrees remain
     /// the safe default for every task created without an explicit choice.
     pub isolation_mode: Option<WorkspaceIsolationMode>,
+    /// Folders without Git the task brings as context: the agent can read
+    /// and change them, but DCC shows no diff for them and Undo cannot
+    /// restore them. Only the task's primary project carries them.
+    #[serde(default)]
+    pub context_folders: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -371,6 +376,7 @@ mod tests {
             base_branch: "main".to_string(),
             name: Some("Feature shell".to_string()),
             isolation_mode: None,
+            context_folders: Vec::new(),
         };
 
         let finalized =
@@ -426,6 +432,7 @@ mod tests {
             base_branch: "main".to_string(),
             name: Some("Local task".to_string()),
             isolation_mode: Some(WorkspaceIsolationMode::LocalDirect),
+            context_folders: Vec::new(),
         };
 
         let finalized =
@@ -472,6 +479,7 @@ mod tests {
             base_branch: "security/totp-only-confirmation".to_string(),
             name: Some("Security task".to_string()),
             isolation_mode: None,
+            context_folders: Vec::new(),
         };
 
         futures::executor::block_on(create_workspace_for_repo(&repo, &git, &events, input))

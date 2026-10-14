@@ -106,7 +106,9 @@ beforeEach(() => {
 				return { workspace: { id: "workspace" } };
 			case "list_repository_linked_folders":
 				return {
-					entries: linkedPaths.length ? [{ repositoryId: "repo", paths: linkedPaths }] : [],
+					entries: linkedPaths.length
+						? [{ repositoryId: "repo", paths: linkedPaths, contextPaths: [] }]
+						: [],
 				};
 			case "create_workspace_bundle_for_repos":
 				return { summary: { bundle: { primaryWorkspaceId: "workspace" } } };

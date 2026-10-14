@@ -341,6 +341,18 @@ CREATE TABLE IF NOT EXISTS dcc_repository_linked_folders (
 );
 "#;
 
+/// Folders without Git a task brings as context, keyed by the task's primary
+/// workspace and fixed when the task is created.
+const WORKSPACE_CONTEXT_FOLDER_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_workspace_context_folders (
+	workspace_id TEXT NOT NULL,
+	path TEXT NOT NULL,
+	position INTEGER NOT NULL,
+	PRIMARY KEY (workspace_id, path),
+	FOREIGN KEY (workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
+);
+"#;
+
 const IDEA_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS dcc_ideas (
 	root_path TEXT PRIMARY KEY NOT NULL CHECK(length(root_path) BETWEEN 1 AND 4096),
@@ -951,7 +963,7 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}\n{REPOSITORY_LINKED_FOLDER_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}\n{REPOSITORY_LINKED_FOLDER_TABLE_SQL}\n{WORKSPACE_CONTEXT_FOLDER_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
@@ -1247,6 +1259,51 @@ impl SqliteWorkspaceRepo {
                 "INSERT INTO dcc_repository_linked_folders (repository_id, path, position, created_at)
                  VALUES (?1, ?2, ?3, ?4)",
                 params![repository_id.0.clone(), path, position as i64, now],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        tx.commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// The context folders of the task whose primary workspace is `id`.
+    pub fn workspace_context_folders(&self, id: &WorkspaceId) -> Result<Vec<String>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT path FROM dcc_workspace_context_folders
+                 WHERE workspace_id = ?1 ORDER BY position",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map(params![id.0.clone()], |row| row.get::<_, String>(0))
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Records the context folders of a task when it is created.
+    pub fn set_workspace_context_folders(&self, id: &WorkspaceId, paths: &[String]) -> Result<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
+            "DELETE FROM dcc_workspace_context_folders WHERE workspace_id = ?1",
+            params![id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        for (position, path) in paths.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO dcc_workspace_context_folders (workspace_id, path, position)
+                 VALUES (?1, ?2, ?3)",
+                params![id.0.clone(), path, position as i64],
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         }
@@ -12527,6 +12584,40 @@ mod tests {
         assert!(repo
             .list_repository_linked_folders()
             .expect("list")
+            .is_empty());
+    }
+
+    #[test]
+    fn sqlite_workspace_repo_keeps_a_task_context_folders_until_the_task_goes() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let workspace = Workspace {
+            id: WorkspaceId("context-task".to_string()),
+            project_id: ProjectId("dcc".to_string()),
+            name: Some("Task".to_string()),
+            root_path: "/tmp/dcc".to_string(),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            snoozed_until: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save task");
+        let paths = vec!["/tmp/specs".to_string(), "/tmp/design".to_string()];
+        repo.set_workspace_context_folders(&workspace.id, &paths)
+            .expect("save context folders");
+        assert_eq!(
+            repo.workspace_context_folders(&workspace.id).unwrap(),
+            paths
+        );
+
+        futures::executor::block_on(repo.delete_workspace(&workspace.id)).expect("delete task");
+        assert!(repo
+            .workspace_context_folders(&workspace.id)
+            .unwrap()
             .is_empty());
     }
 

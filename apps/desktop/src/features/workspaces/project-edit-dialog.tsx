@@ -55,6 +55,7 @@ export function ProjectEditDialog({
 	onOpenChange,
 	onSave,
 	linkedFolders = [],
+	contextFolders = [],
 	onSaveLinkedFolders,
 }: {
 	repository: Repository | null;
@@ -69,6 +70,8 @@ export function ProjectEditDialog({
 	}) => Promise<void>;
 	/** Folders this project brings into every new task. */
 	linkedFolders?: string[];
+	/** The saved linked folders without Git: they join tasks as context. */
+	contextFolders?: string[];
 	onSaveLinkedFolders?: (repositoryId: string, paths: string[]) => Promise<void>;
 }) {
 	const { t } = useTranslation("common");
@@ -411,6 +414,11 @@ export function ProjectEditDialog({
 														<span className="min-w-0 flex-1">
 															<span className="block truncate font-medium text-foreground">
 																{folderName(folder)}
+																{contextFolders.includes(folder) ? (
+																	<span className="ml-1.5 rounded-full bg-muted px-1.5 py-px text-[9.5px] font-medium text-muted-foreground">
+																		{t("projectEditor.contextOnly")}
+																	</span>
+																) : null}
 															</span>
 															<span className="block truncate font-mono text-[10px] text-muted-foreground">
 																{folder}

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Repository, WorkspaceBundleSummary } from "@dcc/contracts";
 import {
 	additionalWorkspaceIdsOf,
+	linkedFolderIndex,
 	linkedFoldersOf,
 	linkedTaskProjects,
+	planLinkedTask,
 } from "./linked-folders";
 
 const repositories = [
@@ -88,5 +90,52 @@ describe("additionalWorkspaceIdsOf", () => {
 		] as WorkspaceBundleSummary[];
 		expect(additionalWorkspaceIdsOf("w-dcc", bundles)).toEqual(["w-lp"]);
 		expect(additionalWorkspaceIdsOf("w-lp", bundles)).toEqual([]);
+	});
+});
+
+describe("planLinkedTask", () => {
+	const primary = { projectId: "dcc", workspaceRoot: "/code/dcc", baseBranch: "main" };
+
+	it("keeps a project with only context folders a single-project task", () => {
+		const index = linkedFolderIndex([
+			{ repositoryId: "repo-dcc", paths: ["/code/specs"], contextPaths: ["/code/specs"] },
+		]);
+		expect(
+			planLinkedTask({ primary, index, repositories, isolationMode: "localDirect" }),
+		).toEqual({ kind: "single", contextFolders: ["/code/specs"] });
+	});
+
+	it("makes Git folders projects and puts context folders on the primary", () => {
+		const index = linkedFolderIndex([
+			{
+				repositoryId: "repo-dcc",
+				paths: ["/code/lp", "/code/specs"],
+				contextPaths: ["/code/specs"],
+			},
+		]);
+		const plan = planLinkedTask({ primary, index, repositories, isolationMode: null });
+		expect(plan.kind).toBe("bundle");
+		if (plan.kind !== "bundle") return;
+		expect(plan.projects.map((project) => project.workspaceRoot)).toEqual([
+			"/code/dcc",
+			"/code/lp",
+		]);
+		expect(plan.projects[0]?.contextFolders).toEqual(["/code/specs"]);
+		expect(plan.projects[1]?.contextFolders).toBeUndefined();
+	});
+
+	it("brings nothing when the person skips linked folders", () => {
+		const index = linkedFolderIndex([
+			{ repositoryId: "repo-dcc", paths: ["/code/lp"], contextPaths: [] },
+		]);
+		expect(
+			planLinkedTask({
+				primary,
+				index,
+				repositories,
+				isolationMode: null,
+				includeLinkedFolders: false,
+			}),
+		).toEqual({ kind: "single", contextFolders: [] });
 	});
 });

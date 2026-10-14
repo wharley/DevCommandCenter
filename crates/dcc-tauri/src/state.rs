@@ -4578,7 +4578,7 @@ impl SessionCommandState {
         let supports_multi_root = registration.capabilities.supports_multi_root;
         let provider = registration.runtime;
         let (working_directory, additional_working_directories) = self
-            .resolve_session_working_directories(session, supports_multi_root)
+            .resolve_provider_directories(session, supports_multi_root)
             .await?;
         let provider_runtime =
             self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
@@ -5094,11 +5094,8 @@ impl SessionCommandState {
     async fn validate_provider_session_attachment(&self, session: &Session) -> Result<()> {
         self.require_active_session_thread(&session.id).await?;
         let registration = self.require_provider_available(&session.provider_id)?;
-        self.resolve_session_working_directories(
-            session,
-            registration.capabilities.supports_multi_root,
-        )
-        .await?;
+        self.resolve_provider_directories(session, registration.capabilities.supports_multi_root)
+            .await?;
         self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
         Ok(())
     }
@@ -5225,12 +5222,9 @@ impl SessionCommandState {
                 candidate.provider_id
             )));
         }
-        self.resolve_session_working_directories(
-            &candidate,
-            registration.capabilities.supports_multi_root,
-        )
-        .await
-        .map(|_| ())
+        self.resolve_provider_directories(&candidate, registration.capabilities.supports_multi_root)
+            .await
+            .map(|_| ())
     }
 
     /// Validates a queued policy against the provider currently persisted on
@@ -5889,12 +5883,9 @@ impl SessionCommandState {
             created_at: String::new(),
             updated_at: String::new(),
         };
-        self.resolve_session_working_directories(
-            &candidate,
-            registration.capabilities.supports_multi_root,
-        )
-        .await
-        .map(|_| ())
+        self.resolve_provider_directories(&candidate, registration.capabilities.supports_multi_root)
+            .await
+            .map(|_| ())
     }
 
     async fn resolve_session_working_directories(
@@ -7482,9 +7473,67 @@ impl SessionCommandState {
         &self,
         session: &Session,
     ) -> Result<Option<String>> {
-        if session.additional_workspace_ids.is_empty() {
+        let context_folders = self.session_context_folders(session)?;
+        if session.additional_workspace_ids.is_empty() && context_folders.is_empty() {
             return Ok(None);
         }
+        let mut lines = if session.additional_workspace_ids.is_empty() {
+            vec!["DCC authorized scope:".to_string()]
+        } else {
+            self.multi_workspace_scope_lines(session).await?
+        };
+        if !context_folders.is_empty() {
+            lines.push("Context folders (not Git repositories): you may read and change them, but DCC shows no diff for them and Undo cannot restore them, so treat changes there as permanent.".to_string());
+            for folder in context_folders {
+                let name = Path::new(&folder)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| folder.clone());
+                lines.push(format!("- context: {name} | folder={folder}"));
+            }
+        }
+        Ok(Some(lines.join("\n")))
+    }
+
+    /// The context folders of the session's task that still exist. A folder
+    /// that is gone only narrows what the agent can reach.
+    fn session_context_folders(&self, session: &Session) -> Result<Vec<String>> {
+        Ok(SqliteWorkspaceRepo::open(&self.db_path)?
+            .workspace_context_folders(&session.workspace_id)?
+            .into_iter()
+            .filter(|folder| Path::new(folder).is_dir())
+            .collect())
+    }
+
+    /// Every directory the provider may use: the task's project roots, then
+    /// its context folders. Review and Undo keep using the project roots only.
+    async fn resolve_provider_directories(
+        &self,
+        session: &Session,
+        provider_supports_multi_root: bool,
+    ) -> Result<(String, Vec<String>)> {
+        let (primary, mut additional) = self
+            .resolve_session_working_directories(session, provider_supports_multi_root)
+            .await?;
+        let context_folders = self.session_context_folders(session)?;
+        if context_folders.is_empty() {
+            return Ok((primary, additional));
+        }
+        if !provider_supports_multi_root {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {} cannot open the task's context folders",
+                session.provider_id
+            )));
+        }
+        for folder in context_folders {
+            if folder != primary && !additional.contains(&folder) {
+                additional.push(folder);
+            }
+        }
+        Ok((primary, additional))
+    }
+
+    async fn multi_workspace_scope_lines(&self, session: &Session) -> Result<Vec<String>> {
         let workspace_repo = SqliteWorkspaceRepo::open(&self.db_path)?;
         let bundle = workspace_repo
             .get_workspace_bundle_for_workspace(&session.workspace_id)
@@ -7499,7 +7548,7 @@ impl SessionCommandState {
         let mut lines = vec![
             "DCC authorized multi-workspace scope:".to_string(),
             if local_bundle {
-                "Work directly in the project checkouts listed below; they are the person's own working copies, not isolated worktrees. Use only these paths for file reads and writes and never touch any unlisted local project. Do not switch branches, reset, stash or rewrite history in them. Undo and delivery only cover the primary project. Decide which listed projects need changes, keep producer/consumer contracts consistent, and test what you changed.".to_string()
+                "Work directly in the project checkouts listed below; they are the person's own working copies, not isolated worktrees. Use only these paths for file reads and writes and never touch any unlisted local project. Do not switch branches, reset, stash or rewrite history in them. The person delivers each project separately. Decide which listed projects need changes, keep producer/consumer contracts consistent, and test what you changed.".to_string()
             } else {
                 "Use only the isolated worktree paths listed below for file reads and writes. Never edit the repositories' original checkouts or any unlisted local project. Decide which listed projects need changes, keep producer/consumer contracts consistent, and test the affected projects in the same task context.".to_string()
             },
@@ -7542,7 +7591,7 @@ impl SessionCommandState {
                 workspace.base_branch,
             ));
         }
-        Ok(Some(lines.join("\n")))
+        Ok(lines)
     }
 
     pub async fn cancel_provider_session(&self, session_id: &SessionId) -> Result<()> {
@@ -10535,6 +10584,70 @@ mod tests {
     }
 
     #[test]
+    fn context_folders_reach_the_provider_but_not_review_or_undo() {
+        let db_path = physical_db_path(
+            std::env::temp_dir().join(format!("dcc-context-scope-{}.sqlite", Uuid::new_v4())),
+        );
+        let repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let workspace = sample_workspace("context-task", "/tmp/dcc-context-worktree");
+        futures::executor::block_on(repo.save_workspace(&workspace)).expect("save workspace");
+        let specs = tempfile::tempdir().expect("context folder");
+        let specs_path = specs.path().to_str().unwrap().to_string();
+        repo.set_workspace_context_folders(
+            &workspace.id,
+            &[specs_path.clone(), "/tmp/dcc-context-gone".to_string()],
+        )
+        .expect("save context folders");
+
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
+        let session = Session {
+            id: SessionId("session-context".to_string()),
+            project_id: workspace.project_id.clone(),
+            workspace_id: workspace.id.clone(),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "claude_code".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let (primary, additional) =
+            futures::executor::block_on(state.resolve_provider_directories(&session, true))
+                .expect("provider directories");
+        assert_eq!(primary, "/tmp/dcc-context-worktree");
+        // The folder that is gone only narrows what the agent can reach.
+        assert_eq!(additional, vec![specs_path.clone()]);
+
+        let unsupported =
+            futures::executor::block_on(state.resolve_provider_directories(&session, false));
+        assert!(matches!(unsupported, Err(dcc_core::CoreError::Provider(_))));
+
+        // Review and Undo keep using the project roots only.
+        let (_, review_roots) =
+            futures::executor::block_on(state.resolve_session_working_directories(&session, false))
+                .expect("review roots");
+        assert!(review_roots.is_empty());
+
+        let instructions =
+            futures::executor::block_on(state.multi_workspace_scope_instructions(&session))
+                .expect("scope instructions")
+                .expect("context scope");
+        assert!(instructions.contains(&format!("folder={specs_path}")));
+        assert!(instructions.contains("Undo cannot restore them"));
+        assert!(!instructions.contains("dcc-context-gone"));
+
+        drop(state);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
     fn local_multi_workspace_scope_resolves_project_checkouts() {
         let db_path = physical_db_path(
             std::env::temp_dir().join(format!("dcc-local-scope-{}.sqlite", Uuid::new_v4())),
@@ -10603,7 +10716,7 @@ mod tests {
                 .expect("build local scope instructions")
                 .expect("local scope instructions");
         assert!(instructions.contains("checkout=/original/secondary"));
-        assert!(instructions.contains("Undo and delivery only cover the primary project"));
+        assert!(instructions.contains("delivers each project separately"));
 
         // A member that somehow carries a worktree breaks the local contract.
         secondary.worktree_path = Some("/tmp/dcc-secondary-worktree".to_string());

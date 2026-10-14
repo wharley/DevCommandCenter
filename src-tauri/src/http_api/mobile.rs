@@ -317,6 +317,7 @@ async fn execute_task(
                 base_branch: repository.base_branch,
                 name: Some(input.title.trim().to_owned()),
                 isolation_mode: input.isolation_mode.clone(),
+                context_folders: Vec::new(),
             },
         )
         .await

@@ -30,8 +30,8 @@ import {
 } from "@/lib/workspace-api";
 import {
 	additionalWorkspaceIdsOf,
-	linkedFoldersOf,
-	linkedTaskProjects,
+	linkedFolderIndex,
+	planLinkedTask,
 } from "@/features/workspaces/linked-folders";
 import { sendTurn, startThread } from "@/lib/session-api";
 import {
@@ -269,26 +269,20 @@ export function QuickComposer() {
 					const name = turn.rawPrompt.trim().split("\n")[0].slice(0, 80);
 					// A project that links folders brings them into the task.
 					const linked = await listRepositoryLinkedFolders();
-					const linkedFolders = linkedFoldersOf(
-						request.rootPath,
+					const plan = planLinkedTask({
+						primary: {
+							projectId: request.projectId,
+							workspaceRoot: request.rootPath,
+							baseBranch: request.baseBranch,
+						},
+						index: linkedFolderIndex(linked.entries),
 						repositories,
-						Object.fromEntries(
-							linked.entries.map((entry) => [entry.repositoryId, entry.paths]),
-						),
-					);
-					if (linkedFolders.length > 0) {
+						isolationMode: request.isolationMode,
+					});
+					if (plan.kind === "bundle") {
 						const output = await createWorkspaceBundleForRepos({
 							name,
-							projects: linkedTaskProjects({
-								primary: {
-									projectId: request.projectId,
-									workspaceRoot: request.rootPath,
-									baseBranch: request.baseBranch,
-								},
-								linkedFolders,
-								repositories,
-								isolationMode: request.isolationMode,
-							}),
+							projects: plan.projects,
 						});
 						return output.summary.bundle.primaryWorkspaceId;
 					}
@@ -298,6 +292,7 @@ export function QuickComposer() {
 						baseBranch: request.baseBranch,
 						isolationMode: request.isolationMode,
 						name,
+						contextFolders: plan.contextFolders,
 					});
 					return output.workspace.id;
 				},

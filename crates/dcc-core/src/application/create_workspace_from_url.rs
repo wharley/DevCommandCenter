@@ -52,6 +52,7 @@ where
         base_branch: cloned.branch,
         name: input.name,
         isolation_mode: None,
+        context_folders: Vec::new(),
     };
 
     create_workspace_for_repo_impl(repo, git, events, workspace_input).await

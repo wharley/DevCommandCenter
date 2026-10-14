@@ -520,6 +520,23 @@ pub struct SetRepositoryPinnedInput {
 pub struct RepositoryLinkedFolders {
     pub repository_id: String,
     pub paths: Vec<String>,
+    /// The linked folders without Git: they join a task as context only.
+    pub context_paths: Vec<String>,
+}
+
+impl RepositoryLinkedFolders {
+    fn new(repository_id: String, paths: Vec<String>) -> Self {
+        let context_paths = paths
+            .iter()
+            .filter(|path| !dcc_infra::git::is_git_repo(Path::new(path)))
+            .cloned()
+            .collect();
+        Self {
+            repository_id,
+            paths,
+            context_paths,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -7360,6 +7377,7 @@ pub async fn create_workspace_from_source_url(
             base_branch: tracking_ref,
             name: workspace_name,
             isolation_mode: None,
+            context_folders: Vec::new(),
         },
     )
     .await
@@ -7416,6 +7434,21 @@ pub async fn create_workspace_from_source_url(
 }
 
 async fn create_workspace_for_repo_with_repo(
+    repo: &SqliteWorkspaceRepo,
+    app: &AppHandle,
+    input: CreateWorkspaceForRepoInput,
+) -> Result<CreateWorkspaceForRepoOutput, String> {
+    // Checked before anything is created, so a bad folder leaves no task.
+    let context_folders = normalize_linked_folders(&input.workspace_root, &input.context_folders)?;
+    let output = create_workspace_for_repo_without_context(repo, app, input).await?;
+    if !context_folders.is_empty() {
+        repo.set_workspace_context_folders(&output.workspace.id, &context_folders)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(output)
+}
+
+async fn create_workspace_for_repo_without_context(
     repo: &SqliteWorkspaceRepo,
     app: &AppHandle,
     mut input: CreateWorkspaceForRepoInput,
@@ -8064,8 +8097,9 @@ pub async fn set_repository_pinned(
 /// The most folders one project brings into a task.
 const MAX_LINKED_FOLDERS: usize = 8;
 
-/// Checks the folders a project links: absolute Git checkouts that exist,
-/// distinct, and neither the project itself nor nested in or around it.
+/// Checks the folders a project links: absolute folders that exist, distinct,
+/// and neither the project itself nor nested in or around it. A Git checkout
+/// joins a task as another project; any other folder joins as context.
 fn normalize_linked_folders(project_root: &str, paths: &[String]) -> Result<Vec<String>, String> {
     if paths.len() > MAX_LINKED_FOLDERS {
         return Err(format!(
@@ -8082,9 +8116,6 @@ fn normalize_linked_folders(project_root: &str, paths: &[String]) -> Result<Vec<
         }
         if !folder.is_dir() {
             return Err(format!("linked folder does not exist: {path}"));
-        }
-        if !dcc_infra::git::is_git_repo(folder) {
-            return Err(format!("linked folder is not a Git repository: {path}"));
         }
         if folder.starts_with(project_root) || project_root.starts_with(folder) {
             return Err(format!(
@@ -8111,10 +8142,7 @@ pub async fn list_repository_linked_folders(
         .list_repository_linked_folders()
         .map_err(|error| error.to_string())?
         .into_iter()
-        .map(|(repository_id, paths)| RepositoryLinkedFolders {
-            repository_id: repository_id.0,
-            paths,
-        })
+        .map(|(repository_id, paths)| RepositoryLinkedFolders::new(repository_id.0, paths))
         .collect();
     Ok(ListRepositoryLinkedFoldersOutput { entries })
 }
@@ -8134,10 +8162,7 @@ pub async fn set_repository_linked_folders(
     let paths = normalize_linked_folders(&repository.root_path, &input.paths)?;
     repo.set_repository_linked_folders(&repository_id, &paths)
         .map_err(|error| error.to_string())?;
-    Ok(RepositoryLinkedFolders {
-        repository_id: repository_id.0,
-        paths,
-    })
+    Ok(RepositoryLinkedFolders::new(repository_id.0, paths))
 }
 
 #[tauri::command]
@@ -9385,6 +9410,7 @@ mod editor_workspace_file_tests {
                 base_branch: existing.base_branch.clone(),
                 name: None,
                 isolation_mode: None,
+                context_folders: Vec::new(),
             },
         )
         .await
@@ -9426,6 +9452,7 @@ mod editor_workspace_file_tests {
                 base_branch: existing.base_branch.clone(),
                 name: None,
                 isolation_mode: None,
+                context_folders: Vec::new(),
             },
         )
         .await
@@ -9537,6 +9564,7 @@ mod editor_workspace_file_tests {
             base_branch: "main".to_string(),
             name: None,
             isolation_mode: None,
+            context_folders: Vec::new(),
         }
     }
 
@@ -10382,7 +10410,7 @@ mod editor_workspace_file_tests {
     }
 
     #[test]
-    fn linked_folders_are_distinct_git_checkouts_outside_the_project() {
+    fn linked_folders_are_distinct_folders_outside_the_project() {
         let parent = tempfile::tempdir().unwrap();
         let project = git_checkout(parent.path(), "dcc");
         let lp = git_checkout(parent.path(), "lp");
@@ -10391,9 +10419,17 @@ mod editor_workspace_file_tests {
         std::fs::create_dir_all(&plain).unwrap();
         let inside = git_checkout(Path::new(&project), "nested");
 
+        let plain = plain.to_str().unwrap().to_string();
         assert_eq!(
-            normalize_linked_folders(&project, &[format!("{lp}/"), api.clone()]).unwrap(),
-            vec![lp.clone(), api.clone()]
+            normalize_linked_folders(&project, &[format!("{lp}/"), api.clone(), plain.clone()])
+                .unwrap(),
+            vec![lp.clone(), api.clone(), plain.clone()]
+        );
+        // Only the folder without Git joins a task as context.
+        assert_eq!(
+            RepositoryLinkedFolders::new("dcc".to_string(), vec![lp.clone(), plain.clone()])
+                .context_paths,
+            vec![plain]
         );
         for (paths, error) in [
             (vec!["relative/lp".to_string()], "absolute"),
@@ -10401,7 +10437,6 @@ mod editor_workspace_file_tests {
                 vec![parent.path().join("missing").to_str().unwrap().to_string()],
                 "does not exist",
             ),
-            (vec![plain.to_str().unwrap().to_string()], "not a Git"),
             (vec![project.clone()], "the project"),
             (vec![inside], "the project"),
             (vec![lp.clone(), lp.clone()], "repeat"),

@@ -99,6 +99,8 @@ type CreateWorkspaceDialogProps = {
 	initialIsolationMode?: WorkspaceIsolationMode;
 	/** Each project's linked folders, by repository id. */
 	linkedFoldersByRepositoryId?: Record<string, string[]>;
+	/** The linked folders without Git, by repository id: context only. */
+	contextPathsByRepositoryId?: Record<string, string[]>;
 	onSaveLinkedFolders?: (repositoryId: string, paths: string[]) => Promise<void>;
 	repositoryContext?: ExistingRepositoryContext | null;
 	onOpenChange: (open: boolean) => void;
@@ -206,6 +208,7 @@ export function CreateWorkspaceDialog({
 	initialCreationScope = "single",
 	initialIsolationMode = "protectedWorktree",
 	linkedFoldersByRepositoryId = EMPTY_LINKED_FOLDERS,
+	contextPathsByRepositoryId = EMPTY_LINKED_FOLDERS,
 	onSaveLinkedFolders,
 	repositoryContext = null,
 	onOpenChange,
@@ -241,10 +244,24 @@ export function CreateWorkspaceDialog({
 		useState<RepositoryOption | null>(null);
 	const branchLoadSequenceRef = useRef(0);
 	const suppressCloseAutoFocusRef = useRef(false);
-	// Projects plus the linked folders that are not projects yet.
+	// The linked folders that can be projects (Git); the others only ride
+	// along as the primary project's context.
+	const linkedProjectFolders = useMemo(
+		() =>
+			Object.fromEntries(
+				Object.entries(linkedFoldersByRepositoryId).map(([repositoryId, paths]) => [
+					repositoryId,
+					paths.filter(
+						(path) => !(contextPathsByRepositoryId[repositoryId] ?? []).includes(path),
+					),
+				]),
+			),
+		[contextPathsByRepositoryId, linkedFoldersByRepositoryId],
+	);
+	// Projects plus the linked Git folders that are not projects yet.
 	const multiOptions = useMemo<RepositoryOption[]>(
 		() =>
-			withLinkedFolderOptions<RepositoryOption>(repositories, linkedFoldersByRepositoryId, (path) => ({
+			withLinkedFolderOptions<RepositoryOption>(repositories, linkedProjectFolders, (path) => ({
 				id: linkedFolderOptionId(path),
 				projectId: inferProjectIdFromWorkspaceRoot(path),
 				name: repositoryNameFromWorkspaceRoot(path),
@@ -255,7 +272,7 @@ export function CreateWorkspaceDialog({
 				// Empty: the task starts from that checkout's current branch.
 				baseBranch: "",
 			})),
-		[linkedFoldersByRepositoryId, repositories],
+		[linkedProjectFolders, repositories],
 	);
 	const singleRepositoryOptions = useMemo<RepositoryOption[]>(
 		() => includePickedRepository(repositories, pickedRepository),
@@ -557,6 +574,10 @@ export function CreateWorkspaceDialog({
 					multiOptions,
 					selectedRepositoryIds,
 				);
+				const [primary, ...others] = selectedRepositories;
+				const primaryContext = primary
+					? (contextPathsByRepositoryId[primary.id] ?? [])
+					: [];
 				const result = await onCreateWorkspaceBundle({
 					name: form.name.trim(),
 					projects: selectedRepositories.map((repository) => ({
@@ -565,15 +586,19 @@ export function CreateWorkspaceDialog({
 						baseBranch: repository.baseBranch,
 						name: repositoryDisplayName(repository),
 						isolationMode: multiUsesWorktree ? null : "localDirect",
+						...(repository === primary && primaryContext.length
+							? { contextFolders: primaryContext }
+							: {}),
 					})),
 				});
-				const [primary, ...others] = selectedRepositories;
 				if (rememberLinkedFolders && primary && onSaveLinkedFolders) {
 					try {
-						await onSaveLinkedFolders(
-							primary.id,
-							others.map((repository) => repository.rootPath),
-						);
+						// The folders picked here, plus the context folders the
+						// primary already links.
+						await onSaveLinkedFolders(primary.id, [
+							...others.map((repository) => repository.rootPath),
+							...primaryContext,
+						]);
 					} catch (error) {
 						toast.error(t("workspaceDialog.rememberLinkedFoldersError"), {
 							description: error instanceof Error ? error.message : String(error),
@@ -759,7 +784,7 @@ export function CreateWorkspaceDialog({
 																current,
 																contextRepository.id,
 																multiOptions,
-																linkedFoldersByRepositoryId,
+																linkedProjectFolders,
 															)
 														: current.includes(contextRepository.id)
 															? current
@@ -929,7 +954,7 @@ export function CreateWorkspaceDialog({
 																		current,
 																		repository.id,
 																		multiOptions,
-																		linkedFoldersByRepositoryId,
+																		linkedProjectFolders,
 																	),
 														)
 													}

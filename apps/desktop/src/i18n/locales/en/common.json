@@ -670,7 +670,8 @@
     },
     "useRepositoryName": "Use original name",
     "linkedFoldersLabel": "Linked folders",
-    "linkedFoldersHint": "Every new task in this project brings these folders (Git repositories). The agent can read and change all of them.",
+    "linkedFoldersHint": "Every new task in this project brings these folders. Git repositories join as projects of the task; folders without Git join as context: the agent reads and changes them, but with no diff and no Undo.",
+    "contextOnly": "no Git · context only",
     "addLinkedFolder": "Add folder",
     "removeLinkedFolder": "Remove {{folder}}",
     "technicalIdentity": "Technical identity",
@@ -3402,7 +3403,7 @@
         "whatIs": "A multi-project task brings two or more repositories into one chat. With [Worktree] checked, each project gets a protected worktree; unchecked, the agent works directly in the checkouts. The agent decides on every request which projects to change, and the turn Undo and Edit from here cover every project.",
         "whenToUse": "When the change spans repositories (API and front end, library and consumer) or when you want to consult one project to change another.",
         "steps": [
-          "To always bring the same folders, open [Edit project] and add them under [Linked folders]. Every [New task] in that project comes with them; uncheck [Linked folders] to skip them this time.",
+          "To always bring the same folders, open [Edit project] and add them under [Linked folders]. Git repositories become projects of the task; folders without Git (docs, specs) join as context only, with no diff and no Undo. Every [New task] in that project comes with them; uncheck [Linked folders] to skip them this time.",
           "For a one-off task, choose [Multiple projects], check the projects and give it a [Task name]. The first one checked is the [Primary]; use [Make primary] to change it.",
           "Click [Create multi-project task]. In [Showing], switch the project the Inspector, the terminal and delivery show.",
           "To undo a turn, use the turn Undo: it checks every project first and restores one at a time, showing each project's result."

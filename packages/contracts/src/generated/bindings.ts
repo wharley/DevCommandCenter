@@ -710,6 +710,12 @@ export type CreateWorkspaceForRepoInput = {
 	 *  the safe default for every task created without an explicit choice.
 	 */
 	isolationMode: WorkspaceIsolationMode | null,
+	/**
+	 *  Folders without Git the task brings as context: the agent can read
+	 *  and change them, but DCC shows no diff for them and Undo cannot
+	 *  restore them. Only the task's primary project carries them.
+	 */
+	contextFolders?: string[],
 };
 
 export type CreateWorkspaceForRepoOutput = {
@@ -2059,6 +2065,8 @@ export type RepositoryIdInput = {
 export type RepositoryLinkedFolders = {
 	repositoryId: string,
 	paths: string[],
+	// The linked folders without Git: they join a task as context only.
+	contextPaths: string[],
 };
 
 export type ResolveWorkspaceSourceUrlInput = {
