@@ -1,7 +1,6 @@
 import { projectIconValue } from "@dcc/mascots";
 import {
 	Box,
-	Boxes,
 	Check,
 	CheckCircle2,
 	FolderOpen,
@@ -9,6 +8,7 @@ import {
 	GitFork,
 	Link2,
 	LoaderCircle,
+	Plus,
 	ShieldCheck,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -46,9 +46,9 @@ import {
 	isBranchWorkspaceSource,
 	linkedFolderOptionId,
 	normalizeWorkspaceRoot,
+	linkedFoldersChanged,
+	linkedProjectSelection,
 	orderMultiProjectSelection,
-	promoteMultiProjectPrimary,
-	selectMultiProject,
 	withLinkedFolderOptions,
 	readLastTaskRepositoryRoot,
 	rememberLastTaskRepositoryRoot,
@@ -223,10 +223,12 @@ export function CreateWorkspaceDialog({
 	const [form, setForm] = useState(INITIAL_FORM);
 	const [availableBranches, setAvailableBranches] = useState<string[]>([]);
 	const [isLoadingBranches, setIsLoadingBranches] = useState(false);
-	const [creationScope, setCreationScope] = useState<"single" | "multi">(
-		"single",
-	);
-	const [multiUsesWorktree, setMultiUsesWorktree] = useState(true);
+	const [usesWorktree, setUsesWorktree] = useState(true);
+	// The other projects of this task besides the primary, as option ids.
+	const [extraRepositoryIds, setExtraRepositoryIds] = useState<string[]>([]);
+	// The primary's folders without Git this task brings as context.
+	const [includedContextPaths, setIncludedContextPaths] = useState<string[]>([]);
+	const [addingProjects, setAddingProjects] = useState(false);
 	const [rememberLinkedFolders, setRememberLinkedFolders] = useState(false);
 	const [workspaceStart, setWorkspaceStart] = useState<WorkspaceStart>("new");
 	const [sourceUrl, setSourceUrl] = useState("");
@@ -234,9 +236,6 @@ export function CreateWorkspaceDialog({
 	const [sourceResolution, setSourceResolution] =
 		useState<WorkspaceSourceUrlResolution | null>(null);
 	const [isResolvingSource, setIsResolvingSource] = useState(false);
-	const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<string[]>(
-		[],
-	);
 	const [selectedSingleRepositoryId, setSelectedSingleRepositoryId] = useState<
 		string | null
 	>(null);
@@ -278,6 +277,35 @@ export function CreateWorkspaceDialog({
 		() => includePickedRepository(repositories, pickedRepository),
 		[pickedRepository, repositories],
 	);
+	// The task's own project: the one picked here, or the project the dialog
+	// was opened from.
+	const primaryOption = useMemo<RepositoryOption | null>(() => {
+		if (mode !== "open") return null;
+		if (repositoryContext) {
+			const root = normalizeWorkspaceRoot(repositoryContext.workspaceRoot);
+			return (
+				repositories.find(
+					(repository) => normalizeWorkspaceRoot(repository.rootPath) === root,
+				) ?? null
+			);
+		}
+		return (
+			singleRepositoryOptions.find((option) => option.id === selectedSingleRepositoryId) ??
+			null
+		);
+	}, [mode, repositories, repositoryContext, selectedSingleRepositoryId, singleRepositoryOptions]);
+	const extraOptions = orderMultiProjectSelection(multiOptions, extraRepositoryIds);
+	const primaryRegistered = Boolean(
+		primaryOption && repositories.some((repository) => repository.id === primaryOption.id),
+	);
+
+	/** A new primary brings its linked folders along, already selected. */
+	function presetLinkedFolders(primaryId: string | null) {
+		setExtraRepositoryIds(
+			primaryId ? linkedProjectSelection(primaryId, multiOptions, linkedProjectFolders) : [],
+		);
+		setIncludedContextPaths(primaryId ? (contextPathsByRepositoryId[primaryId] ?? []) : []);
+	}
 
 	useEffect(() => {
 		if (open) {
@@ -302,15 +330,15 @@ export function CreateWorkspaceDialog({
 			setForm(initialForm);
 			setAvailableBranches([]);
 			setIsLoadingBranches(false);
-			setCreationScope(mode === "open" ? initialCreationScope : "single");
-			setMultiUsesWorktree(initialIsolationMode !== "localDirect");
+			setAddingProjects(mode === "open" && initialCreationScope === "multi");
+			setUsesWorktree(initialIsolationMode !== "localDirect");
 			setRememberLinkedFolders(false);
 			setWorkspaceStart(initialWorkspaceStart(repositoryContext !== null));
 			setSourceUrl("");
 			setValidatedSourceUrl("");
 			setSourceResolution(null);
 			setIsResolvingSource(false);
-			setSelectedRepositoryIds([]);
+			presetLinkedFolders(mode === "open" ? (initialRepository?.id ?? null) : null);
 			setSelectedSingleRepositoryId(initialRepository?.id ?? null);
 			setPickedRepository(null);
 			if (mode === "open" && initialForm.workspaceRoot.trim().length > 0) {
@@ -321,6 +349,9 @@ export function CreateWorkspaceDialog({
 
 	function selectSingleRepository(repository: RepositoryOption) {
 		rememberLastTaskRepositoryRoot(repository.rootPath);
+		if (repository.id !== selectedSingleRepositoryId) {
+			presetLinkedFolders(repository.id);
+		}
 		setSelectedSingleRepositoryId(repository.id);
 		setForm((current) => ({
 			...current,
@@ -446,6 +477,7 @@ export function CreateWorkspaceDialog({
 				baseBranch: "",
 			};
 			setPickedRepository(repositoryOption);
+			presetLinkedFolders(null);
 			setSelectedSingleRepositoryId(repositoryOption.id);
 			rememberLastTaskRepositoryRoot(repositoryOption.rootPath);
 
@@ -504,18 +536,10 @@ export function CreateWorkspaceDialog({
 
 	const isSourceWorkspace =
 		mode === "open" &&
-		creationScope === "single" &&
 		repositoryContext !== null &&
 		workspaceStart === "branch";
 
 	const canSubmit = useMemo(() => {
-		if (mode === "open" && creationScope === "multi") {
-			return (
-				form.name.trim().length > 0 &&
-				selectedRepositoryIds.length >= 2 &&
-				!isSubmitting
-			);
-		}
 		const hasCommonFields =
 			form.projectId.trim().length > 0 &&
 			form.workspaceRoot.trim().length > 0 &&
@@ -535,7 +559,6 @@ export function CreateWorkspaceDialog({
 
 		return hasCommonFields && form.baseBranch.trim().length > 0;
 	}, [
-		creationScope,
 		form.baseBranch,
 		form.name,
 		form.projectId,
@@ -545,14 +568,24 @@ export function CreateWorkspaceDialog({
 		isResolvingSource,
 		isSourceWorkspace,
 		mode,
-		selectedRepositoryIds.length,
 		sourceResolution,
 		sourceUrl,
 		validatedSourceUrl,
 	]);
-	const protectedWorktreeCount =
-		creationScope === "multi" ? selectedRepositoryIds.length : 1;
-	const multiLocal = creationScope === "multi" && !multiUsesWorktree;
+	// A task with other projects becomes a multi-project task.
+	const bringsProjects = mode === "open" && !isSourceWorkspace && extraOptions.length > 0;
+	const protectedWorktreeCount = 1 + (bringsProjects ? extraOptions.length : 0);
+	const localMode = mode === "open" && !isSourceWorkspace && !usesWorktree;
+	const taskFolders = [
+		...extraOptions.map((option) => option.rootPath),
+		...includedContextPaths,
+	];
+	const canRememberLinkedFolders =
+		Boolean(onSaveLinkedFolders) &&
+		primaryRegistered &&
+		!isSourceWorkspace &&
+		primaryOption !== null &&
+		linkedFoldersChanged(linkedFoldersByRepositoryId[primaryOption.id] ?? [], taskFolders);
 	const protectionBranch = isSourceWorkspace
 		? (sourceResolution?.baseBranch ?? null)
 		: form.baseBranch.trim() || null;
@@ -568,46 +601,35 @@ export function CreateWorkspaceDialog({
 		// trigger after the newly selected task has focused its composer.
 		suppressCloseAutoFocusRef.current = true;
 		try {
-			if (mode === "open" && creationScope === "multi") {
-				// The first picked project is the primary (see the "Primary" chip).
-				const selectedRepositories = orderMultiProjectSelection(
-					multiOptions,
-					selectedRepositoryIds,
-				);
-				const [primary, ...others] = selectedRepositories;
-				const primaryContext = primary
-					? (contextPathsByRepositoryId[primary.id] ?? [])
-					: [];
+			const isolationMode: WorkspaceIsolationMode | null = usesWorktree ? null : "localDirect";
+			if (bringsProjects && primaryOption) {
+				// Other projects make this a multi-project task; the primary keeps
+				// the base branch chosen here and brings its context folders.
 				const result = await onCreateWorkspaceBundle({
-					name: form.name.trim(),
-					projects: selectedRepositories.map((repository) => ({
-						projectId: repository.projectId,
-						workspaceRoot: repository.rootPath,
-						baseBranch: repository.baseBranch,
-						name: repositoryDisplayName(repository),
-						isolationMode: multiUsesWorktree ? null : "localDirect",
-						...(repository === primary && primaryContext.length
-							? { contextFolders: primaryContext }
-							: {}),
-					})),
+					name: form.name.trim() || t("sidebar.newWorkspace"),
+					projects: [
+						{
+							projectId: form.projectId.trim(),
+							workspaceRoot: form.workspaceRoot.trim(),
+							baseBranch: form.baseBranch.trim(),
+							name: repositoryDisplayName(primaryOption),
+							isolationMode,
+							...(includedContextPaths.length
+								? { contextFolders: includedContextPaths }
+								: {}),
+						},
+						...extraOptions.map((repository) => ({
+							projectId: repository.projectId,
+							workspaceRoot: repository.rootPath,
+							baseBranch: repository.baseBranch,
+							name: repositoryDisplayName(repository),
+							isolationMode,
+						})),
+					],
 				});
-				if (rememberLinkedFolders && primary && onSaveLinkedFolders) {
-					try {
-						// The folders picked here, plus the context folders the
-						// primary already links.
-						await onSaveLinkedFolders(primary.id, [
-							...others.map((repository) => repository.rootPath),
-							...primaryContext,
-						]);
-					} catch (error) {
-						toast.error(t("workspaceDialog.rememberLinkedFoldersError"), {
-							description: error instanceof Error ? error.message : String(error),
-						});
-					}
-				}
 				toast.success(t("workspaceDialog.multiToastSuccess"), {
 					description: t(
-						multiUsesWorktree
+						usesWorktree
 							? "workspaceDialog.multiToastDescription"
 							: "workspaceDialog.multiLocalToastDescription",
 						{ count: result.workspaces.length },
@@ -637,11 +659,21 @@ export function CreateWorkspaceDialog({
 					workspaceRoot: form.workspaceRoot.trim(),
 					baseBranch: form.baseBranch.trim(),
 					name: form.name.trim() || null,
-					isolationMode: null,
+					isolationMode,
+					contextFolders: includedContextPaths,
 				});
 				notifyWorkspaceCreationResult(t, mode, result);
 			}
-			if (mode === "open" && creationScope === "single") {
+			if (rememberLinkedFolders && canRememberLinkedFolders && primaryOption) {
+				try {
+					await onSaveLinkedFolders?.(primaryOption.id, taskFolders);
+				} catch (error) {
+					toast.error(t("workspaceDialog.rememberLinkedFoldersError"), {
+						description: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
+			if (mode === "open") {
 				rememberLastTaskRepositoryRoot(form.workspaceRoot);
 			}
 			onOpenChange(false);
@@ -727,90 +759,7 @@ export function CreateWorkspaceDialog({
 
 				<form onSubmit={handleSubmit} className="workspace-dialog-form">
 					<div className="workspace-dialog-scroll">
-						{mode === "open" ? (
-							<div className="space-y-2">
-								<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-									{t("workspaceDialog.taskScopeLabel")}
-								</p>
-								<div className="grid grid-cols-2 gap-2 max-[500px]:grid-cols-1">
-									<button
-										type="button"
-										aria-pressed={creationScope === "single"}
-										className={cn(
-											"flex min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-											creationScope === "single"
-												? "border-emerald-500/35 bg-emerald-500/[0.07]"
-												: "border-border/60 bg-muted/10 hover:bg-muted/35",
-										)}
-										disabled={isSubmitting}
-										onClick={() => setCreationScope("single")}
-									>
-										<span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background ring-1 ring-border/50">
-											<Box className="size-4" strokeWidth={1.8} />
-										</span>
-										<span className="min-w-0">
-											<strong className="block text-[12px] font-medium text-foreground">
-												{t("workspaceDialog.singleWorkspace")}
-											</strong>
-											<small className="mt-1 block text-[10.5px] leading-4 text-muted-foreground">
-												{t("workspaceDialog.singleWorkspaceDescription")}
-											</small>
-										</span>
-									</button>
-									<button
-										type="button"
-										aria-pressed={creationScope === "multi"}
-										className={cn(
-											"flex min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45",
-											creationScope === "multi"
-												? "border-emerald-500/35 bg-emerald-500/[0.07]"
-												: "border-border/60 bg-muted/10 hover:bg-muted/35",
-										)}
-										disabled={isSubmitting || repositories.length < 2}
-										onClick={() => {
-											setCreationScope("multi");
-											setWorkspaceStart("new");
-											const contextRepository = repositoryContext
-												? repositories.find(
-														(repository) =>
-															repository.rootPath ===
-															repositoryContext.workspaceRoot,
-													)
-												: null;
-											if (contextRepository) {
-												setSelectedRepositoryIds((current) =>
-													current.length === 0
-														? selectMultiProject(
-																current,
-																contextRepository.id,
-																multiOptions,
-																linkedProjectFolders,
-															)
-														: current.includes(contextRepository.id)
-															? current
-															: [contextRepository.id, ...current],
-												);
-											}
-										}}
-									>
-										<span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background ring-1 ring-border/50">
-											<Boxes className="size-4" strokeWidth={1.8} />
-										</span>
-										<span className="min-w-0">
-											<strong className="block text-[12px] font-medium text-foreground">
-												{t("workspaceDialog.multiWorkspace")}
-											</strong>
-											<small className="mt-1 block text-[10.5px] leading-4 text-muted-foreground">
-												{t("workspaceDialog.multiWorkspaceDescription")}
-											</small>
-										</span>
-									</button>
-								</div>
-							</div>
-						) : null}
-
 						{mode === "open" &&
-						creationScope === "single" &&
 						repositoryContext === null &&
 						(repositories.length > 0 || pickedRepository !== null) ? (
 							<div className="space-y-2">
@@ -888,7 +837,6 @@ export function CreateWorkspaceDialog({
 						) : null}
 
 						{mode === "open" &&
-						creationScope === "single" &&
 						repositoryContext ? (
 							<div className="grid grid-cols-2 gap-1 rounded-md border border-border/60 p-1">
 								<Button
@@ -915,125 +863,161 @@ export function CreateWorkspaceDialog({
 							</div>
 						) : null}
 
-						{mode === "open" && creationScope === "multi" ? (
+						{mode === "open" && !isSourceWorkspace && primaryOption ? (
 							<div className="flex min-w-0 flex-col gap-2">
-								<div>
-									<p className="text-[12px] font-medium">
-										{t("workspaceDialog.selectProjects")}
-									</p>
-									<p className="text-[11px] leading-snug text-muted-foreground">
-										{t("workspaceDialog.selectProjectsDescription")}
-									</p>
+								<div className="flex items-center justify-between gap-3">
+									<div className="min-w-0">
+										<p className="text-[12px] font-medium text-foreground">
+											{t("workspaceDialog.alsoInTask")}
+										</p>
+										<p className="text-[10.5px] text-muted-foreground">
+											{t("workspaceDialog.alsoInTaskDescription")}
+										</p>
+									</div>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										aria-expanded={addingProjects}
+										className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-muted-foreground"
+										disabled={isSubmitting}
+										onClick={() => setAddingProjects((current) => !current)}
+									>
+										<Plus className="size-3.5" aria-hidden />
+										{t("workspaceDialog.addProject")}
+									</Button>
 								</div>
-								<div className="max-h-52 space-y-1.5 overflow-y-auto rounded-xl border border-border/60 bg-muted/10 p-2">
-									{multiOptions.map((repository) => {
-										const checked = selectedRepositoryIds.includes(
-											repository.id,
-										);
-										const primary =
-											checked && selectedRepositoryIds[0] === repository.id;
-										return (
-											<label
+								{extraOptions.length > 0 || (contextPathsByRepositoryId[primaryOption.id] ?? []).length > 0 ? (
+									<div className="flex min-w-0 flex-wrap gap-1.5">
+										{extraOptions.map((repository) => (
+											<button
+												type="button"
 												key={repository.id}
-												className={cn(
-													"workspace-dialog-project-option flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors",
-													checked
-														? "border-emerald-500/30 bg-emerald-500/[0.055]"
-														: "border-transparent hover:border-border/50 hover:bg-muted/40",
-												)}
+												disabled={isSubmitting}
+												title={repository.rootPath}
+												aria-label={t("workspaceDialog.removeFromTask", {
+													project: repositoryDisplayName(repository),
+												})}
+												className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/[0.07] px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-emerald-500/[0.12]"
+												onClick={() =>
+													setExtraRepositoryIds((current) =>
+														current.filter((id) => id !== repository.id),
+													)
+												}
 											>
-												<input
-													type="checkbox"
-													checked={checked}
+												<Check className="size-3 shrink-0 text-emerald-600 dark:text-emerald-400" strokeWidth={2.4} />
+												<span className="truncate">{repositoryDisplayName(repository)}</span>
+											</button>
+										))}
+										{(contextPathsByRepositoryId[primaryOption.id] ?? []).map((path) => {
+											const included = includedContextPaths.includes(path);
+											return (
+												<button
+													type="button"
+													key={path}
 													disabled={isSubmitting}
-													onChange={() =>
-														setSelectedRepositoryIds((current) =>
-															checked
-																? current.filter((id) => id !== repository.id)
-																: selectMultiProject(
-																		current,
-																		repository.id,
-																		multiOptions,
-																		linkedProjectFolders,
-																	),
+													title={path}
+													aria-pressed={included}
+													className={cn(
+														"inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+														included
+															? "border-border bg-muted/50 text-foreground"
+															: "border-dashed border-border/70 text-muted-foreground line-through",
+													)}
+													onClick={() =>
+														setIncludedContextPaths((current) =>
+															included
+																? current.filter((candidate) => candidate !== path)
+																: [...current, path],
 														)
 													}
-													className="sr-only"
-												/>
-												<span
-													className={cn(
-														"grid size-5 shrink-0 place-items-center rounded-md border",
-														checked
-															? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-															: "border-border/70 bg-background text-transparent",
-													)}
 												>
-													<Check className="size-3" strokeWidth={2.4} />
-												</span>
-												<ProjectIdentityGlyph
-													icon={projectIconValue(repository)}
-													color={repository.color}
-													seed={repository.rootPath}
-													size="sm"
-												/>
-												<span className="min-w-0 flex-1">
-													<span className="block truncate text-[12px] font-medium">
-														{repositoryDisplayName(repository)}
+													<FolderOpen className="size-3 shrink-0" aria-hidden />
+													<span className="truncate">{repositoryNameFromWorkspaceRoot(path)}</span>
+													<span className="shrink-0 text-[10px] font-normal text-muted-foreground">
+														{t("workspaceDialog.contextFolder")}
 													</span>
-													<span className="workspace-dialog-project-meta text-[10px] text-muted-foreground">
+												</button>
+											);
+										})}
+									</div>
+								) : (
+									<p className="text-[11px] text-muted-foreground">
+										{t("workspaceDialog.onlyThisProject")}
+									</p>
+								)}
+								{addingProjects ? (
+									<div className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-border/60 bg-muted/10 p-2">
+										{multiOptions
+											.filter((repository) => repository.id !== primaryOption.id)
+											.map((repository) => {
+												const checked = extraRepositoryIds.includes(repository.id);
+												return (
+													<label
+														key={repository.id}
+														className={cn(
+															"workspace-dialog-project-option flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5 transition-colors",
+															checked
+																? "border-emerald-500/30 bg-emerald-500/[0.055]"
+																: "border-transparent hover:border-border/50 hover:bg-muted/40",
+														)}
+													>
+														<input
+															type="checkbox"
+															checked={checked}
+															disabled={isSubmitting}
+															onChange={() =>
+																setExtraRepositoryIds((current) =>
+																	checked
+																		? current.filter((id) => id !== repository.id)
+																		: [...current, repository.id],
+																)
+															}
+															className="sr-only"
+														/>
 														<span
-															className="workspace-dialog-path font-mono"
-															title={repository.rootPath}
+															className={cn(
+																"grid size-5 shrink-0 place-items-center rounded-md border",
+																checked
+																	? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+																	: "border-border/70 bg-background text-transparent",
+															)}
 														>
-															{repository.rootPath}
+															<Check className="size-3" strokeWidth={2.4} />
 														</span>
-														<span className="shrink-0">·</span>
-														<span className="shrink-0">
-															{repository.baseBranch
-																? t("workspaceDialog.basePreview", {
-																	branch: repository.baseBranch,
-																})
-																: t("workspaceDialog.linkedFolderBranch")}
+														<ProjectIdentityGlyph
+															icon={projectIconValue(repository)}
+															color={repository.color}
+															seed={repository.rootPath}
+															size="sm"
+														/>
+														<span className="min-w-0 flex-1">
+															<span className="block truncate text-[12px] font-medium">
+																{repositoryDisplayName(repository)}
+															</span>
+															<span className="workspace-dialog-project-meta text-[10px] text-muted-foreground">
+																<span
+																	className="workspace-dialog-path font-mono"
+																	title={repository.rootPath}
+																>
+																	{repository.rootPath}
+																</span>
+																<span className="shrink-0">·</span>
+																<span className="shrink-0">
+																	{repository.baseBranch
+																		? t("workspaceDialog.basePreview", {
+																				branch: repository.baseBranch,
+																			})
+																		: t("workspaceDialog.linkedFolderBranch")}
+																</span>
+															</span>
 														</span>
-													</span>
-												</span>
-												{primary ? (
-													<span
-														className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300"
-														title={t("workspaceDialog.primaryHint")}
-													>
-														{t("workspaceDialog.primary")}
-													</span>
-												) : checked ? (
-													<button
-														type="button"
-														disabled={isSubmitting}
-														className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-														title={t("workspaceDialog.primaryHint")}
-														onClick={(event) => {
-															// Inside the label: keep the click from toggling the checkbox.
-															event.preventDefault();
-															event.stopPropagation();
-															setSelectedRepositoryIds((current) =>
-																promoteMultiProjectPrimary(current, repository.id),
-															);
-														}}
-													>
-														{t("workspaceDialog.makePrimary")}
-													</button>
-												) : null}
-											</label>
-										);
-									})}
-								</div>
-								<p className="text-[11px] text-muted-foreground">
-									{t("workspaceDialog.projectsSelected", {
-										count: selectedRepositoryIds.length,
-									})}
-								</p>
-								{onSaveLinkedFolders &&
-								selectedRepositoryIds.length >= 2 &&
-								!selectedRepositoryIds[0]?.startsWith("linked:") ? (
+													</label>
+												);
+											})}
+									</div>
+								) : null}
+								{canRememberLinkedFolders ? (
 									<label className="inline-flex cursor-pointer items-center gap-2 text-[11.5px] text-muted-foreground has-[:disabled]:cursor-progress has-[:disabled]:opacity-60">
 										<input
 											type="checkbox"
@@ -1178,7 +1162,6 @@ export function CreateWorkspaceDialog({
 							)}
 							<div
 								className={
-									creationScope === "multi" ||
 									isSourceWorkspace ||
 									mode === "open"
 										? "hidden"
@@ -1218,7 +1201,6 @@ export function CreateWorkspaceDialog({
 
 							<div
 								className={
-									creationScope === "multi" ||
 									isSourceWorkspace ||
 									(mode === "open" &&
 										(repositoryContext !== null ||
@@ -1303,7 +1285,7 @@ export function CreateWorkspaceDialog({
 							</h3>
 							<div
 								className={
-									creationScope === "multi" || isSourceWorkspace
+									isSourceWorkspace
 										? "hidden"
 										: "flex min-w-0 flex-col gap-1"
 								}
@@ -1374,14 +1356,10 @@ export function CreateWorkspaceDialog({
 									htmlFor="workspace-name"
 									className="text-[12px] font-medium tracking-[-0.01em]"
 								>
-									{creationScope === "multi"
-										? t("workspaceDialog.multiName")
-										: t("workspaceDialog.displayName")}{" "}
-									{creationScope === "single" ? (
-										<span className="font-normal text-muted-foreground">
-											({t("workspaceDialog.optional")})
-										</span>
-									) : null}
+									{t("workspaceDialog.displayName")}{" "}
+									<span className="font-normal text-muted-foreground">
+										({t("workspaceDialog.optional")})
+									</span>
 								</Label>
 								<Input
 									id="workspace-name"
@@ -1392,11 +1370,7 @@ export function CreateWorkspaceDialog({
 											name: event.target.value,
 										}))
 									}
-									placeholder={
-										creationScope === "multi"
-											? t("workspaceDialog.multiNamePlaceholder")
-											: t("workspaceDialog.defaultsFromBranch")
-									}
+									placeholder={t("workspaceDialog.defaultsFromBranch")}
 									autoComplete="off"
 									spellCheck={false}
 									disabled={isSubmitting}
@@ -1406,7 +1380,7 @@ export function CreateWorkspaceDialog({
 						</div>
 						{mode === "open" ? (
 							<div className="workspace-dialog-protection">
-								{multiLocal ? (
+								{localMode ? (
 									<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-amber-500/12 text-amber-600 dark:text-amber-400">
 										<FolderOpen className="size-[18px]" strokeWidth={1.9} />
 									</span>
@@ -1417,28 +1391,26 @@ export function CreateWorkspaceDialog({
 								)}
 								<div className="min-w-0 flex-1">
 									<p className="text-[12px] font-medium text-foreground">
-										{creationScope === "multi" && protectedWorktreeCount < 2
-											? t("workspaceDialog.protectionPending")
-											: multiLocal
-												? t("workspaceDialog.localPreview", {
-														count: protectedWorktreeCount,
-													})
-												: t("workspaceDialog.protectionPreview", {
-														count: protectedWorktreeCount,
-													})}
+										{localMode
+											? t("workspaceDialog.localPreview", {
+													count: protectedWorktreeCount,
+												})
+											: t("workspaceDialog.protectionPreview", {
+													count: protectedWorktreeCount,
+												})}
 									</p>
 									<p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">
-										{multiLocal
+										{localMode
 											? t("workspaceDialog.localDescription")
 											: t("workspaceDialog.protectionDescription")}
 									</p>
-									{creationScope === "multi" ? (
+									{!isSourceWorkspace ? (
 										<label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-[11.5px] text-muted-foreground has-[:disabled]:cursor-progress has-[:disabled]:opacity-60">
 											<input
 												type="checkbox"
-												checked={multiUsesWorktree}
+												checked={usesWorktree}
 												disabled={isSubmitting}
-												onChange={(event) => setMultiUsesWorktree(event.target.checked)}
+												onChange={(event) => setUsesWorktree(event.target.checked)}
 												className="size-3.5 accent-primary"
 											/>
 											<span className="font-medium text-foreground">
@@ -1447,7 +1419,7 @@ export function CreateWorkspaceDialog({
 											<span aria-hidden>·</span>
 											<span>
 												{t(
-													multiUsesWorktree
+													usesWorktree
 														? "newTask.execution.protectedDescription"
 														: "newTask.execution.localDescription",
 												)}
@@ -1455,7 +1427,7 @@ export function CreateWorkspaceDialog({
 										</label>
 									) : null}
 								</div>
-								{creationScope === "single" && protectionBranch ? (
+								{protectionBranch ? (
 									<span
 										className="workspace-dialog-branch"
 										title={protectionBranch}
@@ -1500,7 +1472,7 @@ export function CreateWorkspaceDialog({
 								</>
 							) : mode === "clone" ? (
 								t("workspaceDialog.cloneSubmit")
-							) : creationScope === "multi" ? (
+							) : bringsProjects ? (
 								t("workspaceDialog.multiSubmit")
 							) : isSourceWorkspace ? (
 								t("workspaceDialog.sourceSubmit")

@@ -7,9 +7,9 @@ import {
 	isBranchWorkspaceSource,
 	LAST_TASK_REPOSITORY_ROOT_STORAGE_KEY,
 	linkedFolderOptionId,
+	linkedFoldersChanged,
+	linkedProjectSelection,
 	orderMultiProjectSelection,
-	promoteMultiProjectPrimary,
-	selectMultiProject,
 	withLinkedFolderOptions,
 	readLastTaskRepositoryRoot,
 	rememberLastTaskRepositoryRoot,
@@ -143,18 +143,6 @@ describe("multi-project primary", () => {
 			),
 		).toEqual(["api"]);
 	});
-
-	it("moves the chosen project to the front and keeps the rest in order", () => {
-		expect(promoteMultiProjectPrimary(["dcc", "lp", "api"], "api")).toEqual([
-			"api",
-			"dcc",
-			"lp",
-		]);
-	});
-
-	it("ignores a project that is not selected", () => {
-		expect(promoteMultiProjectPrimary(["dcc", "lp"], "api")).toEqual(["dcc", "lp"]);
-	});
 });
 
 describe("linked folders in a multi-project task", () => {
@@ -170,18 +158,20 @@ describe("linked folders in a multi-project task", () => {
 		expect(options.map((option) => option.id)).toEqual(["dcc", "lp", "linked:/code/docs-site"]);
 	});
 
-	it("brings the primary's linked folders along on the first pick", () => {
+	it("selects the primary's linked folders that can be projects", () => {
 		const options = withLinkedFolderOptions(projects, linked, folder);
-		expect(selectMultiProject([], "dcc", options, linked)).toEqual([
-			"dcc",
+		expect(linkedProjectSelection("dcc", options, linked)).toEqual([
 			"lp",
 			"linked:/code/docs-site",
 		]);
+		expect(linkedProjectSelection("lp", options, linked)).toEqual([]);
 	});
 
-	it("adds only the picked project once a primary exists", () => {
-		const options = withLinkedFolderOptions(projects, linked, folder);
-		expect(selectMultiProject(["lp"], "dcc", options, linked)).toEqual(["lp", "dcc"]);
-		expect(selectMultiProject(["lp"], "lp", options, linked)).toEqual(["lp"]);
+	it("notices when the task's folders differ from the saved ones", () => {
+		expect(linkedFoldersChanged(["/code/lp"], ["/code/lp/"])).toBe(false);
+		expect(linkedFoldersChanged(["/code/lp"], ["/code/lp", "/code/api"])).toBe(true);
+		expect(linkedFoldersChanged(["/code/lp", "/code/api"], ["/code/api", "/code/lp"])).toBe(
+			false,
+		);
 	});
 });

@@ -963,6 +963,12 @@
     "primary": "Primary",
     "makePrimary": "Make primary",
     "primaryHint": "The task lives in this project, the agent starts here and reads its instructions. It can still change every selected project.",
+    "alsoInTask": "Also in this task",
+    "alsoInTaskDescription": "The agent can read and change all of them.",
+    "addProject": "Add project",
+    "removeFromTask": "Remove {{project}} from this task",
+    "contextFolder": "context",
+    "onlyThisProject": "Only this project. Use Add project to work on others together.",
     "rememberLinkedFolders": "Remember these folders in the primary project",
     "rememberLinkedFoldersError": "The task was created, but the folders were not saved to the project.",
     "linkedFolderBranch": "checkout's current branch",
@@ -3406,8 +3412,8 @@
         "whenToUse": "When the change spans repositories (API and front end, library and consumer) or when you want to consult one project to change another.",
         "steps": [
           "To always bring the same folders, open [Edit project] and add them under [Linked folders]. Git repositories become projects of the task; folders without Git (docs, specs) join as context only, with no diff and no Undo. Every [New task] in that project comes with them; uncheck [Linked folders] to skip them this time.",
-          "For a one-off task, choose [Multiple projects], check the projects and give it a [Task name]. The first one checked is the [Primary]; use [Make primary] to change it.",
-          "Click [Create multi-project task]. In [Showing], switch the project the Inspector, the terminal and delivery show.",
+          "For a one-off task, pick the project in [New task] and use [Add project] under [Also in this task]. The project you picked is the primary; click a project in the list to remove it from this task.",
+          "With another project besides the primary, the task becomes multi-project. In [Showing], switch the project the Inspector, the terminal and delivery show.",
           "To undo a turn, use the turn Undo: it checks every project first and restores one at a time, showing each project's result."
         ],
         "prompt": "Add the birthDate field to the contract in api-core and consume it in the profile form in web-app. Keep compatibility with old clients.",

@@ -135,11 +135,6 @@ export function orderMultiProjectSelection<Repository extends { id: string }>(
 	});
 }
 
-export function promoteMultiProjectPrimary(selectedIds: string[], id: string): string[] {
-	if (!selectedIds.includes(id)) return selectedIds;
-	return [id, ...selectedIds.filter((candidate) => candidate !== id)];
-}
-
 /** Option id of a linked folder that is not a DCC project yet. */
 export function linkedFolderOptionId(path: string) {
 	return `linked:${normalizeWorkspaceRoot(path)}`;
@@ -171,23 +166,28 @@ export function withLinkedFolderOptions<
 }
 
 /**
- * Picks a project for a multi-project task. The first pick is the primary and
- * brings its linked folders along, already selected.
+ * The other projects a task brings when `primaryId` is its project: the
+ * linked Git folders of that project, as option ids, in the saved order.
  */
-export function selectMultiProject<Option extends { id: string; rootPath: string }>(
-	selectedIds: string[],
-	optionId: string,
+export function linkedProjectSelection<Option extends { id: string; rootPath: string }>(
+	primaryId: string,
 	options: readonly Option[],
 	linkedFoldersByRepositoryId: Record<string, string[]>,
 ): string[] {
-	if (selectedIds.includes(optionId)) return selectedIds;
-	if (selectedIds.length > 0) return [...selectedIds, optionId];
-	const linkedIds = (linkedFoldersByRepositoryId[optionId] ?? []).flatMap((path) => {
+	return (linkedFoldersByRepositoryId[primaryId] ?? []).flatMap((path) => {
 		const root = normalizeWorkspaceRoot(path);
 		const option = options.find(
 			(candidate) => normalizeWorkspaceRoot(candidate.rootPath) === root,
 		);
-		return option && option.id !== optionId ? [option.id] : [];
+		return option && option.id !== primaryId ? [option.id] : [];
 	});
-	return [optionId, ...linkedIds];
+}
+
+/** Whether a task's folders differ from the ones the project saved. */
+export function linkedFoldersChanged(saved: readonly string[], next: readonly string[]) {
+	const normalize = (paths: readonly string[]) =>
+		new Set(paths.map((path) => normalizeWorkspaceRoot(path)));
+	const before = normalize(saved);
+	const after = normalize(next);
+	return before.size !== after.size || [...after].some((path) => !before.has(path));
 }

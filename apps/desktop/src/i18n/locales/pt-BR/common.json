@@ -963,6 +963,12 @@
     "primary": "Principal",
     "makePrimary": "Tornar principal",
     "primaryHint": "A tarefa fica neste projeto, o agente começa nele e lê as instruções dele. Ele ainda pode alterar todos os projetos selecionados.",
+    "alsoInTask": "Também nesta tarefa",
+    "alsoInTaskDescription": "O agente pode ler e alterar todos.",
+    "addProject": "Adicionar projeto",
+    "removeFromTask": "Tirar {{project}} desta tarefa",
+    "contextFolder": "contexto",
+    "onlyThisProject": "Só este projeto. Use Adicionar projeto para trabalhar em outros juntos.",
     "rememberLinkedFolders": "Lembrar estas pastas no projeto principal",
     "rememberLinkedFoldersError": "A tarefa foi criada, mas as pastas não foram salvas no projeto.",
     "linkedFolderBranch": "branch atual do checkout",
@@ -3406,8 +3412,8 @@
         "whenToUse": "Quando a mudança atravessa repositórios (API e front, biblioteca e consumidor) ou quando você quer consultar um projeto para alterar outro.",
         "steps": [
           "Para trazer sempre as mesmas pastas, abra [Editar projeto] e adicione-as em [Pastas vinculadas]. Repositórios Git viram projetos da tarefa; pastas sem Git (docs, specs) entram só como contexto, sem diff e sem Undo. Toda [Nova tarefa] nesse projeto já vem com elas; desmarque [Pastas vinculadas] para pular desta vez.",
-          "Para uma tarefa avulsa, escolha [Vários projetos], marque os projetos e dê um [Nome da tarefa]. O primeiro marcado é o [Principal]; use [Tornar principal] para trocar.",
-          "Clique em [Criar tarefa multi-projeto]. Em [Mostrando], troque o projeto que o Inspector, o terminal e a entrega exibem.",
+          "Para uma tarefa avulsa, escolha o projeto na [Nova tarefa] e use [Adicionar projeto] em [Também nesta tarefa]. O projeto escolhido é o principal; clique num projeto da lista para tirá-lo desta tarefa.",
+          "Com outro projeto além do principal, a tarefa vira multi-projeto. Em [Mostrando], troque o projeto que o Inspector, o terminal e a entrega exibem.",
           "Para desfazer um turno, use o Undo do turno: ele verifica todos os projetos antes e restaura um por vez, mostrando o resultado de cada um."
         ],
         "prompt": "Adicione o campo birthDate ao contrato em api-core e consuma no formulário de perfil em web-app. Mantenha compatibilidade com clientes antigos.",
