@@ -2295,6 +2295,7 @@ async fn dispatch_delegation_tool(
                     title: args.title,
                     kind: Default::default(),
                     proposal_id: None,
+                    shared_checkout: false,
                 },
             )
             .await;
