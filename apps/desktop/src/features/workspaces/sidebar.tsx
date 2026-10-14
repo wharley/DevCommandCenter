@@ -139,6 +139,9 @@ import { ProjectEditDialog } from "./project-edit-dialog";
 import { ProjectIdentityGlyph } from "./project-identity";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 import { repositoryDisplayName } from "./repository-display-name";
+import { SidebarChildTaskRow } from "./sidebar-child-task-row";
+import type { ChildTaskEntry } from "./sidebar-child-tasks.logic";
+import { useChildTasksByWorkspace } from "./use-child-tasks";
 import {
 	formatDiskBytes,
 	workspaceDiskUsageIds,
@@ -155,6 +158,7 @@ type VirtualItem =
 			headerVariant: "project" | "waiting" | "completed";
 	  }
 	| { kind: "row"; groupId: string; workspace: WorkspaceSummary }
+	| { kind: "child-task"; groupId: string; workspaceId: string; task: ChildTaskEntry }
 	| {
 			kind: "section-label";
 			sectionId: typeof PINNED_SECTION_ID | typeof RECENT_SECTION_ID;
@@ -170,6 +174,7 @@ const SECTION_LABEL_HEIGHT = 24;
 const IDLE_TOGGLE_HEIGHT = 30;
 const ROW_HEIGHT = 76;
 const COMPACT_ROW_HEIGHT = 54;
+const CHILD_TASK_HEIGHT = 26;
 const GROUP_GAP = 10;
 const EMPTY_GROUP_GAP = 8;
 const EMPTY_AGENTS: AgentView[] = [];
@@ -335,6 +340,8 @@ type WorkspacesSidebarProps = {
 	showCompletedDiskUsage?: boolean;
 	sessionQueryScope?: string;
 	onSelectWorkspace: (workspaceId: string) => void;
+	/** Opens one conversation of a workspace: a child task's, or its parent's. */
+	onSelectSession?: (workspaceId: string, sessionId: string) => void;
 	onNewTask: () => void;
 	newTaskActive?: boolean;
 	onCreateWorkspace: () => void;
@@ -422,6 +429,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	showCompletedDiskUsage = true,
 	sessionQueryScope = "local",
 	onSelectWorkspace: selectWorkspace,
+	onSelectSession,
 	onNewTask,
 	newTaskActive = false,
 	onCreateWorkspace,
@@ -495,6 +503,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	);
 	const seenResults = useSeenWorkspaceResults();
 	const blockersQuery = useWorkspaceBlockers(showAgentStates && sessionQueryScope === "local");
+	const childTasks = useChildTasksByWorkspace(showAgentStates && sessionQueryScope === "local");
 	const workspaceBlockers = useMemo(
 		() => blockersByWorkspace(blockersQuery.data ?? []),
 		[blockersQuery.data],
@@ -903,6 +912,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
+		const pushChildTasks = (list: VirtualItem[], groupId: string, workspaceId: string) => {
+			for (const task of childTasks.get(workspaceId) ?? []) {
+				list.push({ kind: "child-task", groupId, workspaceId, task });
+			}
+		};
 		const visibleGroups = railGroups;
 		const hasPinnedGroups = visibleGroups.some((group) => group.pinnedAt);
 
@@ -960,6 +974,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						groupId: group.id,
 						workspace: row,
 					});
+					pushChildTasks(items, group.id, row.id);
 				}
 			}
 		}
@@ -1032,6 +1047,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						groupId: section.id,
 						workspace: row,
 					});
+					// A finished task's phases are over; only live work nests.
+					if (section.id !== COMPLETED_SECTION_ID) {
+						pushChildTasks(items, section.id, row.id);
+					}
 				}
 			}
 			previousHasRows = section.rows.length > 0;
@@ -1039,7 +1058,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		items.push({ kind: "bottom-padding" });
 		return items;
-	}, [completedRows, idleGroups, railGroups, sectionOpenState, t, waitingRows]);
+	}, [childTasks, completedRows, idleGroups, railGroups, sectionOpenState, t, waitingRows]);
 
 	const virtualizer = useVirtualizer({
 		count: flatItems.length,
@@ -1055,6 +1074,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					return IDLE_TOGGLE_HEIGHT;
 				case "row":
 					return isCompactRailSection(item.groupId) ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
+				case "child-task":
+					return CHILD_TASK_HEIGHT;
 				case "group-gap":
 					return item.size;
 				case "bottom-padding":
@@ -1072,6 +1093,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					return "idle-toggle";
 				case "row":
 					return `row-${item.groupId}-${item.workspace.id}`;
+				case "child-task":
+					return `child-${item.groupId}-${item.task.id}`;
 				case "group-gap":
 					return `gap-${index}`;
 				case "bottom-padding":
@@ -1207,6 +1230,19 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		(item: VirtualItem) => {
 			if (item.kind === "group-gap" || item.kind === "bottom-padding") {
 				return null;
+			}
+
+			if (item.kind === "child-task") {
+				return (
+					<SidebarChildTaskRow
+						task={item.task}
+						onSelect={
+							onSelectSession
+								? () => onSelectSession(item.workspaceId, item.task.sessionId)
+								: undefined
+						}
+					/>
+				);
 			}
 
 			if (item.kind === "section-label") {
@@ -1627,6 +1663,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			onSetWorkspacePinned,
 			onDeleteWorkspace,
 			onRestoreWorkspace,
+			onSelectSession,
 			onSelectWorkspace,
 			openProjectRemovalDialog,
 			openWorkspaceDeletionDialog,

@@ -1,0 +1,48 @@
+import { memo } from "react";
+import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
+import type { ChildTaskEntry } from "./sidebar-child-tasks.logic";
+
+/**
+ * A task the agent of this workspace proposed or started (`dcc_propose_task`),
+ * nested under the workspace's row the way a coordinator's phases hang under
+ * it. Amber when it waits on the person: a proposal to start, edits to review.
+ */
+export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
+	task,
+	onSelect,
+}: {
+	task: ChildTaskEntry;
+	onSelect?: () => void;
+}) {
+	const { t } = useTranslation("common");
+	const waitsOnPerson = task.state !== "open";
+	return (
+		<button
+			type="button"
+			data-child-task={task.id}
+			data-state={task.state}
+			disabled={!onSelect}
+			onClick={onSelect}
+			title={task.title}
+			className="group/dccChildTask flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-9 pr-3 text-left text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-default"
+		>
+			<span
+				aria-hidden
+				className={cn(
+					"size-1.5 shrink-0 rounded-full",
+					task.state === "open" && "bg-emerald-500/80",
+					task.state === "review" && "bg-amber-500",
+					task.state === "proposed" && "border border-amber-500 bg-transparent",
+				)}
+			/>
+			{/* Sized on spans: a global font reset on button would undo it here. */}
+			<span className="min-w-0 flex-1 truncate text-[12px] leading-5">{task.title}</span>
+			{waitsOnPerson ? (
+				<span className="shrink-0 text-[10.5px] font-medium leading-5 text-amber-700 dark:text-amber-300">
+					{t(`sidebar.childTask.${task.state}`)}
+				</span>
+			) : null}
+		</button>
+	);
+});

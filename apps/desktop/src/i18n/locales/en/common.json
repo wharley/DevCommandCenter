@@ -384,6 +384,11 @@
     }
   },
   "sidebar": {
+    "childTask": {
+      "proposed": "proposed",
+      "review": "review",
+      "open": "open"
+    },
     "groupSignal": {
       "running": "An agent is running in this project",
       "attention": "Something in this project needs you"

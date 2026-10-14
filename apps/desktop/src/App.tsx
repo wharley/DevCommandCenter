@@ -4162,6 +4162,19 @@ export default function App() {
 		setIsQuickOpenOpen(true);
 	}, []);
 
+	/** The sidebar's nested task rows: open one conversation of a workspace. */
+	const handleSelectWorkspaceSession = useCallback(
+		(workspaceId: string, sessionId: string) => {
+			setGlobalSurface(null);
+			setPendingSessionNavigation({ sessionId, workspaceId });
+			requestWorkspaceSelection(workspaceId);
+			if (selectedWorkspace?.id === workspaceId) {
+				setSelectedSessionId(sessionId);
+			}
+		},
+		[requestWorkspaceSelection, selectedWorkspace?.id],
+	);
+
 	const handleSelectSessionSearchResult = useCallback(
 		async (result: SessionSearchResult) => {
 			try {
@@ -5346,6 +5359,7 @@ export default function App() {
 							showCompletedDiskUsage={!isRemoteBackend}
 							sessionQueryScope={backendCacheKey}
 							onSelectWorkspace={handleSelectWorkspaceSurface}
+							onSelectSession={handleSelectWorkspaceSession}
 							onNewTask={() => {
 								if (isRemoteBackend) {
 									showRemoteUnsupported("workspaces");
