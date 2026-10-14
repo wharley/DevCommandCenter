@@ -351,6 +351,7 @@ mod tests {
             SessionEventKind::UsageLimitResumed {
                 automatic,
                 turn_id: None,
+                account_label: None,
             },
         )
     }

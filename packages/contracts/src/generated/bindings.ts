@@ -463,6 +463,7 @@ export type CoreEvent = ({ workspacePrepared: {
 	session_id: string,
 	automatic: boolean,
 	turn_id: string | null,
+	account_label?: string | null,
 } }) & { sessionAborted?: never; sessionCheckpointCreated?: never; sessionCompleted?: never; sessionConversationRewound?: never; sessionDelegationCancelled?: never; sessionDelegationCompleted?: never; sessionDelegationDelta?: never; sessionDelegationFailed?: never; sessionDelegationRequested?: never; sessionDelegationStarted?: never; sessionMcpRuntimeStatusChanged?: never; sessionObjectivePaused?: never; sessionPlanApproved?: never; sessionPlanHandedOff?: never; sessionQueuedTurnDispatched?: never; sessionQueuedTurnRemoved?: never; sessionResumed?: never; sessionStarted?: never; sessionTurnAborted?: never; sessionTurnAssistantMessageCompleted?: never; sessionTurnAssistantMessageDelta?: never; sessionTurnAssistantMessageStarted?: never; sessionTurnCompleted?: never; sessionTurnDelta?: never; sessionTurnModelEffective?: never; sessionTurnNativeSubagentActivity?: never; sessionTurnNativeSubagentModelConfirmed?: never; sessionTurnNativeSubagentModelRequested?: never; sessionTurnPermissionRequested?: never; sessionTurnPermissionResolved?: never; sessionTurnQueueReordered?: never; sessionTurnQueued?: never; sessionTurnReasoningCompleted?: never; sessionTurnReasoningDelta?: never; sessionTurnReasoningStarted?: never; sessionTurnStarted?: never; sessionTurnSteered?: never; sessionTurnToolCallCompleted?: never; sessionTurnToolCallDelta?: never; sessionTurnToolCallFailed?: never; sessionTurnToolCallStarted?: never; sessionTurnToolCallUpdated?: never; sessionTurnUserInputRequested?: never; sessionTurnUserInputResolved?: never; sessionUsageLimitAutoResumeChanged?: never; sessionUsageLimitReached?: never; workspacePrepared?: never; workspaceReady?: never } | ({ sessionUsageLimitAutoResumeChanged: {
 	session_id: string,
 	enabled: boolean,
@@ -2451,7 +2452,12 @@ paused?: boolean } |
  *  DCC sent the continuation turn after a usage limit, by itself
  *  (`automatic`) or because the person asked.
  */
-{ type: "usage_limit_resumed"; automatic: boolean; turnId?: TurnId | null } |
+{ type: "usage_limit_resumed"; automatic: boolean; turnId?: TurnId | null;
+/**
+ *  The account the task moved to, named as it was then (empty for the
+ *  system login); `None` when it continued on the same account.
+ */
+accountLabel?: string | null } |
 // The person chose whether this task continues by itself after a limit.
 { type: "usage_limit_auto_resume_changed"; enabled: boolean } |
 /**

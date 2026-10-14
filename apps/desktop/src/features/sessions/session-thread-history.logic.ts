@@ -15,6 +15,11 @@ export type SessionMessageStatus = {
 	reason?: string;
 	/** The plan's usage limit stopped the turn: a wait, not an error. */
 	usageLimited?: boolean;
+	/**
+	 * After that limit the task moved to this account (empty: the system
+	 * login) and continued there.
+	 */
+	continuedOnAccount?: string;
 };
 
 export type WorkspaceMessageRole = "user" | "assistant" | "system";
@@ -467,6 +472,15 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					paused: record.kind.paused ?? false,
 				},
 			};
+		case "usage_limit_resumed":
+			return {
+				sessionUsageLimitResumed: {
+					session_id: record.sessionId,
+					automatic: record.kind.automatic,
+					turn_id: record.kind.turnId ?? null,
+					account_label: record.kind.accountLabel ?? null,
+				},
+			};
 		case "conversation_rewound":
 			return {
 				sessionConversationRewound: {
@@ -503,6 +517,9 @@ function getEventSessionId(event: CoreEvent): string | null {
 	}
 	if ("sessionUsageLimitReached" in event && event.sessionUsageLimitReached) {
 		return event.sessionUsageLimitReached.session_id;
+	}
+	if ("sessionUsageLimitResumed" in event && event.sessionUsageLimitResumed) {
+		return event.sessionUsageLimitResumed.session_id;
 	}
 	if (
 		"sessionMcpRuntimeStatusChanged" in event &&
@@ -638,6 +655,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionObjectivePaused" in event) return "session.objective.paused";
 	if ("sessionConversationRewound" in event) return "session.conversation.rewound";
 	if ("sessionUsageLimitReached" in event) return "session.usage-limit.reached";
+	if ("sessionUsageLimitResumed" in event) return "session.usage-limit.resumed";
 	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnSteered" in event) return "session.turn.steered";
@@ -1380,6 +1398,7 @@ export function projectWorkspaceMessages(
 	const abortedTurns = new Map<string, string>();
 	// Recorded just before the turn's abort (`usage_limit_reached`).
 	const usageLimitedTurns = new Set<string>();
+	let lastUsageLimitedTurn: string | null = null;
 	const turnStartedAtByTurnId = new Map<string, string>();
 	const turnEndedAtByTurnId = new Map<string, string>();
 	const turnModelByTurnId = new Map<string, string | null>();
@@ -1890,6 +1909,19 @@ export function projectWorkspaceMessages(
 
 		if ("sessionUsageLimitReached" in event && event.sessionUsageLimitReached) {
 			usageLimitedTurns.add(event.sessionUsageLimitReached.turn_id);
+			lastUsageLimitedTurn = event.sessionUsageLimitReached.turn_id;
+			continue;
+		}
+
+		if ("sessionUsageLimitResumed" in event && event.sessionUsageLimitResumed) {
+			const account = event.sessionUsageLimitResumed.account_label;
+			if (account != null && lastUsageLimitedTurn) {
+				for (const message of messages) {
+					if (message.turnId === lastUsageLimitedTurn && message.status?.usageLimited) {
+						message.status = { ...message.status, continuedOnAccount: account };
+					}
+				}
+			}
 			continue;
 		}
 

@@ -522,6 +522,10 @@ pub enum SessionEventKind {
         automatic: bool,
         #[serde(rename = "turnId", default)]
         turn_id: Option<TurnId>,
+        /// The account the task moved to, named as it was then (empty for the
+        /// system login); `None` when it continued on the same account.
+        #[serde(rename = "accountLabel", default)]
+        account_label: Option<String>,
     },
     /// The person chose whether this task continues by itself after a limit.
     UsageLimitAutoResumeChanged {

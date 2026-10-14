@@ -1131,6 +1131,44 @@ describe("projectWorkspaceMessages", () => {
 		});
 	});
 
+	it("names the account a task moved to after its usage limit", () => {
+		const limit: SessionEventRecord = {
+			eventId: "evt-limit",
+			sessionId: "session-a",
+			sequence: 2,
+			occurredAt: "2026-05-01T12:00:04Z",
+			kind: {
+				type: "usage_limit_reached",
+				turnId: "turn-1",
+				resetsAt: "2026-05-01T15:40:00Z",
+				autoResume: false,
+				paused: false,
+			},
+		};
+		const resumed = (sequence: number, accountLabel: string | null): SessionEventRecord => ({
+			eventId: `evt-resumed-${sequence}`,
+			sessionId: "session-a",
+			sequence,
+			occurredAt: "2026-05-01T12:01:00Z",
+			kind: { type: "usage_limit_resumed", automatic: false, turnId: "turn-2", accountLabel },
+		});
+		const project = (last: SessionEventRecord) =>
+			projectWorkspaceMessages(
+				[
+					sessionTurnStarted("session-a", "turn-1", "Alpha"),
+					limit,
+					{ ...sessionTurnAborted("session-a", "turn-1", "You've hit your usage limit."), sequence: 3 },
+					last,
+				],
+				[],
+				"session-a",
+			);
+
+		expect(project(resumed(4, "Pessoal"))[1]?.status?.continuedOnAccount).toBe("Pessoal");
+		expect(project(resumed(4, ""))[1]?.status?.continuedOnAccount).toBe("");
+		expect(project(resumed(4, null))[1]?.status?.continuedOnAccount).toBeUndefined();
+	});
+
 	it("marks a turn the usage limit stopped as a wait, not an error", () => {
 		const limit: SessionEventRecord = {
 			eventId: "evt-limit",

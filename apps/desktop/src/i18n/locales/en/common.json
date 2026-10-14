@@ -5225,6 +5225,7 @@
     "enableKeepAwake": "Turn on \"While agents work\"",
     "timelineWaiting": "Usage limit reached · back at {{time}}",
     "timelinePaused": "Usage limit reached",
+    "timelineContinuedOn": "continued on the {{name}} account",
     "timelineResumedAuto": "Resumed on its own after the limit",
     "timelineResumedManual": "Resumed after the limit",
     "otherAccounts": "Or continue on another account:",

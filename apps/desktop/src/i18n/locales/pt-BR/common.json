@@ -5225,6 +5225,7 @@
     "enableKeepAwake": "Ativar \"Durante agentes\"",
     "timelineWaiting": "Limite de uso atingido · volta às {{time}}",
     "timelinePaused": "Limite de uso atingido",
+    "timelineContinuedOn": "continuou na conta {{name}}",
     "timelineResumedAuto": "Retomado sozinho depois do limite",
     "timelineResumedManual": "Retomado depois do limite",
     "otherAccounts": "Ou continue em outra conta:",

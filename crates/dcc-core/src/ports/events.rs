@@ -60,6 +60,8 @@ pub enum CoreEvent {
         session_id: String,
         automatic: bool,
         turn_id: Option<String>,
+        #[serde(default)]
+        account_label: Option<String>,
     },
     SessionUsageLimitAutoResumeChanged {
         session_id: String,
@@ -996,15 +998,21 @@ impl CoreEvent {
                     && paused == actual_paused
             }
             (
-                SessionEventKind::UsageLimitResumed { automatic, turn_id },
+                SessionEventKind::UsageLimitResumed {
+                    automatic,
+                    turn_id,
+                    account_label,
+                },
                 Self::SessionUsageLimitResumed {
                     automatic: actual_automatic,
                     turn_id: actual_turn_id,
+                    account_label: actual_account_label,
                     ..
                 },
             ) => {
                 automatic == actual_automatic
                     && turn_id.as_ref().map(|id| &id.0) == actual_turn_id.as_ref()
+                    && account_label == actual_account_label
             }
             (
                 SessionEventKind::UsageLimitAutoResumeChanged { enabled },

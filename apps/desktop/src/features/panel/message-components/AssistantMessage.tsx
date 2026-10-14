@@ -69,6 +69,7 @@ type AssistantStatus = {
 	type: "incomplete";
 	reason?: string;
 	usageLimited?: boolean;
+	continuedOnAccount?: string;
 };
 
 type NativeSubagentSupervision = {
@@ -749,6 +750,16 @@ export const AssistantMessage = memo(function AssistantMessage({
 						<div className="min-w-0 flex-1">
 							<div className="text-[12px] font-medium text-foreground">
 								{t("usageLimit.timelinePaused")}
+								{status.continuedOnAccount != null ? (
+									<span className="font-normal text-muted-foreground">
+										{" · "}
+										{t("usageLimit.timelineContinuedOn", {
+											name:
+												status.continuedOnAccount ||
+												t("usageLimit.defaultAccount"),
+										})}
+									</span>
+								) : null}
 							</div>
 							{status.reason ? (
 								<p className="mt-0.5 text-[12px] text-muted-foreground">{status.reason}</p>

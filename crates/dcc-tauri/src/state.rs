@@ -4408,11 +4408,12 @@ impl SessionCommandState {
     /// Points the session at another account of its provider and stops the
     /// old account's process. The native conversation id survives only where
     /// every account reaches the same native history.
+    /// Returns whether the session changed account.
     pub(crate) async fn move_session_to_account(
         &self,
         session_id: &SessionId,
         account_id: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let transition = self.acquire_provider_transition(session_id).await?;
         let mut session = self
             .peek_session(session_id)
@@ -4423,7 +4424,7 @@ impl SessionCommandState {
             .as_ref()
             .and_then(|runtime| runtime.account_id.clone());
         if current == account_id {
-            return Ok(());
+            return Ok(false);
         }
         let mut runtime = session.provider_runtime.clone().unwrap_or_default();
         runtime.account_id = account_id;
@@ -4438,7 +4439,8 @@ impl SessionCommandState {
         }
         session.provider_runtime = Some(runtime);
         session.updated_at = Utc::now().to_rfc3339();
-        SessionRepo::save_session(self, &session).await
+        SessionRepo::save_session(self, &session).await?;
+        Ok(true)
     }
 
     /// Continues a task stopped by its plan's usage limit under another
@@ -4457,14 +4459,37 @@ impl SessionCommandState {
                 "Esta tarefa não está parada por limite de uso.".to_string(),
             ));
         }
-        self.move_session_to_account(session_id, account_id).await?;
-        self.resume_after_usage_limit(session_id, false).await
+        let moved = self
+            .move_session_to_account(session_id, account_id.clone())
+            .await?;
+        let account_label = if moved {
+            Some(match account_id {
+                Some(id) => self.provider_account(&id)?.label,
+                None => String::new(),
+            })
+        } else {
+            None
+        };
+        self.send_usage_limit_continuation(session_id, false, account_label)
+            .await
     }
 
     pub async fn resume_after_usage_limit(
         &self,
         session_id: &SessionId,
         automatic: bool,
+    ) -> Result<TurnId> {
+        self.send_usage_limit_continuation(session_id, automatic, None)
+            .await
+    }
+
+    /// Sends the continuation turn of a task stopped by its usage limit and
+    /// records it, with the account the task moved to when it moved.
+    async fn send_usage_limit_continuation(
+        &self,
+        session_id: &SessionId,
+        automatic: bool,
+        account_label: Option<String>,
     ) -> Result<TurnId> {
         use dcc_core::domain::usage_limit::{
             continuation_prompt, session_usage_limit, usage_limit_phase, UsageLimitPhase,
@@ -4558,11 +4583,13 @@ impl SessionCommandState {
                 SessionEventKind::UsageLimitResumed {
                     automatic,
                     turn_id: Some(turn_id.clone()),
+                    account_label: account_label.clone(),
                 },
                 dcc_core::ports::events::CoreEvent::SessionUsageLimitResumed {
                     session_id: session_id.0.clone(),
                     automatic,
                     turn_id: Some(turn_id.0.clone()),
+                    account_label,
                 },
             )
             .await
