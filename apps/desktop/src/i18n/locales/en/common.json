@@ -2792,6 +2792,7 @@
         "conversationNotReady": "This conversation is not ready to control apps.",
         "expired": "The request expired. Ask the agent to request access again.",
         "allow": "Allow",
+        "taskWide": "Once allowed, this task does not ask again while these apps stay open.",
         "deny": "Deny",
         "unknownConversation": "Unknown conversation ({{id}})",
         "unknownWorkspace": "Unknown workspace ({{id}})"
@@ -4934,6 +4935,7 @@
       "remaining": "Request expires in {{time}}",
       "deny": "Deny",
       "allow": "Open and allow",
+      "taskWide": "Once allowed, this task does not ask again until you turn agent control off.",
       "example": "Example: https://example.com or http://localhost:5173"
     },
     "open": "Open browser",

@@ -1740,6 +1740,11 @@ fn require_browser_control_grant(
         *grant = None;
     }
     if control_grant_is_current(grant.as_ref(), &scope, lifecycle_token, now) {
+        // An agent-approved grant lasts while the agent keeps using it; the
+        // short manual grant does not.
+        if let Some(grant) = grant.as_mut().filter(|grant| grant.lease_id.is_some()) {
+            grant.expires_at = now + APPROVED_BROWSER_OPEN_GRANT_TTL;
+        }
         Ok(())
     } else {
         Err("browser control is not armed".to_string())
@@ -4606,6 +4611,7 @@ pub async fn browser_read_audit(
 pub async fn browser_disarm_control(
     state: State<'_, BrowserState>,
     sessions: State<'_, SessionCommandState>,
+    requests: State<'_, crate::browser_agent_requests::BrowserAgentRequestBroker>,
     workspace_id: String,
     session_id: Option<String>,
     lifecycle_token: u64,
@@ -4622,6 +4628,10 @@ pub async fn browser_disarm_control(
         )?;
         clear_browser_control_grant(&state);
         invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
+        // Turning control off also ends the task's standing approval.
+        if let Some(session_id) = session_id.as_deref() {
+            requests.forget_task_approval(session_id);
+        }
         Ok(BrowserControlStatus {
             armed: false,
             remaining_ms: 0,

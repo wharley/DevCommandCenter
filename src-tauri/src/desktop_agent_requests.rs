@@ -307,3 +307,23 @@ pub fn browser_agent_claim(
         .map(|(view, _)| view)
         .map_err(|error| error.to_string())
 }
+
+/// Gets the person's attention for an agent request waiting on them, only
+/// when DCC is not the window they are looking at: the Dock icon bounces and
+/// a system notification names it. The renderer passes the text, already in
+/// the person's language.
+#[tauri::command]
+pub fn agent_request_attention(app: AppHandle, title: String, body: String) {
+    use tauri::Manager;
+    use tauri_plugin_notification::NotificationExt;
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if window.is_focused().unwrap_or(false) {
+        return;
+    }
+    let _ = window.request_user_attention(Some(tauri::UserAttentionType::Informational));
+    let title: String = title.chars().take(120).collect();
+    let body: String = body.chars().take(240).collect();
+    let _ = app.notification().builder().title(title).body(body).show();
+}

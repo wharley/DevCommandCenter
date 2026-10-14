@@ -2792,6 +2792,7 @@
         "conversationNotReady": "Esta conversa ainda não está pronta para controlar aplicativos.",
         "expired": "O pedido expirou. Peça ao agente para solicitar o acesso novamente.",
         "allow": "Permitir",
+        "taskWide": "Ao permitir, esta tarefa não pergunta de novo enquanto esses apps estiverem abertos.",
         "deny": "Negar",
         "unknownConversation": "Conversa desconhecida ({{id}})",
         "unknownWorkspace": "Workspace desconhecido ({{id}})"
@@ -4934,6 +4935,7 @@
       "remaining": "A solicitação expira em {{time}}",
       "deny": "Negar",
       "allow": "Abrir e permitir",
+      "taskWide": "Ao permitir, esta tarefa não pergunta de novo até você desligar o controle do agente.",
       "example": "Exemplo: https://example.com ou http://localhost:5173"
     },
     "open": "Abrir navegador",

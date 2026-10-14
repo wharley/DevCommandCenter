@@ -83,6 +83,15 @@ navigation, and that is the content changing, not the window being replaced.
 A grant ends after 10 minutes without a capture or action by the agent, and 1
 hour after approval at most. The user can revoke it at any time.
 
+One approval covers the task. When its grant lapses, or the task gets a new
+provider runtime, the next request re-arms the apps the person approved for
+that task, keeping those still running, without a card. Full access does not
+skip the card: pointer input moves the person's cursor and brings windows
+forward. Turning control off ends the task's approval, as does restarting DCC.
+Requests wait five minutes; Escape does not deny, and when DCC is not the
+focused window the Dock icon bounces and a system notification names the
+request.
+
 ## Failure messages
 
 Native effects return a status code (`DCC_COMPUTER_ERR_*` in

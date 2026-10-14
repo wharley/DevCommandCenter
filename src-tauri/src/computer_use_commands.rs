@@ -40,7 +40,9 @@ const ACTION_SETTLE_MAX: Duration = Duration::from_secs(3);
 const WEB_ACCESSIBILITY_WARMUP_POLL: Duration = Duration::from_millis(200);
 const WEB_ACCESSIBILITY_WARMUP_ATTEMPTS: usize = 6;
 const WEB_ACCESSIBILITY_RECONCILE_INTERVAL: Duration = Duration::from_secs(15);
-const CONTROL_REQUEST_TTL: Duration = Duration::from_secs(45);
+/// Long enough to notice and answer from another app; silence is not a
+/// refusal, a later request shows a new card.
+const CONTROL_REQUEST_TTL: Duration = Duration::from_secs(5 * 60);
 /// The MCP listener permits eight requests total. Four long-lived consent
 /// waits leave capacity for normal Browser and Computer tools.
 const MAX_PENDING_CONTROL_REQUESTS: usize = 4;
@@ -533,6 +535,10 @@ pub struct ComputerUseState {
     /// switched off again once no live grant allows that bundle.
     web_accessibility: Arc<Mutex<HashMap<i32, WebAccessibilityEntry>>>,
     web_accessibility_watcher: Arc<AtomicBool>,
+    /// Apps the person approved for each task (session). One approval covers
+    /// the task: a later request re-arms these apps without asking, until the
+    /// person turns control off or DCC restarts.
+    task_approved_apps: Arc<Mutex<HashMap<String, Vec<String>>>>,
 }
 
 impl Default for ComputerUseState {
@@ -552,6 +558,7 @@ impl ComputerUseState {
             preview_refreshing: Arc::new(Mutex::new(HashSet::new())),
             web_accessibility: Arc::new(Mutex::new(HashMap::new())),
             web_accessibility_watcher: Arc::new(AtomicBool::new(false)),
+            task_approved_apps: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -918,9 +925,13 @@ impl ComputerUseState {
         self.reconcile_web_accessibility();
         Ok(self.grant_status(Some(session_id)))
     }
+    /// The person turning control off also ends the task's approval.
     pub(crate) fn disarm(&self, session_id: &str) -> ComputerGrantStatus {
         if let Ok(mut grants) = self.grants.lock() {
             grants.remove(session_id);
+        }
+        if let Ok(mut approved) = self.task_approved_apps.lock() {
+            approved.remove(session_id);
         }
         self.clear_preview_frame(session_id);
         self.reconcile_web_accessibility();
@@ -970,6 +981,9 @@ impl ComputerUseState {
             );
         }
         if self.agent_status(session_id, expected_lease_id).grant.armed {
+            return Ok(self.agent_status(session_id, expected_lease_id));
+        }
+        if self.rearm_task_approval(session_id, expected_lease_id) {
             return Ok(self.agent_status(session_id, expected_lease_id));
         }
         let reason = normalized_control_reason(reason)?;
@@ -1037,6 +1051,9 @@ impl ComputerUseState {
                 let result = self.arm_for_lease(session_id, expected_lease_id, &allowed_bundle_ids);
                 let _ = completion.send(result.clone());
                 result?;
+                if let Ok(mut approved) = self.task_approved_apps.lock() {
+                    approved.insert(session_id.to_string(), allowed_bundle_ids.clone());
+                }
                 if !self.lease_matches(session_id, expected_lease_id) {
                     self.disarm_for_lease(session_id, expected_lease_id);
                     return Err(
@@ -1046,6 +1063,31 @@ impl ComputerUseState {
                 Ok(self.agent_status(session_id, expected_lease_id))
             }
         }
+    }
+
+    /// Re-arms the apps this task was already approved for, keeping only
+    /// those still running. `false` when the task has no approval or none of
+    /// its apps is available, so the person is asked again.
+    fn rearm_task_approval(&self, session_id: &str, expected_lease_id: &str) -> bool {
+        let Some(approved) = self
+            .task_approved_apps
+            .lock()
+            .ok()
+            .and_then(|approved| approved.get(session_id).cloned())
+        else {
+            return false;
+        };
+        let Ok(available) = self.native.targets() else {
+            return false;
+        };
+        let running: Vec<String> = approved
+            .into_iter()
+            .filter(|bundle| available.iter().any(|target| &target.bundle_id == bundle))
+            .collect();
+        !running.is_empty()
+            && self
+                .arm_for_lease(session_id, expected_lease_id, &running)
+                .is_ok()
     }
 
     pub(crate) fn pending_control_requests(&self) -> ComputerUsePendingRequestsOutput {
@@ -2641,6 +2683,55 @@ mod tests {
         assert!(response.grant.armed);
         assert!(waiting.await.unwrap().unwrap().grant.armed);
         assert!(state.pending_control_requests().requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn one_approval_covers_the_task_until_the_person_turns_it_off() {
+        let native = Arc::new(FakeNative::with_target());
+        let state = ComputerUseState::with_native(native);
+        state.record_projection("session", "lease");
+        let waiting = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                state
+                    .request_control("session", "workspace", "provider", "lease", "edit")
+                    .await
+            })
+        };
+        let request = next_pending_request(&state).await;
+        state
+            .respond_control_request(&request.request_id, true, &["com.example.Editor".to_string()])
+            .await
+            .unwrap();
+        assert!(waiting.await.unwrap().unwrap().grant.armed);
+
+        // The grant lapses (idle, or a new provider runtime for the task)...
+        state.grants.lock().unwrap().remove("session");
+        state.record_projection("session", "lease-2");
+        // ...and the task's next request re-arms the same app without a card.
+        let again = state
+            .request_control("session", "workspace", "provider", "lease-2", "edit more")
+            .await
+            .unwrap();
+        assert!(again.grant.armed);
+        assert!(state.pending_control_requests().requests.is_empty());
+
+        // Turning control off ends the task's approval: the next one asks.
+        state.disarm("session");
+        let asking = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                state
+                    .request_control("session", "workspace", "provider", "lease-2", "edit")
+                    .await
+            })
+        };
+        let request = next_pending_request(&state).await;
+        state
+            .respond_control_request(&request.request_id, false, &[])
+            .await
+            .unwrap();
+        assert!(asking.await.unwrap().is_err());
     }
 
     #[tokio::test]

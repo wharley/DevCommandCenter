@@ -21,7 +21,9 @@ use crate::browser_commands::{
     revoke_browser_approved_lease, validate_browser_url, BrowserControlStatus, BrowserState,
 };
 
-pub const BROWSER_AGENT_REQUEST_TTL: Duration = Duration::from_secs(45);
+/// Long enough to notice and answer from another app; silence is not a
+/// refusal, a later open asks again.
+pub const BROWSER_AGENT_REQUEST_TTL: Duration = Duration::from_secs(5 * 60);
 const MAX_REASON_CHARS: usize = 500;
 const MAX_PENDING_REQUESTS: usize = 64;
 /// The bridge admits at most 128 live leases. Retain a small bounded tail so
@@ -47,6 +49,11 @@ pub struct BrowserAgentRequestView {
     pub url: String,
     pub reason: String,
     pub expires_at_ms: u64,
+    /// The task needs no prompt (Full access, or the person already allowed
+    /// it). The window opens it at once when that task is on screen, and
+    /// asks otherwise, since opening it would take the person's screen.
+    #[serde(default)]
+    pub preapproved: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,6 +121,10 @@ pub struct BrowserAgentRequestBroker {
     pending: Arc<Mutex<HashMap<String, PendingRequest>>>,
     revoked_leases: Arc<Mutex<HashSet<(String, String)>>>,
     revoked_lease_order: Arc<Mutex<VecDeque<(String, String)>>>,
+    /// Tasks (sessions) whose Browser open the person already allowed. One
+    /// approval covers the task, like Synara's routine-action consent; it
+    /// ends when the person turns agent control off or DCC restarts.
+    approved_sessions: Arc<Mutex<HashSet<String>>>,
 }
 
 /// Dropping an HTTP/MCP future is cancellation, not an abandoned approval.
@@ -132,11 +143,23 @@ impl Drop for PendingRequestGuard {
 }
 
 impl BrowserAgentRequestBroker {
+    #[cfg(test)]
     pub async fn request_open(
         &self,
         scope: BrowserAgentRequestScope,
         url: String,
         reason: String,
+    ) -> BrowserAgentOpenResult {
+        self.request_open_with(scope, url, reason, false).await
+    }
+
+    /// `request_open` for a task that may need no prompt (`preapproved`).
+    pub async fn request_open_with(
+        &self,
+        scope: BrowserAgentRequestScope,
+        url: String,
+        reason: String,
+        preapproved: bool,
     ) -> BrowserAgentOpenResult {
         if !valid_scope(&scope)
             || validate_browser_url(&url).is_err()
@@ -158,6 +181,7 @@ impl BrowserAgentRequestBroker {
             url,
             reason,
             expires_at_ms,
+            preapproved,
         };
         let (completion, receiver) = oneshot::channel();
         {
@@ -287,6 +311,9 @@ impl BrowserAgentRequestBroker {
                             &request.scope.lease_id,
                         ) =>
                     {
+                        if let Ok(mut approved) = self.approved_sessions.lock() {
+                            approved.insert(request.scope.session_id.clone());
+                        }
                         BrowserAgentOpenResult {
                             status: BrowserAgentOpenStatus::Approved,
                             lifecycle_token: Some(token),
@@ -319,6 +346,20 @@ impl BrowserAgentRequestBroker {
         }
         request.claimed = true;
         Some(request.view.clone())
+    }
+
+    /// Whether the person already allowed a Browser open in this task.
+    pub fn task_approved(&self, session_id: &str) -> bool {
+        self.approved_sessions
+            .lock()
+            .is_ok_and(|approved| approved.contains(session_id))
+    }
+
+    /// Ends the task's approval, when the person turns agent control off.
+    pub fn forget_task_approval(&self, session_id: &str) {
+        if let Ok(mut approved) = self.approved_sessions.lock() {
+            approved.remove(session_id);
+        }
     }
 
     /// The open request with this id, whoever it belongs to.
@@ -572,6 +613,7 @@ mod tests {
                     url: "https://example.com".into(),
                     reason: "open".into(),
                     expires_at_ms: now_ms() + 30_000,
+                    preapproved: false,
                 },
                 completion,
                 claimed: false,
@@ -723,6 +765,7 @@ mod tests {
                     url: "https://example.com".into(),
                     reason: "open".into(),
                     expires_at_ms: 0,
+                    preapproved: false,
                 },
                 completion,
                 claimed: false,

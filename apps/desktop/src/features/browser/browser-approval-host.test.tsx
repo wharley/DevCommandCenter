@@ -42,9 +42,12 @@ beforeEach(() => {
 	container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); vi.useRealTimers(); });
-async function render(sessions: WorkspaceSessionSummary[]) {
-	await act(async () => root.render(<QueryClientProvider client={client}><BrowserApprovalHost workspaceSessions={sessions} onApproved={onApproved} /></QueryClientProvider>));
+async function mount(sessions: WorkspaceSessionSummary[], visibleSessionId: string | null = null) {
+	await act(async () => root.render(<QueryClientProvider client={client}><BrowserApprovalHost workspaceSessions={sessions} visibleSessionId={visibleSessionId} onApproved={onApproved} /></QueryClientProvider>));
 	await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+}
+async function render(sessions: WorkspaceSessionSummary[]) {
+	await mount(sessions);
 	expect(document.body.textContent).toContain(request.reason);
 }
 const onApproved = vi.fn();
@@ -57,6 +60,32 @@ describe("Browser approval host", () => {
 		await act(async () => button("browser.approval.allow").click());
 		expect(onApproved).toHaveBeenCalledExactlyOnceWith(request);
 		expect(mocks.resolve).not.toHaveBeenCalled();
+	});
+
+	it("opens a preapproved request at once when its task is on screen", async () => {
+		const preapproved = { ...request, preapproved: true };
+		mocks.list.mockResolvedValue([preapproved]);
+		mocks.claim.mockImplementation(async () => preapproved);
+		await mount([session("workspace-a", "session-a", "Target conversation")], "session-a");
+		expect(mocks.claim).toHaveBeenCalledOnce();
+		expect(onApproved).toHaveBeenCalledExactlyOnceWith(preapproved);
+		expect(document.body.textContent).not.toContain(request.reason);
+	});
+
+	it("still asks for a preapproved request of a task the person is not looking at", async () => {
+		mocks.list.mockResolvedValue([{ ...request, preapproved: true }]);
+		await mount([session("workspace-a", "session-a", "Target conversation")], "other-session");
+		expect(document.body.textContent).toContain(request.reason);
+		expect(mocks.claim).not.toHaveBeenCalled();
+	});
+
+	it("does not deny when the card is dismissed with Escape", async () => {
+		await render([session("workspace-a", "session-a", "Target conversation")]);
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		});
+		expect(mocks.resolve).not.toHaveBeenCalled();
+		expect(document.body.textContent).toContain(request.reason);
 	});
 
 	it("denies without opening or acknowledging", async () => {
@@ -124,7 +153,7 @@ describe("Browser approval host", () => {
 
 	it("opens an outside approval even when the hidden main window had not listed it", async () => {
 		mocks.list.mockResolvedValue([]);
-		await act(async () => root.render(<QueryClientProvider client={client}><BrowserApprovalHost workspaceSessions={[]} onApproved={onApproved} /></QueryClientProvider>));
+		await act(async () => root.render(<QueryClientProvider client={client}><BrowserApprovalHost workspaceSessions={[]} visibleSessionId={null} onApproved={onApproved} /></QueryClientProvider>));
 		await act(async () => { await vi.advanceTimersByTimeAsync(10); });
 		await act(async () => mocks.listen.mock.calls[0][0](request));
 		expect(onApproved).toHaveBeenCalledExactlyOnceWith(request);

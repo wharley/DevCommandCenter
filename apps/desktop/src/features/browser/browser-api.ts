@@ -26,6 +26,8 @@ export type BrowserOpenRequest = {
 	url: string;
 	reason: string;
 	expiresAtMs: number;
+	/** The task needs no prompt; it opens at once while that task is on screen. */
+	preapproved?: boolean;
 };
 
 /** Metadata only: no cookie or credential values cross the native boundary. */

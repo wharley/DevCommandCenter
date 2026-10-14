@@ -6029,7 +6029,11 @@ export default function App() {
 				}
 			/>
 			<ComputerUseApprovalHost workspaceSessions={workspaceSessions} />
-			<BrowserApprovalHost workspaceSessions={workspaceSessions} onApproved={handleBrowserOpenApproved} />
+			<BrowserApprovalHost
+				workspaceSessions={workspaceSessions}
+				visibleSessionId={effectiveSelectedSessionId}
+				onApproved={handleBrowserOpenApproved}
+			/>
 			<SkillsDialog
 				open={isSkillsOpen}
 				onOpenChange={setIsSkillsOpen}

@@ -20,6 +20,7 @@ import {
 	respondComputerUseControlRequest,
 	type ComputerUseAccessKind,
 } from "@/lib/computer-use-api";
+import { useAgentRequestAttention } from "@/lib/agent-request-attention";
 
 type ComputerUseApprovalHostProps = {
 	workspaceSessions: WorkspaceSessionSummary[];
@@ -59,6 +60,11 @@ export function ComputerUseApprovalHost({
 		staleTime: 0,
 	});
 	const request = pendingQuery.data?.[0] ?? null;
+	useAgentRequestAttention(
+		request?.requestId ?? null,
+		t("settings.computerUse.approval.title"),
+		request?.reason ?? "",
+	);
 	const statusQuery = useQuery({
 		queryKey: ["computer-use", "approval-status", request?.requestId, request?.sessionId],
 		queryFn: () => getComputerUseStatus(request?.sessionId ?? null),
@@ -207,13 +213,12 @@ export function ComputerUseApprovalHost({
 		<>
 			<Dialog
 			open={Boolean(request && remainingMs > 0)}
-			onOpenChange={(open) => {
-				if (!open) void decide(false);
-			}}
+			// Only the buttons answer: Esc or a click outside must not deny.
+			onOpenChange={() => {}}
 		>
 			<DialogContent
 				className="flex max-h-[min(88vh,760px)] w-[min(92vw,560px)] max-w-[560px] flex-col overflow-hidden"
-				showCloseButton={!busyDecision}
+				showCloseButton={false}
 			>
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
@@ -221,7 +226,8 @@ export function ComputerUseApprovalHost({
 						{t("settings.computerUse.approval.title")}
 					</DialogTitle>
 					<DialogDescription>
-						{t("settings.computerUse.approval.description")}
+						{t("settings.computerUse.approval.description")}{" "}
+						{t("settings.computerUse.approval.taskWide")}
 					</DialogDescription>
 				</DialogHeader>
 				{request && (

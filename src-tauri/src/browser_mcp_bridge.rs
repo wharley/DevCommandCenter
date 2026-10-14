@@ -98,8 +98,33 @@ const DCC_MCP_TOOL_COUNT: usize =
 const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_DELEGATED_TASK_CHARS: usize = 32_000;
 const MAX_DELEGATED_TITLE_CHARS: usize = 80;
-const COMPUTER_CONTROL_REQUEST_HTTP_TIMEOUT: Duration = Duration::from_secs(50);
+/// A little past the five minutes a Browser or computer-use approval waits.
+const COMPUTER_CONTROL_REQUEST_HTTP_TIMEOUT: Duration = Duration::from_secs(5 * 60 + 10);
 const DCC_MCP_SERVER_INSTRUCTIONS: &str = "DCC exposes browser and desktop tools for this session. For a web task, call dcc_browser_status first. If the target is not open, call dcc_browser_open with an explicit HTTP(S) URL and a concise reason. It waits for the user to approve the visible DCC Browser. At sign-in, MFA, CAPTCHA, payment, or identity-sensitive steps, let the user complete the handoff; never request, copy, import, or invent cookies, passwords, or credentials. The user can use the Browser Sessions menu to import an eligible existing site session locally or sign in manually, including in an owned login popup; agents never receive or import cookies. After every navigation, click, fill, select, key press, reload, or user handoff, call dcc_browser_context again and use its fresh anchors before reporting a result, login state, or blocker; never infer one from the action alone. Do not use curl or another HTTP client to judge that Browser's authenticated access. Computer Use is a separate capability for an explicitly user-requested external desktop-app task; it is never an automatic Browser fallback. Its observation is a screenshot plus an element list: act on a listed element by ref, and use x/y on the screenshot only for what the list does not show. Every action returns the window as it looks afterwards with a new generation; check it before reporting a result. To hand a bounded task to another coding agent (another provider or model), call dcc_delegate_task: it returns a taskId at once and DCC later delivers the result into this conversation as a message starting with [DCC] (mid-turn when you are still working). Continue independent work or end your turn instead of polling; pass wait=true, or call dcc_task_wait, only when you cannot continue without the result.";
+
+/// Whether the task's latest turn runs with Full access, which allows the
+/// visible DCC Browser without a prompt.
+async fn session_runs_in_full_access(sessions: &SessionCommandState, session_id: &str) -> bool {
+    use dcc_core::domain::{
+        provider::ProviderApprovalPolicy,
+        session::{SessionEventKind, SessionId},
+    };
+    let Ok(events) =
+        dcc_core::ports::SessionEventRepo::list_events_by_session(
+            sessions,
+            &SessionId(session_id.to_string()),
+        )
+        .await
+    else {
+        return false;
+    };
+    events.iter().rev().find_map(|event| match &event.kind {
+        SessionEventKind::TurnStarted {
+            approval_policy, ..
+        } => Some(*approval_policy == Some(ProviderApprovalPolicy::FullAccess)),
+        _ => None,
+    }) == Some(true)
+}
 
 fn browser_mcp_tool_policies() -> Vec<ProviderMcpToolPolicy> {
     // This override belongs only to DCC's ephemeral, lease-bound loopback
@@ -1482,9 +1507,14 @@ async fn dispatch_tool(
                 if !bridge.lease_is_current(binding) {
                     return ToolDispatch::rejected();
                 }
+                // Like Synara: a task in Full access, or one the person already
+                // allowed, needs no prompt. The window still decides, because
+                // opening the Browser shows that task on the person's screen.
+                let preapproved = bridge.browser_requests.task_approved(&binding.session_id)
+                    || session_runs_in_full_access(&bridge.sessions, &binding.session_id).await;
                 let result = bridge
                     .browser_requests
-                    .request_open(
+                    .request_open_with(
                         BrowserAgentRequestScope {
                             workspace_id: binding.workspace_id.clone(),
                             session_id: binding.session_id.clone(),
@@ -1493,6 +1523,7 @@ async fn dispatch_tool(
                         },
                         args.url,
                         args.reason,
+                        preapproved,
                     )
                     .await;
                 ToolDispatch::executed(

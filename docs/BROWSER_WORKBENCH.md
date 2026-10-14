@@ -47,17 +47,28 @@ an explicit button click; it does not depend on macOS notification permissions.
 **Deny** responds without opening DCC. **Open and allow** opens the integrated
 Browser in the requesting conversation in the background, preserving DCC's hidden
 or minimized state and the user's foreground app. Approval is completed only after
-the native Browser acknowledges the matching lifecycle. Requests retain their
-45-second deadline, disappear on cancellation or expiry, and are shown in queue
-order. The native process watches the queue even when the main WebView is inactive.
-Other platforms retain the in-app approval dialog.
+the native Browser acknowledges the matching lifecycle. Requests wait five minutes,
+disappear on cancellation or expiry, and are shown in queue order; an unanswered
+request is not a refusal, and the next open asks again. Only the buttons answer:
+Escape or a click outside the in-app dialog leaves the request waiting. When DCC
+is not the focused window, the Dock icon bounces and a system notification names
+the request. The native process watches the queue even when the main WebView is
+inactive. Other platforms retain the in-app approval dialog.
+
+One approval covers the task, as Synara does for routine actions. A task whose
+latest turn runs in Full access, or one the person already allowed, sends a
+preapproved request: it opens at once while that task is on screen, and still
+shows the card otherwise, because opening it would move the person's screen to
+another task. Turning agent control off ends the task's approval, as does
+restarting DCC.
 
 On macOS 14+, background suspension is disabled for the main renderer and Browser
 so approvals and page work can continue while DCC is hidden. Older macOS versions
 do not support this WebKit policy and may still throttle background work.
 
-The person can grant Browser control for at most 60 seconds. DCC keeps the grant bound
-to workspace, session, Browser lifecycle, and the projected provider lease.
+The manual control switch grants 60 seconds. An approved open grants 10 minutes,
+renewed by each agent action. DCC keeps the grant bound to workspace, session,
+Browser lifecycle, and the projected provider lease.
 
 The provider-neutral Browser tools support:
 
