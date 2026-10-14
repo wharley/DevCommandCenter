@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { memo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { workingBranchLabel } from "@/features/workspaces/working-branch";
 import type { WorkspaceSetupReport } from "@dcc/contracts";
 import {
 	Popover,
@@ -58,8 +59,7 @@ export const ExecutionContextRail = memo(function ExecutionContextRail({
 	const multiProject = contextProjects.length > 1;
 	const displayedProject =
 		projectLabel || t("composer.executionDock.projectFallback");
-	const workingBranch =
-		currentBranch && currentBranch !== "HEAD" ? currentBranch : baseBranch;
+	const workingBranch = workingBranchLabel(currentBranch, baseBranch, t);
 	const visibleProjects = multiProject
 		? contextProjects.slice(0, 3)
 		: [

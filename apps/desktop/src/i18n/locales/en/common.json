@@ -5287,6 +5287,10 @@
     "accountLeft": "{{percent}}% left",
     "accountExhausted": "no limit left"
   },
+  "workingBranch": {
+    "detached": "{{branch}} · no branch",
+    "detachedNoBase": "no branch"
+  },
   "providerSetup": {
     "notSignedIn": "Not signed in. Sign in and try again.",
     "notSignedInCommand": "Not signed in. Run {{command}} in a terminal and try again.",

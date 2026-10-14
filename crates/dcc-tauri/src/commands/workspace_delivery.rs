@@ -726,6 +726,7 @@ mod tests {
             behind_of_remote_count: 0,
             conflict_count: 0,
             merge_in_progress: false,
+            has_remote: true,
         }
     }
 

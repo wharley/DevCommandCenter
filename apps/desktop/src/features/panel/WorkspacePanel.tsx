@@ -1102,6 +1102,7 @@ export function WorkspacePanel({
 			branchAdditions: branchEntries.reduce((sum, entry) => sum + entry.insertions, 0),
 			branchDeletions: branchEntries.reduce((sum, entry) => sum + entry.deletions, 0),
 			aheadOfRemoteCount: status?.aheadOfRemoteCount ?? 0,
+			hasRemote: status?.hasRemote,
 			pullRequestState: pullRequestQuery.data?.state ?? null,
 			pullRequestNumber: pullRequestQuery.data?.number ?? null,
 		};

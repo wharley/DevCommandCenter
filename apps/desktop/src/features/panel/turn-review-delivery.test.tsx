@@ -99,6 +99,7 @@ beforeEach(() => {
 		behindOfRemoteCount: 0,
 		conflictCount: 0,
 		mergeInProgress: false,
+		hasRemote: true,
 	};
 	vi.mocked(api.workspaceGitStatus).mockImplementation(async () =>
 		structuredClone(status),
@@ -150,7 +151,7 @@ afterEach(async () => {
 });
 
 describe("live commit review", () => {
-	it("opens the current index without staging anything and commits only its fingerprint", async () => {
+	it("leaves a hand-staged index as it is and commits only its fingerprint", async () => {
 		await render("commit");
 		expect(document.body.textContent).toContain("src/current.ts");
 		expect(document.body.textContent).toContain("src/new.ts");
@@ -216,10 +217,18 @@ describe("live commit review", () => {
 		expect(document.body.textContent).toContain("hook rejected commit");
 		expect(close).not.toHaveBeenCalled();
 	});
-	it("does not stage automatically when nothing is prepared", async () => {
+	it("stages every change on open when nothing is prepared yet", async () => {
 		status.staged = [];
 		await render("commit");
-		expect(button("turnReview.delivery.confirmCommit").disabled).toBe(true);
+		expect(api.workspaceGitStageAll).toHaveBeenCalledExactlyOnceWith({
+			workspaceRoot: rootPath,
+			relativePath: ".",
+		});
+	});
+	it("does not stage on open while a merge is in progress", async () => {
+		status.staged = [];
+		status.mergeInProgress = true;
+		await render("commit");
 		expect(api.workspaceGitStageAll).not.toHaveBeenCalled();
 	});
 });

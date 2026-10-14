@@ -38,13 +38,19 @@ import {
 } from "@/features/commit/workspace-delivery-busy";
 import {
 	workspaceGitCommit,
+	workspaceGitStageAll,
 	workspaceGitStageFile,
 	workspaceGitStatus,
 	workspaceGitUnstageFile,
 } from "@/lib/workspace-api";
 import { TurnReviewStats } from "./turn-review-file-label";
 
-/** Live index review. Opening it never stages files or uses the historical patch. */
+/**
+ * Live index review; it never uses the historical patch. When nothing is
+ * staged yet it stages every change on open, like the Dock's commit does, so
+ * the commit is one click with the deterministic message filled in. Anything
+ * the person already staged by hand is left exactly as it is.
+ */
 export function TurnReviewCommitDialog({
 	workspaceRoot,
 	onClose,
@@ -99,7 +105,20 @@ export function TurnReviewCommitDialog({
 
 	useEffect(() => {
 		alive.current = true;
-		void refresh()
+		const open = async () => {
+			const status = await workspaceGitStatus({ workspaceRoot });
+			if (
+				status.staged.length === 0 &&
+				status.unstaged.length > 0 &&
+				!status.mergeInProgress &&
+				status.conflictCount === 0 &&
+				!isWorkspaceDeliveryBusy(workspaceRoot)
+			) {
+				await workspaceGitStageAll({ workspaceRoot, relativePath: "." });
+			}
+			await refresh();
+		};
+		void open()
 			.catch((cause) => {
 				if (alive.current) setError(String(cause));
 			})

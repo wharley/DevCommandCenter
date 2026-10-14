@@ -600,6 +600,9 @@ pub struct WorkspaceGitStatusOutput {
     pub behind_of_remote_count: u32,
     pub conflict_count: u32,
     pub merge_in_progress: bool,
+    /// The repository has at least one remote, so push and pull requests have
+    /// somewhere to go. Without one, delivery stops at a local commit.
+    pub has_remote: bool,
 }
 
 /// The only input accepted by the commit-message suggestion operation is the
@@ -1319,6 +1322,17 @@ fn resolve_upstream_branch_counts(root: &str) -> Result<(u32, u32), String> {
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);
     Ok((ahead, behind))
+}
+
+/// Unknown counts as present: hiding push on a git hiccup would be worse than
+/// offering it to a repository that turns out to have no remote.
+fn resolve_has_remote(root: &str) -> bool {
+    match run_git_output(root, &["remote"]) {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| !line.trim().is_empty()),
+        _ => true,
+    }
 }
 
 fn resolve_conflict_count(root: &str) -> Result<u32, String> {
@@ -4708,6 +4722,7 @@ pub(crate) fn workspace_git_status_inner(workspace_root: &str) -> Result<Workspa
             behind_of_remote_count: 0,
             conflict_count: 0,
             merge_in_progress: false,
+            has_remote: false,
         });
     }
 
@@ -4786,6 +4801,7 @@ pub(crate) fn workspace_git_status_inner(workspace_root: &str) -> Result<Workspa
         resolve_upstream_branch_counts(root).unwrap_or((0, 0));
     let conflict_count = resolve_conflict_count(root).unwrap_or(0);
     let merge_in_progress = git_internal_path_exists(root, "MERGE_HEAD");
+    let has_remote = resolve_has_remote(root);
 
     Ok(WorkspaceGitStatusOutput {
         staged,
@@ -4796,6 +4812,7 @@ pub(crate) fn workspace_git_status_inner(workspace_root: &str) -> Result<Workspa
         behind_of_remote_count,
         conflict_count,
         merge_in_progress,
+        has_remote,
     })
 }
 

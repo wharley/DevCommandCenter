@@ -19,6 +19,7 @@ import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-st
 import { useWorkspaceForgeContext } from "@/features/inspector/use-workspace-forge-context";
 import { useWorkspacePrStatus } from "@/features/inspector/use-workspace-pr-status";
 import { useWorkspaceGitBranchDiff } from "@/features/inspector/use-workspace-git-branch-diff";
+import { workingBranchLabel } from "@/features/workspaces/working-branch";
 import { workspaceGitStatus } from "@/lib/workspace-api";
 import { TurnReviewCommitDialog } from "./turn-review-commit-dialog";
 
@@ -138,9 +139,9 @@ export function TurnReviewDelivery({
 					className="dcc-turn-review-delivery-branch"
 					title={branch ?? undefined}
 				>
-					{branch ?? t("turnReview.delivery.noBranch")}
+					{workingBranchLabel(branch, base, t) ?? t("turnReview.delivery.noBranch")}
 				</span>
-				<span>{t("turnReview.delivery.liveBranch")}</span>
+				{branch === "HEAD" ? null : <span>{t("turnReview.delivery.liveBranch")}</span>}
 				{ahead > 0 && (
 					<span>{t("turnReview.delivery.ahead", { count: ahead })}</span>
 				)}

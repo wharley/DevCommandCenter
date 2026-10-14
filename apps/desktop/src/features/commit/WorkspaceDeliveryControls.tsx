@@ -62,6 +62,7 @@ export function WorkspaceDeliveryControls({
 				hasChangeRequest: Boolean(changeSummary?.pullRequestState?.trim()),
 				hasOpenRequest:
 					changeSummary?.pullRequestState?.trim().toLowerCase() === "open",
+				hasRemote: changeSummary?.hasRemote,
 			}),
 		[actionLoading, changeSummary, commitMode, multiProject],
 	);

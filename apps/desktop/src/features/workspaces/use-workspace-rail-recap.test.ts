@@ -21,6 +21,7 @@ const cleanGitStatus: WorkspaceGitStatusOutput = {
 	behindOfRemoteCount: 0,
 	conflictCount: 0,
 	mergeInProgress: false,
+	hasRemote: true,
 };
 
 const noPr: WorkspacePrStatusOutput = {

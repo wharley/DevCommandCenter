@@ -28,6 +28,7 @@ export function useWorkspaceGitStatus(
 					behindOfRemoteCount: 0,
 					conflictCount: 0,
 					mergeInProgress: false,
+					hasRemote: true,
 				};
 			}
 			return workspaceGitStatus({ workspaceRoot: root });

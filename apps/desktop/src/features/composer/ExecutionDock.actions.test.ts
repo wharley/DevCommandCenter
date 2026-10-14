@@ -98,4 +98,32 @@ describe("resolveExecutionDockActions", () => {
 		expect(actions.some((action) => action.id === "create-pr")).toBe(false);
 	});
 
+	it("stops at a local commit when the repository has no remote", () => {
+		const base = {
+			mode: "commit-and-push" as const,
+			loading: false,
+			multiProject: false,
+			hasLocalChanges: true,
+			hasBranchChanges: true,
+			hasAheadCommits: true,
+			hasChangeRequest: false,
+			hasOpenRequest: false,
+			hasRemote: false,
+		};
+		const actions = resolveExecutionDockActions(base);
+		expect(actions[0]).toMatchObject({ mode: "commit", kind: "execute", disabled: false, primary: true });
+		const byId = Object.fromEntries(actions.map((action) => [action.id, action.disabled]));
+		expect(byId["commit-and-push"]).toBe(true);
+		expect(byId.push).toBe(true);
+		expect(byId["create-pr"]).toBe(true);
+		expect(byId["create-draft-pr"]).toBe(true);
+		expect(actions.filter((action) => action.mode === "commit")).toHaveLength(1);
+
+		expect(resolveExecutionDockActions({ ...base, mode: "create-pr", hasLocalChanges: false })[0])
+			.toMatchObject({ mode: "commit", disabled: true });
+		expect(resolveExecutionDockActions({ ...base, mode: "resolve-conflicts" })[0])
+			.toMatchObject({ kind: "review" });
+		expect(resolveExecutionDockActions({ ...base, hasRemote: undefined })[0])
+			.toMatchObject({ mode: "commit-and-push" });
+	});
 });

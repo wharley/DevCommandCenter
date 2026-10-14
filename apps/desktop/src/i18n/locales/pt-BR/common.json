@@ -5287,6 +5287,10 @@
     "accountLeft": "{{percent}}% livre",
     "accountExhausted": "sem limite agora"
   },
+  "workingBranch": {
+    "detached": "{{branch}} · sem branch",
+    "detachedNoBase": "sem branch"
+  },
   "providerSetup": {
     "notSignedIn": "Não está logado. Faça login e tente de novo.",
     "notSignedInCommand": "Não está logado. Rode {{command}} no terminal e tente de novo.",

@@ -8,6 +8,8 @@ export type ExecutionDockChangeSummary = {
 	branchAdditions: number;
 	branchDeletions: number;
 	aheadOfRemoteCount: number;
+	/** False when the repository has no remote; omitted counts as present. */
+	hasRemote?: boolean;
 	pullRequestState?: string | null;
 	pullRequestNumber?: number | null;
 };

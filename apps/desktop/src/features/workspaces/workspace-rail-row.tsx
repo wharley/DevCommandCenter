@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { workingBranchLabel } from "./working-branch";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -435,7 +436,7 @@ export const WorkspaceRailRowItem = memo(
 				? t(nextActionKey, { ...railRecap?.recap.params, defaultValue: recapMessage })
 				: null;
 		const railMeta = metadataEnabled ? railState.meta : null;
-		const branchLabel = railState.currentBranch || workspace.branch || null;
+		const branchLabel = workingBranchLabel(railState.currentBranch, workspace.branch, t);
 		const hasPriorityWorkspaceStatus = workspaceRailStatusTakesRecapSlot(
 			workspace.status,
 			Boolean(recapMessage),

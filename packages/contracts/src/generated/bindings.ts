@@ -3516,6 +3516,11 @@ export type WorkspaceGitStatusOutput = {
 	behindOfRemoteCount: number,
 	conflictCount: number,
 	mergeInProgress: boolean,
+	/**
+	 *  The repository has at least one remote, so push and pull requests have
+	 *  somewhere to go. Without one, delivery stops at a local commit.
+	 */
+	hasRemote: boolean,
 };
 
 export type WorkspaceGitSyncBaseInput = {
