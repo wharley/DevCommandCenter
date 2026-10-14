@@ -1911,6 +1911,8 @@
       "favoritesEmpty": "Tap the ★ on a model to pin it here with the current effort.",
       "providerUnavailable": "{{provider}} needs setup",
       "openSetup": "Open setup",
+      "hiddenProviders_one": "{{count}} provider needs setup · Set up",
+      "hiddenProviders_other": "{{count}} providers need setup · Set up",
       "managedEffort": "Automatic effort",
       "directOn": "Direct responses on",
       "directOff": "Direct responses off"

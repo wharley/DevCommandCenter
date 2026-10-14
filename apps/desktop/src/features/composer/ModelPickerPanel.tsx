@@ -12,7 +12,7 @@ import { Check, Plus, RotateCcw, Search, Sparkles, Star, Zap } from "lucide-reac
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 import { ProviderAccountStrip } from "@/features/providers/provider-account-strip";
-import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
+import { getProviderSetupReason } from "@/features/providers/provider-selection.logic";
 import { openSettingsSection } from "@/features/settings/settings-navigation";
 import { cn } from "@/lib/utils";
 import { clampEffort, DEFAULT_EFFORT_LEVEL, getEffortDisplay } from "./effort";
@@ -31,6 +31,7 @@ import {
 	isModelFavorited,
 	MAX_SHORTCUT_ROWS,
 	pickerProviders,
+	providersNeedingSetup,
 	shortcutRowIndex,
 	type ModelPickerRow,
 } from "./model-picker.logic";
@@ -86,7 +87,14 @@ export function ModelPickerPanel({
 }: ModelPickerPanelProps) {
 	const { t } = useTranslation("common");
 	const favorites = useModelFavorites();
-	const visibleProviders = useMemo(() => pickerProviders(providers), [providers]);
+	const visibleProviders = useMemo(
+		() => pickerProviders(providers, selectedProviderId),
+		[providers, selectedProviderId],
+	);
+	const hiddenProviders = useMemo(
+		() => providersNeedingSetup(providers, selectedProviderId),
+		[providers, selectedProviderId],
+	);
 	const [activeTab, setActiveTab] = useState(() =>
 		initialModelPickerTab({ providers, favorites, selectedProviderId }),
 	);
@@ -100,10 +108,10 @@ export function ModelPickerPanel({
 		[visibleProviders],
 	);
 	const activeProvider = visibleProviders.find((provider) => provider.id === activeTab) ?? null;
-	const setupReason = activeProvider ? getProviderUnhealthyReason(activeProvider) : null;
+	const setupReason = activeProvider ? getProviderSetupReason(activeProvider) : null;
 	const rows = useMemo(
-		() => buildModelPickerRows({ providers, favorites, activeTab, query }),
-		[providers, favorites, activeTab, query],
+		() => buildModelPickerRows({ providers, favorites, activeTab, query, selectedProviderId }),
+		[providers, favorites, activeTab, query, selectedProviderId],
 	);
 	const effortLabel = (effort: string) =>
 		t(`composer.effort.${effort}`, { defaultValue: getEffortDisplay(effort).label });
@@ -219,7 +227,7 @@ export function ModelPickerPanel({
 				>
 					{tabs.map((tab) => {
 						const provider = visibleProviders.find((entry) => entry.id === tab);
-						const reason = provider ? getProviderUnhealthyReason(provider) : null;
+						const reason = provider ? getProviderSetupReason(provider) : null;
 						const label = provider
 							? reason
 								? t("composer.picker.providerUnavailable", { provider: provider.label })
@@ -420,6 +428,20 @@ export function ModelPickerPanel({
 					</button>
 				) : null}
 			</div>
+
+			{hiddenProviders.length > 0 ? (
+				<button
+					type="button"
+					title={hiddenProviders.map((provider) => provider.label).join(", ")}
+					onClick={() => {
+						onDone();
+						openSettingsSection("model");
+					}}
+					className="shrink-0 border-t border-border/60 px-3 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+				>
+					{t("composer.picker.hiddenProviders", { count: hiddenProviders.length })}
+				</button>
+			) : null}
 
 			<EffortSection
 				levels={availableEffortLevels}

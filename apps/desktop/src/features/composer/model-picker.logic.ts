@@ -1,5 +1,8 @@
 import type { ProviderCatalog } from "@dcc/contracts";
-import { isProviderEnabled } from "@/features/providers/provider-selection.logic";
+import {
+	isProviderEnabled,
+	isProviderReady,
+} from "@/features/providers/provider-selection.logic";
 import {
 	modelFavoriteKey,
 	resolveModelFavorite,
@@ -24,12 +27,33 @@ export type ModelPickerRow = {
 };
 
 /**
- * Providers switched off in Settings never reach the picker. The catalog still
- * carries them (history labels and Settings need them), so the hiding is a
- * picker concern, like Synara and T3 Code do it.
+ * Only providers that can start reach the picker: switched on and healthy.
+ * The catalog still carries the rest (history labels and Settings need them),
+ * so the hiding is a picker concern. The provider already selected stays, so a
+ * conversation on a provider that broke still shows why.
  */
-export function pickerProviders(providers: ProviderCatalog["providers"]) {
-	return providers.filter(isProviderEnabled);
+export function pickerProviders(
+	providers: ProviderCatalog["providers"],
+	keepProviderId: string | null = null,
+) {
+	return providers.filter(
+		(provider) =>
+			isProviderReady(provider) ||
+			(provider.id === keepProviderId && isProviderEnabled(provider)),
+	);
+}
+
+/** Switched-on providers the picker leaves out because they need setup. */
+export function providersNeedingSetup(
+	providers: ProviderCatalog["providers"],
+	keepProviderId: string | null = null,
+) {
+	return providers.filter(
+		(provider) =>
+			isProviderEnabled(provider) &&
+			!isProviderReady(provider) &&
+			provider.id !== keepProviderId,
+	);
 }
 
 /** Cursor exposes every routed variant; only its plain models belong in a list. */
@@ -69,12 +93,13 @@ export function buildModelPickerRows(input: {
 	favorites: ModelFavorite[];
 	activeTab: string;
 	query: string;
+	selectedProviderId?: string | null;
 }): ModelPickerRow[] {
-	const providers = pickerProviders(input.providers);
+	const providers = pickerProviders(input.providers, input.selectedProviderId ?? null);
 	const query = input.query.trim();
 
 	if (input.activeTab === FAVORITES_TAB) {
-		return input.favorites.flatMap((favorite) => {
+		const favoriteRows = input.favorites.flatMap((favorite) => {
 			const { provider, model, available } = resolveModelFavorite(
 				favorite,
 				providers,
@@ -87,6 +112,15 @@ export function buildModelPickerRows(input: {
 				favorite,
 			}];
 		});
+		if (!query) return favoriteRows;
+		// Searching from favorites still reaches every provider's models.
+		const starred = new Set(
+			favoriteRows.map((row) => `${row.providerId}:${row.modelId}`),
+		);
+		const others = searchProviders(providers, null, query).filter(
+			(row) => !starred.has(row.key),
+		);
+		return [...favoriteRows, ...others];
 	}
 
 	const active = providers.find((provider) => provider.id === input.activeTab);
@@ -98,8 +132,16 @@ export function buildModelPickerRows(input: {
 	if (!query) return own;
 
 	// A search that misses the open tab still finds the model elsewhere.
-	const others = providers
-		.filter((provider) => provider.id !== active?.id)
+	return [...own, ...searchProviders(providers, active?.id ?? null, query)];
+}
+
+function searchProviders(
+	providers: ProviderCatalog["providers"],
+	skipProviderId: string | null,
+	query: string,
+) {
+	return providers
+		.filter((provider) => provider.id !== skipProviderId)
 		.flatMap((provider) =>
 			pickerModels(provider)
 				.filter((model) =>
@@ -107,7 +149,6 @@ export function buildModelPickerRows(input: {
 				)
 				.map((model) => modelRow(provider, model, true)),
 		);
-	return [...own, ...others];
 }
 
 /** The tab the picker opens on: favorites when any can be used, else the current provider. */
@@ -116,7 +157,7 @@ export function initialModelPickerTab(input: {
 	favorites: ModelFavorite[];
 	selectedProviderId: string | null;
 }) {
-	const providers = pickerProviders(input.providers);
+	const providers = pickerProviders(input.providers, input.selectedProviderId);
 	const hasUsableFavorite = input.favorites.some(
 		(favorite) => resolveModelFavorite(favorite, providers).available,
 	);

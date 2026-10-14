@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
 	getProviderActionBlockReason,
+	getProviderSetupReason,
 	getProviderUnhealthyReason,
 	isProviderEnabled,
+	isProviderReady,
 	resolveSelectedModelId,
 	resolveSelectedProviderId,
 } from "./provider-selection.logic";
@@ -106,6 +108,29 @@ describe("resolveSelectedProviderId", () => {
 
 	it("returns null when there are no providers", () => {
 		expect(resolveSelectedProviderId([], null)).toBeNull();
+	});
+
+	it("does not default new work to a provider that needs setup", () => {
+		const loggedOut = {
+			...makeProvider("grok", true),
+			health: { Unhealthy: { reason: "not authenticated" } },
+		};
+		expect(resolveSelectedProviderId([loggedOut, makeProvider("beta", false)], null)).toBe("beta");
+		expect(resolveSelectedProviderId([loggedOut], null)).toBe("grok");
+	});
+});
+
+describe("isProviderReady", () => {
+	it("needs the provider switched on and healthy", () => {
+		expect(isProviderReady(makeProvider("alpha", true))).toBe(true);
+		expect(isProviderReady(makeProvider("alpha", true, false))).toBe(false);
+		expect(isProviderReady({ ...makeProvider("alpha", true), health: { Degraded: { reason: "x" } } })).toBe(false);
+	});
+
+	it("reports Degraded as a setup reason, unlike the send gate", () => {
+		const degraded = { ...makeProvider("antigravity", true), health: { Degraded: { reason: "runtime not found" } } };
+		expect(getProviderSetupReason(degraded)).toBe("runtime not found");
+		expect(getProviderUnhealthyReason(degraded)).toBeNull();
 	});
 });
 

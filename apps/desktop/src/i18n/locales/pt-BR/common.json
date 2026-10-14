@@ -1911,6 +1911,8 @@
       "favoritesEmpty": "Toque na ★ de um modelo para fixá-lo aqui com o esforço atual.",
       "providerUnavailable": "{{provider}} precisa de configuração",
       "openSetup": "Abrir configuração",
+      "hiddenProviders_one": "{{count}} provedor precisa de configuração · Configurar",
+      "hiddenProviders_other": "{{count}} provedores precisam de configuração · Configurar",
       "managedEffort": "Esforço automático",
       "directOn": "Resposta direta ligada",
       "directOff": "Resposta direta desligada"

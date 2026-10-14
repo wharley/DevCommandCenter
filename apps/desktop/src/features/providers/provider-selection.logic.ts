@@ -24,6 +24,19 @@ export function isProviderEnabled(
 	return provider.enabled !== false;
 }
 
+/**
+ * Switched on and healthy: the only providers the composer offers for new
+ * work. A provider without a health report (fallback catalog) counts as ready.
+ */
+export function isProviderReady(
+	provider: ProviderCatalog["providers"][number],
+): boolean {
+	return (
+		isProviderEnabled(provider) &&
+		(provider.health == null || provider.health === "Healthy")
+	);
+}
+
 /** Gate used before actions that create or enqueue new work. */
 export function getProviderActionBlockReason(
 	provider: ProviderCatalog["providers"][number] | null,
@@ -92,7 +105,11 @@ export function resolveSelectedProviderId(
 		}
 	}
 
-	const selectableProviders = providers.filter(isProviderEnabled);
+	// New work defaults to a provider that can actually start; only when none
+	// is ready does it fall back to any switched-on one.
+	const readyProviders = providers.filter(isProviderReady);
+	const selectableProviders =
+		readyProviders.length > 0 ? readyProviders : providers.filter(isProviderEnabled);
 	const stableProvider = selectableProviders.find((provider) => provider.stable);
 	if (stableProvider) {
 		return stableProvider.id;
@@ -146,5 +163,23 @@ export function getProviderUnhealthyReason(
 		return health.Unhealthy?.reason ?? "Provider is unavailable";
 	}
 
+	return null;
+}
+
+/**
+ * Why a provider is not ready, Degraded included: a missing runtime reports
+ * Degraded and still fails at start, so the picker treats both alike.
+ */
+export function getProviderSetupReason(
+	provider: ProviderCatalog["providers"][number] | null,
+): string | null {
+	const unhealthy = getProviderUnhealthyReason(provider);
+	if (unhealthy) {
+		return unhealthy;
+	}
+	const health = provider?.health;
+	if (health && typeof health === "object" && "Degraded" in health) {
+		return health.Degraded?.reason ?? "Provider is unavailable";
+	}
 	return null;
 }
