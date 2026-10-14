@@ -272,10 +272,12 @@ use dcc_tauri::commands::{
     },
     provider_commands::{
         AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
-        ConnectAntigravityOutput, InstallAntigravityOutput, ListProvidersOutput,
-        ProviderAccountResetInput, ProviderAccountResetOutput, ProviderAccountUsageInput,
+        ConnectAntigravityOutput, CreateProviderAccountInput, InstallAntigravityOutput,
+        ListProviderAccountsOutput, ListProvidersOutput, ProviderAccountIdInput,
+        ProviderAccountOutput, ProviderAccountResetInput, ProviderAccountResetOutput,
+        ProviderAccountStatusInput, ProviderAccountStatusOutput, ProviderAccountUsageInput,
         ProviderAccountUsageOutput, ProviderAvailabilityInput, ProviderAvailabilityOutput,
-        SetProviderAvailabilityInput,
+        ProviderAccountSignInOutput, RenameProviderAccountInput, SetProviderAvailabilityInput,
     },
     session_commands::{
         AiMemoryExportHistoryOutput, AiMemoryOutboxStatusOutput, AiMemoryQueryHit,
@@ -627,6 +629,13 @@ struct ProviderMethods {
     get_provider_availability: String,
     set_provider_availability: String,
     provider_account_usage: String,
+    list_provider_accounts: String,
+    create_provider_account: String,
+    rename_provider_account: String,
+    remove_provider_account: String,
+    provider_account_status: String,
+    sign_in_provider_account: String,
+    cancel_provider_account_sign_in: String,
     provider_account_reset: String,
     install_antigravity: String,
     get_antigravity_status: String,
@@ -961,6 +970,16 @@ fn main() {
         .typ::<ProviderAccountResetOutput>()
         .typ::<ProviderAccountUsageInput>()
         .typ::<ProviderAccountUsageOutput>()
+        .typ::<dcc_core::domain::provider::ProviderAccount>()
+        .typ::<dcc_core::domain::provider::ProviderAccountStatus>()
+        .typ::<ListProviderAccountsOutput>()
+        .typ::<CreateProviderAccountInput>()
+        .typ::<RenameProviderAccountInput>()
+        .typ::<ProviderAccountIdInput>()
+        .typ::<ProviderAccountOutput>()
+        .typ::<ProviderAccountStatusInput>()
+        .typ::<ProviderAccountStatusOutput>()
+        .typ::<ProviderAccountSignInOutput>()
         .typ::<InstallAntigravityOutput>()
         .typ::<AntigravityStatusInput>()
         .typ::<AntigravityStatusOutput>()
@@ -1298,6 +1317,13 @@ fn main() {
             get_provider_availability: "get_provider_availability".to_string(),
             set_provider_availability: "set_provider_availability".to_string(),
             provider_account_usage: "provider_account_usage".to_string(),
+            list_provider_accounts: "list_provider_accounts".to_string(),
+            create_provider_account: "create_provider_account".to_string(),
+            rename_provider_account: "rename_provider_account".to_string(),
+            remove_provider_account: "remove_provider_account".to_string(),
+            provider_account_status: "provider_account_status".to_string(),
+            sign_in_provider_account: "sign_in_provider_account".to_string(),
+            cancel_provider_account_sign_in: "cancel_provider_account_sign_in".to_string(),
             provider_account_reset: "provider_account_reset".to_string(),
             install_antigravity: "install_antigravity".to_string(),
             get_antigravity_status: "get_antigravity_status".to_string(),

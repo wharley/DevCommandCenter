@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShownAccountLabel } from "@/features/providers/provider-accounts";
 import { ChevronDown } from "lucide-react";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -73,8 +74,9 @@ function FullExecutionMenu({
 	const effortLabel = t(`composer.effort.${selectedEffortId}`, {
 		defaultValue: getEffortDisplay(selectedEffortId).label,
 	});
+	const accountLabel = useShownAccountLabel(selectedProvider?.id);
 	const triggerTitle = selectedModel
-		? `${selectedModel.label} — ${selectedProvider?.label ?? "Provider"} · ${effortLabel}`
+		? `${selectedModel.label} — ${selectedProvider?.label ?? "Provider"}${accountLabel ? ` (${accountLabel})` : ""} · ${effortLabel}`
 		: compactModelLabel;
 
 	useOpenModelPickerShortcut({
@@ -118,6 +120,11 @@ function FullExecutionMenu({
 				<span className="dcc-composer-model-summary min-w-0 truncate text-[12px] font-medium leading-4 text-foreground">
 					{compactModelLabel}
 				</span>
+				{accountLabel ? (
+					<span className="max-w-[6rem] shrink-0 truncate text-[12px] leading-4 text-muted-foreground">
+						· {accountLabel}
+					</span>
+				) : null}
 				{availableEffortLevels.length > 0 ? (
 					<span className="dcc-composer-effort-summary shrink-0 text-[12px] leading-4 text-muted-foreground">
 						· {effortLabel}

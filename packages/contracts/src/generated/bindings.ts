@@ -6,7 +6,7 @@ export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","can
 
 export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
-export const PROVIDER_METHODS = {"connectAntigravity":"connect_antigravity","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviders":"list_providers","providerAccountReset":"provider_account_reset","providerAccountUsage":"provider_account_usage","setProviderAvailability":"set_provider_availability"} as const;
+export const PROVIDER_METHODS = {"cancelProviderAccountSignIn":"cancel_provider_account_sign_in","connectAntigravity":"connect_antigravity","createProviderAccount":"create_provider_account","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviderAccounts":"list_provider_accounts","listProviders":"list_providers","providerAccountReset":"provider_account_reset","providerAccountStatus":"provider_account_status","providerAccountUsage":"provider_account_usage","removeProviderAccount":"remove_provider_account","renameProviderAccount":"rename_provider_account","setProviderAvailability":"set_provider_availability","signInProviderAccount":"sign_in_provider_account"} as const;
 
 export const SESSION_METHODS = {"abortRun":"abort_run","aiMemoryCheckpoint":"ai_memory_checkpoint","aiMemoryExportHistory":"ai_memory_export_history","aiMemoryExportStatus":"ai_memory_export_status","aiMemoryOutboxList":"ai_memory_outbox_list","aiMemoryOutboxRetry":"ai_memory_outbox_retry","aiMemoryRecoveredSources":"ai_memory_recovered_sources","aiMemorySettingsLoad":"ai_memory_settings_load","aiMemorySettingsSave":"ai_memory_settings_save","aiMemorySidecarStatus":"ai_memory_sidecar_status","aiMemorySourceActionSave":"ai_memory_source_action_save","aiMemorySourceActions":"ai_memory_source_actions","applyTaskTitle":"apply_task_title","approvePlan":"approve_plan","clearSessionObjective":"clear_session_objective","closeSession":"close_session","decisionProviderCompletionAction":"decision_provider_completion_action","decisionProviderHistory":"decision_provider_history","decisionProviderModelRoute":"decision_provider_model_route","decisionProviderSettingsLoad":"decision_provider_settings_load","decisionProviderSettingsSave":"decision_provider_settings_save","dispatchNextQueuedTurn":"dispatch_next_queued_turn","executeConversationRewind":"execute_conversation_rewind","executeGuardedUndo":"execute_guarded_undo","getSessionObjective":"get_session_objective","inheritSessionObjective":"inherit_session_objective","interruptNativeSubagent":"interrupt_native_subagent","lastTurnReview":"last_turn_review","listMcpRuntimeStatuses":"list_mcp_runtime_statuses","listThreadEvents":"list_thread_events","listTurnQueue":"list_turn_queue","listWorkspaceSessions":"list_workspace_sessions","prepareConversationRewind":"prepare_conversation_rewind","prepareGuardedUndo":"prepare_guarded_undo","prepareTurn":"prepare_turn","queryAiMemory":"query_ai_memory","queueTurn":"queue_turn","recordPlanHandoff":"record_plan_handoff","removeQueuedTurn":"remove_queued_turn","reorderTurnQueue":"reorder_turn_queue","respondToPermissionRequest":"respond_to_permission_request","respondToUserInput":"respond_to_user_input","restoreSession":"restore_session","resumeSession":"resume_session","runPullRequestReviewAgent":"run_pull_request_review_agent","searchSessions":"search_sessions","sendTurn":"send_turn","sessionLiveSnapshot":"session_live_snapshot","sessionTurnUsage":"session_turn_usage","setSessionObjective":"set_session_objective","startMcpOauth":"start_mcp_oauth","startThread":"start_thread","steerNativeSubagent":"steer_native_subagent","steerTurn":"steer_turn","syncSessionToAiMemory":"sync_session_to_ai_memory","transitionSessionObjective":"transition_session_objective","turnReviewFileDiff":"turn_review_file_diff","usageDashboard":"usage_dashboard","waitMcpOauth":"wait_mcp_oauth"} as const;
 
@@ -241,6 +241,11 @@ export type Capabilities = {
 	 *  backend rejects it instead of silently dropping the preference.
 	 */
 	supportsRuntimeHome?: boolean,
+	/**
+	 *  The adapter runs a session as a named DCC account by applying the
+	 *  account's provider-native `config_dir` (see `ProviderAccount`).
+	 */
+	supportsAccounts?: boolean,
 	/**
 	 *  The adapter honors an explicit executable path from runtime config.
 	 *  Invalid non-empty paths must never silently fall back to PATH.
@@ -688,6 +693,13 @@ export type CreateMcpIntegrationInput = {
 
 export type CreateMcpIntegrationOutput = {
 	integration: McpIntegrationRecord,
+};
+
+export type CreateProviderAccountInput = {
+	providerId: string,
+	label: string,
+	// An existing config folder to reference instead of a new one.
+	importDir?: string | null,
 };
 
 export type CreateWorkspaceBundleForReposInput = {
@@ -1221,6 +1233,10 @@ export type ListMissionSpecsOutput = {
 	specs: MissionSpecEntry[],
 };
 
+export type ListProviderAccountsOutput = {
+	accounts: ProviderAccount[],
+};
+
 export type ListProvidersOutput = {
 	catalog: ProviderCatalog,
 };
@@ -1595,6 +1611,30 @@ export type PrepareTurnOutput = {
 
 export type ProjectId = string;
 
+/**
+ *  A named sign-in of a provider, e.g. a personal and a work Claude account.
+ *  The system login is implicit and never stored: it is the absence of an
+ *  account. Sessions keep the account they started with.
+ */
+export type ProviderAccount = {
+	id: string,
+	providerId: ProviderId,
+	label: string,
+	// Provider-native config directory holding this account's login.
+	configDir: string,
+	// DCC created the directory (as opposed to importing an existing one).
+	managed: boolean,
+	createdAt: string,
+};
+
+export type ProviderAccountIdInput = {
+	accountId: string,
+};
+
+export type ProviderAccountOutput = {
+	account: ProviderAccount,
+};
+
 export type ProviderAccountResetInput = {
 	providerId: string,
 	creditId?: string | null,
@@ -1603,6 +1643,30 @@ export type ProviderAccountResetInput = {
 
 export type ProviderAccountResetOutput = {
 	outcome: ProviderResetOutcome,
+};
+
+export type ProviderAccountSignInOutput = {
+	status: ProviderAccountStatus,
+};
+
+// Who a provider runtime is signed in as, as the runtime itself reports it.
+export type ProviderAccountStatus = {
+	loggedIn: boolean,
+	email?: string | null,
+	organization?: string | null,
+	plan?: string | null,
+};
+
+export type ProviderAccountStatusInput = {
+	providerId: string,
+	// `None` checks the system login.
+	accountId?: string | null,
+};
+
+export type ProviderAccountStatusOutput = {
+	status: ProviderAccountStatus | null,
+	// What to run in a terminal to sign this account in.
+	loginCommand: string | null,
 };
 
 export type ProviderAccountUsage = {
@@ -1717,6 +1781,16 @@ export type ProviderRuntimeConfig = {
 	homePath?: string | null,
 	shadowHomePath?: string | null,
 	maxConcurrentSubagents?: number | null,
+	/**
+	 *  DCC provider account this runtime runs as. `None` is the system login.
+	 *  The backend resolves it into `config_dir`; adapters never read the id.
+	 */
+	accountId?: string | null,
+	/**
+	 *  Provider-native config directory of the account (Claude:
+	 *  `CLAUDE_CONFIG_DIR`). Only the backend sets it, from `account_id`.
+	 */
+	configDir?: string | null,
 };
 
 export type ProviderUsageSummary = {
@@ -2018,6 +2092,11 @@ export type RemoveMcpIntegrationOutput = {
 export type RemoveQueuedTurnInput = {
 	sessionId: SessionId,
 	queuedTurnId: string,
+};
+
+export type RenameProviderAccountInput = {
+	accountId: string,
+	label: string,
 };
 
 export type RenameWorkspaceInput = {

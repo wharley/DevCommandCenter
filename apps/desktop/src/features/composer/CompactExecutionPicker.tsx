@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShownAccountLabel } from "@/features/providers/provider-accounts";
 import { ChevronDown } from "lucide-react";
 import {
 	Dialog,
@@ -58,6 +59,7 @@ export function CompactExecutionPicker({
 	const label = selectedModel
 		? getCompactComposerModelLabel(selectedProvider?.id ?? null, selectedModel.label)
 		: selectedModelId || t("composer.model.select");
+	const accountLabel = useShownAccountLabel(selectedProvider?.id);
 	const effortLabel = t(`composer.effort.${selectedEffortId}`, {
 		defaultValue: getEffortDisplay(selectedEffortId).label,
 	});
@@ -92,6 +94,9 @@ export function CompactExecutionPicker({
 				>
 					<ProviderIcon provider={selectedProvider?.id} className="size-[13px] shrink-0" />
 					<span className="truncate text-xs text-foreground">{label}</span>
+					{accountLabel ? (
+						<span className="max-w-[5rem] shrink-0 truncate text-xs">· {accountLabel}</span>
+					) : null}
 					{availableEffortLevels.length > 0 && (
 						<span className="shrink-0 text-xs">· {effortLabel}</span>
 					)}

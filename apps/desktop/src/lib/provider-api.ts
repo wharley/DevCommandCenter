@@ -8,8 +8,11 @@ import type {
 	ProviderAvailabilityInput,
 	ProviderAvailabilityOutput,
 	ProviderAccountUsageOutput,
+	ProviderAccount,
 	ProviderAccountResetInput,
 	ProviderAccountResetOutput,
+	ProviderAccountSignInOutput,
+	ProviderAccountStatusOutput,
 	ProviderCatalog,
 	ProviderRuntimeConfig,
 	SetProviderAvailabilityInput,
@@ -96,6 +99,98 @@ export async function getProviderAccountUsage(
 			},
 		},
 	);
+}
+
+/** Named sign-ins of providers that support accounts. */
+export async function listProviderAccounts(): Promise<ProviderAccount[]> {
+	if (!isTauriRuntime()) {
+		return [];
+	}
+	const output = await invoke<{ accounts: ProviderAccount[] }>(
+		PROVIDER_METHODS.listProviderAccounts,
+	);
+	return output.accounts.map((account) => ({
+		...account,
+		providerId: coerceProviderId(account.providerId),
+	}));
+}
+
+export async function createProviderAccount(input: {
+	providerId: string;
+	label: string;
+	importDir?: string | null;
+}): Promise<ProviderAccount> {
+	if (!isTauriRuntime()) {
+		throw new Error("Provider accounts require the desktop runtime.");
+	}
+	const output = await invoke<{ account: ProviderAccount }>(
+		PROVIDER_METHODS.createProviderAccount,
+		{ input: { ...input, importDir: input.importDir ?? null } },
+	);
+	return output.account;
+}
+
+export async function renameProviderAccount(
+	accountId: string,
+	label: string,
+): Promise<ProviderAccount> {
+	if (!isTauriRuntime()) {
+		throw new Error("Provider accounts require the desktop runtime.");
+	}
+	const output = await invoke<{ account: ProviderAccount }>(
+		PROVIDER_METHODS.renameProviderAccount,
+		{ input: { accountId, label } },
+	);
+	return output.account;
+}
+
+export async function removeProviderAccount(accountId: string): Promise<void> {
+	if (!isTauriRuntime()) {
+		throw new Error("Provider accounts require the desktop runtime.");
+	}
+	await invoke(PROVIDER_METHODS.removeProviderAccount, {
+		input: { accountId },
+	});
+}
+
+/** Who the account (or, with `null`, the system login) is signed in as. */
+export async function getProviderAccountStatus(
+	providerId: string,
+	accountId: string | null,
+): Promise<ProviderAccountStatusOutput> {
+	if (!isTauriRuntime()) {
+		return { status: null, loginCommand: null };
+	}
+	return invoke<ProviderAccountStatusOutput>(
+		PROVIDER_METHODS.providerAccountStatus,
+		{ input: { providerId, accountId } },
+	);
+}
+
+/**
+ * Signs the account (or, with `null`, the system login) in through the
+ * browser. Resolves once the person authorized; rejects on cancel or failure.
+ */
+export async function signInProviderAccount(
+	providerId: string,
+	accountId: string | null,
+): Promise<ProviderAccountSignInOutput> {
+	if (!isTauriRuntime()) {
+		throw new Error("Provider sign-in requires the desktop runtime.");
+	}
+	return invoke<ProviderAccountSignInOutput>(PROVIDER_METHODS.signInProviderAccount, {
+		input: { providerId, accountId },
+	});
+}
+
+export async function cancelProviderAccountSignIn(
+	providerId: string,
+	accountId: string | null,
+): Promise<void> {
+	if (!isTauriRuntime()) return;
+	await invoke(PROVIDER_METHODS.cancelProviderAccountSignIn, {
+		input: { providerId, accountId },
+	});
 }
 
 export async function consumeProviderAccountReset(

@@ -721,6 +721,7 @@ fn capabilities() -> Capabilities {
             ProviderApprovalPolicy::FullAccess,
         ],
         supports_runtime_home: true,
+        supports_accounts: false,
         supports_runtime_binary: true,
         supports_shadow_home: false,
         supports_subagent_concurrency: false,

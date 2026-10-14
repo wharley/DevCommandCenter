@@ -2057,6 +2057,33 @@ pub(crate) fn append_tool_instructions(prompt: String, tool_instructions: Option
     )
 }
 
+/// Credentials a parent process may carry that would outrank an account's own
+/// Claude login.
+const CLAUDE_INHERITED_CREDENTIAL_VARS: [&str; 3] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
+
+/// Points a Claude process at the account's config directory. Returns whether
+/// an account applied; without one the process keeps the system login.
+pub(crate) fn apply_claude_account_environment(
+    command: &mut Command,
+    runtime: Option<&ProviderRuntimeConfig>,
+) -> bool {
+    let Some(config_dir) = runtime
+        .and_then(|config| config.config_dir.as_deref())
+        .and_then(|path| resolve_runtime_home_path(Some(path)))
+    else {
+        return false;
+    };
+    command.env("CLAUDE_CONFIG_DIR", config_dir);
+    for name in CLAUDE_INHERITED_CREDENTIAL_VARS {
+        command.env_remove(name);
+    }
+    true
+}
+
 /// Namespaced env for stdin-only CLI adapters (no undocumented vendor-specific vars).
 pub(crate) fn apply_cli_spawn_environment(
     command: &mut Command,
@@ -2075,9 +2102,15 @@ pub(crate) fn apply_cli_spawn_environment(
     match provider_registry_id {
         "claude_code" => {
             command.env("DCC_AGENT_RUNTIME", "claude_code");
-            if let Some(home_path) = runtime_cfg.and_then(|config| config.home_path.as_deref()) {
-                if let Some(resolved_home) = resolve_runtime_home_path(Some(home_path)) {
-                    command.env("HOME", resolved_home);
+            // An account isolates only Claude's own config, so the agent keeps
+            // the person's HOME (git, ssh and gh logins). The legacy runtime
+            // home still swaps HOME when no account is selected.
+            if !apply_claude_account_environment(command, runtime_cfg) {
+                if let Some(home_path) = runtime_cfg.and_then(|config| config.home_path.as_deref())
+                {
+                    if let Some(resolved_home) = resolve_runtime_home_path(Some(home_path)) {
+                        command.env("HOME", resolved_home);
+                    }
                 }
             }
         }
@@ -2556,6 +2589,7 @@ pub fn stable_cli_capabilities() -> Capabilities {
         supports_multi_root: false,
         approval_policies: Vec::new(),
         supports_runtime_home: false,
+        supports_accounts: false,
         supports_runtime_binary: false,
         supports_shadow_home: false,
         supports_subagent_concurrency: false,
@@ -2587,6 +2621,7 @@ pub fn experimental_cli_capabilities() -> Capabilities {
         supports_multi_root: false,
         approval_policies: Vec::new(),
         supports_runtime_home: false,
+        supports_accounts: false,
         supports_runtime_binary: false,
         supports_shadow_home: false,
         supports_subagent_concurrency: false,
@@ -2718,6 +2753,8 @@ mod tests {
                 home_path: Some(shared_home.to_string_lossy().to_string()),
                 shadow_home_path: Some(shadow_home.to_string_lossy().to_string()),
                 max_concurrent_subagents: None,
+                account_id: None,
+                config_dir: None,
             }),
             mcp_servers: Vec::new(),
             native_resume_id: None,

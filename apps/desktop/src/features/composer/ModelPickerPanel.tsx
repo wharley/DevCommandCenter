@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Plus, RotateCcw, Search, Sparkles, Star, Zap } from "lucide-react";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderIcon } from "@/features/providers/provider-icons";
+import { ProviderAccountStrip } from "@/features/providers/provider-account-strip";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
 import { openSettingsSection } from "@/features/settings/settings-navigation";
 import { cn } from "@/lib/utils";
@@ -277,6 +278,10 @@ export function ModelPickerPanel({
 					<Plus className="size-4" strokeWidth={1.75} />
 				</button>
 			</div>
+
+			{activeProvider ? (
+				<ProviderAccountStrip provider={activeProvider} disabled={disabled} />
+			) : null}
 
 			<label className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 px-3">
 				<Search className="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden />

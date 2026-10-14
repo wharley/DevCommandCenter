@@ -27,6 +27,7 @@ import {
 	installAntigravity,
 } from "@/lib/provider-api";
 import { toast } from "sonner";
+import { ProviderAccountsSection } from "./provider-accounts-section";
 import {
 	SUBAGENT_CONCURRENCY_OPTIONS,
 	draftToProviderRuntimeConfig,
@@ -158,6 +159,9 @@ function ProviderRuntimeCard({
 				</Button>
 			</CardHeader>
 			<CardContent className="space-y-3 px-4 py-4">
+				{provider.capabilities?.supportsAccounts ? (
+					<ProviderAccountsSection providerId={provider.id} />
+				) : null}
 				{provider.id === "antigravity" ? (
 					<div className="space-y-2 rounded-xl border border-border/50 bg-background/60 p-3">
 						<div className="space-y-3">

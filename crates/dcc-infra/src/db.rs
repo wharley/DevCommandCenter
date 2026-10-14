@@ -20,6 +20,7 @@ use dcc_core::domain::agent::{
     REVIEWER_OFFER, REVIEWER_PRESET,
 };
 use dcc_core::domain::objective::{ObjectivePauseReason, ObjectiveStatus, SessionObjective};
+use dcc_core::domain::provider::{ProviderAccount, ProviderId};
 use dcc_core::{
     domain::{
         delegation::{
@@ -162,6 +163,19 @@ CREATE TABLE IF NOT EXISTS dcc_forge_login_preferences (
 	host TEXT NOT NULL,
 	login TEXT NOT NULL,
 	PRIMARY KEY (provider, host)
+);
+"#;
+
+/// Named provider sign-ins (e.g. personal and work Claude). The system login
+/// is the absence of a row.
+const PROVIDER_ACCOUNT_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_provider_accounts (
+	id TEXT PRIMARY KEY NOT NULL CHECK(length(id) BETWEEN 1 AND 64),
+	provider_id TEXT NOT NULL CHECK(length(provider_id) BETWEEN 1 AND 128),
+	label TEXT NOT NULL CHECK(length(label) BETWEEN 1 AND 64),
+	config_dir TEXT NOT NULL CHECK(length(config_dir) BETWEEN 1 AND 4096),
+	managed INTEGER NOT NULL CHECK(managed IN (0, 1)),
+	created_at TEXT NOT NULL
 );
 "#;
 
@@ -901,6 +915,17 @@ SELECT transaction_id, operation_id, delegation_id, workspace_id,
   FROM dcc_delegation_apply_transactions
 "#;
 
+fn provider_account_from_row(row: &Row<'_>) -> rusqlite::Result<ProviderAccount> {
+    Ok(ProviderAccount {
+        id: row.get(0)?,
+        provider_id: ProviderId(row.get(1)?),
+        label: row.get(2)?,
+        config_dir: row.get(3)?,
+        managed: row.get(4)?,
+        created_at: row.get(5)?,
+    })
+}
+
 #[derive(Clone)]
 pub struct SqliteWorkspaceRepo {
     conn: Arc<Mutex<Connection>>,
@@ -963,7 +988,7 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}\n{REPOSITORY_LINKED_FOLDER_TABLE_SQL}\n{WORKSPACE_CONTEXT_FOLDER_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{PROVIDER_ACCOUNT_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}\n{REPOSITORY_LINKED_FOLDER_TABLE_SQL}\n{WORKSPACE_CONTEXT_FOLDER_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
@@ -1083,6 +1108,84 @@ impl SqliteWorkspaceRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         }
         Ok(())
+    }
+
+    pub fn list_provider_accounts(&self) -> Result<Vec<ProviderAccount>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut statement = conn
+            .prepare(
+                "SELECT id, provider_id, label, config_dir, managed, created_at
+                 FROM dcc_provider_accounts ORDER BY provider_id, created_at, id",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        statement
+            .query_map([], provider_account_from_row)
+            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    pub fn get_provider_account(&self, id: &str) -> Result<Option<ProviderAccount>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.query_row(
+            "SELECT id, provider_id, label, config_dir, managed, created_at
+             FROM dcc_provider_accounts WHERE id = ?1",
+            params![id],
+            provider_account_from_row,
+        )
+        .optional()
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    pub fn insert_provider_account(&self, account: &ProviderAccount) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "INSERT INTO dcc_provider_accounts (id, provider_id, label, config_dir, managed, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                account.id,
+                account.provider_id.0,
+                account.label,
+                account.config_dir,
+                account.managed,
+                account.created_at
+            ],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn rename_provider_account(&self, id: &str, label: &str) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "UPDATE dcc_provider_accounts SET label = ?2 WHERE id = ?1",
+                params![id, label],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
+    }
+
+    pub fn delete_provider_account(&self, id: &str) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute("DELETE FROM dcc_provider_accounts WHERE id = ?1", params![id])
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
     }
 
     pub fn update_repository_forge_login(

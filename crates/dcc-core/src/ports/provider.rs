@@ -7,8 +7,8 @@ use specta::Type;
 use crate::{
     domain::mcp::{McpDefinitionId, McpToolPolicyDecision},
     domain::provider::{
-        Capabilities, HealthStatus, ProviderAccountUsage, ProviderApprovalPolicy, ProviderEvent,
-        ProviderId, ProviderResetOutcome, SessionHandle,
+        Capabilities, HealthStatus, ProviderAccountStatus, ProviderAccountUsage,
+        ProviderApprovalPolicy, ProviderEvent, ProviderId, ProviderResetOutcome, SessionHandle,
     },
     domain::session::SessionId,
     domain::workspace::WorkspaceId,
@@ -195,6 +195,14 @@ pub struct ProviderRuntimeConfig {
     pub shadow_home_path: Option<String>,
     #[serde(default)]
     pub max_concurrent_subagents: Option<u16>,
+    /// DCC provider account this runtime runs as. `None` is the system login.
+    /// The backend resolves it into `config_dir`; adapters never read the id.
+    #[serde(default)]
+    pub account_id: Option<String>,
+    /// Provider-native config directory of the account (Claude:
+    /// `CLAUDE_CONFIG_DIR`). Only the backend sets it, from `account_id`.
+    #[serde(default)]
+    pub config_dir: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -374,6 +382,26 @@ pub trait Provider: Send + Sync {
         _runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<Option<ProviderAccountUsage>> {
         Ok(None)
+    }
+    /// Who the runtime is signed in as. `Ok(None)` means the adapter cannot
+    /// tell; only adapters that support accounts answer.
+    async fn account_status(
+        &self,
+        _runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<ProviderAccountStatus>> {
+        Ok(None)
+    }
+    /// Signs the runtime in through the person's browser and reports who it
+    /// signed in as. `scratch_dir` is an empty folder the adapter may use for
+    /// the duration of the sign-in.
+    async fn account_sign_in(
+        &self,
+        _runtime: Option<&ProviderRuntimeConfig>,
+        _scratch_dir: &std::path::Path,
+    ) -> Result<ProviderAccountStatus> {
+        Err(crate::CoreError::Provider(
+            "This provider cannot sign in from DCC".to_string(),
+        ))
     }
     async fn consume_account_reset(
         &self,

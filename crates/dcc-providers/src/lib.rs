@@ -95,6 +95,7 @@ pub enum ProviderCapability {
     DelegationRequest,
     MultiRoot,
     RuntimeHome,
+    Accounts,
     RuntimeBinary,
     ShadowHome,
     SubagentConcurrency,
@@ -122,6 +123,7 @@ pub fn supports_provider_capability(
         ProviderCapability::DelegationRequest => capabilities.can_request_delegation,
         ProviderCapability::MultiRoot => capabilities.supports_multi_root,
         ProviderCapability::RuntimeHome => capabilities.supports_runtime_home,
+        ProviderCapability::Accounts => capabilities.supports_accounts,
         ProviderCapability::RuntimeBinary => capabilities.supports_runtime_binary,
         ProviderCapability::ShadowHome => capabilities.supports_shadow_home,
         ProviderCapability::SubagentConcurrency => capabilities.supports_subagent_concurrency,
@@ -181,6 +183,18 @@ pub fn validate_provider_runtime_config(
     {
         return Err(format!(
             "provider {provider_id} does not support a DCC-managed runtime home"
+        ));
+    }
+    if (runtime.account_id.is_some() || runtime.config_dir.is_some())
+        && !supports_provider_capability(capabilities, ProviderCapability::Accounts)
+    {
+        return Err(format!(
+            "provider {provider_id} does not support separate accounts"
+        ));
+    }
+    if runtime.config_dir.is_some() && runtime.account_id.is_none() {
+        return Err(format!(
+            "provider {provider_id} received an account directory without an account"
         ));
     }
     if runtime.shadow_home_path.is_some()
@@ -562,9 +576,39 @@ mod tests {
                 home_path: Some("/tmp/home".to_string()),
                 shadow_home_path: Some("/tmp/shadow".to_string()),
                 max_concurrent_subagents: Some(4),
+                account_id: None,
+                config_dir: None,
             }
         )
         .is_ok());
+    }
+
+    #[test]
+    fn only_account_providers_take_an_account_and_never_a_bare_directory() {
+        use dcc_core::ports::ProviderRuntimeConfig;
+        let claude = provider_registration("claude_code").expect("Claude provider");
+        let account = ProviderRuntimeConfig {
+            account_id: Some("claude_code-zedy".to_string()),
+            config_dir: Some("/tmp/zedy".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert!(validate_provider_runtime_config("claude_code", &claude.capabilities, &account)
+            .is_ok());
+        let bare_directory = ProviderRuntimeConfig {
+            config_dir: Some("/tmp/zedy".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert!(validate_provider_runtime_config(
+            "claude_code",
+            &claude.capabilities,
+            &bare_directory
+        )
+        .is_err());
+
+        let gemini = provider_registration("gemini").expect("Gemini provider");
+        assert!(
+            validate_provider_runtime_config("gemini", &gemini.capabilities, &account).is_err()
+        );
     }
 
     #[test]

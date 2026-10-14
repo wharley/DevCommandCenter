@@ -6,7 +6,8 @@ use tauri::State;
 use dcc_core::{
     domain::{
         provider::{
-            ProviderAccountUsage, ProviderCatalog, ProviderModelDescriptor, ProviderResetOutcome,
+            ProviderAccount, ProviderAccountStatus, ProviderAccountUsage, ProviderCatalog,
+            ProviderModelDescriptor, ProviderResetOutcome,
         },
         session::SessionId,
         workspace::WorkspaceId,
@@ -108,6 +109,259 @@ pub struct AntigravityStatusOutput {
     pub signed_in: bool,
     pub cached_model_count: usize,
     pub last_verified_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListProviderAccountsOutput {
+    pub accounts: Vec<ProviderAccount>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProviderAccountInput {
+    pub provider_id: String,
+    pub label: String,
+    /// An existing config folder to reference instead of a new one.
+    #[serde(default)]
+    pub import_dir: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameProviderAccountInput {
+    pub account_id: String,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountIdInput {
+    pub account_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountOutput {
+    pub account: ProviderAccount,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountStatusInput {
+    pub provider_id: String,
+    /// `None` checks the system login.
+    #[serde(default)]
+    pub account_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountStatusOutput {
+    pub status: Option<ProviderAccountStatus>,
+    /// What to run in a terminal to sign this account in.
+    pub login_command: Option<String>,
+}
+
+#[tauri::command]
+pub async fn list_provider_accounts(
+    state: State<'_, SessionCommandState>,
+) -> Result<ListProviderAccountsOutput, String> {
+    Ok(ListProviderAccountsOutput {
+        accounts: state
+            .list_provider_accounts()
+            .map_err(|error| error.to_string())?,
+    })
+}
+
+#[tauri::command]
+pub async fn create_provider_account(
+    state: State<'_, SessionCommandState>,
+    input: CreateProviderAccountInput,
+) -> Result<ProviderAccountOutput, String> {
+    Ok(ProviderAccountOutput {
+        account: state
+            .create_provider_account(
+                input.provider_id.trim(),
+                &input.label,
+                input.import_dir.as_deref(),
+            )
+            .map_err(|error| error.to_string())?,
+    })
+}
+
+#[tauri::command]
+pub async fn rename_provider_account(
+    state: State<'_, SessionCommandState>,
+    input: RenameProviderAccountInput,
+) -> Result<ProviderAccountOutput, String> {
+    Ok(ProviderAccountOutput {
+        account: state
+            .rename_provider_account(input.account_id.trim(), &input.label)
+            .map_err(|error| error.to_string())?,
+    })
+}
+
+#[tauri::command]
+pub async fn remove_provider_account(
+    state: State<'_, SessionCommandState>,
+    input: ProviderAccountIdInput,
+) -> Result<(), String> {
+    state
+        .remove_provider_account(input.account_id.trim())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn provider_account_status(
+    state: State<'_, SessionCommandState>,
+    input: ProviderAccountStatusInput,
+) -> Result<ProviderAccountStatusOutput, String> {
+    provider_account_status_for_state(&state, input).await
+}
+
+/// Asks the runtime who it is signed in as, under the account's own config.
+pub async fn provider_account_status_for_state(
+    state: &SessionCommandState,
+    input: ProviderAccountStatusInput,
+) -> Result<ProviderAccountStatusOutput, String> {
+    let provider_id = input.provider_id.trim();
+    let registration = state
+        .require_provider_available(provider_id)
+        .map_err(|error| error.to_string())?;
+    if !supports_provider_capability(&registration.capabilities, ProviderCapability::Accounts) {
+        return Err(format!(
+            "provider {provider_id} does not support separate accounts"
+        ));
+    }
+    let runtime = state
+        .provider_runtime_config(
+            provider_id,
+            Some(&ProviderRuntimeConfig {
+                account_id: input.account_id.clone(),
+                ..ProviderRuntimeConfig::default()
+            }),
+        )
+        .map_err(|error| error.to_string())?;
+    let login_command = runtime
+        .config_dir
+        .as_deref()
+        .map(dcc_providers::claude_code::claude_account_login_command)
+        .or_else(|| Some("claude auth login".to_string()));
+    let status = registration
+        .runtime
+        .account_status(Some(&runtime))
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ProviderAccountStatusOutput {
+        status,
+        login_command,
+    })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountSignInOutput {
+    pub status: ProviderAccountStatus,
+}
+
+/// Sign-ins waiting on the browser, by account, so the person can cancel one
+/// (or start it again, which cancels the earlier one).
+static ACCOUNT_SIGN_INS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (u64, tokio::sync::oneshot::Sender<()>)>>,
+> = std::sync::OnceLock::new();
+static NEXT_ACCOUNT_SIGN_IN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn account_sign_in_key(provider_id: &str, account_id: Option<&str>) -> String {
+    format!("{provider_id}\n{}", account_id.unwrap_or_default())
+}
+
+fn account_sign_ins(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, (u64, tokio::sync::oneshot::Sender<()>)>>
+{
+    ACCOUNT_SIGN_INS.get_or_init(Default::default)
+}
+
+#[tauri::command]
+pub async fn sign_in_provider_account(
+    state: State<'_, SessionCommandState>,
+    input: ProviderAccountStatusInput,
+) -> Result<ProviderAccountSignInOutput, String> {
+    sign_in_provider_account_for_state(&state, input).await
+}
+
+/// Signs an account (or the system login) in through the browser. Returns
+/// once the person authorized, cancelled, or the sign-in gave up.
+pub async fn sign_in_provider_account_for_state(
+    state: &SessionCommandState,
+    input: ProviderAccountStatusInput,
+) -> Result<ProviderAccountSignInOutput, String> {
+    let provider_id = input.provider_id.trim();
+    let registration = state
+        .require_provider_available(provider_id)
+        .map_err(|error| error.to_string())?;
+    if !supports_provider_capability(&registration.capabilities, ProviderCapability::Accounts) {
+        return Err(format!(
+            "provider {provider_id} does not support separate accounts"
+        ));
+    }
+    let runtime = state
+        .provider_runtime_config(
+            provider_id,
+            Some(&ProviderRuntimeConfig {
+                account_id: input.account_id.clone(),
+                ..ProviderRuntimeConfig::default()
+            }),
+        )
+        .map_err(|error| error.to_string())?;
+    let scratch_dir = state
+        .app_data_dir()
+        .join("tmp")
+        .join(format!("provider-sign-in-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&scratch_dir)
+        .map_err(|error| format!("could not prepare the sign-in: {error}"))?;
+
+    let key = account_sign_in_key(provider_id, input.account_id.as_deref());
+    let token = NEXT_ACCOUNT_SIGN_IN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (cancel, cancelled) = tokio::sync::oneshot::channel();
+    if let Some((_, earlier)) = account_sign_ins()
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(key.clone(), (token, cancel))
+    {
+        let _ = earlier.send(());
+    }
+    // Dropping the sign-in future on cancel also stops its Claude process.
+    let outcome = tokio::select! {
+        outcome = registration.runtime.account_sign_in(Some(&runtime), &scratch_dir) => Some(outcome),
+        _ = cancelled => None,
+    };
+    if let Ok(mut sign_ins) = account_sign_ins().lock() {
+        if sign_ins.get(&key).is_some_and(|(current, _)| *current == token) {
+            sign_ins.remove(&key);
+        }
+    }
+    let _ = std::fs::remove_dir_all(&scratch_dir);
+    match outcome {
+        Some(Ok(status)) => Ok(ProviderAccountSignInOutput { status }),
+        Some(Err(error)) => Err(error.to_string()),
+        None => Err("sign-in cancelled".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn cancel_provider_account_sign_in(
+    input: ProviderAccountStatusInput,
+) -> Result<(), String> {
+    let key = account_sign_in_key(input.provider_id.trim(), input.account_id.as_deref());
+    if let Some((_, cancel)) = account_sign_ins()
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&key)
+    {
+        let _ = cancel.send(());
+    }
+    Ok(())
 }
 
 #[tauri::command]

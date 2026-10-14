@@ -257,6 +257,10 @@ pub struct Capabilities {
     /// backend rejects it instead of silently dropping the preference.
     #[serde(default)]
     pub supports_runtime_home: bool,
+    /// The adapter runs a session as a named DCC account by applying the
+    /// account's provider-native `config_dir` (see `ProviderAccount`).
+    #[serde(default)]
+    pub supports_accounts: bool,
     /// The adapter honors an explicit executable path from runtime config.
     /// Invalid non-empty paths must never silently fall back to PATH.
     #[serde(default)]
@@ -437,6 +441,35 @@ pub struct ProviderAccountUsage {
     pub plan_type: Option<String>,
     pub updated_at: String,
     pub is_cached: bool,
+}
+
+/// A named sign-in of a provider, e.g. a personal and a work Claude account.
+/// The system login is implicit and never stored: it is the absence of an
+/// account. Sessions keep the account they started with.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccount {
+    pub id: String,
+    pub provider_id: ProviderId,
+    pub label: String,
+    /// Provider-native config directory holding this account's login.
+    pub config_dir: String,
+    /// DCC created the directory (as opposed to importing an existing one).
+    pub managed: bool,
+    pub created_at: String,
+}
+
+/// Who a provider runtime is signed in as, as the runtime itself reports it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountStatus {
+    pub logged_in: bool,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub organization: Option<String>,
+    #[serde(default)]
+    pub plan: Option<String>,
 }
 
 #[cfg(test)]

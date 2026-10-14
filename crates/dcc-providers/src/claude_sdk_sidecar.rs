@@ -16,8 +16,9 @@ use dcc_core::{
     domain::{
         mcp::McpDefinitionId,
         provider::{
-            Capabilities, HealthStatus, ProviderAccountUsage, ProviderAccountUsageState,
-            ProviderEvent, ProviderId, ProviderUsageWindow, SessionHandle,
+            Capabilities, HealthStatus, ProviderAccountStatus, ProviderAccountUsage,
+            ProviderAccountUsageState, ProviderEvent, ProviderId, ProviderUsageWindow,
+            SessionHandle,
         },
         session::SessionId,
     },
@@ -32,8 +33,8 @@ use crate::claude_mcp::{
     claude_mcp_runtime_version, parse_claude_mcp_status_snapshot, write_initial_mcp_configuration,
 };
 use crate::common::{
-    apply_cli_spawn_environment, augmented_path, now_iso, parse_provider_stream_line,
-    ParsedProviderLine, ProviderStreamState,
+    apply_claude_account_environment, apply_cli_spawn_environment, augmented_path, now_iso,
+    parse_provider_stream_line, ParsedProviderLine, ProviderStreamState,
 };
 
 #[derive(Clone)]
@@ -395,7 +396,17 @@ fn parse_claude_oauth_account_usage(value: &Value) -> Result<ProviderAccountUsag
     })
 }
 
+/// The account's config directory, as the Claude process receives it.
+fn claude_account_config_dir(runtime: Option<&ProviderRuntimeConfig>) -> Option<PathBuf> {
+    runtime
+        .and_then(|config| config.config_dir.as_deref())
+        .and_then(|path| crate::common::resolve_runtime_home_path(Some(path)))
+}
+
 fn claude_credentials_path(runtime: Option<&ProviderRuntimeConfig>) -> Option<PathBuf> {
+    if let Some(config_dir) = claude_account_config_dir(runtime) {
+        return Some(config_dir.join(".credentials.json"));
+    }
     if let Some(config_dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
         let path = PathBuf::from(config_dir);
         if !path.as_os_str().is_empty() {
@@ -420,6 +431,187 @@ fn oauth_token_from_credentials(raw: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// How long Claude may take to hand its sign-in page to `BROWSER`.
+const CLAUDE_SIGN_IN_LINK_WAIT: Duration = Duration::from_secs(60);
+/// How long the person has to authorize in the browser.
+const CLAUDE_SIGN_IN_WAIT: Duration = Duration::from_secs(600);
+
+/// Stand-in for `BROWSER`: Claude calls it with its sign-in link, and it writes
+/// the link next to itself (`<script>.link`) for DCC to open instead.
+const CLAUDE_SIGN_IN_BROWSER_SCRIPT: &str =
+    "#!/bin/sh\nprintf '%s' \"$1\" > \"$0.tmp\" && mv \"$0.tmp\" \"$0.link\"\n";
+
+/// Runs `claude auth login` out of sight, the way Orca does: Claude hands its
+/// sign-in link to `BROWSER`, DCC opens that link, and the browser's answer
+/// returns to Claude's own localhost callback. The link Claude prints instead
+/// needs a pasted code, so only the `BROWSER` one is used.
+async fn run_claude_browser_sign_in(
+    executable: &std::path::Path,
+    runtime: Option<&ProviderRuntimeConfig>,
+    scratch_dir: &std::path::Path,
+    open_link: impl Fn(&str) -> Result<()>,
+) -> Result<()> {
+    let browser = scratch_dir.join("open-sign-in-link");
+    let link_path = scratch_dir.join("open-sign-in-link.link");
+    fs::write(&browser, CLAUDE_SIGN_IN_BROWSER_SCRIPT)
+        .map_err(|error| CoreError::Provider(format!("could not prepare sign-in: {error}")))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&browser, fs::Permissions::from_mode(0o700))
+            .map_err(|error| CoreError::Provider(format!("could not prepare sign-in: {error}")))?;
+    }
+
+    let is_script = executable
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "js" | "mjs"));
+    let mut command = if is_script {
+        let mut command = Command::new("node");
+        command.arg(executable);
+        command
+    } else {
+        Command::new(executable)
+    };
+    command
+        .args(["auth", "login"])
+        .current_dir(scratch_dir)
+        .env("PATH", augmented_path())
+        .env("BROWSER", &browser)
+        // Claude ties its localhost callback to stdin staying open.
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    apply_claude_account_environment(&mut command, runtime);
+    let mut child = command
+        .spawn()
+        .map_err(|error| CoreError::Provider(format!("failed to start Claude sign-in: {error}")))?;
+    let _stdin = child.stdin.take();
+    let output = Arc::new(std::sync::Mutex::new(String::new()));
+    for stream in [
+        child.stdout.take().map(|out| Box::new(out) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+        child.stderr.take().map(|err| Box::new(err) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let output = Arc::clone(&output);
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stream).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Ok(mut output) = output.lock() {
+                    output.push_str(&line);
+                    output.push('\n');
+                }
+            }
+        });
+    }
+    let failure = |reason: &str| {
+        let detail = output
+            .lock()
+            .map(|output| output.trim().lines().last().unwrap_or_default().to_string())
+            .unwrap_or_default();
+        if detail.is_empty() {
+            CoreError::Provider(reason.to_string())
+        } else {
+            CoreError::Provider(format!("{reason} ({detail})"))
+        }
+    };
+
+    let started = tokio::time::Instant::now();
+    let link = loop {
+        if let Ok(link) = fs::read_to_string(&link_path) {
+            break link.trim().to_string();
+        }
+        if child.try_wait().ok().flatten().is_some() {
+            return Err(failure("Claude stopped before opening its sign-in page"));
+        }
+        if started.elapsed() > CLAUDE_SIGN_IN_LINK_WAIT {
+            return Err(failure("Claude did not open its sign-in page"));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    if !is_claude_local_sign_in_link(&link) {
+        return Err(CoreError::Provider(
+            "Claude asked to open an unexpected sign-in page; sign in with the command instead"
+                .to_string(),
+        ));
+    }
+    open_link(&link)?;
+
+    match tokio::time::timeout(CLAUDE_SIGN_IN_WAIT, child.wait()).await {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(_)) => Err(failure("Claude sign-in did not finish")),
+        Ok(Err(error)) => Err(CoreError::Provider(format!(
+            "Claude sign-in stopped unexpectedly: {error}"
+        ))),
+        Err(_) => Err(CoreError::Provider(
+            "Claude sign-in timed out waiting for the browser".to_string(),
+        )),
+    }
+}
+
+/// Claude's sign-in page that answers on this computer's localhost callback.
+fn is_claude_local_sign_in_link(link: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(link) else {
+        return false;
+    };
+    let claude_host = url
+        .host_str()
+        .is_some_and(|host| matches!(host, "claude.com" | "claude.ai"));
+    let local_redirect = url
+        .query_pairs()
+        .find(|(key, _)| key == "redirect_uri")
+        .and_then(|(_, value)| reqwest::Url::parse(&value).ok())
+        .is_some_and(|redirect| {
+            redirect.scheme() == "http"
+                && redirect
+                    .host_str()
+                    .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1"))
+        });
+    url.scheme() == "https" && claude_host && local_redirect
+}
+
+fn open_in_browser(url: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(url).status();
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open").arg(url).status();
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        _ => Err(CoreError::Provider(
+            "could not open the browser for Claude sign-in".to_string(),
+        )),
+    }
+}
+
+/// Reads `claude auth status` JSON. Anything unreadable counts as signed out,
+/// since a session would fail the same way.
+fn parse_claude_account_status(raw: &[u8]) -> ProviderAccountStatus {
+    let Ok(value) = serde_json::from_slice::<Value>(raw) else {
+        return ProviderAccountStatus::default();
+    };
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    ProviderAccountStatus {
+        logged_in: value.get("loggedIn").and_then(Value::as_bool) == Some(true),
+        email: text("email"),
+        organization: text("orgName"),
+        plan: text("subscriptionType"),
+    }
+}
+
 fn claude_auth_reports_logged_out(raw: &[u8]) -> bool {
     serde_json::from_slice::<Value>(raw)
         .ok()
@@ -427,15 +619,43 @@ fn claude_auth_reports_logged_out(raw: &[u8]) -> bool {
         == Some(false)
 }
 
+/// Keychain service Claude Code keeps a login under. With `CLAUDE_CONFIG_DIR`
+/// set, Claude suffixes the default name with the first 8 hex digits of the
+/// directory's SHA-256 (checked against Claude Code 2.1.293), so every account
+/// has its own item.
+fn claude_keychain_service(config_dir: Option<&str>) -> String {
+    use sha2::{Digest, Sha256};
+    match config_dir {
+        Some(dir) => {
+            let digest = Sha256::digest(dir.as_bytes());
+            let suffix: String = digest
+                .iter()
+                .take(4)
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            format!("Claude Code-credentials-{suffix}")
+        }
+        None => "Claude Code-credentials".to_string(),
+    }
+}
+
+fn claude_keychain_config_dir(runtime: Option<&ProviderRuntimeConfig>) -> Option<String> {
+    claude_account_config_dir(runtime)
+        .map(|dir| dir.display().to_string())
+        .or_else(|| {
+            std::env::var("CLAUDE_CONFIG_DIR")
+                .ok()
+                .filter(|dir| !dir.is_empty())
+        })
+}
+
 #[cfg(target_os = "macos")]
-async fn claude_oauth_token_from_keychain() -> Option<String> {
+async fn claude_oauth_token_from_keychain(
+    runtime: Option<&ProviderRuntimeConfig>,
+) -> Option<String> {
+    let service = claude_keychain_service(claude_keychain_config_dir(runtime).as_deref());
     let mut command = Command::new("security");
-    command.args([
-        "find-generic-password",
-        "-w",
-        "-s",
-        "Claude Code-credentials",
-    ]);
+    command.args(["find-generic-password", "-w", "-s", service.as_str()]);
     command.kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(5), command.output())
         .await
@@ -448,17 +668,23 @@ async fn claude_oauth_token_from_keychain() -> Option<String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn claude_oauth_token_from_keychain() -> Option<String> {
+async fn claude_oauth_token_from_keychain(
+    _runtime: Option<&ProviderRuntimeConfig>,
+) -> Option<String> {
     None
 }
 
 async fn claude_oauth_access_token(runtime: Option<&ProviderRuntimeConfig>) -> Option<String> {
-    if let Some(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN")
-        .ok()
-        .map(|token| token.trim().to_string())
-        .filter(|token| !token.is_empty())
-    {
-        return Some(token);
+    // An account's own login wins over a token DCC itself inherited, the same
+    // way its Claude process runs without that token.
+    if claude_account_config_dir(runtime).is_none() {
+        if let Some(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN")
+            .ok()
+            .map(|token| token.trim().to_string())
+            .filter(|token| !token.is_empty())
+        {
+            return Some(token);
+        }
     }
 
     if let Some(token) = claude_credentials_path(runtime)
@@ -468,7 +694,7 @@ async fn claude_oauth_access_token(runtime: Option<&ProviderRuntimeConfig>) -> O
         return Some(token);
     }
 
-    claude_oauth_token_from_keychain().await
+    claude_oauth_token_from_keychain(runtime).await
 }
 
 async fn fetch_claude_account_usage(
@@ -511,7 +737,10 @@ fn provider_runtime_cache_key(runtime: Option<&ProviderRuntimeConfig>) -> String
     let shadow_home = runtime
         .and_then(|config| config.shadow_home_path.as_deref())
         .unwrap_or_default();
-    format!("{home}\n{shadow_home}")
+    let config_dir = runtime
+        .and_then(|config| config.config_dir.as_deref())
+        .unwrap_or_default();
+    format!("{home}\n{shadow_home}\n{config_dir}")
 }
 
 async fn cache_claude_account_usage(state: &ProviderRuntimeState, cache_key: &str, value: &Value) {
@@ -1290,6 +1519,37 @@ impl Provider for ClaudeSdkSidecarAdapter {
         Ok(HealthStatus::Healthy)
     }
 
+    async fn account_status(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<ProviderAccountStatus>> {
+        let executable = self.resolve_claude_executable().await?;
+        let mut command = self.binary_command(&["--auth-status"])?;
+        command.env("DCC_CLAUDE_CODE_BIN_PATH", executable.path);
+        apply_claude_account_environment(&mut command, runtime);
+        let output = tokio::time::timeout(Duration::from_secs(15), command.output())
+            .await
+            .map_err(|_| CoreError::Provider("Claude Code sign-in check timed out.".to_string()))?
+            .map_err(|error| {
+                CoreError::Provider(format!("failed to execute Claude auth check: {error}"))
+            })?;
+        Ok(Some(parse_claude_account_status(&output.stdout)))
+    }
+
+    async fn account_sign_in(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+        scratch_dir: &std::path::Path,
+    ) -> Result<ProviderAccountStatus> {
+        let executable = self.resolve_claude_executable().await?;
+        run_claude_browser_sign_in(&executable.path, runtime, scratch_dir, open_in_browser)
+            .await?;
+        Ok(self
+            .account_status(runtime)
+            .await?
+            .unwrap_or_default())
+    }
+
     async fn account_usage(
         &self,
         runtime: Option<&ProviderRuntimeConfig>,
@@ -1903,5 +2163,119 @@ done
             br#"{"loggedIn":true,"authMethod":"oauth","apiProvider":"firstParty"}"#
         ));
         assert!(!claude_auth_reports_logged_out(b"not json"));
+    }
+
+    const LOCAL_SIGN_IN_LINK: &str = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=http%3A%2F%2Flocalhost%3A55500%2Fcallback";
+
+    #[test]
+    fn opens_only_claude_pages_that_answer_on_localhost() {
+        assert!(is_claude_local_sign_in_link(LOCAL_SIGN_IN_LINK));
+        assert!(!is_claude_local_sign_in_link(
+            "https://claude.com/cai/oauth/authorize?redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback"
+        ));
+        assert!(!is_claude_local_sign_in_link(
+            "https://evil.example/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1%2Fcallback"
+        ));
+        assert!(!is_claude_local_sign_in_link("not a url"));
+    }
+
+    #[cfg(unix)]
+    fn fake_claude(dir: &std::path::Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("claude");
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sign_in_opens_the_link_claude_hands_to_browser_under_the_account() {
+        let root = std::env::temp_dir().join(format!("dcc-claude-sign-in-{}", Uuid::new_v4()));
+        let scratch = root.join("scratch");
+        fs::create_dir_all(&scratch).unwrap();
+        // Records the account dir it ran under, hands the link to BROWSER and
+        // finishes once the browser "answered" (here: right away).
+        let claude = fake_claude(
+            &root,
+            &format!(
+                "printf '%s' \"$CLAUDE_CONFIG_DIR\" > \"{}/config-dir\"\n\"$BROWSER\" '{LOCAL_SIGN_IN_LINK}'\nexit 0",
+                root.display()
+            ),
+        );
+        let runtime = ProviderRuntimeConfig {
+            account_id: Some("claude_code-zedy".to_string()),
+            config_dir: Some(root.join("zedy").display().to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        let opened = std::sync::Mutex::new(Vec::new());
+
+        run_claude_browser_sign_in(&claude, Some(&runtime), &scratch, |link| {
+            opened.lock().unwrap().push(link.to_string());
+            Ok(())
+        })
+        .await
+        .expect("sign-in finishes");
+
+        assert_eq!(opened.into_inner().unwrap(), vec![LOCAL_SIGN_IN_LINK.to_string()]);
+        assert_eq!(
+            fs::read_to_string(root.join("config-dir")).unwrap(),
+            root.join("zedy").display().to_string()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sign_in_reports_claude_stopping_before_its_page() {
+        let root = std::env::temp_dir().join(format!("dcc-claude-sign-in-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let claude = fake_claude(&root, "echo 'login is unavailable' >&2\nexit 1");
+
+        let error = run_claude_browser_sign_in(&claude, None, &root, |_| Ok(()))
+            .await
+            .expect_err("no page was opened");
+
+        assert!(error.to_string().contains("stopped before opening"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_account_reads_its_own_keychain_item() {
+        assert_eq!(claude_keychain_service(None), "Claude Code-credentials");
+        // Same digest Claude Code takes of CLAUDE_CONFIG_DIR (sha256, 8 hex).
+        assert_eq!(
+            claude_keychain_service(Some(
+                "/Users/me/.dcc/provider-accounts/claude_code/claude_code-zedy"
+            )),
+            "Claude Code-credentials-9e32860d"
+        );
+    }
+
+    #[test]
+    fn reads_who_an_account_is_signed_in_as() {
+        let status = parse_claude_account_status(
+            br#"{"loggedIn":true,"email":"me@zedy.dev","orgName":"Zedy","subscriptionType":"max"}"#,
+        );
+        assert!(status.logged_in);
+        assert_eq!(status.email.as_deref(), Some("me@zedy.dev"));
+        assert_eq!(status.organization.as_deref(), Some("Zedy"));
+        assert_eq!(status.plan.as_deref(), Some("max"));
+        assert!(!parse_claude_account_status(br#"{"loggedIn":false}"#).logged_in);
+        assert!(!parse_claude_account_status(b"not json").logged_in);
+    }
+
+    #[test]
+    fn usage_cache_separates_accounts() {
+        let personal = ProviderRuntimeConfig::default();
+        let work = ProviderRuntimeConfig {
+            account_id: Some("claude_code-zedy".to_string()),
+            config_dir: Some("/accounts/zedy".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert_ne!(
+            provider_runtime_cache_key(Some(&personal)),
+            provider_runtime_cache_key(Some(&work))
+        );
     }
 }

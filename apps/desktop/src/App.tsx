@@ -26,6 +26,7 @@ import type {
 	DelegationContextPolicy,
 	MissionSpecEntry,
 	PullRequestHubItem,
+	ProviderAccount,
 	ProviderCatalog,
 	Repository,
 	SessionEventRecord,
@@ -163,7 +164,15 @@ import {
 } from "./features/sessions/workspace-sessions-query";
 import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
 import { daemonListCombs } from "./lib/daemon-api";
-import { listProviders } from "./lib/provider-api";
+import { listProviderAccounts, listProviders } from "./lib/provider-api";
+import {
+	PROVIDER_ACCOUNTS_QUERY_KEY,
+	ProviderAccountsContext,
+	resolveTurnAccountId,
+	useProviderAccountSelection,
+	withProviderAccount,
+	type ConversationAccount,
+} from "./features/providers/provider-accounts";
 import {
 	compileMissionSpecContext,
 	deleteRepository,
@@ -320,6 +329,7 @@ const LazyUsageDialog = lazy(() =>
 );
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
 const EMPTY_WORKSPACES: WorkspaceSummary[] = [];
+const EMPTY_PROVIDER_ACCOUNTS: ProviderAccount[] = [];
 const LOCAL_BACKEND_CACHE_KEY = "local";
 
 function isCompactCommandPrompt(prompt: string) {
@@ -1621,15 +1631,84 @@ export default function App() {
 		},
 		[selectedProvider, selectedWorkspace?.additionalWorkspaceIds?.length, t],
 	);
+	const visibleWorkspaceSessions = useMemo(
+		() => visibleSessions(workspaceSessions),
+		[workspaceSessions],
+	);
+	const effectiveSelectedSessionId =
+		selectedSessionId &&
+		visibleWorkspaceSessions.some(
+			(summary) => summary.session.id === selectedSessionId,
+		)
+			? selectedSessionId
+			: (visibleWorkspaceSessions[0]?.session.id ?? null);
+	const providerAccountsQuery = useQuery({
+		queryKey: PROVIDER_ACCOUNTS_QUERY_KEY,
+		queryFn: listProviderAccounts,
+		staleTime: 30_000,
+	});
+	const providerAccounts = providerAccountsQuery.data ?? EMPTY_PROVIDER_ACCOUNTS;
+	const providerAccountSelection = useProviderAccountSelection();
+	// The open conversation stays on the account it started with.
+	const conversationAccount = useMemo<ConversationAccount | null>(() => {
+		const session = workspaceSessions.find(
+			(summary) => summary.session.id === effectiveSelectedSessionId,
+		)?.session;
+		return session
+			? {
+					providerId: session.providerId,
+					accountId: session.providerRuntime?.accountId ?? null,
+				}
+			: null;
+	}, [effectiveSelectedSessionId, workspaceSessions]);
+	const providerAccountsContextValue = useMemo(
+		() => ({ accounts: providerAccounts, conversation: conversationAccount }),
+		[conversationAccount, providerAccounts],
+	);
+	/** Runtime for a provider's new conversation, with its picked account. */
+	const newConversationRuntime = useCallback(
+		(provider: ProviderCatalog["providers"][number]) =>
+			withProviderAccount(
+				draftToProviderRuntimeConfig(
+					getProviderRuntimeDraft(providerRuntimeSettings, provider.id),
+					provider.capabilities,
+				),
+				provider.capabilities.supportsAccounts
+					? resolveTurnAccountId({
+							providerId: provider.id,
+							conversation: null,
+							selection: providerAccountSelection,
+							accounts: providerAccounts,
+						})
+					: null,
+			),
+		[providerAccountSelection, providerAccounts, providerRuntimeSettings],
+	);
 	const selectedProviderRuntime = useMemo(
 		() =>
-			draftToProviderRuntimeConfig(
-				selectedProvider
-					? getProviderRuntimeDraft(providerRuntimeSettings, selectedProvider.id)
+			withProviderAccount(
+				draftToProviderRuntimeConfig(
+					selectedProvider
+						? getProviderRuntimeDraft(providerRuntimeSettings, selectedProvider.id)
+						: null,
+					selectedProvider?.capabilities ?? null,
+				),
+				selectedProvider?.capabilities.supportsAccounts
+					? resolveTurnAccountId({
+							providerId: selectedProvider.id,
+							conversation: conversationAccount,
+							selection: providerAccountSelection,
+							accounts: providerAccounts,
+						})
 					: null,
-				selectedProvider?.capabilities ?? null,
 			),
-		[providerRuntimeSettings, selectedProvider],
+		[
+			conversationAccount,
+			providerAccountSelection,
+			providerAccounts,
+			providerRuntimeSettings,
+			selectedProvider,
+		],
 	);
 	const handlePrepareWorkspaceScopeDelivery = useCallback(async (): Promise<
 		MultiWorkspaceDeliveryPreview[]
@@ -1650,17 +1729,6 @@ export default function App() {
 		selectedProviderRuntime,
 	]);
 	useDockUnreadBadge(allWorkspaces);
-	const visibleWorkspaceSessions = useMemo(
-		() => visibleSessions(workspaceSessions),
-		[workspaceSessions],
-	);
-	const effectiveSelectedSessionId =
-		selectedSessionId &&
-		visibleWorkspaceSessions.some(
-			(summary) => summary.session.id === selectedSessionId,
-		)
-			? selectedSessionId
-			: (visibleWorkspaceSessions[0]?.session.id ?? null);
 	const {
 		activityEvents: sessionActivityEvents,
 		events: legacySessionEvents,
@@ -2372,10 +2440,7 @@ export default function App() {
 						null);
 			const providerRuntime = usesSelection
 				? selectedProviderRuntime
-				: draftToProviderRuntimeConfig(
-						getProviderRuntimeDraft(providerRuntimeSettings, provider.id),
-						provider.capabilities,
-					);
+				: newConversationRuntime(provider);
 			const workspaceId = target?.workspaceId ?? selectedWorkspace?.id ?? "";
 			const sessionsKey = getWorkspaceSessionsCacheKey(backendCacheKey, workspaceId);
 			// The reviewer keeps one conversation per task, so a later round knows
@@ -2878,10 +2943,7 @@ export default function App() {
 						effort: request.effort ?? null,
 						fastMode: request.fastMode ?? null,
 						providerRuntime: targetProvider
-							? draftToProviderRuntimeConfig(
-									getProviderRuntimeDraft(providerRuntimeSettings, targetProvider.id),
-									targetProvider.capabilities,
-								)
+							? newConversationRuntime(targetProvider)
 							: null,
 					});
 					startedCount += 1;
@@ -5566,6 +5628,7 @@ export default function App() {
 									resetKey={`${selectedWorkspace.id}:${effectiveSelectedSessionId ?? ""}`}
 									context={frontendErrorContext}
 								>
+								<ProviderAccountsContext.Provider value={providerAccountsContextValue}>
 								<SessionWorkbench
 									workspaceId={selectedWorkspace.id}
 									workspaceName={selectedWorkspace.name}
@@ -5688,6 +5751,7 @@ export default function App() {
 										}
 									onComposerPrefillConsumed={handleComposerPrefillConsumed}
 								/>
+								</ProviderAccountsContext.Provider>
 								</RenderErrorBoundary>
 							) : (
 								<WorkspaceBootstrapState

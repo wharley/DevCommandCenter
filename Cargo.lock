@@ -985,6 +985,7 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "uuid",
  "zeroize",

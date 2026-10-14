@@ -918,7 +918,11 @@ pub async fn run_delegation(
         .map(|summary| summary.thread.title.clone())
         .filter(|title| !title.trim().is_empty())
         .unwrap_or_else(|| workspace.name.clone().unwrap_or_else(|| "Untitled".to_string()));
-    let provider_runtime = input.provider_runtime.clone().or_else(|| {
+    // A child on the parent's provider runs as the parent's account.
+    let parent_runtime = (parent.provider_id == target_provider_id)
+        .then(|| parent.provider_runtime.clone())
+        .flatten();
+    let provider_runtime = input.provider_runtime.clone().or(parent_runtime).or_else(|| {
         sessions
             .iter()
             .filter(|summary| summary.session.provider_id == target_provider_id)

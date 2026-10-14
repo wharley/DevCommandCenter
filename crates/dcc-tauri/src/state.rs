@@ -43,7 +43,8 @@ use dcc_core::{
         },
         project::{Project, ProjectId},
         provider::{
-            McpOauthSupport, ProviderApprovalPolicy, ProviderEvent, ProviderId, SessionHandle,
+            McpOauthSupport, ProviderAccount, ProviderApprovalPolicy, ProviderEvent, ProviderId,
+            SessionHandle,
         },
         repository::{Repository, RepositoryId},
         session::{
@@ -1995,6 +1996,18 @@ impl SessionCommandState {
         runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<ProviderRuntimeConfig> {
         let mut runtime = runtime.cloned().unwrap_or_default();
+        // Only the account decides the config directory; a caller never does.
+        runtime.config_dir = None;
+        if let Some(account_id) = runtime.account_id.clone() {
+            let account = self.provider_account(&account_id)?;
+            if account.provider_id.0 != provider_id {
+                return Err(dcc_core::CoreError::Provider(format!(
+                    "account {account_id} belongs to {}, not {provider_id}",
+                    account.provider_id.0
+                )));
+            }
+            runtime.config_dir = Some(account.config_dir);
+        }
         if provider_id == "antigravity" && runtime.home_path.is_none() {
             runtime.home_path = Some(
                 self.provider_home_root()
@@ -2008,7 +2021,9 @@ impl SessionCommandState {
                 crate::antigravity_installation::managed_executable_path(&self.app_data_dir)
                     .map(|path| path.display().to_string());
         }
-        if self.is_legacy_managed_provider_home(provider_id, &runtime) {
+        if runtime.account_id.is_none()
+            && self.is_legacy_managed_provider_home(provider_id, &runtime)
+        {
             return Ok(ProviderRuntimeConfig::default());
         }
         let registration = registered_provider(provider_id)?;
@@ -2158,6 +2173,143 @@ impl SessionCommandState {
 
     fn provider_home_root(&self) -> PathBuf {
         self.app_data_dir.join("provider-homes")
+    }
+
+    /// Directory DCC creates an account's config in when none is imported.
+    pub(crate) fn provider_accounts_root(&self) -> PathBuf {
+        self.app_data_dir.join("provider-accounts")
+    }
+
+    pub(crate) fn list_provider_accounts(&self) -> Result<Vec<ProviderAccount>> {
+        SqliteWorkspaceRepo::open(&self.db_path)?.list_provider_accounts()
+    }
+
+    /// Adds a named sign-in. Without `import_dir`, DCC creates the account's
+    /// config directory and links the person's shared Claude config into it;
+    /// with one, it references that directory as it is.
+    pub(crate) fn create_provider_account(
+        &self,
+        provider_id: &str,
+        label: &str,
+        import_dir: Option<&str>,
+    ) -> Result<ProviderAccount> {
+        let registration = registered_provider(provider_id)?;
+        if !supports_provider_capability(&registration.capabilities, ProviderCapability::Accounts) {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider {provider_id} does not support separate accounts"
+            )));
+        }
+        let label = normalize_provider_account_label(label)?;
+        let repo = SqliteWorkspaceRepo::open(&self.db_path)?;
+        let accounts = repo.list_provider_accounts()?;
+        if accounts.iter().any(|account| {
+            account.provider_id.0 == provider_id && account.label.eq_ignore_ascii_case(&label)
+        }) {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "an account named {label} already exists"
+            )));
+        }
+        let id = unique_provider_account_id(provider_id, &label, &accounts);
+        let (config_dir, managed) = match import_dir.map(str::trim).filter(|dir| !dir.is_empty()) {
+            Some(dir) => (self.importable_account_dir(dir, &accounts)?, false),
+            None => {
+                let dir = self.provider_accounts_root().join(provider_id).join(&id);
+                std::fs::create_dir_all(&dir).map_err(|error| {
+                    dcc_core::CoreError::Provider(format!(
+                        "could not create the account folder {}: {error}",
+                        dir.display()
+                    ))
+                })?;
+                dcc_providers::claude_code::link_claude_shared_config(&dir).map_err(|error| {
+                    dcc_core::CoreError::Provider(format!(
+                        "could not share your Claude settings with the account: {error}"
+                    ))
+                })?;
+                (dir, true)
+            }
+        };
+        let account = ProviderAccount {
+            id,
+            provider_id: ProviderId(provider_id.to_string()),
+            label,
+            config_dir: config_dir.display().to_string(),
+            managed,
+            created_at: Utc::now().to_rfc3339(),
+        };
+        repo.insert_provider_account(&account)?;
+        Ok(account)
+    }
+
+    fn importable_account_dir(&self, dir: &str, accounts: &[ProviderAccount]) -> Result<PathBuf> {
+        let path = PathBuf::from(dir);
+        if !path.is_absolute() || !path.is_dir() {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "{dir} is not an existing folder"
+            )));
+        }
+        let canonical = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let wanted = canonical(&path);
+        if dcc_providers::claude_code::claude_system_config_dir()
+            .is_some_and(|system| canonical(&system) == wanted)
+        {
+            return Err(dcc_core::CoreError::Provider(
+                "that folder is the system login, which DCC already offers as the default account"
+                    .to_string(),
+            ));
+        }
+        if accounts
+            .iter()
+            .any(|account| canonical(Path::new(&account.config_dir)) == wanted)
+        {
+            return Err(dcc_core::CoreError::Provider(
+                "another account already uses that folder".to_string(),
+            ));
+        }
+        Ok(path)
+    }
+
+    pub(crate) fn rename_provider_account(
+        &self,
+        account_id: &str,
+        label: &str,
+    ) -> Result<ProviderAccount> {
+        let label = normalize_provider_account_label(label)?;
+        let repo = SqliteWorkspaceRepo::open(&self.db_path)?;
+        let account = self.provider_account(account_id)?;
+        if repo.list_provider_accounts()?.iter().any(|other| {
+            other.id != account.id
+                && other.provider_id == account.provider_id
+                && other.label.eq_ignore_ascii_case(&label)
+        }) {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "an account named {label} already exists"
+            )));
+        }
+        repo.rename_provider_account(account_id, &label)?;
+        Ok(ProviderAccount { label, ..account })
+    }
+
+    /// Forgets the account. Its folder, login and conversation history stay on
+    /// disk, so adding it again under the same name signs it straight back in.
+    pub(crate) fn remove_provider_account(&self, account_id: &str) -> Result<()> {
+        if !SqliteWorkspaceRepo::open(&self.db_path)?.delete_provider_account(account_id)? {
+            return Err(dcc_core::CoreError::Provider(format!(
+                "provider account {account_id} no longer exists"
+            )));
+        }
+        Ok(())
+    }
+
+    /// A stored account. A session whose account was removed fails closed
+    /// instead of quietly running as the system login.
+    pub(crate) fn provider_account(&self, account_id: &str) -> Result<ProviderAccount> {
+        SqliteWorkspaceRepo::open(&self.db_path)?
+            .get_provider_account(account_id)?
+            .ok_or_else(|| {
+                dcc_core::CoreError::Provider(format!(
+                    "provider account {account_id} no longer exists; choose another account"
+                ))
+            })
     }
 
     pub(crate) fn app_data_dir(&self) -> &std::path::Path {
@@ -8088,6 +8240,49 @@ impl EventBus for SessionCommandState {
     }
 }
 
+const PROVIDER_ACCOUNT_LABEL_MAX_CHARS: usize = 64;
+
+fn normalize_provider_account_label(label: &str) -> Result<String> {
+    let label = label.split_whitespace().collect::<Vec<_>>().join(" ");
+    if label.is_empty() || label.chars().count() > PROVIDER_ACCOUNT_LABEL_MAX_CHARS {
+        return Err(dcc_core::CoreError::Provider(format!(
+            "an account name needs 1 to {PROVIDER_ACCOUNT_LABEL_MAX_CHARS} characters"
+        )));
+    }
+    Ok(label)
+}
+
+/// A stable id from the name (`claude_code-zedy`), which also names the
+/// account's folder; numbered when the name was used before.
+fn unique_provider_account_id(
+    provider_id: &str,
+    label: &str,
+    accounts: &[ProviderAccount],
+) -> String {
+    let mut slug = String::new();
+    for character in label.chars().flat_map(char::to_lowercase) {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    let slug: String = if slug.is_empty() { "account" } else { slug }
+        .chars()
+        .take(32)
+        .collect();
+    let base = format!("{provider_id}-{}", slug.trim_end_matches('-'));
+    let taken = |id: &str| accounts.iter().any(|account| account.id == id);
+    if !taken(&base) {
+        return base;
+    }
+    (2..)
+        .map(|number| format!("{base}-{number}"))
+        .find(|id| !taken(id))
+        .expect("an unused numbered id exists")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8113,6 +8308,98 @@ mod tests {
         assert!(breaker.allow("http://memory-b"));
         breaker.record_success("http://memory-b");
         assert!(breaker.allow("http://memory-b"));
+    }
+
+    #[test]
+    fn a_session_runs_as_its_account_until_the_account_is_removed() {
+        let temp_root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(temp_root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+
+        let zedy = state
+            .create_provider_account("claude_code", "  Zedy  ", None)
+            .expect("create account");
+        assert_eq!(zedy.id, "claude_code-zedy");
+        assert_eq!(zedy.label, "Zedy");
+        assert!(zedy.managed);
+        assert!(Path::new(&zedy.config_dir).is_dir());
+        assert!(state
+            .create_provider_account("claude_code", "zedy", None)
+            .is_err());
+        assert!(state
+            .create_provider_account("gemini", "Zedy", None)
+            .is_err());
+
+        let selected = ProviderRuntimeConfig {
+            account_id: Some(zedy.id.clone()),
+            config_dir: Some("/somewhere/else".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        let runtime = state
+            .provider_runtime_config("claude_code", Some(&selected))
+            .expect("account resolves");
+        assert_eq!(runtime.config_dir.as_deref(), Some(zedy.config_dir.as_str()));
+        assert!(state
+            .provider_runtime_config("codex", Some(&selected))
+            .is_err());
+        let smuggled = ProviderRuntimeConfig {
+            config_dir: Some("/somewhere/else".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert_eq!(
+            state
+                .provider_runtime_config("claude_code", Some(&smuggled))
+                .expect("system login")
+                .config_dir,
+            None
+        );
+
+        let renamed = state
+            .rename_provider_account(&zedy.id, "Zedy work")
+            .expect("rename");
+        assert_eq!(renamed.label, "Zedy work");
+        assert_eq!(state.list_provider_accounts().unwrap(), vec![renamed]);
+
+        state.remove_provider_account(&zedy.id).expect("remove");
+        assert!(state
+            .provider_runtime_config("claude_code", Some(&selected))
+            .is_err());
+        assert!(Path::new(&zedy.config_dir).is_dir());
+    }
+
+    #[test]
+    fn account_ids_come_from_the_name_and_stay_unique() {
+        let existing = |id: &str| ProviderAccount {
+            id: id.to_string(),
+            provider_id: ProviderId("claude_code".to_string()),
+            label: id.to_string(),
+            config_dir: format!("/accounts/{id}"),
+            managed: true,
+            created_at: "2026-10-14T00:00:00Z".to_string(),
+        };
+        assert_eq!(
+            unique_provider_account_id("claude_code", "Zedy — Trabalho!", &[]),
+            "claude_code-zedy-trabalho"
+        );
+        assert_eq!(
+            unique_provider_account_id("claude_code", "Ação", &[]),
+            "claude_code-a-o"
+        );
+        assert_eq!(
+            unique_provider_account_id("claude_code", "???", &[]),
+            "claude_code-account"
+        );
+        assert_eq!(
+            unique_provider_account_id(
+                "claude_code",
+                "Zedy",
+                &[existing("claude_code-zedy"), existing("claude_code-zedy-2")]
+            ),
+            "claude_code-zedy-3"
+        );
+        assert!(normalize_provider_account_label("   ").is_err());
+        assert!(normalize_provider_account_label(&"x".repeat(65)).is_err());
     }
 
     #[test]

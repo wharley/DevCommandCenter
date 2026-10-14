@@ -1283,6 +1283,7 @@ mod tests {
                     ProviderApprovalPolicy::FullAccess,
                 ],
                 supports_runtime_home: true,
+                supports_accounts: false,
                 supports_runtime_binary: false,
                 supports_shadow_home: false,
                 supports_subagent_concurrency: false,

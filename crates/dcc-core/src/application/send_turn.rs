@@ -105,10 +105,20 @@ pub fn merge_send_turn_session_selection(
             }
         }
     };
-    let merged_provider_runtime = input
+    let mut merged_provider_runtime = input
         .provider_runtime
         .clone()
         .or_else(|| session.provider_runtime.clone());
+    // A conversation stays on the account it started with: another account
+    // is another login with its own native history to resume from.
+    if merged_provider == session.provider_id {
+        if let Some(runtime) = merged_provider_runtime.as_mut() {
+            runtime.account_id = session
+                .provider_runtime
+                .as_ref()
+                .and_then(|runtime| runtime.account_id.clone());
+        }
+    }
     (merged_provider, merged_model, merged_provider_runtime)
 }
 
@@ -528,6 +538,8 @@ mod tests {
                     home_path: Some("/tmp/codex-home".to_string()),
                     shadow_home_path: None,
                     max_concurrent_subagents: None,
+                    account_id: None,
+                    config_dir: None,
                 }),
                 working_directory_override: None,
                 state: SessionState::Active,
@@ -567,6 +579,8 @@ mod tests {
                     home_path: Some("/tmp/gemini-home".to_string()),
                     shadow_home_path: None,
                     max_concurrent_subagents: None,
+                    account_id: None,
+                    config_dir: None,
                 }),
                 plan_mode: None,
                 effort: None,
@@ -589,6 +603,62 @@ mod tests {
                 .and_then(|runtime| runtime.home_path.as_deref()),
             Some("/tmp/gemini-home")
         );
+    }
+
+    #[test]
+    fn a_conversation_keeps_its_account_until_the_provider_changes() {
+        let account = |id: Option<&str>| {
+            Some(ProviderRuntimeConfig {
+                account_id: id.map(str::to_string),
+                ..ProviderRuntimeConfig::default()
+            })
+        };
+        let session = Session {
+            id: SessionId("session-account".to_string()),
+            project_id: crate::domain::project::ProjectId("project-1".to_string()),
+            workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "claude_code".to_string(),
+            model: None,
+            provider_runtime: account(Some("claude_code-zedy")),
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-10-14T12:00:00Z".to_string(),
+            updated_at: "2026-10-14T12:00:00Z".to_string(),
+        };
+        let input = |provider: &str, runtime: Option<ProviderRuntimeConfig>| SendTurnInput {
+            session_id: session.id.clone(),
+            prompt: "hello".to_string(),
+            tool_instructions: None,
+            provider_id: Some(provider.to_string()),
+            model: None,
+            provider_runtime: runtime,
+            plan_mode: None,
+            effort: None,
+            fast_mode: None,
+            approval_policy: None,
+            evidence: None,
+            retry_of_turn_id: None,
+            decision_provider_model_route: None,
+        };
+
+        let (_, _, same_provider) = merge_send_turn_session_selection(
+            &session,
+            &input("claude_code", account(Some("claude_code-personal"))),
+        );
+        assert_eq!(
+            same_provider.and_then(|runtime| runtime.account_id).as_deref(),
+            Some("claude_code-zedy")
+        );
+        let (_, _, system_login) =
+            merge_send_turn_session_selection(&session, &input("claude_code", account(None)));
+        assert_eq!(
+            system_login.and_then(|runtime| runtime.account_id).as_deref(),
+            Some("claude_code-zedy")
+        );
+        let (_, _, other_provider) =
+            merge_send_turn_session_selection(&session, &input("codex", account(None)));
+        assert_eq!(other_provider.and_then(|runtime| runtime.account_id), None);
     }
 
     #[test]

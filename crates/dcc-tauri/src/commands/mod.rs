@@ -46,8 +46,10 @@ pub use mcp_commands::{
     disconnect_mcp_oauth, list_mcp_integrations, remove_mcp_integration, set_mcp_tool_policy,
 };
 pub use provider_commands::{
-    get_provider_availability, list_providers, provider_account_reset, provider_account_usage,
-    set_provider_availability,
+    cancel_provider_account_sign_in, create_provider_account, get_provider_availability,
+    list_provider_accounts, list_providers, provider_account_reset, provider_account_status,
+    provider_account_usage, remove_provider_account, rename_provider_account,
+    set_provider_availability, sign_in_provider_account,
 };
 pub use session_commands::{
     abort_run, apply_task_title, approve_plan, execute_conversation_rewind, execute_guarded_undo,

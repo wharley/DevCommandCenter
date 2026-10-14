@@ -30,6 +30,7 @@ import {
 	SquareTerminal,
 	Target,
 	Undo2,
+	UsersRound,
 	Workflow,
 } from "lucide-react";
 import {
@@ -61,6 +62,7 @@ export const HELP_TOPIC_IDS = [
 	"browser",
 	"delegate",
 	"handoff",
+	"providerAccounts",
 	"memory",
 	"skills",
 	"delivery",
@@ -98,6 +100,7 @@ export const HELP_TOPIC_ICONS: Record<HelpTopicId, LucideIcon> = {
 	browser: Globe,
 	delegate: Send,
 	handoff: ArrowLeftRight,
+	providerAccounts: UsersRound,
 	memory: Database,
 	skills: Sparkles,
 	delivery: GitPullRequestArrow,
