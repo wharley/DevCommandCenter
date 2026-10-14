@@ -168,7 +168,9 @@
     "task": {
       "open": "Aberta",
       "close": "Concluir tarefa",
-      "closeHint": "Encerra a tarefa; as alterações vão para revisão"
+      "closeHint": "Encerra a tarefa",
+      "reviewAndApply": "Revisar e aplicar",
+      "reviewAndApplyHint": "Encerra a tarefa e abre as alterações para aplicar aqui"
     },
     "proposal": {
       "label": "Tarefa proposta",
@@ -180,7 +182,8 @@
       "readOnly": "só leitura",
       "hint": "Nada roda até você começar. Vira uma conversa própria; o agente recebe um resumo a cada rodada que ela termina.",
       "dismissed": "Proposta descartada",
-      "kind": "Tarefa"
+      "kind": "Tarefa",
+      "sharedCheckout": "direto no seu checkout"
     },
     "reviewStrip": {
       "message_one": "{{agent}} deixou {{count}} arquivo para você revisar",

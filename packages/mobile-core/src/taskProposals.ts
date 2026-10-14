@@ -14,8 +14,10 @@ export type TaskProposal = {
 	brief: string;
 	provider: string;
 	model: string | null;
-	/** Works in its own worktree, reviewed before it reaches the task. */
+	/** Changes files (read-only otherwise). */
 	edits: boolean;
+	/** Its edits land straight in the parent's checkout; no worktree. */
+	sharedCheckout: boolean;
 	createdAt: string;
 };
 
@@ -41,6 +43,7 @@ function parseOne(raw: unknown): TaskProposal | null {
 		provider: text(value.provider) ?? "",
 		model: text(value.model),
 		edits: value.edits === true,
+		sharedCheckout: value.sharedCheckout === true,
 		createdAt: text(value.createdAt) ?? "",
 	};
 }
@@ -62,7 +65,7 @@ export function proposalsForSession(proposals: TaskProposal[], sessionId: string
 /** "Codex · worktree próprio": who runs it and where it may write. */
 export function proposalMeta(proposal: TaskProposal): string {
 	const agent = proposal.model ?? proposal.provider;
-	const scope = proposal.edits ? "worktree próprio" : "só leitura";
+	const scope = !proposal.edits ? "só leitura" : proposal.sharedCheckout ? "direto no checkout" : "worktree próprio";
 	return agent ? `${agent} · ${scope}` : scope;
 }
 

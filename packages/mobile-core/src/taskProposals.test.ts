@@ -5,6 +5,7 @@ const wire = {
 	proposals: [
 		{ id: "t-1", parentSessionId: "s1", workspaceId: "w1", title: "Fase 2: push", brief: "Implement push.", provider: "Codex", model: null, edits: true, createdAt: "2026-10-14T12:00:00Z" },
 		{ id: "t-2", parentSessionId: "s2", title: "Ler o relay", brief: "Read it.", provider: "Cursor", model: "gpt-5.6", edits: false },
+		{ id: "t-4", parentSessionId: "s2", title: "Local", provider: "Claude Code", edits: true, sharedCheckout: true },
 		{ id: "", parentSessionId: "s1" },
 		{ id: "t-3" },
 	],
@@ -13,7 +14,7 @@ const wire = {
 describe("task proposals", () => {
 	it("reads the list and drops malformed entries", () => {
 		const proposals = parseTaskProposals(wire);
-		expect(proposals.map((p) => p.id)).toEqual(["t-1", "t-2"]);
+		expect(proposals.map((p) => p.id)).toEqual(["t-1", "t-2", "t-4"]);
 		expect(proposals[0]).toMatchObject({ title: "Fase 2: push", edits: true, model: null });
 		expect(parseTaskProposals(null)).toEqual([]);
 		expect(parseTaskProposals({ proposals: "x" })).toEqual([]);
@@ -24,6 +25,7 @@ describe("task proposals", () => {
 		expect(proposalsForSession(proposals, "s1").map((p) => p.id)).toEqual(["t-1"]);
 		expect(proposalMeta(proposals[0]!)).toBe("Codex · worktree próprio");
 		expect(proposalMeta(proposals[1]!)).toBe("gpt-5.6 · só leitura");
+		expect(proposalMeta(proposals[2]!)).toBe("Claude Code · direto no checkout");
 	});
 
 	it("knows which stream events can change the list", () => {

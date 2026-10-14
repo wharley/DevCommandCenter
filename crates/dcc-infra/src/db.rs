@@ -11835,6 +11835,7 @@ mod tests {
                 timeout_seconds: Some(300),
                 allow_file_edits: false,
                 approval_policy: None,
+                shared_checkout: false,
             },
             result_summary: Some("No blocking issues.".to_string()),
             touched_files: vec!["src/lib.rs".to_string()],

@@ -368,8 +368,12 @@ pub async fn create_delegation_with_state(
         reported_turn_id: None,
     };
 
-    let edit_capable =
-        matches!(delegation.mode, DelegationMode::Implement) || delegation.budget.allow_file_edits;
+    if delegation.budget.shared_checkout && delegation.kind != DelegationKind::Task {
+        return Err("only a task can edit the parent's checkout directly".to_string());
+    }
+    let edit_capable = (matches!(delegation.mode, DelegationMode::Implement)
+        || delegation.budget.allow_file_edits)
+        && !delegation.budget.shared_checkout;
     let mut bound_operation = if let Some(operation_id) = input
         .delegation_worktree_operation_id
         .as_deref()
@@ -738,7 +742,9 @@ pub async fn complete_delegation_with_state(
 
     let now = now_iso();
     let mut updated = delegation;
-    let review_required = input.review_required || updated.budget.allow_file_edits;
+    // Edits made straight in the parent's checkout are already there.
+    let review_required = (input.review_required || updated.budget.allow_file_edits)
+        && !updated.budget.shared_checkout;
     updated.status = if review_required {
         DelegationStatus::ReviewPending
     } else {

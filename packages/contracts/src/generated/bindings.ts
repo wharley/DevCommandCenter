@@ -944,6 +944,12 @@ export type DelegationBudget = {
 	 *  read-only scope is then an instruction, not a guarantee).
 	 */
 	approvalPolicy?: ProviderApprovalPolicy | null,
+	/**
+	 *  A task whose edits land straight in the parent's checkout: no
+	 *  worktree, nothing to review or apply. Only for tasks, by the person's
+	 *  choice (it follows a parent that runs without a worktree).
+	 */
+	sharedCheckout?: boolean,
 };
 
 export type DelegationContextPolicy = { type: "minimal" } | { type: "review_current_diff" } | { type: "spec_plan" } | { type: "selected_files"; paths: string[] } | { type: "full_reanchor" };
@@ -2325,6 +2331,8 @@ export type RunDelegationInput = {
 	kind?: DelegationKind,
 	// Starts this waiting task proposal instead of a new record.
 	proposalId?: DelegationId | null,
+	// A task that edits works straight in the parent's checkout.
+	sharedCheckout?: boolean,
 };
 
 export type RunDelegationOutput = {

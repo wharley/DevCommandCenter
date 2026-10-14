@@ -181,6 +181,7 @@ pub(super) async fn list_task_proposals(
                 "model": proposal.target_model_id,
                 "edits": matches!(proposal.mode, DelegationMode::Implement)
                     || proposal.budget.allow_file_edits,
+                "sharedCheckout": proposal.budget.shared_checkout,
                 "createdAt": proposal.created_at,
             })
         })

@@ -46,6 +46,7 @@ describe("delegate task tool instructions", () => {
 			expect(instructions).toContain("At most 3 proposals per turn");
 			expect(instructions).toContain("propose it with dcc_propose_task before you end the turn");
 			expect(instructions).toContain("A one-line tweak stays a sentence");
+			expect(instructions).toContain("Pass worktree=true when its edits may collide");
 		}
 		const cursor = FALLBACK_PROVIDER_CATALOG.providers.find((item) => item.id === "cursor");
 		expect(

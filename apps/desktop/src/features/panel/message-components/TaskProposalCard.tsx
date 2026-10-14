@@ -40,7 +40,11 @@ export function TaskProposalCard({
 	const meta = [
 		t("delegation.proposal.label"),
 		decisions.modelLabel ?? decisions.providerLabel,
-		editsFiles ? t("delegation.proposal.worktree") : t("delegation.proposal.readOnly"),
+		!editsFiles
+			? t("delegation.proposal.readOnly")
+			: proposal.budget.sharedCheckout
+				? t("delegation.proposal.sharedCheckout")
+				: t("delegation.proposal.worktree"),
 	].join(" · ");
 
 	const act = async (action: "start" | "dismiss") => {

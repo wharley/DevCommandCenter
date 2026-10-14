@@ -168,7 +168,9 @@
     "task": {
       "open": "Open",
       "close": "Close task",
-      "closeHint": "Ends the task; its edits go to review"
+      "closeHint": "Ends the task",
+      "reviewAndApply": "Review and apply",
+      "reviewAndApplyHint": "Ends the task and opens its changes to apply them here"
     },
     "proposal": {
       "label": "Proposed task",
@@ -180,7 +182,8 @@
       "readOnly": "read-only",
       "hint": "Nothing runs until you start it. It becomes a conversation of its own; the agent hears back each time it ends a turn.",
       "dismissed": "Proposal dismissed",
-      "kind": "Task"
+      "kind": "Task",
+      "sharedCheckout": "edits your checkout"
     },
     "reviewStrip": {
       "message_one": "{{agent}} left {{count}} file for you to review",

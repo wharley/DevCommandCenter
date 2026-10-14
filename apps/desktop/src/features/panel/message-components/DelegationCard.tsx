@@ -196,6 +196,14 @@ export function DelegationCard({
 	};
 
 	const isRunning = (status === "running" || status === "queued") && !taskIdle;
+	// A task's worktree edits reach the workspace through review: closing and
+	// opening that review is one step for the person.
+	const reviewOnClose =
+		taskIdle &&
+		touchedFiles.length > 0 &&
+		Boolean(onReviewDelegation) &&
+		record?.mode === "implement" &&
+		!record.budget.sharedCheckout;
 	const handleCloseTask = async () => {
 		if (!record || closing) {
 			return;
@@ -204,7 +212,11 @@ export function DelegationCard({
 		setCloseError(null);
 		try {
 			await completeTask({ delegationId: record.id });
+			// The Inspector reads the same cache entry; it must see review_pending first.
 			await queryClient.invalidateQueries({ queryKey: ["delegations", workspaceId] });
+			if (reviewOnClose) {
+				onReviewDelegation?.(record.id);
+			}
 		} catch (cause) {
 			setCloseError(cause instanceof Error ? cause.message : String(cause));
 		} finally {
@@ -372,15 +384,15 @@ export function DelegationCard({
 					{taskIdle ? (
 						<Button
 							type="button"
-							variant="ghost"
+							variant={reviewOnClose ? "default" : "ghost"}
 							size="sm"
 							className="h-7 gap-1 px-2.5 text-[11.5px]"
 							disabled={closing}
-							title={t("delegation.task.closeHint")}
+							title={t(reviewOnClose ? "delegation.task.reviewAndApplyHint" : "delegation.task.closeHint")}
 							onClick={() => void handleCloseTask()}
 						>
 							{closing ? <LoaderCircle className="size-3 animate-spin" aria-hidden /> : null}
-							{t("delegation.task.close")}
+							{t(reviewOnClose ? "delegation.task.reviewAndApply" : "delegation.task.close")}
 						</Button>
 					) : null}
 					{showReview ? (

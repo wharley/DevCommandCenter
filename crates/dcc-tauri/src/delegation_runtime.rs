@@ -130,6 +130,9 @@ pub struct RunDelegationInput {
     /// Starts this waiting task proposal instead of a new record.
     #[serde(default)]
     pub proposal_id: Option<DelegationId>,
+    /// A task that edits works straight in the parent's checkout.
+    #[serde(default)]
+    pub shared_checkout: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -963,6 +966,7 @@ pub async fn run_delegation(
         }),
         allow_file_edits,
         approval_policy: None,
+        shared_checkout: is_task && allow_file_edits && input.shared_checkout,
     };
     let target_provider_id = resolve_target_provider(
         state,
@@ -1003,7 +1007,7 @@ pub async fn run_delegation(
     });
 
     let workspace_state = WorkspaceCommandState::from_session(state);
-    let prepared = if allow_file_edits {
+    let prepared = if allow_file_edits && !budget.shared_checkout {
         Some(
             workspace_prepare_delegation_worktree_with_state(
                 &workspace_state,
@@ -1030,7 +1034,11 @@ pub async fn run_delegation(
                 workspace_branch: &workspace.base_branch,
                 workspace_path: &workspace_path,
                 parent_title: &parent_title,
-                isolated_worktree: allow_file_edits,
+                scope: match (allow_file_edits, budget.shared_checkout) {
+                    (false, _) => TaskScope::ReadOnly,
+                    (true, false) => TaskScope::OwnWorktree,
+                    (true, true) => TaskScope::SharedCheckout,
+                },
             }),
             _ => {
                 let git_context = match input.context_policy {
@@ -1384,7 +1392,15 @@ pub struct TaskPromptContext<'a> {
     pub workspace_branch: &'a str,
     pub workspace_path: &'a str,
     pub parent_title: &'a str,
-    pub isolated_worktree: bool,
+    pub scope: TaskScope,
+}
+
+/// Where a task may write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskScope {
+    ReadOnly,
+    OwnWorktree,
+    SharedCheckout,
 }
 
 /// The first message of a task: the brief, framed as a conversation the
@@ -1398,17 +1414,26 @@ pub fn build_task_prompt(context: &TaskPromptContext<'_>) -> String {
         String::new(),
         "Scope:".to_string(),
     ];
-    if context.isolated_worktree {
-        lines.extend(
+    match context.scope {
+        TaskScope::OwnWorktree => lines.extend(
             [
                 "- You are in an isolated git worktree created from the parent's current HEAD; edit freely there.",
                 "- Do not commit, push, delete branches, reset history, or run destructive commands.",
                 "- The human reviews your edits before they reach the parent workspace.",
             ]
             .map(str::to_string),
-        );
-    } else {
-        lines.push("- Work read-only. Do not edit files or run destructive commands.".to_string());
+        ),
+        TaskScope::SharedCheckout => lines.extend(
+            [
+                "- You edit the parent's checkout directly: your changes land in the human's workspace as you make them.",
+                "- The parent session may work in the same files; check git status first and keep to your task's files.",
+                "- Do not commit, push, delete branches, reset history, or run destructive commands.",
+            ]
+            .map(str::to_string),
+        ),
+        TaskScope::ReadOnly => {
+            lines.push("- Work read-only. Do not edit files or run destructive commands.".to_string())
+        }
     }
     lines.extend([
         "- This is your own conversation: the human may follow up here.".to_string(),
@@ -1467,10 +1492,17 @@ pub fn task_result_turn(
     if !delegation.touched_files.is_empty() {
         lines.extend([
             String::new(),
-            format!(
-                "It has changed {} file(s) in its own worktree so far; the human reviews them when the task is closed — do not re-implement them.",
-                delegation.touched_files.len()
-            ),
+            if delegation.budget.shared_checkout {
+                format!(
+                    "It has changed {} file(s) directly in your checkout; they are already in your workspace — do not redo them.",
+                    delegation.touched_files.len()
+                )
+            } else {
+                format!(
+                    "It has changed {} file(s) in its own worktree so far; the human reviews them when the task is closed — do not re-implement them.",
+                    delegation.touched_files.len()
+                )
+            },
         ]);
     }
     let listed: Vec<String> = tasks
@@ -1645,7 +1677,7 @@ pub async fn complete_task(
             touched_files: task.touched_files.clone(),
             diff_summary: task.diff_summary.clone(),
             validation_summary: None,
-            review_required: is_edit_capable(&task),
+            review_required: is_edit_capable(&task) && !task.budget.shared_checkout,
         },
     )
     .await
@@ -1712,6 +1744,9 @@ pub struct ProposeTaskInput {
     pub target_model_id: Option<String>,
     /// Start without a card; only for a turn the person started.
     pub start_now: bool,
+    /// An edit task's own worktree. Omitted: wherever the parent works —
+    /// its checkout when it runs without a worktree, a worktree otherwise.
+    pub worktree: Option<bool>,
 }
 
 /// Records a task the parent agent suggests. It waits as a card in the
@@ -1784,6 +1819,11 @@ pub async fn propose_task(
         timeout_seconds: None,
         allow_file_edits: input.edits,
         approval_policy: None,
+        shared_checkout: input.edits
+            && match input.worktree {
+                Some(worktree) => !worktree,
+                None => parent_runs_without_worktree(state, &parent).await,
+            },
     };
     let target_provider_id = input
         .target_provider_id
@@ -1816,6 +1856,25 @@ pub async fn propose_task(
         return start_task_proposal(state, &proposal.id, None).await;
     }
     Ok(proposal)
+}
+
+/// The person chose no worktree for this task's workspace ("Worktree"
+/// unchecked on New task): its agent works in the repository itself.
+async fn parent_runs_without_worktree(
+    state: &SessionCommandState,
+    parent: &dcc_core::domain::session::Session,
+) -> bool {
+    if parent.working_directory_override.is_some() {
+        return false;
+    }
+    let Ok(repo) = SqliteWorkspaceRepo::open(state.db_path()) else {
+        return false;
+    };
+    // Unknown workspace: keep the safe default, an isolated worktree.
+    matches!(
+        WorkspaceRepo::get_workspace(&repo, &parent.workspace_id).await,
+        Ok(Some(workspace)) if workspace.worktree_path.is_none()
+    )
 }
 
 /// Launches a waiting proposal as its own conversation. `instruction` is the
@@ -1857,6 +1916,7 @@ pub async fn start_task_proposal(
             title: proposal.title.clone(),
             kind: DelegationKind::Task,
             proposal_id: Some(proposal.id.clone()),
+            shared_checkout: proposal.budget.shared_checkout,
         },
     )
     .await
@@ -2829,6 +2889,7 @@ mod tests {
                     title: None,
                     kind: Default::default(),
                     proposal_id: None,
+                    shared_checkout: false,
                 },
             )
             .await
@@ -2854,6 +2915,7 @@ mod tests {
                 title: None,
                 kind: Default::default(),
                 proposal_id: None,
+                shared_checkout: false,
             }
         }
 
@@ -2943,6 +3005,7 @@ mod tests {
                 target_provider_id: Some("not-a-provider".to_string()),
                 target_model_id: None,
                 start_now: false,
+                worktree: None,
             }
         }
 
@@ -3144,6 +3207,7 @@ mod tests {
                 timeout_seconds: None,
                 allow_file_edits: false,
                 approval_policy: None,
+                shared_checkout: false,
             };
             DelegationRepo::save_delegation(state, &task).await.expect("save task");
             task
@@ -3282,6 +3346,56 @@ mod tests {
         }
 
         #[tokio::test(flavor = "current_thread")]
+        async fn a_task_follows_a_parent_that_works_without_a_worktree() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let parent = SessionRepo::get_session(state, &SessionId("parent".to_string()))
+                .await
+                .expect("load")
+                .expect("parent");
+            // The fixture workspace has no worktree: the person unchecked it.
+            assert!(parent_runs_without_worktree(state, &parent).await);
+            let in_a_worktree = dcc_core::domain::session::Session {
+                working_directory_override: Some("/workspace/.worktrees/x".to_string()),
+                ..parent
+            };
+            assert!(!parent_runs_without_worktree(state, &in_a_worktree).await);
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_task_in_the_shared_checkout_closes_without_review() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let mut task = open_task(state).await;
+            task.mode = DelegationMode::Implement;
+            task.budget.allow_file_edits = true;
+            task.budget.shared_checkout = true;
+            task.touched_files = vec!["src/push.ts".to_string()];
+            DelegationRepo::save_delegation(state, &task).await.expect("save");
+
+            let status = task_result_turn(&task, None, &[]);
+            assert!(status.contains("directly in your checkout"), "{status}");
+
+            let closed = complete_task(state, &task.id).await.expect("close");
+            assert_eq!(closed.status, DelegationStatus::Completed);
+        }
+
+        #[test]
+        fn a_shared_checkout_task_is_told_it_edits_the_parents_files() {
+            let prompt = build_task_prompt(&TaskPromptContext {
+                instruction: "Add push.",
+                workspace_name: "dcc",
+                workspace_branch: "main",
+                workspace_path: "/repo",
+                parent_title: "Mobile",
+                scope: TaskScope::SharedCheckout,
+            });
+            assert!(prompt.starts_with(TASK_BRIEF_HEADER));
+            assert!(prompt.contains("You edit the parent's checkout directly"));
+            assert!(!prompt.contains("isolated git worktree"));
+        }
+
+        #[tokio::test(flavor = "current_thread")]
         async fn tasks_do_not_use_up_the_delegation_allowance() {
             let fixture = fixture().await;
             let state = &fixture.state;
@@ -3316,6 +3430,7 @@ mod tests {
                     title: None,
                     kind: Default::default(),
                     proposal_id: None,
+                    shared_checkout: false,
                 },
             )
             .await

@@ -81,6 +81,11 @@ pub struct DelegationBudget {
     /// read-only scope is then an instruction, not a guarantee).
     #[serde(default)]
     pub approval_policy: Option<super::provider::ProviderApprovalPolicy>,
+    /// A task whose edits land straight in the parent's checkout: no
+    /// worktree, nothing to review or apply. Only for tasks, by the person's
+    /// choice (it follows a parent that runs without a worktree).
+    #[serde(default)]
+    pub shared_checkout: bool,
 }
 
 impl Default for DelegationBudget {
@@ -90,6 +95,7 @@ impl Default for DelegationBudget {
             timeout_seconds: Some(600),
             allow_file_edits: false,
             approval_policy: None,
+            shared_checkout: false,
         }
     }
 }

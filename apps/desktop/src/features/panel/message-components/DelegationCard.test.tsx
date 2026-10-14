@@ -186,4 +186,40 @@ describe("DelegationCard", () => {
 		expect(container.querySelector('[data-agent][data-state="working"]')).not.toBeNull();
 		expect(container.textContent).not.toContain("delegation.task.close");
 	});
+
+	it("closes a worktree task and opens its review in one step", async () => {
+		const onReviewDelegation = vi.fn();
+		const task = record({
+			kind: "task",
+			status: "running",
+			title: "Fase 2",
+			mode: "implement",
+			touchedFiles: ["src/push.ts"],
+		});
+		await render(task, { childBusy: false, onReviewDelegation });
+		const button = [...container.querySelectorAll("button")].find(
+			(item) => item.textContent === "delegation.task.reviewAndApply",
+		);
+		expect(button).toBeDefined();
+		vi.mocked(invoke).mockClear();
+		await act(async () => button?.click());
+		expect(invoke).toHaveBeenCalledWith("complete_task", { input: { delegationId: "d-1" } });
+		expect(onReviewDelegation).toHaveBeenCalledWith("d-1");
+	});
+
+	it("just closes a task whose edits landed in the checkout", async () => {
+		const task = record({
+			kind: "task",
+			status: "running",
+			title: "Fase 2",
+			mode: "implement",
+			touchedFiles: ["src/push.ts"],
+		});
+		await render(
+			{ ...task, budget: { ...task.budget, sharedCheckout: true } },
+			{ childBusy: false, onReviewDelegation: vi.fn() },
+		);
+		expect(container.textContent).toContain("delegation.task.close");
+		expect(container.textContent).not.toContain("delegation.task.reviewAndApply");
+	});
 });
