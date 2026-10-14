@@ -162,4 +162,28 @@ describe("DelegationCard", () => {
 		);
 		expect(container.textContent).toBe("delegation.proposal.dismissed · Fase 3");
 	});
+
+	it("shows an open task waiting between turns, with a way to close it", async () => {
+		const task = record({
+			kind: "task",
+			status: "running",
+			title: "Fase 2",
+			mode: "research",
+			resultSummary: "Phase 2 done.",
+		});
+		await render(task, { childBusy: false });
+		expect(container.textContent).toContain("delegation.task.open");
+		expect(container.textContent).toContain("Phase 2 done.");
+		expect(container.querySelector('[data-agent][data-state="working"]')).toBeNull();
+		const close = [...container.querySelectorAll("button")].find(
+			(item) => item.textContent === "delegation.task.close",
+		);
+		vi.mocked(invoke).mockClear();
+		await act(async () => close?.click());
+		expect(invoke).toHaveBeenCalledWith("complete_task", { input: { delegationId: "d-1" } });
+
+		await render(task, { childBusy: true });
+		expect(container.querySelector('[data-agent][data-state="working"]')).not.toBeNull();
+		expect(container.textContent).not.toContain("delegation.task.close");
+	});
 });

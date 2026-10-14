@@ -620,6 +620,16 @@ export function ActiveThreadViewport({
 		() => new Map((sessions ?? []).map((summary) => [summary.session.id, summary.thread.title])),
 		[sessions],
 	);
+	// A task stays open between turns; only a live turn means it is working.
+	const busySessionIds = useMemo(
+		() =>
+			new Set(
+				(sessions ?? [])
+					.filter((summary) => summary.projection.activeTurnId)
+					.map((summary) => summary.session.id),
+			),
+		[sessions],
+	);
 	// Once a conversation is on screen it stays mounted: routing a model,
 	// choosing one or a rehydrate show below the last turn instead of
 	// replacing (and later remounting) the whole timeline. Only the first
@@ -1053,6 +1063,11 @@ export function ActiveThreadViewport({
 														: null
 												}
 												verification={verificationByDelegation.get(message.delegation.id)}
+												childBusy={
+													message.delegation.childSessionId
+														? busySessionIds.has(message.delegation.childSessionId)
+														: undefined
+												}
 											/>
 										</div>
 									);

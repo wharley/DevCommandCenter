@@ -54,7 +54,12 @@ export function classifyToolAction(action: string): ToolKind {
 	// headline, not an anonymous "other action". Codex names it bare, Claude
 	// as `mcp__<server>__dcc_delegate_task`.
 	const bareAction = action.split("__").at(-1) ?? action;
-	if (bareAction === "dcc_delegate_task" || bareAction === "dcc_propose_task") return "agent";
+	if (
+		bareAction === "dcc_delegate_task" ||
+		bareAction === "dcc_propose_task" ||
+		bareAction === "dcc_task_message"
+	)
+		return "agent";
 	if (action.startsWith("mcp__")) return "mcp";
 	const normalized = action.toLowerCase().replace(/[^a-z0-9]/g, "");
 	return KIND_BY_ACTION[normalized] ?? "other";

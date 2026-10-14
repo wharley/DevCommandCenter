@@ -23,6 +23,7 @@ import type {
 	StartDelegationInput,
 	StartDelegationOutput,
 	StartTaskProposalInput,
+	CompleteTaskInput,
 } from "@dcc/contracts";
 
 export function createDelegation(input: CreateDelegationInput) {
@@ -96,4 +97,9 @@ export function cancelRunningDelegation(input: CancelRunningDelegationInput) {
 /** The person's "Start" on a task the agent proposed: launches its conversation. */
 export function startTaskProposal(input: StartTaskProposalInput) {
 	return invoke<RunDelegationOutput>(DELEGATION_METHODS.startTaskProposal, { input });
+}
+
+/** The person's "Close task": an open task stops; its edits go to review. */
+export function completeTask(input: CompleteTaskInput) {
+	return invoke<RunDelegationOutput>(DELEGATION_METHODS.completeTask, { input });
 }

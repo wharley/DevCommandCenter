@@ -242,6 +242,7 @@ use dcc_tauri::commands::{
         GetDelegationInput,
         GetDelegationOutput, ListDelegationsInput, ListDelegationsOutput, RunDelegationInput,
         RunDelegationOutput, StartDelegationInput, StartDelegationOutput, StartTaskProposalInput,
+        CompleteTaskInput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -669,6 +670,7 @@ struct DelegationMethods {
     delegation_result_turn: String,
     cancel_running_delegation: String,
     start_task_proposal: String,
+    complete_task: String,
 }
 
 fn main() {
@@ -1109,6 +1111,7 @@ fn main() {
         .typ::<DelegationResultTurnOutput>()
         .typ::<CancelRunningDelegationInput>()
         .typ::<StartTaskProposalInput>()
+        .typ::<CompleteTaskInput>()
         .typ::<CompleteDelegationInput>()
         .typ::<CompleteDelegationOutput>()
         .typ::<ApproveDelegationInput>()
@@ -1362,6 +1365,7 @@ fn main() {
             delegation_result_turn: "delegation_result_turn".to_string(),
             cancel_running_delegation: "cancel_running_delegation".to_string(),
             start_task_proposal: "start_task_proposal".to_string(),
+            complete_task: "complete_task".to_string(),
         },
     );
 

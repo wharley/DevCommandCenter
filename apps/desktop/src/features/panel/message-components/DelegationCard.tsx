@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ChevronDown, FileCode2, LoaderCircle } from "lucide-react";
 import type { Delegation, ProviderCatalog } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { completeTask } from "@/lib/delegation-api";
 import { useWorkspaceDelegations } from "@/features/sessions/use-workspace-delegations";
 import { delegationStatusClass } from "@/features/sessions/delegation-status";
 import {
@@ -54,6 +56,7 @@ export function DelegationCard({
 	childTitle,
 	verification,
 	onReviewDelegationFile,
+	childBusy,
 }: {
 	delegation: WorkspaceMessageDelegation;
 	fallbackContent: string;
@@ -79,10 +82,15 @@ export function DelegationCard({
 	verification?: readonly DelegationCheck[];
 	/** Opens one changed file of the delegation's worktree in the Inspector. */
 	onReviewDelegationFile?: (delegationId: string, path: string) => void;
+	/** The child conversation has a turn in progress; an open task between turns does not. */
+	childBusy?: boolean;
 }) {
 	const { t } = useTranslation("common");
 	const [isRerunning, setIsRerunning] = useState(false);
 	const [reportOpen, setReportOpen] = useState(false);
+	const [closing, setClosing] = useState(false);
+	const [closeError, setCloseError] = useState<string | null>(null);
+	const queryClient = useQueryClient();
 	// Shares the cache entry with the Inspector and the lineage menu.
 	const delegationsQuery = useWorkspaceDelegations(workspaceId);
 	const record =
@@ -113,9 +121,13 @@ export function DelegationCard({
 			</div>
 		);
 	}
-	const statusLabel = t(`inspector.delegations.status.${status}`, {
-		defaultValue: status,
-	});
+	// An open task between turns waits for the person, it is not working.
+	const taskIdle = record?.kind === "task" && status === "running" && childBusy === false;
+	const statusLabel = taskIdle
+		? t("delegation.task.open")
+		: t(`inspector.delegations.status.${status}`, {
+				defaultValue: status,
+			});
 	const decisions = record ? describeDelegation(record, providers) : null;
 	// What ran, in one muted line; how (context, permission) only on hover.
 	const agentLabel = decisions ? (decisions.modelLabel ?? decisions.providerLabel) : null;
@@ -168,7 +180,7 @@ export function DelegationCard({
 	const childSessionId = record?.childSessionId ?? delegation.childSessionId ?? null;
 	const showReview =
 		Boolean(onReviewDelegation || onReviewChanges) &&
-		(status === "review_pending" || touchedFiles.length > 0);
+		(status === "review_pending" || (touchedFiles.length > 0 && status !== "running"));
 	// Finished results can be handed to the parent agent through the composer.
 	// Agent-requested delegations already deliver their result on their own.
 	const canSendResult =
@@ -183,7 +195,22 @@ export function DelegationCard({
 		onReviewChanges?.();
 	};
 
-	const isRunning = status === "running" || status === "queued";
+	const isRunning = (status === "running" || status === "queued") && !taskIdle;
+	const handleCloseTask = async () => {
+		if (!record || closing) {
+			return;
+		}
+		setClosing(true);
+		setCloseError(null);
+		try {
+			await completeTask({ delegationId: record.id });
+			await queryClient.invalidateQueries({ queryKey: ["delegations", workspaceId] });
+		} catch (cause) {
+			setCloseError(cause instanceof Error ? cause.message : String(cause));
+		} finally {
+			setClosing(false);
+		}
+	};
 	const reportIsLong = summary.length > COLLAPSED_REPORT_CHARS;
 	const showSummary = Boolean(summary) && !isRunning;
 	const failedChecks = (verification ?? []).filter((check) => !check.ok);
@@ -223,7 +250,7 @@ export function DelegationCard({
 							delegationStatusClass(status),
 						)}
 					>
-						{status === "running" ? (
+						{status === "running" && !taskIdle ? (
 							<span
 								aria-hidden
 								className="mr-1 inline-block size-1.5 animate-pulse rounded-full bg-current"
@@ -337,7 +364,25 @@ export function DelegationCard({
 					</div>
 				) : null}
 
+				{closeError ? (
+					<p className="mt-2 text-[11.5px] leading-4 text-destructive">{closeError}</p>
+				) : null}
+
 				<div className="mt-3 flex flex-wrap items-center gap-1.5">
+					{taskIdle ? (
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="h-7 gap-1 px-2.5 text-[11.5px]"
+							disabled={closing}
+							title={t("delegation.task.closeHint")}
+							onClick={() => void handleCloseTask()}
+						>
+							{closing ? <LoaderCircle className="size-3 animate-spin" aria-hidden /> : null}
+							{t("delegation.task.close")}
+						</Button>
+					) : null}
 					{showReview ? (
 						<Button
 							type="button"

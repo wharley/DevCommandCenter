@@ -2,7 +2,7 @@
 
 
 /* Constants */
-export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation","startTaskProposal":"start_task_proposal"} as const;
+export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","completeTask":"complete_task","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation","startTaskProposal":"start_task_proposal"} as const;
 
 export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
@@ -401,6 +401,10 @@ export type CompleteDelegationInput = {
 
 export type CompleteDelegationOutput = {
 	delegation: Delegation,
+};
+
+export type CompleteTaskInput = {
+	delegationId: DelegationId,
 };
 
 export type ConnectAntigravityInput = {
@@ -923,6 +927,11 @@ export type Delegation = {
 	 *  shows it before any child conversation exists.
 	 */
 	title?: string | null,
+	/**
+	 *  A task's child turn already handed back to the parent, so a turn that
+	 *  ended is reported once however many signals announce it.
+	 */
+	reportedTurnId?: TurnId | null,
 };
 
 export type DelegationBudget = {

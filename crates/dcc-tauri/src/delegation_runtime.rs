@@ -77,6 +77,11 @@ const TASK_PROPOSAL_TTL_DAYS: i64 = 7;
 /// How much of a task's last answer wakes the parent: enough to decide the
 /// next step; the person reads the rest in the task itself.
 const TASK_HAND_BACK_CHARS: usize = 400;
+/// Opens every task's first message; its turn is the brief, which the parent
+/// is waiting to hear back from.
+const TASK_BRIEF_HEADER: &str = "Task from Dev Command Center";
+/// Tasks listed in a status, newest first.
+const MAX_LISTED_TASKS: usize = 8;
 /// A child that never started its turn within this window is treated as lost.
 const CHILD_START_GRACE_SECONDS: i64 = 180;
 /// Fallback for records without a budget timeout.
@@ -1259,7 +1264,10 @@ pub async fn on_session_turn_terminal(state: SessionCommandState, session_id: Se
         return;
     };
     if delegation.status == DelegationStatus::Running {
-        finalize_running_delegation(&state, delegation).await;
+        match delegation.kind {
+            DelegationKind::Task => report_task_turn(&state, delegation).await,
+            DelegationKind::Delegation => finalize_running_delegation(&state, delegation).await,
+        }
     }
 }
 
@@ -1360,11 +1368,7 @@ async fn finalize_running_delegation(state: &SessionCommandState, delegation: De
                 }
             };
             if completed.origin == DelegationOrigin::Agent {
-                let prompt = match completed.kind {
-                    DelegationKind::Task => task_result_turn(&completed),
-                    DelegationKind::Delegation => delegation_result_turn(&completed, None),
-                };
-                deliver_result(state, &completed, prompt).await;
+                deliver_result(state, &completed, delegation_result_turn(&completed, None)).await;
             }
         }
     }
@@ -1388,7 +1392,7 @@ pub struct TaskPromptContext<'a> {
 pub fn build_task_prompt(context: &TaskPromptContext<'_>) -> String {
     let mut lines = vec![
         format!(
-            "Task from Dev Command Center, proposed in \"{}\" and started by the human.",
+            "{TASK_BRIEF_HEADER}, proposed in \"{}\" and started by the human.",
             context.parent_title
         ),
         String::new(),
@@ -1429,13 +1433,14 @@ pub fn build_task_prompt(context: &TaskPromptContext<'_>) -> String {
 }
 
 /// What wakes the parent when a task ends a turn: a short status, not the
-/// whole report — the parent coordinates, the task holds the detail.
-pub fn task_result_turn(delegation: &Delegation) -> String {
-    let title = delegation
-        .title
-        .as_deref()
-        .filter(|title| !title.trim().is_empty())
-        .unwrap_or("Untitled task");
+/// whole report — the parent coordinates, the task holds the detail. `tasks`
+/// is every task of the parent, so it sees where the whole plan stands.
+pub fn task_result_turn(
+    delegation: &Delegation,
+    interrupted: Option<&str>,
+    tasks: &[Delegation],
+) -> String {
+    let title = task_title(delegation);
     let mut lines = vec![
         format!(
             "[DCC] Task \"{}\" ended a turn — {} (task {}).",
@@ -1444,26 +1449,255 @@ pub fn task_result_turn(delegation: &Delegation) -> String {
             delegation.id.0
         ),
         String::new(),
-        clip(
+    ];
+    match interrupted {
+        Some(reason) => lines.push(format!(
+            "The turn was interrupted: {}",
+            clip(reason, TASK_HAND_BACK_CHARS)
+        )),
+        None => lines.push(clip(
             delegation
                 .result_summary
                 .as_deref()
                 .filter(|summary| !summary.trim().is_empty())
                 .unwrap_or("The task returned no text."),
             TASK_HAND_BACK_CHARS,
-        ),
-    ];
-    if matches!(delegation.status, DelegationStatus::ReviewPending) {
+        )),
+    }
+    if !delegation.touched_files.is_empty() {
         lines.extend([
             String::new(),
-            "Its edits wait in an isolated worktree for the human to review; do not re-implement them.".to_string(),
+            format!(
+                "It has changed {} file(s) in its own worktree so far; the human reviews them when the task is closed — do not re-implement them.",
+                delegation.touched_files.len()
+            ),
         ]);
+    }
+    let listed: Vec<String> = tasks
+        .iter()
+        .filter(|task| task.kind == DelegationKind::Task && task.status != DelegationStatus::Cancelled)
+        .take(MAX_LISTED_TASKS)
+        .map(|task| {
+            format!(
+                "- {} — {} (task {})",
+                task_title(task),
+                task_status_label(&task.status),
+                task.id.0
+            )
+        })
+        .collect();
+    if !listed.is_empty() {
+        lines.push(String::new());
+        lines.push("Your tasks:".to_string());
+        lines.extend(listed);
     }
     lines.extend([
         String::new(),
-        "The human can open the task to read the rest or keep talking to it. Tell them where the plan stands and, if a next step is due, propose it.".to_string(),
+        "The human can open the task to read the rest or keep talking to it. Tell them where the plan stands and, if a next step is due, propose it. Follow-ups to an open task go through dcc_task_message, from a turn the human started.".to_string(),
     ]);
     lines.join("\n")
+}
+
+fn task_title(task: &Delegation) -> &str {
+    task.title
+        .as_deref()
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or("Untitled task")
+}
+
+fn task_status_label(status: &DelegationStatus) -> &'static str {
+    match status {
+        DelegationStatus::Draft => "proposed, waiting for the human to start it",
+        DelegationStatus::Queued | DelegationStatus::Running => "open",
+        DelegationStatus::ReviewPending => "closed, edits awaiting the human's review",
+        DelegationStatus::Completed => "closed",
+        DelegationStatus::Failed => "failed",
+        DelegationStatus::Cancelled => "dismissed",
+    }
+}
+
+/// The turn that ended last in a child's history, and the abort reason when
+/// it was interrupted.
+fn last_ended_turn(
+    events: &[dcc_core::domain::session::SessionEventRecord],
+) -> Option<(TurnId, Option<String>)> {
+    events.iter().rev().find_map(|event| match &event.kind {
+        SessionEventKind::TurnCompleted { turn_id } => Some((turn_id.clone(), None)),
+        SessionEventKind::TurnAborted { turn_id, reason } => Some((
+            turn_id.clone(),
+            Some(
+                reason
+                    .clone()
+                    .filter(|reason| !reason.trim().is_empty())
+                    .unwrap_or_else(|| "stopped".to_string()),
+            ),
+        )),
+        _ => None,
+    })
+}
+
+/// A task's child ended a turn. The task stays open; its record takes the
+/// latest answer and changed files. The parent is woken only for turns it is
+/// waiting on — the brief and its own follow-ups — never for turns the
+/// person drove inside the task: they are already there.
+async fn report_task_turn(state: &SessionCommandState, task: Delegation) {
+    let Some(_guard) = FinalizeGuard::acquire(&task.id) else {
+        return;
+    };
+    let mut task = match DelegationRepo::get_delegation(state, &task.id).await {
+        Ok(Some(current)) if current.status == DelegationStatus::Running => current,
+        _ => return,
+    };
+    let Some(child_session_id) = task.child_session_id.clone() else {
+        return;
+    };
+    let Ok(events) = SessionEventRepo::list_events_by_session(state, &child_session_id).await
+    else {
+        return;
+    };
+    if SessionProjection::fold(&events).and_then(|projection| projection.active_turn_id).is_some() {
+        return;
+    }
+    let Some((turn_id, interrupted)) = last_ended_turn(&events) else {
+        return;
+    };
+    if task.reported_turn_id.as_ref() == Some(&turn_id) {
+        return;
+    }
+    let turn_prompt = events.iter().find_map(|event| match &event.kind {
+        SessionEventKind::TurnStarted { turn_id: id, prompt, .. } if *id == turn_id => {
+            Some(prompt.as_str())
+        }
+        _ => None,
+    });
+    let wakes_parent = turn_prompt.is_some_and(|prompt| {
+        prompt.starts_with(TASK_BRIEF_HEADER) || prompt.starts_with(DCC_TURN_PREFIX)
+    });
+
+    let mut touched = Vec::<String>::new();
+    let (mut additions, mut deletions) = (0u64, 0u64);
+    if let Ok(change_sets) = state.list_turn_change_sets(&child_session_id) {
+        for file in change_sets.iter().flat_map(|change_set| change_set.files.iter()) {
+            if !touched.contains(&file.path) {
+                touched.push(file.path.clone());
+            }
+            additions += u64::from(file.insertions);
+            deletions += u64::from(file.deletions);
+        }
+    }
+    touched.sort();
+    if interrupted.is_none() {
+        if let Some(text) = summarize_child_turn(&events)
+            .assistant_text
+            .filter(|text| !text.trim().is_empty())
+        {
+            task.result_summary = Some(clip(&text, MAX_SUMMARY_CHARS));
+        }
+    }
+    task.diff_summary = (!touched.is_empty())
+        .then(|| format!("{} file(s), +{additions}/-{deletions}", touched.len()));
+    task.touched_files = touched;
+    task.reported_turn_id = Some(turn_id);
+    task.updated_at = Utc::now().to_rfc3339();
+    if let Err(error) = DelegationRepo::save_delegation(state, &task).await {
+        eprintln!("[DCC] task turn report failed: {error}");
+        return;
+    }
+    if !wakes_parent || task.origin != DelegationOrigin::Agent {
+        return;
+    }
+    let tasks = DelegationRepo::list_delegations(state, None, Some(&task.parent_session_id))
+        .await
+        .unwrap_or_default();
+    let prompt = task_result_turn(&task, interrupted.as_deref(), &tasks);
+    deliver_result(state, &task, prompt).await;
+}
+
+/// The person's "Close task": the task stops being open. Its edits go to
+/// review like a delegation's; nothing wakes the parent, which hears about
+/// the review outcome as usual.
+pub async fn complete_task(
+    state: &SessionCommandState,
+    task_id: &DelegationId,
+) -> Result<Delegation, String> {
+    let _guard = FinalizeGuard::acquire(task_id)
+        .ok_or_else(|| "the task is reporting a turn right now; try again".to_string())?;
+    let task = DelegationRepo::get_delegation(state, task_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("task not found: {}", task_id.0))?;
+    if task.kind != DelegationKind::Task || task.status != DelegationStatus::Running {
+        return Err("only an open task can be closed".to_string());
+    }
+    if let Some(child_session_id) = task.child_session_id.as_ref() {
+        let events = SessionEventRepo::list_events_by_session(state, child_session_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        if SessionProjection::fold(&events).and_then(|projection| projection.active_turn_id).is_some() {
+            return Err("the task is still working; wait for its turn to end or stop it first".to_string());
+        }
+    }
+    complete_delegation_with_state(
+        state,
+        CompleteDelegationInput {
+            delegation_id: task.id.clone(),
+            summary: task.result_summary.clone(),
+            touched_files: task.touched_files.clone(),
+            diff_summary: task.diff_summary.clone(),
+            validation_summary: None,
+            review_required: is_edit_capable(&task),
+        },
+    )
+    .await
+    .map(|output| output.delegation)
+}
+
+/// `dcc_task_message`: the parent's follow-up to one of its open tasks. It
+/// becomes a turn of its own in the task, so its end reports back.
+pub async fn message_task(
+    state: &SessionCommandState,
+    parent_session_id: &SessionId,
+    task_id: &str,
+    message: &str,
+) -> Result<Delegation, String> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("the message cannot be empty".to_string());
+    }
+    let task = delegation_for_parent(state, parent_session_id, task_id).await?;
+    if task.kind != DelegationKind::Task || task.status != DelegationStatus::Running {
+        return Err("only an open task takes messages; propose a new task instead".to_string());
+    }
+    let parent_events = SessionEventRepo::list_events_by_session(state, parent_session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    if !open_turn_prompt(&parent_events)
+        .is_some_and(|(_, prompt)| !prompt.starts_with(DCC_TURN_PREFIX))
+    {
+        return Err("messages to a task go out from a turn the human started; tell them what you would send".to_string());
+    }
+    let child_session_id = task
+        .child_session_id
+        .clone()
+        .ok_or_else(|| "the task has no conversation".to_string())?;
+    let prompt = format!("{DCC_TURN_PREFIX}Message from the session that coordinates this task:\n\n{message}");
+    let child_busy = SessionEventRepo::list_events_by_session(state, &child_session_id)
+        .await
+        .ok()
+        .and_then(|events| SessionProjection::fold(&events))
+        .and_then(|projection| projection.active_turn_id)
+        .is_some();
+    // Queued rather than steered: the message needs a turn of its own so
+    // that turn's end is reported back.
+    let turn = hand_back_turn(&child_session_id, prompt);
+    if child_busy {
+        run_queue_turn(state, state, QueueTurnInput { turn })
+            .await
+            .map_err(|error| error.to_string())?;
+    } else {
+        send_turn_with_state(state, turn).await?;
+    }
+    Ok(task)
 }
 
 #[derive(Clone, Debug)]
@@ -2007,11 +2241,13 @@ pub async fn reconcile_running_delegations(state: &SessionCommandState) {
                     }
                 }
             }
-            ChildOutcome::Completed | ChildOutcome::Aborted(_) => {
-                finalize_running_delegation(state, delegation).await;
-            }
+            ChildOutcome::Completed | ChildOutcome::Aborted(_) => match delegation.kind {
+                DelegationKind::Task => report_task_turn(state, delegation).await,
+                DelegationKind::Delegation => finalize_running_delegation(state, delegation).await,
+            },
             ChildOutcome::NotStarted => {
-                if start_grace_elapsed(&delegation, now) {
+                // A task that already reported turns is open, not lost.
+                if delegation.reported_turn_id.is_none() && start_grace_elapsed(&delegation, now) {
                     fail_and_hand_back(
                         state,
                         &delegation.id,
@@ -2127,6 +2363,7 @@ mod tests {
             started_at: Some("2026-10-05T10:00:00Z".to_string()),
             kind: Default::default(),
             title: None,
+            reported_turn_id: None,
         }
     }
 
@@ -2858,7 +3095,7 @@ mod tests {
             task.started_at = Some((Utc::now() - chrono::Duration::hours(3)).to_rfc3339());
             DelegationRepo::save_delegation(state, &task).await.expect("save task");
             append(state, "parent", started("p-1", "work")).await;
-            append(state, "child", started("c-1", "brief")).await;
+            append(state, "child", started("c-1", "Task from Dev Command Center, proposed in \"x\".")).await;
             reconcile_running_delegations(state).await;
             assert_eq!(
                 DelegationRepo::get_delegation(state, &task.id)
@@ -2895,6 +3132,153 @@ mod tests {
             assert!(queued[0].starts_with("[DCC] Task \"Fase 2\" ended a turn"), "{}", queued[0]);
             assert!(queued[0].contains("Push notifications work."));
             assert!(queued[0].chars().count() < 900, "the status stays short");
+        }
+
+        async fn open_task(state: &SessionCommandState) -> Delegation {
+            let mut task = running_delegation(state, DelegationOrigin::Agent).await;
+            task.kind = DelegationKind::Task;
+            task.title = Some("Fase 2".to_string());
+            task.mode = DelegationMode::Research;
+            task.budget = DelegationBudget {
+                turn_limit: None,
+                timeout_seconds: None,
+                allow_file_edits: false,
+                approval_policy: None,
+            };
+            DelegationRepo::save_delegation(state, &task).await.expect("save task");
+            task
+        }
+
+        async fn child_turn(state: &SessionCommandState, turn: &str, prompt: &str, answer: &str) {
+            append(state, "child", started(turn, prompt)).await;
+            append(
+                state,
+                "child",
+                SessionEventKind::TurnAssistantMessageCompleted {
+                    turn_id: TurnId(turn.to_string()),
+                    message_id: format!("m-{turn}"),
+                    phase: AssistantMessagePhase::FinalAnswer,
+                    content: Some(answer.to_string()),
+                },
+            )
+            .await;
+            append(
+                state,
+                "child",
+                SessionEventKind::TurnCompleted {
+                    turn_id: TurnId(turn.to_string()),
+                },
+            )
+            .await;
+            on_session_turn_terminal(state.clone(), SessionId("child".to_string())).await;
+        }
+
+        async fn load(state: &SessionCommandState, id: &DelegationId) -> Delegation {
+            DelegationRepo::get_delegation(state, id)
+                .await
+                .expect("load")
+                .expect("record")
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_task_stays_open_and_wakes_the_parent_only_for_turns_it_waits_on() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let task = open_task(state).await;
+            append(state, "parent", started("p-1", "plan")).await;
+
+            child_turn(state, "c-1", "Task from Dev Command Center, proposed in \"plan\".", "Phase 2 done.").await;
+            // The watchdog announcing the same turn again reports nothing new.
+            reconcile_running_delegations(state).await;
+            let queued = queued_prompts(state, "parent").await;
+            assert_eq!(queued.len(), 1);
+            assert!(queued[0].contains("Phase 2 done."));
+            assert!(queued[0].contains("Your tasks:\n- Fase 2 — open"), "{}", queued[0]);
+            let stored = load(state, &task.id).await;
+            assert_eq!(stored.status, DelegationStatus::Running);
+            assert_eq!(stored.reported_turn_id, Some(TurnId("c-1".to_string())));
+
+            // The person talking to the task: recorded, the parent left alone.
+            child_turn(state, "c-2", "also rename the button", "Renamed.").await;
+            assert_eq!(queued_prompts(state, "parent").await.len(), 1);
+            assert_eq!(load(state, &task.id).await.result_summary.as_deref(), Some("Renamed."));
+
+            // A follow-up the parent sent comes back to it.
+            child_turn(state, "c-3", "[DCC] Message from the session that coordinates this task:\n\nadd tests", "Tests added.").await;
+            let queued = queued_prompts(state, "parent").await;
+            assert_eq!(queued.len(), 2);
+            assert!(queued[1].contains("Tests added."));
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn an_interrupted_task_turn_keeps_the_task_open() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let task = open_task(state).await;
+            append(state, "parent", started("p-1", "plan")).await;
+            append(state, "child", started("c-1", "Task from Dev Command Center, proposed in \"plan\".")).await;
+            append(
+                state,
+                "child",
+                SessionEventKind::TurnAborted {
+                    turn_id: TurnId("c-1".to_string()),
+                    reason: Some("Stopped by the person.".to_string()),
+                },
+            )
+            .await;
+            on_session_turn_terminal(state.clone(), SessionId("child".to_string())).await;
+
+            assert_eq!(load(state, &task.id).await.status, DelegationStatus::Running);
+            let queued = queued_prompts(state, "parent").await;
+            assert_eq!(queued.len(), 1);
+            assert!(queued[0].contains("The turn was interrupted: Stopped by the person."));
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn closing_a_task_waits_for_its_turn_to_end() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let task = open_task(state).await;
+            append(state, "child", started("c-1", "Task from Dev Command Center.")).await;
+            let error = complete_task(state, &task.id).await.expect_err("still working");
+            assert!(error.contains("still working"), "{error}");
+
+            append(
+                state,
+                "child",
+                SessionEventKind::TurnCompleted {
+                    turn_id: TurnId("c-1".to_string()),
+                },
+            )
+            .await;
+            let closed = complete_task(state, &task.id).await.expect("close");
+            assert_eq!(closed.status, DelegationStatus::Completed);
+            let error = complete_task(state, &task.id).await.expect_err("closed already");
+            assert!(error.contains("only an open task"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn the_parent_messages_a_task_only_from_a_turn_the_person_started() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let task = open_task(state).await;
+            append(state, "parent", started("p-1", "[DCC] Task \"Fase 2\" ended a turn")).await;
+            let error = message_task(state, &SessionId("parent".to_string()), &task.id.0, "add tests")
+                .await
+                .expect_err("a DCC turn cannot message");
+            assert!(error.contains("a turn the human started"), "{error}");
+
+            append(state, "parent", SessionEventKind::TurnCompleted { turn_id: TurnId("p-1".to_string()) }).await;
+            append(state, "parent", started("p-2", "ask the task to add tests")).await;
+            // The task is mid-turn: the message waits as a turn of its own.
+            append(state, "child", started("c-1", "Task from Dev Command Center.")).await;
+            message_task(state, &SessionId("parent".to_string()), &task.id.0, "add tests")
+                .await
+                .expect("queued");
+            let queued = queued_prompts(state, "child").await;
+            assert_eq!(queued.len(), 1);
+            assert!(queued[0].starts_with("[DCC] Message from the session that coordinates this task:"));
+            assert!(queued[0].ends_with("add tests"));
         }
 
         #[tokio::test(flavor = "current_thread")]

@@ -9218,6 +9218,7 @@ mod editor_workspace_file_tests {
             started_at: None,
             kind: Default::default(),
             title: None,
+            reported_turn_id: None,
         }))
         .expect("save delegation");
 

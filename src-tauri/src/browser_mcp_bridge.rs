@@ -84,9 +84,10 @@ const BROWSER_MCP_TOOL_NAMES: [&str; 13] = [
     "dcc_browser_evidence_read",
 ];
 #[cfg(test)]
-const DELEGATION_MCP_TOOL_NAMES: [&str; 5] = [
+const DELEGATION_MCP_TOOL_NAMES: [&str; 6] = [
     "dcc_delegate_task",
     "dcc_propose_task",
+    "dcc_task_message",
     "dcc_task_status",
     "dcc_task_wait",
     "dcc_task_cancel",
@@ -944,6 +945,12 @@ fn propose_task_edits_default() -> bool {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskMessageArgs {
+    task_id: String,
+    message: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TaskWaitArgs {
     task_id: String,
     #[serde(default)]
@@ -1479,8 +1486,8 @@ async fn dispatch_tool(
         );
     }
     match call.name.as_str() {
-        "dcc_delegate_task" | "dcc_propose_task" | "dcc_task_status" | "dcc_task_wait"
-        | "dcc_task_cancel" => {
+        "dcc_delegate_task" | "dcc_propose_task" | "dcc_task_message" | "dcc_task_status"
+        | "dcc_task_wait" | "dcc_task_cancel" => {
             if !bridge.lease_is_current(binding) {
                 return ToolDispatch::computer_error(
                     "delegation is unavailable for this provider session",
@@ -2347,6 +2354,32 @@ async fn dispatch_delegation_tool(
                 Err(error) => ToolDispatch::computer_error(&format!("Task proposal rejected: {error}")),
             }
         }
+        "dcc_task_message" => {
+            let Some(args) = call
+                .arguments
+                .and_then(|arguments| serde_json::from_value::<TaskMessageArgs>(arguments).ok())
+                .filter(|args| args.message.chars().count() <= MAX_DELEGATED_TASK_CHARS)
+            else {
+                return ToolDispatch::computer_error("invalid dcc_task_message arguments");
+            };
+            match dcc_tauri::delegation_runtime::message_task(
+                &bridge.sessions,
+                &parent,
+                &args.task_id,
+                &args.message,
+            )
+            .await
+            {
+                Ok(task) => {
+                    let mut view = delegation_task_view(&task);
+                    view["delivery"] = json!(
+                        "The task got your message as a turn of its own. When that turn ends, DCC sends you a short status starting with [DCC]. Do not poll."
+                    );
+                    reply("Message sent to the task.", view)
+                }
+                Err(error) => ToolDispatch::computer_error(&format!("Message not sent: {error}")),
+            }
+        }
         "dcc_task_status" => {
             let Some(args) = call
                 .arguments
@@ -2773,6 +2806,7 @@ fn tools() -> Vec<Value> {
         json!({"name":"dcc_computer_key","description":"Press one supported key combination in an observed allowed window, for example COMMAND+L, ENTER, TAB or PAGE_DOWN. It reaches only that app, so system-wide shortcuts do not apply. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target,"key":{"type":"string","enum":computer_keys},"modifiers":{"type":"array","maxItems":4,"items":{"type":"string","enum":["SHIFT","CONTROL","OPTION","COMMAND"]}}},"required":["target","key"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_delegate_task","description":"Delegate a bounded, self-contained task to another coding agent (a different provider or model) working in this same workspace. Returns a taskId immediately; DCC later sends you the result as a new message starting with [DCC]. End your turn or keep working on independent parts — do not poll. The child sees only `task` plus the workspace's git context, so include everything it needs. review and explain are read-only. implement edits an isolated git worktree; the human reviews those edits before anything reaches your workspace and DCC tells you whether they were applied. A delegated agent cannot delegate again, and a turn started by a [DCC] result cannot delegate either: report it and let the human ask for more.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"task":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS},"title":{"type":"string","maxLength":MAX_DELEGATED_TITLE_CHARS,"description":"A short name for the task (a few words, in the human's language), shown to them as the child conversation's title, e.g. \"Corrigir respostas antigas\"."},"mode":{"type":"string","enum":["review","explain","implement"],"default":"review"},"provider":{"type":"string","enum":dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS,"description":"Target provider. Omit to let DCC pick an available provider other than yours."},"model":{"type":"string","maxLength":128,"description":"Target model id. Omit for the provider's default."},"wait":{"type":"boolean","default":false,"description":"Block until the task finishes (or timeoutSeconds) and return its result. Use only when you cannot continue without it."},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600,"default":300}},"required":["task"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
         json!({"name":"dcc_propose_task","description":"Propose a piece of work as its own task: a separate, long-lived conversation in this workspace, on your own provider unless you name another, that the human starts with one click. Use it when a phase of the plan, or independent multi-step work, deserves a clean context of its own. Keep quick things (a question, a read, one edit) in this conversation, and mention small follow-ups in your reply instead of proposing them. Nothing runs until the human starts it. The task sees only your brief plus the workspace, so make it self-contained. Each time the task ends a turn, DCC sends you a short status starting with [DCC]: tell the human where the plan stands and propose the next step if one is due. At most 3 proposals per turn. Use start=now only when the human, in this turn, explicitly asked you to start the work. A task cannot propose tasks.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TITLE_CHARS,"description":"A short name in the human's language, shown on the card and as the task's title, e.g. \"Fase 2: notificações push\"."},"task":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS,"description":"The self-contained brief: goal, files or area, constraints, and what done looks like."},"edits":{"type":"boolean","default":true,"description":"The task changes files: it works in its own isolated worktree that the human reviews. false keeps it read-only."},"provider":{"type":"string","enum":dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS,"description":"Omit to use your own provider."},"model":{"type":"string","maxLength":128,"description":"Model id. Omit for the provider's default."},"start":{"type":"string","enum":["propose","now"],"default":"propose","description":"propose shows a card the human starts; now starts at once and is refused unless the human started this turn."}},"required":["title","task"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
+        json!({"name":"dcc_task_message","description":"Send a follow-up to one of your open tasks (from dcc_propose_task). It runs as a turn of its own in that task, and when it ends DCC sends you a short status starting with [DCC]. Only from a turn the human started; from a [DCC] status, tell the human what you would send instead.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":128},"message":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS}},"required":["taskId","message"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
         json!({"name":"dcc_task_status","description":"Read the status and, once finished, the result of a task you delegated with dcc_delegate_task. Only needed if you must check before DCC delivers the result.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64}},"required":["taskId"]},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}),
         json!({"name":"dcc_task_wait","description":"Block until a task you delegated finishes, up to timeoutSeconds, and return its result. Use only when you cannot continue without it; otherwise DCC delivers the result on its own. If it times out the task keeps running and the result still arrives as a [DCC] message.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600,"default":300}},"required":["taskId"]},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}),
         json!({"name":"dcc_task_cancel","description":"Cancel a task you delegated that is still running. Its partial work is discarded.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64},"reason":{"type":"string","maxLength":2000}},"required":["taskId"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}}),

@@ -132,4 +132,8 @@ pub struct Delegation {
     /// shows it before any child conversation exists.
     #[serde(default)]
     pub title: Option<String>,
+    /// A task's child turn already handed back to the parent, so a turn that
+    /// ended is reported once however many signals announce it.
+    #[serde(default)]
+    pub reported_turn_id: Option<TurnId>,
 }

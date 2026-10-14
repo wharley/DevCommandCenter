@@ -768,6 +768,7 @@ CREATE TABLE IF NOT EXISTS dcc_delegations (
 	started_at TEXT NULL,
 	kind TEXT NOT NULL DEFAULT 'delegation',
 	title TEXT NULL,
+	reported_turn_id TEXT NULL,
 	FOREIGN KEY (parent_session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE,
 	FOREIGN KEY (child_session_id) REFERENCES dcc_sessions(id) ON DELETE SET NULL,
 	FOREIGN KEY (workspace_id) REFERENCES dcc_workspaces(id) ON DELETE CASCADE
@@ -789,7 +790,7 @@ CREATE INDEX IF NOT EXISTS idx_dcc_delegations_status
 const DELEGATION_SELECT_SQL: &str = "SELECT id, parent_session_id, parent_turn_id, child_session_id, \
      workspace_id, target_provider_id, target_model_id, mode, status, prompt, context_policy_json, \
      budget_json, result_summary, touched_files_json, diff_summary, validation_summary, created_at, \
-     updated_at, origin, instruction, started_at, kind, title FROM dcc_delegations";
+     updated_at, origin, instruction, started_at, kind, title, reported_turn_id FROM dcc_delegations";
 
 const DELEGATION_WORKTREE_OPERATION_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS dcc_delegation_worktree_operations (
@@ -2702,6 +2703,12 @@ impl SqliteSessionRepo {
             "TEXT NOT NULL DEFAULT 'delegation'",
         )?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_delegations", "title", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_delegations",
+            "reported_turn_id",
+            "TEXT NULL",
+        )?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_sessions",
@@ -4908,6 +4915,7 @@ impl SqliteSessionRepo {
                 _ => DelegationKind::Delegation,
             },
             title: row.get::<_, Option<String>>(22)?,
+            reported_turn_id: row.get::<_, Option<String>>(23)?.map(TurnId),
         })
     }
 
@@ -9401,8 +9409,8 @@ impl DelegationRepo for SqliteSessionRepo {
 				id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 				target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
 				result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at,
-				origin, instruction, started_at, kind, title
-			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+				origin, instruction, started_at, kind, title, reported_turn_id
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
 			ON CONFLICT(id) DO UPDATE SET
 				parent_session_id = excluded.parent_session_id,
 				parent_turn_id = excluded.parent_turn_id,
@@ -9425,7 +9433,8 @@ impl DelegationRepo for SqliteSessionRepo {
 				instruction = excluded.instruction,
 				started_at = excluded.started_at,
 				kind = excluded.kind,
-				title = excluded.title
+				title = excluded.title,
+				reported_turn_id = excluded.reported_turn_id
 			"#,
             params![
                 delegation.id.0.clone(),
@@ -9463,6 +9472,10 @@ impl DelegationRepo for SqliteSessionRepo {
                     DelegationKind::Task => "task",
                 },
                 delegation.title.clone(),
+                delegation
+                    .reported_turn_id
+                    .as_ref()
+                    .map(|turn_id| turn_id.0.clone()),
             ],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -9479,7 +9492,7 @@ impl DelegationRepo for SqliteSessionRepo {
 			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 			       target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
 			       result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at,
-			       origin, instruction, started_at, kind, title
+			       origin, instruction, started_at, kind, title, reported_turn_id
 			  FROM dcc_delegations
 			 WHERE id = ?1
 			"#,
@@ -9503,7 +9516,7 @@ impl DelegationRepo for SqliteSessionRepo {
 			SELECT id, parent_session_id, parent_turn_id, child_session_id, workspace_id,
 			       target_provider_id, target_model_id, mode, status, prompt, context_policy_json, budget_json,
 			       result_summary, touched_files_json, diff_summary, validation_summary, created_at, updated_at,
-			       origin, instruction, started_at, kind, title
+			       origin, instruction, started_at, kind, title, reported_turn_id
 			  FROM dcc_delegations
 		"#;
         let order_sql = " ORDER BY updated_at DESC, created_at DESC";
@@ -11834,6 +11847,7 @@ mod tests {
             started_at: None,
             kind: DelegationKind::Task,
             title: Some("Fase 2".to_string()),
+            reported_turn_id: None,
         };
 
         futures::executor::block_on(repo.save_delegation(&delegation)).expect("save delegation");

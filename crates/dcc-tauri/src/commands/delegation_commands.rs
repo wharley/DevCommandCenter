@@ -365,6 +365,7 @@ pub async fn create_delegation_with_state(
             .title
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
+        reported_turn_id: None,
     };
 
     let edit_capable =
@@ -521,6 +522,7 @@ pub async fn create_task_proposal_with_state(
         started_at: None,
         kind: DelegationKind::Task,
         title: Some(input.title.trim().to_string()),
+        reported_turn_id: None,
     };
     DelegationRepo::save_delegation(&*state, &proposal)
         .await
@@ -991,6 +993,23 @@ pub async fn start_task_proposal(
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct CompleteTaskInput {
+    pub delegation_id: DelegationId,
+}
+
+/// The person's "Close task": an open task stops; its edits go to review.
+#[tauri::command]
+pub async fn complete_task(
+    state: State<'_, SessionCommandState>,
+    input: CompleteTaskInput,
+) -> Result<RunDelegationOutput, String> {
+    crate::delegation_runtime::complete_task(&state, &input.delegation_id)
+        .await
+        .map(|delegation| RunDelegationOutput { delegation })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct DelegationResultTurnInput {
     pub delegation_id: DelegationId,
     /// The failure reason lives on the timeline event, not on the record.
@@ -1121,6 +1140,7 @@ mod tests {
             started_at: None,
             kind: Default::default(),
             title: None,
+            reported_turn_id: None,
         }
     }
 
