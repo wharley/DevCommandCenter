@@ -158,7 +158,7 @@ type VirtualItem =
 			headerVariant: "project" | "waiting" | "completed";
 	  }
 	| { kind: "row"; groupId: string; workspace: WorkspaceSummary }
-	| { kind: "child-task"; groupId: string; workspaceId: string; task: ChildTaskEntry }
+	| { kind: "child-task"; groupId: string; workspaceId: string; task: ChildTaskEntry; last: boolean }
 	| {
 			kind: "section-label";
 			sectionId: typeof PINNED_SECTION_ID | typeof RECENT_SECTION_ID;
@@ -913,9 +913,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
 		const pushChildTasks = (list: VirtualItem[], groupId: string, workspaceId: string) => {
-			for (const task of childTasks.get(workspaceId) ?? []) {
-				list.push({ kind: "child-task", groupId, workspaceId, task });
-			}
+			const tasks = childTasks.get(workspaceId) ?? [];
+			tasks.forEach((task, index) => {
+				list.push({ kind: "child-task", groupId, workspaceId, task, last: index === tasks.length - 1 });
+			});
 		};
 		const visibleGroups = railGroups;
 		const hasPinnedGroups = visibleGroups.some((group) => group.pinnedAt);
@@ -1236,6 +1237,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				return (
 					<SidebarChildTaskRow
 						task={item.task}
+						last={item.last}
 						onSelect={
 							onSelectSession
 								? () => onSelectSession(item.workspaceId, item.task.sessionId)

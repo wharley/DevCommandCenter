@@ -10,9 +10,12 @@ import type { ChildTaskEntry } from "./sidebar-child-tasks.logic";
  */
 export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 	task,
+	last = false,
 	onSelect,
 }: {
 	task: ChildTaskEntry;
+	/** The last task of its workspace: the guide line stops at its row. */
+	last?: boolean;
 	onSelect?: () => void;
 }) {
 	const { t } = useTranslation("common");
@@ -25,8 +28,15 @@ export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 			disabled={!onSelect}
 			onClick={onSelect}
 			title={task.title}
-			className="group/dccChildTask flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-9 pr-3 text-left text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-default"
+			className="group/dccChildTask relative flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-9 pr-3 text-left text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-default"
 		>
+			{/* The guide from the workspace row down through its tasks, with a tick to each. */}
+			<span
+				aria-hidden
+				data-guide={last ? "last" : "through"}
+				className={cn("absolute left-[22px] top-0 w-px bg-border", last ? "h-1/2" : "h-full")}
+			/>
+			<span aria-hidden className="absolute left-[22px] top-1/2 h-px w-2.5 bg-border" />
 			<span
 				aria-hidden
 				className={cn(

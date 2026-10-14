@@ -29,7 +29,7 @@ describe("SidebarChildTaskRow", () => {
 			root.render(
 				<>
 					<SidebarChildTaskRow task={{ id: "t1", title: "Fase 1: relay", state: "open", sessionId: "c1" }} onSelect={onSelect} />
-					<SidebarChildTaskRow task={{ id: "t2", title: "Fase 2: push", state: "proposed", sessionId: "p" }} />
+					<SidebarChildTaskRow task={{ id: "t2", title: "Fase 2: push", state: "proposed", sessionId: "p" }} last />
 				</>,
 			);
 		});
@@ -38,6 +38,9 @@ describe("SidebarChildTaskRow", () => {
 		expect(open?.textContent).toBe("Fase 1: relay");
 		expect(proposed?.textContent).toBe("Fase 2: pushsidebar.childTask.proposed");
 		expect(proposed?.disabled).toBe(true);
+		// The guide runs through the first row and stops halfway down the last.
+		expect(open?.querySelector("[data-guide]")?.getAttribute("data-guide")).toBe("through");
+		expect(proposed?.querySelector("[data-guide]")?.getAttribute("data-guide")).toBe("last");
 		await act(async () => open?.click());
 		expect(onSelect).toHaveBeenCalledOnce();
 	});
