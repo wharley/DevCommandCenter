@@ -135,6 +135,7 @@ import { subscribeIdeaFinished } from "./features/agents/idea-events";
 import { createIdea } from "./lib/research-api";
 import { dccQueryKeys } from "./lib/query-client";
 import { inferProjectIdFromWorkspaceRoot } from "./features/workspaces/create-workspace-dialog.logic";
+import { linkedFoldersOf, linkedTaskProjects } from "./features/workspaces/linked-folders";
 import { subscribeOpenPullRequest } from "./features/agents/pr-review-jobs";
 import { markAgentResultSeen } from "./features/agents/agent-seen-results";
 import { subscribeOpenFinding } from "./features/agents/open-finding-command";
@@ -169,6 +170,8 @@ import {
 	setWorkspacePinned,
 	setWorkspaceSnooze,
 	updateRepositoryIdentity,
+	listRepositoryLinkedFolders,
+	setRepositoryLinkedFolders,
 	workspaceGitBranchDiff,
 	workspaceGitStatus,
 	workspaceDeliveryFailureSnapshot,
@@ -311,6 +314,7 @@ const LazyUsageDialog = lazy(() =>
 	import("./features/usage").then((module) => ({ default: module.UsageDialog })),
 );
 const ONBOARDING_COMPLETE_KEY = "dcc.onboarding.complete";
+const EMPTY_LINKED_FOLDERS: Record<string, string[]> = {};
 const EMPTY_WORKSPACES: WorkspaceSummary[] = [];
 const LOCAL_BACKEND_CACHE_KEY = "local";
 
@@ -693,6 +697,26 @@ export default function App() {
 		staleTime: 60_000,
 		refetchOnWindowFocus: false,
 	});
+	const linkedFoldersQuery = useQuery({
+		queryKey: ["repositoryLinkedFolders", backendCacheKey],
+		queryFn: async () => {
+			if (isRemoteBackend) {
+				return {};
+			}
+			const result = await listRepositoryLinkedFolders();
+			return Object.fromEntries(
+				result.entries.map((entry) => [entry.repositoryId, entry.paths]),
+			) as Record<string, string[]>;
+		},
+		staleTime: 60_000,
+		refetchOnWindowFocus: false,
+	});
+	const linkedFoldersByRepositoryId = linkedFoldersQuery.data ?? EMPTY_LINKED_FOLDERS;
+	const linkedFoldersForRoot = useCallback(
+		(rootPath: string) =>
+			linkedFoldersOf(rootPath, repositoriesQuery.data ?? [], linkedFoldersByRepositoryId),
+		[linkedFoldersByRepositoryId, repositoriesQuery.data],
+	);
 	const workspacesFromBackend = workspacesQuery.data ?? EMPTY_WORKSPACES;
 	const repositoriesFromBackend = repositoriesQuery.data ?? [];
 	// Ideas in progress are projects too, but they live on the researcher's
@@ -1694,15 +1718,19 @@ export default function App() {
 			}
 
 			applyWorkspaceTitle(workspaceId, title);
+			// A multi-project task takes the title on its bundle; its primary
+			// workspace keeps the project's name.
+			const workspaceName = titled.workspace.name ?? title;
 			queryClient.setQueryData<WorkspaceSummary[]>(
 				["workspaces", backendCacheKey],
 				(current = []) =>
 					current.map((workspace) =>
 						workspace.id === workspaceId
-							? { ...workspace, name: title, isAutoNamed: false }
+							? { ...workspace, name: workspaceName, isAutoNamed: false }
 							: workspace,
 					),
 			);
+			void queryClient.invalidateQueries({ queryKey: ["workspaceBundles"] });
 			queryClient.setQueryData<WorkspaceSessionSummary[]>(
 				getWorkspaceSessionsCacheKey(backendCacheKey, workspaceId),
 				(current = []) =>
@@ -4735,8 +4763,35 @@ export default function App() {
 			workspaceRoot: string;
 			baseBranch: string;
 			isolationMode?: WorkspaceIsolationMode;
+			/** False skips the project's linked folders for this task. */
+			includeLinkedFolders?: boolean;
 		}) => {
 			try {
+				const linkedFolders =
+					input.includeLinkedFolders === false
+						? []
+						: linkedFoldersForRoot(input.workspaceRoot);
+				if (linkedFolders.length > 0) {
+					// The project brings its linked folders: one task over all of
+					// them, every folder in the mode the person chose.
+					const result = await createWorkspaceBundle({
+						name: t("sidebar.newWorkspace"),
+						projects: linkedTaskProjects({
+							primary: input,
+							linkedFolders,
+							repositories: repositoriesFromBackend,
+							isolationMode: input.isolationMode,
+						}),
+					});
+					void queryClient.invalidateQueries({ queryKey: ["workspaceBundles"] });
+					void queryClient.invalidateQueries({ queryKey: ["workspaces", backendCacheKey] });
+					void queryClient.invalidateQueries({
+						queryKey: ["repositories", backendCacheKey],
+					});
+					requestNewTaskComposerFocus(result.primaryWorkspace.id);
+					setGlobalSurface(null);
+					return;
+				}
 				const result = await createWorkspace({
 					projectId: input.projectId,
 					workspaceRoot: input.workspaceRoot,
@@ -4756,7 +4811,16 @@ export default function App() {
 				});
 			}
 		},
-		[backendCacheKey, createWorkspace, queryClient, requestNewTaskComposerFocus, t],
+		[
+			backendCacheKey,
+			createWorkspace,
+			createWorkspaceBundle,
+			linkedFoldersForRoot,
+			queryClient,
+			repositoriesFromBackend,
+			requestNewTaskComposerFocus,
+			t,
+		],
 	);
 
 	useQuickComposerNavigation((launch) => {
@@ -5060,6 +5124,16 @@ export default function App() {
 		},
 		[backendCacheKey, queryClient],
 	);
+	const handleSaveLinkedFolders = useCallback(
+		async (repositoryId: string, paths: string[]) => {
+			const saved = await setRepositoryLinkedFolders({ repositoryId, paths });
+			queryClient.setQueryData<Record<string, string[]>>(
+				["repositoryLinkedFolders", backendCacheKey],
+				(current = {}) => ({ ...current, [saved.repositoryId]: saved.paths }),
+			);
+		},
+		[backendCacheKey, queryClient],
+	);
 	const handleSetProjectPinned = useCallback(
 		async (repositoryId: string, pinned: boolean) => {
 			const updated = await setRepositoryPinned({ repositoryId, pinned });
@@ -5284,6 +5358,10 @@ export default function App() {
 							onUpdateProjectIdentity={
 								isRemoteBackend ? undefined : handleUpdateProjectIdentity
 							}
+							linkedFoldersByRepositoryId={linkedFoldersByRepositoryId}
+							onSaveLinkedFolders={
+								isRemoteBackend ? undefined : handleSaveLinkedFolders
+							}
 							onSetProjectPinned={
 								isRemoteBackend ? undefined : handleSetProjectPinned
 							}
@@ -5380,6 +5458,8 @@ export default function App() {
 								mode={workspaceCreationMode}
 								initialCreationScope={workspaceCreationScope}
 								initialIsolationMode={workspaceCreationIsolation}
+								linkedFoldersByRepositoryId={linkedFoldersByRepositoryId}
+								onSaveLinkedFolders={handleSaveLinkedFolders}
 								repositoryContext={workspaceRepositoryContext}
 								onOpenChange={handleWorkspaceDialogOpenChange}
 								onCreateWorkspace={async (input) => {
@@ -5450,12 +5530,22 @@ export default function App() {
 								<NewTaskLaunchState
 									repositories={projectRepositories}
 									isCreating={isCreatingWorkspace}
-									onSelectProject={async (repository, isolationMode) => {
+									linkedFolderCounts={Object.fromEntries(
+										Object.entries(linkedFoldersByRepositoryId).map(
+											([repositoryId, paths]) => [repositoryId, paths.length],
+										),
+									)}
+									onSelectProject={async (
+										repository,
+										isolationMode,
+										includeLinkedFolders,
+									) => {
 										await handleQuickCreateTask({
 											projectId: repository.projectId,
 											workspaceRoot: repository.rootPath,
 											baseBranch: repository.baseBranch,
 											isolationMode,
+											includeLinkedFolders,
 										});
 									}}
 									onSelectMultiple={(isolationMode) => {

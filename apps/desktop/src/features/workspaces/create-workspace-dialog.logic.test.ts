@@ -6,8 +6,11 @@ import {
 	initialWorkspaceStart,
 	isBranchWorkspaceSource,
 	LAST_TASK_REPOSITORY_ROOT_STORAGE_KEY,
+	linkedFolderOptionId,
 	orderMultiProjectSelection,
 	promoteMultiProjectPrimary,
+	selectMultiProject,
+	withLinkedFolderOptions,
 	readLastTaskRepositoryRoot,
 	rememberLastTaskRepositoryRoot,
 	repositoryNameFromWorkspaceRoot,
@@ -151,5 +154,34 @@ describe("multi-project primary", () => {
 
 	it("ignores a project that is not selected", () => {
 		expect(promoteMultiProjectPrimary(["dcc", "lp"], "api")).toEqual(["dcc", "lp"]);
+	});
+});
+
+describe("linked folders in a multi-project task", () => {
+	const projects = [
+		{ id: "dcc", rootPath: "/code/dcc" },
+		{ id: "lp", rootPath: "/code/lp" },
+	];
+	const linked = { dcc: ["/code/lp", "/code/docs-site/"] };
+	const folder = (path: string) => ({ id: linkedFolderOptionId(path), rootPath: path });
+
+	it("adds the linked folders that are not projects yet, once", () => {
+		const options = withLinkedFolderOptions(projects, { ...linked, lp: ["/code/docs-site"] }, folder);
+		expect(options.map((option) => option.id)).toEqual(["dcc", "lp", "linked:/code/docs-site"]);
+	});
+
+	it("brings the primary's linked folders along on the first pick", () => {
+		const options = withLinkedFolderOptions(projects, linked, folder);
+		expect(selectMultiProject([], "dcc", options, linked)).toEqual([
+			"dcc",
+			"lp",
+			"linked:/code/docs-site",
+		]);
+	});
+
+	it("adds only the picked project once a primary exists", () => {
+		const options = withLinkedFolderOptions(projects, linked, folder);
+		expect(selectMultiProject(["lp"], "dcc", options, linked)).toEqual(["lp", "dcc"]);
+		expect(selectMultiProject(["lp"], "lp", options, linked)).toEqual(["lp"]);
 	});
 });

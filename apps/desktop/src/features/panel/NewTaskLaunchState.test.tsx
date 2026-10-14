@@ -54,7 +54,7 @@ const shortcut = () =>
 it("starts the task in a worktree by default", async () => {
 	expect(worktree().checked).toBe(true);
 	await act(async () => shortcut().click());
-	expect(onSelectProject).toHaveBeenCalledWith(repository, "protectedWorktree");
+	expect(onSelectProject).toHaveBeenCalledWith(repository, "protectedWorktree", true);
 });
 
 it("starts the task in the current checkout when worktree is unchecked", async () => {
@@ -62,5 +62,28 @@ it("starts the task in the current checkout when worktree is unchecked", async (
 	expect(worktree().checked).toBe(false);
 	expect(host.textContent).toContain("newTask.execution.localDescription");
 	await act(async () => shortcut().click());
-	expect(onSelectProject).toHaveBeenCalledWith(repository, "localDirect");
+	expect(onSelectProject).toHaveBeenCalledWith(repository, "localDirect", true);
+});
+
+it("only offers linked folders when a project links some, and can skip them", async () => {
+	expect(host.textContent).not.toContain("newTask.linkedFolders");
+	act(() =>
+		root.render(
+			<NewTaskLaunchState
+				repositories={[repository]}
+				isCreating={false}
+				onSelectProject={onSelectProject}
+				onSelectMultiple={() => {}}
+				onOpenProject={() => {}}
+				linkedFolderCounts={{ [repository.id]: 2 }}
+			/>,
+		),
+	);
+	expect(shortcut().textContent).toContain("+2");
+	const linked = host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[1]!;
+	expect(linked.checked).toBe(true);
+	act(() => linked.click());
+	expect(shortcut().textContent).not.toContain("+2");
+	await act(async () => shortcut().click());
+	expect(onSelectProject).toHaveBeenCalledWith(repository, "protectedWorktree", false);
 });

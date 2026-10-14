@@ -302,13 +302,14 @@ use dcc_tauri::commands::{
         DeleteWorkspaceBundleInput, DeleteWorkspaceInput, ListChildDirectoriesInput,
         ListChildDirectoriesOutput, ListGitTrackedFilesInput, ListGitTrackedFilesOutput,
         ListLocalBranchesInput, ListLocalBranchesOutput, ListMissionSpecsInput,
-        ListMissionSpecsOutput, ListRepositoriesOutput, ListWorkspaceBundlesOutput,
-        ListWorkspacesOutput, MissionSpecContextFileState, MissionSpecContextFileStatus,
-        MissionSpecContextStatusInput, MissionSpecContextStatusOutput, MissionSpecEntry,
-        MissionValidationEntry, ReadWorkspaceFileInput, ReadWorkspaceFileOutput,
-        RenameWorkspaceInput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
-        SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
-        SearchWorkspaceMatch, SearchWorkspaceOutput, SetRepositoryPinnedInput,
+        ListMissionSpecsOutput, ListRepositoriesOutput, ListRepositoryLinkedFoldersOutput,
+        ListWorkspaceBundlesOutput, ListWorkspacesOutput, MissionSpecContextFileState,
+        MissionSpecContextFileStatus, MissionSpecContextStatusInput,
+        MissionSpecContextStatusOutput, MissionSpecEntry, MissionValidationEntry,
+        ReadWorkspaceFileInput, ReadWorkspaceFileOutput, RenameWorkspaceInput, RepositoryIdInput,
+        RepositoryLinkedFolders, ResolveWorkspaceSourceUrlInput, SaveMissionValidationInput,
+        SaveMissionValidationOutput, SearchWorkspaceInput, SearchWorkspaceMatch,
+        SearchWorkspaceOutput, SetRepositoryLinkedFoldersInput, SetRepositoryPinnedInput,
         SetWorkspacePinnedInput, SetWorkspaceSnoozeInput, UpdateRepositoryIdentityInput,
         WorkspaceApplyDelegationWorktreeInput, WorkspaceApplyDelegationWorktreeOutput,
         WorkspaceBundleIdInput, WorkspaceBundleStateOutput, WorkspaceContinueFromBaseBranchInput,
@@ -462,6 +463,8 @@ struct WorkspaceMethods {
     delete_repository: String,
     update_repository_identity: String,
     set_repository_pinned: String,
+    list_repository_linked_folders: String,
+    set_repository_linked_folders: String,
     set_workspace_pinned: String,
     workspace_github_cli_status: String,
     workspace_forge_cli_status: String,
@@ -795,6 +798,9 @@ fn main() {
         .typ::<RepositoryIdInput>()
         .typ::<UpdateRepositoryIdentityInput>()
         .typ::<SetRepositoryPinnedInput>()
+        .typ::<RepositoryLinkedFolders>()
+        .typ::<ListRepositoryLinkedFoldersOutput>()
+        .typ::<SetRepositoryLinkedFoldersInput>()
         .typ::<SetWorkspacePinnedInput>()
         .typ::<GithubCliStatusInput>()
         .typ::<GithubCliStatusOutput>()
@@ -1112,6 +1118,8 @@ fn main() {
                 delete_repository: "delete_repository".to_string(),
                 update_repository_identity: "update_repository_identity".to_string(),
                 set_repository_pinned: "set_repository_pinned".to_string(),
+                list_repository_linked_folders: "list_repository_linked_folders".to_string(),
+                set_repository_linked_folders: "set_repository_linked_folders".to_string(),
                 set_workspace_pinned: "set_workspace_pinned".to_string(),
                 workspace_github_cli_status: "workspace_github_cli_status".to_string(),
                 workspace_forge_cli_status: "workspace_forge_cli_status".to_string(),

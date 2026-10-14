@@ -514,6 +514,27 @@ pub struct SetRepositoryPinnedInput {
     pub pinned: bool,
 }
 
+/// Folders a project brings into every new task, in order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryLinkedFolders {
+    pub repository_id: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRepositoryLinkedFoldersOutput {
+    pub entries: Vec<RepositoryLinkedFolders>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRepositoryLinkedFoldersInput {
+    pub repository_id: String,
+    pub paths: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SetWorkspacePinnedInput {
@@ -7570,13 +7591,26 @@ fn validate_bundle_projects(
                 "workspace bundle contains duplicate project root: {root}"
             ));
         }
-        let registered = repositories.iter().any(|repository| {
-            repository.root_path.trim() == root && repository.project_id == project.project_id
-        });
-        if !registered {
-            return Err(format!(
-                "project must be opened in DCC before it can join a multi-workspace: {root}"
-            ));
+        // A project linked from another one may not be opened in DCC yet: it
+        // joins as long as it is a Git checkout, and creating its task
+        // registers it like any other folder.
+        match repositories
+            .iter()
+            .find(|repository| repository.root_path.trim() == root)
+        {
+            Some(repository) if repository.project_id != project.project_id => {
+                return Err(format!(
+                    "project id does not match the project opened at {root}"
+                ));
+            }
+            Some(_) => {}
+            None if Path::new(root).is_absolute()
+                && dcc_infra::git::is_git_repo(Path::new(root)) => {}
+            None => {
+                return Err(format!(
+                    "project must be a Git checkout to join a multi-workspace: {root}"
+                ));
+            }
         }
     }
     Ok(())
@@ -7647,6 +7681,13 @@ pub async fn create_workspace_bundle_for_repos(
 
     let mut created = Vec::with_capacity(input.projects.len());
     for mut project in input.projects {
+        // A linked folder that is not a DCC project yet has no known base:
+        // the task starts from what that checkout has now.
+        if project.base_branch.trim().is_empty() {
+            project.base_branch =
+                super::local_branches::current_branch(project.workspace_root.trim())?
+                    .unwrap_or_else(|| "HEAD".into());
+        }
         if project
             .name
             .as_deref()
@@ -8018,6 +8059,85 @@ pub async fn set_repository_pinned(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "project not found".to_string())
+}
+
+/// The most folders one project brings into a task.
+const MAX_LINKED_FOLDERS: usize = 8;
+
+/// Checks the folders a project links: absolute Git checkouts that exist,
+/// distinct, and neither the project itself nor nested in or around it.
+fn normalize_linked_folders(project_root: &str, paths: &[String]) -> Result<Vec<String>, String> {
+    if paths.len() > MAX_LINKED_FOLDERS {
+        return Err(format!(
+            "a project links at most {MAX_LINKED_FOLDERS} folders"
+        ));
+    }
+    let project_root = Path::new(project_root.trim().trim_end_matches('/'));
+    let mut normalized: Vec<String> = Vec::with_capacity(paths.len());
+    for path in paths {
+        let path = path.trim().trim_end_matches('/');
+        let folder = Path::new(path);
+        if !folder.is_absolute() {
+            return Err(format!("linked folder must be an absolute path: {path}"));
+        }
+        if !folder.is_dir() {
+            return Err(format!("linked folder does not exist: {path}"));
+        }
+        if !dcc_infra::git::is_git_repo(folder) {
+            return Err(format!("linked folder is not a Git repository: {path}"));
+        }
+        if folder.starts_with(project_root) || project_root.starts_with(folder) {
+            return Err(format!(
+                "linked folder cannot be the project, inside it or around it: {path}"
+            ));
+        }
+        if normalized
+            .iter()
+            .any(|other| Path::new(other).starts_with(folder) || folder.starts_with(other))
+        {
+            return Err(format!("linked folders cannot repeat or nest: {path}"));
+        }
+        normalized.push(path.to_string());
+    }
+    Ok(normalized)
+}
+
+#[tauri::command]
+pub async fn list_repository_linked_folders(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<ListRepositoryLinkedFoldersOutput, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let entries = repo
+        .list_repository_linked_folders()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(repository_id, paths)| RepositoryLinkedFolders {
+            repository_id: repository_id.0,
+            paths,
+        })
+        .collect();
+    Ok(ListRepositoryLinkedFoldersOutput { entries })
+}
+
+#[tauri::command]
+pub async fn set_repository_linked_folders(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetRepositoryLinkedFoldersInput,
+) -> Result<RepositoryLinkedFolders, String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let repository_id = RepositoryId(input.repository_id.trim().to_string());
+    let repository = repo
+        .get_repository(&repository_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "project not found".to_string())?;
+    let paths = normalize_linked_folders(&repository.root_path, &input.paths)?;
+    repo.set_repository_linked_folders(&repository_id, &paths)
+        .map_err(|error| error.to_string())?;
+    Ok(RepositoryLinkedFolders {
+        repository_id: repository_id.0,
+        paths,
+    })
 }
 
 #[tauri::command]
@@ -10208,8 +10328,8 @@ mod editor_workspace_file_tests {
             ],
         };
         assert!(validate_bundle_projects(&repositories, &unregistered)
-            .expect_err("unregistered project must fail")
-            .contains("must be opened"));
+            .expect_err("an unregistered folder that is not Git must fail")
+            .contains("must be a Git checkout"));
 
         let duplicate = CreateWorkspaceBundleForReposInput {
             name: "Checkout".to_string(),
@@ -10221,6 +10341,78 @@ mod editor_workspace_file_tests {
         assert!(validate_bundle_projects(&repositories, &duplicate)
             .expect_err("duplicate project must fail")
             .contains("duplicate"));
+    }
+
+    fn git_checkout(parent: &Path, name: &str) -> String {
+        let root = parent.join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success());
+        root.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn bundle_validation_accepts_an_unregistered_git_checkout() {
+        let parent = tempfile::tempdir().unwrap();
+        let linked = git_checkout(parent.path(), "lp");
+        let repositories = vec![registered_repository("backend", "/tmp/backend")];
+        let input = CreateWorkspaceBundleForReposInput {
+            name: "Checkout".to_string(),
+            projects: vec![
+                bundle_project("backend", "/tmp/backend"),
+                bundle_project("lp", &linked),
+            ],
+        };
+        validate_bundle_projects(&repositories, &input).expect("linked Git checkout joins");
+
+        let mismatched = CreateWorkspaceBundleForReposInput {
+            name: "Checkout".to_string(),
+            projects: vec![
+                bundle_project("other", "/tmp/backend"),
+                bundle_project("lp", &linked),
+            ],
+        };
+        assert!(validate_bundle_projects(&repositories, &mismatched)
+            .expect_err("a registered root keeps its project id")
+            .contains("does not match"));
+    }
+
+    #[test]
+    fn linked_folders_are_distinct_git_checkouts_outside_the_project() {
+        let parent = tempfile::tempdir().unwrap();
+        let project = git_checkout(parent.path(), "dcc");
+        let lp = git_checkout(parent.path(), "lp");
+        let api = git_checkout(parent.path(), "api");
+        let plain = parent.path().join("docs");
+        std::fs::create_dir_all(&plain).unwrap();
+        let inside = git_checkout(Path::new(&project), "nested");
+
+        assert_eq!(
+            normalize_linked_folders(&project, &[format!("{lp}/"), api.clone()]).unwrap(),
+            vec![lp.clone(), api.clone()]
+        );
+        for (paths, error) in [
+            (vec!["relative/lp".to_string()], "absolute"),
+            (
+                vec![parent.path().join("missing").to_str().unwrap().to_string()],
+                "does not exist",
+            ),
+            (vec![plain.to_str().unwrap().to_string()], "not a Git"),
+            (vec![project.clone()], "the project"),
+            (vec![inside], "the project"),
+            (vec![lp.clone(), lp.clone()], "repeat"),
+        ] {
+            let message = normalize_linked_folders(&project, &paths).unwrap_err();
+            assert!(message.contains(error), "{message}");
+        }
+        let too_many = vec![lp; MAX_LINKED_FOLDERS + 1];
+        assert!(normalize_linked_folders(&project, &too_many)
+            .unwrap_err()
+            .contains("at most"));
     }
 
     #[test]

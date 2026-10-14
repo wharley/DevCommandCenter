@@ -669,6 +669,10 @@
       "pink": "Rosa forte"
     },
     "useRepositoryName": "Usar nome original",
+    "linkedFoldersLabel": "Pastas vinculadas",
+    "linkedFoldersHint": "Toda nova tarefa neste projeto já traz estas pastas (repositórios Git). O agente pode ler e alterar todas.",
+    "addLinkedFolder": "Adicionar pasta",
+    "removeLinkedFolder": "Remover {{folder}}",
     "technicalIdentity": "Identidade técnica",
     "cancel": "Cancelar",
     "save": "Salvar",
@@ -956,6 +960,9 @@
     "primary": "Principal",
     "makePrimary": "Tornar principal",
     "primaryHint": "A tarefa fica neste projeto, o agente começa nele e lê as instruções dele. Ele ainda pode alterar todos os projetos selecionados.",
+    "rememberLinkedFolders": "Lembrar estas pastas no projeto principal",
+    "rememberLinkedFoldersError": "A tarefa foi criada, mas as pastas não foram salvas no projeto.",
+    "linkedFolderBranch": "branch atual do checkout",
     "localPreview_one": "{{count}} projeto vai trabalhar direto no checkout",
     "localPreview_other": "{{count}} projetos vão trabalhar direto no checkout",
     "localDescription": "Sem worktree: o agente edita seus checkouts atuais. Entregue cada projeto pelo Inspector.",
@@ -1686,6 +1693,9 @@
     "multipleProjects": "Selecionar vários projetos…",
     "multipleProjectsDescription": "Coordene dois ou mais projetos na mesma tarefa.",
     "openAnotherProject": "Abrir outro projeto…",
+    "linkedFolders": "Pastas vinculadas",
+    "linkedFoldersDescription": "Traz as pastas que o projeto vincula",
+    "linkedFoldersBadge": "{{count}} pastas vinculadas entram nesta tarefa",
     "execution": {
       "worktree": "Worktree",
       "protected": "Worktree protegido",
@@ -3389,16 +3399,16 @@
       "multiProject": {
         "label": "Tarefa multi-projeto",
         "summary": "Um chat coordenando dois ou mais repositórios.",
-        "whatIs": "Uma tarefa multi-projeto cria um worktree protegido em cada repositório escolhido e um único chat que enxerga todos. O agente trabalha nos projetos em conjunto, e cada um mantém sua branch.",
-        "whenToUse": "Quando a mudança atravessa repositórios: API e front, biblioteca e consumidor, contrato e implementação.",
+        "whatIs": "Uma tarefa multi-projeto junta dois ou mais repositórios num único chat. Com [Worktree] marcado, cada projeto ganha um worktree protegido; desmarcado, o agente trabalha direto nos checkouts. O agente decide a cada pedido em quais projetos mexer, e o Undo do turno e Editar a partir daqui cobrem todos os projetos.",
+        "whenToUse": "Quando a mudança atravessa repositórios (API e front, biblioteca e consumidor) ou quando você quer consultar um projeto para alterar outro.",
         "steps": [
-          "No menu de [Nova tarefa], escolha [Nova tarefa multi-projeto].",
-          "Marque os projetos em [Vários projetos] e dê um [Nome da tarefa].",
-          "Clique em [Criar tarefa multi-projeto]. O DCC prepara um worktree por projeto.",
-          "No chat, cite em qual projeto cada mudança deve acontecer. O Inspector mostra os diffs separados."
+          "Para trazer sempre as mesmas pastas, abra [Editar projeto] e adicione-as em [Pastas vinculadas]. Toda [Nova tarefa] nesse projeto já vem com elas; desmarque [Pastas vinculadas] para pular desta vez.",
+          "Para uma tarefa avulsa, escolha [Vários projetos], marque os projetos e dê um [Nome da tarefa]. O primeiro marcado é o [Principal]; use [Tornar principal] para trocar.",
+          "Clique em [Criar tarefa multi-projeto]. Em [Mostrando], troque o projeto que o Inspector, o terminal e a entrega exibem.",
+          "Para desfazer um turno, use o Undo do turno: ele verifica todos os projetos antes e restaura um por vez, mostrando o resultado de cada um."
         ],
         "prompt": "Adicione o campo birthDate ao contrato em api-core e consuma no formulário de perfil em web-app. Mantenha compatibilidade com clientes antigos.",
-        "keywords": "multi projeto vários repositórios monorepo api front coordenar worktrees"
+        "keywords": "multi projeto vários repositórios pastas vinculadas principal local worktrees undo desfazer api front coordenar"
       },
       "mergeConflict": {
         "label": "Resolver conflitos",

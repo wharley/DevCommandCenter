@@ -139,3 +139,55 @@ export function promoteMultiProjectPrimary(selectedIds: string[], id: string): s
 	if (!selectedIds.includes(id)) return selectedIds;
 	return [id, ...selectedIds.filter((candidate) => candidate !== id)];
 }
+
+/** Option id of a linked folder that is not a DCC project yet. */
+export function linkedFolderOptionId(path: string) {
+	return `linked:${normalizeWorkspaceRoot(path)}`;
+}
+
+/**
+ * The linked folders of every project, as options for a multi-project task:
+ * a folder that is already a project uses that project; any other folder
+ * becomes an option of its own, after the projects.
+ */
+export function withLinkedFolderOptions<
+	Option extends { id: string; rootPath: string },
+>(
+	options: readonly Option[],
+	linkedFoldersByRepositoryId: Record<string, string[]>,
+	folderOption: (path: string) => Option,
+): Option[] {
+	const known = new Set(options.map((option) => normalizeWorkspaceRoot(option.rootPath)));
+	const extra: Option[] = [];
+	for (const paths of Object.values(linkedFoldersByRepositoryId)) {
+		for (const path of paths) {
+			const root = normalizeWorkspaceRoot(path);
+			if (known.has(root)) continue;
+			known.add(root);
+			extra.push(folderOption(path));
+		}
+	}
+	return [...options, ...extra];
+}
+
+/**
+ * Picks a project for a multi-project task. The first pick is the primary and
+ * brings its linked folders along, already selected.
+ */
+export function selectMultiProject<Option extends { id: string; rootPath: string }>(
+	selectedIds: string[],
+	optionId: string,
+	options: readonly Option[],
+	linkedFoldersByRepositoryId: Record<string, string[]>,
+): string[] {
+	if (selectedIds.includes(optionId)) return selectedIds;
+	if (selectedIds.length > 0) return [...selectedIds, optionId];
+	const linkedIds = (linkedFoldersByRepositoryId[optionId] ?? []).flatMap((path) => {
+		const root = normalizeWorkspaceRoot(path);
+		const option = options.find(
+			(candidate) => normalizeWorkspaceRoot(candidate.rootPath) === root,
+		);
+		return option && option.id !== optionId ? [option.id] : [];
+	});
+	return [optionId, ...linkedIds];
+}

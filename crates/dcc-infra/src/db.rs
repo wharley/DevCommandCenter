@@ -328,6 +328,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS dcc_session_search USING fts5(
 /// opportunistically; no page data, browser state, or capability is stored.
 // Ideas in progress: repositories under ~/dcc-ideias kept out of the project
 // list. The row goes away with its repository.
+/// Folders a project brings into every new task: each becomes another
+/// project of that task, in this order.
+const REPOSITORY_LINKED_FOLDER_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_repository_linked_folders (
+	repository_id TEXT NOT NULL,
+	path TEXT NOT NULL,
+	position INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (repository_id, path),
+	FOREIGN KEY (repository_id) REFERENCES dcc_repositories(id) ON DELETE CASCADE
+);
+"#;
+
 const IDEA_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS dcc_ideas (
 	root_path TEXT PRIMARY KEY NOT NULL CHECK(length(root_path) BETWEEN 1 AND 4096),
@@ -938,7 +951,7 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}\n{REPOSITORY_LINKED_FOLDER_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
@@ -1176,6 +1189,81 @@ impl SqliteWorkspaceRepo {
             .execute(
                 "UPDATE dcc_repositories SET pinned_at = ?1 WHERE id = ?2",
                 params![pinned_at, repository_id.0.clone()],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(changed > 0)
+    }
+
+    /// Every project's linked folders, in their saved order.
+    pub fn list_repository_linked_folders(&self) -> Result<Vec<(RepositoryId, Vec<String>)>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT repository_id, path FROM dcc_repository_linked_folders
+                 ORDER BY repository_id, position",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut linked: Vec<(RepositoryId, Vec<String>)> = Vec::new();
+        for row in rows {
+            let (repository_id, path) =
+                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            match linked.last_mut() {
+                Some((current, paths)) if current.0 == repository_id => paths.push(path),
+                _ => linked.push((RepositoryId(repository_id), vec![path])),
+            }
+        }
+        Ok(linked)
+    }
+
+    /// Replaces a project's linked folders with `paths`, in that order.
+    pub fn set_repository_linked_folders(
+        &self,
+        repository_id: &RepositoryId,
+        paths: &[String],
+    ) -> Result<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        tx.execute(
+            "DELETE FROM dcc_repository_linked_folders WHERE repository_id = ?1",
+            params![repository_id.0.clone()],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let now = Utc::now().to_rfc3339();
+        for (position, path) in paths.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO dcc_repository_linked_folders (repository_id, path, position, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![repository_id.0.clone(), path, position as i64, now],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        tx.commit()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
+    }
+
+    /// Renames a multi-project task.
+    pub fn rename_workspace_bundle(&self, id: &WorkspaceBundleId, name: &str) -> Result<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let changed = conn
+            .execute(
+                "UPDATE dcc_workspace_bundles SET name = ?1, updated_at = ?2 WHERE id = ?3",
+                params![name, Utc::now().to_rfc3339(), id.0.clone()],
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(changed > 0)
@@ -12394,6 +12482,52 @@ mod tests {
             created_at: "2026-01-02T00:00:00Z".to_string(),
         })
         .expect("save without a sentence");
+    }
+
+    #[test]
+    fn sqlite_workspace_repo_keeps_linked_folders_in_order_and_drops_them_with_the_project() {
+        let repo = SqliteWorkspaceRepo::from_connection(in_memory_conn()).expect("create repo");
+        let repository = Repository {
+            id: RepositoryId("/tmp/dcc".to_string()),
+            project_id: ProjectId("dcc".to_string()),
+            name: "dcc".to_string(),
+            display_name: None,
+            icon: None,
+            color: None,
+            logo: None,
+            pinned_at: None,
+            root_path: "/tmp/dcc".to_string(),
+            base_branch: "main".to_string(),
+            remote: None,
+            remote_url: None,
+            forge_provider: None,
+            forge_login: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        futures::executor::block_on(repo.save_repository(&repository)).expect("save project");
+
+        let paths = vec!["/tmp/lp".to_string(), "/tmp/api".to_string()];
+        repo.set_repository_linked_folders(&repository.id, &paths)
+            .expect("save linked folders");
+        assert_eq!(
+            repo.list_repository_linked_folders().expect("list"),
+            vec![(repository.id.clone(), paths)]
+        );
+
+        repo.set_repository_linked_folders(&repository.id, &["/tmp/api".to_string()])
+            .expect("replace linked folders");
+        assert_eq!(
+            repo.list_repository_linked_folders().expect("list"),
+            vec![(repository.id.clone(), vec!["/tmp/api".to_string()])]
+        );
+
+        futures::executor::block_on(repo.delete_repository(&repository.id))
+            .expect("delete project");
+        assert!(repo
+            .list_repository_linked_folders()
+            .expect("list")
+            .is_empty());
     }
 
     #[test]

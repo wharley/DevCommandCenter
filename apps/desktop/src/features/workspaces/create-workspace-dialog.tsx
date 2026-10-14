@@ -44,9 +44,12 @@ import {
 	initialTaskRepository,
 	initialWorkspaceStart,
 	isBranchWorkspaceSource,
+	linkedFolderOptionId,
 	normalizeWorkspaceRoot,
 	orderMultiProjectSelection,
 	promoteMultiProjectPrimary,
+	selectMultiProject,
+	withLinkedFolderOptions,
 	readLastTaskRepositoryRoot,
 	rememberLastTaskRepositoryRoot,
 	repositoryNameFromWorkspaceRoot,
@@ -67,6 +70,8 @@ import { ProjectIdentityGlyph } from "./project-identity";
 import "./workspace-dialog.css";
 
 type WorkspaceCreationMode = "open" | "clone";
+
+const EMPTY_LINKED_FOLDERS: Record<string, string[]> = {};
 
 type RepositoryOption = Pick<
 	Repository,
@@ -92,6 +97,9 @@ type CreateWorkspaceDialogProps = {
 	initialCreationScope?: "single" | "multi";
 	/** Carries the *Worktree* choice from New task into a multi-project task. */
 	initialIsolationMode?: WorkspaceIsolationMode;
+	/** Each project's linked folders, by repository id. */
+	linkedFoldersByRepositoryId?: Record<string, string[]>;
+	onSaveLinkedFolders?: (repositoryId: string, paths: string[]) => Promise<void>;
 	repositoryContext?: ExistingRepositoryContext | null;
 	onOpenChange: (open: boolean) => void;
 	onCreateWorkspace: (
@@ -197,6 +205,8 @@ export function CreateWorkspaceDialog({
 	mode,
 	initialCreationScope = "single",
 	initialIsolationMode = "protectedWorktree",
+	linkedFoldersByRepositoryId = EMPTY_LINKED_FOLDERS,
+	onSaveLinkedFolders,
 	repositoryContext = null,
 	onOpenChange,
 	onCreateWorkspace,
@@ -214,6 +224,7 @@ export function CreateWorkspaceDialog({
 		"single",
 	);
 	const [multiUsesWorktree, setMultiUsesWorktree] = useState(true);
+	const [rememberLinkedFolders, setRememberLinkedFolders] = useState(false);
 	const [workspaceStart, setWorkspaceStart] = useState<WorkspaceStart>("new");
 	const [sourceUrl, setSourceUrl] = useState("");
 	const [validatedSourceUrl, setValidatedSourceUrl] = useState("");
@@ -230,6 +241,22 @@ export function CreateWorkspaceDialog({
 		useState<RepositoryOption | null>(null);
 	const branchLoadSequenceRef = useRef(0);
 	const suppressCloseAutoFocusRef = useRef(false);
+	// Projects plus the linked folders that are not projects yet.
+	const multiOptions = useMemo<RepositoryOption[]>(
+		() =>
+			withLinkedFolderOptions<RepositoryOption>(repositories, linkedFoldersByRepositoryId, (path) => ({
+				id: linkedFolderOptionId(path),
+				projectId: inferProjectIdFromWorkspaceRoot(path),
+				name: repositoryNameFromWorkspaceRoot(path),
+				displayName: null,
+				icon: null,
+				color: null,
+				rootPath: path,
+				// Empty: the task starts from that checkout's current branch.
+				baseBranch: "",
+			})),
+		[linkedFoldersByRepositoryId, repositories],
+	);
 	const singleRepositoryOptions = useMemo<RepositoryOption[]>(
 		() => includePickedRepository(repositories, pickedRepository),
 		[pickedRepository, repositories],
@@ -260,6 +287,7 @@ export function CreateWorkspaceDialog({
 			setIsLoadingBranches(false);
 			setCreationScope(mode === "open" ? initialCreationScope : "single");
 			setMultiUsesWorktree(initialIsolationMode !== "localDirect");
+			setRememberLinkedFolders(false);
 			setWorkspaceStart(initialWorkspaceStart(repositoryContext !== null));
 			setSourceUrl("");
 			setValidatedSourceUrl("");
@@ -526,7 +554,7 @@ export function CreateWorkspaceDialog({
 			if (mode === "open" && creationScope === "multi") {
 				// The first picked project is the primary (see the "Primary" chip).
 				const selectedRepositories = orderMultiProjectSelection(
-					repositories,
+					multiOptions,
 					selectedRepositoryIds,
 				);
 				const result = await onCreateWorkspaceBundle({
@@ -539,6 +567,19 @@ export function CreateWorkspaceDialog({
 						isolationMode: multiUsesWorktree ? null : "localDirect",
 					})),
 				});
+				const [primary, ...others] = selectedRepositories;
+				if (rememberLinkedFolders && primary && onSaveLinkedFolders) {
+					try {
+						await onSaveLinkedFolders(
+							primary.id,
+							others.map((repository) => repository.rootPath),
+						);
+					} catch (error) {
+						toast.error(t("workspaceDialog.rememberLinkedFoldersError"), {
+							description: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
 				toast.success(t("workspaceDialog.multiToastSuccess"), {
 					description: t(
 						multiUsesWorktree
@@ -713,9 +754,16 @@ export function CreateWorkspaceDialog({
 												: null;
 											if (contextRepository) {
 												setSelectedRepositoryIds((current) =>
-													current.includes(contextRepository.id)
-														? current
-														: [contextRepository.id, ...current],
+													current.length === 0
+														? selectMultiProject(
+																current,
+																contextRepository.id,
+																multiOptions,
+																linkedFoldersByRepositoryId,
+															)
+														: current.includes(contextRepository.id)
+															? current
+															: [contextRepository.id, ...current],
 												);
 											}
 										}}
@@ -853,7 +901,7 @@ export function CreateWorkspaceDialog({
 									</p>
 								</div>
 								<div className="max-h-52 space-y-1.5 overflow-y-auto rounded-xl border border-border/60 bg-muted/10 p-2">
-									{repositories.map((repository) => {
+									{multiOptions.map((repository) => {
 										const checked = selectedRepositoryIds.includes(
 											repository.id,
 										);
@@ -877,7 +925,12 @@ export function CreateWorkspaceDialog({
 														setSelectedRepositoryIds((current) =>
 															checked
 																? current.filter((id) => id !== repository.id)
-																: [...current, repository.id],
+																: selectMultiProject(
+																		current,
+																		repository.id,
+																		multiOptions,
+																		linkedFoldersByRepositoryId,
+																	),
 														)
 													}
 													className="sr-only"
@@ -911,9 +964,11 @@ export function CreateWorkspaceDialog({
 														</span>
 														<span className="shrink-0">·</span>
 														<span className="shrink-0">
-															{t("workspaceDialog.basePreview", {
-																branch: repository.baseBranch,
-															})}
+															{repository.baseBranch
+																? t("workspaceDialog.basePreview", {
+																	branch: repository.baseBranch,
+																})
+																: t("workspaceDialog.linkedFolderBranch")}
 														</span>
 													</span>
 												</span>
@@ -951,6 +1006,20 @@ export function CreateWorkspaceDialog({
 										count: selectedRepositoryIds.length,
 									})}
 								</p>
+								{onSaveLinkedFolders &&
+								selectedRepositoryIds.length >= 2 &&
+								!selectedRepositoryIds[0]?.startsWith("linked:") ? (
+									<label className="inline-flex cursor-pointer items-center gap-2 text-[11.5px] text-muted-foreground has-[:disabled]:cursor-progress has-[:disabled]:opacity-60">
+										<input
+											type="checkbox"
+											checked={rememberLinkedFolders}
+											disabled={isSubmitting}
+											onChange={(event) => setRememberLinkedFolders(event.target.checked)}
+											className="size-3.5 accent-primary"
+										/>
+										<span>{t("workspaceDialog.rememberLinkedFolders")}</span>
+									</label>
+								) : null}
 							</div>
 						) : null}
 

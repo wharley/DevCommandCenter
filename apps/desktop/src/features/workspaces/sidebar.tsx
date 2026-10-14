@@ -397,6 +397,9 @@ type WorkspacesSidebarProps = {
 		logo: string | null;
 	}) => Promise<void>;
 	onSetProjectPinned?: (repositoryId: string, pinned: boolean) => Promise<void>;
+	/** Each project's linked folders, by repository id. */
+	linkedFoldersByRepositoryId?: Record<string, string[]>;
+	onSaveLinkedFolders?: (repositoryId: string, paths: string[]) => Promise<void>;
 	onSetWorkspacePinned?: (workspaceId: string, pinned: boolean) => Promise<void>;
 	selectedWorkspaceId: string | null;
 	workspaces: WorkspaceSummary[];
@@ -451,6 +454,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onDeleteProject,
 	onUpdateProjectIdentity,
 	onSetProjectPinned,
+	linkedFoldersByRepositoryId,
+	onSaveLinkedFolders,
 	onSetWorkspacePinned,
 	selectedWorkspaceId,
 	workspaces,
@@ -2366,6 +2371,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					if (!onUpdateProjectIdentity) return;
 					await onUpdateProjectIdentity(input);
 				}}
+				linkedFolders={
+					projectEditTarget
+						? linkedFoldersByRepositoryId?.[projectEditTarget.id]
+						: undefined
+				}
+				onSaveLinkedFolders={onSaveLinkedFolders}
 			/>
 
 			<Dialog

@@ -27,7 +27,10 @@ type NewTaskLaunchStateProps = {
 	onSelectProject: (
 		repository: Repository,
 		isolationMode: WorkspaceIsolationMode,
+		includeLinkedFolders: boolean,
 	) => Promise<void>;
+	/** How many folders each project links, by repository id. */
+	linkedFolderCounts?: Record<string, number>;
 	onSelectMultiple: (isolationMode: WorkspaceIsolationMode) => void;
 	onOpenProject: () => void;
 };
@@ -38,6 +41,7 @@ export function NewTaskLaunchState({
 	onSelectProject,
 	onSelectMultiple,
 	onOpenProject,
+	linkedFolderCounts = {},
 }: NewTaskLaunchStateProps) {
 	const { t } = useTranslation("common");
 	// Per-task choice: every new task starts isolated; opting out is one click.
@@ -45,6 +49,22 @@ export function NewTaskLaunchState({
 	const isolationMode: WorkspaceIsolationMode = useWorktree
 		? "protectedWorktree"
 		: "localDirect";
+	const [includeLinkedFolders, setIncludeLinkedFolders] = useState(true);
+	const anyLinkedFolders = repositories.some(
+		(repository) => (linkedFolderCounts[repository.id] ?? 0) > 0,
+	);
+	const linkedBadge = (repository: Repository) => {
+		const count = linkedFolderCounts[repository.id] ?? 0;
+		if (count === 0 || !includeLinkedFolders) return null;
+		return (
+			<span
+				className="shrink-0 rounded-full bg-foreground/[0.08] px-1.5 text-[10px] font-semibold tabular-nums text-muted-foreground"
+				title={t("newTask.linkedFoldersBadge", { count })}
+			>
+				+{count}
+			</span>
+		);
+	};
 	const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
 	const selectingProject = useRef(false);
 	const busy = isCreating || pendingProjectId !== null;
@@ -54,7 +74,7 @@ export function NewTaskLaunchState({
 		selectingProject.current = true;
 		setPendingProjectId(repository.id);
 		try {
-			await onSelectProject(repository, isolationMode);
+			await onSelectProject(repository, isolationMode, includeLinkedFolders);
 		} finally {
 			selectingProject.current = false;
 			setPendingProjectId(null);
@@ -118,6 +138,7 @@ export function NewTaskLaunchState({
 											{repository.baseBranch}
 										</small>
 									</span>
+									{linkedBadge(repository)}
 									{pendingProjectId === repository.id ? (
 										<LoaderCircle className="size-3.5 animate-spin" />
 									) : null}
@@ -170,6 +191,22 @@ export function NewTaskLaunchState({
 							)}
 						</span>
 					</label>
+					{anyLinkedFolders ? (
+						<label className="dcc-task-launch-worktree inline-flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground has-[:disabled]:cursor-progress has-[:disabled]:opacity-60">
+							<input
+								type="checkbox"
+								checked={includeLinkedFolders}
+								disabled={busy}
+								onChange={(event) => setIncludeLinkedFolders(event.target.checked)}
+								className="size-3.5 accent-primary"
+							/>
+							<span className="font-medium text-foreground">
+								{t("newTask.linkedFolders")}
+							</span>
+							<span aria-hidden>·</span>
+							<span>{t("newTask.linkedFoldersDescription")}</span>
+						</label>
+					) : null}
 					{repositories.length > 0 ? (
 						<div
 							className="dcc-project-shortcuts"
@@ -198,6 +235,7 @@ export function NewTaskLaunchState({
 											{repository.baseBranch}
 										</small>
 									</span>
+									{linkedBadge(repository)}
 									{pendingProjectId === repository.id ? (
 										<LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" />
 									) : (

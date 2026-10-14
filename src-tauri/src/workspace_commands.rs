@@ -16,6 +16,8 @@ use dcc_tauri::{
         RenameWorkspaceInput, RepositoryIdInput, ResolveWorkspaceSourceUrlInput,
         SaveMissionValidationInput, SaveMissionValidationOutput, SearchWorkspaceInput,
         SearchWorkspaceOutput, SetRepositoryPinnedInput, SetWorkspacePinnedInput,
+        ListRepositoryLinkedFoldersOutput, RepositoryLinkedFolders,
+        SetRepositoryLinkedFoldersInput,
         UpdateRepositoryIdentityInput, WorkspaceApplyDelegationWorktreeInput,
         WorkspaceApplyDelegationWorktreeOutput, WorkspaceBundleIdInput, WorkspaceBundleStateOutput,
         WorkspaceContinueFromBaseBranchInput, WorkspaceContinueFromBaseBranchOutput,
@@ -171,6 +173,21 @@ pub async fn set_repository_pinned(
     input: SetRepositoryPinnedInput,
 ) -> Result<Repository, String> {
     dcc_tauri::commands::workspace_commands::set_repository_pinned(state, input).await
+}
+
+#[tauri::command]
+pub async fn list_repository_linked_folders(
+    state: State<'_, WorkspaceCommandState>,
+) -> Result<ListRepositoryLinkedFoldersOutput, String> {
+    dcc_tauri::commands::workspace_commands::list_repository_linked_folders(state).await
+}
+
+#[tauri::command]
+pub async fn set_repository_linked_folders(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetRepositoryLinkedFoldersInput,
+) -> Result<RepositoryLinkedFolders, String> {
+    dcc_tauri::commands::workspace_commands::set_repository_linked_folders(state, input).await
 }
 
 #[tauri::command]

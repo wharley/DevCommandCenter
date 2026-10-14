@@ -44,7 +44,7 @@ use dcc_core::{
         provider::ProviderUserInputResponse,
         provider::{ProviderPermissionRequest, ProviderPermissionResponse},
         Input, ProviderRuntimeConfig, ProviderTurnInput, SessionEventRepo, SessionRepo, ThreadRepo,
-        WorkspaceRepo,
+        WorkspaceBundleRepo, WorkspaceRepo,
     },
 };
 use dcc_infra::ai_memory::{AiMemoryConfig, AiMemoryHit};
@@ -3240,13 +3240,17 @@ fn normalize_task_title(title: &str) -> Result<String, String> {
     Ok(title)
 }
 
-fn workspace_accepts_automatic_title(workspace: &Workspace) -> bool {
-    let Some(name) = workspace.name.as_deref().map(str::trim) else {
+fn is_automatic_task_name(name: Option<&str>) -> bool {
+    let Some(name) = name.map(str::trim) else {
         return true;
     };
     name.is_empty()
         || name.eq_ignore_ascii_case("new task")
         || name.eq_ignore_ascii_case("nova tarefa")
+}
+
+fn workspace_accepts_automatic_title(workspace: &Workspace) -> bool {
+    is_automatic_task_name(workspace.name.as_deref())
 }
 
 #[tauri::command]
@@ -3286,6 +3290,31 @@ async fn apply_task_title_to_state(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("thread not found for session: {}", session_id.0))?;
+
+    // A multi-project task shows its bundle's name; each member keeps its
+    // project's name, which labels that project everywhere else.
+    let bundle =
+        WorkspaceBundleRepo::get_workspace_bundle_for_workspace(&workspace_repo, &workspace_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .filter(|bundle| bundle.bundle.primary_workspace_id == workspace_id);
+    if let Some(bundle) = bundle {
+        let applied = is_automatic_task_name(Some(&bundle.bundle.name));
+        if applied {
+            thread.title = title.clone();
+            ThreadRepo::save_thread(state, &thread)
+                .await
+                .map_err(|error| error.to_string())?;
+            workspace_repo
+                .rename_workspace_bundle(&bundle.bundle.id, &title)
+                .map_err(|error| error.to_string())?;
+        }
+        return Ok(ApplyTaskTitleOutput {
+            applied,
+            workspace,
+            thread,
+        });
+    }
 
     let applied = workspace_accepts_automatic_title(&workspace);
     if applied {
@@ -3706,6 +3735,125 @@ mod tests {
             persisted.name.as_deref(),
             Some("Corrigir título da sidebar")
         );
+
+        drop(state);
+        drop(workspace_repo);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn automatic_title_names_a_multi_project_task_and_keeps_project_names() {
+        use dcc_core::domain::workspace_bundle::{
+            WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleIsolation, WorkspaceBundleMember,
+            WorkspaceBundleState,
+        };
+        let db_path = std::fs::canonicalize(std::env::temp_dir())
+            .expect("physical temp directory")
+            .join(format!(
+                "dcc-automatic-bundle-title-{}.sqlite",
+                uuid::Uuid::new_v4()
+            ));
+        let workspace_repo = SqliteWorkspaceRepo::open(&db_path).expect("open workspace repo");
+        let member = |id: &str, name: &str| Workspace {
+            id: WorkspaceId(id.to_string()),
+            project_id: dcc_core::domain::project::ProjectId(id.to_string()),
+            name: Some(name.to_string()),
+            root_path: format!("/tmp/{id}"),
+            base_branch: "main".to_string(),
+            worktree_path: None,
+            source: None,
+            state: dcc_core::domain::workspace::WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            snoozed_until: None,
+            created_at: "2026-08-01T00:00:00Z".to_string(),
+            updated_at: "2026-08-01T00:00:00Z".to_string(),
+        };
+        let primary = member("bundle-title-dcc", "DevCommandCenter");
+        let secondary = member("bundle-title-lp", "DCC LP");
+        for workspace in [&primary, &secondary] {
+            WorkspaceRepo::save_workspace(&workspace_repo, workspace)
+                .await
+                .expect("save workspace");
+        }
+        let bundle_id = WorkspaceBundleId("bundle-title".to_string());
+        WorkspaceBundleRepo::save_workspace_bundle(
+            &workspace_repo,
+            &WorkspaceBundle {
+                id: bundle_id.clone(),
+                name: "Nova tarefa".to_string(),
+                primary_workspace_id: primary.id.clone(),
+                state: WorkspaceBundleState::Ready,
+                isolation: WorkspaceBundleIsolation::Local,
+                created_at: "2026-08-01T00:00:00Z".to_string(),
+                updated_at: "2026-08-01T00:00:00Z".to_string(),
+            },
+            &[primary.id.clone(), secondary.id.clone()]
+                .into_iter()
+                .enumerate()
+                .map(|(position, workspace_id)| WorkspaceBundleMember {
+                    bundle_id: bundle_id.clone(),
+                    workspace_id,
+                    created_for_bundle: true,
+                    position: position as u32,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .expect("save bundle");
+
+        let app_data = tempfile::tempdir().expect("app data directory");
+        let state = SessionCommandState::new_headless(
+            db_path.clone(),
+            std::fs::canonicalize(app_data.path()).expect("physical app data"),
+        );
+        let started = run_start_thread(
+            &state,
+            &state,
+            &state,
+            &state,
+            StartThreadInput {
+                workspace_id: primary.id.clone(),
+                additional_workspace_ids: Vec::new(),
+                project_id: primary.project_id.clone(),
+                provider_id: "codex".to_string(),
+                model: None,
+                provider_runtime: None,
+                working_directory_override: None,
+                title: Some("Nova tarefa".to_string()),
+                forked_from: None,
+            },
+        )
+        .await
+        .expect("start thread");
+
+        let input = |title: &str| ApplyTaskTitleInput {
+            workspace_id: primary.id.0.clone(),
+            session_id: started.session.id.0.clone(),
+            title: title.to_string(),
+        };
+        let titled = apply_task_title_to_state(&state, input("Ligar a LP ao DCC"))
+            .await
+            .expect("apply task title");
+        assert!(titled.applied);
+        assert_eq!(titled.thread.title, "Ligar a LP ao DCC");
+
+        let bundle = WorkspaceBundleRepo::get_workspace_bundle(&workspace_repo, &bundle_id)
+            .await
+            .expect("read bundle")
+            .expect("bundle exists");
+        assert_eq!(bundle.bundle.name, "Ligar a LP ao DCC");
+        let persisted = WorkspaceRepo::get_workspace(&workspace_repo, &primary.id)
+            .await
+            .expect("read workspace")
+            .expect("workspace exists");
+        assert_eq!(persisted.name.as_deref(), Some("DevCommandCenter"));
+
+        // A task the person already named keeps its name.
+        let again = apply_task_title_to_state(&state, input("Outro título"))
+            .await
+            .expect("apply task title again");
+        assert!(!again.applied);
 
         drop(state);
         drop(workspace_repo);

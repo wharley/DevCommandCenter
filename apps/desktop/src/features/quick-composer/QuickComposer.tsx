@@ -21,10 +21,18 @@ import { WorkspaceComposer } from "@/features/composer/WorkspaceComposer";
 import type { ComposerSubmittedTurn } from "@/features/composer/composer-turn";
 import { listProviders } from "@/lib/provider-api";
 import {
+	createWorkspaceBundleForRepos,
 	createWorkspaceForRepo,
 	listRepositories,
+	listRepositoryLinkedFolders,
+	listWorkspaceBundles,
 	listWorkspaces,
 } from "@/lib/workspace-api";
+import {
+	additionalWorkspaceIdsOf,
+	linkedFoldersOf,
+	linkedTaskProjects,
+} from "@/features/workspaces/linked-folders";
 import { sendTurn, startThread } from "@/lib/session-api";
 import {
 	getProviderUnhealthyReason,
@@ -258,18 +266,48 @@ export function QuickComposer() {
 				checkpoint: checkpointQuickLaunch,
 				onProgress: setLaunch,
 				createWorkspace: async ({ request }) => {
+					const name = turn.rawPrompt.trim().split("\n")[0].slice(0, 80);
+					// A project that links folders brings them into the task.
+					const linked = await listRepositoryLinkedFolders();
+					const linkedFolders = linkedFoldersOf(
+						request.rootPath,
+						repositories,
+						Object.fromEntries(
+							linked.entries.map((entry) => [entry.repositoryId, entry.paths]),
+						),
+					);
+					if (linkedFolders.length > 0) {
+						const output = await createWorkspaceBundleForRepos({
+							name,
+							projects: linkedTaskProjects({
+								primary: {
+									projectId: request.projectId,
+									workspaceRoot: request.rootPath,
+									baseBranch: request.baseBranch,
+								},
+								linkedFolders,
+								repositories,
+								isolationMode: request.isolationMode,
+							}),
+						});
+						return output.summary.bundle.primaryWorkspaceId;
+					}
 					const output = await createWorkspaceForRepo({
 						projectId: request.projectId,
 						workspaceRoot: request.rootPath,
 						baseBranch: request.baseBranch,
 						isolationMode: request.isolationMode,
-						name: turn.rawPrompt.trim().split("\n")[0].slice(0, 80),
+						name,
 					});
 					return output.workspace.id;
 				},
 				startSession: async ({ workspaceId, request }) => {
+					// Derived from the durable bundle, so a resumed launch finds
+					// the same projects.
+					const { bundles } = await listWorkspaceBundles();
 					const output = await startThread({
 						workspaceId: workspaceId!,
+						additionalWorkspaceIds: additionalWorkspaceIdsOf(workspaceId!, bundles),
 						projectId: request.projectId,
 						providerId: request.providerId,
 						model: request.modelId,

@@ -61,6 +61,9 @@ import type {
 	ReadWorkspaceFileOutput,
 	RenameWorkspaceInput,
 	SetRepositoryPinnedInput,
+	ListRepositoryLinkedFoldersOutput,
+	RepositoryLinkedFolders,
+	SetRepositoryLinkedFoldersInput,
 	SetWorkspacePinnedInput,
 	SetWorkspaceSnoozeInput,
 	UpdateRepositoryIdentityInput,
@@ -222,6 +225,19 @@ export function updateRepositoryIdentity(input: UpdateRepositoryIdentityInput) {
 
 export function setRepositoryPinned(input: SetRepositoryPinnedInput) {
 	return invoke<Repository>(WORKSPACE_METHODS.setRepositoryPinned, { input });
+}
+
+/** Every project's linked folders, in their saved order. */
+export function listRepositoryLinkedFolders() {
+	return invoke<ListRepositoryLinkedFoldersOutput>(
+		WORKSPACE_METHODS.listRepositoryLinkedFolders,
+	);
+}
+
+export function setRepositoryLinkedFolders(input: SetRepositoryLinkedFoldersInput) {
+	return invoke<RepositoryLinkedFolders>(WORKSPACE_METHODS.setRepositoryLinkedFolders, {
+		input,
+	});
 }
 
 export function setWorkspacePinned(input: SetWorkspacePinnedInput) {

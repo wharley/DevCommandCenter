@@ -51,6 +51,7 @@ let launch: QuickLaunch | null;
 let failStart: boolean;
 let failHide: boolean;
 let taskState: string | null;
+let linkedPaths: string[];
 let failTaskLookup: boolean;
 const ipc = vi.fn();
 const button = (label: string) =>
@@ -63,6 +64,7 @@ beforeEach(() => {
 	launch = null;
 	failStart = false;
 	failHide = false;
+	linkedPaths = [];
 	taskState = "ready";
 	failTaskLookup = false;
 	vi.mocked(listen).mockClear();
@@ -102,6 +104,23 @@ beforeEach(() => {
 				return launch;
 			case "create_workspace_for_repo":
 				return { workspace: { id: "workspace" } };
+			case "list_repository_linked_folders":
+				return {
+					entries: linkedPaths.length ? [{ repositoryId: "repo", paths: linkedPaths }] : [],
+				};
+			case "create_workspace_bundle_for_repos":
+				return { summary: { bundle: { primaryWorkspaceId: "workspace" } } };
+			case "list_workspace_bundles":
+				return {
+					bundles: linkedPaths.length
+						? [
+								{
+									bundle: { primaryWorkspaceId: "workspace" },
+									members: [{ workspaceId: "workspace" }, { workspaceId: "linked" }],
+								},
+							]
+						: [],
+				};
 			case "start_thread":
 				if (failStart) throw new Error("Provider unavailable");
 				return { session: { id: "session" } };
@@ -160,6 +179,32 @@ it.each(["localDirect", "protectedWorktree"] as const)(
 		expect(launch?.phase).toBe("completed");
 	},
 );
+it("brings the project's linked folders into the task", async () => {
+	linkedPaths = ["/fixture/lp"];
+	await act(async () => root.render(<QuickComposer />));
+	await act(async () => button("quickComposer.localDirect").click());
+	await act(async () => button("submit-fixture").click());
+	expect(ipc).not.toHaveBeenCalledWith("create_workspace_for_repo", expect.anything());
+	expect(ipc).toHaveBeenCalledWith("create_workspace_bundle_for_repos", {
+		input: expect.objectContaining({
+			projects: [
+				expect.objectContaining({ workspaceRoot: "/fixture/repo", isolationMode: "localDirect" }),
+				expect.objectContaining({
+					workspaceRoot: "/fixture/lp",
+					baseBranch: "",
+					isolationMode: "localDirect",
+				}),
+			],
+		}),
+	});
+	expect(ipc).toHaveBeenCalledWith("start_thread", {
+		input: expect.objectContaining({
+			workspaceId: "workspace",
+			additionalWorkspaceIds: ["linked"],
+		}),
+	});
+	expect(launch?.phase).toBe("completed");
+});
 it("keeps an accepted send accepted when window dismissal fails", async () => {
 	failHide = true;
 	await act(async () => root.render(<QuickComposer />));
