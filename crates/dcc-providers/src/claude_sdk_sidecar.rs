@@ -718,6 +718,13 @@ async fn fetch_claude_account_usage(
         .await
         .map_err(|error| CoreError::Provider(format!("Claude usage request failed: {error}")))?;
     let status = response.status();
+    // The access token lapses within hours and Claude renews it the next time
+    // it runs. DCC never renews it: the refresh token rotates, so doing it here
+    // would sign the person's own Claude out. Until then, usage waits for
+    // activity like an account without a token.
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Ok(None);
+    }
     if !status.is_success() {
         return Err(CoreError::Provider(format!(
             "Claude usage request returned HTTP {status}"
