@@ -4037,6 +4037,9 @@
       "copy": "Copy",
       "exitCode": "exit {{code}}",
       "truncated": "Long output: showing the beginning and the end.",
+      "planProgress": "{{done}}/{{total}} · {{step}}",
+      "planDone": "{{total}}/{{total}} steps done",
+      "planSteps": "Plan steps",
       "verbs": {
         "command": {
           "live": "Running",

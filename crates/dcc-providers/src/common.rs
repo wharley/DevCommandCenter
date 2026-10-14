@@ -1871,6 +1871,12 @@ pub(crate) fn codex_item_detail(item: &serde_json::Map<String, Value>) -> Option
             detail.file = first_path.filter(|path| !path.is_empty());
             detail.diff = (!diff.is_empty()).then_some(diff);
         }
+        // The agent's step list; the timeline shows it as a checklist.
+        "todo_list" | "todoList" => {
+            let items = item.get("items").and_then(Value::as_array)?;
+            detail.input =
+                serde_json::to_string_pretty(&serde_json::json!({ "items": items })).ok();
+        }
         _ => return None,
     }
     let detail = detail.bounded();
@@ -2618,6 +2624,17 @@ mod tests {
         chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0)
             .unwrap()
             .to_rfc3339()
+    }
+
+    #[test]
+    fn codex_todo_list_detail_carries_the_steps() {
+        let item = serde_json::json!({
+            "type": "todo_list",
+            "items": [{ "text": "One", "completed": true }, { "text": "Two", "completed": false }]
+        });
+        let detail = codex_item_detail(item.as_object().unwrap()).expect("todo list detail");
+        let input: Value = serde_json::from_str(detail.input.as_deref().unwrap()).unwrap();
+        assert_eq!(input["items"][1]["text"], "Two");
     }
 
     #[test]

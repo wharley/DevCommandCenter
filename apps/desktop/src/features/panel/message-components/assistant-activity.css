@@ -334,6 +334,41 @@
 	font-size: 11px;
 	color: var(--muted-foreground);
 }
+.dcc-plan-checklist {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: 12px;
+}
+.dcc-plan-checklist li {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	line-height: 1.35;
+	color: var(--foreground);
+}
+.dcc-plan-checklist li svg {
+	margin-top: 1px;
+}
+.dcc-plan-checklist li[data-status="completed"] {
+	color: var(--muted-foreground);
+}
+.dcc-plan-checklist li[data-status="completed"] svg {
+	color: var(--success);
+}
+.dcc-plan-checklist li[data-status="in_progress"] {
+	font-weight: 500;
+}
+.dcc-plan-checklist li[data-status="in_progress"] svg {
+	color: var(--primary);
+}
+.dcc-plan-checklist li[data-status="pending"] svg {
+	color: var(--muted-foreground);
+	opacity: 0.6;
+}
 .dcc-tool-input > summary {
 	cursor: pointer;
 	font-size: 11px;

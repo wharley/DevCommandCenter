@@ -4,6 +4,7 @@ import {
 	Check,
 	CheckCircle2,
 	ChevronRight,
+	Circle,
 	CircleDashed,
 	Copy,
 	FileText,
@@ -30,6 +31,7 @@ import {
 	type ToolKind,
 } from "@/features/panel/message-components/turn-activity.logic";
 import { cn } from "@/lib/utils";
+import { parsePlanChecklist, type PlanChecklist } from "./plan-checklist";
 
 export type ToolCallAnnotation = Extract<WorkspaceMessageAnnotation, { type: "tool-call" }>;
 
@@ -104,6 +106,17 @@ function ToolCallDetails({
 	}, [annotation.content, detail?.output]);
 	const kind = classifyToolAction(annotation.action);
 	const showCommand = Boolean(command) && kind !== "edit";
+	const checklist = useMemo(
+		() => (kind === "plan" ? parsePlanChecklist(detail?.input) : null),
+		[detail?.input, kind],
+	);
+	if (checklist) {
+		return (
+			<div className="dcc-tool-details">
+				<PlanChecklistView checklist={checklist} />
+			</div>
+		);
+	}
 	return (
 		<div className="dcc-tool-details">
 			{file && kind !== "command" ? (
@@ -168,6 +181,29 @@ function ToolCallDetails({
 	);
 }
 
+/** The agent's steps, done, current and still to do, in its own order. */
+function PlanChecklistView({ checklist }: { checklist: PlanChecklist }) {
+	const { t } = useTranslation("common");
+	return (
+		<ol className="dcc-plan-checklist" aria-label={t("conversation.toolCall.planSteps")}>
+			{checklist.steps.map((step, index) => {
+				const StepIcon =
+					step.status === "completed"
+						? CheckCircle2
+						: step.status === "in_progress"
+							? CircleDashed
+							: Circle;
+				return (
+					<li key={`${index}:${step.text}`} data-status={step.status}>
+						<StepIcon className="size-3.5 shrink-0" aria-hidden />
+						<span>{step.text}</span>
+					</li>
+				);
+			})}
+		</ol>
+	);
+}
+
 /**
  * One tool call: what it did on a single line (verb, target, result badges),
  * with the command, output, exit code and diff one click away.
@@ -189,7 +225,22 @@ export const ToolCallRow = memo(function ToolCallRow({
 	const unfinished = !failed && !live && Boolean(annotation.streaming);
 	const kind = classifyToolAction(annotation.action);
 	const Icon = KIND_ICON[kind];
+	const checklist = useMemo(
+		() => (kind === "plan" ? parsePlanChecklist(annotation.detail?.input) : null),
+		[annotation.detail?.input, kind],
+	);
+	// A plan shows where the agent is: "6/12 · Running the tests".
+	const planTarget = checklist
+		? checklist.current
+			? t("conversation.toolCall.planProgress", {
+					done: checklist.completed,
+					total: checklist.steps.length,
+					step: checklist.current.text,
+				})
+			: t("conversation.toolCall.planDone", { total: checklist.steps.length })
+		: null;
 	const target =
+		planTarget ??
 		toolTarget(annotation) ??
 		(kind === "mcp" ? mcpToolLabel(annotation.action) : kind === "other" ? annotation.action : null);
 	const stats = diffStats(annotation.detail?.diff);

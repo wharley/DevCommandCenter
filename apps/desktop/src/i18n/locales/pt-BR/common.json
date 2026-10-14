@@ -4037,6 +4037,9 @@
       "copy": "Copiar",
       "exitCode": "código {{code}}",
       "truncated": "Saída longa: mostrando o começo e o fim.",
+      "planProgress": "{{done}}/{{total}} · {{step}}",
+      "planDone": "{{total}}/{{total}} etapas concluídas",
+      "planSteps": "Etapas do plano",
       "verbs": {
         "command": {
           "live": "Rodando",

@@ -1516,6 +1516,53 @@ fn codex_notification_thread_and_turn(params: &Value) -> Option<(&str, &str)> {
     Some((thread_id, turn_id))
 }
 
+/// Codex's plan updates (`turn/plan/updated`) as one plan tool call each,
+/// with the steps as its input, so the timeline shows the agent's checklist
+/// the same way it shows Claude's TodoWrite. The same plan keeps one row.
+fn codex_plan_update_events(method: &str, params: &Value) -> Vec<ProviderEvent> {
+    if method != "turn/plan/updated" {
+        return Vec::new();
+    }
+    let Some(plan) = params
+        .get("plan")
+        .and_then(Value::as_array)
+        .filter(|plan| !plan.is_empty())
+    else {
+        return Vec::new();
+    };
+    let Ok(input) = serde_json::to_string_pretty(&json!({ "plan": plan })) else {
+        return Vec::new();
+    };
+    let turn_id = params
+        .get("turnId")
+        .and_then(Value::as_str)
+        .unwrap_or("turn");
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&input, &mut hasher);
+    let id = format!("plan-{turn_id}-{:x}", std::hash::Hasher::finish(&hasher));
+    let at = now_iso();
+    vec![
+        ProviderEvent::ToolCallStarted {
+            id: id.clone(),
+            action: "update_plan".to_string(),
+            command: None,
+            file: None,
+            at: at.clone(),
+        },
+        ProviderEvent::ToolCallCompleted {
+            id,
+            detail: Some(
+                ToolCallDetail {
+                    input: Some(input),
+                    ..ToolCallDetail::default()
+                }
+                .bounded(),
+            ),
+            at,
+        },
+    ]
+}
+
 fn project_codex_notification_event(
     method: &str,
     params: &Value,
@@ -3232,6 +3279,15 @@ impl CodexAppServerAdapter {
                         }
                         continue;
                     }
+                    let plan_events = codex_plan_update_events(method, params);
+                    if !plan_events.is_empty() {
+                        if codex_notification_belongs_to_root(params, current_thread_id.as_deref()) {
+                            for event in plan_events {
+                                let _ = runtime.events_tx.send(event);
+                            }
+                        }
+                        continue;
+                    }
                     let native_subagent_events = codex_native_subagent_events(params);
                     if !native_subagent_events.is_empty() {
                         for event in native_subagent_events {
@@ -4754,6 +4810,42 @@ unified_exec                         stable             true
             }
             other => panic!("expected Codex turn usage, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn codex_plan_updates_become_a_plan_tool_call_with_the_steps() {
+        let params = json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "plan": [
+                { "step": "Inspect", "status": "completed" },
+                { "step": "Change", "status": "inProgress" }
+            ]
+        });
+        let events = codex_plan_update_events("turn/plan/updated", &params);
+        let [ProviderEvent::ToolCallStarted { id, action, .. }, ProviderEvent::ToolCallCompleted {
+            id: completed_id,
+            detail: Some(detail),
+            ..
+        }] = events.as_slice()
+        else {
+            panic!("expected a started and completed plan call, got {events:?}");
+        };
+        assert_eq!(action, "update_plan");
+        assert_eq!(id, completed_id);
+        let input: Value = serde_json::from_str(detail.input.as_deref().unwrap()).unwrap();
+        assert_eq!(input["plan"][1]["step"], "Change");
+        // The same plan keeps the same row; another method or an empty plan is nothing.
+        assert!(matches!(
+            codex_plan_update_events("turn/plan/updated", &params).first(),
+            Some(ProviderEvent::ToolCallStarted { id: again, .. }) if again == id
+        ));
+        assert!(codex_plan_update_events("item/started", &params).is_empty());
+        assert!(codex_plan_update_events(
+            "turn/plan/updated",
+            &json!({ "turnId": "turn-1", "plan": [] })
+        )
+        .is_empty());
     }
 
     #[test]
