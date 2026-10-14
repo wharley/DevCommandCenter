@@ -9216,6 +9216,8 @@ mod editor_workspace_file_tests {
             origin: Default::default(),
             instruction: None,
             started_at: None,
+            kind: Default::default(),
+            title: None,
         }))
         .expect("save delegation");
 

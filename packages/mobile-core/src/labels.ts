@@ -173,7 +173,8 @@ const KIND_BY_ACTION: Record<string, ToolKind> = {
 };
 
 export function classifyToolAction(action: string): ToolKind {
-	if ((action.split("__").at(-1) ?? action) === "dcc_delegate_task") return "agent";
+	const bareAction = action.split("__").at(-1) ?? action;
+	if (bareAction === "dcc_delegate_task" || bareAction === "dcc_propose_task") return "agent";
 	if (action.startsWith("mcp__")) return "mcp";
 	const normalized = action.toLowerCase().replace(/[^a-z0-9]/g, "");
 	return KIND_BY_ACTION[normalized] ?? "other";

@@ -162,7 +162,20 @@
       "failed": "Falha da delegação avisada ao agente",
       "applied": "Agente avisado: você aplicou as mudanças delegadas",
       "discarded": "Agente avisado: você descartou as mudanças delegadas",
-      "showSent": "ver texto enviado"
+      "showSent": "ver texto enviado",
+      "taskTurn": "Status da tarefa enviado ao agente"
+    },
+    "proposal": {
+      "label": "Tarefa proposta",
+      "start": "Começar",
+      "starting": "Começando…",
+      "dismiss": "Descartar",
+      "editBrief": "Editar instruções",
+      "worktree": "worktree próprio",
+      "readOnly": "só leitura",
+      "hint": "Nada roda até você começar. Vira uma conversa própria; o agente recebe um resumo a cada rodada que ela termina.",
+      "dismissed": "Proposta descartada",
+      "kind": "Tarefa"
     },
     "reviewStrip": {
       "message_one": "{{agent}} deixou {{count}} arquivo para você revisar",

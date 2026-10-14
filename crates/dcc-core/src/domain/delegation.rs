@@ -43,6 +43,17 @@ pub enum DelegationOrigin {
     Agent,
 }
 
+/// What the record is. A delegation is a bounded helper run whose result goes
+/// back to the parent (`dcc_delegate_task`); a task is a conversation of its
+/// own that the parent proposed (`dcc_propose_task`) and the person started.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegationKind {
+    #[default]
+    Delegation,
+    Task,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DelegationContextPolicy {
@@ -115,4 +126,10 @@ pub struct Delegation {
     /// First transition to `Running`; the timeout budget counts from here.
     #[serde(default)]
     pub started_at: Option<String>,
+    #[serde(default)]
+    pub kind: DelegationKind,
+    /// The short name the requester gave the work; a task's proposal card
+    /// shows it before any child conversation exists.
+    #[serde(default)]
+    pub title: Option<String>,
 }

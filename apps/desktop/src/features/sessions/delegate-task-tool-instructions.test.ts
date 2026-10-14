@@ -35,6 +35,25 @@ describe("delegate task tool instructions", () => {
 		expect(instructions).not.toContain("codex (Codex)");
 	});
 
+	it("teaches every requester to propose tasks on its own provider", () => {
+		for (const providerId of ["claude_code", "codex", "cursor"]) {
+			const instructions = buildDelegateTaskToolInstructions(
+				FALLBACK_PROVIDER_CATALOG.providers,
+				providerId,
+			);
+			expect(instructions).toContain("call dcc_propose_task");
+			expect(instructions).toContain("runs on your own provider");
+			expect(instructions).toContain("At most 3 proposals per turn");
+		}
+		const cursor = FALLBACK_PROVIDER_CATALOG.providers.find((item) => item.id === "cursor");
+		expect(
+			resolveDelegateTaskToolInstructions({
+				provider: cursor,
+				providers: FALLBACK_PROVIDER_CATALOG.providers,
+			}),
+		).toContain("dcc_propose_task");
+	});
+
 	it("does not expose instructions to providers that cannot request delegation", () => {
 		const provider = {
 			...FALLBACK_PROVIDER_CATALOG.providers[0],

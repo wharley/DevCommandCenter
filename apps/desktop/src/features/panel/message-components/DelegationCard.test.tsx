@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Delegation } from "@dcc/contracts";
+import { invoke } from "@tauri-apps/api/core";
 import { DelegationCard } from "./DelegationCard";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => ({ delegations: [] })) }));
@@ -118,5 +119,47 @@ describe("DelegationCard", () => {
 		expect(chip?.textContent).toContain("Companion.swift");
 		await act(async () => chip?.click());
 		expect(onReviewDelegation).toHaveBeenCalledWith("d-1", "Sources/App/Companion.swift");
+	});
+
+	it("shows a proposed task as a card that starts with the edited brief", async () => {
+		const proposal = record({
+			kind: "task",
+			status: "draft",
+			childSessionId: null,
+			title: "Fase 2: push",
+			instruction: "Implement push notifications.",
+			prompt: "Implement push notifications.",
+		});
+		await render(proposal);
+		expect(container.textContent).toContain("Fase 2: push");
+		expect(container.textContent).toContain("delegation.proposal.label");
+		expect(container.textContent).toContain("Implement push notifications.");
+		expect(container.querySelector('[data-agent][data-state="working"]')).toBeNull();
+
+		const button = (label: string) =>
+			[...container.querySelectorAll("button")].find((item) => item.textContent === label);
+		await act(async () => button("delegation.proposal.editBrief")?.click());
+		const textarea = container.querySelector("textarea");
+		expect(textarea?.value).toBe("Implement push notifications.");
+		await act(async () => {
+			const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+			setter?.call(textarea, "Implement push notifications on Android only.");
+			textarea?.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		vi.mocked(invoke).mockClear();
+		await act(async () => button("delegation.proposal.start")?.click());
+		expect(invoke).toHaveBeenCalledWith("start_task_proposal", {
+			input: {
+				delegationId: "d-1",
+				instruction: "Implement push notifications on Android only.",
+			},
+		});
+	});
+
+	it("leaves one muted line for a dismissed proposal", async () => {
+		await render(
+			record({ kind: "task", status: "cancelled", childSessionId: null, title: "Fase 3" }),
+		);
+		expect(container.textContent).toBe("delegation.proposal.dismissed · Fase 3");
 	});
 });

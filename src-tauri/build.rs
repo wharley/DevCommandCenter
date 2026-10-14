@@ -177,8 +177,8 @@ use dcc_core::{
     },
     domain::{
         delegation::{
-            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
-            DelegationOrigin, DelegationStatus,
+            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationKind,
+            DelegationMode, DelegationOrigin, DelegationStatus,
         },
         mcp::{
             McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
@@ -241,7 +241,7 @@ use dcc_tauri::commands::{
         CancelRunningDelegationInput, DelegationResultTurnInput, DelegationResultTurnOutput,
         GetDelegationInput,
         GetDelegationOutput, ListDelegationsInput, ListDelegationsOutput, RunDelegationInput,
-        RunDelegationOutput, StartDelegationInput, StartDelegationOutput,
+        RunDelegationOutput, StartDelegationInput, StartDelegationOutput, StartTaskProposalInput,
     },
     forge_commands::{
         ForgeCliAccountEntry, ForgeCliAccountsInput, ForgeCliAccountsOutput, ForgeCliProvider,
@@ -668,6 +668,7 @@ struct DelegationMethods {
     run_delegation: String,
     delegation_result_turn: String,
     cancel_running_delegation: String,
+    start_task_proposal: String,
 }
 
 fn main() {
@@ -715,6 +716,7 @@ fn main() {
         .typ::<DelegationMode>()
         .typ::<DelegationStatus>()
         .typ::<DelegationOrigin>()
+        .typ::<DelegationKind>()
         .typ::<DelegationContextPolicy>()
         .typ::<DelegationBudget>()
         .typ::<Delegation>()
@@ -1106,6 +1108,7 @@ fn main() {
         .typ::<DelegationResultTurnInput>()
         .typ::<DelegationResultTurnOutput>()
         .typ::<CancelRunningDelegationInput>()
+        .typ::<StartTaskProposalInput>()
         .typ::<CompleteDelegationInput>()
         .typ::<CompleteDelegationOutput>()
         .typ::<ApproveDelegationInput>()
@@ -1358,6 +1361,7 @@ fn main() {
             run_delegation: "run_delegation".to_string(),
             delegation_result_turn: "delegation_result_turn".to_string(),
             cancel_running_delegation: "cancel_running_delegation".to_string(),
+            start_task_proposal: "start_task_proposal".to_string(),
         },
     );
 

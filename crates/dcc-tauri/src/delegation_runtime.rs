@@ -25,8 +25,8 @@ use dcc_core::{
     },
     domain::{
         delegation::{
-            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
-            DelegationOrigin, DelegationStatus,
+            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationKind,
+            DelegationMode, DelegationOrigin, DelegationStatus,
         },
         provider::ProviderApprovalPolicy,
         session::{AssistantMessagePhase, SessionEventKind, SessionId, SessionProjection, TurnId},
@@ -40,9 +40,11 @@ use dcc_core::{
 use crate::{
     commands::{
         delegation_commands::{
-            complete_delegation_with_state, create_delegation_with_state,
-            fail_delegation_with_state, start_delegation_with_state, CompleteDelegationInput,
-            CreateDelegationInput, FailDelegationInput, StartDelegationInput,
+            cancel_delegation_with_state, complete_delegation_with_state,
+            create_delegation_with_state, create_task_proposal_with_state,
+            fail_delegation_with_state, start_delegation_with_state, CancelDelegationInput,
+            CompleteDelegationInput, CreateDelegationInput, CreateTaskProposalInput,
+            FailDelegationInput, StartDelegationInput,
         },
         session_commands::send_turn_with_state,
         workspace_commands::{
@@ -68,6 +70,13 @@ pub const MAX_AGENT_DELEGATIONS_PER_TURN: usize = 6;
 /// Every turn DCC itself sends to an agent (hand-backs, review outcomes)
 /// starts with this, so a turn it started is never mistaken for the person's.
 const DCC_TURN_PREFIX: &str = "[DCC] ";
+/// Task proposals one parent turn may add; past that a card is noise.
+pub const MAX_TASK_PROPOSALS_PER_TURN: usize = 3;
+/// A proposal nobody started within this window is withdrawn.
+const TASK_PROPOSAL_TTL_DAYS: i64 = 7;
+/// How much of a task's last answer wakes the parent: enough to decide the
+/// next step; the person reads the rest in the task itself.
+const TASK_HAND_BACK_CHARS: usize = 400;
 /// A child that never started its turn within this window is treated as lost.
 const CHILD_START_GRACE_SECONDS: i64 = 180;
 /// Fallback for records without a budget timeout.
@@ -111,6 +120,11 @@ pub struct RunDelegationInput {
     /// conversation's title. Omitted: derived from the instruction.
     #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
+    pub kind: DelegationKind,
+    /// Starts this waiting task proposal instead of a new record.
+    #[serde(default)]
+    pub proposal_id: Option<DelegationId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -858,7 +872,8 @@ pub async fn run_delegation(
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("parent session not found: {}", input.parent_session_id.0))?;
 
-    if input.origin == DelegationOrigin::Agent {
+    // A started proposal is the person's go-ahead, not the agent fanning out.
+    if input.origin == DelegationOrigin::Agent && input.proposal_id.is_none() {
         // A delegated agent works on a bounded task; letting it fan out again
         // turns one request into an unbounded tree of paid runs.
         if DelegationRepo::get_delegation_by_child_session(state, &parent.id)
@@ -885,7 +900,10 @@ pub async fn run_delegation(
                 .await
                 .map_err(|error| error.to_string())?
                 .into_iter()
-                .filter(|delegation| delegation.origin == DelegationOrigin::Agent)
+                .filter(|delegation| {
+                    delegation.origin == DelegationOrigin::Agent
+                        && delegation.kind == DelegationKind::Delegation
+                })
                 .collect();
         let active = agent_delegations
             .iter()
@@ -929,9 +947,11 @@ pub async fn run_delegation(
         .unwrap_or_else(|| workspace.root_path.clone());
 
     let allow_file_edits = matches!(input.mode, DelegationMode::Implement);
+    let is_task = input.kind == DelegationKind::Task;
     let mut budget = DelegationBudget {
-        turn_limit: Some(1),
-        timeout_seconds: Some(if allow_file_edits {
+        // A task is a conversation of its own: no turn count, no clock.
+        turn_limit: (!is_task).then_some(1),
+        timeout_seconds: (!is_task).then_some(if allow_file_edits {
             IMPLEMENT_TIMEOUT_SECONDS
         } else {
             READ_ONLY_TIMEOUT_SECONDS
@@ -999,6 +1019,14 @@ pub async fn run_delegation(
     let launched = async {
         let prompt = match input.prebuilt_prompt.clone() {
             Some(prompt) if !prompt.trim().is_empty() => prompt,
+            _ if is_task => build_task_prompt(&TaskPromptContext {
+                instruction: &instruction,
+                workspace_name: workspace.name.as_deref().unwrap_or("workspace"),
+                workspace_branch: &workspace.base_branch,
+                workspace_path: &workspace_path,
+                parent_title: &parent_title,
+                isolated_worktree: allow_file_edits,
+            }),
             _ => {
                 let git_context = match input.context_policy {
                     DelegationContextPolicy::ReviewCurrentDiff
@@ -1077,6 +1105,9 @@ pub async fn run_delegation(
                 } else {
                     instruction.clone()
                 }),
+                kind: input.kind,
+                title: input.title.clone(),
+                proposal_id: input.proposal_id.clone(),
             },
         )
         .await?
@@ -1329,8 +1360,299 @@ async fn finalize_running_delegation(state: &SessionCommandState, delegation: De
                 }
             };
             if completed.origin == DelegationOrigin::Agent {
-                deliver_result(state, &completed, delegation_result_turn(&completed, None)).await;
+                let prompt = match completed.kind {
+                    DelegationKind::Task => task_result_turn(&completed),
+                    DelegationKind::Delegation => delegation_result_turn(&completed, None),
+                };
+                deliver_result(state, &completed, prompt).await;
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task proposals (`dcc_propose_task`)
+// ---------------------------------------------------------------------------
+
+pub struct TaskPromptContext<'a> {
+    pub instruction: &'a str,
+    pub workspace_name: &'a str,
+    pub workspace_branch: &'a str,
+    pub workspace_path: &'a str,
+    pub parent_title: &'a str,
+    pub isolated_worktree: bool,
+}
+
+/// The first message of a task: the brief, framed as a conversation the
+/// person can keep talking to, not a one-shot report.
+pub fn build_task_prompt(context: &TaskPromptContext<'_>) -> String {
+    let mut lines = vec![
+        format!(
+            "Task from Dev Command Center, proposed in \"{}\" and started by the human.",
+            context.parent_title
+        ),
+        String::new(),
+        "Scope:".to_string(),
+    ];
+    if context.isolated_worktree {
+        lines.extend(
+            [
+                "- You are in an isolated git worktree created from the parent's current HEAD; edit freely there.",
+                "- Do not commit, push, delete branches, reset history, or run destructive commands.",
+                "- The human reviews your edits before they reach the parent workspace.",
+            ]
+            .map(str::to_string),
+        );
+    } else {
+        lines.push("- Work read-only. Do not edit files or run destructive commands.".to_string());
+    }
+    lines.extend([
+        "- This is your own conversation: the human may follow up here.".to_string(),
+        "- When you end a turn, DCC hands its first lines back to the parent session, so open your final message with the outcome.".to_string(),
+        String::new(),
+        "Workspace:".to_string(),
+        format!("- Name: {}", context.workspace_name),
+        format!(
+            "- Branch: {}",
+            if context.workspace_branch.is_empty() {
+                "unknown"
+            } else {
+                context.workspace_branch
+            }
+        ),
+        format!("- Path: {}", context.workspace_path),
+        String::new(),
+        "Task:".to_string(),
+        context.instruction.trim().to_string(),
+    ]);
+    lines.join("\n")
+}
+
+/// What wakes the parent when a task ends a turn: a short status, not the
+/// whole report — the parent coordinates, the task holds the detail.
+pub fn task_result_turn(delegation: &Delegation) -> String {
+    let title = delegation
+        .title
+        .as_deref()
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or("Untitled task");
+    let mut lines = vec![
+        format!(
+            "[DCC] Task \"{}\" ended a turn — {} (task {}).",
+            title,
+            agent_label(delegation),
+            delegation.id.0
+        ),
+        String::new(),
+        clip(
+            delegation
+                .result_summary
+                .as_deref()
+                .filter(|summary| !summary.trim().is_empty())
+                .unwrap_or("The task returned no text."),
+            TASK_HAND_BACK_CHARS,
+        ),
+    ];
+    if matches!(delegation.status, DelegationStatus::ReviewPending) {
+        lines.extend([
+            String::new(),
+            "Its edits wait in an isolated worktree for the human to review; do not re-implement them.".to_string(),
+        ]);
+    }
+    lines.extend([
+        String::new(),
+        "The human can open the task to read the rest or keep talking to it. Tell them where the plan stands and, if a next step is due, propose it.".to_string(),
+    ]);
+    lines.join("\n")
+}
+
+#[derive(Clone, Debug)]
+pub struct ProposeTaskInput {
+    pub parent_session_id: SessionId,
+    pub title: String,
+    pub instruction: String,
+    /// The task edits files, so it gets its own worktree.
+    pub edits: bool,
+    /// Omitted: the parent's own provider.
+    pub target_provider_id: Option<String>,
+    pub target_model_id: Option<String>,
+    /// Start without a card; only for a turn the person started.
+    pub start_now: bool,
+}
+
+/// Records a task the parent agent suggests. It waits as a card in the
+/// parent's thread until the person starts or dismisses it, unless the
+/// person's own turn asked for it to start right away.
+pub async fn propose_task(
+    state: &SessionCommandState,
+    input: ProposeTaskInput,
+) -> Result<Delegation, String> {
+    let title = input.title.trim().to_string();
+    let instruction = input.instruction.trim().to_string();
+    if title.is_empty() || instruction.is_empty() {
+        return Err("a task needs a title and a brief".to_string());
+    }
+    let parent = SessionRepo::get_session(state, &input.parent_session_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("parent session not found: {}", input.parent_session_id.0))?;
+    if DelegationRepo::get_delegation_by_child_session(state, &parent.id)
+        .await
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Err("a task or delegated agent cannot propose tasks; report back instead".to_string());
+    }
+    let events = SessionEventRepo::list_events_by_session(state, &parent.id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let open_turn = open_turn_prompt(&events);
+    let person_turn = open_turn
+        .as_ref()
+        .is_some_and(|(_, prompt)| !prompt.starts_with(DCC_TURN_PREFIX));
+    if input.start_now && !person_turn {
+        return Err("start=now is only for a turn the human started; propose the task instead so they can start it".to_string());
+    }
+    let proposals: Vec<Delegation> = DelegationRepo::list_delegations(state, None, Some(&parent.id))
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|delegation| delegation.kind == DelegationKind::Task)
+        .collect();
+    if let Some((turn_id, _)) = &open_turn {
+        let this_turn = proposals
+            .iter()
+            .filter(|proposal| proposal.parent_turn_id.as_ref() == Some(turn_id))
+            .count();
+        if this_turn >= MAX_TASK_PROPOSALS_PER_TURN {
+            return Err(format!(
+                "you already proposed {this_turn} tasks in this turn; let the human pick before proposing more"
+            ));
+        }
+    }
+    if proposals.iter().any(|proposal| {
+        proposal.status == DelegationStatus::Draft
+            && proposal
+                .title
+                .as_deref()
+                .is_some_and(|existing| existing.trim().eq_ignore_ascii_case(&title))
+    }) {
+        return Err("a proposal with this title is already waiting for the human".to_string());
+    }
+
+    let mode = if input.edits {
+        DelegationMode::Implement
+    } else {
+        DelegationMode::Research
+    };
+    let budget = DelegationBudget {
+        turn_limit: None,
+        timeout_seconds: None,
+        allow_file_edits: input.edits,
+        approval_policy: None,
+    };
+    let target_provider_id = input
+        .target_provider_id
+        .map(|provider| provider.trim().to_string())
+        .filter(|provider| !provider.is_empty())
+        .unwrap_or_else(|| parent.provider_id.clone());
+    let target_provider_id = dcc_core::domain::provider::ProviderId(target_provider_id);
+    state
+        .validate_delegation_target(&target_provider_id, &mode, &budget)
+        .map_err(|error| error.to_string())?;
+    let proposal = create_task_proposal_with_state(
+        state,
+        CreateTaskProposalInput {
+            parent_session_id: parent.id.clone(),
+            parent_turn_id: open_turn.map(|(turn_id, _)| turn_id),
+            workspace_id: parent.workspace_id.clone(),
+            target_provider_id,
+            target_model_id: input
+                .target_model_id
+                .map(|model| model.trim().to_string())
+                .filter(|model| !model.is_empty()),
+            mode,
+            title,
+            instruction,
+            budget,
+        },
+    )
+    .await?;
+    if input.start_now {
+        return start_task_proposal(state, &proposal.id, None).await;
+    }
+    Ok(proposal)
+}
+
+/// Launches a waiting proposal as its own conversation. `instruction` is the
+/// brief as the person edited it on the card.
+pub async fn start_task_proposal(
+    state: &SessionCommandState,
+    proposal_id: &DelegationId,
+    instruction: Option<String>,
+) -> Result<Delegation, String> {
+    // Two clicks on Start must not launch two children.
+    let _guard = FinalizeGuard::acquire(proposal_id)
+        .ok_or_else(|| "this task is already starting".to_string())?;
+    let proposal = DelegationRepo::get_delegation(state, proposal_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("task proposal not found: {}", proposal_id.0))?;
+    if proposal.kind != DelegationKind::Task || proposal.status != DelegationStatus::Draft {
+        return Err("this task proposal was already started or dismissed".to_string());
+    }
+    let instruction = instruction
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| proposal.instruction.clone())
+        .unwrap_or_else(|| proposal.prompt.clone());
+    run_delegation(
+        state,
+        RunDelegationInput {
+            parent_session_id: proposal.parent_session_id.clone(),
+            target_provider_id: Some(proposal.target_provider_id.0.clone()),
+            target_model_id: proposal.target_model_id.clone(),
+            mode: proposal.mode.clone(),
+            instruction,
+            context_policy: DelegationContextPolicy::Minimal,
+            origin: DelegationOrigin::Agent,
+            prebuilt_prompt: None,
+            effort: None,
+            fast_mode: None,
+            provider_runtime: None,
+            title: proposal.title.clone(),
+            kind: DelegationKind::Task,
+            proposal_id: Some(proposal.id.clone()),
+        },
+    )
+    .await
+    .map(|output| output.delegation)
+}
+
+/// Withdraws proposals nobody started within [`TASK_PROPOSAL_TTL_DAYS`].
+async fn expire_task_proposals(state: &SessionCommandState) {
+    let Ok(drafts) = DelegationRepo::list_delegations_by_status(state, DelegationStatus::Draft).await
+    else {
+        return;
+    };
+    let cutoff = Utc::now() - chrono::Duration::days(TASK_PROPOSAL_TTL_DAYS);
+    for proposal in drafts {
+        let expired = proposal.kind == DelegationKind::Task
+            && DateTime::parse_from_rfc3339(&proposal.created_at)
+                .is_ok_and(|created| created.with_timezone(&Utc) < cutoff);
+        if !expired {
+            continue;
+        }
+        if let Err(error) = cancel_delegation_with_state(
+            state,
+            CancelDelegationInput {
+                delegation_id: proposal.id.clone(),
+                reason: Some("Nobody started this proposal within a week.".to_string()),
+            },
+        )
+        .await
+        {
+            eprintln!("[DCC] task proposal expiry failed: {error}");
         }
     }
 }
@@ -1617,6 +1939,9 @@ pub fn notify_parent_of_review_outcome(
 // ---------------------------------------------------------------------------
 
 fn timed_out(delegation: &Delegation, now: DateTime<Utc>) -> bool {
+    if delegation.kind == DelegationKind::Task {
+        return false;
+    }
     let timeout = delegation
         .budget
         .timeout_seconds
@@ -1646,6 +1971,7 @@ fn start_grace_elapsed(delegation: &Delegation, now: DateTime<Utc>) -> bool {
 /// restart), aborts children past their timeout budget, and fails children
 /// that never started.
 pub async fn reconcile_running_delegations(state: &SessionCommandState) {
+    expire_task_proposals(state).await;
     let Ok(running) = DelegationRepo::list_delegations_by_status(state, DelegationStatus::Running).await
     else {
         return;
@@ -1799,6 +2125,8 @@ mod tests {
             origin: DelegationOrigin::Agent,
             instruction: None,
             started_at: Some("2026-10-05T10:00:00Z".to_string()),
+            kind: Default::default(),
+            title: None,
         }
     }
 
@@ -2262,6 +2590,8 @@ mod tests {
                     fast_mode: None,
                     provider_runtime: None,
                     title: None,
+                    kind: Default::default(),
+                    proposal_id: None,
                 },
             )
             .await
@@ -2285,6 +2615,8 @@ mod tests {
                 fast_mode: None,
                 provider_runtime: None,
                 title: None,
+                kind: Default::default(),
+                proposal_id: None,
             }
         }
 
@@ -2363,6 +2695,223 @@ mod tests {
             assert!(!error.contains("in this turn"), "{error}");
         }
 
+        fn proposal_input(title: &str) -> ProposeTaskInput {
+            ProposeTaskInput {
+                parent_session_id: SessionId("parent".to_string()),
+                title: title.to_string(),
+                instruction: "Implement phase 2.".to_string(),
+                edits: true,
+                // Unknown on purpose: a proposal that passes the guards
+                // stops at the provider check.
+                target_provider_id: Some("not-a-provider".to_string()),
+                target_model_id: None,
+                start_now: false,
+            }
+        }
+
+        async fn saved_proposal(
+            state: &SessionCommandState,
+            title: &str,
+            turn: Option<&str>,
+        ) -> Delegation {
+            create_task_proposal_with_state(
+                state,
+                CreateTaskProposalInput {
+                    parent_session_id: SessionId("parent".to_string()),
+                    parent_turn_id: turn.map(|turn| TurnId(turn.to_string())),
+                    workspace_id: WorkspaceId("workspace".to_string()),
+                    target_provider_id: dcc_core::domain::provider::ProviderId(
+                        "codex".to_string(),
+                    ),
+                    target_model_id: None,
+                    mode: DelegationMode::Implement,
+                    title: title.to_string(),
+                    instruction: "Implement it.".to_string(),
+                    budget: DelegationBudget::default(),
+                },
+            )
+            .await
+            .expect("save proposal")
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn start_now_needs_a_turn_the_person_started() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let now = |title: &str| ProposeTaskInput {
+                start_now: true,
+                ..proposal_input(title)
+            };
+            let error = propose_task(state, now("Fase 2")).await.expect_err("no open turn");
+            assert!(error.contains("start=now"), "{error}");
+
+            append(state, "parent", started("p-2", "[DCC] Task \"Fase 1\" ended a turn")).await;
+            let error = propose_task(state, now("Fase 2")).await.expect_err("DCC turn");
+            assert!(error.contains("start=now"), "{error}");
+
+            // Proposing from that same turn is fine: the person still decides.
+            let error = propose_task(state, proposal_input("Fase 2"))
+                .await
+                .expect_err("stops at the unknown provider");
+            assert!(!error.contains("start=now"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn proposals_are_capped_per_turn_and_not_repeated() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            append(state, "parent", started("p-1", "plan the mobile app")).await;
+            saved_proposal(state, "Fase 1", Some("p-1")).await;
+
+            let error = propose_task(state, proposal_input("fase 1"))
+                .await
+                .expect_err("same title waits already");
+            assert!(error.contains("already waiting"), "{error}");
+
+            saved_proposal(state, "Fase 2", Some("p-1")).await;
+            saved_proposal(state, "Fase 3", Some("p-1")).await;
+            let error = propose_task(state, proposal_input("Fase 4"))
+                .await
+                .expect_err("fourth proposal in one turn");
+            assert!(error.contains("already proposed 3 tasks"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_task_cannot_propose_tasks() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            running_delegation(state, DelegationOrigin::Agent).await;
+            let error = propose_task(
+                state,
+                ProposeTaskInput {
+                    parent_session_id: SessionId("child".to_string()),
+                    ..proposal_input("Fase 2")
+                },
+            )
+            .await
+            .expect_err("depth stays one");
+            assert!(error.contains("cannot propose"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_proposal_shows_a_card_and_starts_only_once() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let proposal = saved_proposal(state, "Fase 2", None).await;
+            assert_eq!(proposal.status, DelegationStatus::Draft);
+            assert_eq!(proposal.kind, DelegationKind::Task);
+            let parent_events =
+                SessionEventRepo::list_events_by_session(state, &SessionId("parent".to_string()))
+                    .await
+                    .expect("history");
+            assert!(parent_events.iter().any(|event| matches!(
+                &event.kind,
+                SessionEventKind::DelegationRequested { delegation_id } if *delegation_id == proposal.id
+            )));
+
+            cancel_delegation_with_state(
+                state,
+                CancelDelegationInput {
+                    delegation_id: proposal.id.clone(),
+                    reason: None,
+                },
+            )
+            .await
+            .expect("dismiss");
+            let error = start_task_proposal(state, &proposal.id, None)
+                .await
+                .expect_err("a dismissed proposal cannot start");
+            assert!(error.contains("already started or dismissed"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn proposals_nobody_started_expire_after_a_week() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let mut old = saved_proposal(state, "Fase antiga", None).await;
+            old.created_at = (Utc::now() - chrono::Duration::days(8)).to_rfc3339();
+            DelegationRepo::save_delegation(state, &old).await.expect("age it");
+            let fresh = saved_proposal(state, "Fase nova", None).await;
+
+            reconcile_running_delegations(state).await;
+
+            let status = |id: DelegationId| async move {
+                DelegationRepo::get_delegation(state, &id)
+                    .await
+                    .expect("load")
+                    .expect("record")
+                    .status
+            };
+            assert_eq!(status(old.id).await, DelegationStatus::Cancelled);
+            assert_eq!(status(fresh.id).await, DelegationStatus::Draft);
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_task_ending_a_turn_wakes_the_parent_with_a_short_status() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let mut task = running_delegation(state, DelegationOrigin::Agent).await;
+            task.kind = DelegationKind::Task;
+            task.title = Some("Fase 2".to_string());
+            task.budget.timeout_seconds = None;
+            // Long past any delegation timeout: a task has no clock.
+            task.started_at = Some((Utc::now() - chrono::Duration::hours(3)).to_rfc3339());
+            DelegationRepo::save_delegation(state, &task).await.expect("save task");
+            append(state, "parent", started("p-1", "work")).await;
+            append(state, "child", started("c-1", "brief")).await;
+            reconcile_running_delegations(state).await;
+            assert_eq!(
+                DelegationRepo::get_delegation(state, &task.id)
+                    .await
+                    .expect("load")
+                    .expect("task")
+                    .status,
+                DelegationStatus::Running
+            );
+
+            append(
+                state,
+                "child",
+                SessionEventKind::TurnAssistantMessageCompleted {
+                    turn_id: TurnId("c-1".to_string()),
+                    message_id: "m".to_string(),
+                    phase: AssistantMessagePhase::FinalAnswer,
+                    content: Some(format!("Push notifications work. {}", "detail ".repeat(200))),
+                },
+            )
+            .await;
+            append(
+                state,
+                "child",
+                SessionEventKind::TurnCompleted {
+                    turn_id: TurnId("c-1".to_string()),
+                },
+            )
+            .await;
+            on_session_turn_terminal(state.clone(), SessionId("child".to_string())).await;
+
+            let queued = queued_prompts(state, "parent").await;
+            assert_eq!(queued.len(), 1);
+            assert!(queued[0].starts_with("[DCC] Task \"Fase 2\" ended a turn"), "{}", queued[0]);
+            assert!(queued[0].contains("Push notifications work."));
+            assert!(queued[0].chars().count() < 900, "the status stays short");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn tasks_do_not_use_up_the_delegation_allowance() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            append(state, "parent", started("p-1", "work")).await;
+            for index in 0..MAX_AGENT_DELEGATIONS_PER_TURN {
+                saved_proposal(state, &format!("Fase {index}"), Some("p-1")).await;
+            }
+            let error = run_delegation(state, agent_review_from_parent())
+                .await
+                .expect_err("stops at the unknown provider");
+            assert!(!error.contains("in this turn"), "{error}");
+            assert!(!error.contains("already running"), "{error}");
+        }
+
         #[tokio::test(flavor = "current_thread")]
         async fn an_agent_delegation_finds_the_parent_workspace() {
             let fixture = fixture().await;
@@ -2381,6 +2930,8 @@ mod tests {
                     fast_mode: None,
                     provider_runtime: None,
                     title: None,
+                    kind: Default::default(),
+                    proposal_id: None,
                 },
             )
             .await

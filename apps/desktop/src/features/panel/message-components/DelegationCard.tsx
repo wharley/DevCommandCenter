@@ -26,6 +26,7 @@ import { delegationInstruction } from "@/features/sessions/delegation-lineage";
 import { AgentMascot } from "@/features/providers/agent-mascot";
 import { AssistantProse } from "./AssistantProse";
 import { MessageTimestamp } from "./message-metadata";
+import { TaskProposalCard } from "./TaskProposalCard";
 
 /** Reports longer than this open collapsed, showing their first lines. */
 const COLLAPSED_REPORT_CHARS = 320;
@@ -88,15 +89,41 @@ export function DelegationCard({
 		delegationsQuery.data?.find((item) => item.id === delegation.id) ?? null;
 
 	const status: Delegation["status"] = record?.status ?? PHASE_STATUS[delegation.phase];
+	const isTask = record?.kind === "task";
+	if (record && isTask && status === "draft") {
+		return (
+			<TaskProposalCard
+				proposal={record}
+				workspaceId={workspaceId}
+				providers={providers}
+				createdAt={createdAt}
+			/>
+		);
+	}
+	if (record && isTask && status === "cancelled" && !record.childSessionId) {
+		return (
+			<div
+				data-message-role="system"
+				className="flex min-w-0 justify-center px-4 text-[11.5px] leading-5 text-muted-foreground"
+			>
+				<p className="w-full max-w-[42rem] truncate">
+					{t("delegation.proposal.dismissed")}
+					{record.title ? ` · ${record.title}` : ""}
+				</p>
+			</div>
+		);
+	}
 	const statusLabel = t(`inspector.delegations.status.${status}`, {
 		defaultValue: status,
 	});
 	const decisions = record ? describeDelegation(record, providers) : null;
 	// What ran, in one muted line; how (context, permission) only on hover.
 	const agentLabel = decisions ? (decisions.modelLabel ?? decisions.providerLabel) : null;
-	const modeLabel = decisions
-		? t(`inspector.delegations.mode.${decisions.mode}`, { defaultValue: decisions.mode })
-		: null;
+	const modeLabel = isTask
+		? t("delegation.proposal.kind")
+		: decisions
+			? t(`inspector.delegations.mode.${decisions.mode}`, { defaultValue: decisions.mode })
+			: null;
 	const decisionDetails = decisions
 		? [
 				decisions.providerLabel,
@@ -109,14 +136,15 @@ export function DelegationCard({
 					: t("delegation.card.readOnly"),
 			].join(" · ")
 		: undefined;
-	const title =
-		childTitle?.trim() && !childTitle.startsWith("Delegated ")
+	const title = isTask && record?.title?.trim()
+		? record.title.trim()
+		: childTitle?.trim() && !childTitle.startsWith("Delegated ")
 			? childTitle.trim()
 			: record
 				? (delegationInstruction(record).split("\n").find((line) => line.trim()) ?? "").trim()
 				: "";
 	const availableRerunTargets =
-		record && onRerunDelegation && canRerunDelegation(record)
+		record && !isTask && onRerunDelegation && canRerunDelegation(record)
 			? rerunTargets(record, eligibleDelegationTargets(providers))
 			: [];
 	const handleRerun = async (targetProviderId: string) => {

@@ -90,6 +90,8 @@ fn cursor_capabilities() -> Capabilities {
     capabilities.supports_multi_root = true;
     capabilities.plan_mode_support = dcc_core::domain::provider::TurnControlSupport::Native;
     capabilities.supports_dynamic_models = true;
+    // Cursor receives DCC's MCP tools, so it can propose and delegate tasks.
+    capabilities.can_request_delegation = true;
     capabilities
 }
 

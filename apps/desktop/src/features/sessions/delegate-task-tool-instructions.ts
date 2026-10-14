@@ -33,6 +33,14 @@ function buildNativeSubagentInstructions(provider: Provider) {
 	];
 }
 
+/** `dcc_propose_task`: a phase of the plan as its own conversation, on any provider. */
+const TASK_PROPOSAL_INSTRUCTIONS = [
+	"Task proposals (Dev Command Center):",
+	"- When a phase of the plan, or independent multi-step work, deserves its own conversation with a clean context, call dcc_propose_task when it is in your tool list: a short title in the human's language and a self-contained brief. It runs on your own provider unless you name another.",
+	"- The human starts it from a card; nothing runs before that. Keep quick work here (a question, a read, one edit) and mention small follow-ups in your reply instead of proposing them. At most 3 proposals per turn.",
+	"- Each time a task ends a turn, DCC sends you a message starting with [DCC] Task. Tell the human where the plan stands and propose the next step if one is due; do not start work on your own from that message.",
+];
+
 export function buildDelegateTaskToolInstructions(
 	providers: ProviderCatalog["providers"],
 	currentProviderId: string,
@@ -44,7 +52,11 @@ export function buildDelegateTaskToolInstructions(
 		return "";
 	}
 
-	const lines = buildNativeSubagentInstructions(currentProvider);
+	const lines = [
+		...buildNativeSubagentInstructions(currentProvider),
+		"",
+		...TASK_PROPOSAL_INSTRUCTIONS,
+	];
 	const targets = providers.filter(
 		(provider) =>
 			provider.id !== currentProviderId &&

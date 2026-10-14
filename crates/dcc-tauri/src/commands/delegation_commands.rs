@@ -7,8 +7,8 @@ use uuid::Uuid;
 use dcc_core::{
     domain::{
         delegation::{
-            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationMode,
-            DelegationOrigin, DelegationStatus,
+            Delegation, DelegationBudget, DelegationContextPolicy, DelegationId, DelegationKind,
+            DelegationMode, DelegationOrigin, DelegationStatus,
         },
         delegation_worktree::{DelegationWorktreeOperationId, DelegationWorktreeOperationState},
         provider::ProviderId,
@@ -45,6 +45,14 @@ pub struct CreateDelegationInput {
     pub origin: DelegationOrigin,
     #[serde(default)]
     pub instruction: Option<String>,
+    #[serde(default)]
+    pub kind: DelegationKind,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The waiting task proposal this run starts: its record is filled in
+    /// instead of a new one, so the card already in the thread follows it.
+    #[serde(default)]
+    pub proposal_id: Option<DelegationId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -300,11 +308,34 @@ pub async fn create_delegation_with_state(
         None
     };
 
+    let proposal = match input.proposal_id.as_ref() {
+        Some(proposal_id) => {
+            let proposal = DelegationRepo::get_delegation(&*state, proposal_id)
+                .await
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("task proposal not found: {}", proposal_id.0))?;
+            if proposal.kind != DelegationKind::Task
+                || proposal.status != DelegationStatus::Draft
+                || proposal.parent_session_id != input.parent_session_id
+            {
+                return Err("this task proposal was already started or dismissed".to_string());
+            }
+            Some(proposal)
+        }
+        None => None,
+    };
+
     let now = now_iso();
     let delegation = Delegation {
-        id: DelegationId(Uuid::new_v4().to_string()),
+        id: proposal
+            .as_ref()
+            .map(|proposal| proposal.id.clone())
+            .unwrap_or_else(|| DelegationId(Uuid::new_v4().to_string())),
         parent_session_id: input.parent_session_id.clone(),
-        parent_turn_id: input.parent_turn_id,
+        parent_turn_id: match proposal.as_ref() {
+            Some(proposal) => proposal.parent_turn_id.clone(),
+            None => input.parent_turn_id,
+        },
         child_session_id: input.child_session_id,
         workspace_id: input.workspace_id,
         target_provider_id: input.target_provider_id,
@@ -318,7 +349,10 @@ pub async fn create_delegation_with_state(
         touched_files: Vec::new(),
         diff_summary: None,
         validation_summary: None,
-        created_at: now.clone(),
+        created_at: proposal
+            .as_ref()
+            .map(|proposal| proposal.created_at.clone())
+            .unwrap_or_else(|| now.clone()),
         updated_at: now.clone(),
         origin: input.origin,
         instruction: input
@@ -326,6 +360,11 @@ pub async fn create_delegation_with_state(
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
         started_at: None,
+        kind: input.kind,
+        title: input
+            .title
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
     };
 
     let edit_capable =
@@ -407,6 +446,10 @@ pub async fn create_delegation_with_state(
         }
         return Err(error.to_string());
     }
+    if proposal.is_some() {
+        // The thread already shows this record's card since it was proposed.
+        return Ok(CreateDelegationOutput { delegation });
+    }
     if let Err(error) = append_and_publish_parent_event(
         &state,
         &delegation.parent_session_id,
@@ -431,6 +474,71 @@ pub async fn create_delegation_with_state(
     }
 
     Ok(CreateDelegationOutput { delegation })
+}
+
+#[derive(Clone, Debug)]
+pub struct CreateTaskProposalInput {
+    pub parent_session_id: SessionId,
+    pub parent_turn_id: Option<TurnId>,
+    pub workspace_id: WorkspaceId,
+    pub target_provider_id: ProviderId,
+    pub target_model_id: Option<String>,
+    pub mode: DelegationMode,
+    pub title: String,
+    pub instruction: String,
+    pub budget: DelegationBudget,
+}
+
+/// Records a task the parent agent proposed, as a `draft` the person starts
+/// or dismisses from the card it puts in the parent's thread. Nothing runs.
+pub async fn create_task_proposal_with_state(
+    state: &SessionCommandState,
+    input: CreateTaskProposalInput,
+) -> Result<Delegation, String> {
+    let now = now_iso();
+    let instruction = input.instruction.trim().to_string();
+    let proposal = Delegation {
+        id: DelegationId(Uuid::new_v4().to_string()),
+        parent_session_id: input.parent_session_id,
+        parent_turn_id: input.parent_turn_id,
+        child_session_id: None,
+        workspace_id: input.workspace_id,
+        target_provider_id: input.target_provider_id,
+        target_model_id: input.target_model_id,
+        mode: input.mode,
+        status: DelegationStatus::Draft,
+        prompt: instruction.clone(),
+        context_policy: DelegationContextPolicy::Minimal,
+        budget: input.budget,
+        result_summary: None,
+        touched_files: Vec::new(),
+        diff_summary: None,
+        validation_summary: None,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        origin: DelegationOrigin::Agent,
+        instruction: Some(instruction),
+        started_at: None,
+        kind: DelegationKind::Task,
+        title: Some(input.title.trim().to_string()),
+    };
+    DelegationRepo::save_delegation(&*state, &proposal)
+        .await
+        .map_err(|error| error.to_string())?;
+    append_and_publish_parent_event(
+        state,
+        &proposal.parent_session_id,
+        SessionEventKind::DelegationRequested {
+            delegation_id: proposal.id.clone(),
+        },
+        CoreEvent::SessionDelegationRequested {
+            session_id: proposal.parent_session_id.0.clone(),
+            delegation_id: proposal.id.0.clone(),
+        },
+        now,
+    )
+    .await?;
+    Ok(proposal)
 }
 
 #[tauri::command]
@@ -863,6 +971,26 @@ pub async fn run_delegation(
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct StartTaskProposalInput {
+    pub delegation_id: DelegationId,
+    /// The brief as the person edited it on the card; omitted keeps the agent's.
+    #[serde(default)]
+    pub instruction: Option<String>,
+}
+
+/// The person's "Start" on a task proposal: launches the child conversation.
+#[tauri::command]
+pub async fn start_task_proposal(
+    state: State<'_, SessionCommandState>,
+    input: StartTaskProposalInput,
+) -> Result<RunDelegationOutput, String> {
+    crate::delegation_runtime::start_task_proposal(&state, &input.delegation_id, input.instruction)
+        .await
+        .map(|delegation| RunDelegationOutput { delegation })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct DelegationResultTurnInput {
     pub delegation_id: DelegationId,
     /// The failure reason lives on the timeline event, not on the record.
@@ -991,6 +1119,8 @@ mod tests {
             origin: Default::default(),
             instruction: None,
             started_at: None,
+            kind: Default::default(),
+            title: None,
         }
     }
 

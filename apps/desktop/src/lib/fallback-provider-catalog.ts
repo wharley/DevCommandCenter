@@ -166,6 +166,7 @@ export const FALLBACK_PROVIDER_CATALOG: ProviderCatalog = {
 				...experimentalMultiRootCapabilities,
 				planModeSupport: "native",
 				supportsDynamicModels: true,
+				canRequestDelegation: true,
 			},
 			health: stableHealth,
 			stable: false,

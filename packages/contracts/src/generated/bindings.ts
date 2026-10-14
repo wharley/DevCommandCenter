@@ -2,7 +2,7 @@
 
 
 /* Constants */
-export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation"} as const;
+export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation","startTaskProposal":"start_task_proposal"} as const;
 
 export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
 
@@ -679,6 +679,13 @@ export type CreateDelegationInput = {
 	budget?: DelegationBudget,
 	origin?: DelegationOrigin,
 	instruction?: string | null,
+	kind?: DelegationKind,
+	title?: string | null,
+	/**
+	 *  The waiting task proposal this run starts: its record is filled in
+	 *  instead of a new one, so the card already in the thread follows it.
+	 */
+	proposalId?: DelegationId | null,
 };
 
 export type CreateDelegationOutput = {
@@ -910,6 +917,12 @@ export type Delegation = {
 	instruction?: string | null,
 	// First transition to `Running`; the timeout budget counts from here.
 	startedAt?: string | null,
+	kind?: DelegationKind,
+	/**
+	 *  The short name the requester gave the work; a task's proposal card
+	 *  shows it before any child conversation exists.
+	 */
+	title?: string | null,
 };
 
 export type DelegationBudget = {
@@ -927,6 +940,13 @@ export type DelegationBudget = {
 export type DelegationContextPolicy = { type: "minimal" } | { type: "review_current_diff" } | { type: "spec_plan" } | { type: "selected_files"; paths: string[] } | { type: "full_reanchor" };
 
 export type DelegationId = string;
+
+/**
+ *  What the record is. A delegation is a bounded helper run whose result goes
+ *  back to the parent (`dcc_delegate_task`); a task is a conversation of its
+ *  own that the parent proposed (`dcc_propose_task`) and the person started.
+ */
+export type DelegationKind = "delegation" | "task";
 
 export type DelegationMode = "review" | "implement" | "explain" | "test" | "research";
 
@@ -2293,6 +2313,9 @@ export type RunDelegationInput = {
 	 *  conversation's title. Omitted: derived from the instruction.
 	 */
 	title?: string | null,
+	kind?: DelegationKind,
+	// Starts this waiting task proposal instead of a new record.
+	proposalId?: DelegationId | null,
 };
 
 export type RunDelegationOutput = {
@@ -2698,6 +2721,12 @@ export type StartMcpOauthInput = {
 
 export type StartMcpOauthOutput = {
 	authorizationUrl: string,
+};
+
+export type StartTaskProposalInput = {
+	delegationId: DelegationId,
+	// The brief as the person edited it on the card; omitted keeps the agent's.
+	instruction?: string | null,
 };
 
 export type StartThreadInput = {

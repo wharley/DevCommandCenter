@@ -5,7 +5,12 @@
  * `delegation_runtime.rs`). They are addressed to the agent, so the thread
  * shows them as a one-line system event instead of a message the person wrote.
  */
-export type DelegationHandBackOutcome = "finished" | "failed" | "applied" | "discarded";
+export type DelegationHandBackOutcome =
+	| "finished"
+	| "failed"
+	| "applied"
+	| "discarded"
+	| "taskTurn";
 
 export type DelegationHandBack = {
 	delegationId: string;
@@ -13,6 +18,7 @@ export type DelegationHandBack = {
 };
 
 const RESULT_PATTERN = /^\[DCC\] Delegated \w+ task (finished|failed) — .*\(task ([^)\s]+)\)\./;
+const TASK_TURN_PATTERN = /^\[DCC\] Task ".*" ended a turn — .*\(task ([^)\s]+)\)\./;
 const OUTCOME_PATTERN =
 	/^\[DCC\] The human (APPLIED|DISCARDED) the edits from your delegated \w+ task — .*\(task ([^)\s]+)\)\./;
 
@@ -24,6 +30,10 @@ export function parseDelegationHandBack(content: string): DelegationHandBack | n
 			delegationId: result[2],
 			outcome: result[1] === "failed" ? "failed" : "finished",
 		};
+	}
+	const taskTurn = TASK_TURN_PATTERN.exec(firstLine);
+	if (taskTurn?.[1]) {
+		return { delegationId: taskTurn[1], outcome: "taskTurn" };
 	}
 	const outcome = OUTCOME_PATTERN.exec(firstLine);
 	if (outcome?.[1] && outcome[2]) {

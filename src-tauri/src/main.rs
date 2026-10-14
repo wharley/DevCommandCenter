@@ -90,7 +90,7 @@ use dcc_infra::mcp_db::SqliteMcpRepo;
 use delegation_commands::{
     approve_delegation, cancel_delegation, cancel_running_delegation, complete_delegation,
     create_delegation, delegation_result_turn, fail_delegation, get_delegation, list_delegations, run_delegation,
-    start_delegation,
+    start_delegation, start_task_proposal,
 };
 use feedback_commands::{dcc_feedback_context, dcc_feedback_create, dcc_feedback_list};
 use forge_commands::{
@@ -7168,6 +7168,7 @@ pub fn run() {
             run_delegation,
             delegation_result_turn,
             cancel_running_delegation,
+            start_task_proposal,
             mcp_commands::list_mcp_integrations,
             mcp_commands::create_mcp_integration,
             mcp_commands::activate_mcp_integration,

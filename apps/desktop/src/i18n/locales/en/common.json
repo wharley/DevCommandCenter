@@ -162,7 +162,20 @@
       "failed": "Delegation failure reported to the agent",
       "applied": "Agent told: you applied the delegated changes",
       "discarded": "Agent told: you discarded the delegated changes",
-      "showSent": "show sent text"
+      "showSent": "show sent text",
+      "taskTurn": "Task status handed to the agent"
+    },
+    "proposal": {
+      "label": "Proposed task",
+      "start": "Start",
+      "starting": "Starting…",
+      "dismiss": "Dismiss",
+      "editBrief": "Edit brief",
+      "worktree": "own worktree",
+      "readOnly": "read-only",
+      "hint": "Nothing runs until you start it. It becomes a conversation of its own; the agent hears back each time it ends a turn.",
+      "dismissed": "Proposal dismissed",
+      "kind": "Task"
     },
     "reviewStrip": {
       "message_one": "{{agent}} left {{count}} file for you to review",

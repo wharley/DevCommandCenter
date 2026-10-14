@@ -26,6 +26,14 @@ describe("parseDelegationHandBack", () => {
 		).toEqual({ delegationId: "d-3", outcome: "discarded" });
 	});
 
+	it("reads the short status a task sends when it ends a turn", () => {
+		expect(
+			parseDelegationHandBack(
+				'[DCC] Task "Fase 2: notificações" ended a turn — Cursor (task t-9).\n\nPush works.',
+			),
+		).toEqual({ delegationId: "t-9", outcome: "taskTurn" });
+	});
+
 	it("leaves prompts the person wrote alone", () => {
 		expect(parseDelegationHandBack("[DCC] can you check this?")).toBeNull();
 		expect(parseDelegationHandBack("Delegated implement task finished (task x).")).toBeNull();
