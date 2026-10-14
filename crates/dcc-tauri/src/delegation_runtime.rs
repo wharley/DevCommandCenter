@@ -62,6 +62,12 @@ pub use dcc_providers::PROVIDER_IDS as DELEGATION_PROVIDER_IDS;
 
 /// Agent-initiated delegations a single parent may have in flight at once.
 pub const MAX_ACTIVE_AGENT_DELEGATIONS_PER_PARENT: usize = 4;
+/// Agent-initiated delegations one parent turn may start, finished or not;
+/// delegate → wait → delegate inside a turn never trips the in-flight cap.
+pub const MAX_AGENT_DELEGATIONS_PER_TURN: usize = 6;
+/// Every turn DCC itself sends to an agent (hand-backs, review outcomes)
+/// starts with this, so a turn it started is never mistaken for the person's.
+const DCC_TURN_PREFIX: &str = "[DCC] ";
 /// A child that never started its turn within this window is treated as lost.
 const CHILD_START_GRACE_SECONDS: i64 = 180;
 /// Fallback for records without a budget timeout.
@@ -725,6 +731,20 @@ pub fn writes_guarded(delegation: &Delegation) -> bool {
 // Launch
 // ---------------------------------------------------------------------------
 
+/// The open turn and the prompt that started it. Steering adds guidance to a
+/// turn without changing who started it.
+fn open_turn_prompt(
+    events: &[dcc_core::domain::session::SessionEventRecord],
+) -> Option<(TurnId, String)> {
+    let active = SessionProjection::fold(events)?.active_turn_id?;
+    events.iter().rev().find_map(|event| match &event.kind {
+        SessionEventKind::TurnStarted { turn_id, prompt, .. } if *turn_id == active => {
+            Some((active.clone(), prompt.clone()))
+        }
+        _ => None,
+    })
+}
+
 fn resolve_target_provider(
     state: &SessionCommandState,
     requested: Option<&str>,
@@ -848,22 +868,49 @@ pub async fn run_delegation(
         {
             return Err("a delegated agent cannot delegate further; finish your task and report back".to_string());
         }
-        let active = DelegationRepo::list_delegations(state, None, Some(&parent.id))
+        let parent_events = SessionEventRepo::list_events_by_session(state, &parent.id)
             .await
-            .map_err(|error| error.to_string())?
-            .into_iter()
+            .map_err(|error| error.to_string())?;
+        let open_turn = open_turn_prompt(&parent_events);
+        // A turn DCC started (a result coming back) is not the person asking
+        // for more work; delegating from it chains paid runs nobody requested.
+        if open_turn
+            .as_ref()
+            .is_some_and(|(_, prompt)| prompt.starts_with(DCC_TURN_PREFIX))
+        {
+            return Err("this turn was started by DCC handing you a result, not by the human; do not delegate again on your own — report what you have and, if more work is needed, suggest it to the human so they can ask for it".to_string());
+        }
+        let agent_delegations: Vec<Delegation> =
+            DelegationRepo::list_delegations(state, None, Some(&parent.id))
+                .await
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .filter(|delegation| delegation.origin == DelegationOrigin::Agent)
+                .collect();
+        let active = agent_delegations
+            .iter()
             .filter(|delegation| {
-                delegation.origin == DelegationOrigin::Agent
-                    && matches!(
-                        delegation.status,
-                        DelegationStatus::Draft | DelegationStatus::Queued | DelegationStatus::Running
-                    )
+                matches!(
+                    delegation.status,
+                    DelegationStatus::Draft | DelegationStatus::Queued | DelegationStatus::Running
+                )
             })
             .count();
         if active >= MAX_ACTIVE_AGENT_DELEGATIONS_PER_PARENT {
             return Err(format!(
                 "{active} delegations are already running for this session; wait for their results before delegating more"
             ));
+        }
+        if let Some((turn_id, _)) = &open_turn {
+            let this_turn = agent_delegations
+                .iter()
+                .filter(|delegation| delegation.parent_turn_id.as_ref() == Some(turn_id))
+                .count();
+            if this_turn >= MAX_AGENT_DELEGATIONS_PER_TURN {
+                return Err(format!(
+                    "you already delegated {this_turn} tasks in this turn; finish with what you have and let the human decide on more"
+                ));
+            }
         }
     }
 
@@ -2220,6 +2267,100 @@ mod tests {
             .await
             .expect_err("nested delegation must be refused");
             assert!(error.contains("cannot delegate further"));
+        }
+
+        fn agent_review_from_parent() -> RunDelegationInput {
+            RunDelegationInput {
+                parent_session_id: SessionId("parent".to_string()),
+                // Unknown on purpose: a request that passes the guards stops
+                // at the provider check instead of launching anything.
+                target_provider_id: Some("not-a-provider".to_string()),
+                target_model_id: None,
+                mode: DelegationMode::Review,
+                instruction: "review".to_string(),
+                context_policy: DelegationContextPolicy::Minimal,
+                origin: DelegationOrigin::Agent,
+                prebuilt_prompt: None,
+                effort: None,
+                fast_mode: None,
+                provider_runtime: None,
+                title: None,
+            }
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_turn_dcc_started_cannot_delegate() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            append(
+                state,
+                "parent",
+                started("p-2", "[DCC] Delegated review task finished — Codex (task d-1)."),
+            )
+            .await;
+
+            let error = run_delegation(state, agent_review_from_parent())
+                .await
+                .expect_err("a hand-back turn must not delegate");
+            assert!(error.contains("started by DCC"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_hand_back_steered_into_the_persons_turn_still_lets_it_delegate() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            append(state, "parent", started("p-1", "work")).await;
+            append(
+                state,
+                "parent",
+                SessionEventKind::TurnSteered {
+                    turn_id: TurnId("p-1".to_string()),
+                    prompt: "[DCC] Delegated review task finished — Codex (task d-1).".to_string(),
+                },
+            )
+            .await;
+
+            let error = run_delegation(state, agent_review_from_parent())
+                .await
+                .expect_err("stops at the unknown provider");
+            assert!(!error.contains("started by DCC"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn one_turn_cannot_start_unlimited_delegations() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            append(state, "parent", started("p-1", "work")).await;
+            for _ in 0..MAX_AGENT_DELEGATIONS_PER_TURN {
+                let mut finished = delegation(DelegationStatus::Completed);
+                finished.id = DelegationId(Uuid::new_v4().to_string());
+                finished.workspace_id = WorkspaceId("workspace".to_string());
+                finished.origin = DelegationOrigin::Agent;
+                finished.parent_turn_id = Some(TurnId("p-1".to_string()));
+                DelegationRepo::save_delegation(state, &finished)
+                    .await
+                    .expect("save delegation");
+            }
+
+            let error = run_delegation(state, agent_review_from_parent())
+                .await
+                .expect_err("the per-turn cap must refuse");
+            assert!(error.contains("already delegated 6 tasks in this turn"), "{error}");
+
+            // The next turn the person starts gets a fresh allowance.
+            append(
+                state,
+                "parent",
+                SessionEventKind::TurnCompleted {
+                    turn_id: TurnId("p-1".to_string()),
+                },
+            )
+            .await;
+            append(state, "parent", started("p-2", "keep going")).await;
+            let error = run_delegation(state, agent_review_from_parent())
+                .await
+                .expect_err("stops at the unknown provider");
+            assert!(!error.contains("in this turn"), "{error}");
         }
 
         #[tokio::test(flavor = "current_thread")]
