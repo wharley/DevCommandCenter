@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use std::{collections::HashSet, path::Path};
+use std::{collections::HashSet, path::Path, time::Duration};
 use tauri::State;
 
 use dcc_core::{
     domain::{
         provider::{
-            ProviderAccount, ProviderAccountStatus, ProviderAccountUsage, ProviderCatalog,
+            HealthStatus, ProviderAccount, ProviderAccountStatus, ProviderAccountUsage,
+            ProviderCatalog,
             ProviderModelDescriptor, ProviderResetOutcome,
         },
         session::SessionId,
@@ -374,6 +375,7 @@ pub async fn list_providers_for_state(
     let mut catalog = dcc_providers::provider_catalog().await;
     apply_antigravity_account_overlay(&mut catalog, state);
     apply_provider_availability_overlay(&mut catalog, state)?;
+    apply_signed_out_overlay(&mut catalog, state).await;
     for descriptor in &catalog.providers {
         if descriptor.capabilities.supports_dynamic_models {
             // The catalog just consulted the runtime; reuse that list as the
@@ -436,6 +438,68 @@ fn apply_provider_availability_overlay(
         descriptor.availability_generation = availability.generation;
     }
     Ok(())
+}
+
+/// Providers whose healthcheck only proves the binary runs but that can say
+/// who is signed in. Signed out in the default config and in every DCC
+/// account means the turn fails at start, so the provider reports Degraded
+/// and the picker leaves it out until someone signs in.
+const SIGN_IN_CHECKED_PROVIDERS: [&str; 1] = ["codex"];
+const SIGN_IN_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn apply_signed_out_overlay(catalog: &mut ProviderCatalog, state: &SessionCommandState) {
+    let accounts = state.list_provider_accounts().unwrap_or_default();
+    for descriptor in &mut catalog.providers {
+        let provider_id = descriptor.id.0.clone();
+        if !SIGN_IN_CHECKED_PROVIDERS.contains(&provider_id.as_str())
+            || !descriptor.enabled
+            || !matches!(descriptor.health, HealthStatus::Healthy)
+        {
+            continue;
+        }
+        let Ok(registration) = state.require_provider_available(&provider_id) else {
+            continue;
+        };
+        let account_ids = std::iter::once(None).chain(
+            accounts
+                .iter()
+                .filter(|account| account.provider_id.0 == provider_id)
+                .map(|account| Some(account.id.clone())),
+        );
+        let mut signed_out = false;
+        for account_id in account_ids {
+            let Ok(runtime) = state.provider_runtime_config(
+                &provider_id,
+                Some(&ProviderRuntimeConfig {
+                    account_id,
+                    ..ProviderRuntimeConfig::default()
+                }),
+            ) else {
+                continue;
+            };
+            match tokio::time::timeout(
+                SIGN_IN_CHECK_TIMEOUT,
+                registration.runtime.account_status(Some(&runtime)),
+            )
+            .await
+            {
+                Ok(Ok(Some(status))) if !status.logged_in => signed_out = true,
+                // Signed in somewhere, or no clear answer: never hide on doubt.
+                _ => {
+                    signed_out = false;
+                    break;
+                }
+            }
+        }
+        if signed_out {
+            descriptor.health = HealthStatus::Degraded {
+                reason: format!(
+                    "{} is not signed in. Run `codex login` or add a signed-in account in Settings.",
+                    descriptor.label
+                ),
+            };
+        }
+    }
 }
 
 #[tauri::command]

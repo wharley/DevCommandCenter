@@ -2531,6 +2531,8 @@
       "runtimeNoSupportedProviders": "No supported providers are available in the current catalog.",
       "providersNav": "Providers",
       "experimental": "experimental",
+      "recheck": "Check again",
+      "rechecking": "Checking…",
       "railOff": "Off",
       "railUnavailable": "Unavailable",
       "railAttention": "Needs attention",

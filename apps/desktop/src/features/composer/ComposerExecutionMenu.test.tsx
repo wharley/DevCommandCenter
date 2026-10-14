@@ -1,5 +1,6 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { FALLBACK_PROVIDER_CATALOG } from "@/lib/fallback-provider-catalog";
@@ -37,7 +38,8 @@ function Harness({
 	const [modelId, setModelId] = useState(initialModel);
 	const [effort, setEffort] = useState("medium");
 	const [direct, setDirect] = useState(false);
-	return <ComposerExecutionMenu compact={compact} open={open} onOpenChange={setOpen}
+	const [queryClient] = useState(() => new QueryClient());
+	return <QueryClientProvider client={queryClient}><ComposerExecutionMenu compact={compact} open={open} onOpenChange={setOpen}
 		providers={providers}
 		selectedProviderId={providerId} selectedModelId={modelId}
 		availableEffortLevels={["low", "medium", "high", "xhigh"]} selectedEffortId={effort}
@@ -47,7 +49,7 @@ function Harness({
 		onSelectEffort={(value) => { selected("effort", value); setEffort(value); }}
 		onSelectUltrathink={() => { selected("effort", "ultrathink"); setEffort("ultrathink"); }}
 		onSetDirectResponse={(value) => { selected("direct", value); setDirect(value); }}
-	/>;
+	/></QueryClientProvider>;
 }
 
 const options = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];

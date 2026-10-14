@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight } from "lucide-react";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { Switch } from "@/components/ui/switch";
@@ -20,6 +20,9 @@ import {
 	type ProviderRuntimeSettings,
 } from "./provider-runtime-settings";
 import { providerRailStatus, type ProviderRailStatus } from "./providers-settings.logic";
+
+/** Signing in from a terminal does not tell DCC; this reruns the health checks. */
+const PROVIDER_CATALOG_QUERY_KEY = ["providers", "catalog"] as const;
 
 type Provider = ProviderCatalog["providers"][number];
 
@@ -153,6 +156,8 @@ function ProviderDetail({
 			draft.maxConcurrentSubagents,
 	);
 	const [advancedOpen, setAdvancedOpen] = useState(customizedRuntime);
+	const queryClient = useQueryClient();
+	const checking = useIsFetching({ queryKey: PROVIDER_CATALOG_QUERY_KEY }) > 0;
 
 	return (
 		<div className="min-w-0">
@@ -179,7 +184,17 @@ function ProviderDetail({
 									: "text-amber-600 dark:text-amber-400",
 							)}
 						>
-							{healthProblem.reason}
+							{healthProblem.reason}{" "}
+							<button
+								type="button"
+								disabled={checking}
+								onClick={() =>
+									void queryClient.invalidateQueries({ queryKey: PROVIDER_CATALOG_QUERY_KEY })
+								}
+								className="font-medium text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground disabled:no-underline"
+							>
+								{checking ? t("settings.model.rechecking") : t("settings.model.recheck")}
+							</button>
 						</p>
 					) : null}
 					{!enabled ? (

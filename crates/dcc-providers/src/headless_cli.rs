@@ -517,6 +517,60 @@ fn normalized_gemini_auth_failure(message: &str) -> Option<&'static str> {
     None
 }
 
+/// Gemini CLI keys that sign in without the personal Google login.
+const GEMINI_KEY_VARIABLES: [&str; 2] = ["GEMINI_API_KEY", "GOOGLE_API_KEY"];
+
+/// True when Gemini CLI is set to the personal Google sign-in and nothing
+/// else (API key, Vertex AI) would carry the session. Google refuses that
+/// login for most accounts, so the turn would fail after the person sends.
+/// Enterprise accounts can still use it, so the caller reports Degraded, not
+/// Unhealthy: the picker leaves it out but a session already on it can send.
+fn gemini_personal_signin_only(
+    settings_json: Option<&str>,
+    dot_env: Option<&str>,
+    env: impl Fn(&str) -> Option<String>,
+) -> bool {
+    let Some(settings) = settings_json.and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+    else {
+        return false;
+    };
+    let selected = settings
+        .pointer("/security/auth/selectedType")
+        .or_else(|| settings.get("selectedAuthType"))
+        .and_then(Value::as_str);
+    if selected != Some("oauth-personal") {
+        return false;
+    }
+    let has_value = |name: &str| env(name).is_some_and(|value| !value.trim().is_empty());
+    if GEMINI_KEY_VARIABLES.iter().any(|name| has_value(name)) {
+        return false;
+    }
+    if env("GOOGLE_GENAI_USE_VERTEXAI").is_some_and(|value| value.trim() == "true") {
+        return false;
+    }
+    let dot_env_has_key = dot_env.is_some_and(|raw| {
+        raw.lines().any(|line| {
+            let line = line.trim().trim_start_matches("export ").trim_start();
+            GEMINI_KEY_VARIABLES
+                .iter()
+                .any(|name| line.strip_prefix(name).is_some_and(|rest| rest.trim_start().starts_with('=')))
+        })
+    });
+    !dot_env_has_key
+}
+
+fn gemini_personal_signin_only_on_disk() -> bool {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return false;
+    };
+    let gemini_dir = home.join(".gemini");
+    let settings = fs::read_to_string(gemini_dir.join("settings.json")).ok();
+    let dot_env = fs::read_to_string(gemini_dir.join(".env")).ok();
+    gemini_personal_signin_only(settings.as_deref(), dot_env.as_deref(), |name| {
+        std::env::var(name).ok()
+    })
+}
+
 fn normalized_headless_failure_message(
     kind: HeadlessCliKind,
     stderr_output: &str,
@@ -1020,6 +1074,15 @@ impl Provider for HeadlessCliProviderAdapter {
         }
 
         match self.binary_command().output().await {
+            Ok(output)
+                if output.status.success()
+                    && self.kind == HeadlessCliKind::Gemini
+                    && gemini_personal_signin_only_on_disk() =>
+            {
+                Ok(HealthStatus::Degraded {
+                    reason: GEMINI_UNSUPPORTED_CLIENT_MESSAGE.to_string(),
+                })
+            }
             Ok(output) if output.status.success() => Ok(HealthStatus::Healthy),
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1043,6 +1106,40 @@ impl Provider for HeadlessCliProviderAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flags_gemini_set_to_personal_signin_only() {
+        let personal = r#"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#;
+        let no_env = |_: &str| None;
+        assert!(gemini_personal_signin_only(Some(personal), None, no_env));
+        assert!(gemini_personal_signin_only(
+            Some(r#"{"selectedAuthType":"oauth-personal"}"#),
+            None,
+            no_env
+        ));
+        assert!(!gemini_personal_signin_only(
+            Some(r#"{"security":{"auth":{"selectedType":"gemini-api-key"}}}"#),
+            None,
+            no_env
+        ));
+        assert!(!gemini_personal_signin_only(None, None, no_env));
+        assert!(!gemini_personal_signin_only(Some(personal), None, |name: &str| {
+            (name == "GEMINI_API_KEY").then(|| "key".to_string())
+        }));
+        assert!(!gemini_personal_signin_only(Some(personal), None, |name: &str| {
+            (name == "GOOGLE_GENAI_USE_VERTEXAI").then(|| "true".to_string())
+        }));
+        assert!(!gemini_personal_signin_only(
+            Some(personal),
+            Some("# keys\nexport GEMINI_API_KEY=abc\n"),
+            no_env
+        ));
+        assert!(gemini_personal_signin_only(
+            Some(personal),
+            Some("GEMINI_MODEL=flash\n"),
+            no_env
+        ));
+    }
 
     #[test]
     fn parses_gemini_init_continuation_id() {

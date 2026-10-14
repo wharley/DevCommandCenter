@@ -2531,6 +2531,8 @@
       "runtimeNoSupportedProviders": "Nenhum provedor suportado está disponível no catálogo atual.",
       "providersNav": "Provedores",
       "experimental": "experimental",
+      "recheck": "Verificar de novo",
+      "rechecking": "Verificando…",
       "railOff": "Desligado",
       "railUnavailable": "Indisponível",
       "railAttention": "Precisa de atenção",

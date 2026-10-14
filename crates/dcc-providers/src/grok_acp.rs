@@ -281,11 +281,8 @@ impl GrokAcpAdapter {
             crate::common::acp_supports_image_prompts(&initialized),
             Ordering::SeqCst,
         );
-        let auth_method = select_auth_method(&initialized).ok_or_else(|| {
-            CoreError::Provider(
-                "Grok Build is not authenticated. Run `grok login` or set XAI_API_KEY.".to_string(),
-            )
-        })?;
+        let auth_method = select_auth_method(&initialized)
+            .ok_or_else(|| CoreError::Provider(GROK_NOT_AUTHENTICATED.to_string()))?;
         runtime
             .send_request(
                 "authenticate",
@@ -402,6 +399,60 @@ impl GrokAcpAdapter {
             state.sessions.lock().await.remove(&session_key);
         });
     }
+}
+
+const GROK_NOT_AUTHENTICATED: &str =
+    "Grok Build is not authenticated. Run `grok login` or set XAI_API_KEY.";
+const GROK_AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Asks a throwaway `grok agent stdio` the same `initialize` a session sends
+/// and reads whether it offers a usable sign-in. `grok --version` passes with
+/// an expired login, which then fails only after the person sends. `None`
+/// when the probe itself could not tell (spawn, timeout, unreadable reply).
+async fn grok_signed_in() -> Option<bool> {
+    let mut command = Command::new("grok");
+    command
+        .args(["--no-auto-update", "agent", "stdio"])
+        .current_dir(std::env::temp_dir())
+        .env("PATH", augmented_path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = command.spawn().ok()?;
+    let mut stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": 1,
+            "clientInfo": { "name": "dcc", "version": "0.1.8" },
+            "clientCapabilities": {},
+        },
+    });
+    let probe = async {
+        stdin
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .ok()?;
+        stdin.flush().await.ok()?;
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines.next_line().await.ok()? {
+            let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if message.get("id").and_then(Value::as_u64) == Some(1) {
+                let result = message.get("result")?;
+                return Some(select_auth_method(result).is_some());
+            }
+        }
+        None
+    };
+    let signed_in = timeout(GROK_AUTH_PROBE_TIMEOUT, probe).await.ok().flatten();
+    let _ = child.kill().await;
+    signed_in
 }
 
 fn select_auth_method(initialized: &Value) -> Option<&'static str> {
@@ -689,7 +740,14 @@ impl Provider for GrokAcpAdapter {
         command.arg("--version");
         command.env("PATH", augmented_path());
         match command.output().await {
-            Ok(output) if output.status.success() => Ok(HealthStatus::Healthy),
+            // Only a clear "no sign-in" hides Grok; a probe that cannot tell
+            // leaves it as the version check found it.
+            Ok(output) if output.status.success() => match grok_signed_in().await {
+                Some(false) => Ok(HealthStatus::Unhealthy {
+                    reason: GROK_NOT_AUTHENTICATED.to_string(),
+                }),
+                _ => Ok(HealthStatus::Healthy),
+            },
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();

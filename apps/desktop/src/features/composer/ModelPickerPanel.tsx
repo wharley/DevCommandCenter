@@ -7,6 +7,7 @@ import {
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Check, Plus, RotateCcw, Search, Sparkles, Star, Zap } from "lucide-react";
 import type { ProviderCatalog } from "@dcc/contracts";
@@ -37,6 +38,10 @@ import {
 } from "./model-picker.logic";
 
 const IS_MAC = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+
+const PROVIDER_CATALOG_QUERY_KEY = ["providers", "catalog"] as const;
+/** Opening the picker rechecks providers left out, at most this often. */
+const SETUP_RECHECK_MS = 30_000;
 
 /** Brand accent for the open-tab underline; monochrome marks use the foreground. */
 const TAB_ACCENT: Record<string, string> = {
@@ -95,6 +100,17 @@ export function ModelPickerPanel({
 		() => providersNeedingSetup(providers, selectedProviderId),
 		[providers, selectedProviderId],
 	);
+	const queryClient = useQueryClient();
+	// Someone who signs in from a terminal and comes back should see the
+	// provider now, not when the five-minute catalog cache runs out.
+	const hasHiddenProviders = hiddenProviders.length > 0;
+	useEffect(() => {
+		if (!hasHiddenProviders) return;
+		const updatedAt =
+			queryClient.getQueryState(PROVIDER_CATALOG_QUERY_KEY)?.dataUpdatedAt ?? 0;
+		if (Date.now() - updatedAt < SETUP_RECHECK_MS) return;
+		void queryClient.invalidateQueries({ queryKey: PROVIDER_CATALOG_QUERY_KEY });
+	}, [hasHiddenProviders, queryClient]);
 	const [activeTab, setActiveTab] = useState(() =>
 		initialModelPickerTab({ providers, favorites, selectedProviderId }),
 	);
