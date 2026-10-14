@@ -165,6 +165,7 @@ import {
 import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
 import { daemonListCombs } from "./lib/daemon-api";
 import { listProviderAccounts, listProviders } from "./lib/provider-api";
+import { localizedProviderSetupReason } from "./features/providers/provider-setup-message";
 import {
 	PROVIDER_ACCOUNTS_QUERY_KEY,
 	ProviderAccountsContext,
@@ -1616,7 +1617,7 @@ export default function App() {
 			}
 			const healthReason = getProviderUnhealthyReason(selectedProvider);
 			if (healthReason) {
-				return healthReason;
+				return localizedProviderSetupReason(healthReason, t) ?? healthReason;
 			}
 			if (
 				selectedProvider &&
@@ -6085,7 +6086,7 @@ export default function App() {
 				onComplete={handleCompleteOnboarding}
 				onOpenHelp={() => openHelp()}
 			/>
-			<Toaster theme={theme} position="bottom-right" visibleToasts={6} />
+			<Toaster theme={theme} position="bottom-right" visibleToasts={6} closeButton />
 		</AgentsProvider>
 	);
 }

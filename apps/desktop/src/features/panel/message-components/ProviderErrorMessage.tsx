@@ -1,12 +1,18 @@
-import { Copy } from "lucide-react";
+import { Copy, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { localizedProviderSetupReason } from "@/features/providers/provider-setup-message";
+import { openSettingsSection } from "@/features/settings/settings-navigation";
 import { providerErrorMessage } from "./provider-error-message";
 
 export function ProviderErrorMessage({ reason }: { reason: string }) {
 	const { t } = useTranslation("common");
-	const message = providerErrorMessage(reason);
+	const unwrapped = providerErrorMessage(reason);
+	// A provider that could not start (signed out, runtime missing) is said in
+	// the person's language with a way to fix it; the raw text stays below.
+	const setup = localizedProviderSetupReason(unwrapped, t);
+	const message = setup ?? unwrapped;
 	return (
 		<div className="mt-0.5 space-y-1.5 text-[11px] leading-4 text-muted-foreground">
 			<p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message}</p>
@@ -19,6 +25,18 @@ export function ProviderErrorMessage({ reason }: { reason: string }) {
 						{reason}
 					</pre>
 				</details>
+			) : null}
+			{setup ? (
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="mr-1 h-6 gap-1.5 px-1.5 text-[11px]"
+					onClick={() => openSettingsSection("model")}
+				>
+					<Settings2 className="size-3" aria-hidden />
+					{t("providerSetup.openSetup")}
+				</Button>
 			) : null}
 			<Button
 				type="button"

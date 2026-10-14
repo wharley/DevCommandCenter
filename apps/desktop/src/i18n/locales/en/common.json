@@ -5286,5 +5286,13 @@
     "continueOnHint": "The task moves to that account and continues where it stopped. Later messages stay on it.",
     "accountLeft": "{{percent}}% left",
     "accountExhausted": "no limit left"
+  },
+  "providerSetup": {
+    "notSignedIn": "Not signed in. Sign in and try again.",
+    "notSignedInCommand": "Not signed in. Run {{command}} in a terminal and try again.",
+    "personalSignInUnsupported": "Personal Google sign-in no longer works in Gemini CLI. Use an API key or Vertex AI, or set up Antigravity.",
+    "runtimeMissing": "The Antigravity runtime is not installed. Install it or point to its executable in settings.",
+    "notInstalled": "{{binary}} is not installed on this machine.",
+    "openSetup": "Set up provider"
   }
 }

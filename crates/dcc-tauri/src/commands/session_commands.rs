@@ -2478,10 +2478,12 @@ pub async fn start_thread_with_state(
     let output = run_start_thread(state, state, state, state, input)
         .await
         .map_err(|error| error.to_string())?;
-    state
-        .attach_provider_session(&output.session)
-        .await
-        .map_err(|error| error.to_string())?;
+    // A provider that cannot start (signed out, runtime missing) must not
+    // strand the task as "ready to start" behind a toast: the first send
+    // attaches again and records the failure as an interrupted turn.
+    if let Err(error) = state.attach_provider_session(&output.session).await {
+        eprintln!("[DCC] provider did not start with the thread: {error}");
+    }
     Ok(output)
 }
 
@@ -2506,9 +2508,15 @@ pub async fn send_turn_with_state(
         .await
         .map_err(|error| error.to_string())?;
     let session = state
-        .prepare_provider_session_for_turn_under_transition(&transition, &input)
+        .select_provider_session_for_turn_under_transition(&transition, &input)
         .await
         .map_err(|error| error.to_string())?;
+    if let Err(error) = state
+        .attach_current_provider_session_under_transition(&transition, &session)
+        .await
+    {
+        return record_provider_start_failure(state, input, error.to_string()).await;
+    }
     if state
         .session_mcp_oauth_support(&session.id)
         .map_err(|error| error.to_string())?
@@ -2643,6 +2651,24 @@ pub async fn send_turn_with_state(
         return Err(abort_turn(error.to_string()).await);
     }
 
+    Ok(output)
+}
+
+/// The provider could not start, so nothing ran. The turn is still recorded
+/// and closed as interrupted with the reason, the same state an agent that
+/// fails mid-turn leaves: the task shows why, and Retry works from there.
+async fn record_provider_start_failure(
+    state: &SessionCommandState,
+    input: SendTurnInput,
+    reason: String,
+) -> Result<SendTurnOutput, String> {
+    let Ok(output) = run_send_turn(state, state, state, input).await else {
+        return Err(reason);
+    };
+    state
+        .emit_unbound_started_turn_aborted(&output.session.id, &output.turn.id, Some(reason.clone()))
+        .await
+        .map_err(|_| reason)?;
     Ok(output)
 }
 

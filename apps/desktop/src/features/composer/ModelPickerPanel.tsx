@@ -14,6 +14,7 @@ import type { ProviderCatalog } from "@dcc/contracts";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 import { ProviderAccountStrip } from "@/features/providers/provider-account-strip";
 import { getProviderSetupReason } from "@/features/providers/provider-selection.logic";
+import { localizedProviderSetupReason } from "@/features/providers/provider-setup-message";
 import { openSettingsSection } from "@/features/settings/settings-navigation";
 import { cn } from "@/lib/utils";
 import { clampEffort, DEFAULT_EFFORT_LEVEL, getEffortDisplay } from "./effort";
@@ -124,7 +125,10 @@ export function ModelPickerPanel({
 		[visibleProviders],
 	);
 	const activeProvider = visibleProviders.find((provider) => provider.id === activeTab) ?? null;
-	const setupReason = activeProvider ? getProviderSetupReason(activeProvider) : null;
+	const rawSetupReason = activeProvider ? getProviderSetupReason(activeProvider) : null;
+	const setupReason = rawSetupReason
+		? (localizedProviderSetupReason(rawSetupReason, t) ?? rawSetupReason)
+		: null;
 	const rows = useMemo(
 		() => buildModelPickerRows({ providers, favorites, activeTab, query, selectedProviderId }),
 		[providers, favorites, activeTab, query, selectedProviderId],

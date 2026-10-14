@@ -19,6 +19,7 @@ import {
 	type ProviderRuntimeDraft,
 	type ProviderRuntimeSettings,
 } from "./provider-runtime-settings";
+import { localizedProviderSetupReason } from "./provider-setup-message";
 import { providerRailStatus, type ProviderRailStatus } from "./providers-settings.logic";
 
 /** Signing in from a terminal does not tell DCC; this reruns the health checks. */
@@ -184,7 +185,7 @@ function ProviderDetail({
 									: "text-amber-600 dark:text-amber-400",
 							)}
 						>
-							{healthProblem.reason}{" "}
+							{localizedProviderSetupReason(healthProblem.reason, t) ?? healthProblem.reason}{" "}
 							<button
 								type="button"
 								disabled={checking}

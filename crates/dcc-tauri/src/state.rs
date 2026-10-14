@@ -5386,6 +5386,22 @@ impl SessionCommandState {
         transition: &ProviderTransitionGuard,
         input: &SendTurnInput,
     ) -> Result<Session> {
+        let session = self
+            .select_provider_session_for_turn_under_transition(transition, input)
+            .await?;
+        self.attach_current_provider_session_under_transition(transition, &session)
+            .await?;
+        Ok(session)
+    }
+
+    /// Everything before the provider starts: selection, binding hand-off and
+    /// the durable session for the turn. Kept apart from the attach so a send
+    /// can tell "the provider could not start" from a request that is invalid.
+    pub async fn select_provider_session_for_turn_under_transition(
+        &self,
+        transition: &ProviderTransitionGuard,
+        input: &SendTurnInput,
+    ) -> Result<Session> {
         self.validate_provider_transition(transition, &input.session_id)?;
         // Selection, binding cancellation, persistence, and attachment must
         // move together for one session. The lock lives in ProcessRuntime, so
@@ -5419,10 +5435,7 @@ impl SessionCommandState {
         } else {
             self.mark_cold_attach_if_needed(&input.session_id).await?;
         }
-        let session = prepare_session_for_turn(self, input).await?;
-        self.attach_current_provider_session_under_transition(transition, &session)
-            .await?;
-        Ok(session)
+        prepare_session_for_turn(self, input).await
     }
 
     async fn validate_provider_turn_selection(
