@@ -160,7 +160,7 @@ mod macos {
         if state.stopped.load(Ordering::Relaxed) {
             return;
         }
-        let pending = app.state::<BrowserAgentRequestBroker>().pending_all();
+        let pending = app.state::<BrowserAgentRequestBroker>().pending_to_offer();
         let Ok(mut suppressed) = state.suppressed.lock() else {
             return;
         };

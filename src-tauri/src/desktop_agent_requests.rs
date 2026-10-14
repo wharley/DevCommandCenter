@@ -212,7 +212,7 @@ impl AgentRequestSource for DesktopAgentRequests {
     fn pending(&self) -> Vec<PendingAgentRequest> {
         let mut requests: Vec<_> = self
             .broker
-            .pending_all()
+            .pending_to_offer()
             .into_iter()
             .map(browser_request)
             .collect();

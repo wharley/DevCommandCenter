@@ -25,6 +25,9 @@ use crate::browser_commands::{
 /// refusal, a later open asks again.
 pub const BROWSER_AGENT_REQUEST_TTL: Duration = Duration::from_secs(5 * 60);
 const MAX_REASON_CHARS: usize = 500;
+/// Time a preapproved open gets for the window to take it itself before the
+/// native card and paired phones offer it; the window checks every second.
+const PREAPPROVED_GRACE_MS: u64 = 3_000;
 const MAX_PENDING_REQUESTS: usize = 64;
 /// The bridge admits at most 128 live leases. Retain a small bounded tail so
 /// a revoke which races a just-starting open request still wins without
@@ -248,6 +251,21 @@ impl BrowserAgentRequestBroker {
             (left.expires_at_ms, &left.request_id).cmp(&(right.expires_at_ms, &right.request_id))
         });
         requests
+    }
+
+    /// Requests to put in front of the person: the native card and paired
+    /// phones. A preapproved open is left alone during its grace, while the
+    /// window may open it without asking.
+    pub fn pending_to_offer(&self) -> Vec<BrowserAgentRequestView> {
+        let now = now_ms();
+        let ttl = BROWSER_AGENT_REQUEST_TTL.as_millis().min(u64::MAX as u128) as u64;
+        self.pending_all()
+            .into_iter()
+            .filter(|request| {
+                !request.preapproved
+                    || now >= request.expires_at_ms.saturating_sub(ttl) + PREAPPROVED_GRACE_MS
+            })
+            .collect()
     }
 
     /// Resolving allow checks the actual native Browser state. A renderer
@@ -595,6 +613,41 @@ mod tests {
             provider_id: "provider".into(),
             lease_id: lease.into(),
         }
+    }
+
+    #[test]
+    fn a_preapproved_open_waits_its_grace_before_the_card_and_phones_see_it() {
+        let broker = BrowserAgentRequestBroker::default();
+        let ttl = BROWSER_AGENT_REQUEST_TTL.as_millis() as u64;
+        for (id, preapproved, age_ms) in [("fresh", true, 0), ("old", true, 5_000), ("asks", false, 0)] {
+            let (completion, _receiver) = oneshot::channel();
+            broker.pending.lock().unwrap().insert(
+                id.into(),
+                PendingRequest {
+                    scope: scope("lease"),
+                    view: BrowserAgentRequestView {
+                        request_id: id.into(),
+                        workspace_id: "workspace".into(),
+                        session_id: "session".into(),
+                        provider_id: "provider".into(),
+                        url: "https://example.com".into(),
+                        reason: "open".into(),
+                        expires_at_ms: now_ms() + ttl - age_ms,
+                        preapproved,
+                    },
+                    completion,
+                    claimed: false,
+                },
+            );
+        }
+        let mut offered: Vec<String> = broker
+            .pending_to_offer()
+            .into_iter()
+            .map(|request| request.request_id)
+            .collect();
+        offered.sort();
+        assert_eq!(offered, vec!["asks".to_string(), "old".to_string()]);
+        assert_eq!(broker.pending_all().len(), 3);
     }
 
     #[test]
