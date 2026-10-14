@@ -1250,6 +1250,11 @@ export type ListWorkspacesOutput = {
 	 *  intentionally omitted.
 	 */
 	remoteBranchDeletionTargets: { [key in string]: WorkspaceRemoteBranchDeletionTarget },
+	/**
+	 *  Folders without Git each task brings as context, keyed by its primary
+	 *  workspace id. Tasks without any are omitted.
+	 */
+	contextFolders: { [key in string]: string[] },
 };
 
 export type LocalBranchEntry = {

@@ -314,6 +314,22 @@ function WorkspaceIdentityCard({
 						<span>{t("sidebar.workspaceIdentity.localCheckout")}</span>
 					</div>
 				)}
+				{workspace.contextFolders?.length ? (
+					<div
+						className="flex min-w-0 items-start gap-2 text-muted-foreground"
+						title={workspace.contextFolders.join("\n")}
+					>
+						<FolderOpen className="mt-px size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+						<span className="line-clamp-2">
+							{t("sidebar.workspaceIdentity.contextFolders", {
+								count: workspace.contextFolders.length,
+								folders: workspace.contextFolders
+									.map((folder) => folder.split(/[\\/]/u).filter(Boolean).at(-1) ?? folder)
+									.join(" · "),
+							})}
+						</span>
+					</div>
+				) : null}
 				{memberProjects.length > 1 ? (
 					<div className="flex min-w-0 items-start gap-2 border-t border-border/60 pt-1.5 text-muted-foreground">
 						<Layers3 className="mt-px size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />

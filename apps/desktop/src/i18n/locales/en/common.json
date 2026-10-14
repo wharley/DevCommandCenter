@@ -576,6 +576,8 @@
       "protectedWorktree": "Protected worktree",
       "coordinatedProjects_one": "{{count}} coordinated project · {{projects}}",
       "coordinatedProjects_other": "{{count}} coordinated projects · {{projects}}",
+      "contextFolders_one": "Context (no Git): {{folders}}",
+      "contextFolders_other": "Context (no Git): {{folders}}",
       "localCheckout": "Directly in the checkout"
     },
     "bundleMembers_one": "{{count}} project in this task",

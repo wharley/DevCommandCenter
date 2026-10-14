@@ -35,6 +35,8 @@ export interface WorkspaceSummary {
 	memberNames?: string[];
 	memberProjectNames?: string[];
 	remoteDeletionTargets?: WorkspaceRemoteBranchDeletionTarget[];
+	/** Folders without Git the task brings as context (no diff, no Undo). */
+	contextFolders?: string[];
 }
 
 export type WorkspaceTone = "success" | "warn" | "secondary";

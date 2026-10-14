@@ -671,6 +671,7 @@ export default function App() {
 				workspaceToSummary(
 					workspace,
 					result.remoteBranchDeletionTargets?.[workspace.id] ?? null,
+					result.contextFolders?.[workspace.id] ?? [],
 				),
 			);
 		},

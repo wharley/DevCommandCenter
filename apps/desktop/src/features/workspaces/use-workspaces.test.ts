@@ -6,6 +6,27 @@ import {
 } from "./use-workspaces";
 
 describe("workspaceToSummary", () => {
+	it("carries the task's context folders, empty by default", () => {
+		const workspace = {
+			id: "context-task",
+			projectId: "widgets",
+			name: "Task",
+			rootPath: "/repo/widgets",
+			baseBranch: "main",
+			worktreePath: null,
+			source: null,
+			state: "ready",
+			setupReport: null,
+			pinnedAt: null,
+			createdAt: "2026-01-01T00:00:00Z",
+			updatedAt: "2026-01-01T00:00:00Z",
+		} as Parameters<typeof workspaceToSummary>[0];
+		expect(workspaceToSummary(workspace).contextFolders).toEqual([]);
+		expect(workspaceToSummary(workspace, null, ["/docs/specs"]).contextFolders).toEqual([
+			"/docs/specs",
+		]);
+	});
+
 	it("treats a recommended setup report as ready instead of blocking the task", () => {
 		const summary = workspaceToSummary({
 			id: "recommended-setup",

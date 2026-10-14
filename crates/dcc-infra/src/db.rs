@@ -1285,6 +1285,35 @@ impl SqliteWorkspaceRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
     }
 
+    /// Every task's context folders, by primary workspace, in order.
+    pub fn list_workspace_context_folders(&self) -> Result<Vec<(WorkspaceId, Vec<String>)>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT workspace_id, path FROM dcc_workspace_context_folders
+                 ORDER BY workspace_id, position",
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut folders: Vec<(WorkspaceId, Vec<String>)> = Vec::new();
+        for row in rows {
+            let (workspace_id, path) =
+                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            match folders.last_mut() {
+                Some((current, paths)) if current.0 == workspace_id => paths.push(path),
+                _ => folders.push((WorkspaceId(workspace_id), vec![path])),
+            }
+        }
+        Ok(folders)
+    }
+
     /// Records the context folders of a task when it is created.
     pub fn set_workspace_context_folders(&self, id: &WorkspaceId, paths: &[String]) -> Result<()> {
         let mut conn = self
@@ -12612,6 +12641,10 @@ mod tests {
         assert_eq!(
             repo.workspace_context_folders(&workspace.id).unwrap(),
             paths
+        );
+        assert_eq!(
+            repo.list_workspace_context_folders().unwrap(),
+            vec![(workspace.id.clone(), paths.clone())]
         );
 
         futures::executor::block_on(repo.delete_workspace(&workspace.id)).expect("delete task");

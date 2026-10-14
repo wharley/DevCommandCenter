@@ -147,6 +147,7 @@ export function workspaceMutationIds(
 export function workspaceToSummary(
 	workspace: Workspace,
 	remoteDeletionTarget?: WorkspaceRemoteBranchDeletionTarget | null,
+	contextFolders: string[] = [],
 ): WorkspaceSummary {
 	// Older tasks may have persisted `setup_pending` for recommendations that
 	// were never required. Only an observed warning/failure should keep setup
@@ -200,6 +201,7 @@ export function workspaceToSummary(
 		pinnedAt: workspace.pinnedAt,
 		snoozedUntil: workspace.snoozedUntil ?? null,
 		remoteDeletionTargets: remoteDeletionTarget ? [remoteDeletionTarget] : [],
+		contextFolders,
 		createdAt: workspace.createdAt,
 		updatedAt: workspace.updatedAt,
 	};

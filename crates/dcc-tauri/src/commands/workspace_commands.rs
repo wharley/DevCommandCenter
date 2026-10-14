@@ -274,6 +274,9 @@ pub struct ListWorkspacesOutput {
     /// workspace id. Workspaces without a safely identifiable branch are
     /// intentionally omitted.
     pub remote_branch_deletion_targets: BTreeMap<String, WorkspaceRemoteBranchDeletionTarget>,
+    /// Folders without Git each task brings as context, keyed by its primary
+    /// workspace id. Tasks without any are omitted.
+    pub context_folders: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -7952,10 +7955,18 @@ pub async fn list_workspaces(
         healthy_workspaces.push(workspace);
     }
 
+    let context_folders = repo
+        .list_workspace_context_folders()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(workspace_id, paths)| (workspace_id.0, paths))
+        .collect();
+
     Ok(ListWorkspacesOutput {
         workspaces: healthy_workspaces,
         broken_workspace_reasons,
         remote_branch_deletion_targets,
+        context_folders,
     })
 }
 
