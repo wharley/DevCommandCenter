@@ -4,6 +4,7 @@ export type ProviderSetupIssue =
 	| "notSignedIn"
 	| "personalSignInUnsupported"
 	| "runtimeMissing"
+	| "invalidExecutable"
 	| "notInstalled";
 
 export type ProviderSetupMessage = {
@@ -23,6 +24,9 @@ export function providerSetupMessage(reason: string): ProviderSetupMessage | nul
 	const command = reason.match(/`([^`]+)`/)?.[1]?.trim() || null;
 	if (/personal google sign-in is no longer supported/i.test(reason)) {
 		return { issue: "personalSignInUnsupported", command: null, binary: null };
+	}
+	if (/configured .*executable path is invalid/i.test(reason)) {
+		return { issue: "invalidExecutable", command: null, binary: null };
 	}
 	if (/antigravity acp runtime (?:not found|is not on path)/i.test(reason)) {
 		return { issue: "runtimeMissing", command: null, binary: null };
@@ -50,6 +54,8 @@ export function localizedProviderSetupReason(reason: string, t: TFunction<"commo
 			return t("providerSetup.personalSignInUnsupported");
 		case "runtimeMissing":
 			return t("providerSetup.runtimeMissing");
+		case "invalidExecutable":
+			return t("providerSetup.invalidExecutable");
 		case "notInstalled":
 			return t("providerSetup.notInstalled", { binary: message.binary ?? "" });
 	}

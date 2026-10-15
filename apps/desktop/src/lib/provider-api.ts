@@ -59,6 +59,17 @@ export async function listProviders(): Promise<ListProvidersOutput> {
 	}
 }
 
+/** Whether an executable path set in Settings exists and can run. */
+export async function checkProviderExecutable(path: string): Promise<boolean> {
+	if (!isTauriRuntime()) {
+		return true;
+	}
+	const output = await invoke<{ usable: boolean }>(PROVIDER_METHODS.checkProviderExecutable, {
+		input: { path },
+	});
+	return output.usable;
+}
+
 export async function getProviderAvailability(
 	input: ProviderAvailabilityInput,
 ): Promise<ProviderAvailabilityOutput> {

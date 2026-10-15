@@ -1,5 +1,6 @@
 use dcc_tauri::commands::provider_commands::{
-    AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
+    AntigravityStatusInput, AntigravityStatusOutput, CheckProviderExecutableInput,
+    CheckProviderExecutableOutput, ConnectAntigravityInput,
     ConnectAntigravityOutput, CreateProviderAccountInput, InstallAntigravityOutput,
     ListProviderAccountsOutput, ListProvidersOutput, ProviderAccountIdInput, ProviderAccountOutput,
     ProviderAccountResetInput, ProviderAccountResetOutput, ProviderAccountStatusInput,
@@ -15,6 +16,13 @@ pub async fn list_providers(
     state: State<'_, SessionCommandState>,
 ) -> Result<ListProvidersOutput, String> {
     dcc_tauri::commands::provider_commands::list_providers_for_state(&state).await
+}
+
+#[tauri::command]
+pub async fn check_provider_executable(
+    input: CheckProviderExecutableInput,
+) -> Result<CheckProviderExecutableOutput, String> {
+    Ok(dcc_tauri::commands::provider_commands::check_provider_executable(input))
 }
 
 #[tauri::command]

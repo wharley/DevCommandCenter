@@ -2523,7 +2523,7 @@
       "antigravityConnectFailed": "Antigravity Google sign-in failed.",
       "runtimeBinaryPath": "Executable path",
       "runtimeBinaryPlaceholder": "/path/to/provider-executable",
-      "runtimeBinaryHint": "Uses this exact executable for new sessions. An invalid path never falls back to another installation.",
+      "runtimeBinaryHint": "Uses this exact executable for new sessions and on each conversation's next send. An invalid path never falls back to another installation.",
       "runtimeHomePath": "Home path",
       "runtimeShadowHomePath": "Shadow home path",
       "runtimeSubagentConcurrency": "Concurrent subagents",
@@ -5331,6 +5331,7 @@
     "detachedNoBase": "no branch"
   },
   "providerSetup": {
+    "invalidExecutable": "The configured executable is missing or cannot run. Fix the path or use Reset in Settings → Advanced.",
     "notSignedIn": "Not signed in. Sign in and try again.",
     "notSignedInCommand": "Not signed in. Run {{command}} in a terminal and try again.",
     "personalSignInUnsupported": "Personal Google sign-in no longer works in Gemini CLI. Use an API key or Vertex AI, or set up Antigravity.",

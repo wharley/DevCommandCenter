@@ -119,12 +119,28 @@ pub fn merge_send_turn_session_selection(
                 .and_then(|runtime| runtime.account_id.clone());
         }
     }
-    (merged_provider, merged_model, merged_provider_runtime)
+    // A runtime with nothing set is how the composer says "Settings were
+    // cleared"; it replaces the conversation's runtime instead of keeping an
+    // old executable path the person already removed.
+    (
+        merged_provider,
+        merged_model,
+        normalized_provider_runtime(merged_provider_runtime),
+    )
+}
+
+/// An empty runtime and no runtime mean the same thing.
+pub fn normalized_provider_runtime(
+    runtime: Option<ProviderRuntimeConfig>,
+) -> Option<ProviderRuntimeConfig> {
+    runtime.filter(|runtime| !runtime.is_empty())
 }
 
 pub fn send_turn_selection_differs_from_session(session: &Session, input: &SendTurnInput) -> bool {
     let (p, m, r) = merge_send_turn_session_selection(session, input);
-    p != session.provider_id || m != session.model || r != session.provider_runtime
+    p != session.provider_id
+        || m != session.model
+        || r != normalized_provider_runtime(session.provider_runtime.clone())
 }
 
 /// Applies the composer's provider/model/runtime selection without creating a
@@ -659,6 +675,79 @@ mod tests {
         let (_, _, other_provider) =
             merge_send_turn_session_selection(&session, &input("codex", account(None)));
         assert_eq!(other_provider.and_then(|runtime| runtime.account_id), None);
+    }
+
+    #[test]
+    fn an_empty_runtime_clears_the_conversations_executable() {
+        let broken = ProviderRuntimeConfig {
+            binary_path: Some("/tmp/missing/agy_acp_server.par".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        let session = Session {
+            id: SessionId("session-runtime".to_string()),
+            project_id: crate::domain::project::ProjectId("project-1".to_string()),
+            workspace_id: crate::domain::workspace::WorkspaceId("workspace-1".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "antigravity".to_string(),
+            model: None,
+            provider_runtime: Some(broken.clone()),
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-10-14T12:00:00Z".to_string(),
+            updated_at: "2026-10-14T12:00:00Z".to_string(),
+        };
+        let input = |runtime: Option<ProviderRuntimeConfig>| SendTurnInput {
+            session_id: session.id.clone(),
+            prompt: "hello".to_string(),
+            tool_instructions: None,
+            provider_id: Some("antigravity".to_string()),
+            model: None,
+            provider_runtime: runtime,
+            plan_mode: None,
+            effort: None,
+            fast_mode: None,
+            approval_policy: None,
+            evidence: None,
+            retry_of_turn_id: None,
+            decision_provider_model_route: None,
+        };
+
+        // Settings cleared: the old path goes away.
+        let (_, _, cleared) =
+            merge_send_turn_session_selection(&session, &input(Some(ProviderRuntimeConfig::default())));
+        assert_eq!(cleared, None);
+        assert!(send_turn_selection_differs_from_session(
+            &session,
+            &input(Some(ProviderRuntimeConfig::default()))
+        ));
+        // No runtime sent (other clients): the conversation keeps its own.
+        let (_, _, kept) = merge_send_turn_session_selection(&session, &input(None));
+        assert_eq!(kept, Some(broken));
+        // An empty runtime on a conversation without one is no change.
+        let plain = Session { provider_runtime: Some(ProviderRuntimeConfig::default()), ..session.clone() };
+        assert!(!send_turn_selection_differs_from_session(
+            &plain,
+            &input(Some(ProviderRuntimeConfig::default()))
+        ));
+    }
+
+    #[test]
+    fn only_the_account_and_homes_decide_the_native_store() {
+        let base = ProviderRuntimeConfig {
+            binary_path: Some("/opt/a".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        let other_binary = ProviderRuntimeConfig {
+            binary_path: Some("/opt/b".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        let other_home = ProviderRuntimeConfig {
+            home_path: Some("/homes/x".to_string()),
+            ..ProviderRuntimeConfig::default()
+        };
+        assert!(ProviderRuntimeConfig::same_native_store(Some(&base), Some(&other_binary)));
+        assert!(ProviderRuntimeConfig::same_native_store(Some(&base), None));
+        assert!(!ProviderRuntimeConfig::same_native_store(Some(&base), Some(&other_home)));
     }
 
     #[test]

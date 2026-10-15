@@ -278,6 +278,7 @@ use dcc_tauri::commands::{
         ProviderAccountOutput, ProviderAccountResetInput, ProviderAccountResetOutput,
         ProviderAccountStatusInput, ProviderAccountStatusOutput, ProviderAccountUsageInput,
         ProviderAccountUsageOutput, ProviderAvailabilityInput, ProviderAvailabilityOutput,
+        CheckProviderExecutableInput, CheckProviderExecutableOutput,
         ProviderAccountSignInOutput, RenameProviderAccountInput, SetProviderAvailabilityInput,
     },
     session_commands::{
@@ -627,6 +628,7 @@ struct SessionMethods {
 #[serde(rename_all = "camelCase")]
 struct ProviderMethods {
     list_providers: String,
+    check_provider_executable: String,
     get_provider_availability: String,
     set_provider_availability: String,
     provider_account_usage: String,
@@ -991,6 +993,8 @@ fn main() {
         .typ::<ConnectAntigravityOutput>()
         .typ::<ProviderAvailability>()
         .typ::<ProviderAvailabilityState>()
+        .typ::<CheckProviderExecutableInput>()
+        .typ::<CheckProviderExecutableOutput>()
         .typ::<ProviderAvailabilityInput>()
         .typ::<ProviderAvailabilityOutput>()
         .typ::<SetProviderAvailabilityInput>()
@@ -1320,6 +1324,7 @@ fn main() {
         "PROVIDER_METHODS",
         ProviderMethods {
             list_providers: "list_providers".to_string(),
+            check_provider_executable: "check_provider_executable".to_string(),
             get_provider_availability: "get_provider_availability".to_string(),
             set_provider_availability: "set_provider_availability".to_string(),
             provider_account_usage: "provider_account_usage".to_string(),

@@ -7179,6 +7179,7 @@ pub fn run() {
             mcp_commands::set_mcp_tool_policy,
             provider_commands::list_providers,
             provider_commands::get_provider_availability,
+            provider_commands::check_provider_executable,
             provider_commands::set_provider_availability,
             provider_commands::provider_account_reset,
             provider_commands::provider_account_usage,

@@ -5428,7 +5428,12 @@ impl SessionCommandState {
             // conversation; a model change alone keeps it.
             let (provider_id, _, provider_runtime) =
                 merge_send_turn_session_selection(&current, input);
-            if provider_id != current.provider_id || provider_runtime != current.provider_runtime {
+            if provider_id != current.provider_id
+                || !ProviderRuntimeConfig::same_native_store(
+                    provider_runtime.as_ref(),
+                    current.provider_runtime.as_ref(),
+                )
+            {
                 self.session_repo
                     .delete_provider_native_sessions(&input.session_id, None)?;
             }

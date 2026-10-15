@@ -182,9 +182,12 @@ function ProviderDetail({
 							<button
 								type="button"
 								disabled={checking}
-								onClick={() =>
-									void queryClient.invalidateQueries({ queryKey: PROVIDER_CATALOG_QUERY_KEY })
-								}
+								onClick={() => {
+									void queryClient.invalidateQueries({ queryKey: PROVIDER_CATALOG_QUERY_KEY });
+									void queryClient.invalidateQueries({
+										queryKey: ["providers", "configuredExecutables"],
+									});
+								}}
 								className="font-medium text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground disabled:no-underline"
 							>
 								{checking ? t("settings.model.rechecking") : t("settings.model.recheck")}

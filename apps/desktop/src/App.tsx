@@ -164,7 +164,15 @@ import {
 } from "./features/sessions/workspace-sessions-query";
 import { FALLBACK_PROVIDER_CATALOG } from "./lib/fallback-provider-catalog";
 import { daemonListCombs } from "./lib/daemon-api";
-import { listProviderAccounts, listProviders } from "./lib/provider-api";
+import {
+	checkProviderExecutable,
+	listProviderAccounts,
+	listProviders,
+} from "./lib/provider-api";
+import {
+	configuredExecutables,
+	withConfiguredExecutableHealth,
+} from "./features/providers/configured-executable";
 import { localizedProviderSetupReason } from "./features/providers/provider-setup-message";
 import {
 	PROVIDER_ACCOUNTS_QUERY_KEY,
@@ -924,7 +932,7 @@ export default function App() {
 		staleTime: 300_000,
 		placeholderData: () => ({ catalog: FALLBACK_PROVIDER_CATALOG }),
 	});
-	const providerCatalog =
+	const baseProviderCatalog =
 		providersQuery.data?.catalog ?? FALLBACK_PROVIDER_CATALOG;
 	const workspaceSessionsQuery = useQuery(
 		workspaceSessionsQueryOptions(selectedWorkspace?.id ?? null, {
@@ -978,6 +986,37 @@ export default function App() {
 	});
 	const [providerRuntimeSettings, setProviderRuntimeSettings] =
 		useState<ProviderRuntimeSettings>(() => readProviderRuntimeSettings());
+	// Executable paths set in Settings are checked here: the backend
+	// healthcheck never sees them.
+	const configuredProviderExecutables = useMemo(
+		() => configuredExecutables(baseProviderCatalog.providers, providerRuntimeSettings),
+		[baseProviderCatalog.providers, providerRuntimeSettings],
+	);
+	const configuredExecutablesQuery = useQuery({
+		queryKey: ["providers", "configuredExecutables", configuredProviderExecutables],
+		queryFn: async () => {
+			const checks = await Promise.all(
+				configuredProviderExecutables.map(async ({ providerId, path }) =>
+					(await checkProviderExecutable(path).catch(() => true)) ? null : providerId,
+				),
+			);
+			return checks.filter((providerId): providerId is string => providerId !== null);
+		},
+		enabled: configuredProviderExecutables.length > 0,
+		staleTime: 30_000,
+	});
+	const providerCatalog = useMemo(
+		() =>
+			withConfiguredExecutableHealth(
+				baseProviderCatalog,
+				new Set(
+					configuredProviderExecutables.length > 0
+						? (configuredExecutablesQuery.data ?? [])
+						: [],
+				),
+			),
+		[baseProviderCatalog, configuredExecutablesQuery.data, configuredProviderExecutables.length],
+	);
 	const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 	const [pendingSessionClose, setPendingSessionClose] =
 		useState<PendingSessionClose | null>(null);
@@ -1689,9 +1728,11 @@ export default function App() {
 			),
 		[providerAccountSelection, providerAccounts, providerRuntimeSettings],
 	);
+	// Always explicit, even with Settings cleared: an empty runtime tells the
+	// backend to drop the conversation's old one, where null would keep it.
 	const selectedProviderRuntime = useMemo(
 		() =>
-			withProviderAccount(
+			(withProviderAccount(
 				draftToProviderRuntimeConfig(
 					selectedProvider
 						? getProviderRuntimeDraft(providerRuntimeSettings, selectedProvider.id)
@@ -1706,7 +1747,7 @@ export default function App() {
 							accounts: providerAccounts,
 						})
 					: null,
-			),
+			) ?? (selectedProvider ? {} : null)),
 		[
 			conversationAccount,
 			providerAccountSelection,

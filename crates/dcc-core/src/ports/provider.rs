@@ -205,6 +205,31 @@ pub struct ProviderRuntimeConfig {
     pub config_dir: Option<String>,
 }
 
+impl ProviderRuntimeConfig {
+    /// Nothing set: the provider runs with its defaults, the same as no
+    /// runtime at all.
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+
+    /// What decides where the provider keeps its native conversations: the
+    /// account and the homes. The executable and the subagent limit do not,
+    /// so changing them keeps the conversation resumable.
+    pub fn same_native_store(left: Option<&Self>, right: Option<&Self>) -> bool {
+        let key = |runtime: Option<&Self>| {
+            runtime.map(|runtime| {
+                (
+                    runtime.account_id.clone(),
+                    runtime.config_dir.clone(),
+                    runtime.home_path.clone(),
+                    runtime.shadow_home_path.clone(),
+                )
+            })
+        };
+        key(left).unwrap_or_default() == key(right).unwrap_or_default()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderTurnInput {

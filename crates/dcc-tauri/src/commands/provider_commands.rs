@@ -502,6 +502,48 @@ async fn apply_signed_out_overlay(catalog: &mut ProviderCatalog, state: &Session
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckProviderExecutableInput {
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckProviderExecutableOutput {
+    pub usable: bool,
+}
+
+/// Whether an executable path set in Settings can run. The path lives in the
+/// desktop's settings, so the provider healthcheck never sees it; without
+/// this a provider pointed at a missing file still reads as ready.
+pub fn check_provider_executable(input: CheckProviderExecutableInput) -> CheckProviderExecutableOutput {
+    CheckProviderExecutableOutput {
+        usable: is_usable_executable(Path::new(input.path.trim())),
+    }
+}
+
+fn is_usable_executable(path: &Path) -> bool {
+    if !path.is_absolute() {
+        return false;
+    }
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
 #[tauri::command]
 pub async fn get_provider_availability(
     state: State<'_, SessionCommandState>,
@@ -710,6 +752,26 @@ pub async fn provider_account_reset(
 mod tests {
     use super::*;
     use dcc_core::domain::provider::HealthStatus;
+
+    #[test]
+    fn a_configured_executable_must_be_an_absolute_runnable_file() {
+        let dir = tempfile::tempdir().expect("executable dir");
+        let runnable = dir.path().join("agent");
+        std::fs::write(&runnable, b"#!/bin/sh\n").expect("write agent");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&runnable, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod agent");
+        }
+        let check = |path: &str| {
+            check_provider_executable(CheckProviderExecutableInput { path: path.to_string() }).usable
+        };
+        assert!(check(runnable.to_str().expect("utf8 path")));
+        assert!(!check("/tmp/dcc-quebra/agy_acp_server.par"));
+        assert!(!check("agent"));
+        assert!(!check(dir.path().to_str().expect("utf8 dir")));
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn account_usage_is_refused_before_any_runtime_for_unsupported_or_disabled_providers() {
