@@ -519,7 +519,10 @@ export class DemoBackend implements Backend {
 		const finish: Step[] = [
 			{ delayMs: 200, kind: { type: "turn_tool_call_started", turnId, toolCallId: `${turnId}-t2`, toolName: "Bash", toolInput: { command: "yarn test" } } },
 			{ delayMs: 1400, kind: { type: "turn_tool_call_completed", turnId, toolCallId: `${turnId}-t2` } },
-			...streamText(turnId, "Pronto: os 42 testes passaram. Fiz a mudança em `src/app.ts` e deixei o diff no workspace para você revisar."),
+			...streamText(
+				turnId,
+				"Pronto: os 42 testes passaram. Fiz a mudança em `src/app.ts`:\n\n```ts\n// O timeout agora vem da configuração\nexport const timeoutMs = config.http?.timeoutMs ?? 30_000;\n```\n\nDeixei o diff no workspace para você revisar.",
+			),
 			{ delayMs: 300, kind: { type: "turn_completed", turnId } },
 		];
 		const start: Step[] = [

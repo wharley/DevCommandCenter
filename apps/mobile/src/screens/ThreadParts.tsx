@@ -270,15 +270,16 @@ export function QuestionCard({
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({
 		userWrap: { alignItems: "flex-end" },
+		// Neutral: green stays for what is live and for the main action.
 		userBubble: {
 			maxWidth: "85%",
-			backgroundColor: color.accent,
-			borderRadius: radius.lg,
-			borderBottomRightRadius: 4,
+			backgroundColor: color.bubble,
+			borderRadius: radius.xl,
+			borderBottomRightRadius: 6,
 			paddingHorizontal: 14,
-			paddingVertical: 8,
+			paddingVertical: 10,
 		},
-		userText: { color: color.accentInk, fontSize: 15, lineHeight: 21 },
+		userText: { color: color.fg, fontSize: 15, lineHeight: 21 },
 		aborted: { fontSize: 10, letterSpacing: 1.8, textTransform: "uppercase", color: alpha(color.danger, 0.8) },
 		systemRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
 		rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: color.border },

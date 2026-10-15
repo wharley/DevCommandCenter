@@ -317,3 +317,25 @@ export function pipelineText(pipeline: DeliveryForge["pipeline"]): string | null
 	if (status === "canceled" || status === "cancelled") return "CI cancelado";
 	return `CI: ${pipeline.status}`;
 }
+
+/**
+ * What the thread's diff chip says: the branch and everything it differs
+ * from its base by — committed on the branch plus still local. A file in
+ * both counts once, with both sets of lines.
+ */
+export function workspaceDiffStat(summary: DeliverySummary): {
+	branch: string | null;
+	files: number;
+	additions: number;
+	deletions: number;
+} {
+	const paths = new Set<string>();
+	let additions = 0;
+	let deletions = 0;
+	for (const change of [...summary.branchChanges, ...summary.changes]) {
+		paths.add(change.path);
+		additions += change.insertions;
+		deletions += change.deletions;
+	}
+	return { branch: summary.branch, files: paths.size, additions, deletions };
+}

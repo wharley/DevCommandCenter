@@ -27,6 +27,8 @@ const dark = {
 	info: "#6ea8fe",
 	/** Neutral fill for chips and secondary round buttons. */
 	chip: "#232831",
+	/** The person's message in a thread. */
+	bubble: "#232831",
 	/** Floating controls where the system has no glass (Android, iOS < 26). */
 	glass: "rgba(30,34,41,0.72)",
 	glassBorder: "rgba(255,255,255,0.08)",
@@ -57,6 +59,7 @@ const light: Palette = {
 	danger: "#c93a2a",
 	info: "#2457c5",
 	chip: "#eceef1",
+	bubble: "#e2e5ea",
 	glass: "rgba(255,255,255,0.78)",
 	glassBorder: "rgba(255,255,255,0.9)",
 	shadow: "rgba(14,17,22,0.12)",

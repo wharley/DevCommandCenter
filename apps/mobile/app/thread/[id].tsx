@@ -14,8 +14,9 @@ import {
 	t,
 	stoppedByUsageLimit,
 	threadTitle,
-	workspaceLabel,
+	workspaceDiffStat,
 	type AccessPolicy,
+	type DeliverySummary,
 	type MobileCatalog,
 	type RenderItem,
 	type SessionSearchResult,
@@ -29,7 +30,7 @@ import { useBackend } from "@/backend/session";
 import { errorMessage, isAlreadyResolved } from "@/backend/types";
 import { AssistantBlock, PermissionCard, QuestionCard, SystemRow, TraceBlock, UserBubble } from "@/screens/ThreadParts";
 import { ThreadSync, type ThreadSnapshot } from "@/screens/threadSync";
-import { alpha, makeStyles, radius, useTheme } from "@/theme";
+import { alpha, makeStyles, useTheme } from "@/theme";
 import { AccessPill } from "@/ui/AccessPicker";
 import { AgentRequestCard } from "@/ui/AgentRequestCard";
 import { TaskProposalCard } from "@/ui/TaskProposalCard";
@@ -37,7 +38,9 @@ import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { FileMentionList } from "@/ui/FileMentionList";
 import { useDictation } from "@/dictation/useDictation";
+import { Glass, GlassButton, GlassPill } from "@/ui/glass";
 import { Button, Loading, Mono, StateDot } from "@/ui/primitives";
+import { EdgeFade } from "@/ui/surfaces";
 import { AgentMascot } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
 import { router, useLocalSearchParams } from "expo-router";
@@ -85,6 +88,9 @@ export default function ThreadScreen() {
 	const [selection, setSelection] = useState({ start: 0, end: 0 });
 	const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number } | undefined>();
 	const [composerFocused, setComposerFocused] = useState(false);
+	/** Height of the floating composer, so the list ends above it. */
+	const [dockHeight, setDockHeight] = useState(120);
+	const [diff, setDiff] = useState<ReturnType<typeof workspaceDiffStat> | null>(null);
 	const attachments = useAttachments(backend);
 	const dictation = useDictation(composer, setComposer);
 	const input = useRef<TextInput>(null);
@@ -140,6 +146,23 @@ export default function ThreadScreen() {
 		if (seenWorkspace && finished) markWorkspaceSeen(seenWorkspace);
 	}, [seenWorkspace, finished]);
 
+	// The diff chip: what the workspace changed, read on open and again when a turn starts or ends.
+	const diffWorkspace = meta?.workspaceId ?? null;
+	const turnRunning = isThreadRunning(snapshot.state.messages);
+	useEffect(() => {
+		if (!diffWorkspace) return;
+		let cancelled = false;
+		backend
+			.request<DeliverySummary>("GET", `/api/v1/mobile/workspaces/${encodeURIComponent(diffWorkspace)}/delivery`)
+			.then((summary) => {
+				if (!cancelled) setDiff(workspaceDiffStat(summary));
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [backend, diffWorkspace, turnRunning]);
+
 	const projectKey = meta?.projectId ?? null;
 	useEffect(() => {
 		let cancelled = false;
@@ -166,7 +189,6 @@ export default function ThreadScreen() {
 	const items = useMemo(() => groupMessages(state.messages), [state.messages]);
 	const running = useMemo(() => isThreadRunning(state.messages), [state.messages]);
 	const title = useMemo(() => meta?.threadTitle?.trim() || threadTitle(state.messages) || "Sessão", [meta, state.messages]);
-	const place = meta ? workspaceLabel(meta) : "";
 	const waitingOnYou =
 		questions.length > 0 ||
 		threadRequests.length > 0 ||
@@ -353,53 +375,31 @@ export default function ThreadScreen() {
 		}
 	};
 
+	const goBack = () => (router.canGoBack() ? router.back() : router.replace("/"));
+	const openDelivery = meta?.workspaceId
+		? () => router.push({ pathname: "/delivery/[id]", params: { id: meta.workspaceId! } })
+		: undefined;
+	const stateText = waitingOnYou ? "precisa de você" : running ? "rodando" : "parado";
+	const dockBottom = keyboardOpen ? 8 : Math.max(insets.bottom, 8);
+	const headerSpace = insets.top + 6 + 48 + (diff ? 44 : 0) + 6;
+	const banner = (
+		<View style={{ gap: 8, marginBottom: 8 }}>
+			<ConnectionBanner backend={backend} />
+			{snapshot.error ? <Text style={styles.error}>{snapshot.error}</Text> : null}
+			{notice ? (
+				<Pressable onPress={() => setNotice(null)}>
+					<Text style={styles.notice}>{notice}</Text>
+				</Pressable>
+			) : null}
+		</View>
+	);
+
 	return (
 		<KeyboardAvoidingView style={styles.root} behavior="padding">
-			<View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-				<Pressable
-					// Opened from a notification on a cold start, the thread is the only screen.
-					onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))}
-					hitSlop={10}
-					accessibilityRole="button"
-					accessibilityLabel="Voltar"
-					style={styles.back}
-				>
-					<Feather name="arrow-left" size={18} color={color.mute} />
-				</Pressable>
-				<View style={{ flex: 1, minWidth: 0 }}>
-					<Text style={styles.title} numberOfLines={1}>
-						{title}
-					</Text>
-					<View style={styles.subtitle}>
-						<StateDot state={waitingOnYou ? "wait" : running ? "live" : "idle"} size={6} />
-						<Mono style={styles.subtitleText} numberOfLines={1}>
-							{[waitingOnYou ? "precisa de você" : running ? "rodando" : "parado", place].filter(Boolean).join(" · ")}
-						</Mono>
-					</View>
-				</View>
-				{meta?.workspaceId ? (
-					<Pressable
-						onPress={() => router.push({ pathname: "/delivery/[id]", params: { id: meta.workspaceId! } })}
-						hitSlop={10}
-						accessibilityRole="button"
-						accessibilityLabel="Entrega: commit, envio e PR"
-						style={styles.deliver}
-					>
-						<Feather name="git-pull-request" size={18} color={color.mute} />
-					</Pressable>
-				) : null}
-			</View>
-			<View style={styles.banner}>
-				<ConnectionBanner backend={backend} />
-				{snapshot.error ? <Text style={styles.error}>{snapshot.error}</Text> : null}
-				{notice ? (
-					<Pressable onPress={() => setNotice(null)}>
-						<Text style={styles.notice}>{notice}</Text>
-					</Pressable>
-				) : null}
-			</View>
 			{snapshot.loading && items.length === 0 ? (
-				<Loading />
+				<View style={{ flex: 1, paddingTop: headerSpace }}>
+					<Loading />
+				</View>
 			) : (
 				<FlatList
 					ref={list}
@@ -407,7 +407,9 @@ export default function ThreadScreen() {
 					keyExtractor={(item) => item.key}
 					renderItem={renderItem}
 					extraData={`${liveHead}/${mascotState}/${agentLabel}`}
-					contentContainerStyle={styles.listContent}
+					contentContainerStyle={[styles.listContent, { paddingTop: headerSpace, paddingBottom: dockHeight + dockBottom + 20 }]}
+					scrollIndicatorInsets={{ top: headerSpace - insets.top, bottom: dockHeight }}
+					ListHeaderComponent={banner}
 					ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
 					onScroll={onScroll}
 					scrollEventThrottle={64}
@@ -461,81 +463,131 @@ export default function ThreadScreen() {
 					}
 				/>
 			)}
-			{/* With the keyboard up it already covers the home indicator / nav bar. */}
-			<View style={[styles.composer, { paddingBottom: keyboardOpen ? 10 : Math.max(insets.bottom, 10) }]}>
-				{mention && meta?.workspaceId ? (
-					<FileMentionList
-						backend={backend}
-						scope={{ workspaceId: meta.workspaceId }}
-						query={mention.query}
-						onPick={insertMention}
-					/>
-				) : null}
-				{!running && stoppedByUsageLimit(state.messages) ? (
-					<Button
-						label={t("usageLimit.continue")}
-						variant="ghost"
-						busy={resuming}
-						onPress={() => void resumeAfterLimit()}
-						accessibilityLabel={t("usageLimit.continue")}
-					/>
-				) : null}
-				{provider ? (
-					<AccessPill
-						available={availableAccess}
-						value={access}
-						onChange={chooseAccess}
-						providerLabel={provider.label}
-						disabled={sending}
-					/>
-				) : null}
-				<AttachmentTray attachments={attachments} />
-				{imagesUnsupported ? <Text style={styles.notice}>{t("composer.attachments.imagesUnsupported")}</Text> : null}
-				<DictationStatus dictation={dictation} />
-				<View style={styles.composerRow}>
-					<AttachButton attachments={attachments} disabled={sending} />
-					<TextInput
-						ref={input}
-						value={composer}
-						onChangeText={setComposer}
-						selection={forcedSelection}
-						onSelectionChange={(event) => {
-							setSelection(event.nativeEvent.selection);
-							setForcedSelection(undefined);
-						}}
-						onFocus={() => setComposerFocused(true)}
-						onBlur={() => setComposerFocused(false)}
-						placeholder={running ? "O agente está trabalhando…" : "Mensagem para o agente"}
-						placeholderTextColor={color.faint}
-						style={styles.input}
-						multiline
-						// Prompts carry identifiers and commands; autocorrect mangles them.
-						autoCorrect={false}
-						editable={!sending && !dictation.listening}
-						accessibilityLabel="Mensagem para o agente"
-					/>
-					<MicButton dictation={dictation} disabled={sending} />
-					{running ? (
-						<Pressable
-							onPress={() => void stop()}
-							style={[styles.sendButton, styles.stopButton]}
-							accessibilityRole="button"
-							accessibilityLabel="Parar o agente"
-						>
-							{stopping ? <ActivityIndicator size="small" color={color.danger} /> : <Feather name="square" size={16} color={color.danger} />}
-						</Pressable>
-					) : (
-						<Pressable
-							onPress={() => void send()}
-							disabled={!canSend}
-							style={[styles.sendButton, { opacity: canSend ? 1 : 0.4 }]}
-							accessibilityRole="button"
-							accessibilityLabel="Enviar"
-						>
-							{sending ? <ActivityIndicator size="small" color={color.accentInk} /> : <Feather name="arrow-up" size={18} color={color.accentInk} />}
-						</Pressable>
-					)}
+
+			<EdgeFade edge="top" height={headerSpace + 16} solid={(headerSpace - 10) / (headerSpace + 16)} />
+			<EdgeFade edge="bottom" height={dockHeight + dockBottom + 28} solid={0.45} />
+
+			<View style={[styles.header, { top: insets.top + 6 }]}>
+				{/* Opened from a notification on a cold start, the thread is the only screen. */}
+				<GlassButton icon="chevron-left" accessibilityLabel="Voltar" onPress={goBack} />
+				<View style={styles.titleBlock}>
+					<Text style={styles.title} numberOfLines={1} accessibilityRole="header">
+						{title}
+					</Text>
+					<View style={styles.subtitle}>
+						<StateDot state={waitingOnYou ? "wait" : running ? "live" : "idle"} size={6} />
+						<Mono style={styles.subtitleText} numberOfLines={1}>
+							{[stateText, agentLabel].filter(Boolean).join(" · ")}
+						</Mono>
+					</View>
 				</View>
+				{openDelivery ? (
+					<GlassButton icon="git-pull-request" accessibilityLabel="Entrega: commit, envio e PR" onPress={openDelivery} />
+				) : (
+					<View style={{ width: 44 }} />
+				)}
+			</View>
+
+			{diff ? (
+				<View style={[styles.diffRow, { top: insets.top + 60 }]} pointerEvents="box-none">
+					<GlassPill
+						onPress={openDelivery}
+						accessibilityLabel={`${diff.branch ?? "Workspace"}: ${diff.files} arquivos alterados, ${diff.additions} linhas a mais, ${diff.deletions} a menos. Abrir entrega`}
+						style={styles.diffPill}
+					>
+						<Feather name="git-branch" size={12} color={color.mute} />
+						{diff.branch ? (
+							<Mono style={styles.diffBranch} numberOfLines={1}>
+								{diff.branch}
+							</Mono>
+						) : null}
+						<Mono style={styles.diffText}>
+							{diff.files === 0 ? "· sem mudanças" : `· ${diff.files} ${diff.files === 1 ? "arquivo" : "arquivos"}`}
+						</Mono>
+						{diff.files > 0 ? <Mono style={[styles.diffText, { color: color.accent }]}>+{diff.additions}</Mono> : null}
+						{diff.files > 0 ? <Mono style={[styles.diffText, { color: color.danger }]}>−{diff.deletions}</Mono> : null}
+						<Feather name="chevron-right" size={13} color={color.mute} />
+					</GlassPill>
+				</View>
+			) : null}
+
+			{/* With the keyboard up it already covers the home indicator / nav bar. */}
+			<View style={[styles.dock, { bottom: dockBottom }]} onLayout={(event) => setDockHeight(event.nativeEvent.layout.height)}>
+					{mention && meta?.workspaceId ? (
+						<FileMentionList
+							backend={backend}
+							scope={{ workspaceId: meta.workspaceId }}
+							query={mention.query}
+							onPick={insertMention}
+						/>
+					) : null}
+					{!running && stoppedByUsageLimit(state.messages) ? (
+						<Button
+							label={t("usageLimit.continue")}
+							variant="ghost"
+							busy={resuming}
+							onPress={() => void resumeAfterLimit()}
+							accessibilityLabel={t("usageLimit.continue")}
+						/>
+					) : null}
+				<Glass radius={26} style={styles.capsule}>
+					{provider ? (
+						<AccessPill
+							available={availableAccess}
+							value={access}
+							onChange={chooseAccess}
+							providerLabel={provider.label}
+							disabled={sending}
+						/>
+					) : null}
+					<AttachmentTray attachments={attachments} />
+					{imagesUnsupported ? <Text style={styles.notice}>{t("composer.attachments.imagesUnsupported")}</Text> : null}
+					<DictationStatus dictation={dictation} />
+					<View style={styles.composerRow}>
+						<AttachButton attachments={attachments} disabled={sending} />
+						<TextInput
+							ref={input}
+							value={composer}
+							onChangeText={setComposer}
+							selection={forcedSelection}
+							onSelectionChange={(event) => {
+								setSelection(event.nativeEvent.selection);
+								setForcedSelection(undefined);
+							}}
+							onFocus={() => setComposerFocused(true)}
+							onBlur={() => setComposerFocused(false)}
+							placeholder={running ? "O agente está trabalhando…" : "Mensagem para o agente"}
+							placeholderTextColor={color.faint}
+							style={styles.input}
+							multiline
+							// Prompts carry identifiers and commands; autocorrect mangles them.
+							autoCorrect={false}
+							editable={!sending && !dictation.listening}
+							accessibilityLabel="Mensagem para o agente"
+						/>
+						<MicButton dictation={dictation} disabled={sending} />
+						{running ? (
+							<Pressable
+								onPress={() => void stop()}
+								style={[styles.sendButton, styles.stopButton]}
+								accessibilityRole="button"
+								accessibilityLabel="Parar o agente"
+							>
+								{stopping ? <ActivityIndicator size="small" color={color.danger} /> : <Feather name="square" size={16} color={color.danger} />}
+							</Pressable>
+						) : (
+							<Pressable
+								onPress={() => void send()}
+								disabled={!canSend}
+								style={[styles.sendButton, { opacity: canSend ? 1 : 0.4 }]}
+								accessibilityRole="button"
+								accessibilityLabel="Enviar"
+							>
+								{sending ? <ActivityIndicator size="small" color={color.accentInk} /> : <Feather name="arrow-up" size={18} color={color.accentInk} />}
+							</Pressable>
+						)}
+					</View>
+				</Glass>
 			</View>
 		</KeyboardAvoidingView>
 	);
@@ -567,48 +619,32 @@ function AgentHeader({
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({
 		root: { flex: 1, backgroundColor: color.bg },
-		header: {
-			flexDirection: "row",
-			alignItems: "center",
-			gap: 10,
-			paddingHorizontal: 12,
-			paddingBottom: 10,
-			borderBottomWidth: 1,
-			borderBottomColor: color.border,
-		},
-		back: { padding: 6 },
-		deliver: { padding: 6 },
-		title: { color: color.fg, fontSize: 15, fontWeight: "600" },
-		subtitle: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
-		subtitleText: { fontSize: 10, color: color.faint, letterSpacing: 0.6, flexShrink: 1 },
-		banner: { paddingHorizontal: 12, paddingTop: 10 },
-		error: { color: color.danger, fontSize: 12, marginBottom: 8 },
-		notice: { color: color.mute, fontSize: 12, marginBottom: 8 },
-		listContent: { paddingHorizontal: 16, paddingBottom: 20, paddingTop: 4 },
+		header: { position: "absolute", left: 16, right: 16, flexDirection: "row", alignItems: "center", gap: 10 },
+		titleBlock: { flex: 1, minWidth: 0, alignItems: "center" },
+		title: { color: color.fg, fontSize: 16, fontWeight: "600", letterSpacing: -0.2, maxWidth: "100%" },
+		subtitle: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3, maxWidth: "100%" },
+		subtitleText: { fontSize: 11, color: color.mute, flexShrink: 1 },
+		diffRow: { position: "absolute", left: 16, right: 16, alignItems: "center" },
+		diffPill: { gap: 6, minHeight: 34, paddingHorizontal: 12, maxWidth: "100%" },
+		diffBranch: { fontSize: 12, color: color.fg, flexShrink: 1 },
+		diffText: { fontSize: 12, color: color.mute },
+		error: { color: color.danger, fontSize: 12 },
+		notice: { color: color.mute, fontSize: 12 },
+		listContent: { paddingHorizontal: 16 },
 		agentHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
 		agentLabel: { fontSize: 11, color: color.mute, flexShrink: 1 },
-		composer: {
-			gap: 8,
-			paddingHorizontal: 12,
-			paddingTop: 8,
-			borderTopWidth: 1,
-			borderTopColor: color.border,
-			backgroundColor: color.panel,
-		},
-		composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+		dock: { position: "absolute", left: 12, right: 12, gap: 8 },
+		capsule: { paddingHorizontal: 8, paddingVertical: 8, gap: 8 },
+		composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 6 },
 		input: {
 			flex: 1,
 			maxHeight: 140,
 			minHeight: 40,
-			borderWidth: 1,
-			borderColor: color.border,
-			backgroundColor: color.bg,
-			borderRadius: radius.md,
 			color: color.fg,
-			paddingHorizontal: 12,
+			paddingHorizontal: 6,
 			paddingTop: 10,
 			paddingBottom: 10,
-			fontSize: 15,
+			fontSize: 16,
 		},
 		sendButton: {
 			width: 40,
@@ -618,6 +654,6 @@ const useStyles = makeStyles((color) =>
 			alignItems: "center",
 			justifyContent: "center",
 		},
-		stopButton: { backgroundColor: alpha(color.danger, 0.12), borderWidth: 1, borderColor: alpha(color.danger, 0.5) },
+		stopButton: { backgroundColor: alpha(color.danger, 0.14) },
 	}),
 );

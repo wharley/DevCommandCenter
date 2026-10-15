@@ -148,22 +148,24 @@ export function EdgeFade({
 	const { color } = useTheme();
 	const styles = useStyles();
 	const id = useId().replace(/:/g, "");
-	// Opaque from the edge for `solid` of the height, then clearing toward the content.
-	const [from, to] =
-		edge === "top"
-			? [{ at: solid, o: 1 }, { at: 1, o: 0 }]
-			: [{ at: 0, o: 0 }, { at: 1 - solid, o: 1 }];
+	const solidHeight = Math.round(height * Math.min(1, Math.max(0, solid)));
+	// A plain fill under the chrome, then a gradient clearing toward the content.
+	const block = <View style={{ height: solidHeight, backgroundColor: color.bg }} />;
+	const ramp = (
+		<Svg width="100%" height={height - solidHeight}>
+			<Defs>
+				<LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+					<Stop offset="0" stopColor={color.bg} stopOpacity={edge === "top" ? 1 : 0} />
+					<Stop offset="1" stopColor={color.bg} stopOpacity={edge === "top" ? 0 : 1} />
+				</LinearGradient>
+			</Defs>
+			<Rect width="100%" height="100%" fill={`url(#${id})`} />
+		</Svg>
+	);
 	return (
 		<View pointerEvents="none" style={[styles.band, edge === "top" ? { top: 0 } : { bottom: 0 }, { height }]}>
-			<Svg width="100%" height="100%">
-				<Defs>
-					<LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-						<Stop offset={String(from.at)} stopColor={color.bg} stopOpacity={from.o} />
-						<Stop offset={String(to.at)} stopColor={color.bg} stopOpacity={to.o} />
-					</LinearGradient>
-				</Defs>
-				<Rect width="100%" height="100%" fill={`url(#${id})`} />
-			</Svg>
+			{edge === "top" ? block : ramp}
+			{edge === "top" ? ramp : block}
 		</View>
 	);
 }
