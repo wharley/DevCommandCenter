@@ -292,9 +292,9 @@ export function SheetHeader({ title, detail, onClose }: { title: string; detail?
 
 /**
  * The body of a sheet: the header rides inside the scroll view, pinned.
- * The native sheet takes over the first scroll view it finds and pins its
- * frame to the sheet's top edge, so a header placed above it ends up under
- * the content.
+ * The native form sheet lays out its scroll view itself and expects it as
+ * the screen's only child (react-native-screens warns past two subviews):
+ * render this as the screen's root, with nothing beside it.
  */
 export function SheetScroll({
 	header,

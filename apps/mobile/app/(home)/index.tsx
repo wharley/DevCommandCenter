@@ -10,14 +10,14 @@ import { useAgentRequests } from "@/backend/agentRequests";
 import { useBackend } from "@/backend/session";
 import { useTaskProposals } from "@/backend/taskProposals";
 import { pendingKey, useHomeData } from "@/screens/homeData";
-import { useHomeScope } from "@/screens/homeScope";
+import { useHomeScope, useProjectDiff } from "@/screens/homeScope";
 import { AgentRequestHeader, AttentionCard, NeedsYouCard, openNewTask, RecentRow, RunningRow } from "@/screens/rows";
 import { makeStyles, useTheme } from "@/theme";
 import { AgentRequestCard } from "@/ui/AgentRequestCard";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { Glass, GlassButton, GlassPill } from "@/ui/glass";
 import { haptic } from "@/ui/haptics";
-import { EmptyState, Loading, Panel, SectionLabel } from "@/ui/primitives";
+import { EmptyState, Loading, Mono, Panel, SectionLabel } from "@/ui/primitives";
 import { ProjectGlyph } from "@/ui/sprites";
 import { EdgeFade, GroupedList } from "@/ui/surfaces";
 import { TaskProposalCard } from "@/ui/TaskProposalCard";
@@ -40,6 +40,7 @@ export default function HomeScreen() {
 	const backend = useBackend();
 	const { scan, attention, refreshing, refresh, respond, resolving, showNotice, error, notice, dismissNotice } = useHomeData();
 	const { project, workspaces } = useHomeScope();
+	const diff = useProjectDiff(project);
 	const agentRequests = useAgentRequests();
 	const taskProposals = useTaskProposals();
 
@@ -92,6 +93,7 @@ export default function HomeScreen() {
 				) : null}
 
 				<View style={styles.heading}>
+					{diff ? <DiffLine diff={diff} /> : null}
 					<Text style={styles.title} accessibilityRole="header">
 						Tarefas
 					</Text>
@@ -230,6 +232,27 @@ export default function HomeScreen() {
 	);
 }
 
+/** "⑂ feat/x · 3 arquivos +42 −8" for one worktree, "2 worktrees · …" for several. */
+function DiffLine({ diff }: { diff: NonNullable<ReturnType<typeof useProjectDiff>> }) {
+	const { color } = useTheme();
+	const styles = useStyles();
+	const where = diff.branch ?? `${diff.worktrees} worktrees`;
+	return (
+		<View style={styles.diffLine} accessibilityLabel={`${where}: ${diff.files} arquivos alterados, ${diff.additions} linhas a mais, ${diff.deletions} a menos`}>
+			<Feather name="git-branch" size={12} color={color.mute} />
+			<Mono style={styles.diffText} numberOfLines={1}>
+				{where} · {diff.files === 0 ? "sem mudanças" : `${diff.files} ${diff.files === 1 ? "arquivo" : "arquivos"}`}
+				{diff.files > 0 ? (
+					<>
+						{" "}
+						<Text style={{ color: color.accent }}>+{diff.additions}</Text> <Text style={{ color: color.danger }}>−{diff.deletions}</Text>
+					</>
+				) : null}
+			</Mono>
+		</View>
+	);
+}
+
 /** "2 precisam de você · 1 rodando", or a calm line when nothing waits. */
 function Summary({ needsYou, running, loaded }: { needsYou: number; running: number; loaded: boolean }) {
 	const { color } = useTheme();
@@ -283,6 +306,8 @@ const useStyles = makeStyles((color) =>
 		heading: { paddingHorizontal: 4, marginTop: 6, marginBottom: 22, gap: 4 },
 		title: { color: color.fg, fontSize: 32, lineHeight: 38, fontWeight: "700", letterSpacing: -0.8 },
 		summary: { color: color.mute, fontSize: 14 },
+		diffLine: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 },
+		diffText: { color: color.mute, fontSize: 12, flexShrink: 1 },
 		sections: { gap: 26 },
 		cards: { gap: 10 },
 		topBar: { position: "absolute", left: 16, right: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },

@@ -43,7 +43,7 @@ import * as Crypto from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { KeyboardAwareScrollView, useKeyboardState, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const POLL_MS = 800;
@@ -81,6 +81,7 @@ export default function NewTaskScreen() {
 	const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number } | undefined>();
 	const [promptFocused, setPromptFocused] = useState(false);
 	const input = useRef<TextInput>(null);
+	const scroll = useRef<KeyboardAwareScrollViewRef>(null);
 	const [phase, setPhase] = useState<Phase>({ kind: "editing" });
 	const [picker, setPicker] = useState<"project" | "agent" | "access" | null>(null);
 	const alive = useRef(true);
@@ -251,11 +252,13 @@ export default function NewTaskScreen() {
 	const tint = repository ? projectTint(repository.color, repository.rootPath) : color.accent;
 	const providerProblems = catalog?.providers.filter((p) => providerUnavailableReason(p)) ?? [];
 	const close = () => router.back();
+	const keyboardOpen = useKeyboardState((keyboard) => keyboard.isVisible);
 
 	return (
 		<View style={styles.root}>
 			<DitherHero tint={tint} height={440} />
 			<KeyboardAwareScrollView
+				ref={scroll}
 				style={{ flex: 1 }}
 				contentContainerStyle={[styles.content, { paddingTop: topInset + 64, paddingBottom: insets.bottom + 16 }]}
 				keyboardShouldPersistTaps="handled"
@@ -277,25 +280,26 @@ export default function NewTaskScreen() {
 					</Panel>
 				) : (
 					<>
-						<View style={styles.hero}>
+						{/* While typing, the hero steps aside so the whole composer clears the keyboard. */}
+						<View style={[styles.hero, keyboardOpen && styles.heroTyping]}>
 							{repository ? (
 								<ProjectGlyph
 									icon={repository.icon === "logo" ? repository.logo : repository.icon}
 									color={repository.color}
 									seed={repository.rootPath}
-									size={96}
+									size={keyboardOpen ? 40 : 96}
 									active={creating}
 								/>
 							) : null}
 							<View style={styles.heroText}>
-								<Text style={styles.lead}>O que vamos fazer em</Text>
-								<Text style={styles.heroTitle} numberOfLines={2} accessibilityRole="header">
+								{keyboardOpen ? null : <Text style={styles.lead}>O que vamos fazer em</Text>}
+								<Text style={[styles.heroTitle, keyboardOpen && styles.heroTitleTyping]} numberOfLines={2} accessibilityRole="header">
 									{repoLabel ?? "qual projeto"}?
 								</Text>
-								<View style={styles.where}>
+								{keyboardOpen ? null : <View style={styles.where}>
 									<Feather name={worktree ? "git-branch" : "folder"} size={12} color={color.mute} />
 									<Mono style={styles.whereText}>{worktree ? "num worktree novo" : "no checkout atual"}</Mono>
-								</View>
+								</View>}
 							</View>
 						</View>
 
@@ -309,7 +313,11 @@ export default function NewTaskScreen() {
 									setSelection(event.nativeEvent.selection);
 									setForcedSelection(undefined);
 								}}
-								onFocus={() => setPromptFocused(true)}
+								onFocus={() => {
+									setPromptFocused(true);
+									// Bring the send row up with the keyboard, not just the caret.
+									setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 300);
+								}}
 								onBlur={() => setPromptFocused(false)}
 								placeholder="Descreva a tarefa… use @ para citar um arquivo"
 								placeholderTextColor={color.faint}
@@ -523,6 +531,8 @@ const useStyles = makeStyles((color) =>
 		error: { color: color.danger, fontSize: 12, lineHeight: 17 },
 		hint: { color: color.mute, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
 		hero: { flexGrow: 1, alignItems: "center", justifyContent: "center", gap: 18, paddingVertical: 24 },
+		heroTyping: { flexGrow: 0, flexDirection: "row", gap: 12, paddingVertical: 4 },
+		heroTitleTyping: { fontSize: 20, lineHeight: 24 },
 		heroText: { alignItems: "center", gap: 6, paddingHorizontal: 16 },
 		lead: { color: color.mute, fontSize: 15 },
 		heroTitle: { color: color.fg, fontSize: 28, lineHeight: 33, fontWeight: "700", letterSpacing: -0.7, textAlign: "center" },

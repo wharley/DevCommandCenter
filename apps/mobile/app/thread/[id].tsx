@@ -98,6 +98,7 @@ export default function ThreadScreen() {
 	const sync = useRef<ThreadSync | null>(null);
 	const list = useRef<FlatList<RenderItem>>(null);
 	const stick = useRef(true);
+	const listSize = useRef({ content: 0, visible: 0 });
 
 	useEffect(() => {
 		const controller = new ThreadSync(backend, threadId, setSnapshot);
@@ -334,9 +335,28 @@ export default function ThreadScreen() {
 		}
 	};
 
-	const followEnd = () => {
-		if (stick.current) requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }));
+	/**
+	 * To the last message, from the sizes the list reported. `scrollToEnd` keeps
+	 * the height from before the keyboard shrank the list and stops short.
+	 */
+	const scrollToBottom = (animated: boolean) => {
+		const { content, visible } = listSize.current;
+		list.current?.scrollToOffset({ offset: Math.max(0, content - visible), animated });
 	};
+
+	const followEnd = () => {
+		if (stick.current) requestAnimationFrame(() => scrollToBottom(false));
+	};
+
+
+	// The keyboard shrinks the list once its animation ends; then keep the latest
+	// message in view above the composer.
+	useEffect(() => {
+		if (!keyboardOpen) return;
+		stick.current = true;
+		const timer = setTimeout(() => scrollToBottom(true), 450);
+		return () => clearTimeout(timer);
+	}, [keyboardOpen]);
 
 	const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
 		const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
@@ -400,207 +420,217 @@ export default function ThreadScreen() {
 
 	return (
 		<KeyboardAvoidingView style={styles.root} behavior="padding">
-			{snapshot.loading && items.length === 0 ? (
-				<View style={{ flex: 1, paddingTop: headerSpace }}>
-					<Loading />
-				</View>
-			) : (
-				<FlatList
-					ref={list}
-					data={items}
-					keyExtractor={(item) => item.key}
-					renderItem={renderItem}
-					extraData={`${liveHead}/${mascotState}/${agentLabel}`}
-					contentContainerStyle={[styles.listContent, { paddingTop: headerSpace, paddingBottom: dockHeight + dockBottom + 20 }]}
-					scrollIndicatorInsets={{ top: headerSpace - insets.top, bottom: dockHeight }}
-					ListHeaderComponent={banner}
-					ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-					onScroll={onScroll}
-					scrollEventThrottle={64}
-					onContentSizeChange={followEnd}
-					// The keyboard closing resizes the list without changing its content.
-					onLayout={followEnd}
-					keyboardShouldPersistTaps="handled"
-					ListFooterComponent={
-						awaitingFirstOutput ||
-						questions.length > 0 ||
-						threadRequests.length > 0 ||
-						threadProposals.length > 0 ? (
-							<View style={{ gap: 12, marginTop: 12 }}>
-								{awaitingFirstOutput ? <AgentHeader meta={meta} label={agentLabel} state={mascotState} /> : null}
-								{threadRequests.map((request) => (
-									<AgentRequestCard
-										key={request.requestId}
-										request={request}
-										busy={agentRequests.answering.has(request.requestId)}
-										onRespond={(answer) =>
-											void agentRequests.respond(request, answer).then((text) => {
-												if (text) setNotice(text);
-												sync.current?.nudge();
-											})
-										}
-									/>
-								))}
-								{threadProposals.map((proposal) => (
-									<TaskProposalCard
-										key={proposal.id}
-										proposal={proposal}
-										busy={taskProposals.answering.has(proposal.id)}
-										onAnswer={(action) =>
-											void taskProposals.answer(proposal, action).then((text) => {
-												if (text) setNotice(text);
-												sync.current?.nudge();
-											})
-										}
-									/>
-								))}
-								{questions.map((request) => (
-									<QuestionCard
-										key={request.requestId}
-										request={request}
-										busy={busy.has(request.requestId)}
-										onSubmit={(answers) => {
-											haptic("success");
-											void respondQuestion(request.requestId, answers);
-										}}
-									/>
-								))}
-							</View>
-						) : null
-					}
-				/>
-			)}
-
-			<EdgeFade edge="top" height={headerSpace + 16} solid={(headerSpace - 10) / (headerSpace + 16)} />
-			<EdgeFade edge="bottom" height={dockHeight + dockBottom + 28} solid={0.45} />
-
-			<View style={[styles.header, { top: insets.top + 6 }]}>
-				{/* Opened from a notification on a cold start, the thread is the only screen. */}
-				<GlassButton icon="chevron-left" accessibilityLabel="Voltar" onPress={goBack} />
-				<View style={styles.titleBlock}>
-					<Text style={styles.title} numberOfLines={1} accessibilityRole="header">
-						{title}
-					</Text>
-					<View style={styles.subtitle}>
-						<StateDot state={waitingOnYou ? "wait" : running ? "live" : "idle"} size={6} />
-						<Mono style={styles.subtitleText} numberOfLines={1}>
-							{[stateText, agentLabel].filter(Boolean).join(" · ")}
-						</Mono>
+			{/* Padding shrinks this wrapper, not the floating chrome: absolute children
+			    are placed against the inner view, so they rise with the keyboard. */}
+			<View style={styles.frame}>
+				{snapshot.loading && items.length === 0 ? (
+					<View style={{ flex: 1, paddingTop: headerSpace }}>
+						<Loading />
 					</View>
-				</View>
-				{openDelivery ? (
-					<GlassButton icon="git-pull-request" accessibilityLabel="Entrega: commit, envio e PR" onPress={openDelivery} />
 				) : (
-					<View style={{ width: 44 }} />
+					<FlatList
+						ref={list}
+						data={items}
+						keyExtractor={(item) => item.key}
+						renderItem={renderItem}
+						extraData={`${liveHead}/${mascotState}/${agentLabel}`}
+						contentContainerStyle={[styles.listContent, { paddingTop: headerSpace, paddingBottom: dockHeight + dockBottom + 20 }]}
+						scrollIndicatorInsets={{ top: headerSpace - insets.top, bottom: dockHeight }}
+						ListHeaderComponent={banner}
+						ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+						onScroll={onScroll}
+						scrollEventThrottle={64}
+						onContentSizeChange={(_, height) => {
+							listSize.current.content = height;
+							followEnd();
+						}}
+						// The keyboard closing resizes the list without changing its content.
+						onLayout={(event) => {
+							listSize.current.visible = event.nativeEvent.layout.height;
+							followEnd();
+						}}
+						keyboardShouldPersistTaps="handled"
+						ListFooterComponent={
+							awaitingFirstOutput ||
+							questions.length > 0 ||
+							threadRequests.length > 0 ||
+							threadProposals.length > 0 ? (
+								<View style={{ gap: 12, marginTop: 12 }}>
+									{awaitingFirstOutput ? <AgentHeader meta={meta} label={agentLabel} state={mascotState} /> : null}
+									{threadRequests.map((request) => (
+										<AgentRequestCard
+											key={request.requestId}
+											request={request}
+											busy={agentRequests.answering.has(request.requestId)}
+											onRespond={(answer) =>
+												void agentRequests.respond(request, answer).then((text) => {
+													if (text) setNotice(text);
+													sync.current?.nudge();
+												})
+											}
+										/>
+									))}
+									{threadProposals.map((proposal) => (
+										<TaskProposalCard
+											key={proposal.id}
+											proposal={proposal}
+											busy={taskProposals.answering.has(proposal.id)}
+											onAnswer={(action) =>
+												void taskProposals.answer(proposal, action).then((text) => {
+													if (text) setNotice(text);
+													sync.current?.nudge();
+												})
+											}
+										/>
+									))}
+									{questions.map((request) => (
+										<QuestionCard
+											key={request.requestId}
+											request={request}
+											busy={busy.has(request.requestId)}
+											onSubmit={(answers) => {
+												haptic("success");
+												void respondQuestion(request.requestId, answers);
+											}}
+										/>
+									))}
+								</View>
+							) : null
+						}
+					/>
 				)}
-			</View>
 
-			{diff ? (
-				<View style={[styles.diffRow, { top: insets.top + 60 }]} pointerEvents="box-none">
-					<GlassPill
-						onPress={openDelivery}
-						accessibilityLabel={`${diff.branch ?? "Workspace"}: ${diff.files} arquivos alterados, ${diff.additions} linhas a mais, ${diff.deletions} a menos. Abrir entrega`}
-						style={styles.diffPill}
-					>
-						<Feather name="git-branch" size={12} color={color.mute} />
-						{diff.branch ? (
-							<Mono style={styles.diffBranch} numberOfLines={1}>
-								{diff.branch}
+				<EdgeFade edge="top" height={headerSpace + 16} solid={(headerSpace - 10) / (headerSpace + 16)} />
+				<EdgeFade edge="bottom" height={dockHeight + dockBottom + 28} solid={0.45} />
+
+				<View style={[styles.header, { top: insets.top + 6 }]}>
+					{/* Opened from a notification on a cold start, the thread is the only screen. */}
+					<GlassButton icon="chevron-left" accessibilityLabel="Voltar" onPress={goBack} />
+					<View style={styles.titleBlock}>
+						<Text style={styles.title} numberOfLines={1} accessibilityRole="header">
+							{title}
+						</Text>
+						<View style={styles.subtitle}>
+							<StateDot state={waitingOnYou ? "wait" : running ? "live" : "idle"} size={6} />
+							<Mono style={styles.subtitleText} numberOfLines={1}>
+								{[stateText, agentLabel].filter(Boolean).join(" · ")}
 							</Mono>
-						) : null}
-						<Mono style={styles.diffText}>
-							{diff.files === 0 ? "· sem mudanças" : `· ${diff.files} ${diff.files === 1 ? "arquivo" : "arquivos"}`}
-						</Mono>
-						{diff.files > 0 ? <Mono style={[styles.diffText, { color: color.accent }]}>+{diff.additions}</Mono> : null}
-						{diff.files > 0 ? <Mono style={[styles.diffText, { color: color.danger }]}>−{diff.deletions}</Mono> : null}
-						<Feather name="chevron-right" size={13} color={color.mute} />
-					</GlassPill>
-				</View>
-			) : null}
-
-			{/* With the keyboard up it already covers the home indicator / nav bar. */}
-			<View style={[styles.dock, { bottom: dockBottom }]} onLayout={(event) => setDockHeight(event.nativeEvent.layout.height)}>
-					{mention && meta?.workspaceId ? (
-						<FileMentionList
-							backend={backend}
-							scope={{ workspaceId: meta.workspaceId }}
-							query={mention.query}
-							onPick={insertMention}
-						/>
-					) : null}
-					{!running && stoppedByUsageLimit(state.messages) ? (
-						<Button
-							label={t("usageLimit.continue")}
-							variant="ghost"
-							busy={resuming}
-							onPress={() => void resumeAfterLimit()}
-							accessibilityLabel={t("usageLimit.continue")}
-						/>
-					) : null}
-				<Glass radius={26} style={styles.capsule}>
-					{provider ? (
-						<AccessPill
-							available={availableAccess}
-							value={access}
-							onChange={chooseAccess}
-							providerLabel={provider.label}
-							disabled={sending}
-						/>
-					) : null}
-					<AttachmentTray attachments={attachments} />
-					{imagesUnsupported ? <Text style={styles.notice}>{t("composer.attachments.imagesUnsupported")}</Text> : null}
-					<DictationStatus dictation={dictation} />
-					<View style={styles.composerRow}>
-						<AttachButton attachments={attachments} disabled={sending} />
-						<TextInput
-							ref={input}
-							value={composer}
-							onChangeText={setComposer}
-							selection={forcedSelection}
-							onSelectionChange={(event) => {
-								setSelection(event.nativeEvent.selection);
-								setForcedSelection(undefined);
-							}}
-							onFocus={() => setComposerFocused(true)}
-							onBlur={() => setComposerFocused(false)}
-							placeholder={running ? "O agente está trabalhando…" : "Mensagem para o agente"}
-							placeholderTextColor={color.faint}
-							style={styles.input}
-							multiline
-							// Prompts carry identifiers and commands; autocorrect mangles them.
-							autoCorrect={false}
-							editable={!sending && !dictation.listening}
-							accessibilityLabel="Mensagem para o agente"
-						/>
-						<MicButton dictation={dictation} disabled={sending} />
-						{running ? (
-							<Pressable
-								onPress={() => {
-								haptic("warning");
-								void stop();
-							}}
-								style={[styles.sendButton, styles.stopButton]}
-								accessibilityRole="button"
-								accessibilityLabel="Parar o agente"
-							>
-								{stopping ? <ActivityIndicator size="small" color={color.danger} /> : <Feather name="square" size={16} color={color.danger} />}
-							</Pressable>
-						) : (
-							<Pressable
-								onPress={() => {
-								haptic("tap");
-								void send();
-							}}
-								disabled={!canSend}
-								style={[styles.sendButton, { opacity: canSend ? 1 : 0.4 }]}
-								accessibilityRole="button"
-								accessibilityLabel="Enviar"
-							>
-								{sending ? <ActivityIndicator size="small" color={color.accentInk} /> : <Feather name="arrow-up" size={18} color={color.accentInk} />}
-							</Pressable>
-						)}
+						</View>
 					</View>
-				</Glass>
+					{openDelivery ? (
+						<GlassButton icon="git-pull-request" accessibilityLabel="Entrega: commit, envio e PR" onPress={openDelivery} />
+					) : (
+						<View style={{ width: 44 }} />
+					)}
+				</View>
+
+				{diff ? (
+					<View style={[styles.diffRow, { top: insets.top + 60 }]} pointerEvents="box-none">
+						<GlassPill
+							onPress={openDelivery}
+							accessibilityLabel={`${diff.branch ?? "Workspace"}: ${diff.files} arquivos alterados, ${diff.additions} linhas a mais, ${diff.deletions} a menos. Abrir entrega`}
+							style={styles.diffPill}
+						>
+							<Feather name="git-branch" size={12} color={color.mute} />
+							{diff.branch ? (
+								<Mono style={styles.diffBranch} numberOfLines={1}>
+									{diff.branch}
+								</Mono>
+							) : null}
+							<Mono style={styles.diffText}>
+								{diff.files === 0 ? "· sem mudanças" : `· ${diff.files} ${diff.files === 1 ? "arquivo" : "arquivos"}`}
+							</Mono>
+							{diff.files > 0 ? <Mono style={[styles.diffText, { color: color.accent }]}>+{diff.additions}</Mono> : null}
+							{diff.files > 0 ? <Mono style={[styles.diffText, { color: color.danger }]}>−{diff.deletions}</Mono> : null}
+							<Feather name="chevron-right" size={13} color={color.mute} />
+						</GlassPill>
+					</View>
+				) : null}
+
+				{/* With the keyboard up it already covers the home indicator / nav bar. */}
+				<View style={[styles.dock, { bottom: dockBottom }]} onLayout={(event) => setDockHeight(event.nativeEvent.layout.height)}>
+						{mention && meta?.workspaceId ? (
+							<FileMentionList
+								backend={backend}
+								scope={{ workspaceId: meta.workspaceId }}
+								query={mention.query}
+								onPick={insertMention}
+							/>
+						) : null}
+						{!running && stoppedByUsageLimit(state.messages) ? (
+							<Button
+								label={t("usageLimit.continue")}
+								variant="ghost"
+								busy={resuming}
+								onPress={() => void resumeAfterLimit()}
+								accessibilityLabel={t("usageLimit.continue")}
+							/>
+						) : null}
+					<Glass radius={26} style={styles.capsule}>
+						{provider ? (
+							<AccessPill
+								available={availableAccess}
+								value={access}
+								onChange={chooseAccess}
+								providerLabel={provider.label}
+								disabled={sending}
+							/>
+						) : null}
+						<AttachmentTray attachments={attachments} />
+						{imagesUnsupported ? <Text style={styles.notice}>{t("composer.attachments.imagesUnsupported")}</Text> : null}
+						<DictationStatus dictation={dictation} />
+						<View style={styles.composerRow}>
+							<AttachButton attachments={attachments} disabled={sending} />
+							<TextInput
+								ref={input}
+								value={composer}
+								onChangeText={setComposer}
+								selection={forcedSelection}
+								onSelectionChange={(event) => {
+									setSelection(event.nativeEvent.selection);
+									setForcedSelection(undefined);
+								}}
+								onFocus={() => setComposerFocused(true)}
+								onBlur={() => setComposerFocused(false)}
+								placeholder={running ? "O agente está trabalhando…" : "Mensagem para o agente"}
+								placeholderTextColor={color.faint}
+								style={styles.input}
+								multiline
+								// Prompts carry identifiers and commands; autocorrect mangles them.
+								autoCorrect={false}
+								editable={!sending && !dictation.listening}
+								accessibilityLabel="Mensagem para o agente"
+							/>
+							<MicButton dictation={dictation} disabled={sending} />
+							{running ? (
+								<Pressable
+									onPress={() => {
+									haptic("warning");
+									void stop();
+								}}
+									style={[styles.sendButton, styles.stopButton]}
+									accessibilityRole="button"
+									accessibilityLabel="Parar o agente"
+								>
+									{stopping ? <ActivityIndicator size="small" color={color.danger} /> : <Feather name="square" size={16} color={color.danger} />}
+								</Pressable>
+							) : (
+								<Pressable
+									onPress={() => {
+									haptic("tap");
+									void send();
+								}}
+									disabled={!canSend}
+									style={[styles.sendButton, { opacity: canSend ? 1 : 0.4 }]}
+									accessibilityRole="button"
+									accessibilityLabel="Enviar"
+								>
+									{sending ? <ActivityIndicator size="small" color={color.accentInk} /> : <Feather name="arrow-up" size={18} color={color.accentInk} />}
+								</Pressable>
+							)}
+						</View>
+					</Glass>
+				</View>
 			</View>
 		</KeyboardAvoidingView>
 	);
@@ -632,6 +662,7 @@ function AgentHeader({
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({
 		root: { flex: 1, backgroundColor: color.bg },
+		frame: { flex: 1 },
 		header: { position: "absolute", left: 16, right: 16, flexDirection: "row", alignItems: "center", gap: 10 },
 		titleBlock: { flex: 1, minWidth: 0, alignItems: "center" },
 		title: { color: color.fg, fontSize: 16, fontWeight: "600", letterSpacing: -0.2, maxWidth: "100%" },

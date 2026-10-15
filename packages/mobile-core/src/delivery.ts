@@ -339,3 +339,21 @@ export function workspaceDiffStat(summary: DeliverySummary): {
 	}
 	return { branch: summary.branch, files: paths.size, additions, deletions };
 }
+
+/** A project's line on the home: its worktrees' diffs added up. */
+export function projectDiffStat(stats: Array<ReturnType<typeof workspaceDiffStat>>): {
+	worktrees: number;
+	files: number;
+	additions: number;
+	deletions: number;
+	/** The branch, when the project has a single worktree. */
+	branch: string | null;
+} {
+	return {
+		worktrees: stats.length,
+		files: stats.reduce((sum, stat) => sum + stat.files, 0),
+		additions: stats.reduce((sum, stat) => sum + stat.additions, 0),
+		deletions: stats.reduce((sum, stat) => sum + stat.deletions, 0),
+		branch: stats.length === 1 ? stats[0]!.branch : null,
+	};
+}

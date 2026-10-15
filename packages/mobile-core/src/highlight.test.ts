@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { workspaceDiffStat, type DeliverySummary } from "./delivery.ts";
+import { projectDiffStat, workspaceDiffStat, type DeliverySummary } from "./delivery.ts";
 import { highlightCode } from "./highlight.ts";
 
 describe("highlightCode", () => {
@@ -34,5 +34,14 @@ describe("workspaceDiffStat", () => {
 			branchChanges: [change("a.ts", 10, 4)],
 		} as unknown as DeliverySummary;
 		expect(workspaceDiffStat(summary)).toEqual({ branch: "feat/x", files: 2, additions: 15, deletions: 5 });
+	});
+});
+
+describe("projectDiffStat", () => {
+	it("adds up worktrees and names the branch only when there is one", () => {
+		const a = { branch: "feat/a", files: 2, additions: 10, deletions: 1 };
+		const b = { branch: "main", files: 1, additions: 3, deletions: 4 };
+		expect(projectDiffStat([a, b])).toEqual({ worktrees: 2, files: 3, additions: 13, deletions: 5, branch: null });
+		expect(projectDiffStat([a])).toEqual({ worktrees: 1, files: 2, additions: 10, deletions: 1, branch: "feat/a" });
 	});
 });
