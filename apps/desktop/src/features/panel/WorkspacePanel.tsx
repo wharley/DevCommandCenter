@@ -1160,11 +1160,7 @@ export function WorkspacePanel({
 							relativePath: ".",
 						});
 					}
-					const suggestion = await prepareWorkspaceCommitMessage(workspacePath.trim(), {
-						providerId: selectedProviderId,
-						model: selectedModelId,
-						providerRuntime: selectedProviderRuntime,
-					});
+					const suggestion = await prepareWorkspaceCommitMessage(workspacePath.trim());
 					setCommitPreview({
 						mode,
 						stagedFileCount: suggestion.stagedFileCount ?? 0,

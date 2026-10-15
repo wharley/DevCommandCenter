@@ -26,7 +26,6 @@ import {
 	workspaceDeliveryRecoveryExecute,
 } from "@/lib/workspace-api";
 import type {
-	ProviderRuntimeConfig,
 	WorkspaceChangeRequestCreateInput,
 	WorkspaceDeliveryFailureSnapshot,
 } from "@dcc/contracts";
@@ -61,12 +60,6 @@ type WorkspaceDeliveryControllerOptions = {
 	onCreateRequest?: (draft: boolean) => void;
 	queryClient: QueryClient;
 	t: TFunction<"common">;
-};
-
-export type WorkspaceCommitSuggestionOptions = {
-	providerId?: string | null;
-	model?: string | null;
-	providerRuntime?: ProviderRuntimeConfig | null;
 };
 
 export type WorkspaceDeliveryCreateRequestInput = WorkspaceChangeRequestCreateInput & {
@@ -106,8 +99,8 @@ async function commitMessageForStagedChanges(
 	workspaceRoot: string,
 ) {
 	try {
-		// Automatic delivery never invokes a provider. Provider output is allowed
-		// only through prepareWorkspaceCommitMessage, which opens a human preview.
+		// Delivery never invokes a provider: the message comes from the staged
+		// files and the person edits it.
 		const suggestion = await workspaceGitCommitSuggestion({
 			workspaceRoot,
 			providerId: null,
@@ -135,35 +128,15 @@ async function commitMessageForStagedChanges(
 	}
 }
 
+/**
+ * The commit message the preview opens with. Delivery text is never written
+ * by a model: it is derived from the staged files, the same as automatic
+ * delivery, and the person edits it in the preview.
+ */
 export async function prepareWorkspaceCommitMessage(
 	workspaceRoot: string,
-	options?: WorkspaceCommitSuggestionOptions,
 ): Promise<WorkspaceCommitMessageSuggestion> {
-	try {
-		const suggestion = await workspaceGitCommitSuggestion({
-			workspaceRoot,
-			providerId: options?.providerId ?? null,
-			model: options?.model ?? null,
-			providerRuntime: options?.providerRuntime ?? null,
-		});
-		return {
-			...suggestion,
-			subject: sanitizeWorkspaceCommitSubject(suggestion.subject),
-			body: sanitizeWorkspaceCommitBody(suggestion.body),
-		};
-	} catch {
-		const status = await workspaceGitStatus({ workspaceRoot });
-		if (!status.stagedFingerprint) {
-			throw new Error("Unable to capture the staged Git snapshot; refresh and try again");
-		}
-		return {
-			subject: deriveWorkspaceCommitMessage(status.staged),
-			body: null,
-			stagedFileCount: status.staged.length,
-			stagedFingerprint: status.stagedFingerprint,
-			source: "git-staged-fallback",
-		};
-	}
+	return commitMessageForStagedChanges(workspaceRoot);
 }
 
 export function useWorkspaceDelivery({
