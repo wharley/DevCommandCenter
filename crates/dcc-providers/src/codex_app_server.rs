@@ -2019,6 +2019,8 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_computer_type"
                 | "dcc_computer_key"
                 | "dcc_delegate_task"
+                | "dcc_propose_task"
+                | "dcc_task_message"
                 | "dcc_task_status"
                 | "dcc_task_wait"
                 | "dcc_task_cancel"
@@ -5708,6 +5710,13 @@ unified_exec                         stable             true
             "unrelated_tool",
             McpToolPolicyDecision::Allow,
         ));
+        for task_tool in ["dcc_propose_task", "dcc_task_message"] {
+            assert!(is_auto_allowed_dcc_browser_tool(
+                &internal,
+                task_tool,
+                McpToolPolicyDecision::Allow,
+            ));
+        }
     }
 
     #[test]

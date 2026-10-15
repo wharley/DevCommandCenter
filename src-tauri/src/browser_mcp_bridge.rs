@@ -669,8 +669,10 @@ fn rpc_timeout(value: &Value) -> Duration {
         .cloned()
         .and_then(|params| serde_json::from_value::<ToolCall>(params).ok())
         .filter(|call| {
-            matches!(call.name.as_str(), "dcc_delegate_task" | "dcc_task_wait")
-                && tool_call_is_well_formed(call)
+            matches!(
+                call.name.as_str(),
+                "dcc_delegate_task" | "dcc_propose_task" | "dcc_task_message" | "dcc_task_wait"
+            ) && tool_call_is_well_formed(call)
         });
     if is_control_request {
         return COMPUTER_CONTROL_REQUEST_HTTP_TIMEOUT;
@@ -1228,6 +1230,17 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         "dcc_delegate_task" => call.arguments.as_ref().is_some_and(|arguments| {
             serde_json::from_value::<DelegateTaskArgs>(arguments.clone())
                 .is_ok_and(|args| delegate_task_args_are_well_formed(&args))
+        }),
+        "dcc_propose_task" => call.arguments.as_ref().is_some_and(|arguments| {
+            serde_json::from_value::<ProposeTaskArgs>(arguments.clone())
+                .is_ok_and(|args| propose_task_args_are_well_formed(&args))
+        }),
+        "dcc_task_message" => call.arguments.as_ref().is_some_and(|arguments| {
+            serde_json::from_value::<TaskMessageArgs>(arguments.clone()).is_ok_and(|args| {
+                valid_task_id(&args.task_id)
+                    && !args.message.trim().is_empty()
+                    && args.message.chars().count() <= MAX_DELEGATED_TASK_CHARS
+            })
         }),
         "dcc_task_status" => call.arguments.as_ref().is_some_and(|arguments| {
             serde_json::from_value::<TaskStatusArgs>(arguments.clone())
@@ -3843,6 +3856,52 @@ mod tests {
     }
 
     #[test]
+    fn task_tools_pass_the_gate_with_their_own_arguments() {
+        let call = |name: &str, arguments: Value| ToolCall {
+            name: name.to_string(),
+            arguments: Some(arguments),
+            _meta: None,
+        };
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_propose_task",
+            json!({"title":"Fase 2: push","task":"Implement push notifications."})
+        )));
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_propose_task",
+            json!({"title":"Fase 2","task":"x","edits":false,"worktree":true,"provider":"codex","start":"now"})
+        )));
+        assert!(!tool_call_is_well_formed(&call("dcc_propose_task", json!({"task":"no title"}))));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_propose_task",
+            json!({"title":"x","task":"y","start":"later"})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_propose_task",
+            json!({"title":"x","task":"y","parentSessionId":"someone-else"})
+        )));
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_task_message",
+            json!({"taskId":"abc","message":"add tests"})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_task_message",
+            json!({"taskId":"abc","message":"  "})
+        )));
+        // Every task tool the schema lists must get through the gate.
+        for tool in tools() {
+            let name = tool["name"].as_str().unwrap_or_default();
+            if name.starts_with("dcc_task_") || name == "dcc_propose_task" {
+                let arguments = match name {
+                    "dcc_propose_task" => json!({"title":"t","task":"b"}),
+                    "dcc_task_message" => json!({"taskId":"abc","message":"m"}),
+                    _ => json!({"taskId":"abc"}),
+                };
+                assert!(tool_call_is_well_formed(&call(name, arguments)), "{name} is rejected");
+            }
+        }
+    }
+
+    #[test]
     fn schemas_are_closed_and_expose_browser_and_computer_tools() {
         let schema_tools = tools();
         let names: Vec<_> = schema_tools
@@ -3875,6 +3934,8 @@ mod tests {
                 "dcc_computer_type",
                 "dcc_computer_key",
                 "dcc_delegate_task",
+                "dcc_propose_task",
+                "dcc_task_message",
                 "dcc_task_status",
                 "dcc_task_wait",
                 "dcc_task_cancel",
