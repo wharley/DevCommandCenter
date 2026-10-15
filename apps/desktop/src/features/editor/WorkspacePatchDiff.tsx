@@ -53,7 +53,7 @@ export default function WorkspacePatchDiff({
 	const { t } = useTranslation("common");
 	const { theme } = useAppearance();
 	const containerRef = useRef<HTMLDivElement>(null);
-	const viewRef = useRef<CodeViewHandle<AnnotationMetadata>>(null);
+	const viewRef = useRef<CodeViewHandle<AnnotationMetadata, undefined>>(null);
 	const resetFrameRef = useRef<number | null>(null);
 	const [selectedLines, setSelectedLines] = useState<{
 		id: string;

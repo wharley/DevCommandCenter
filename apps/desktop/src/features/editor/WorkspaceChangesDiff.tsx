@@ -119,7 +119,7 @@ export default function WorkspaceChangesDiff({
 	className,
 }: WorkspaceChangesDiffProps) {
 	const { theme } = useAppearance();
-	const viewRef = useRef<CodeViewHandle<AnnotationMetadata> | null>(null);
+	const viewRef = useRef<CodeViewHandle<AnnotationMetadata, undefined> | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const selectionButtonRef = useRef<HTMLButtonElement | null>(null);
 	const selectionResetFrameRef = useRef<number | null>(null);

@@ -1,8 +1,19 @@
 import codeReviewControlsCss from "./code-review-controls.css?inline";
 import "./code-review-controls.css";
 import type { SelectedLineRange } from "@pierre/diffs";
-import { Editor, type EditorOptions } from "@pierre/diffs/edit";
-import { EditProvider, File, Virtualizer, useVirtualizer } from "@pierre/diffs/react";
+import {
+	Editor,
+	type EditorChangeEvent,
+	type EditorFactory,
+	type EditorOptions,
+} from "@pierre/diffs/edit";
+import {
+	EditProvider,
+	File,
+	Virtualizer,
+	useVirtualizer,
+	type FileOptions,
+} from "@pierre/diffs/react";
 import { Loader2, MessageSquare, Save, X } from "lucide-react";
 import {
 	forwardRef,
@@ -14,7 +25,6 @@ import {
 	useRef,
 	useState,
 	type RefObject,
-	type ComponentProps,
 	type MutableRefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -126,9 +136,17 @@ export type FileEditorHandle = {
 };
 
 type PierreVirtualizer = ReturnType<typeof useVirtualizer>;
+type FileEditor = Editor<"file", undefined, undefined>;
+type FileEditorOptions = EditorOptions<"file", undefined, undefined>;
 type SelectionActionContext = Parameters<
-	NonNullable<EditorOptions<undefined>["renderSelectionAction"]>
+	NonNullable<FileEditorOptions["renderSelectionAction"]>
 >[0];
+
+const createFileEditor: EditorFactory<undefined, undefined> = (
+	editorType,
+	options,
+	editStateKey,
+) => new Editor(editorType, options, editStateKey);
 
 function triggerAnchor(target: HTMLElement | null): { top: number; left: number } {
 	const rect = target?.getBoundingClientRect();
@@ -142,12 +160,16 @@ function WorkspaceFileRenderer({
 	file,
 	readOnly,
 	options,
+	editorOptions,
+	onEditChange,
 	virtualizerRef,
 	selectedLines,
 }: {
 	file: { name: string; contents: string; cacheKey: string };
 	readOnly: boolean;
-	options: ComponentProps<typeof File>["options"];
+	options: FileOptions<undefined, undefined>;
+	editorOptions: FileEditorOptions;
+	onEditChange: (event: EditorChangeEvent<"file", undefined, undefined>) => void;
 	virtualizerRef: MutableRefObject<PierreVirtualizer>;
 	selectedLines?: SelectedLineRange | null;
 }) {
@@ -163,6 +185,8 @@ function WorkspaceFileRenderer({
 		<File
 			file={file}
 			edit={!readOnly}
+			editorOptions={editorOptions}
+			onEditChange={onEditChange}
 			disableWorkerPool
 			options={options}
 			selectedLines={selectedLines}
@@ -204,7 +228,7 @@ export const WorkspaceFileEditor = forwardRef<
 	const { theme } = useAppearance();
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const virtualizerRef = useRef<PierreVirtualizer>(undefined);
-	const editorRef = useRef<Editor<undefined> | null>(null);
+	const editorRef = useRef<FileEditor | null>(null);
 	const [activeFile, setActiveFile] = useState(() => ({ path, content }));
 	const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null>(null);
 	const valueRef = useRef(content);
@@ -286,34 +310,39 @@ export const WorkspaceFileEditor = forwardRef<
 		[emitAnnotation],
 	);
 
-	if (!editorRef.current) {
-		editorRef.current = new Editor<undefined>({
+	// The File instance creates the editor when editing turns on and drops it
+	// when the session completes; these options are read at creation, later
+	// changes go through setOptions below.
+	const editorOptions = useMemo<FileEditorOptions>(
+		() => ({
 			historyMaxEntries: 32,
-			persistState: false,
 			roundedSelection: true,
 			matchBrackets: true,
-			enabledSelectionAction: Boolean(onAnnotate),
+			enabledSelectionAction: Boolean(onAnnotateRef.current),
 			renderSelectionAction,
 			onAttach: (editor) => {
+				editorRef.current = editor;
 				const target = pendingPositionRef.current;
-				if (target) editor.setState(collapsedEditorState(target.lineNumber, target.column));
+				if (target) {
+					editor.setViewState(collapsedEditorState(target.lineNumber, target.column));
+				}
 			},
-			onChange: (_file, _annotations, _event) => {
-				const editor = editorRef.current;
-				if (!editor) return;
-				valueRef.current = editor.getText();
-				positionRef.current = primaryHandlePosition(editor.getState());
-				onChangeRef.current?.();
+			onComplete: () => {
+				editorRef.current = null;
 			},
-		});
-	}
+		}),
+		[renderSelectionAction],
+	);
 
-	const createEditor = useCallback((options: EditorOptions<undefined>) => {
-		const editor = editorRef.current;
-		if (!editor) throw new Error("Workspace file editor was disposed");
-		editor.setOptions({ ...options, persistState: false, historyMaxEntries: 32 });
-		return editor;
-	}, []);
+	const handleEditChange = useCallback(
+		(event: EditorChangeEvent<"file", undefined, undefined>) => {
+			valueRef.current = event.file.contents;
+			const editor = editorRef.current;
+			if (editor) positionRef.current = primaryHandlePosition(editor.getViewState());
+			onChangeRef.current?.();
+		},
+		[],
+	);
 
 	useImperativeHandle(
 		ref,
@@ -332,7 +361,7 @@ export const WorkspaceFileEditor = forwardRef<
 			getPath: () => pathRef.current,
 			getPosition: () => {
 				if (!readOnly && editorRef.current) {
-					positionRef.current = primaryHandlePosition(editorRef.current.getState());
+					positionRef.current = primaryHandlePosition(editorRef.current.getViewState());
 				}
 				return positionRef.current;
 			},
@@ -385,7 +414,7 @@ export const WorkspaceFileEditor = forwardRef<
 		const frame = requestAnimationFrame(() => {
 			const editor = editorRef.current;
 			if (!editor || editor.getFile()?.name !== activeFile.path) return;
-			editor.setState(collapsedEditorState(target.lineNumber, target.column));
+			editor.setViewState(collapsedEditorState(target.lineNumber, target.column));
 			editor.focus({
 				lineNumber: target.lineNumber,
 				character: target.column - 1,
@@ -403,7 +432,6 @@ export const WorkspaceFileEditor = forwardRef<
 
 	useEffect(
 		() => () => {
-			editorRef.current?.cleanUp();
 			editorRef.current = null;
 			virtualizerRef.current = undefined;
 		},
@@ -418,7 +446,7 @@ export const WorkspaceFileEditor = forwardRef<
 		}),
 		[activeFile, readOnly],
 	);
-	const fileOptions = useMemo<ComponentProps<typeof File>["options"]>(
+	const fileOptions = useMemo<FileOptions<undefined, undefined>>(
 		() => ({
 			disableFileHeader: true,
 			unsafeCSS: codeReviewControlsCss,
@@ -439,7 +467,7 @@ export const WorkspaceFileEditor = forwardRef<
 	);
 	return (
 		<div ref={hostRef} className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
-			<EditProvider createEditor={createEditor}>
+			<EditProvider createEditor={createFileEditor}>
 				<Virtualizer
 					className="h-full min-h-0 min-w-0 flex-1 overflow-auto"
 					contentClassName="min-h-full min-w-full"
@@ -449,6 +477,8 @@ export const WorkspaceFileEditor = forwardRef<
 						file={file}
 						readOnly={readOnly}
 						options={fileOptions}
+						editorOptions={editorOptions}
+						onEditChange={handleEditChange}
 						virtualizerRef={virtualizerRef}
 						selectedLines={readOnly ? selectedLines : null}
 					/>

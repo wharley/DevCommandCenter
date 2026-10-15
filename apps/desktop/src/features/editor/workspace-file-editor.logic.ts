@@ -1,4 +1,4 @@
-import type { EditorState, Position, Range, TextEdit } from "@pierre/diffs";
+import type { EditorViewState, Position, Range, TextEdit } from "@pierre/diffs/edit";
 
 export type FileEditorPosition = { lineNumber: number; column: number };
 
@@ -22,14 +22,14 @@ export function handlePositionToEditor(
 	};
 }
 
-export function primaryHandlePosition(state: EditorState): FileEditorPosition | null {
+export function primaryHandlePosition(state: EditorViewState): FileEditorPosition | null {
 	return editorPositionToHandle(state.selections?.[0]?.end);
 }
 
 export function collapsedEditorState(
 	lineNumber: number,
 	column: number,
-): EditorState {
+): EditorViewState {
 	const position = handlePositionToEditor(lineNumber, column);
 	return {
 		selections: [{ start: position, end: position, direction: 0 }],

@@ -4,9 +4,9 @@ import type { CodeViewProps } from "@pierre/diffs/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WorkspacePatchDiff from "./WorkspacePatchDiff";
 
-let viewProps: CodeViewProps<undefined>;
+let viewProps: CodeViewProps<undefined, undefined>;
 vi.mock("@pierre/diffs/react", () => ({
-	CodeView: (props: CodeViewProps<undefined>) => {
+	CodeView: (props: CodeViewProps<undefined, undefined>) => {
 		viewProps = props;
 		return <div data-testid="code-view" />;
 	},

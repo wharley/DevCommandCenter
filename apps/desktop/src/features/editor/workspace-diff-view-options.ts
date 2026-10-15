@@ -5,7 +5,7 @@ import type { DccTheme } from "@/components/theme-provider";
 export function workspaceDiffViewOptions<TAnnotation = undefined>(
 	theme: DccTheme,
 	inline: boolean,
-): CodeViewReactOptions<TAnnotation> {
+): CodeViewReactOptions<TAnnotation, undefined> {
 	return {
 		disableFileHeader: true,
 		diffStyle: inline ? "unified" : "split",
