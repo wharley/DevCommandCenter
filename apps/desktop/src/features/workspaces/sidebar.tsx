@@ -645,10 +645,18 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		() => new Map(activeGroups.map((group) => [group.sourceKey, group.label])),
 		[activeGroups],
 	);
+	// "Precisa de você" sits above the projects, so a task entering or leaving
+	// it moves every row below. While the pointer is on the sidebar the
+	// section keeps the items it had; the rows still update their own state,
+	// and the section catches up as soon as the pointer leaves.
+	const [frozenAttentionItems, setFrozenAttentionItems] = useState<
+		typeof attentionItems | null
+	>(null);
+	const shownAttentionItems = frozenAttentionItems ?? attentionItems;
 	const visibleAttentionItems = showAllAttentionItems
-		? attentionItems
-		: attentionItems.slice(0, ATTENTION_PREVIEW_LIMIT);
-	const hiddenAttentionItemCount = attentionItems.length - visibleAttentionItems.length;
+		? shownAttentionItems
+		: shownAttentionItems.slice(0, ATTENTION_PREVIEW_LIMIT);
+	const hiddenAttentionItemCount = shownAttentionItems.length - visibleAttentionItems.length;
 
 	useEffect(() => {
 		if (attentionItems.length <= ATTENTION_PREVIEW_LIMIT) {
@@ -1951,7 +1959,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 	return (
 		<>
-			<div className="dcc-project-sidebar flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
+			<div
+				className="dcc-project-sidebar flex h-full min-h-0 flex-col overflow-hidden bg-sidebar"
+				onPointerEnter={() => setFrozenAttentionItems(attentionItems)}
+				onPointerLeave={() => setFrozenAttentionItems(null)}
+			>
 				<div data-slot="window-safe-top" className="flex h-9 shrink-0 items-center px-3">
 					<div
 						data-tauri-drag-region
@@ -2040,9 +2052,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					/>
 				)}
 
-				{attentionItems.length > 0 ? (
+				{shownAttentionItems.length > 0 ? (
 					<section
-						aria-label={t("sidebar.attention.label", { count: attentionItems.length })}
+						aria-label={t("sidebar.attention.label", { count: shownAttentionItems.length })}
 						className="px-2 pb-3"
 					>
 						<div className="mb-1 flex items-center gap-1.5 px-1">
@@ -2050,7 +2062,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 								{t("sidebar.attention.title")}
 							</h2>
 							<span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500/12 px-1 text-[9px] font-semibold tabular-nums text-amber-700 dark:text-amber-300">
-								{attentionItems.length}
+								{shownAttentionItems.length}
 							</span>
 						</div>
 						<div className="dcc-attention-panel space-y-px rounded-lg border border-border/45 bg-foreground/[0.018] p-0.5">
