@@ -3486,6 +3486,9 @@ mod tests {
                     std::fs::write(tree_path.join(file), "x").unwrap();
                 }
                 std::fs::write(tree_path.join("untracked.txt"), "x").unwrap();
+                // Ignored files never reach the phone, new or not.
+                std::fs::write(tree_path.join(".gitignore"), "secret.env\n").unwrap();
+                std::fs::write(tree_path.join("secret.env"), "x").unwrap();
                 let status = std::process::Command::new("git")
                     .args(["add", "README.md", "src"])
                     .current_dir(&tree_path)
@@ -3536,14 +3539,21 @@ mod tests {
             .map(|f| f["path"].as_str().unwrap())
             .collect();
         assert_eq!(paths, ["src/ui/Button.tsx", "src/ui/button.css"]);
+        // A new file not yet committed can be mentioned, as in the file tree.
         let (_, body) = get_json(
             &fixture.app,
             "/api/v1/mobile/workspaces/ws-files/files?q=untracked",
         )
         .await;
+        assert_eq!(body["files"], json!([{ "path": "untracked.txt" }]), "{body}");
+        let (_, body) = get_json(
+            &fixture.app,
+            "/api/v1/mobile/workspaces/ws-files/files?q=secret",
+        )
+        .await;
         assert!(
             body["files"].as_array().unwrap().is_empty(),
-            "only tracked files: {body}"
+            "ignored files stay out: {body}"
         );
         let (_, body) = get_json(
             &fixture.app,
@@ -3551,7 +3561,8 @@ mod tests {
         )
         .await;
         assert_eq!(body["files"].as_array().unwrap().len(), 2);
-        assert_eq!(body["total"], 4);
+        // README, three under src, untracked.txt and .gitignore.
+        assert_eq!(body["total"], 6);
 
         for uri in [
             "/api/v1/mobile/workspaces/missing/files?q=a",
