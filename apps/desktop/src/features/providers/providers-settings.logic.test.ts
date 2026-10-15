@@ -6,14 +6,14 @@ const claude = FALLBACK_PROVIDER_CATALOG.providers.find((provider) => provider.i
 const cursor = FALLBACK_PROVIDER_CATALOG.providers.find((provider) => provider.id === "cursor")!;
 
 describe("provider rail status", () => {
-	it("says off first, then broken, then needing attention", () => {
+	it("says off first, then needing setup however the provider broke", () => {
 		expect(providerRailStatus({ ...claude, enabled: false }, 2)).toEqual({
 			tone: "off",
 			key: "railOff",
 		});
 		expect(
 			providerRailStatus({ ...claude, health: { Unhealthy: { reason: "not signed in" } } }, 0).key,
-		).toBe("railUnavailable");
+		).toBe("railAttention");
 		expect(
 			providerRailStatus({ ...claude, health: { Degraded: { reason: "slow" } } }, 0).key,
 		).toBe("railAttention");

@@ -18,6 +18,7 @@ import {
 } from "@/features/providers/provider-account-strip";
 import { getProviderSetupReason } from "@/features/providers/provider-selection.logic";
 import { localizedProviderSetupReason } from "@/features/providers/provider-setup-message";
+import { modelDescriptionText } from "@/features/providers/catalog-text";
 import { openSettingsSection } from "@/features/settings/settings-navigation";
 import { cn } from "@/lib/utils";
 import { clampEffort, DEFAULT_EFFORT_LEVEL, getEffortDisplay } from "./effort";
@@ -396,7 +397,7 @@ export function ModelPickerPanel({
 									role="option"
 									aria-selected={isActive}
 									aria-disabled={disabled || undefined}
-									title={row.description || undefined}
+									title={row.description ? modelDescriptionText(row.description, t) : undefined}
 									onMouseMove={() => setHighlighted(index)}
 									onClick={() => pick(row)}
 									className={cn(

@@ -2537,8 +2537,7 @@
       "recheck": "Check again",
       "rechecking": "Checking…",
       "railOff": "Off",
-      "railUnavailable": "Unavailable",
-      "railAttention": "Needs attention",
+      "railAttention": "Needs setup",
       "railAccounts_one": "{{count}} account",
       "railAccounts_other": "{{count}} accounts",
       "railReady": "Ready",
@@ -5289,6 +5288,43 @@
     "continueOnHint": "The task moves to that account and continues where it stopped. Later messages stay on it.",
     "accountLeft": "{{percent}}% left",
     "accountExhausted": "no limit left"
+  },
+  "catalogText": {
+    "provider": {
+      "claude_code": "Claude Code for agentic coding and tool use.",
+      "codex": "OpenAI Codex for repo-aware coding workflows.",
+      "cursor": "Cursor Agent CLI with native session resume.",
+      "grok": "Grok Build through the Agent Client Protocol.",
+      "antigravity": "Google's official Antigravity agent, for personal Google accounts.",
+      "gemini": "Legacy Gemini CLI for API keys, Vertex AI, and eligible enterprise accounts. Personal Google sign-in has moved to Antigravity.",
+      "droid": "Factory Droid for workspace coding workflows."
+    },
+    "model": {
+      "claudeFable": "Most capable Claude model for demanding reasoning and long-horizon agentic work.",
+      "claudeOpus": "Everyday and complex tasks with a 1M-token context window.",
+      "efficientSimple": "Most efficient for simpler tasks.",
+      "claudeHaiku": "Fastest and cheapest Claude model for quick follow-ups and subagent work.",
+      "claudeHaikuPrevious": "Previous small model; use it on Claude Code older than 2.1.293.",
+      "frontier": "Frontier intelligence for the most demanding work.",
+      "latestWorkhorse": "Latest workhorse model for coding and everyday work.",
+      "fastAffordable": "Fast and affordable model for easier tasks.",
+      "previousWorkhorse": "Previous generation workhorse model.",
+      "olderWorkhorse": "Older generation workhorse model.",
+      "olderBalanced": "Older balanced model for straightforward work.",
+      "olderFast": "Older fast and efficient model.",
+      "legacyCoding": "Legacy coding model.",
+      "cursorAuto": "Use Cursor's recommended model for this account.",
+      "cursorReported": "Model reported by Cursor Agent CLI for this account.",
+      "grokLatest": "Latest Grok Build model for coding, agentic tasks, and knowledge work through the local ACP CLI.",
+      "antigravityDefault": "Use the default model offered to this Google account.",
+      "antigravityAccount": "Model available to the authenticated Antigravity account.",
+      "geminiLatest": "Latest stable model for long-horizon coding and agentic workflows. CLI availability depends on the account rollout.",
+      "geminiStable": "Stable long-context model with the broadest CLI compatibility.",
+      "droidAuto": "Use Droid's default model selection for this account.",
+      "droidGeminiFast": "Fast Gemini option when available in the local Droid account.",
+      "droidHighCapability": "High capability coding model routed through Droid.",
+      "droidOpenAiLatest": "Latest high-reasoning OpenAI option exposed by Droid."
+    }
   },
   "workingBranch": {
     "detached": "{{branch}} · no branch",

@@ -20,6 +20,7 @@ import {
 	type ProviderRuntimeSettings,
 } from "./provider-runtime-settings";
 import { localizedProviderSetupReason } from "./provider-setup-message";
+import { modelDescriptionText, providerDescriptionText } from "./catalog-text";
 import { providerRailStatus, type ProviderRailStatus } from "./providers-settings.logic";
 
 /** Signing in from a terminal does not tell DCC; this reruns the health checks. */
@@ -44,7 +45,6 @@ export type ProvidersSettingsProps = {
 const STATUS_DOT: Record<ProviderRailStatus["tone"], string> = {
 	ready: "bg-emerald-500",
 	attention: "bg-amber-500",
-	unavailable: "bg-destructive",
 	off: "bg-muted-foreground/35",
 };
 
@@ -115,7 +115,7 @@ function ModelList({
 								</span>
 								{model.description ? (
 									<span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-										{model.description}
+										{modelDescriptionText(model.description, t)}
 									</span>
 								) : null}
 							</span>
@@ -145,9 +145,9 @@ function ProviderDetail({
 	const healthProblem =
 		health && typeof health === "object"
 			? "Unhealthy" in health
-				? { tone: "unavailable" as const, reason: health.Unhealthy?.reason }
+				? { reason: health.Unhealthy?.reason }
 				: "Degraded" in health
-					? { tone: "attention" as const, reason: health.Degraded?.reason }
+					? { reason: health.Degraded?.reason }
 					: null
 			: null;
 	const customizedRuntime = Boolean(
@@ -174,17 +174,10 @@ function ProviderDetail({
 						)}
 					</div>
 					<p className="mt-1 max-w-[60ch] text-[12px] leading-relaxed text-muted-foreground">
-						{provider.description}
+						{providerDescriptionText(provider, t)}
 					</p>
 					{enabled && healthProblem?.reason ? (
-						<p
-							className={cn(
-								"mt-2 max-w-[60ch] text-[12px] leading-relaxed",
-								healthProblem.tone === "unavailable"
-									? "text-destructive"
-									: "text-amber-600 dark:text-amber-400",
-							)}
-						>
+						<p className="mt-2 max-w-[60ch] text-[12px] leading-relaxed text-amber-600 dark:text-amber-400">
 							{localizedProviderSetupReason(healthProblem.reason, t) ?? healthProblem.reason}{" "}
 							<button
 								type="button"

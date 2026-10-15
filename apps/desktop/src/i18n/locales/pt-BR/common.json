@@ -2537,8 +2537,7 @@
       "recheck": "Verificar de novo",
       "rechecking": "Verificando…",
       "railOff": "Desligado",
-      "railUnavailable": "Indisponível",
-      "railAttention": "Precisa de atenção",
+      "railAttention": "Precisa de configuração",
       "railAccounts_one": "{{count}} conta",
       "railAccounts_other": "{{count}} contas",
       "railReady": "Pronto",
@@ -5289,6 +5288,43 @@
     "continueOnHint": "A tarefa passa para essa conta e continua de onde parou. As próximas mensagens seguem nela.",
     "accountLeft": "{{percent}}% livre",
     "accountExhausted": "sem limite agora"
+  },
+  "catalogText": {
+    "provider": {
+      "claude_code": "Claude Code para programar com agentes e ferramentas.",
+      "codex": "OpenAI Codex para fluxos de código que conhecem o repositório.",
+      "cursor": "Cursor Agent CLI, com retomada de sessão nativa.",
+      "grok": "Grok Build pelo Agent Client Protocol.",
+      "antigravity": "Agente oficial Antigravity do Google, para contas Google pessoais.",
+      "gemini": "Gemini CLI legado, para API key, Vertex AI e contas empresariais elegíveis. O login pessoal do Google passou para o Antigravity.",
+      "droid": "Factory Droid para fluxos de código no workspace."
+    },
+    "model": {
+      "claudeFable": "O Claude mais capaz, para raciocínio exigente e trabalho longo com agentes.",
+      "claudeOpus": "Tarefas do dia a dia e complexas, com janela de contexto de 1M tokens.",
+      "efficientSimple": "O mais eficiente para tarefas simples.",
+      "claudeHaiku": "O Claude mais rápido e barato, para ajustes rápidos e subagentes.",
+      "claudeHaikuPrevious": "Modelo pequeno anterior; use no Claude Code anterior à 2.1.293.",
+      "frontier": "Inteligência de fronteira para o trabalho mais exigente.",
+      "latestWorkhorse": "Modelo mais recente para código e trabalho do dia a dia.",
+      "fastAffordable": "Rápido e barato, para tarefas mais fáceis.",
+      "previousWorkhorse": "Modelo de uso geral da geração anterior.",
+      "olderWorkhorse": "Modelo de uso geral de uma geração mais antiga.",
+      "olderBalanced": "Modelo equilibrado mais antigo, para trabalho direto.",
+      "olderFast": "Modelo rápido e eficiente mais antigo.",
+      "legacyCoding": "Modelo de código legado.",
+      "cursorAuto": "Usa o modelo recomendado pelo Cursor para esta conta.",
+      "cursorReported": "Modelo informado pelo Cursor Agent CLI para esta conta.",
+      "grokLatest": "Modelo mais recente do Grok Build, para código, agentes e conhecimento geral, pelo CLI ACP local.",
+      "antigravityDefault": "Usa o modelo padrão oferecido a esta conta Google.",
+      "antigravityAccount": "Modelo disponível para a conta Antigravity conectada.",
+      "geminiLatest": "Modelo estável mais recente para código longo e fluxos com agentes. A disponibilidade no CLI depende da liberação para a conta.",
+      "geminiStable": "Modelo estável de contexto longo, com a maior compatibilidade no CLI.",
+      "droidAuto": "Usa a escolha de modelo padrão do Droid para esta conta.",
+      "droidGeminiFast": "Opção Gemini rápida, quando disponível na conta Droid local.",
+      "droidHighCapability": "Modelo de código de alta capacidade, roteado pelo Droid.",
+      "droidOpenAiLatest": "Opção OpenAI mais recente com raciocínio alto, exposta pelo Droid."
+    }
   },
   "workingBranch": {
     "detached": "{{branch}} · sem branch",
