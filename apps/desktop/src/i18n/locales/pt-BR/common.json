@@ -150,6 +150,9 @@
       "reviewChanges": "Revisar mudanças",
       "working": "{{agent}} está trabalhando nisso…",
       "agentFallback": "agente",
+      "waitingBadge": "Aguardando você",
+      "waitingOnYou": "{{agent}} parou esperando sua autorização ou resposta.",
+      "openToAnswer": "Abrir para responder",
       "showReport": "Ver relatório completo",
       "hideReport": "Recolher relatório",
       "verified": "Conferido nesta conversa",
@@ -389,6 +392,7 @@
   "sidebar": {
     "childTask": {
       "proposed": "proposta",
+      "waiting": "aguardando",
       "review": "revisar",
       "open": "aberta"
     },

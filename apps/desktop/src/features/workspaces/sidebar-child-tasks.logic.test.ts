@@ -1,6 +1,6 @@
 import type { Delegation } from "@dcc/contracts";
 import { describe, expect, it } from "vitest";
-import { childTasksByWorkspace } from "./sidebar-child-tasks.logic";
+import { childTasksByWorkspace, withWaitingTasks } from "./sidebar-child-tasks.logic";
 
 function delegation(overrides: Partial<Delegation>): Delegation {
 	return {
@@ -52,5 +52,20 @@ describe("childTasksByWorkspace", () => {
 			delegation({ id: "broke", status: "failed" }),
 		]);
 		expect(tasks.size).toBe(0);
+	});
+
+	it("marks an open task whose conversation waits on the person", () => {
+		const tasks = childTasksByWorkspace([
+			delegation({ id: "t1", title: "Fase 1", childSessionId: "c1" }),
+			delegation({ id: "t2", title: "Fase 2", childSessionId: "c2" }),
+			delegation({ id: "t3", title: "Fase 3", status: "draft", childSessionId: null }),
+		]).get("w1")!;
+		expect(withWaitingTasks(tasks, ["c2", "parent"]).map((task) => task.state)).toEqual([
+			"open",
+			"waiting",
+			// A proposal opens the parent; the parent waiting does not make it a blocked task.
+			"proposed",
+		]);
+		expect(withWaitingTasks(tasks, undefined)).toEqual(tasks);
 	});
 });

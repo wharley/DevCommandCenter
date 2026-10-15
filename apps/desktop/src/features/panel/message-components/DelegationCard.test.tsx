@@ -222,4 +222,22 @@ describe("DelegationCard", () => {
 		expect(container.textContent).toContain("delegation.task.close");
 		expect(container.textContent).not.toContain("delegation.task.reviewAndApply");
 	});
+
+	it("says when the child stopped for the person and leads to it", async () => {
+		const onSelectSession = vi.fn();
+		await render(record({ kind: "task", status: "running", title: "Fase 2" }), {
+			childBusy: true,
+			childWaiting: true,
+			onSelectSession,
+		});
+		expect(container.textContent).toContain("delegation.card.waitingBadge");
+		expect(container.textContent).toContain("delegation.card.waitingOnYou");
+		expect(container.textContent).not.toContain("delegation.card.working");
+		expect(container.querySelector('[data-agent][data-state="working"]')).toBeNull();
+		const open = [...container.querySelectorAll("button")].find(
+			(item) => item.textContent === "delegation.card.openToAnswer",
+		);
+		await act(async () => open?.click());
+		expect(onSelectSession).toHaveBeenCalledWith("child");
+	});
 });

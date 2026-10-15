@@ -141,7 +141,7 @@ import { ProjectIdentityGlyph } from "./project-identity";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 import { repositoryDisplayName } from "./repository-display-name";
 import { SidebarChildTaskRow } from "./sidebar-child-task-row";
-import type { ChildTaskEntry } from "./sidebar-child-tasks.logic";
+import { withWaitingTasks, type ChildTaskEntry } from "./sidebar-child-tasks.logic";
 import { useChildTasksByWorkspace } from "./use-child-tasks";
 import {
 	formatDiskBytes,
@@ -343,6 +343,8 @@ type WorkspacesSidebarProps = {
 	onSelectWorkspace: (workspaceId: string) => void;
 	/** Opens one conversation of a workspace: a child task's, or its parent's. */
 	onSelectSession?: (workspaceId: string, sessionId: string) => void;
+	/** The conversation on screen, so its task row reads as the current one. */
+	selectedSessionId?: string | null;
 	onNewTask: () => void;
 	newTaskActive?: boolean;
 	onCreateWorkspace: () => void;
@@ -431,6 +433,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	sessionQueryScope = "local",
 	onSelectWorkspace: selectWorkspace,
 	onSelectSession,
+	selectedSessionId = null,
 	onNewTask,
 	newTaskActive = false,
 	onCreateWorkspace,
@@ -927,7 +930,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
 		const pushChildTasks = (list: VirtualItem[], groupId: string, workspaceId: string) => {
-			const tasks = childTasks.get(workspaceId) ?? [];
+			const tasks = withWaitingTasks(
+				childTasks.get(workspaceId) ?? [],
+				workspaceAgentActivities[workspaceId]?.waitingSessionIds,
+			);
 			tasks.forEach((task, index) => {
 				list.push({ kind: "child-task", groupId, workspaceId, task, last: index === tasks.length - 1 });
 			});
@@ -1073,7 +1079,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		items.push({ kind: "bottom-padding" });
 		return items;
-	}, [childTasks, completedRows, idleGroups, railGroups, sectionOpenState, t, waitingRows]);
+	}, [
+		childTasks,
+		completedRows,
+		idleGroups,
+		railGroups,
+		sectionOpenState,
+		t,
+		waitingRows,
+		workspaceAgentActivities,
+	]);
 
 	const virtualizer = useVirtualizer({
 		count: flatItems.length,
@@ -1252,6 +1267,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					<SidebarChildTaskRow
 						task={item.task}
 						last={item.last}
+						selected={
+							selectedWorkspaceId === item.workspaceId &&
+							selectedSessionId === item.task.sessionId &&
+							item.task.state !== "proposed"
+						}
 						onSelect={
 							onSelectSession
 								? () => onSelectSession(item.workspaceId, item.task.sessionId)
@@ -1682,6 +1702,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			onSelectSession,
 			onSelectWorkspace,
 			openProjectRemovalDialog,
+			selectedSessionId,
 			openWorkspaceDeletionDialog,
 			repositoriesBySourceKey,
 			sectionOpenState,
@@ -2101,7 +2122,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 													label: title,
 													reason: reasonLabel,
 												})}
-												onClick={() => onSelectWorkspace(workspace.id)}
+												onClick={() => {
+													// Open the conversation that waits, which may be a
+													// task's child rather than the one last on screen.
+													const waitingSessionId = activity?.waitingSessionIds?.[0];
+													if (waitingSessionId && onSelectSession) {
+														onSelectSession(workspace.id, waitingSessionId);
+														return;
+													}
+													onSelectWorkspace(workspace.id);
+												}}
 												className={cn(
 													"flex h-11 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left transition-colors",
 													selected

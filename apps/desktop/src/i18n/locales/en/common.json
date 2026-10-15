@@ -150,6 +150,9 @@
       "reviewChanges": "Review changes",
       "working": "{{agent}} is working on it…",
       "agentFallback": "the agent",
+      "waitingBadge": "Needs you",
+      "waitingOnYou": "{{agent}} stopped for your approval or answer.",
+      "openToAnswer": "Open to answer",
       "showReport": "Show full report",
       "hideReport": "Collapse report",
       "verified": "Checked in this conversation",
@@ -389,6 +392,7 @@
   "sidebar": {
     "childTask": {
       "proposed": "proposed",
+      "waiting": "needs you",
       "review": "review",
       "open": "open"
     },

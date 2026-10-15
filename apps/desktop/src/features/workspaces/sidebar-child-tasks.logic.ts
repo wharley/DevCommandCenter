@@ -1,7 +1,7 @@
 import type { Delegation } from "@dcc/contracts";
 
 /** What a child task row says about where the task stands. */
-export type ChildTaskState = "proposed" | "open" | "review";
+export type ChildTaskState = "proposed" | "open" | "waiting" | "review";
 
 export type ChildTaskEntry = {
 	id: string;
@@ -40,4 +40,17 @@ export function childTasksByWorkspace(delegations: readonly Delegation[]): Map<s
 		else byWorkspace.set(delegation.workspaceId, [entry]);
 	}
 	return byWorkspace;
+}
+
+/** An open task whose conversation is blocked on the person says so. */
+export function withWaitingTasks(
+	tasks: readonly ChildTaskEntry[],
+	waitingSessionIds: readonly string[] | undefined,
+): ChildTaskEntry[] {
+	if (!waitingSessionIds?.length) return [...tasks];
+	return tasks.map((task) =>
+		task.state === "open" && waitingSessionIds.includes(task.sessionId)
+			? { ...task, state: "waiting" }
+			: task,
+	);
 }

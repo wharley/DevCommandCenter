@@ -57,6 +57,7 @@ export function DelegationCard({
 	verification,
 	onReviewDelegationFile,
 	childBusy,
+	childWaiting = false,
 }: {
 	delegation: WorkspaceMessageDelegation;
 	fallbackContent: string;
@@ -84,6 +85,8 @@ export function DelegationCard({
 	onReviewDelegationFile?: (delegationId: string, path: string) => void;
 	/** The child conversation has a turn in progress; an open task between turns does not. */
 	childBusy?: boolean;
+	/** The child is stopped on an approval or a question only the person can answer. */
+	childWaiting?: boolean;
 }) {
 	const { t } = useTranslation("common");
 	const [isRerunning, setIsRerunning] = useState(false);
@@ -123,11 +126,14 @@ export function DelegationCard({
 	}
 	// An open task between turns waits for the person, it is not working.
 	const taskIdle = record?.kind === "task" && status === "running" && childBusy === false;
-	const statusLabel = taskIdle
-		? t("delegation.task.open")
-		: t(`inspector.delegations.status.${status}`, {
-				defaultValue: status,
-			});
+	const waitingOnPerson = childWaiting && (status === "running" || status === "queued");
+	const statusLabel = waitingOnPerson
+		? t("delegation.card.waitingBadge")
+		: taskIdle
+			? t("delegation.task.open")
+			: t(`inspector.delegations.status.${status}`, {
+					defaultValue: status,
+				});
 	const decisions = record ? describeDelegation(record, providers) : null;
 	// What ran, in one muted line; how (context, permission) only on hover.
 	const agentLabel = decisions ? (decisions.modelLabel ?? decisions.providerLabel) : null;
@@ -237,7 +243,7 @@ export function DelegationCard({
 					<AgentMascot
 						provider={record?.targetProviderId ?? null}
 						model={record?.targetModelId ?? null}
-						state={isRunning ? "working" : "idle"}
+						state={isRunning && !waitingOnPerson ? "working" : "idle"}
 						className="mt-0.5"
 					/>
 					<div className="min-w-0 flex-1">
@@ -259,10 +265,12 @@ export function DelegationCard({
 						variant="outline"
 						className={cn(
 							"mt-0.5 h-5 shrink-0 px-1.5 text-[10px] font-medium",
-							delegationStatusClass(status),
+							waitingOnPerson
+								? "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+								: delegationStatusClass(status),
 						)}
 					>
-						{status === "running" && !taskIdle ? (
+						{status === "running" && !taskIdle && !waitingOnPerson ? (
 							<span
 								aria-hidden
 								className="mr-1 inline-block size-1.5 animate-pulse rounded-full bg-current"
@@ -272,7 +280,13 @@ export function DelegationCard({
 					</Badge>
 				</div>
 
-				{isRunning ? (
+				{waitingOnPerson ? (
+					<p className="mt-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
+						{t("delegation.card.waitingOnYou", {
+							agent: agentLabel ?? t("delegation.card.agentFallback"),
+						})}
+					</p>
+				) : isRunning ? (
 					<p className="mt-2 text-[12px] leading-5 text-muted-foreground">
 						{t("delegation.card.working", {
 							agent: agentLabel ?? t("delegation.card.agentFallback"),
@@ -409,14 +423,16 @@ export function DelegationCard({
 					{childSessionId ? (
 						<Button
 							type="button"
-							variant="ghost"
+							variant={waitingOnPerson ? "default" : "ghost"}
 							size="sm"
-							className="h-7 px-2 text-[11.5px] text-muted-foreground"
+							className={cn("h-7 px-2 text-[11.5px]", !waitingOnPerson && "text-muted-foreground")}
 							onClick={() => onSelectSession(childSessionId)}
 						>
-							{t("delegation.card.openChild", {
-								agent: agentLabel ?? t("delegation.card.agentFallback"),
-							})}
+							{waitingOnPerson
+								? t("delegation.card.openToAnswer")
+								: t("delegation.card.openChild", {
+										agent: agentLabel ?? t("delegation.card.agentFallback"),
+									})}
 						</Button>
 					) : null}
 					{canSendResult ? (

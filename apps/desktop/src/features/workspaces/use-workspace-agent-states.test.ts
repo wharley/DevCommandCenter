@@ -113,6 +113,8 @@ describe("deriveAgentStateFromSessions", () => {
 			completedAt: null,
 			waitingFor: "permission",
 			waitingSince: "2026-09-30T09:40:00.000Z",
+			// The blocked one, so "Needs you" can open it and not the busy one.
+			waitingSessionIds: ["session-blocked"],
 		});
 		expect(
 			deriveAgentActivityFromSessions([

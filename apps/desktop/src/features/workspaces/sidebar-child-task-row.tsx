@@ -11,9 +11,12 @@ import type { ChildTaskEntry } from "./sidebar-child-tasks.logic";
 export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 	task,
 	last = false,
+	selected = false,
 	onSelect,
 }: {
 	task: ChildTaskEntry;
+	/** Its conversation is the one on screen. */
+	selected?: boolean;
 	/** The last task of its workspace: the guide line stops at its row. */
 	last?: boolean;
 	onSelect?: () => void;
@@ -25,10 +28,14 @@ export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 			type="button"
 			data-child-task={task.id}
 			data-state={task.state}
+			aria-current={selected ? "location" : undefined}
 			disabled={!onSelect}
 			onClick={onSelect}
 			title={task.title}
-			className="group/dccChildTask relative flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-9 pr-3 text-left text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-default"
+			className={cn(
+				"group/dccChildTask relative flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-9 pr-3 text-left transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-default",
+				selected ? "bg-accent text-foreground" : "text-muted-foreground",
+			)}
 		>
 			{/* The guide from the workspace row down through its tasks, with a tick to each. */}
 			<span
@@ -42,7 +49,8 @@ export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 				className={cn(
 					"size-1.5 shrink-0 rounded-full",
 					task.state === "open" && "bg-emerald-500/80",
-					task.state === "review" && "bg-amber-500",
+					(task.state === "review" || task.state === "waiting") && "bg-amber-500",
+					task.state === "waiting" && "animate-pulse",
 					task.state === "proposed" && "border border-amber-500 bg-transparent",
 				)}
 			/>

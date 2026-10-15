@@ -959,6 +959,16 @@ export default function App() {
 		staleTime: 5_000,
 		refetchInterval: 10_000,
 	});
+	// A delegated or task child's conversation, and the one that started it.
+	const parentSessionByChild = useMemo(() => {
+		const parents = new Map<string, string>();
+		for (const delegation of delegationsQuery.data ?? []) {
+			if (delegation.childSessionId) {
+				parents.set(delegation.childSessionId, delegation.parentSessionId);
+			}
+		}
+		return parents;
+	}, [delegationsQuery.data]);
 	const pendingImplementationDelegationChildSessionIds = useMemo(() => {
 		const ids = new Set<string>();
 		for (const delegation of delegationsQuery.data ?? []) {
@@ -1659,13 +1669,19 @@ export default function App() {
 		() => visibleSessions(workspaceSessions),
 		[workspaceSessions],
 	);
+	// Opening a workspace lands on its own conversation, not on a child that
+	// is newer only because it is the one working.
 	const effectiveSelectedSessionId =
 		selectedSessionId &&
 		visibleWorkspaceSessions.some(
 			(summary) => summary.session.id === selectedSessionId,
 		)
 			? selectedSessionId
-			: (visibleWorkspaceSessions[0]?.session.id ?? null);
+			: ((
+					visibleWorkspaceSessions.find(
+						(summary) => !parentSessionByChild.has(summary.session.id),
+					) ?? visibleWorkspaceSessions[0]
+				)?.session.id ?? null);
 	const providerAccountsQuery = useQuery({
 		queryKey: PROVIDER_ACCOUNTS_QUERY_KEY,
 		queryFn: listProviderAccounts,
@@ -4187,6 +4203,23 @@ export default function App() {
 		setIsQuickOpenOpen(true);
 	}, []);
 
+	/** The sidebar's workspace row: from inside a child, back to its parent. */
+	const handleSelectWorkspaceFromSidebar = useCallback(
+		(workspaceId: string) => {
+			const parentSessionId =
+				selectedWorkspace?.id === workspaceId && effectiveSelectedSessionId
+					? parentSessionByChild.get(effectiveSelectedSessionId)
+					: undefined;
+			if (parentSessionId) {
+				setGlobalSurface(null);
+				setSelectedSessionId(parentSessionId);
+				return;
+			}
+			handleSelectWorkspaceSurface(workspaceId);
+		},
+		[effectiveSelectedSessionId, handleSelectWorkspaceSurface, parentSessionByChild, selectedWorkspace?.id],
+	);
+
 	/** The sidebar's nested task rows: open one conversation of a workspace. */
 	const handleSelectWorkspaceSession = useCallback(
 		(workspaceId: string, sessionId: string) => {
@@ -5450,8 +5483,9 @@ export default function App() {
 							showAgentStates={!isRemoteBackend}
 							showCompletedDiskUsage={!isRemoteBackend}
 							sessionQueryScope={backendCacheKey}
-							onSelectWorkspace={handleSelectWorkspaceSurface}
+							onSelectWorkspace={handleSelectWorkspaceFromSidebar}
 							onSelectSession={handleSelectWorkspaceSession}
+							selectedSessionId={effectiveSelectedSessionId}
 							onNewTask={() => {
 								if (isRemoteBackend) {
 									showRemoteUnsupported("workspaces");

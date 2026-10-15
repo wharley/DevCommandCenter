@@ -30,6 +30,11 @@ export type WorkspaceAgentActivity = {
 	lastInteractionAt?: string | null;
 	/** `limited`: the limit that stopped the latest turn. */
 	usageLimit?: SessionUsageLimit | null;
+	/**
+	 * `waiting`: the conversations blocked on the person, the one shown first.
+	 * A task's child can wait while its parent is the conversation on screen.
+	 */
+	waitingSessionIds?: string[];
 };
 
 /** The turn has not finished yet, whether the agent is working or waiting. */
@@ -260,6 +265,12 @@ export function deriveAgentActivityFromSessions(
 					completedAt: null,
 					waitingFor: reason,
 					waitingSince: running.lastTurnAwaitingSince ?? null,
+					waitingSessionIds: [
+						running.session.id,
+						...runningSessions
+							.filter((summary) => summary !== running && waitingReason(summary))
+							.map((summary) => summary.session.id),
+					],
 				}
 			: { state: "active", startedAt, completedAt: null };
 	}

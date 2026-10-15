@@ -630,6 +630,20 @@ export function ActiveThreadViewport({
 			),
 		[sessions],
 	);
+	// A child blocked on an approval or a question: the parent's card says so.
+	const waitingSessionIds = useMemo(
+		() =>
+			new Set(
+				(sessions ?? [])
+					.filter(
+						(summary) =>
+							summary.lastTurnAwaitingUser === "permission" ||
+							summary.lastTurnAwaitingUser === "input",
+					)
+					.map((summary) => summary.session.id),
+			),
+		[sessions],
+	);
 	// Once a conversation is on screen it stays mounted: routing a model,
 	// choosing one or a rehydrate show below the last turn instead of
 	// replacing (and later remounting) the whole timeline. Only the first
@@ -1067,6 +1081,11 @@ export function ActiveThreadViewport({
 													message.delegation.childSessionId
 														? busySessionIds.has(message.delegation.childSessionId)
 														: undefined
+												}
+												childWaiting={
+													message.delegation.childSessionId
+														? waitingSessionIds.has(message.delegation.childSessionId)
+														: false
 												}
 											/>
 										</div>
