@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Download, LoaderCircle, LogIn, RefreshCcw } from "lucide-react";
+import {
+	AlertTriangle,
+	CheckCircle2,
+	Download,
+	LoaderCircle,
+	LogIn,
+	RefreshCcw,
+} from "lucide-react";
 import type { ProviderCatalog } from "@dcc/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +54,10 @@ export function AntigravitySetup({
 		staleTime: 30_000,
 	});
 	const status = statusQuery.data;
+	// A path set in Advanced replaces the managed runtime, so the badge speaks
+	// of the file in use: green only when it can actually run.
+	const customPath = draft.binaryPath.trim();
+	const customReady = provider.health == null || provider.health === "Healthy";
 
 	async function refreshAfter(action: () => Promise<string>, failure: string) {
 		try {
@@ -66,9 +77,24 @@ export function AntigravitySetup({
 			<p className="text-[12px] leading-relaxed text-muted-foreground">
 				{t("settings.model.antigravitySetupHint")}
 			</p>
-			{status && (status.managedRuntimeInstalled || status.signedIn) ? (
+			{customPath || (status && (status.managedRuntimeInstalled || status.signedIn)) ? (
 				<div className="flex flex-wrap gap-1.5">
-					{status.managedRuntimeInstalled ? (
+					{customPath ? (
+						<Badge
+							variant={customReady ? "success" : "warn"}
+							className="gap-1 text-[10px]"
+							title={customPath}
+						>
+							{customReady ? (
+								<CheckCircle2 className="size-3" aria-hidden />
+							) : (
+								<AlertTriangle className="size-3" aria-hidden />
+							)}
+							{customReady
+								? t("settings.model.antigravityCustomRuntime")
+								: t("settings.model.antigravityCustomRuntimeBroken")}
+						</Badge>
+					) : status?.managedRuntimeInstalled ? (
 						<Badge variant="success" className="gap-1 text-[10px]">
 							<CheckCircle2 className="size-3" aria-hidden />
 							{t("settings.model.antigravityRuntimeInstalled", {
@@ -76,7 +102,7 @@ export function AntigravitySetup({
 							})}
 						</Badge>
 					) : null}
-					{status.signedIn ? (
+					{status?.signedIn ? (
 						<Badge variant="success" className="gap-1 text-[10px]">
 							<CheckCircle2 className="size-3" aria-hidden />
 							{t("settings.model.antigravitySignedIn", {

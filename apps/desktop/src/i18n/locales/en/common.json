@@ -2101,6 +2101,8 @@
       "createRequest": {
         "title": "Create {{requestLabel}}",
         "route": "{{head}} → {{base}}",
+        "destination": "To {{destination}}",
+        "destinationAs": "To {{destination}} as {{login}}",
         "titleLabel": "Title",
         "descriptionLabel": "Description (optional)",
         "descriptionPlaceholder": "Add context for reviewers…",
@@ -2512,6 +2514,8 @@
       "antigravityInstall": "Install official runtime",
       "antigravityInstalling": "Installing…",
       "antigravityInstalled": "Runtime installed",
+      "antigravityCustomRuntime": "Using the configured executable",
+      "antigravityCustomRuntimeBroken": "The configured executable cannot run",
       "antigravityRuntimeInstalled": "Runtime installed · {{version}}",
       "antigravityConnect": "Sign in with Google",
       "antigravitySignedIn": "Google account connected · {{count}} saved models",

@@ -1054,6 +1054,16 @@ export function WorkspacePanel({
 	const forgeContext = forgeContextQuery.data ?? null;
 	const forgeLogin = forgeContext?.effectiveLogin ?? null;
 	const forgeRequestLabel: "PR" | "MR" = forgeContext?.provider === "gitlab" ? "MR" : "PR";
+	// A pull request needs a forge remote the CLI can reach; a plain git
+	// remote (a directory, a self-hosted server) has nowhere to open one.
+	const forgeReady =
+		forgeContextQuery.isSuccess &&
+		forgeContext?.status === "ready" &&
+		forgeContext?.remoteState === "ok";
+	const forgeDestination =
+		forgeContext?.namespace && forgeContext?.repo
+			? [forgeContext.host, forgeContext.namespace, forgeContext.repo].filter(Boolean).join("/")
+			: null;
 	const pullRequestQuery = useWorkspacePrStatus(workspacePath, currentBranch, forgeLogin);
 	const [syncBaseConfirmationOpen, setSyncBaseConfirmationOpen] = useState(false);
 	const [mergeConfirmationOpen, setMergeConfirmationOpen] = useState(false);
@@ -2077,6 +2087,14 @@ export function WorkspacePanel({
 				localAdditions={gitChangeSummary?.additions ?? 0}
 				localDeletions={gitChangeSummary?.deletions ?? 0}
 				loading={delivery.busy}
+				destination={forgeDestination}
+				destinationLogin={forgeLogin}
+				submitDisabled={!forgeReady}
+				errorMessage={
+					forgeContextQuery.isSuccess && !forgeReady
+						? t("turnReview.delivery.connectForge", { requestLabel: dialogRequestLabel })
+						: null
+				}
 				initialDraft={createRequestDraft === true}
 				onSubmit={async (input) => {
 					const request: WorkspaceDeliveryCreateRequestInput = {

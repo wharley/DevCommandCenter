@@ -32,6 +32,10 @@ type CreateChangeRequestDialogProps = {
 	loading?: boolean;
 	allowIncludeLocalChanges?: boolean;
 	scopeDescription?: string;
+	/** Where the request will be opened, e.g. github.com/owner/repo. */
+	destination?: string | null;
+	/** The account that opens it, when the forge says. */
+	destinationLogin?: string | null;
 	submitDisabled?: boolean;
 	errorMessage?: string | null;
 	initialDraft?: boolean;
@@ -51,6 +55,8 @@ export function CreateChangeRequestDialog({
 	loading = false,
 	allowIncludeLocalChanges = true,
 	scopeDescription,
+	destination = null,
+	destinationLogin = null,
 	submitDisabled = false,
 	errorMessage,
 	initialDraft = false,
@@ -99,6 +105,18 @@ export function CreateChangeRequestDialog({
 								head: headBranch ?? "HEAD",
 								base: baseBranch ?? "main",
 							})}
+							{destination ? (
+								<span className="mt-1 block font-mono text-[11px] text-foreground/80">
+									{destinationLogin
+										? t("composer.executionDock.createRequest.destinationAs", {
+												destination,
+												login: destinationLogin,
+											})
+										: t("composer.executionDock.createRequest.destination", {
+												destination,
+											})}
+								</span>
+							) : null}
 						</DialogDescription>
 					</DialogHeader>
 
