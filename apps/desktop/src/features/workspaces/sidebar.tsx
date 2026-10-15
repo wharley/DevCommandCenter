@@ -497,8 +497,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		enabled: showAgentStates,
 		scope: sessionQueryScope,
 	});
-	const runningActivities = useMemo(
-		() => runningWorkspaceActivities(workspaces, workspaceAgentActivities),
+	// The header counts only agents at work; one waiting on the person is
+	// already under "Precisa de você" and is not running.
+	const workingCount = useMemo(
+		() =>
+			runningWorkspaceActivities(workspaces, workspaceAgentActivities).filter(
+				({ activity }) => activity.state === "active",
+			).length,
 		[workspaceAgentActivities, workspaces],
 	);
 	const seenResults = useSeenWorkspaceResults();
@@ -2186,13 +2191,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 						<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
 							{t("sidebar.title")}
 						</h2>
-						{runningActivities.length > 0 ? (
+						{workingCount > 0 ? (
 							<span
 								className="inline-flex items-center gap-1 text-[10.5px] font-medium tabular-nums text-emerald-700 dark:text-emerald-300/90"
-								title={t("sidebar.runningTasks", { count: runningActivities.length })}
+								title={t("sidebar.runningTasks", { count: workingCount })}
 							>
 								<span aria-hidden className="size-[6px] animate-pulse rounded-full bg-emerald-500" />
-								{t("sidebar.runningCount", { count: runningActivities.length })}
+								{t("sidebar.runningCount", { count: workingCount })}
 							</span>
 						) : null}
 					</div>
