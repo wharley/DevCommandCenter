@@ -43,20 +43,24 @@ import {
 	workspaceGitStatus,
 	workspaceGitUnstageFile,
 } from "@/lib/workspace-api";
+import { workingBranchLabel } from "@/features/workspaces/working-branch";
 import { TurnReviewStats } from "./turn-review-file-label";
 
 /**
  * Live index review; it never uses the historical patch. When nothing is
  * staged yet it stages every change on open, like the Dock's commit does, so
  * the commit is one click with the deterministic message filled in. Anything
- * the person already staged by hand is left exactly as it is.
+ * the person already staged by hand is left exactly as it is, and closing
+ * without committing unstages only what opening staged.
  */
 export function TurnReviewCommitDialog({
 	workspaceRoot,
+	baseBranch = null,
 	onClose,
 	onCommitted,
 }: {
 	workspaceRoot: string;
+	baseBranch?: string | null;
 	onClose: () => void;
 	onCommitted: () => Promise<void>;
 }) {
@@ -74,6 +78,7 @@ export function TurnReviewCommitDialog({
 	const locked = useRef(false);
 	const alive = useRef(true);
 	const messageEdited = useRef(false);
+	const autoStaged = useRef<string[]>([]);
 	const deliveryBusy = useWorkspaceDeliveryBusy(workspaceRoot);
 	const busy = pending || deliveryBusy;
 
@@ -115,6 +120,7 @@ export function TurnReviewCommitDialog({
 				!isWorkspaceDeliveryBusy(workspaceRoot)
 			) {
 				await workspaceGitStageAll({ workspaceRoot, relativePath: "." });
+				autoStaged.current = status.unstaged.map((file) => file.path);
 			}
 			await refresh();
 		};
@@ -173,6 +179,26 @@ export function TurnReviewCommitDialog({
 		});
 	}
 
+	// Leaves the index as the person found it: only paths this dialog staged on
+	// open, and only those still staged, go back.
+	function closeWithoutCommit() {
+		const staged = new Set(snapshot?.staged.map((file) => file.path) ?? []);
+		const restore = autoStaged.current.filter((path) => staged.has(path));
+		autoStaged.current = [];
+		if (restore.length === 0) {
+			onClose();
+			return;
+		}
+		void perform(async () => {
+			for (const relativePath of restore) {
+				await workspaceGitUnstageFile({ workspaceRoot, relativePath });
+			}
+			await queryClient.invalidateQueries({
+				queryKey: ["workspaceGitStatus", workspaceRoot],
+			});
+		}).finally(onClose);
+	}
+
 	const canCommit =
 		snapshot &&
 		snapshot.staged.length > 0 &&
@@ -184,7 +210,7 @@ export function TurnReviewCommitDialog({
 		<Dialog
 			open
 			onOpenChange={(open) => {
-				if (!open && !busy) onClose();
+				if (!open && !busy) closeWithoutCommit();
 			}}
 		>
 			<DialogContent
@@ -195,7 +221,8 @@ export function TurnReviewCommitDialog({
 					<DialogTitle>{t("turnReview.delivery.commitTitle")}</DialogTitle>
 					<DialogDescription>
 						{t("turnReview.delivery.commitScope", {
-							branch: snapshot?.currentBranch ?? "…",
+							branch:
+								workingBranchLabel(snapshot?.currentBranch, baseBranch, t) ?? "…",
 						})}
 					</DialogDescription>
 				</DialogHeader>
@@ -322,7 +349,7 @@ export function TurnReviewCommitDialog({
 							type="button"
 							variant="outline"
 							disabled={busy}
-							onClick={onClose}
+							onClick={closeWithoutCommit}
 						>
 							{t("commit.preview.cancel")}
 						</Button>
@@ -343,6 +370,7 @@ export function TurnReviewCommitDialog({
 										body: sanitizeWorkspaceCommitBody(body),
 										stagedFingerprint: snapshot.stagedFingerprint,
 									});
+									autoStaged.current = [];
 									await onCommitted();
 									onClose();
 								})

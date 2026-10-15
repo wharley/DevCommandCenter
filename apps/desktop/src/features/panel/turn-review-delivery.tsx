@@ -277,6 +277,7 @@ export function TurnReviewDelivery({
 			{commitOpen && (
 				<TurnReviewCommitDialog
 					workspaceRoot={workspaceRoot}
+					baseBranch={base}
 					onClose={() => setCommitOpen(false)}
 					onCommitted={async () => {
 						toast.success(t("composer.executionDock.actions.committed"));

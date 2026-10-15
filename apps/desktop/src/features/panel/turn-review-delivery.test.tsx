@@ -225,6 +225,26 @@ describe("live commit review", () => {
 			relativePath: ".",
 		});
 	});
+	it("unstages on cancel only what opening staged", async () => {
+		status.staged = [];
+		vi.mocked(api.workspaceGitStageAll).mockImplementation(async () => {
+			status.staged = status.unstaged;
+			status.unstaged = [];
+		});
+		await render("commit");
+		await click("commit.preview.cancel");
+		expect(api.workspaceGitUnstageFile).toHaveBeenCalledExactlyOnceWith({
+			workspaceRoot: rootPath,
+			relativePath: "src/new.ts",
+		});
+		expect(close).toHaveBeenCalledTimes(1);
+	});
+	it("leaves a hand-staged index alone on cancel", async () => {
+		await render("commit");
+		await click("commit.preview.cancel");
+		expect(api.workspaceGitUnstageFile).not.toHaveBeenCalled();
+		expect(close).toHaveBeenCalledTimes(1);
+	});
 	it("does not stage on open while a merge is in progress", async () => {
 		status.staged = [];
 		status.mergeInProgress = true;
