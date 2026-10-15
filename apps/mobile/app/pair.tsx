@@ -1,8 +1,13 @@
 import { isPairingLink, onPairingLink, stashPairingLink, takePairingLink } from "@/backend/offerLink";
 import { pairingErrorMessage, pairWithDesktop, readOffer, type PairingProgress } from "@/backend/pairing";
 import { useSession } from "@/backend/session";
-import { Button, Mono, Panel, StateDot, Wordmark } from "@/ui/primitives";
-import { alpha, makeStyles, radius, useTheme } from "@/theme";
+import { alpha, font, makeStyles, radius, useTheme } from "@/theme";
+import { GlassButton } from "@/ui/glass";
+import { haptic } from "@/ui/haptics";
+import { Button, Mono, Panel, SectionLabel } from "@/ui/primitives";
+import { AgentMascot } from "@/ui/sprites";
+import { DitherHero, GroupedList, Row } from "@/ui/surfaces";
+import Feather from "@expo/vector-icons/Feather";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import * as Linking from "expo-linking";
@@ -10,6 +15,7 @@ import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	ActivityIndicator,
+	Platform,
 	Pressable,
 	StyleSheet,
 	Text,
@@ -83,90 +89,147 @@ export default function PairScreen() {
 		setPhase({ kind: "choose" });
 	};
 
+	// A sheet over the app once paired (iOS starts it below the status bar); the first screen otherwise.
+	const ready = session.status === "demo" || session.status === "remote";
+	const topInset = ready && Platform.OS === "ios" ? 8 : insets.top;
+
 	return (
-		<KeyboardAwareScrollView
-			style={styles.root}
-			contentContainerStyle={[styles.content, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 24 }]}
-			keyboardShouldPersistTaps="handled"
-			bottomOffset={24}
+		<View style={styles.root}>
+			<DitherHero tint={color.accent} height={420} />
+			<KeyboardAwareScrollView
+				style={{ flex: 1 }}
+				contentContainerStyle={[styles.content, { paddingTop: topInset + 64, paddingBottom: insets.bottom + 24 }]}
+				keyboardShouldPersistTaps="handled"
+				bottomOffset={24}
+			>
+				{phase.kind === "scan" ? (
+					<Scanner onLink={(url) => void pair(url)} onCancel={() => setPhase({ kind: "choose" })} />
+				) : phase.kind === "working" ? (
+					<Working progress={phase.progress} onCancel={cancel} />
+				) : (
+					<>
+						<Hero
+							state="idle"
+							title="Conecte seu computador"
+							body="No DCC do computador, abra Configurações → Dispositivos → Celular de qualquer rede e escaneie o QR. A conexão é cifrada de ponta a ponta: o relay só repassa bytes."
+						/>
+
+						{phase.kind === "error" ? (
+							<Panel tone="danger">
+								<Text style={styles.error}>{phase.message}</Text>
+							</Panel>
+						) : null}
+
+						<Button label="Escanear QR" style={styles.primary} onPress={() => setPhase({ kind: "scan" })} />
+
+						<View>
+							<SectionLabel>ou cole o link</SectionLabel>
+							<View style={styles.field}>
+								<TextInput
+									value={link}
+									onChangeText={setLink}
+									placeholder="dcc://pair#v=1&…"
+									placeholderTextColor={color.faint}
+									autoCapitalize="none"
+									autoCorrect={false}
+									returnKeyType="go"
+									onSubmitEditing={() => link.trim() && void pair(link)}
+									style={styles.input}
+									accessibilityLabel="Link de pareamento"
+								/>
+								<RoundButton
+									icon="clipboard"
+									accessibilityLabel="Colar"
+									onPress={() => {
+										void Clipboard.getStringAsync().then((text) => setLink(text.trim()));
+									}}
+								/>
+								<RoundButton icon="arrow-right" accessibilityLabel="Parear" primary disabled={!link.trim()} onPress={() => void pair(link)} />
+							</View>
+						</View>
+
+						{session.status !== "demo" ? (
+							<View>
+								<SectionLabel>Sem computador por perto?</SectionLabel>
+								<GroupedList>
+									<Row
+										leading={
+											<View style={styles.tile}>
+												<Feather name="compass" size={16} color={color.accent} />
+											</View>
+										}
+										title="Explorar demonstração"
+										detail={<Text style={styles.rowDetail}>Projetos e agentes fictícios. Nada sai do celular.</Text>}
+										chevron
+										onPress={() => {
+											haptic("tap");
+											void startDemo().then(() => router.replace("/"));
+										}}
+									/>
+								</GroupedList>
+							</View>
+						) : null}
+					</>
+				)}
+			</KeyboardAwareScrollView>
+
+			{ready ? (
+				<View style={[styles.topBar, { top: topInset + 8 }]}>
+					<GlassButton icon="x" accessibilityLabel="Fechar" onPress={() => router.back()} />
+				</View>
+			) : null}
+		</View>
+	);
+}
+
+/** The robot over the dither, a title and a line of help. */
+function Hero({ state, title, body }: { state: "idle" | "working" | "waiting"; title: string; body: string }) {
+	const styles = useStyles();
+	return (
+		<View style={styles.hero}>
+			<AgentMascot provider={null} state={state} size={72} />
+			<Text style={styles.title} accessibilityRole="header">
+				{title}
+			</Text>
+			<Text style={styles.body}>{body}</Text>
+		</View>
+	);
+}
+
+/** A 44pt round action beside the link field. */
+function RoundButton({
+	icon,
+	onPress,
+	accessibilityLabel,
+	primary,
+	disabled,
+}: {
+	icon: keyof typeof Feather.glyphMap;
+	onPress: () => void;
+	accessibilityLabel: string;
+	primary?: boolean;
+	disabled?: boolean;
+}) {
+	const { color } = useTheme();
+	const styles = useStyles();
+	return (
+		<Pressable
+			onPress={() => {
+				haptic("tap");
+				onPress();
+			}}
+			disabled={disabled}
+			hitSlop={4}
+			accessibilityRole="button"
+			accessibilityLabel={accessibilityLabel}
+			accessibilityState={{ disabled: !!disabled }}
+			style={({ pressed }) => [
+				styles.round,
+				{ backgroundColor: primary ? color.accent : color.chip, opacity: disabled ? 0.4 : pressed ? 0.75 : 1 },
+			]}
 		>
-			<View style={styles.header}>
-				<Wordmark />
-				{session.status === "demo" || session.status === "remote" ? (
-					<Pressable onPress={() => router.back()} hitSlop={10}>
-						<Text style={styles.close}>Fechar</Text>
-					</Pressable>
-				) : null}
-			</View>
-
-			{phase.kind === "scan" ? (
-				<Scanner onLink={(url) => void pair(url)} onCancel={() => setPhase({ kind: "choose" })} />
-			) : phase.kind === "working" ? (
-				<Working progress={phase.progress} onCancel={cancel} />
-			) : (
-				<>
-					<Text style={styles.title}>Conecte seu computador</Text>
-					<Text style={styles.body}>
-						No DCC do computador, abra Configurações → Dispositivos → Celular de qualquer rede e
-						escaneie o QR. A conexão é cifrada de ponta a ponta: o relay só repassa bytes.
-					</Text>
-
-					{phase.kind === "error" ? (
-						<Panel tone="danger" style={{ marginTop: 16 }}>
-							<Text style={styles.error}>{phase.message}</Text>
-						</Panel>
-					) : null}
-
-					<Button label="Escanear QR" onPress={() => setPhase({ kind: "scan" })} style={{ marginTop: 20 }} />
-
-					<Mono style={styles.eyebrow}>ou cole o link</Mono>
-					<TextInput
-						value={link}
-						onChangeText={setLink}
-						placeholder="dcc://pair#v=1&…"
-						placeholderTextColor={color.faint}
-						autoCapitalize="none"
-						autoCorrect={false}
-						style={styles.input}
-						accessibilityLabel="Link de pareamento"
-					/>
-					<View style={styles.row}>
-						<Button
-							label="Colar"
-							variant="ghost"
-							style={{ flex: 1 }}
-							onPress={() => {
-								void Clipboard.getStringAsync().then((text) => setLink(text.trim()));
-							}}
-						/>
-						<Button
-							label="Parear"
-							variant="ghost"
-							style={{ flex: 1 }}
-							disabled={!link.trim()}
-							onPress={() => void pair(link)}
-						/>
-					</View>
-
-					{session.status !== "demo" ? (
-						<Panel style={{ marginTop: 28 }}>
-							<Text style={styles.demoTitle}>Sem computador por perto?</Text>
-							<Text style={styles.body}>
-								Explore o app com projetos e agentes fictícios. Nada sai do celular.
-							</Text>
-							<Button
-								label="Explorar demonstração"
-								variant="ghost"
-								style={{ marginTop: 12 }}
-								onPress={() => {
-									void startDemo().then(() => router.replace("/"));
-								}}
-							/>
-						</Panel>
-					) : null}
-				</>
-			)}
-		</KeyboardAwareScrollView>
+			<Feather name={icon} size={17} color={primary ? color.accentInk : color.fg} />
+		</Pressable>
 	);
 }
 
@@ -183,16 +246,14 @@ function Scanner({ onLink, onCancel }: { onLink: (url: string) => void; onCancel
 	if (!permission) return <ActivityIndicator color={color.mute} style={{ marginTop: 40 }} />;
 	if (!permission.granted) {
 		return (
-			<Panel style={{ marginTop: 20 }}>
-				<Text style={styles.body}>
-					Sem acesso à câmera. Libere em Ajustes → DCC → Câmera, ou cole o link de pareamento.
-				</Text>
-				<Button label="Voltar" variant="ghost" style={{ marginTop: 12 }} onPress={onCancel} />
-			</Panel>
+			<>
+				<Hero state="idle" title="Sem acesso à câmera" body="Libere em Ajustes → DCC → Câmera, ou cole o link de pareamento." />
+				<Button label="Voltar" variant="soft" style={styles.primary} onPress={onCancel} />
+			</>
 		);
 	}
 	return (
-		<View style={{ marginTop: 20, gap: 14 }}>
+		<>
 			<View style={styles.camera}>
 				<CameraView
 					style={StyleSheet.absoluteFill}
@@ -201,14 +262,15 @@ function Scanner({ onLink, onCancel }: { onLink: (url: string) => void; onCancel
 					onBarcodeScanned={({ data }) => {
 						if (handled.current || !isPairingLink(data)) return;
 						handled.current = true;
+						haptic("success");
 						onLink(data);
 					}}
 				/>
 				<View style={styles.reticle} pointerEvents="none" />
 			</View>
 			<Text style={styles.body}>Aponte para o QR na tela do computador.</Text>
-			<Button label="Cancelar" variant="ghost" onPress={onCancel} />
-		</View>
+			<Button label="Cancelar" variant="soft" style={styles.primary} onPress={onCancel} />
+		</>
 	);
 }
 
@@ -217,38 +279,41 @@ function Working({ progress, onCancel }: { progress: PairingProgress | null; onC
 	const styles = useStyles();
 	const pending = progress?.step === "pending";
 	return (
-		<View style={{ marginTop: 24, gap: 16 }}>
-			<View style={styles.row}>
-				<StateDot state={pending ? "wait" : "live"} />
-				<Text style={styles.title}>{pending ? "Aguardando aprovação" : "Conectando…"}</Text>
-			</View>
-			<Text style={styles.body}>
-				{pending
-					? "O computador está perguntando se este aparelho pode entrar. Confira os códigos e aprove lá."
-					: "Abrindo um canal cifrado com o computador pelo relay."}
-			</Text>
+		<>
+			<Hero
+				state={pending ? "waiting" : "working"}
+				title={pending ? "Aguardando aprovação" : "Conectando…"}
+				body={
+					pending
+						? "O computador está perguntando se este aparelho pode entrar. Confira os códigos e aprove lá."
+						: "Abrindo um canal cifrado com o computador pelo relay."
+				}
+			/>
 			{progress ? (
-				<Panel style={{ gap: 12 }}>
-					<Fingerprint label="Computador (ao lado do QR)" value={progress.desktopFingerprint} />
+				<GroupedList>
+					<Fingerprint label="Computador" where="ao lado do QR" value={progress.desktopFingerprint} />
 					{progress.step === "pending" ? (
-						<Fingerprint label="Este aparelho (no diálogo de aprovação)" value={progress.deviceFingerprint} highlight />
+						<Fingerprint label="Este aparelho" where="no diálogo de aprovação" value={progress.deviceFingerprint} highlight />
 					) : null}
-				</Panel>
+				</GroupedList>
 			) : (
 				<ActivityIndicator color={color.mute} />
 			)}
-			<Button label="Cancelar" variant="ghost" onPress={onCancel} />
-		</View>
+			<Button label="Cancelar" variant="soft" style={styles.primary} onPress={onCancel} />
+		</>
 	);
 }
 
-function Fingerprint({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function Fingerprint({ label, where, value, highlight }: { label: string; where: string; value: string; highlight?: boolean }) {
 	const { color } = useTheme();
 	const styles = useStyles();
 	return (
-		<View style={{ gap: 4 }}>
-			<Mono style={styles.eyebrowInline}>{label}</Mono>
-			<Mono style={[styles.fingerprint, highlight && { color: color.wait }]} accessibilityLabel={`Código ${value}`}>
+		<View style={styles.fingerprintRow}>
+			<View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+				<Text style={styles.fingerprintLabel}>{label}</Text>
+				<Text style={styles.rowDetail}>{where}</Text>
+			</View>
+			<Mono style={[styles.fingerprint, highlight && { color: color.wait }]} accessibilityLabel={`Código ${value}`} selectable>
 				{value}
 			</Mono>
 		</View>
@@ -258,36 +323,41 @@ function Fingerprint({ label, value, highlight }: { label: string; value: string
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({
 		root: { flex: 1, backgroundColor: color.bg },
-		content: { paddingHorizontal: 20 },
-		header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 28 },
-		close: { color: color.mute, fontSize: 14 },
-		title: { color: color.fg, fontSize: 20, fontWeight: "600" },
-		body: { color: color.mute, fontSize: 14, lineHeight: 20, marginTop: 6 },
+		content: { flexGrow: 1, paddingHorizontal: 16, gap: 22 },
+		topBar: { position: "absolute", left: 16 },
+		// The hero takes the slack, so the actions sit low, within reach of a thumb.
+		hero: { flexGrow: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 12, paddingHorizontal: 12 },
+		title: { color: color.fg, fontSize: 28, lineHeight: 33, fontWeight: "700", letterSpacing: -0.7, textAlign: "center", marginTop: 8 },
+		body: { color: color.mute, fontSize: 15, lineHeight: 22, textAlign: "center" },
 		error: { color: color.danger, fontSize: 13, lineHeight: 18 },
-		eyebrow: { marginTop: 24, marginBottom: 8, fontSize: 10, letterSpacing: 1.8, color: color.mute, textTransform: "uppercase" },
-		eyebrowInline: { fontSize: 10, letterSpacing: 1.5, color: color.mute, textTransform: "uppercase" },
-		input: {
-			borderWidth: 1,
-			borderColor: color.border,
+		primary: { minHeight: 52, borderRadius: 999 },
+		field: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+			paddingLeft: 14,
+			paddingRight: 6,
+			height: 56,
+			borderRadius: radius.lg,
 			backgroundColor: color.panel,
-			borderRadius: radius.md,
-			color: color.fg,
-			padding: 12,
-			fontSize: 14,
 		},
-		row: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
-		demoTitle: { color: color.fg, fontSize: 15, fontWeight: "600" },
-		camera: { height: 320, borderRadius: radius.lg, overflow: "hidden", backgroundColor: color.panel },
+		input: { flex: 1, color: color.fg, fontSize: 14, fontFamily: font.mono },
+		round: { width: 44, height: 44, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+		tile: { width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: alpha(color.accent, 0.12) },
+		rowDetail: { color: color.mute, fontSize: 13 },
+		camera: { height: 340, borderRadius: radius.xl, overflow: "hidden", backgroundColor: color.panel },
 		reticle: {
 			position: "absolute",
-			top: 60,
-			bottom: 60,
-			left: 60,
-			right: 60,
+			top: 70,
+			bottom: 70,
+			left: 70,
+			right: 70,
 			borderWidth: 2,
 			borderColor: alpha(color.accent, 0.8),
 			borderRadius: radius.lg,
 		},
-		fingerprint: { fontSize: 22, letterSpacing: 2, color: color.accent },
+		fingerprintRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 56 },
+		fingerprintLabel: { color: color.fg, fontSize: 15, fontWeight: "500" },
+		fingerprint: { fontSize: 17, letterSpacing: 1.5, color: color.accent },
 	}),
 );

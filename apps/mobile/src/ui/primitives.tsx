@@ -148,18 +148,22 @@ export function Button({
 }: {
 	label: string;
 	onPress: () => void;
-	variant?: "primary" | "wait" | "ghost" | "danger";
+	/** `soft`: a borderless neutral fill, for the secondary action beside a primary one. */
+	variant?: "primary" | "wait" | "ghost" | "soft" | "danger";
 	busy?: boolean;
 	disabled?: boolean;
 	style?: StyleProp<ViewStyle>;
 	accessibilityLabel?: string;
 }) {
-	const { color } = useTheme();
+	const { color, scheme } = useTheme();
 	const styles = useStyles();
+	// On the light grouped background the chip gray all but vanishes; a white cell holds.
+	const soft = scheme === "light" ? color.panel : color.chip;
 	const palette = {
 		primary: { bg: color.accent, fg: color.accentInk, border: color.accent },
 		wait: { bg: color.waitFill, fg: color.waitInk, border: color.waitFill },
 		ghost: { bg: color.bg, fg: color.fg, border: color.border },
+		soft: { bg: soft, fg: color.fg, border: soft },
 		danger: { bg: color.bg, fg: color.danger, border: alpha(color.danger, 0.5) },
 	}[variant];
 	const off = disabled || busy;

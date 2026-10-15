@@ -3,16 +3,20 @@ import { useConnectionState, useSession } from "@/backend/session";
 import type { Backend } from "@/backend/types";
 import type { PushRegistration } from "@/notifications/registration";
 import { pushStatusText, usePushStatus } from "@/notifications/usePush";
-import { makeStyles, useTheme } from "@/theme";
+import { alpha, makeStyles, useTheme } from "@/theme";
 import { appVersionLine } from "@/updates";
-import { Button, Mono, Panel, StateDot } from "@/ui/primitives";
+import { haptic } from "@/ui/haptics";
+import { Mono, SectionLabel, StateDot } from "@/ui/primitives";
+import { GroupedList, Row, SheetHeader, SheetScroll } from "@/ui/surfaces";
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Constants from "expo-constants";
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Alert, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function SettingsScreen() {
+	const { color } = useTheme();
 	const styles = useStyles();
 	const insets = useSafeAreaInsets();
 	const { session, signOut } = useSession();
@@ -23,86 +27,144 @@ export default function SettingsScreen() {
 	};
 
 	return (
-		<ScrollView
-			style={styles.root}
+		<SheetScroll
 			// An iOS sheet already starts below the status bar; Android modals are full screen.
-			contentContainerStyle={[
-				styles.content,
-				{ paddingTop: Platform.OS === "ios" ? 20 : insets.top + 12, paddingBottom: insets.bottom + 24 },
-			]}
+			style={{ marginTop: Platform.OS === "ios" ? 0 : insets.top }}
+			contentStyle={[styles.content, { paddingBottom: insets.bottom }]}
+			header={<SheetHeader title="Ajustes" onClose={() => router.back()} />}
 		>
-			<View style={styles.header}>
-				<Text style={styles.title}>Configurações</Text>
-				<Pressable onPress={() => router.back()} hitSlop={10}>
-					<Text style={styles.close}>Fechar</Text>
-				</Pressable>
-			</View>
-
 			{session.status === "demo" ? (
-				<Panel style={{ gap: 12 }}>
-					<Text style={styles.body}>Você está no modo demonstração: projetos e agentes fictícios, sem rede.</Text>
-					<Button label="Parear com meu computador" onPress={() => router.push("/pair")} />
-					<Button label="Sair da demonstração" variant="ghost" onPress={leave} />
-				</Panel>
+				<View>
+					<SectionLabel>Modo demonstração</SectionLabel>
+					<GroupedList inset={56}>
+						<Row
+							leading={<Tile icon="smartphone" tint={color.accent} />}
+							title="Parear com meu computador"
+							chevron
+							onPress={() => router.push("/pair")}
+						/>
+						<Row
+							leading={<Tile icon="log-out" tint={color.danger} />}
+							title="Sair da demonstração"
+							tone="danger"
+							onPress={() => {
+								haptic("warning");
+								leave();
+							}}
+						/>
+					</GroupedList>
+					<Text style={styles.footnote}>Você está no modo demonstração: projetos e agentes fictícios, sem rede.</Text>
+				</View>
 			) : (
 				<>
 					<Connection backend={session.backend} />
 					<Notifications push={session.push} />
-					<Panel style={{ gap: 14, marginTop: 12 }}>
-						<Field label="Computador" value={desktopFingerprint(session.pairing)} mono accent />
-						<Field label="Este aparelho" value={session.deviceFingerprint} mono accent />
-						<Field label="Id do aparelho" value={session.pairing.deviceId} mono />
-						<Field label="Relay" value={session.pairing.relay} mono />
-						<Field label="Pareado em" value={new Date(session.pairing.pairedAt).toLocaleString("pt-BR")} />
-					</Panel>
-					<Text style={styles.hint}>
-						Os códigos acima são os mesmos que o computador mostra em Configurações → Dispositivos. Para tirar o
-						acesso deste aparelho, revogue-o lá; esquecer aqui só apaga o pareamento deste celular.
-					</Text>
-					<Button
-						label="Esquecer este computador"
-						variant="danger"
-						style={{ marginTop: 16 }}
-						onPress={() =>
-							Alert.alert("Esquecer este computador?", "Para voltar a usar, será preciso parear de novo com um QR novo.", [
-								{ text: "Cancelar", style: "cancel" },
-								{ text: "Esquecer", style: "destructive", onPress: leave },
-							])
-						}
-					/>
+					<View>
+						<SectionLabel>Pareamento</SectionLabel>
+						<GroupedList>
+							<Field label="Computador" value={desktopFingerprint(session.pairing)} mono accent />
+							<Field label="Este aparelho" value={session.deviceFingerprint} mono accent />
+							<Field label="Id do aparelho" value={session.pairing.deviceId} mono stacked />
+							<Field label="Relay" value={session.pairing.relay} mono stacked />
+							<Field label="Pareado em" value={new Date(session.pairing.pairedAt).toLocaleString("pt-BR")} />
+						</GroupedList>
+						<Text style={styles.footnote}>
+							Os códigos acima são os mesmos que o computador mostra em Configurações → Dispositivos. Para tirar o
+							acesso deste aparelho, revogue-o lá; esquecer aqui só apaga o pareamento deste celular.
+						</Text>
+					</View>
+					<GroupedList inset={56}>
+						<Row
+							leading={<Tile icon="trash-2" tint={color.danger} />}
+							title="Esquecer este computador"
+							tone="danger"
+							onPress={() => {
+								haptic("warning");
+								Alert.alert("Esquecer este computador?", "Para voltar a usar, será preciso parear de novo com um QR novo.", [
+									{ text: "Cancelar", style: "cancel" },
+									{ text: "Esquecer", style: "destructive", onPress: leave },
+								]);
+							}}
+						/>
+					</GroupedList>
 				</>
 			)}
 			{__DEV__ ? (
-				<Pressable onPress={() => router.push("/ui-gallery")} accessibilityRole="button" style={{ marginTop: 20 }}>
-					<Text style={[styles.action, { textAlign: "center" }]}>Galeria de componentes</Text>
-				</Pressable>
+				<GroupedList inset={56}>
+					<Row
+						leading={<Tile icon="grid" tint={color.mute} />}
+						title="Galeria de componentes"
+						chevron
+						onPress={() => router.push("/ui-gallery")}
+					/>
+				</GroupedList>
 			) : null}
 			<Mono style={styles.version}>DCC {appVersionLine(Constants.expoConfig?.version)}</Mono>
-		</ScrollView>
+		</SheetScroll>
+	);
+}
+
+/** The leading glyph of an action row: an icon on a faint tile of its tint. */
+function Tile({ icon, tint }: { icon: keyof typeof Feather.glyphMap; tint: string }) {
+	const styles = useStyles();
+	return (
+		<View style={[styles.tile, { backgroundColor: alpha(tint, 0.12) }]}>
+			<Feather name={icon} size={15} color={tint} />
+		</View>
 	);
 }
 
 function Connection({ backend }: { backend: Backend }) {
+	const { color } = useTheme();
 	const styles = useStyles();
 	const state = useConnectionState(backend);
-	const label =
+	const title =
 		state.kind === "online"
-			? "Conectado pelo relay, cifrado de ponta a ponta"
+			? "Conectado"
 			: state.kind === "connecting"
 				? "Conectando…"
 				: state.kind === "offline"
+					? "Sem conexão"
+					: "Acesso revogado";
+	const detail =
+		state.kind === "online"
+			? "Pelo relay, cifrado de ponta a ponta."
+			: state.kind === "connecting"
+				? "Abrindo o canal cifrado com o computador."
+				: state.kind === "offline"
 					? state.error
-					: "O computador não reconhece mais este aparelho";
+					: "O computador não reconhece mais este aparelho.";
 	return (
-		<Panel style={styles.connection}>
-			<StateDot state={state.kind === "online" ? "live" : state.kind === "unpaired" ? "fail" : "wait"} />
-			<Text style={[styles.body, { flex: 1 }]}>{label}</Text>
-			{state.kind === "offline" ? (
-				<Pressable onPress={() => backend.reconnectNow()} hitSlop={8}>
-					<Text style={styles.action}>Tentar</Text>
-				</Pressable>
-			) : null}
-		</Panel>
+		<View>
+			<SectionLabel>Conexão</SectionLabel>
+			<GroupedList>
+				<Row
+					leading={
+						<View style={styles.dotSlot}>
+							<StateDot state={state.kind === "online" ? "live" : state.kind === "unpaired" ? "fail" : "wait"} size={9} />
+						</View>
+					}
+					title={title}
+					detail={<Text style={styles.rowDetail}>{detail}</Text>}
+					trailing={
+						state.kind === "offline" ? (
+							<Pressable
+								onPress={() => {
+									haptic("tap");
+									backend.reconnectNow();
+								}}
+								hitSlop={8}
+								accessibilityRole="button"
+								style={({ pressed }) => [styles.chipButton, pressed && { opacity: 0.75 }]}
+							>
+								<Feather name="refresh-cw" size={13} color={color.fg} />
+								<Text style={styles.chipButtonText}>Tentar</Text>
+							</Pressable>
+						) : null
+					}
+				/>
+			</GroupedList>
+		</View>
 	);
 }
 
@@ -113,61 +175,108 @@ function Notifications({ push }: { push: PushRegistration }) {
 	const [busy, setBusy] = useState(false);
 	const on = status.kind === "on" || status.kind === "pending";
 	const toggle = (value: boolean) => {
+		haptic("select");
 		setBusy(true);
 		void (value ? push.enable() : push.disable()).finally(() => setBusy(false));
 	};
 	return (
-		<Panel style={{ gap: 10, marginTop: 12 }}>
-			<View style={styles.connection}>
-				<Text style={[styles.body, { flex: 1, fontWeight: "600" }]}>Notificações deste aparelho</Text>
-				<Switch
-					accessibilityLabel="Notificações deste aparelho"
-					value={on}
-					disabled={busy || status.kind === "unsupported" || status.kind === "unavailable"}
-					onValueChange={toggle}
-					trackColor={{ true: color.accent, false: color.border }}
+		<View>
+			<SectionLabel>Notificações</SectionLabel>
+			<GroupedList>
+				<Row
+					leading={
+						<View style={styles.dotSlot}>
+							<Feather name="bell" size={17} color={on ? color.wait : color.mute} />
+						</View>
+					}
+					title="Avisos deste aparelho"
+					detail={<Text style={styles.rowDetail}>{pushStatusText(status)}</Text>}
+					trailing={
+						<Switch
+							accessibilityLabel="Notificações deste aparelho"
+							value={on}
+							disabled={busy || status.kind === "unsupported" || status.kind === "unavailable"}
+							onValueChange={toggle}
+							trackColor={{ true: color.accent, false: color.border }}
+						/>
+					}
 				/>
-			</View>
-			<Text style={styles.hint}>{pushStatusText(status)}</Text>
+			</GroupedList>
 			{on ? (
-				<Text style={styles.hint}>
+				<Text style={styles.footnote}>
 					Só o nome do projeto e o tipo do aviso passam pela Expo e pela Apple/Google; o resto chega cifrado ao abrir.
 				</Text>
 			) : null}
-		</Panel>
+		</View>
 	);
 }
 
-function Field({ label, value, mono, accent }: { label: string; value: string; mono?: boolean; accent?: boolean }) {
+/** A label and its value in a grouped list: side by side, or stacked when the value runs long. */
+function Field({
+	label,
+	value,
+	mono,
+	accent,
+	stacked,
+}: {
+	label: string;
+	value: string;
+	mono?: boolean;
+	accent?: boolean;
+	stacked?: boolean;
+}) {
 	const { color } = useTheme();
 	const styles = useStyles();
+	let shown: ReactNode = (
+		<Text style={styles.value} selectable>
+			{value}
+		</Text>
+	);
+	if (mono) {
+		shown = (
+			<Mono style={[styles.value, styles.monoValue, accent && { color: color.accent, fontSize: 15, letterSpacing: 1.5 }]} selectable>
+				{value}
+			</Mono>
+		);
+	}
 	return (
-		<View style={{ gap: 3 }}>
-			<Mono style={styles.label}>{label}</Mono>
-			{mono ? (
-				<Mono style={[styles.value, accent && { color: color.accent, fontSize: 16, letterSpacing: 1.5 }]} selectable>
-					{value}
-				</Mono>
-			) : (
-				<Text style={styles.value}>{value}</Text>
-			)}
+		<View style={[styles.field, stacked && styles.fieldStacked]} accessible accessibilityLabel={`${label}: ${value}`}>
+			<Text style={styles.label}>{label}</Text>
+			{shown}
 		</View>
 	);
 }
 
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({
-		root: { flex: 1, backgroundColor: color.bg },
-		content: { paddingHorizontal: 20 },
-		version: { color: color.faint, fontSize: 10, textAlign: "center", marginTop: 28 },
-		header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
-		title: { color: color.fg, fontSize: 20, fontWeight: "600" },
-		close: { color: color.mute, fontSize: 14 },
-		body: { color: color.fg, fontSize: 14, lineHeight: 20 },
-		hint: { color: color.mute, fontSize: 12, lineHeight: 18, marginTop: 12 },
-		connection: { flexDirection: "row", alignItems: "center", gap: 10 },
-		action: { color: color.wait, fontWeight: "700", fontSize: 13 },
-		label: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: color.mute },
-		value: { color: color.fg, fontSize: 13 },
+		content: { paddingHorizontal: 16, gap: 26 },
+		version: { color: color.faint, fontSize: 11, textAlign: "center" },
+		rowDetail: { color: color.mute, fontSize: 13, lineHeight: 18 },
+		footnote: { color: color.mute, fontSize: 12, lineHeight: 17, marginTop: 8, paddingHorizontal: 4 },
+		dotSlot: { width: 30, alignItems: "center" },
+		tile: { width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center" },
+		chipButton: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 6,
+			height: 32,
+			paddingHorizontal: 12,
+			borderRadius: 999,
+			backgroundColor: color.chip,
+		},
+		chipButtonText: { color: color.fg, fontSize: 13, fontWeight: "600" },
+		field: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+			gap: 12,
+			paddingHorizontal: 14,
+			paddingVertical: 12,
+			minHeight: 50,
+		},
+		fieldStacked: { flexDirection: "column", alignItems: "flex-start", justifyContent: "center", gap: 3 },
+		label: { color: color.fg, fontSize: 15 },
+		value: { color: color.mute, fontSize: 14, flexShrink: 1 },
+		monoValue: { fontSize: 12 },
 	}),
 );

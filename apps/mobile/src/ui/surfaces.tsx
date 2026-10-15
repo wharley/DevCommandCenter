@@ -53,6 +53,7 @@ export function Row({
 	onPress,
 	onLongPress,
 	chevron = false,
+	tone,
 	accessibilityLabel,
 }: {
 	leading?: ReactNode;
@@ -64,6 +65,8 @@ export function Row({
 	/** Opens the row's menu. */
 	onLongPress?: () => void;
 	chevron?: boolean;
+	/** `danger`: a destructive action (sign out, forget); `accent`: an action that adds. */
+	tone?: "danger" | "accent";
 	accessibilityLabel?: string;
 }) {
 	const { color } = useTheme();
@@ -88,7 +91,7 @@ export function Row({
 		>
 			{leading}
 			<View style={styles.rowBody}>
-				<Text style={styles.rowTitle} numberOfLines={1}>
+				<Text style={[styles.rowTitle, tone && { color: tone === "danger" ? color.danger : color.accent }]} numberOfLines={1}>
 					{title}
 				</Text>
 				{typeof detail === "string" ? (
