@@ -1,4 +1,4 @@
-import { Loader2, Save, X } from "lucide-react";
+import { Loader2, MessageSquare, Save, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,19 @@ type FileTabsSurfaceProps = {
 		request: DiffAnnotationRequest;
 		note: string;
 	}) => void;
+	/**
+	 * Files open as tabs in the center of the workbench, next to a Chat tab.
+	 * While the Chat tab is active only the tab strip shows.
+	 */
+	stage?: FileTabsStage;
+};
+
+export type FileTabsStage = {
+	chatActive: boolean;
+	/** What the agent did while the files were in front. */
+	chatStatus: "idle" | "working" | "unread";
+	onShowChat: () => void;
+	onShowFiles: () => void;
 };
 
 export function FileTabsSurface({
@@ -73,6 +86,7 @@ export function FileTabsSurface({
 	onSubmitAnnotation,
 	onEditInComposer,
 	onAddToReview,
+	stage,
 }: FileTabsSurfaceProps) {
 	const { t } = useTranslation("common");
 	const [pending, setPending] = useState<PendingAnnotation | null>(null);
@@ -390,10 +404,14 @@ export function FileTabsSurface({
 		[onAddToReview, pending],
 	);
 
+	const chatActive = stage?.chatActive ?? false;
+	const onShowChat = stage?.onShowChat;
 	// One global key handler for the active tab (embedded surfaces stay silent).
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.defaultPrevented) return;
+			// Behind the Chat tab the files keep quiet.
+			if (chatActive) return;
 			if (
 				(event.metaKey || event.ctrlKey) &&
 				!event.shiftKey &&
@@ -411,11 +429,16 @@ export function FileTabsSurface({
 				setPending(null);
 				return;
 			}
+			// On the stage, Escape goes back to the conversation and keeps the tabs.
+			if (onShowChat) {
+				onShowChat();
+				return;
+			}
 			requestCloseAll();
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [pending, requestCloseAll]);
+	}, [chatActive, onShowChat, pending, requestCloseAll]);
 
 	// On tab switch, re-measure + focus the shared editor after its model swap.
 	useEffect(() => {
@@ -469,15 +492,36 @@ export function FileTabsSurface({
 			className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground"
 		>
 			<div className="flex h-9 items-center border-b border-border">
-				<div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2">
+				<div
+					role="tablist"
+					className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2"
+				>
+					{stage ? (
+						<ChatTab
+							active={stage.chatActive}
+							status={stage.chatStatus}
+							label={t("fileTabs.chat")}
+							statusLabel={
+								stage.chatStatus === "working"
+									? t("fileTabs.chatWorking")
+									: stage.chatStatus === "unread"
+										? t("fileTabs.chatUnread")
+										: null
+							}
+							onActivate={stage.onShowChat}
+						/>
+					) : null}
 					{openFiles.map((file) => (
 						<Tab
 							key={file.path}
 							file={file}
-							active={file.path === activePath}
+							active={file.path === activePath && !chatActive}
 							dirty={Boolean(stateByPath[file.path]?.dirty)}
 							closeLabel={t("fileTabs.close")}
-							onActivate={() => activateTab(file.path)}
+							onActivate={() => {
+								activateTab(file.path);
+								stage?.onShowFiles();
+							}}
 							onPin={() => pinTab(file.path)}
 							onClose={() => closeTab(file.path)}
 						/>
@@ -512,7 +556,12 @@ export function FileTabsSurface({
 					</Button>
 				</div>
 			</div>
-			<div className="relative min-h-0 flex-1 bg-background">
+			<div
+				className={cn(
+					"relative min-h-0 flex-1 bg-background",
+					chatActive && "invisible",
+				)}
+			>
 				{mountedFiles.map((file) => (
 					<div
 						key={file.path}
@@ -615,6 +664,51 @@ export function FileTabsSurface({
 				/>
 			) : null}
 		</section>
+	);
+}
+
+function ChatTab({
+	active,
+	status,
+	label,
+	statusLabel,
+	onActivate,
+}: {
+	active: boolean;
+	status: FileTabsStage["chatStatus"];
+	label: string;
+	statusLabel: string | null;
+	onActivate: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			role="tab"
+			aria-selected={active}
+			onClick={onActivate}
+			title={statusLabel ?? label}
+			className={cn(
+				"flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 transition-colors",
+				active
+					? "bg-muted/60 text-foreground shadow-sm"
+					: "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+			)}
+		>
+			<MessageSquare className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+			<span className="text-[11px]">{label}</span>
+			{status === "working" ? (
+				<Loader2
+					className="size-3 shrink-0 animate-spin text-sky-500"
+					strokeWidth={2}
+					aria-label={statusLabel ?? undefined}
+				/>
+			) : status === "unread" ? (
+				<span
+					className="size-1.5 shrink-0 rounded-full bg-sky-500"
+					aria-label={statusLabel ?? undefined}
+				/>
+			) : null}
+		</button>
 	);
 }
 

@@ -144,6 +144,10 @@ export function isInspectorCodeModeShortcut(
 	return isModifiedShiftShortcut(event, INSPECTOR_CODE_MODE_KEY, platform);
 }
 
+/** The code column next to the sidebar (Cmd/Ctrl+Shift+E, the editors' explorer chord). */
+export const getCodeColumnShortcutKeys = getInspectorCodeModeShortcutKeys;
+export const isCodeColumnShortcut = isInspectorCodeModeShortcut;
+
 /** Workspace search (Cmd/Ctrl+Shift+F): find text across the worktree. */
 export function isWorkspaceSearchShortcut(
 	event: Pick<

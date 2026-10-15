@@ -34,6 +34,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentsSidebarSection } from "@/features/agents/agents-sidebar-section";
+import { CodeColumnToggle } from "@/features/code/code-column-toggle";
 import {
 	dismissDailyRecapBubble,
 	isRecapBubbleVisible,
@@ -1714,6 +1715,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					</TooltipTrigger>
 					<TooltipContent side="right">{t("sidebar.expandSidebar")}</TooltipContent>
 				</Tooltip>
+				{selectedWorkspaceId ? <CodeColumnToggle tooltipSide="right" /> : null}
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<Button
@@ -1979,6 +1981,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</span>
 						</div>
 					</div>
+					{selectedWorkspaceId ? <CodeColumnToggle /> : null}
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button

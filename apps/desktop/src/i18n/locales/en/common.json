@@ -4748,9 +4748,18 @@
       "overwrite": "Overwrite with mine"
     }
   },
+  "codeColumn": {
+    "ariaLabel": "Project code",
+    "files": "Files",
+    "open": "Show project files",
+    "close": "Hide project files"
+  },
   "fileTabs": {
     "close": "Close tab",
-    "closeAll": "Close editor"
+    "closeAll": "Close editor",
+    "chat": "Chat",
+    "chatWorking": "The agent is working",
+    "chatUnread": "The agent replied"
   },
   "quickOpen": {
     "title": "Quick open",

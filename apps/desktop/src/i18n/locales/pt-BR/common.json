@@ -4748,9 +4748,18 @@
       "overwrite": "Sobrescrever com a minha"
     }
   },
+  "codeColumn": {
+    "ariaLabel": "Código do projeto",
+    "files": "Arquivos",
+    "open": "Mostrar arquivos do projeto",
+    "close": "Ocultar arquivos do projeto"
+  },
   "fileTabs": {
     "close": "Fechar aba",
-    "closeAll": "Fechar editor"
+    "closeAll": "Fechar editor",
+    "chat": "Chat",
+    "chatWorking": "O agente está trabalhando",
+    "chatUnread": "O agente respondeu"
   },
   "quickOpen": {
     "title": "Abertura rápida",

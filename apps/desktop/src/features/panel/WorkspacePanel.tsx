@@ -1044,6 +1044,33 @@ export function WorkspacePanel({
 	const hasEmptyThread = !sessionSnapshot;
 	const sessionState = sessionSnapshot?.state ?? null;
 	const lastTurnState = sessionSnapshot?.lastTurnState ?? null;
+	const agentWorking = sessionState === "active" && lastTurnState === "running";
+
+	// Which stage tab is in front while files are open. A new open request
+	// brings the files forward; an agent turn that ends behind them marks the
+	// Chat tab until the conversation is seen.
+	const fileOpenRequestId =
+		workspaceSurfaceSelection?.kind === "file-edit"
+			? workspaceSurfaceSelection.requestId
+			: null;
+	const [stageChatActive, setStageChatActive] = useState(false);
+	const [stageChatUnread, setStageChatUnread] = useState(false);
+	useEffect(() => {
+		setStageChatActive(false);
+		if (fileOpenRequestId === null) setStageChatUnread(false);
+	}, [fileOpenRequestId]);
+	const wasAgentWorkingRef = useRef(agentWorking);
+	useEffect(() => {
+		if (wasAgentWorkingRef.current && !agentWorking && !stageChatActive) {
+			setStageChatUnread(true);
+		}
+		wasAgentWorkingRef.current = agentWorking;
+	}, [agentWorking, stageChatActive]);
+	const showStageChat = useCallback(() => {
+		setStageChatActive(true);
+		setStageChatUnread(false);
+	}, []);
+	const showStageFiles = useCallback(() => setStageChatActive(false), []);
 	// Hoisted here (always mounted) so the execution dock stays accurate even while
 	// the inspector is collapsed. These queries share React Query's cache with the
 	// Inspector, so opening the panel does not create duplicate requests.
@@ -1801,19 +1828,10 @@ export function WorkspacePanel({
 			</div>
 		</div>
 	);
-	const secondarySurfaceContent =
-		workspaceSurfaceSelection?.kind === "git-diff" &&
-			shouldRenderGitDiffSurface(inspectorCollapsed) ? (
-			<WorkspaceEditorSurface
-				workspaceRoot={workspacePath}
-				workspaceId={workspaceId}
-				selection={workspaceSurfaceSelection.file}
-				onClose={onCloseSurface}
-				onSubmitAnnotation={handleSubmitAnnotation}
-				onEditInComposer={handleEditAnnotationInComposer}
-				onAddToReview={handleAddToReview}
-			/>
-		) : workspaceSurfaceSelection?.kind === "file-edit" ? (
+	// Open files are tabs on the stage, next to a Chat tab; the conversation
+	// stays mounted underneath so its scroll and state survive.
+	const stageFileTabs =
+		workspaceSurfaceSelection?.kind === "file-edit" ? (
 			<FileTabsSurface
 				workspaceRoot={workspacePath}
 				path={workspaceSurfaceSelection.path}
@@ -1824,6 +1842,25 @@ export function WorkspacePanel({
 				closeRequestId={fileSurfaceTransitionRequestId}
 				onExternalCloseConfirmed={onFileSurfaceTransitionConfirmed}
 				onClose={handleConfirmedFileSurfaceClose}
+				onSubmitAnnotation={handleSubmitAnnotation}
+				onEditInComposer={handleEditAnnotationInComposer}
+				onAddToReview={handleAddToReview}
+				stage={{
+					chatActive: stageChatActive,
+					chatStatus: agentWorking ? "working" : stageChatUnread ? "unread" : "idle",
+					onShowChat: showStageChat,
+					onShowFiles: showStageFiles,
+				}}
+			/>
+		) : null;
+	const secondarySurfaceContent =
+		workspaceSurfaceSelection?.kind === "git-diff" &&
+			shouldRenderGitDiffSurface(inspectorCollapsed) ? (
+			<WorkspaceEditorSurface
+				workspaceRoot={workspacePath}
+				workspaceId={workspaceId}
+				selection={workspaceSurfaceSelection.file}
+				onClose={onCloseSurface}
 				onSubmitAnnotation={handleSubmitAnnotation}
 				onEditInComposer={handleEditAnnotationInComposer}
 				onAddToReview={handleAddToReview}
@@ -1909,7 +1946,20 @@ export function WorkspacePanel({
 				ref={setSecondarySurfaceContainerNode}
 				className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
 			>
-				{primaryContent}
+				<div
+					className={`flex min-h-0 min-w-0 flex-1 flex-col ${stageFileTabs ? "pt-9" : ""}`}
+				>
+					{primaryContent}
+				</div>
+				{stageFileTabs ? (
+					<div
+						className={`absolute inset-x-0 top-0 z-30 flex flex-col ${
+							stageChatActive ? "h-9 overflow-hidden" : "bottom-0"
+						}`}
+					>
+						{stageFileTabs}
+					</div>
+				) : null}
 				{secondarySurfaceContent ? (
 					<>
 						<button

@@ -94,6 +94,7 @@ import { HelpDialog, type HelpTopicId } from "./features/help";
 import {
 	isOpenPreferredEditorShortcut,
 	isCommandPaletteShortcut,
+	isCodeColumnShortcut,
 	isFocusComposerShortcut,
 	isQuickOpenShortcut,
 	isToggleTerminalShortcut,
@@ -318,6 +319,12 @@ import {
 	type MissionResumeCriterion,
 } from "./features/spec/mission-spec-content";
 import { derivePlanFollowUpState } from "./features/panel/plan-follow-up";
+import { CodeColumn } from "./features/code/code-column";
+import {
+	setCodeColumnOpen,
+	toggleCodeColumn,
+	useCodeColumnOpen,
+} from "./features/code/code-column-store";
 import { projectWorkspaceMessages } from "./features/panel/thread-projection";
 import {
 	waitForAgentResolutionTurn,
@@ -898,6 +905,7 @@ export default function App() {
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [isSkillsOpen, setIsSkillsOpen] = useState(false);
 	const [isUsageOpen, setIsUsageOpen] = useState(false);
+	const codeColumnOpen = useCodeColumnOpen();
 	const [globalSurface, setGlobalSurface] = useState<
 		"pullRequests" | "newTask" | "agent" | null
 	>(null);
@@ -2009,8 +2017,7 @@ export default function App() {
 					openPinnedInspector();
 					return;
 				case "inspector.files":
-					setInspectorMode("code");
-					openPinnedInspector();
+					setCodeColumnOpen(true);
 					return;
 				case "inspector.activity":
 					setInspectorMode("git");
@@ -2098,6 +2105,11 @@ export default function App() {
 			if (isFocusComposerShortcut(event)) {
 				event.preventDefault();
 				dispatchWorkbenchCommand("composer.focus");
+				return;
+			}
+			if (isCodeColumnShortcut(event)) {
+				event.preventDefault();
+				toggleCodeColumn();
 				return;
 			}
 			// Quick Open (Cmd/Ctrl+P) is a navigation chord, so it wins even when a
@@ -5549,6 +5561,18 @@ export default function App() {
 						onMouseDown={handleResizeStart("sidebar")}
 						onKeyDown={handleResizeKeyDown("sidebar")}
 					/>
+
+					{globalSurface === null && selectedLocalWorkspacePath && codeColumnOpen ? (
+						<CodeColumn
+							workspaceRoot={selectedLocalWorkspacePath}
+							selectedPath={
+								surfaceSelection?.kind === "file-edit" ? surfaceSelection.path : null
+							}
+							onOpenFile={handleOpenFileFromQuickOpen}
+							onOpenQuickOpen={handleOpenQuickOpen}
+							onClose={() => setCodeColumnOpen(false)}
+						/>
+					) : null}
 
 					<section
 						aria-label={t("app.workspacePanelAria")}
