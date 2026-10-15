@@ -1009,6 +1009,7 @@ export function WorkspaceComposer({
 						</DropdownMenuContent>
 					</DropdownMenu>
 					<ComposerApprovalPolicyMenu
+						providerId={selectedProvider?.id ?? null}
 						providerName={selectedProvider?.label ?? null}
 						supportedPolicies={supportedApprovalPolicies}
 						selectedPolicy={approvalPolicy}

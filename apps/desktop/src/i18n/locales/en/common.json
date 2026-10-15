@@ -2023,7 +2023,10 @@
         },
         "auto": {
           "label": "Approve for me",
-          "description": "The provider allows common workspace actions and asks when risk is detected."
+          "description": "The provider allows common workspace actions and asks when risk is detected.",
+          "descriptionFor": {
+            "antigravity": "Edits on its own and asks before each new command. A command you already allowed in this conversation runs without asking again."
+          }
         },
         "full_access": {
           "label": "Full access",

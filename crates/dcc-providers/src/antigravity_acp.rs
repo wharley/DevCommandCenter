@@ -70,6 +70,7 @@ type PendingResponse = oneshot::Sender<std::result::Result<Value, String>>;
 struct NativePermission {
     rpc_id: Value,
     options: HashMap<String, String>,
+    command: Option<String>,
 }
 
 struct UserInputPermission {
@@ -93,6 +94,10 @@ struct SessionRuntime {
     events_tx: broadcast::Sender<ProviderEvent>,
     reasoning_active: Mutex<bool>,
     approval_policy: Mutex<Option<ProviderApprovalPolicy>>,
+    /// Commands the person allowed under `Auto` in this session. The official
+    /// `auto_edit` mode asks before every command, even one already allowed,
+    /// so DCC answers the repeats itself.
+    allowed_commands: Mutex<HashSet<String>>,
     allowed_roots: Vec<PathBuf>,
     /// `promptCapabilities.image` from `initialize`.
     image_prompts: std::sync::atomic::AtomicBool,
@@ -272,6 +277,14 @@ impl SessionRuntime {
         match interaction {
             PendingInteraction::Native(permission) => {
                 let selected = permission.options.get(&response.behavior).cloned();
+                if selected.is_some()
+                    && matches!(response.behavior.as_str(), "allow" | "allow_always")
+                    && *self.approval_policy.lock().await == Some(ProviderApprovalPolicy::Auto)
+                {
+                    if let Some(command) = permission.command.clone() {
+                        self.allowed_commands.lock().await.insert(command);
+                    }
+                }
                 let result = selected
                     .map(|option_id| json!({ "outcome": { "outcome": "selected", "optionId": option_id } }))
                     .unwrap_or_else(|| json!({ "outcome": { "outcome": "cancelled" } }));
@@ -435,6 +448,7 @@ impl AntigravityAcpAdapter {
             events_tx,
             reasoning_active: Mutex::new(false),
             approval_policy: Mutex::new(None),
+            allowed_commands: Mutex::new(HashSet::new()),
             allowed_roots,
             image_prompts: std::sync::atomic::AtomicBool::new(false),
         });
@@ -1134,9 +1148,28 @@ async fn handle_permission(runtime: &Arc<SessionRuntime>, id: &Value, params: &V
         }
         return;
     }
-    if let Some(selected) =
-        automatic_permission_option(*runtime.approval_policy.lock().await, &options)
-    {
+    let raw_input = tool.get("rawInput").or_else(|| tool.get("input"));
+    let command = raw_input
+        .and_then(|value| value.get("command").or_else(|| value.get("CommandLine")))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let policy = *runtime.approval_policy.lock().await;
+    let repeated = repeated_command_option(
+        policy,
+        command.as_deref(),
+        &*runtime.allowed_commands.lock().await,
+        &options,
+    );
+    if let Some(option_id) = repeated {
+        let _ = runtime
+            .result(
+                id,
+                json!({ "outcome": { "outcome": "selected", "optionId": option_id } }),
+            )
+            .await;
+        return;
+    }
+    if let Some(selected) = automatic_permission_option(policy, &options) {
         let result = selected
             .map(|option_id| json!({ "outcome": { "outcome": "selected", "optionId": option_id } }))
             .unwrap_or_else(|| json!({ "outcome": { "outcome": "cancelled" } }));
@@ -1150,6 +1183,7 @@ async fn handle_permission(runtime: &Arc<SessionRuntime>, id: &Value, params: &V
         PendingInteraction::Native(NativePermission {
             rpc_id: id.clone(),
             options,
+            command: command.clone(),
         }),
     )
     .await
@@ -1159,11 +1193,6 @@ async fn handle_permission(runtime: &Arc<SessionRuntime>, id: &Value, params: &V
             .await;
         return;
     }
-    let raw_input = tool.get("rawInput").or_else(|| tool.get("input"));
-    let command = raw_input
-        .and_then(|value| value.get("command").or_else(|| value.get("CommandLine")))
-        .and_then(Value::as_str)
-        .map(str::to_string);
     let _ = runtime.events_tx.send(ProviderEvent::PermissionRequested {
         request: ProviderPermissionRequest {
             request_id,
@@ -1221,6 +1250,24 @@ fn automatic_permission_option(
             .or_else(|| options.get("allow_always"))
             .cloned()
     })
+}
+
+/// Under `Auto`, a command the person already allowed in this session is
+/// allowed again without asking. Only the exact same command line counts.
+fn repeated_command_option(
+    policy: Option<ProviderApprovalPolicy>,
+    command: Option<&str>,
+    allowed: &HashSet<String>,
+    options: &HashMap<String, String>,
+) -> Option<String> {
+    if policy != Some(ProviderApprovalPolicy::Auto) {
+        return None;
+    }
+    let command = command?;
+    if !allowed.contains(command) {
+        return None;
+    }
+    options.get("allow").cloned()
 }
 
 async fn insert_interaction(
@@ -1661,6 +1708,38 @@ mod tests {
         assert_eq!(
             automatic_permission_option(Some(ProviderApprovalPolicy::FullAccess), &HashMap::new()),
             Some(None)
+        );
+    }
+
+    #[test]
+    fn auto_allows_only_an_exact_command_already_allowed() {
+        let options = HashMap::from([("allow".to_string(), "once".to_string())]);
+        let allowed = HashSet::from(["npm test".to_string()]);
+        let auto = Some(ProviderApprovalPolicy::Auto);
+        assert_eq!(
+            repeated_command_option(auto, Some("npm test"), &allowed, &options),
+            Some("once".to_string())
+        );
+        assert_eq!(
+            repeated_command_option(auto, Some("npm test -- --watch"), &allowed, &options),
+            None
+        );
+        assert_eq!(
+            repeated_command_option(auto, None, &allowed, &options),
+            None
+        );
+        assert_eq!(
+            repeated_command_option(
+                Some(ProviderApprovalPolicy::Ask),
+                Some("npm test"),
+                &allowed,
+                &options
+            ),
+            None
+        );
+        assert_eq!(
+            repeated_command_option(auto, Some("npm test"), &allowed, &HashMap::new()),
+            None
         );
     }
 

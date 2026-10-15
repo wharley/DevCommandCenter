@@ -2023,7 +2023,10 @@
         },
         "auto": {
           "label": "Aprovar por mim",
-          "description": "O provedor libera ações comuns no workspace e pergunta quando houver risco."
+          "description": "O provedor libera ações comuns no workspace e pergunta quando houver risco.",
+          "descriptionFor": {
+            "antigravity": "Edita sozinho e pergunta antes de cada comando novo. Um comando que você já permitiu nesta conversa roda sem perguntar de novo."
+          }
         },
         "full_access": {
           "label": "Acesso completo",

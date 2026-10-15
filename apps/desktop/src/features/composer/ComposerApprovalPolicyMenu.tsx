@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { composerToolbarTriggerClassName } from "./WorkspaceComposer.logic";
 
 type ComposerApprovalPolicyMenuProps = {
+	providerId: string | null;
 	providerName: string | null;
 	supportedPolicies: readonly ProviderApprovalPolicy[];
 	selectedPolicy: ProviderApprovalPolicy | null;
@@ -32,6 +33,20 @@ type ComposerApprovalPolicyMenuProps = {
 
 const POLICY_ORDER: ProviderApprovalPolicy[] = ["ask", "auto", "full_access"];
 
+// A provider whose own modes cut a policy differently says so in its own words;
+// everyone else reads the shared description.
+function policyDescription(
+	t: (key: string, options?: Record<string, unknown>) => string,
+	policy: ProviderApprovalPolicy,
+	providerId: string | null,
+) {
+	const shared = t(`composer.approval.options.${policy}.description`);
+	if (!providerId) return shared;
+	return t(`composer.approval.options.${policy}.descriptionFor.${providerId}`, {
+		defaultValue: shared,
+	});
+}
+
 function PolicyIcon({ policy }: { policy: ProviderApprovalPolicy | null }) {
 	if (policy === "full_access") return <ShieldAlert className="size-[13px]" strokeWidth={1.8} />;
 	if (policy === "auto") return <ShieldCheck className="size-[13px]" strokeWidth={1.8} />;
@@ -39,6 +54,7 @@ function PolicyIcon({ policy }: { policy: ProviderApprovalPolicy | null }) {
 }
 
 export function ComposerApprovalPolicyMenu({
+	providerId,
 	providerName,
 	supportedPolicies,
 	selectedPolicy,
