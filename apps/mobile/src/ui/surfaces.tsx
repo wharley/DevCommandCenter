@@ -249,14 +249,16 @@ export function SheetScroll({
 	header,
 	children,
 	contentStyle,
+	style,
 }: {
 	header: ReactNode;
 	children: ReactNode;
 	contentStyle?: StyleProp<ViewStyle>;
+	style?: StyleProp<ViewStyle>;
 }) {
 	const styles = useStyles();
 	return (
-		<ScrollView stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
+		<ScrollView style={style} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
 			<View style={styles.sheetPinned}>{header}</View>
 			<View style={contentStyle}>{children}</View>
 		</ScrollView>

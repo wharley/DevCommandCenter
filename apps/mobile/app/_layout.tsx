@@ -127,7 +127,10 @@ function Routes() {
 				<Stack.Screen name="settings" options={{ presentation: "modal" }} />
 				<Stack.Screen name="notifications" options={{ presentation: "modal" }} />
 				<Stack.Screen name="new-task" options={{ presentation: "modal" }} />
-				<Stack.Screen name="delivery/[id]" options={{ presentation: "modal" }} />
+				{/* A page sheet, not a form sheet: iOS's form sheet drops the file list
+				    when the commit footer floats over it. */}
+				<Stack.Screen name="delivery/[id]" options={{ presentation: "modal", contentStyle: { backgroundColor: color.bg } }} />
+				<Stack.Screen name="file" options={{ presentation: "fullScreenModal" }} />
 				<Stack.Screen name="ui-gallery" options={sheetOptions(color)} />
 			</Stack.Protected>
 			<Stack.Screen name="pair" options={{ presentation: ready ? "modal" : "card", gestureEnabled: ready }} />

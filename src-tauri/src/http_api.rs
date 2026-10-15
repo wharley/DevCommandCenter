@@ -515,6 +515,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             get(mobile::patch),
         )
         .route(
+            "/api/v1/mobile/workspaces/:workspace_id/file",
+            get(mobile::file),
+        )
+        .route(
             "/api/v1/mobile/workspaces/:workspace_id/files",
             get(mobile::workspace_files),
         )

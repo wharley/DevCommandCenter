@@ -192,6 +192,15 @@ export class DemoBackend implements Backend {
 		const path = url.pathname;
 		if (method === "GET" && path === "/api/v1/mobile/agent-requests") return { requests: this.agentRequests };
 		if (method === "GET" && path === "/api/v1/mobile/attention") return { items: this.attention() };
+		const fileRoute = /^\/api\/v1\/mobile\/workspaces\/([^/]+)\/(patch|file)$/.exec(path);
+		if (method === "GET" && fileRoute) {
+			const filePath = url.searchParams.get("path") ?? "";
+			this.deliveryState(decodeURIComponent(fileRoute[1]!));
+			const text = demoFileText(filePath);
+			return fileRoute[2] === "file"
+				? { path: filePath, text, truncated: false, binary: false, size: text.length }
+				: { path: filePath, patch: demoPatch(filePath, text), truncated: false };
+		}
 		const delivery = /^\/api\/v1\/mobile\/workspaces\/([^/]+)\/delivery(?:\/([a-z-]+))?$/.exec(path);
 		if (delivery) return this.deliveryRoute(method, decodeURIComponent(delivery[1]!), delivery[2] ?? null, body);
 		const agentAnswer = /^\/api\/v1\/mobile\/agent-requests\/([^/]+)\/respond$/.exec(path);
@@ -799,4 +808,57 @@ function demoFixture(now: number): { sessions: DemoSession[]; combs: Comb[]; rep
 		{ type: "turn_aborted", turnId: "f1", reason: "user" },
 	], 1505);
 	return { sessions: [blocked, running, asking, done, failed], combs, repositories };
+}
+
+/** What a demo file contains: a few believable lines, keyed by its name. */
+function demoFileText(path: string): string {
+	if (path.endsWith("gateway.test.ts")) {
+		return [
+			'import { describe, expect, it } from "vitest";',
+			'import { charge } from "./gateway";',
+			"",
+			'describe("charge", () => {',
+			'\tit("uses the new gateway by default", async () => {',
+			"\t\tconst result = await charge({ amount: 4990, currency: \"BRL\" });",
+			'\t\texpect(result.provider).toBe("pagnet");',
+			"\t});",
+			"",
+			'\tit("falls back to the legacy gateway behind the flag", async () => {',
+			"\t\tconst result = await charge({ amount: 4990, currency: \"BRL\" }, { legacy: true });",
+			'\t\texpect(result.provider).toBe("legacy");',
+			"\t});",
+			"});",
+		].join("\n");
+	}
+	if (path.endsWith(".ts")) {
+		return [
+			'import { legacyCharge } from "./legacy";',
+			'import { isLegacyEnabled } from "./legacy-flag";',
+			"",
+			"export type Charge = { amount: number; currency: \"BRL\" | \"USD\" };",
+			"",
+			"/** Charges through the new gateway; the legacy one stays behind a flag. */",
+			"export async function charge(input: Charge, options = { legacy: isLegacyEnabled() }) {",
+			"\tif (options.legacy) return legacyCharge(input);",
+			"\tconst response = await fetch(\"https://api.pagnet.example/v2/charges\", {",
+			'\t\tmethod: "POST",',
+			"\t\tbody: JSON.stringify({ ...input, capture: true }),",
+			"\t});",
+			"\tif (!response.ok) throw new Error(`Gateway respondeu ${response.status}`);",
+			"\treturn { provider: \"pagnet\", ...(await response.json()) };",
+			"}",
+		].join("\n");
+	}
+	return ["# Guia de onboarding", "", "1. Clone o repositório.", "2. Rode `yarn` e depois `yarn dev`.", "3. Abra http://localhost:3000."].join("\n");
+}
+
+/** A patch for a demo file: its last lines added, one old line removed. */
+function demoPatch(path: string, text: string): string {
+	const lines = text.split("\n");
+	const body = [
+		...lines.slice(0, 3).map((line) => ` ${line}`),
+		"-// TODO: trocar o gateway",
+		...lines.slice(3).map((line) => `+${line}`),
+	];
+	return [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, `@@ -1,4 +1,${lines.length} @@`, ...body].join("\n");
 }

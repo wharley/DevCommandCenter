@@ -34,12 +34,36 @@ const TOKEN_COLORS: Record<Scheme, Record<Exclude<CodeTokenKind, "plain">, strin
 	light: { keyword: "#8a3fb8", string: "#2f7d32", number: "#b5530c", comment: "#8a93a0" },
 };
 
+/** Code with the light highlighting, as nested text (for a block, a diff line or a file line). */
+export function HighlightedCode({ code, lang }: { code: string; lang: string }) {
+	const { scheme } = useTheme();
+	const tokens = useMemo(() => highlightCode(code, lang), [code, lang]);
+	return (
+		<>
+			{tokens.map((token, i) =>
+				token.kind === "plain" ? (
+					<Fragment key={i}>{token.text}</Fragment>
+				) : (
+					<Text key={i} style={{ color: TOKEN_COLORS[scheme][token.kind], fontStyle: token.kind === "comment" ? "italic" : "normal" }}>
+						{token.text}
+					</Text>
+				),
+			)}
+		</>
+	);
+}
+
+/** The fence language for a file name: "theme.ts" → "ts". */
+export function languageOf(path: string): string {
+	const match = /\.([a-z0-9]+)$/i.exec(path);
+	return match ? match[1]!.toLowerCase() : "";
+}
+
 /** A fenced block: language and copy on top, the code scrolling sideways, lightly colored. */
 function CodeBlock({ text, lang }: { text: string; lang: string }) {
-	const { color, scheme } = useTheme();
+	const { color } = useTheme();
 	const styles = useStyles();
 	const [copied, setCopied] = useState(false);
-	const tokens = useMemo(() => highlightCode(text, lang), [text, lang]);
 	useEffect(() => {
 		if (!copied) return;
 		const timer = setTimeout(() => setCopied(false), 1500);
@@ -61,15 +85,7 @@ function CodeBlock({ text, lang }: { text: string; lang: string }) {
 			</View>
 			<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.codeScroll}>
 				<Text style={styles.code} selectable>
-					{tokens.map((token, i) =>
-						token.kind === "plain" ? (
-							<Fragment key={i}>{token.text}</Fragment>
-						) : (
-							<Text key={i} style={{ color: TOKEN_COLORS[scheme][token.kind], fontStyle: token.kind === "comment" ? "italic" : "normal" }}>
-								{token.text}
-							</Text>
-						),
-					)}
+					<HighlightedCode code={text} lang={lang} />
 				</Text>
 			</ScrollView>
 		</View>

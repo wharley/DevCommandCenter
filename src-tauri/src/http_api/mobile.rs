@@ -516,6 +516,78 @@ async fn workspace_patch(root: &FsPath, path: &str) -> Result<Value, HttpApiErro
     Ok(json!({ "path":path, "patch":text, "truncated":truncated }))
 }
 
+/// The phone's file viewer: one file of the workspace as text, capped.
+pub(super) async fn file(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    Path(id): Path<String>,
+    Query(query): Query<PatchQuery>,
+) -> Result<Json<Value>, HttpApiError> {
+    validate_relative_path(&query.path)?;
+    let repo = SqliteWorkspaceRepo::open(&config.read().await.db_path).map_err(core_error)?;
+    let workspace = repo
+        .get_workspace(&WorkspaceId(id))
+        .await
+        .map_err(core_error)?
+        .ok_or_else(|| HttpApiError::NotFound("Workspace não encontrado.".into()))?;
+    let root = PathBuf::from(
+        workspace
+            .worktree_path
+            .as_deref()
+            .unwrap_or(&workspace.root_path),
+    );
+    workspace_file(&root, &query.path).await.map(Json)
+}
+
+async fn workspace_file(root: &FsPath, path: &str) -> Result<Value, HttpApiError> {
+    use tokio::io::AsyncReadExt;
+    const MAX_FILE: u64 = 512_000;
+    validate_relative_path(path)?;
+    let root = tokio::fs::canonicalize(root)
+        .await
+        .map_err(|e| HttpApiError::BadRequest(e.to_string()))?;
+    let target = match tokio::fs::canonicalize(root.join(path)).await {
+        Ok(target) => target,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(HttpApiError::NotFound("Arquivo não encontrado.".into()))
+        }
+        Err(e) => return Err(HttpApiError::BadRequest(e.to_string())),
+    };
+    // Symlinks resolve first, so a link cannot reach outside the workspace.
+    if !target.starts_with(&root) {
+        return Err(HttpApiError::BadRequest("Arquivo fora do workspace.".into()));
+    }
+    let metadata = tokio::fs::metadata(&target)
+        .await
+        .map_err(|e| HttpApiError::BadRequest(e.to_string()))?;
+    if !metadata.is_file() {
+        return Err(HttpApiError::BadRequest("Não é um arquivo.".into()));
+    }
+    let mut bytes = Vec::new();
+    tokio::fs::File::open(&target)
+        .await
+        .map_err(|e| HttpApiError::internal(e.to_string()))?
+        .take(MAX_FILE + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|e| HttpApiError::internal(e.to_string()))?;
+    let truncated = bytes.len() as u64 > MAX_FILE;
+    bytes.truncate(MAX_FILE as usize);
+    // Git's own rule: a NUL in the first 8000 bytes means binary.
+    let binary = bytes.iter().take(8000).any(|byte| *byte == 0);
+    let text = if binary {
+        String::new()
+    } else {
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    Ok(json!({
+        "path": path,
+        "text": text,
+        "truncated": truncated,
+        "binary": binary,
+        "size": metadata.len(),
+    }))
+}
+
 /// Same cap as the desktop's `@` menu (`file-mention-plugin.tsx`).
 const MAX_FILE_RESULTS: usize = 50;
 const MAX_FILE_QUERY: usize = 200;
@@ -892,6 +964,39 @@ mod tests {
             std::os::unix::fs::symlink(outside.path(), root.join("escape")).unwrap();
             assert!(workspace_patch(root, "escape/secret").await.is_err());
             assert!(workspace_patch(root, "escape/deleted").await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn file_reads_text_flags_binary_and_stays_inside_the_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/app.ts"), "export const a = 1;\n").unwrap();
+        let file = workspace_file(root, "src/app.ts").await.unwrap();
+        assert_eq!(file["text"], "export const a = 1;\n");
+        assert_eq!(file["binary"], false);
+        assert_eq!(file["truncated"], false);
+
+        std::fs::write(root.join("logo.png"), [0x89, b'P', b'N', b'G', 0, 1, 2]).unwrap();
+        let binary = workspace_file(root, "logo.png").await.unwrap();
+        assert_eq!(binary["binary"], true);
+        assert_eq!(binary["text"], "");
+
+        std::fs::write(root.join("big.txt"), "x".repeat(600_000)).unwrap();
+        let big = workspace_file(root, "big.txt").await.unwrap();
+        assert_eq!(big["truncated"], true);
+        assert_eq!(big["text"].as_str().unwrap().len(), 512_000);
+
+        assert!(workspace_file(root, "src").await.is_err());
+        assert!(workspace_file(root, "missing.ts").await.is_err());
+        assert!(workspace_file(root, "../outside").await.is_err());
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            std::fs::write(outside.path().join("secret"), "secret").unwrap();
+            std::os::unix::fs::symlink(outside.path(), root.join("escape")).unwrap();
+            assert!(workspace_file(root, "escape/secret").await.is_err());
         }
     }
 
