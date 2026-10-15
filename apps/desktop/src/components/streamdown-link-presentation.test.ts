@@ -3,6 +3,7 @@ import {
 	getStreamdownLinkKind,
 	isCodeFileReference,
 	isLocalFileHref,
+	unwrapFileLinkTargets,
 } from "./streamdown-link-presentation";
 
 describe("getStreamdownLinkKind", () => {
@@ -42,5 +43,24 @@ describe("isCodeFileReference", () => {
 
 	it("does not mark non-code files as code", () => {
 		expect(isCodeFileReference("docs/overview.md")).toBe(false);
+	});
+});
+
+describe("unwrapFileLinkTargets", () => {
+	it("turns file URLs in links into plain local paths", () => {
+		expect(unwrapFileLinkTargets("[`src/preco.js`](file:///Users/me/repo/src/preco.js)")).toBe(
+			"[`src/preco.js`](/Users/me/repo/src/preco.js)",
+		);
+		expect(unwrapFileLinkTargets("[a](file://localhost/tmp/a.ts) and [b](<file:///tmp/b c.ts>)")).toBe(
+			"[a](/tmp/a.ts) and [b](</tmp/b c.ts>)",
+		);
+		expect(unwrapFileLinkTargets("[w](file:///C:/work/main.ts)")).toBe("[w](/C:/work/main.ts)");
+	});
+
+	it("leaves everything else alone", () => {
+		const text = "see file:///tmp/a.ts and [site](https://example.com) or `](file://x)`";
+		expect(unwrapFileLinkTargets("[site](https://example.com)")).toBe("[site](https://example.com)");
+		expect(unwrapFileLinkTargets("plain file:///tmp/a.ts text")).toBe("plain file:///tmp/a.ts text");
+		expect(unwrapFileLinkTargets(text)).toBe(text);
 	});
 });

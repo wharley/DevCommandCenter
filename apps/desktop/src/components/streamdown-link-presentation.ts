@@ -38,3 +38,14 @@ export function isCodeFileReference(path: string) {
 	const filePath = path.split(/[?#]/, 1)[0].replace(/:\d+(?::\d+)?$/, "");
 	return CODE_FILE_EXTENSION.test(filePath);
 }
+
+// The markdown sanitizer behind Streamdown refuses every `file:` URL and
+// prints "[blocked]" in its place, so a provider that links files as
+// `file:///abs/path` loses the link before DCC can open it. The same path
+// without the scheme reaches the link component, which already opens local
+// files.
+const FILE_LINK_TARGET = /\]\((<?)file:\/\/(?:localhost)?(?=\/|[a-zA-Z]:)/g;
+
+export function unwrapFileLinkTargets(markdown: string) {
+	return markdown.includes("file://") ? markdown.replace(FILE_LINK_TARGET, "]($1") : markdown;
+}
